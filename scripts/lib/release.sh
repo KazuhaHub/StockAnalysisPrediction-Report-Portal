@@ -27,6 +27,22 @@ in_week() {
     esac
 }
 
+# note_path ROOT VERSION — the file VERSION's release note lives in.
+#
+# Notes are filed by the tag's own year, docs/releases/<YYYY>/<tag>.md, so the path is a function of
+# the number rather than of the clock: a note written in one year for a tag whose week belongs to the
+# next still lands beside its number. A year directory holds a handful of files and grows by one per
+# release, which is what keeps the top of docs/releases/ readable.
+#
+# VERSION is expected to be a CalVer tag, whose first component is the four-digit year; the retired
+# v0.x line is not one and was filed under docs/releases/0.x/ when it was archived. Callers validate
+# the tag before asking (scripts/tag-release.sh refuses a non-CalVer argument outright).
+note_path() {
+    _np_year=${2#v}
+    _np_year=${_np_year%%.*}
+    printf '%s/docs/releases/%s/%s.md\n' "$1" "$_np_year" "$2"
+}
+
 # derive_version ROOT WEEK — prints the number a maintainer would pick by hand, or fails with the
 # reason on stderr.
 #
@@ -44,8 +60,13 @@ derive_version() {
     _root=$1
     _week=$2
 
+    # The week names its own year directory, so the sweep never reads another year's notes — nor the
+    # archived v0.x ones. in_week and calver_valid stay: they defend against a file that is in the
+    # right place but misnamed.
+    _year=${_week%%.*}
+
     _notes=""
-    for _f in "$_root"/docs/releases/*.md; do
+    for _f in "$_root"/docs/releases/"$_year"/*.md; do
         [ -f "$_f" ] || continue # an unmatched glob arrives here as its own literal text
         _t=$(basename "$_f" .md)
         if in_week "$_t" "$_week" && calver_valid "$_t"; then

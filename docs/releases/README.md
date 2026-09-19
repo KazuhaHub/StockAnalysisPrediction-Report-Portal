@@ -4,6 +4,25 @@ One file per release, the same text as the annotated git tag (`git tag -n99 <tag
 still where a release is cut; these exist so the notes are readable in the repo and in a diff,
 which a tag message is not.
 
+## Layout
+
+Notes are filed by the tag's own year — `docs/releases/<YYYY>/<tag>.md`, where `YYYY` is the year
+component the tag already carries. A year directory holds a handful of files and grows by one per
+release, so the top of `docs/releases/` stays this runbook and two directories.
+
+The retired v0.x line is the exception: it is not CalVer, and its notes were materialised from their
+tags after the fact, so they sit together under `docs/releases/0.x/`.
+
+The path is resolved by `note_path` in `scripts/lib/release.sh`. The tag helper, the derivation and
+the release workflow's body step all call it, so the three cannot disagree about where a note is —
+which is the failure that would otherwise publish an empty release body, or tag a number whose note
+the helper never looked for.
+
+Filing the notes into those directories moved them, and the relative links inside the moved ones were
+rebased to the new depth. An archived file is therefore no longer byte-identical to its tag
+annotation: the annotation is immutable and stays the record, the prose is unchanged, and the link is
+what had to move. Nothing cut from here on moves again, so the equality below holds for every new tag.
+
 That equality is enforced by `scripts/tag_release_test.sh` because it used to be false: `git tag -a
 -F` strips every line beginning with `#` unless told not to, so every annotation cut before this
 helper passed `--cleanup=verbatim` lost its Markdown headings — and any shell comment inside a
@@ -26,15 +45,16 @@ revision. It reads local tags and the working tree only, so a clone that has not
 tag cut elsewhere; naming the version explicitly is the escape hatch, and it is validated the same
 way.
 
-The tag's message is the release note, so a number with no `docs/releases/<tag>.md` in the tagged
-commit cannot be cut — the script names the file to write and stops.
+The tag's message is the release note, so a number with no `docs/releases/<YYYY>/<tag>.md` in the
+tagged commit cannot be cut — the script names the file to write and stops.
 
-**The tag must go on a commit that main CI has already passed**, and the release workflow refuses to
-publish otherwise: it looks for a completed `test` run against that exact commit and requires the
-whole suite, race lane included — and the race lane only runs on a push to `main`. So the note belongs
-in the pull request, not in a commit made after the merge: the squash merge that lands the work is the
-commit to tag, and a follow-up commit that only adds or edits the note has no run of its own and
-cannot be released from.
+**The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
+refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one
+from a push to `main` or from a manual dispatch, and requires the whole suite, race lane included;
+the race lane does not run on a pull request. So the note belongs in the pull request that lands the
+release, and the squash merge is the commit to tag. A note committed straight to `main` after that
+merge can be tagged too, and is the way out when a dependabot branch would not hold it — a commit
+that only exists locally has no run of its own, and the guard says so.
 
 The push is a separate, deliberate command because it is the irreversible step; the script never
 pushes. It refuses a version with no note, a tag that already exists, a tag that is not CalVer, and —
