@@ -331,7 +331,11 @@ jobs:
           REPO_LC: ${{ needs.setup.outputs.repo_lc }}
         run: |
           set -euo pipefail
-          notes_file="docs/releases/${VERSION}.md"
+          # Where the note lives comes from the same helper the tag helper uses. A second copy of the
+          # path rule here is how a release body ends up looking somewhere the tag did not.
+          . scripts/lib/calver.sh
+          . scripts/lib/release.sh
+          notes_file=$(note_path "$PWD" "${VERSION}")
           if [ -f "${notes_file}" ]; then
             cat "${notes_file}" > release_notes.md
             printf '\n' >> release_notes.md

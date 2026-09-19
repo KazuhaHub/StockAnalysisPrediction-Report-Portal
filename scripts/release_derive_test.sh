@@ -38,7 +38,14 @@ fresh_repo() {
     )
 }
 
-note() { printf '# %s — fixture\n\n## Changed\n\n- fixture\n' "$1" > "$repo/docs/releases/$1.md"; }
+# The fixture writes the note at the path the convention names, by hand and not through note_path:
+# a test that resolves the path with the function under test would follow it wherever it moved.
+note() { # tag
+    _y=${1#v}
+    _y=${_y%%.*}
+    mkdir -p "$repo/docs/releases/$_y"
+    printf '# %s — fixture\n\n## Changed\n\n- fixture\n' "$1" > "$repo/docs/releases/$_y/$1.md"
+}
 tagged() { (cd "$repo" && git tag -a --cleanup=verbatim "$1" -m "$1"); }
 
 expect_derive() { # week expected description
@@ -62,6 +69,23 @@ expect_refusal() { # week needle description
         ok
     fi
 }
+
+# ---------- where a note lives ----------
+# The layout is a contract shared by the derivation, the tag helper and the release body: every one
+# of them resolves the file through note_path. The fixtures below pin the layout from the outside, so
+# this pins the function they all call.
+_path=$(note_path /repo v2026.38.1)
+if [ "$_path" = "/repo/docs/releases/2026/v2026.38.1.md" ]; then
+    ok
+else
+    bad "note_path filed v2026.38.1 at [$_path]"
+fi
+_path=$(note_path /repo v2027.1)
+if [ "$_path" = "/repo/docs/releases/2027/v2027.1.md" ]; then
+    ok
+else
+    bad "note_path filed v2027.1 at [$_path]"
+fi
 
 # ---------- an untouched week ----------
 fresh_repo
@@ -147,11 +171,18 @@ tagged v2026.53.9
 expect_derive 2027.1 v2027.1 "a new year does not inherit the old year's revisions"
 
 # ---------- what is not a release note ----------
+# The retired v0.x line keeps its files together under 0.x/, and a note for another year sits in that
+# year's directory. Neither is this week's release, and neither may be counted as a pending note —
+# a derivation that saw them could hand back a number for a week it is not looking at.
 fresh_repo
 printf '# Release notes\n\nnot a release\n' > "$repo/docs/releases/README.md"
-note v0.4.70
+mkdir -p "$repo/docs/releases/0.x"
+printf '# v0.4.70 — fixture\n\n## Changed\n\n- fixture\n' > "$repo/docs/releases/0.x/v0.4.70.md"
+note v2025.1
 note v2026.38.1
-expect_derive 2026.1 v2026.1 "README.md and the legacy v0.x notes are not this week's releases"
+note v2027.1
+expect_derive 2026.1 v2026.1 "README.md, the legacy notes and the neighbouring years are not this week's releases"
+expect_derive 2027.1 v2027.1 "and the neighbouring year's note is still that year's release"
 
 # ---------- the escape hatch still works ----------
 # Nothing here: tag-release.sh takes an explicit version without calling the derivation at all, which

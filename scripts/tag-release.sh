@@ -3,8 +3,8 @@
 #
 # The convention this encodes (see docs/releases/README.md): a release tag is ANNOTATED and its
 # message is the release note verbatim, so `git tag -n99 vYYYY.W[.R]` and the file in docs/releases/
-# say the same thing. Placed on the commit where that release's work is complete — usually the merge
-# that brought it into main.
+# — filed by the tag's own year, docs/releases/<YYYY>/<tag>.md — say the same thing. Placed on the
+# commit where that release's work is complete — usually the merge that brought it into main.
 #
 # Until now that lived in whoever cut the last one's memory, which is why v0.4.42 and v0.4.43 sat on
 # main untagged.
@@ -120,10 +120,13 @@ if [ "$next_only" = 1 ]; then
     exit 0
 fi
 
-note="$root/docs/releases/$version.md"
+note=$(note_path "$root" "$version")
+# Relative, because a git object spec takes a repo-relative path: "$sha:docs/releases/..." and never
+# an absolute one.
+note_rel=${note#"$root"/}
 
 [ -f "$note" ] || {
-    echo "error: no release note at docs/releases/$version.md" >&2
+    echo "error: no release note at $note_rel" >&2
     echo "       write it, commit it, then run this again — the tag's message is that file" >&2
     exit 1
 }
@@ -137,8 +140,8 @@ sha=$(git rev-parse --verify "$commit^{commit}") || exit 1
 
 # The note has to be reachable from the commit being tagged, or the tag describes a release whose
 # own notes are not in it — which is how a tag ends up pointing at the wrong thing.
-if ! git cat-file -e "$sha:docs/releases/$version.md" 2>/dev/null; then
-    echo "error: $commit does not contain docs/releases/$version.md" >&2
+if ! git cat-file -e "$sha:$note_rel" 2>/dev/null; then
+    echo "error: $commit does not contain $note_rel" >&2
     echo "       the tag would describe a release the commit predates" >&2
     exit 1
 fi
@@ -146,14 +149,14 @@ fi
 # The annotation is taken from the COMMIT, not from the working tree. The tag has to keep saying what
 # the tagged commit says even if the note has uncommitted edits, which is exactly the case where
 # tagging from the file quietly publishes text no commit contains.
-if ! git show "$sha:docs/releases/$version.md" | diff -q - "$note" >/dev/null 2>&1; then
-    echo "warning: docs/releases/$version.md differs from the copy in $commit" >&2
+if ! git show "$sha:$note_rel" | diff -q - "$note" >/dev/null 2>&1; then
+    echo "warning: $note_rel differs from the copy in $commit" >&2
     echo "         tagging the committed version; commit the working-tree edits and re-tag to change it" >&2
 fi
 
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT INT TERM
-git show "$sha:docs/releases/$version.md" > "$notes"
+git show "$sha:$note_rel" > "$notes"
 # --cleanup=verbatim, not the default. `git tag -a -F` strips every line starting with '#' unless
 # told otherwise, which silently deleted each Markdown heading from the annotation — and any command
 # example with a shell comment in it. The convention is that the annotation IS the note, so the note

@@ -34,10 +34,14 @@ git config tag.gpgsign false
 
 week=$(date -u +%G.%V | awk -F. '{ printf "%s.%d", $1, $2 + 0 }')
 tag="v${week}"
+# Where the convention files a note: docs/releases/<the tag's own year>/. Written out here rather
+# than derived from the helper, so a change to the layout has to be made in both places on purpose.
+notes_dir="docs/releases/${week%%.*}"
+mkdir -p "$notes_dir"
 
 # A note shaped like the real ones: a heading, then h2 sections, then a bullet that itself starts
 # with a '-'. Only the '#' lines are at risk, and every real note has several.
-cat > "docs/releases/${tag}.md" <<EOF
+cat > "${notes_dir}/${tag}.md" <<EOF
 # ${tag} — a test release
 
 ## Upgrade notes
@@ -89,7 +93,7 @@ if [ "$annotated" = "tag" ]; then ok; else bad "the tag is $annotated, want an a
 
 # The assertion this file exists for: the annotation is the note, headings and all.
 git cat-file tag "$tag" | sed '1,/^$/d' > "$tmp/annotation.txt"
-if diff -u "docs/releases/${tag}.md" "$tmp/annotation.txt" > "$tmp/diff.txt" 2>&1; then
+if diff -u "${notes_dir}/${tag}.md" "$tmp/annotation.txt" > "$tmp/diff.txt" 2>&1; then
     ok
 else
     bad "the annotation is not the note file:"
@@ -101,13 +105,23 @@ run "v${week}.7"
 expect_status 1 "a number with no note is refused"
 contains "no release note" "the refusal names the missing file"
 
+# ---------- a note at the retired flat path ----------
+# Notes are filed under the tag's own year. One left at the old flat path is not where the helper
+# looks, and tagging anyway would publish a tag whose note the working tree appears to have — which
+# is the drift this layout exists to make impossible.
+printf '# v%s.8 — at the retired path\n' "$week" > "docs/releases/v${week}.8.md"
+run "v${week}.8"
+expect_status 1 "a note at the retired flat path is refused"
+contains "no release note" "the refusal says the file is not there"
+rm -f "docs/releases/v${week}.8.md"
+
 # ---------- a duplicate ----------
 run "$tag"
 expect_status 1 "an existing tag is refused"
 contains "already exists" "the refusal says the tag exists"
 
 # ---------- a note that is not in the tagged commit ----------
-cat > "docs/releases/v${week}.9.md" <<EOF
+cat > "${notes_dir}/v${week}.9.md" <<EOF
 # v${week}.9 — not committed
 
 ## Changed
