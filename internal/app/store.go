@@ -259,11 +259,12 @@ func (s *Store) init() error {
 			return err
 		}
 	}
-	// The upgrade ladder, on both paths: the entry points a release writes a conversion step into and
-	// clears again at the next baseline. Every step is empty in this release, which is what a reset
-	// means — what they still do is the part that was never a conversion (seeding the version
-	// registry, asserting the identity index covers version).
-	if err := s.ensureColumns(); err != nil {
+	// The migration ledger (migrate_steps.go), on BOTH paths and only after the verdict above: a
+	// database this release does not recognise is still refused before any statement runs, and one it
+	// does recognise is carried forward — the baseline is frozen, everything since it is a step. A
+	// fresh database runs the same steps as an upgraded one, so there is one shape in the world
+	// rather than two that must be kept in step.
+	if err := s.runMigrations(); err != nil {
 		return err
 	}
 	if err := s.reconcileReportVersions(); err != nil {

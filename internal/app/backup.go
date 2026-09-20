@@ -57,6 +57,11 @@ type backupHeader struct {
 	Driver        string   `json:"driver"`
 	AppVersion    string   `json:"app_version"`
 	Tables        []string `json:"tables"`
+	// Migrations is the migration ledger the release that wrote this dump had applied — the steps
+	// this DATA satisfies, not a diagnostic note. A restore validates it (checkDumpMigrations) and
+	// uses it to decide which columns the dump is allowed to be missing, so it is a claim the content
+	// has to bear out.
+	Migrations []string `json:"migrations"`
 }
 
 // backupSection introduces one table. Columns are recorded per dump rather than assumed, so a file
@@ -70,21 +75,21 @@ type backupSection struct {
 // so that stays true by construction rather than by luck.
 const b64Key = "$b64"
 
-// backupTables lists every table in the current schema, from the schema declaration itself so a new
-// table is included the day it is declared and nobody has to remember a second list.
+// backupTables lists every table in the current schema, from the schema declarations and the
+// migration list themselves so a new table is included the day it is declared and nobody has to
+// remember a second list.
 func (s *Store) backupTables() []string {
 	seen := map[string]bool{}
-	var out []string
+	var base []string
 	for _, stmt := range s.baseSchemaStmts() {
 		t, _, ok := parseCreateTable(stmt)
 		if !ok || seen[t] {
 			continue
 		}
 		seen[t] = true
-		out = append(out, t)
+		base = append(base, t)
 	}
-	sort.Strings(out) // stable across builds, so two dumps of the same data diff cleanly
-	return out
+	return backupTableNames(base, s.migrations())
 }
 
 // Backup writes a full dump of the configured database to path ("-" for stdout).
@@ -154,6 +159,7 @@ func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
 		Driver:        s.driver,
 		AppVersion:    version.Version,
 		Tables:        names,
+		Migrations:    s.migrationIdsTx(tx),
 	}); err != nil {
 		return 0, 0, err
 	}
@@ -367,6 +373,14 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if err := checkSchemaGeneration(rep.Header.SchemaVersion); err != nil {
 		return nil, err
 	}
+	// The dump's own migration level, checked before anything is deleted: which steps its data
+	// satisfies decides both whether this build can load it at all, and which columns it is allowed to
+	// be missing.
+	steps := s.migrations()
+	if err := checkDumpMigrations(rep.Header.Migrations, steps); err != nil {
+		return nil, err
+	}
+	optional := optionalColumns(rep.Header.Migrations, steps)
 
 	var tx *sql.Tx
 	if force {
@@ -383,13 +397,20 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 			}
 		}
 	}
-	if err := s.restoreStream(dec, tx, known, identity, rep); err != nil {
+	if err := s.restoreStream(dec, tx, known, optional, identity, rep); err != nil {
 		return nil, err
 	}
 	if !force {
 		return rep, nil
 	}
 	if err := s.resetIdentities(tx, identity, rep.Rows); err != nil {
+		return nil, err
+	}
+	// The database's own consistency is settled HERE, inside the transaction that wrote the rows: a
+	// restore that ended with the data and the ledger disagreeing would be a database nobody could
+	// reason about, and leaving a step unrecorded is how the next start re-runs an upgrade over data
+	// that has already been upgraded.
+	if err := s.finishRestore(tx, steps); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -399,10 +420,41 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	return rep, nil
 }
 
+// finishRestore settles the database after its rows have been replaced: the unknown-step check, the
+// product check, and the ledger. All of it runs on the restore's own transaction, so a failure here
+// takes the data back with it rather than leaving a half-loaded database behind.
+func (s *Store) finishRestore(tx *sql.Tx, steps []migration) error {
+	e := migExec{s: s, ex: tx}
+	known := map[string]bool{}
+	for _, m := range steps {
+		known[m.id] = true
+	}
+	// A dump from a release that had steps this build does not: its `meta` carried the record in.
+	if err := refuseUnknownLedgerRowsExec(e, known); err != nil {
+		return err
+	}
+	// What the schema actually looks like now, not what the dump claimed.
+	if err := s.verifyMigrationProducts(e, steps); err != nil {
+		return err
+	}
+	// Re-record. The restored `meta` came from whichever release wrote the dump, so the ledger in it
+	// describes that release's view — this build's steps are what the database has just been checked
+	// against, and a missing row would make the next start re-run a step whose work is already done.
+	for _, m := range steps {
+		if e.setting(migrationLedgerKey(m.id)) != "" {
+			continue
+		}
+		if err := e.setSetting(migrationLedgerKey(m.id), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // restoreStream reads the dump body. With tx == nil it validates and counts without writing, which
 // is the dry run; the parsing and the column checks are identical either way, so a dry run that
 // passes is real evidence about the file.
-func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known map[string]map[string]bool, identity map[string]string, rep *RestoreReport) error {
+func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map[string]map[string]bool, identity map[string]string, rep *RestoreReport) error {
 	var (
 		table  string
 		cols   []string
@@ -447,14 +499,14 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known map[string]ma
 						table, c, firstNonEmpty(rep.Header.AppVersion, "the version that wrote the backup"))
 				}
 			}
-			// Every column the current schema declares has to be in the dump. This used to tolerate
-			// a missing one — the column kept its default and the restore said so afterwards — but a
-			// restore that succeeds while silently producing rows that never had the data is worse
-			// than one that refuses, and the database it produced would be refused at the next
-			// startup anyway. Failing here moves that from after the destructive step to before it.
+			// Every column the current schema declares has to be in the dump — EXCEPT the ones added
+			// by a migration the dump predates, which the header named and optionalColumns allows. A
+			// missing column used to be tolerated for everything, which is how a restore could
+			// succeed while silently producing rows that never had the data; a missing column is now
+			// either declared absent by the dump's own migration level, or the refusal stands.
 			var missing []string
 			for c := range cset {
-				if !containsString(cols, c) {
+				if !containsString(cols, c) && !optional[table][c] {
 					missing = append(missing, c)
 				}
 			}

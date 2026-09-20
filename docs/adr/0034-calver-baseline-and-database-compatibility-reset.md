@@ -1,5 +1,11 @@
 # ADR 0034 — CalVer release identity and a database compatibility reset
 
+> **Amended by [ADR 0035](0035-migrations-after-a-frozen-baseline.md).** The baseline stays frozen and
+> is still the acceptance contract — a database that does not satisfy it is still refused before any
+> statement runs. What §3's empty ladder becomes is a real one: additions after the baseline are
+> ordered, forward-only migration steps recorded in a ledger and applied at startup, once the boundary
+> has accepted the database.
+
 **Status: Accepted.** 2026-09-19. Supersedes the squash-at-every-major-boundary policy of
 [ADR 0013](0013-v2-schema-consolidation.md) (whose historical rationale is preserved there).
 Amends the boundary guarantees of [ADR 0027](0027-backup-and-restore.md).
