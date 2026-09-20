@@ -3,7 +3,8 @@ name: Release
 # One pipeline produces the release archives, the fixed ghcr.io image tag, and a published GitHub
 # Release from one batch of binaries:
 #
-#   setup   → resolve the tag, refuse anything that is not a CalVer tag, resolve the peeled commit
+#   setup   → resolve the tag, refuse anything that is not a CalVer tag, resolve the commit
+#   tag     → after the exact commit passes full CI, create or verify the annotated release tag
 #   web     → build the SPA (Vite) once and reuse it as an artifact (rebuilding it inside every
 #             matrix leg would be wasted work)
 #   build   → matrix cross-compiles 6 platforms, downloads the web bundle into web/internal/dist and
@@ -11,12 +12,10 @@ name: Release
 #   release → tar/zip + SHA256SUMS, then create or update the DRAFT GitHub Release
 #   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag, then
 #             attach the durable identity (commit + image digest) to the draft
-#   publish → publish that draft, as a pre-release unless the operator asked for a full release
+#   publish → publish that draft as Beta or Stable, or leave it unpublished for review
 #
-# **A tag publishes a pre-release.** A release that stopped at a draft was one no channel could
-# follow, which is what made a tag look like it had not done anything; the default now is the one an
-# operator would pick anyway. `workflow_dispatch` can ask for a full release, or for a draft when a
-# release needs to be looked at before it is public.
+# **A tag publishes a Beta.** The Actions form can cut the next tag from the latest fully-tested main
+# commit and publish it as Beta or Stable, so the normal release path needs no local command.
 #
 # Maturity is still GitHub Release metadata, never the tag and never the binary: tag spelling selects
 # nothing, and :latest / :beta are owned by release-channels.yml, which promotes the already-published
@@ -30,22 +29,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v2026.38"
+        description: "Version, e.g. v2026.38.12. Leave blank to choose the next CalVer tag."
+        required: false
+        type: string
+      notes:
+        description: "Reader-facing Markdown release notes stored on the annotated tag."
         required: true
         type: string
       maturity:
-        # What the release is published as. The default is the one a maintainer would choose anyway,
-        # so an ordinary tag needs no input; `draft` is the escape hatch for a release that has to be
-        # looked at before it is public, and it is never undone by this workflow.
-        description: "Published maturity. A tag publishes a pre-release unless this says otherwise."
+        description: "Release channel"
         required: false
         type: choice
-        default: "prerelease"
-        options: ["prerelease", "release", "draft"]
+        default: "beta"
+        options: ["beta", "stable", "draft"]
 
-# Least privilege by default; the three jobs that write override it (release and publish -> GitHub
-# Release, docker -> ghcr.io). Everything else inherits contents: read, so a compromised build step
-# cannot push to the repository.
+# Least privilege by default; tag, release, docker and publish request write permissions only for
+# their own mutations. Everything else inherits contents: read, so a compromised build step cannot
+# push to the repository.
 permissions:
   contents: read
 
@@ -71,6 +71,7 @@ jobs:
     outputs:
       tag: ${{ steps.t.outputs.tag }}
       sha: ${{ steps.t.outputs.sha }}
+      create_tag: ${{ steps.t.outputs.create_tag }}
       owner_lc: ${{ steps.t.outputs.owner_lc }}
       repo_lc: ${{ steps.t.outputs.repo_lc }}
       short_sha: ${{ steps.t.outputs.short_sha }}
@@ -90,24 +91,52 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_NOTES: ${{ inputs.notes }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail
+          . scripts/lib/calver.sh
+          . scripts/lib/release.sh
+
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             tag="$INPUT_TAG"
-            # A dispatch from main would build main's code and label it with the tag. Require the
-            # selected ref to be the tag itself, so the checkout below is the tagged commit.
-            if [ "$GITHUB_REF" != "refs/tags/${tag}" ]; then
-              echo "::error::select the ${tag} tag as the workflow ref when dispatching"
+            if [ "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" ]; then
+              echo "::error::run the release form from the ${DEFAULT_BRANCH} branch"
               exit 1
             fi
+            if [ -z "$tag" ]; then
+              tag=$(derive_version "$PWD" "$(calver_current_week)")
+            fi
+            if ! printf '%s' "$INPUT_NOTES" | grep -q '[^[:space:]]'; then
+              echo "::error::release notes cannot be empty"
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "::error::tag ${tag} already exists; choose another version"
+              exit 1
+            fi
+            sha=$(git rev-parse --verify HEAD)
+            create_tag=true
           else
             tag="$GITHUB_REF_NAME"
+            if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              git fetch --force --no-tags origin "refs/tags/${tag}:refs/tags/${tag}" || {
+                echo "::error::no tag ${tag} on origin"; exit 1; }
+            fi
+            # Annotated tags only: the annotation carries the release note, and a lightweight tag
+            # carries no identity of its own to check the build against.
+            obj=$(git rev-parse --verify "refs/tags/${tag}")
+            if [ "$(git cat-file -t "$obj")" != "tag" ]; then
+              echo "::error::${tag} is a lightweight tag; release tags must be annotated"
+              exit 1
+            fi
+            sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
+            create_tag=false
           fi
 
           echo "::group::Validate the tag"
-          . scripts/lib/calver.sh
           if ! calver_valid "$tag"; then
             echo "::error::$tag is not a CalVer release tag. Expected vYYYY.W[.R] — the ISO"
             echo "::error::week-numbering year, the UTC ISO week the series starts in, and an optional"
@@ -116,22 +145,6 @@ jobs:
           fi
           echo "$tag is a well-formed CalVer tag"
           echo "::endgroup::"
-
-          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            git fetch --force --no-tags origin "refs/tags/${tag}:refs/tags/${tag}" || {
-              echo "::error::no tag ${tag} on origin"; exit 1; }
-          fi
-          # Annotated tags only: the annotation carries the release note, and a lightweight tag
-          # carries no identity of its own to check the build against.
-          obj=$(git rev-parse --verify "refs/tags/${tag}")
-          if [ "$(git cat-file -t "$obj")" != "tag" ]; then
-            echo "::error::${tag} is a lightweight tag; release tags are annotated (scripts/tag-release.sh)"
-            exit 1
-          fi
-          # Peel to the commit: the tag object's own sha is not what the build must be checked out
-          # at or verified against, and conflating the two is how a binary ends up labelled with a
-          # revision it was not built from.
-          sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
 
           owner_lc="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
           repo_lc="$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
@@ -148,6 +161,7 @@ jobs:
           {
             echo "tag=${tag}"
             echo "sha=${sha}"
+            echo "create_tag=${create_tag}"
             echo "owner_lc=${owner_lc}"
             echo "repo_lc=${repo_lc}"
             echo "short_sha=${short_sha}"
@@ -155,6 +169,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Require the annotated release note
+        if: github.event_name != 'workflow_dispatch'
         shell: bash
         env:
           VERSION: ${{ steps.t.outputs.tag }}
@@ -201,6 +216,55 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT: ${{ needs.setup.outputs.sha }}
         run: python3 scripts/release_guard.py wait-ci "$COMMIT"
+
+  tag:
+    name: Create or verify the annotated tag
+    # Keep tag creation late: a failed platform build must not leave behind a version with no
+    # publishable artifact set. The build itself needs only setup's resolved version and commit.
+    needs: [setup, ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Create or verify tag
+        shell: bash
+        env:
+          CREATE_TAG: ${{ needs.setup.outputs.create_tag }}
+          VERSION: ${{ needs.setup.outputs.tag }}
+          EXPECTED_SHA: ${{ needs.setup.outputs.sha }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          ACTOR: ${{ github.actor }}
+          ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          set -euo pipefail
+          if [ "$CREATE_TAG" != "true" ]; then
+            actual=$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")
+            test "$actual" = "$EXPECTED_SHA" || {
+              echo "::error::tag ${VERSION} no longer points at ${EXPECTED_SHA}"; exit 1; }
+            echo "verified existing annotated tag ${VERSION}"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "::error::tag ${VERSION} was created while this run was waiting"
+            exit 1
+          fi
+          notes_file=$(mktemp)
+          trap 'rm -f "$notes_file"' EXIT INT TERM
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
+          git config user.name "$ACTOR"
+          git config user.email "${ACTOR_ID}+${ACTOR}@users.noreply.github.com"
+          git tag -a --cleanup=verbatim "$VERSION" "$EXPECTED_SHA" -F "$notes_file"
+          # GITHUB_TOKEN deliberately suppresses a second tag-push workflow run. This run already
+          # owns the build and continues after creating the immutable release identity.
+          git push origin "refs/tags/${VERSION}"
+          echo "created ${VERSION} at ${EXPECTED_SHA}"
 
   web:
     name: Build web assets
@@ -285,7 +349,7 @@ jobs:
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
-          # The committed note seeds the GitHub Release body. The running portal reads that Release
+          # The annotated note seeds the GitHub Release body. The running portal reads that Release
           # back from GitHub, which remains the sole authority if its body or maturity changes later.
           mkdir -p out
           mod=$(go list -m)
@@ -314,7 +378,7 @@ jobs:
     permissions:
       contents: write
       packages: read
-    needs: [setup, build, ci]
+    needs: [setup, build, ci, tag]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -564,13 +628,13 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.setup.outputs.tag }}
-          # `inputs` is empty on a tag push, and empty means the default: a pre-release.
-          MATURITY: ${{ inputs.maturity || 'prerelease' }}
+          # `inputs` is empty on a tag push, and empty means the default: Beta.
+          MATURITY: ${{ inputs.maturity || 'beta' }}
         run: |
           set -euo pipefail
           case "${MATURITY}" in
-            prerelease) flags="--prerelease" ;;
-            release) flags="--prerelease=false" ;;
+            beta | prerelease) flags="--prerelease" ;;
+            stable | release) flags="--prerelease=false" ;;
             draft)
               # The escape hatch, and a deliberate outcome rather than a skipped step: a release
               # that has to be read before it is public stays invisible until someone publishes it.
@@ -578,7 +642,7 @@ jobs:
               exit 0
               ;;
             *)
-              echo "::error::unknown maturity '${MATURITY}' (prerelease | release | draft)"
+              echo "::error::unknown maturity '${MATURITY}' (beta | stable | draft)"
               exit 1
               ;;
           esac

@@ -31,7 +31,14 @@ helper passed `--cleanup=verbatim` lost its Markdown headings — and any shell 
 command example — while the file kept them. Tags already cut are left as they are; the next one
 onward says what its file says.
 
-Cutting one from an already-green merge commit:
+The normal release path is entirely in GitHub: open **Actions → Release → Run workflow**, select
+`main`, leave Version blank to derive the next CalVer number (or enter one explicitly), paste the
+reader-facing Markdown notes, and choose `beta`, `stable`, or `draft`. The workflow verifies the
+exact `main` commit's full CI before it creates the annotated tag. It then builds the six archives and
+fixed container image, publishes the Release at the selected maturity, and lets Release channels
+reconcile `:beta` and `:latest`.
+
+The command-line equivalent remains available for recovery and automation:
 
 ```sh
 scripts/tag-release.sh --next
@@ -95,14 +102,12 @@ is no `-beta`: whether a release is a pre-release or a full release is GitHub Re
 the tag, and it is what moves the rolling channels. See
 [ADR 0034](../adr/0034-calver-baseline-and-database-compatibility-reset.md).
 
-**A tag publishes a pre-release.** The pipeline builds, attaches the archives and the image digest, and
-then publishes the release itself: a release that stopped at a draft was one no channel could follow,
-which is what made a tag look like it had done nothing. `workflow_dispatch` can ask for a full release
-(`maturity: release`) or leave the release unpublished for review (`maturity: draft`). Publishing fires
-the `release` event, and the reconciliation workflow then updates the rolling image channels,
-promoting the bytes that were already published by digest rather than rebuilding them. To re-run that
-by hand after a missed event, dispatch the **Release channels** workflow (with `dry_run` to see the
-decision first).
+**A manually pushed tag publishes a Beta.** The GitHub Actions form can publish the tag it creates as
+Beta, Stable, or leave it as a draft. In every case the pipeline builds and records the fixed image
+before making the Release public. Publishing fires the `release` event, and the reconciliation
+workflow then updates the rolling image channels, promoting the bytes that were already published by
+digest rather than rebuilding them. To re-run that after a missed event, dispatch the **Release
+channels** workflow (with `dry_run` to see the decision first).
 
 Promote an already-published Beta without rebuilding it:
 
