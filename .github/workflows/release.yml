@@ -271,21 +271,6 @@ jobs:
         with:
           name: web-dist
           path: internal/web/dist
-      - name: Package the release note
-        shell: bash
-        env:
-          VERSION: ${{ needs.setup.outputs.tag }}
-        run: |
-          set -euo pipefail
-          # The note is compiled into the binary (internal/version's go:embed), so it must be in
-          # place before `go build`. setup already proved it exists; this only needs the path.
-          . scripts/lib/calver.sh
-          . scripts/lib/release.sh
-          notes_file=$(note_path "$PWD" "${VERSION}")
-          cp "${notes_file}" internal/version/releasenote.md
-          # Hand the path to the build step, so the artifact check verifies the SAME file rather
-          # than resolving it a second time.
-          echo "NOTE_FILE=${notes_file}" >> "$GITHUB_ENV"
       - name: Build report-portal
         shell: bash
         env:
@@ -298,6 +283,13 @@ jobs:
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
+          # The release note is compiled into the binary (internal/version's go:embed), so it has to
+          # be in place before the build. setup proved it exists; this only needs the path, and the
+          # same value is handed to the artifact check below so both look at one file.
+          . scripts/lib/calver.sh
+          . scripts/lib/release.sh
+          note_file=$(note_path "$PWD" "${VERSION}")
+          cp "${note_file}" internal/version/releasenote.md
           mkdir -p out
           mod=$(go list -m)
           short_sha="${SHORT_SHA}"
@@ -311,7 +303,7 @@ jobs:
           # the binary itself, so a wrong module path (which makes every -X a silent no-op) or a
           # checkout of the wrong commit cannot pass. The note file is passed so the same check also
           # proves THIS release's note is inside the artifact.
-          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$NOTE_FILE"
+          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$note_file"
       - uses: actions/upload-artifact@v7
         with:
           name: report-portal-${{ matrix.goos }}-${{ matrix.goarch }}
