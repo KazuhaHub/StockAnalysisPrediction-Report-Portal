@@ -18,7 +18,7 @@ import Markdown from './Markdown'
 // It is also the surface a `required` policy escalates to. The reader can close it; the coordinator
 // then keeps the update visible in the site-wide banner instead of trapping work behind an overlay.
 
-type ReleaseMaturity = 'release' | 'beta'
+type ReleaseMaturity = 'release' | 'beta' | 'dev'
 export type ReleaseNotes = { tag: string; available: boolean; markdown: string; url: string; maturity: ReleaseMaturity | '' }
 export type ReleaseHistoryItem = { tag: string; title: string; url: string; maturity: ReleaseMaturity }
 
@@ -111,9 +111,13 @@ export default function ReleaseNotesModal({
   const historyVisible = browseHistory && history.length > 1
   const selectedHistoryItem = history.find((item) => item.tag === selectedTag)
   const maturity = selectedHistoryItem?.maturity ?? (notes?.tag === selectedTag ? notes.maturity : '')
+  const maturityKey = (value: ReleaseMaturity) =>
+    value === 'release' ? 'update.release' : value === 'beta' ? 'update.beta' : 'update.dev'
+  const maturityColor = (value: ReleaseMaturity) =>
+    value === 'release' ? 'green' : value === 'beta' ? 'blue' : 'default'
   const maturityTag = maturity ? (
-    <Tag color={maturity === 'release' ? 'green' : 'blue'} bordered={false}>
-      {t(maturity === 'release' ? 'update.release' : 'update.beta')}
+    <Tag color={maturityColor(maturity)} bordered={false}>
+      {t(maturityKey(maturity))}
     </Tag>
   ) : null
 
@@ -123,7 +127,7 @@ export default function ReleaseNotesModal({
       onCancel={onClose}
       title={<Space size={8}>{t('update.notesTitle', { version: titleVersion })}{maturityTag}</Space>}
       width={980}
-      className="rp-run-analysis-modal rp-release-notes-modal"
+      className={`rp-run-analysis-modal rp-release-notes-modal${historyVisible ? ' rp-release-notes-modal--history' : ''}`}
       // Rendering under the application root avoids Ant Design's body scroll lock. In this app,
       // html/body/#root are all height:100%; locking body collapses the document to one viewport
       // and forces a long page to scroll to zero before the dialog appears.
@@ -177,7 +181,7 @@ export default function ReleaseNotesModal({
             onChange={setSelectedTag}
             options={history.map((item) => ({
               value: item.tag,
-              label: `${productVersionLabel(item.tag)} · ${t(item.maturity === 'release' ? 'update.release' : 'update.beta')}`,
+              label: `${productVersionLabel(item.tag)} · ${t(maturityKey(item.maturity))}`,
             }))}
           />
         </div>
@@ -196,8 +200,8 @@ export default function ReleaseNotesModal({
                 <span>
                   <span className="rp-release-history__version">
                     <strong>{productVersionLabel(item.tag)}</strong>
-                    <Tag color={item.maturity === 'release' ? 'green' : 'blue'} bordered={false}>
-                      {t(item.maturity === 'release' ? 'update.release' : 'update.beta')}
+                    <Tag color={maturityColor(item.maturity)} bordered={false}>
+                      {t(maturityKey(item.maturity))}
                     </Tag>
                   </span>
                   {item.title && <small>{item.title}</small>}

@@ -69,6 +69,9 @@ func releaseNotesResp(reqTag, serverTag, note string, hasNote bool, history []ve
 		tag = serverTag
 	}
 	maturity := ""
+	if !version.IsReleaseTag(tag) {
+		maturity = "dev"
+	}
 	for _, entry := range history {
 		if entry.Tag == tag {
 			maturity = entry.Maturity
