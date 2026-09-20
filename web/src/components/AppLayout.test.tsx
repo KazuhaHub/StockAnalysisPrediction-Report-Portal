@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
 
-const updateState = vi.hoisted(() => ({ available: false }))
+const updateState = vi.hoisted(() => ({ value: {} as unknown }))
 // The header's queue badge polls through the conditional-GET helper; `queue` decides whether it has
 // a count yet. UNCHANGED is what a 304 looks like — an answer to a tag this mount never sent.
 const queueState = vi.hoisted(() => ({ answer: null as unknown }))
@@ -15,7 +15,14 @@ const siteState = vi.hoisted(() => ({
   settings: { footerText: '', footerShowInfo: false, footerShowVersion: false },
 }))
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    // Interpolate as i18next does, so a test can assert both the string chosen and the value put
+    // into it (the version label is the string plus the number).
+    t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${Object.values(o).join(',')}` : k),
+    i18n: { language: 'en-US' },
+  }),
+}))
 vi.mock('../site', () => ({
   SiteLogo: () => <span data-testid="site-logo" />,
   useSite: () => ({
@@ -33,7 +40,10 @@ vi.mock('../auth', () => ({
 vi.mock('../api/client', () => ({
   api: { get: () => Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' }) },
 }))
-vi.mock('../lib/useVersionCheck', () => ({ useVersionCheck: () => updateState.available }))
+vi.mock('../lib/updateState', async (orig) => {
+  const actual = await orig<typeof import('../lib/updateState')>()
+  return { ...actual, useUpdateState: () => updateState.value }
+})
 vi.mock('../lib/conditionalGet', () => ({
   UNCHANGED,
   forgetTags,
@@ -47,6 +57,11 @@ vi.mock('./SiteAnnouncement', () => ({
   AnnouncementStrip: () => null,
   AnnouncementPopup: () => null,
 }))
+
+// The build this test bundle "is running", and the state the shared coordinator reports. Both the
+// footer label and the banner read from here, so the page identity is stubbed once.
+const page = { version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10T00:00:00Z' }
+const noUpdate = { page, target: null, kind: null, policy: 'dismissible', workerReady: false, failed: false }
 
 function renderAt(path: string) {
   return render(
@@ -65,6 +80,14 @@ function renderAt(path: string) {
     </MemoryRouter>,
   )
 }
+
+beforeEach(() => {
+  updateState.value = noUpdate
+  vi.stubEnv('VITE_BUILD_VERSION', page.version)
+  vi.stubEnv('VITE_BUILD_COMMIT', page.commit)
+  vi.stubEnv('VITE_BUILD_DATE', page.buildDate)
+})
+afterEach(() => vi.unstubAllEnvs())
 
 // An absent badge is how this header says "nothing is queued". It used to say that before anything
 // had been asked, and — on a summary request that keeps failing — for ever.
@@ -186,7 +209,7 @@ describe('AppLayout desktop navigation', () => {
 
 describe('AppLayout mobile chat focus mode', () => {
   beforeEach(() => {
-    updateState.available = false
+    updateState.value = noUpdate
     siteState.settings = { footerText: '', footerShowInfo: false, footerShowVersion: false }
   })
 
@@ -226,8 +249,10 @@ describe('AppLayout mobile chat focus mode', () => {
     vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
     const { container } = renderAt('/queue')
 
-    // The footer shows the product version, not the git tag: 2026.38.1, not v2026.38.1 (ADR 0034).
-    const footer = await screen.findByText('2026.38.1').then((el) => el.closest('.ant-layout-footer'))
+    // The footer shows the product version, not the git tag: 2026.38.1, not v2026.38.1 (ADR 0034),
+    // behind a localized "Version" prefix, and as a button so the release notes are keyboard- and
+    // touch-reachable rather than hover-only.
+    const footer = await screen.findByText('version.label:2026.38.1').then((el) => el.closest('.ant-layout-footer'))
     expect(footer).not.toBeNull()
     expect(footer!.querySelector('.ant-space'), 'a flex row re-splits the baselines').toBeNull()
     const flexed = [...footer!.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.display.includes('flex'))
@@ -235,12 +260,16 @@ describe('AppLayout mobile chat focus mode', () => {
     expect(container.querySelector('[data-testid="site-logo"]')).not.toBeNull()
   })
 
-  it('uses the info background without a dark separator under the update banner', async () => {
-    updateState.available = true
+  it('draws the update banner from the shared coordinator, with no close affordance stacked on it', async () => {
+    updateState.value = {
+      ...noUpdate,
+      target: { version: 'v2026.38.2', commit: 'bbbbbbb', buildDate: '2026-08-11T00:00:00Z' },
+      kind: 'newer',
+    }
     vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
     const { container } = renderAt('/queue')
 
-    expect(await screen.findByText('update.desc')).toBeTruthy()
+    expect(await screen.findByText(/update\.newTitle:2026\.38\.2/)).toBeTruthy()
     const banner = container.querySelector<HTMLElement>('.rp-update-banner')
     expect(banner).not.toBeNull()
     expect(banner?.style.borderBottom).toBe('')

@@ -1,32 +1,41 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Breadcrumb, Button, Divider, Dropdown, FloatButton, Grid, Layout, Popover, Segmented, Select, Space, Spin, Tooltip, theme } from 'antd'
-import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, InfoCircleFilled, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
+import { Badge, Breadcrumb, Button, Divider, Dropdown, FloatButton, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
+import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api } from '../api/client'
 import { usePrefs } from '../prefs'
 import { useReaderPrefs } from '../reader'
 import { useAuth } from '../auth'
 import { SiteLogo, useSite } from '../site'
 import { sanitizeFooterHtml } from '../lib/footerHtml'
 import { QUEUE_EVENT, RUN_ANALYSIS_EVENT } from '../lib/shortcuts'
-import { applyUpdate, useSWUpdateReady } from '../lib/swUpdate'
-import { useVersionCheck } from '../lib/useVersionCheck'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { prefetch } from '../lib/prefetch'
-import { productVersionLabel } from '../lib/productVersionLabel'
 import { queueOnScreen } from '../lib/queueWatch'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import Omnibox from './Omnibox'
 import RunAnalysisModal from './RunAnalysisModal'
 import QueueDrawer from './QueueDrawer'
 import SiteAnnouncement, { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
+import { UpdateBanner, UpdateProvider } from './UpdateProvider'
+import VersionLabel from './VersionLabel'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
 const { Header, Content, Footer } = Layout
 
+// The shell is wrapped in the update coordinator so the banner, the footer's version label and the
+// management rail's copy of it all read one piece of state, and so the release-note dialog is
+// mounted exactly once for every route — portal and /manage alike.
 export default function AppLayout() {
+  return (
+    <UpdateProvider>
+      <AppShell />
+    </UpdateProvider>
+  )
+}
+
+function AppShell() {
   const { t } = useTranslation()
   const { settings, title } = useSite()
   const { mode, setMode, lang, setLang, langs } = usePrefs()
@@ -75,7 +84,6 @@ export default function AppLayout() {
   // keep the old UI during the transition otherwise). /manage/* collapses to one key — its tabs are
   // nested under ManageLayout, which owns its own Suspense, so its shell must not remount per tab.
   const suspenseKey = loc.pathname.startsWith('/manage') ? '/manage' : loc.pathname
-  const [ver, setVer] = useState<{ version: string; commit: string; buildDate: string } | null>(null)
   const [runOpen, setRunOpen] = useState(false)
   const [runTargetId, setRunTargetId] = useState<number | undefined>() // pinned workflow from an entry-button shortcut
   const [queueOpen, setQueueOpen] = useState(false)
@@ -89,7 +97,6 @@ export default function AppLayout() {
   const [accountOpen, setAccountOpen] = useState(false)
   const canRun = can('run_batch')
   const canWrite = can('report_edit')
-  const swUpdateReady = useSWUpdateReady()
 
   // Show back-to-top once the window has scrolled past ~one screen. Self-controlled
   // (rather than antd's FloatButton.BackTop) so it's reliable across pages.
@@ -99,16 +106,11 @@ export default function AppLayout() {
     onScroll()
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
-  useEffect(() => {
-    api.get<{ version: string; commit: string; buildDate: string }>('/api/version').then(setVer).catch(() => {})
-  }, [])
-  // "New version" prompt: once a deploy lands under this open tab, show a persistent inline banner
-  // (not a floating notification that overlaps content) with a Refresh action. It stays until refresh
-  // so a user cannot accidentally dismiss the only indication that the open client is stale.
-  // Two ways to learn a new build exists — the server reports a different one, or a service worker
-  // has installed beside us — and ONE way to act on it, so the user is never told twice or, worse,
-  // reloaded without being asked.
-  const updateAvailable = useVersionCheck() || swUpdateReady
+  // "New version" prompt: once a deploy lands under this open tab, the shared coordinator says so
+  // with a persistent inline banner (not a floating notification that overlaps content) and the
+  // actions the administrator's policy allows. Two ways to learn a new build exists — the server
+  // reports a different one, or a service worker has installed beside us — and ONE way to act on it,
+  // so the user is never told twice or, worse, reloaded without being asked.
 
   // Warm the report-viewing chunks shortly after the shell mounts. StockPage/RunPage statically pull
   // the heavy Markdown chunk, so pre-loading them makes clicking a report navigate near-instantly
@@ -196,7 +198,10 @@ export default function AppLayout() {
   const footerText = settings.footerText || title
   const footerHtml = settings.footerText ? sanitizeFooterHtml(settings.footerText) : ''
   const showFooterInfo = settings.footerShowInfo
-  const showFooterVersion = settings.footerShowVersion && !!ver
+  // The footer's version is the build THIS page is running, which the bundle always knows — unlike
+  // before, when the footer waited on a server answer and a portal whose /api/version failed showed
+  // no version at all.
+  const showFooterVersion = settings.footerShowVersion
   const showFooter = showFooterInfo || showFooterVersion
   const workbenchItems = [
     ...(canRun
@@ -533,52 +538,12 @@ export default function AppLayout() {
         </Space>
       </Header>
 
-      {/* New-version banner: sticky right under the header. The info-colored bar spans full width while
-          the notice itself — icon, text, button — is one centred group, so the button always sits beside
-          the sentence it belongs to. Letting the text flex-grow instead pinned the button to the far edge
-          of the 1240px content column, leaving the two marooned at opposite ends of a wide screen. */}
-      {updateAvailable && (
-        <div
-          className="rp-update-banner"
-          style={{
-            position: 'sticky',
-            top: 'var(--rp-header-h, 64px)',
-            zIndex: 19,
-            background: token.colorInfoBg,
-          }}
-        >
-          <div
-            style={{
-              maxWidth: onChat ? 'none' : contentMaxWidth,
-              margin: '0 auto',
-              padding: compact ? '8px 12px' : '8px 20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              gap: 10,
-            }}
-          >
-            {/* Icon and sentence are one unit: when the row wraps on a phone, only the button drops to
-                its own line — the icon must never strand itself above the text it annotates. */}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <InfoCircleFilled style={{ color: token.colorInfo, fontSize: 15, flexShrink: 0 }} />
-              <span style={{ minWidth: 0, color: token.colorText, fontSize: 14 }}>{t('update.desc')}</span>
-            </span>
-            <Button
-              type="primary"
-              size="small"
-              // One click is the whole handover: find the build carrying the update — asking the
-              // registration if the browser has not looked yet — hand over to it, then reload. It
-              // used to reload with nothing waiting, which left the new HTML under the old worker
-              // and brought the banner straight back for a second round.
-              onClick={() => void applyUpdate()}
-            >
-              {t('update.refresh')}
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* New-version banner: sticky right under the header, driven by the shared coordinator. The
+          info-colored bar spans full width while the notice itself — icon, text, actions — is one
+          centred group. Under a `required` policy it draws nothing: the release-note dialog is the
+          prompt, and stacking a second presentation of one decision on top of it is exactly the
+          duplicate overlay the shared coordinator exists to prevent. */}
+      <UpdateBanner maxWidth={onChat ? 'none' : contentMaxWidth} compact={compact} />
 
       {/* Site-wide announcements: a full-width tinted strip under the header, collapsed to one line,
           the way the update banner is. This one follows the reader onto every page, so it is chrome
@@ -679,21 +644,7 @@ export default function AppLayout() {
             </>
           )}
           {showFooterInfo && showFooterVersion && <span style={{ margin: '0 6px' }}>·</span>}
-          {showFooterVersion && (
-            <Tooltip
-              title={
-                <div style={{ lineHeight: 1.6, fontWeight: 600 }}>
-                  <div>{productVersionLabel(ver.version)}</div>
-                  <div>commit: {ver.commit}</div>
-                  <div>built: {ver.buildDate}</div>
-                </div>
-              }
-            >
-              <span style={{ cursor: 'help', fontVariantNumeric: 'tabular-nums' }}>
-                {productVersionLabel(ver.version)}
-              </span>
-            </Tooltip>
-          )}
+          {showFooterVersion && <VersionLabel />}
         </Footer>
       )}
     </Layout>

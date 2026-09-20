@@ -91,9 +91,32 @@ describe('SiteSettingsPage', () => {
       // The portal's own origin belongs with the deployment's settings, not on the email page —
       // reset links were only the first of seven things to derive from it.
       publicUrl: 'https://portal.example.com',
+      // An absent stored policy reads as the default, so a first save writes the default rather
+      // than dropping the field (which would leave it unknowable to a later reader).
+      updatePromptPolicy: 'dismissible',
     })
     expect(Object.keys(apiMock.post.mock.calls[0][1])).not.toContain('announcementTitle')
     expect(Object.keys(apiMock.post.mock.calls[0][1])).not.toContain('announcementContent')
     expect(refreshMock).toHaveBeenCalledTimes(1)
+  })
+
+  // One radio group, not a pair of switches: "may the reader defer" and "must they refresh" are one
+  // decision, and two booleans can spell a state nobody chose.
+  it('shows the stored update policy and saves a change to it', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation((url: string) =>
+      url.includes('/geoip') ? Promise.resolve({}) : Promise.resolve({ ...loadedSettings, updatePromptPolicy: 'persistent' }),
+    )
+    renderPage()
+
+    const persisted = await screen.findByRole('radio', { name: /settings\.policy\.persistent/ })
+    const required = screen.getByRole('radio', { name: /settings\.policy\.required/ })
+    expect((persisted as HTMLInputElement).checked).toBe(true)
+
+    await user.click(required)
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(apiMock.post.mock.calls[0][1].updatePromptPolicy).toBe('required')
   })
 })

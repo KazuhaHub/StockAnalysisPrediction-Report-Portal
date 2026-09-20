@@ -426,11 +426,65 @@ body {
   }
 }
 
+/* Release notes reuse the Run Analysis dialog's shell — same width, mask, header and responsive
+   rules — and change only what the content needs: one scrolling column instead of two panes, and a
+   footer with the external link pushed away from the actions. */
+.rp-release-notes-modal .ant-modal-body {
+  max-height: min(720px, calc(100dvh - 280px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.rp-release-notes-current {
+  display: block;
+  margin-bottom: 12px;
+}
+.rp-release-notes-body {
+  min-width: 0;
+}
+.rp-release-notes-state {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+}
+.rp-release-notes-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rp-release-notes-footer .ant-btn-link {
+  padding-inline: 0;
+}
+@media (max-width: 767px) {
+  .rp-release-notes-modal .ant-modal-body {
+    max-height: calc(100dvh - 240px);
+  }
+  /* The actions keep their width and drop below the link rather than shrinking into an ellipsis;
+     the primary Refresh stays the last thing in the row wherever the row breaks. */
+  .rp-release-notes-footer {
+    justify-content: flex-end;
+  }
+  .rp-release-notes-footer__external {
+    margin-inline-end: auto;
+  }
+}
+
+/* The footer/sidebar version label: secondary text that behaves like a button, so the release notes
+   are reachable by keyboard and on touch, not only by hovering a span. */
+.rp-version-label.ant-btn {
+  text-decoration: none;
+}
+.rp-version-label.ant-btn:hover,
+.rp-version-label.ant-btn:focus-visible {
+  color: var(--ant-color-primary);
+  text-decoration: underline;
+}
+
 .rp-home-search-row {
   width: min(780px, 100%);
   margin: 0 auto;
-}
-.rp-home-search-row__input {
+}.rp-home-search-row__input {
   width: 100%;
 }
 .rp-home-search-row__advanced.ant-btn {

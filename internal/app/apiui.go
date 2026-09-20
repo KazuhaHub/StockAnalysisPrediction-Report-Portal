@@ -1203,6 +1203,8 @@ func (s *Server) apiAdminSettings(w http.ResponseWriter, r *http.Request, user s
 		// deployment's own settings. The stored key is unchanged.
 		"publicUrl": s.st.GetSetting("public_url", ""),
 		"newCount":  s.st.CountNew(),
+		// How hard the update prompt insists (dismissible / persistent / required).
+		"updatePromptPolicy": s.updatePromptPolicy(),
 	}
 	for k, v := range s.siteSettingsJSON() {
 		out[k] = v
@@ -1234,6 +1236,9 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 		PublicUrl                                                                             *string
 		AnnouncementLevel, AnnouncementTitle, AnnouncementContent, HomeMoreStyle              *string
 		FooterShowInfo, FooterShowVersion, PwaEnabled, AnnouncementEnabled, AnnouncementPopup *bool
+		// How hard the update prompt insists (dismissible / persistent / required). One enum, not a
+		// pair of switches: see update_api.go.
+		UpdatePromptPolicy *string
 		// Whether the reader-facing announcement bands fold their overflow (ADR 0025). A site-wide
 		// display switch, so it rides the site-settings endpoint rather than earning one of its
 		// own; the announcements page posts it by itself, which is what per-field merge is for.
@@ -1286,6 +1291,13 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 		jsonErrorCode(w, http.StatusBadRequest, "bad_pwa_icon_url", "无效的安装图标地址")
 		return
 	}
+	// An unknown policy is refused, not coerced: a silent fallback to the default would tell an
+	// admin their choice was kept when it was not.
+	if in.UpdatePromptPolicy != nil && !validUpdatePromptPolicy(*in.UpdatePromptPolicy) {
+		jsonErrorCode(w, http.StatusBadRequest, "bad_update_policy",
+			"更新提示策略必须是 dismissible、persistent 或 required 之一")
+		return
+	}
 	if in.OldBase != nil {
 		s.st.SetSetting("old_base", strings.TrimSpace(*in.OldBase))
 	}
@@ -1330,6 +1342,9 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 	}
 	if in.AnnouncementPopup != nil {
 		s.st.SetSetting("announcement_popup", strconv.FormatBool(*in.AnnouncementPopup))
+	}
+	if in.UpdatePromptPolicy != nil {
+		s.st.SetSetting(updatePromptPolicySetting, normalizeUpdatePromptPolicy(*in.UpdatePromptPolicy))
 	}
 	if in.AnnouncementCollapse != nil {
 		s.st.SetSetting("announcement_collapse", strconv.FormatBool(*in.AnnouncementCollapse))
