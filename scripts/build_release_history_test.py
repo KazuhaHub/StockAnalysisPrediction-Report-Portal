@@ -77,7 +77,43 @@ class BuildReleaseHistoryTest(unittest.TestCase):
             )
             self.assertEqual(
                 [(item["tag"], item["maturity"]) for item in items],
-                [("v2026.38.2", "release"), ("v2026.38.1", "release"), ("v2026.38", "beta")],
+                [("v2026.38.2", "release"), ("v2026.38.1", "release")],
+            )
+
+    def test_full_release_history_contains_only_full_release_milestones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes = root / "docs" / "releases" / "2026"
+            notes.mkdir(parents=True)
+            tags = [f"v2026.{30 + revision}" for revision in range(10)]
+            for tag in tags:
+                (notes / f"{tag}.md").write_text(f"# {tag}\n", encoding="utf-8")
+            maturities = {
+                tag: ("release" if revision in {0, 3} else "beta")
+                for revision, tag in enumerate(tags[:-1])
+            }
+            items = MODULE.build(root, tags[9], maturities, "release")
+            self.assertEqual(
+                [item["tag"] for item in items],
+                ["v2026.39", "v2026.33", "v2026.30"],
+            )
+
+    def test_beta_history_keeps_milestones_and_only_betas_after_latest_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            notes = root / "docs" / "releases" / "2026"
+            notes.mkdir(parents=True)
+            tags = [f"v2026.{30 + revision}" for revision in range(10)]
+            for tag in tags:
+                (notes / f"{tag}.md").write_text(f"# {tag}\n", encoding="utf-8")
+            maturities = {
+                tag: ("release" if revision in {0, 3, 7} else "beta")
+                for revision, tag in enumerate(tags[:-1])
+            }
+            items = MODULE.build(root, tags[9], maturities, "beta")
+            self.assertEqual(
+                [item["tag"] for item in items],
+                ["v2026.39", "v2026.38", "v2026.37", "v2026.33", "v2026.30"],
             )
 
     def test_reads_only_published_maturity_records(self):

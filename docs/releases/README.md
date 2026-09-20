@@ -56,6 +56,9 @@ labels full releases and Beta builds explicitly and never infers maturity from t
 A full-release note summarizes the user-visible changes since the previous full release, while each
 Beta note remains the incremental test-stage record. The history builder does not concatenate Beta
 notes into the full-release note, because that would duplicate an intentionally curated summary.
+Full-release builds therefore package only full-release milestones. Beta builds package those same
+milestones plus the Beta notes created after the latest full release; Beta notes already covered by
+a later full-release summary are omitted. The resulting list is capped at 10 entries after filtering.
 Both generated files are gitignored paths, because a build input that overwrites a tracked file dirties the worktree and the
 binary would then be stamped `vcs.modified=true`, which the release check refuses. A `go:embed` carries
 them into the artifact. The portal serves the current note and this recent offline history to the
