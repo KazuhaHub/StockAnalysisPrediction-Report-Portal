@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Divider, Form, Input, Select, Space, Switch, Typography, Upload } from 'antd'
+import { App, Button, Divider, Form, Input, Radio, Select, Space, Switch, Typography, Upload } from 'antd'
 import { DeleteOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-import type { SettingsResp } from '../../api/types'
+import type { SettingsResp, UpdatePromptPolicy } from '../../api/types'
 import { useSite } from '../../site'
 import { BrandIcon } from '../../components/icons'
 import LoadGate from '../../components/LoadGate'
@@ -22,8 +22,11 @@ function tzOptions(systemLabel: string) {
   return [{ value: '', label: systemLabel }, ...zones.map((z) => ({ value: z, label: z }))]
 }
 
-// Site branding, PWA, footer, and panel timezone. Announcement lives on its own
-// page now; each page posts only its own fields and the settings API merges
+// The update-prompt policies, in the order the page presents them: least intrusive first.
+const UPDATE_POLICIES: UpdatePromptPolicy[] = ['dismissible', 'persistent', 'required']
+
+// Site branding, PWA, footer, panel timezone and the update prompt. Announcement lives on
+// its own page now; each page posts only its own fields and the settings API merges
 // per-field (nil = untouched), so saving here never disturbs the announcement.
 export default function SiteSettingsPage() {
   const { t } = useTranslation()
@@ -46,6 +49,7 @@ export default function SiteSettingsPage() {
           footerText: r.footerText || '',
           footerShowInfo: r.footerShowInfo !== false,
           footerShowVersion: r.footerShowVersion !== false,
+          updatePromptPolicy: r.updatePromptPolicy || 'dismissible',
           pwaEnabled: r.pwaEnabled !== false,
           pwaIconUrl: r.pwaIconUrl || '',
           timezone: r.timezone || '',
@@ -73,6 +77,7 @@ export default function SiteSettingsPage() {
         footerText: v.footerText || '',
         footerShowInfo: v.footerShowInfo !== false,
         footerShowVersion: v.footerShowVersion !== false,
+        updatePromptPolicy: v.updatePromptPolicy || 'dismissible',
         pwaEnabled: v.pwaEnabled !== false,
         pwaIconUrl: v.pwaIconUrl || '',
         timezone: v.timezone || '',
@@ -209,6 +214,26 @@ export default function SiteSettingsPage() {
         <Form.Item name="footerShowVersion" label={t('settings.footerShowVersion')} valuePropName="checked">
           <Switch />
         </Form.Item>
+        {/* One radio group, not a pair of switches: "may the reader defer" and "must they refresh"
+            are the same decision, and two booleans can describe a state nobody chose. */}
+        <Divider titlePlacement="left">{t('settings.updatePrompt')}</Divider>
+        <Form.Item name="updatePromptPolicy" style={{ marginBottom: 8 }}>
+          <Radio.Group>
+            <Space orientation="vertical" size={10}>
+              {UPDATE_POLICIES.map((p) => (
+                <Radio key={p} value={p}>
+                  <span>{t(`settings.policy.${p}`)}</span>
+                  <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '2px 0 0', maxWidth: 560 }}>
+                    {t(`settings.policy.${p}Hint`)}
+                  </Typography.Paragraph>
+                </Radio>
+              ))}
+            </Space>
+          </Radio.Group>
+        </Form.Item>
+        <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+          {t('settings.updatePromptHint')}
+        </Typography.Paragraph>
         {/* The portal's own origin. It used to sit on the email page, because reset links were the
             first thing that needed an origin a forged Host header cannot poison — but the SAML
             entity id, the OIDC redirect URL, the WebAuthn relying-party id, registration links and

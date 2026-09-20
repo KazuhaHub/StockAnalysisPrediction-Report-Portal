@@ -45,7 +45,7 @@ func TestRandPasswordAlphabet(t *testing.T) {
 // handleVersion answers the signed-in app's build identity from the ldflags-injected package vars.
 func TestHandleVersionReportsBuildIdentity(t *testing.T) {
 	rec := httptest.NewRecorder()
-	s := &Server{}
+	s := tenancyServer(t)
 	s.handleVersion(rec, httptest.NewRequest("GET", "/api/version", nil), "alice")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("handleVersion → %d", rec.Code)

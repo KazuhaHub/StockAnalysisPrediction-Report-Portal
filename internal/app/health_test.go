@@ -108,7 +108,7 @@ func TestVersionRequiresSession(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous GET /api/version = %d, want 401", rec.Code)
 	}
-	for _, leak := range []string{"version", "commit", "buildDate"} {
+	for _, leak := range []string{"version", "commit", "buildDate", "updatePromptPolicy"} {
 		if strings.Contains(rec.Body.String(), leak) {
 			t.Errorf("unauthenticated /api/version leaked %q: %s", leak, rec.Body.String())
 		}

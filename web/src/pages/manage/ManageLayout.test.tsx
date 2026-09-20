@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import ManageLayout from './ManageLayout'
 
@@ -11,14 +11,12 @@ vi.mock('react-router', () => ({
   Outlet: () => null,
 }))
 
-// Echo the i18n key so menu entries are findable by their key.
+// Echo the i18n key, with its values, so menu entries are findable by their key.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => k }),
-}))
-
-// The footer shows the build version; stub the fetch.
-vi.mock('../../api/client', () => ({
-  api: { get: () => Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-01-01T00:00:00Z' }) },
+  useTranslation: () => ({
+    t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${Object.values(o).join(',')}` : k),
+    i18n: { language: 'en-US' },
+  }),
 }))
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
@@ -27,7 +25,9 @@ describe('ManageLayout — grouped rail', () => {
   beforeEach(() => {
     navigate.mockReset()
     localStorage.removeItem(COLLAPSE_KEY)
+    vi.stubEnv('VITE_BUILD_VERSION', 'v2026.38')
   })
+  afterEach(() => vi.unstubAllEnvs())
 
   it('renders section group headers (no Maintenance group after legacy import removal)', () => {
     render(<ManageLayout />)
@@ -62,5 +62,19 @@ describe('ManageLayout — grouped rail', () => {
     expect(localStorage.getItem(COLLAPSE_KEY)).toBeNull()
     fireEvent.click(screen.getByText('nav.collapse'))
     expect(localStorage.getItem(COLLAPSE_KEY)).toBe('1')
+  })
+
+  // The console shows the same version label as the portal footer, and it is the loaded build's —
+  // not the server's, which is what the update prompt exists to compare.
+  it('shows the version label in the rail footer, and hides it when collapsed', () => {
+    const { unmount } = render(<ManageLayout />)
+    expect(screen.getByText('version.label:2026.38')).toBeTruthy()
+    unmount()
+
+    localStorage.setItem(COLLAPSE_KEY, '1')
+    render(<ManageLayout />)
+    // An icon-only strip has no room for it, and the rail's own collapse is not the place to fight
+    // that: the footer keeps its entry point at every other width.
+    expect(screen.queryByText('version.label:2026.38')).toBeNull()
   })
 })

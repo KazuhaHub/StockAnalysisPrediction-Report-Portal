@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react'
-import { Button, Drawer, Menu, Spin, Tooltip, Typography, theme } from 'antd'
+import { Button, Drawer, Menu, Spin, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   AuditOutlined,
@@ -27,9 +27,8 @@ import {
 } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../api/client'
 import { prefetch } from '../../lib/prefetch'
-import { productVersionLabel } from '../../lib/productVersionLabel'
+import VersionLabel from '../../components/VersionLabel'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const NARROW_QUERY = '(max-width: 767px)'
@@ -93,13 +92,8 @@ export default function ManageLayout() {
       return false
     }
   })
-  const [ver, setVer] = useState<{ version: string; commit: string; buildDate: string } | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const active = loc.pathname.split('/')[2] || 'site'
-
-  useEffect(() => {
-    api.get<{ version: string; commit: string; buildDate: string }>('/api/version').then(setVer).catch(() => {})
-  }, [])
 
   useEffect(() => {
     let mq: MediaQueryList
@@ -306,24 +300,7 @@ export default function ManageLayout() {
             >
               {!collapsed && <span style={{ marginInlineStart: 8 }}>{t('nav.collapse')}</span>}
             </Button>
-            {!collapsed && ver && (
-              <Tooltip
-                title={
-                  <div style={{ lineHeight: 1.6, fontWeight: 600 }}>
-                    <div>{productVersionLabel(ver.version)}</div>
-                    <div>commit: {ver.commit}</div>
-                    <div>built: {ver.buildDate}</div>
-                  </div>
-                }
-              >
-                <Typography.Text
-                  type="secondary"
-                  style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', cursor: 'help', paddingInlineEnd: 4 }}
-                >
-                  {productVersionLabel(ver.version)}
-                </Typography.Text>
-              </Tooltip>
-            )}
+            {!collapsed && <VersionLabel style={{ paddingInlineEnd: 4 }} />}
           </div>
         )}
       </div>

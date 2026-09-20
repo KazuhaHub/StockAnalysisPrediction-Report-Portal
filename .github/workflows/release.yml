@@ -67,6 +67,8 @@ jobs:
       sha: ${{ steps.t.outputs.sha }}
       owner_lc: ${{ steps.t.outputs.owner_lc }}
       repo_lc: ${{ steps.t.outputs.repo_lc }}
+      short_sha: ${{ steps.t.outputs.short_sha }}
+      build_date: ${{ steps.t.outputs.build_date }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -127,12 +129,44 @@ jobs:
 
           owner_lc="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
           repo_lc="$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
+          # One build date for the whole artifact set. The Go binaries and the SPA bundle both carry
+          # it, and the two must agree: the in-app update prompt compares build identity to decide
+          # whether the page it is on is the build the server is serving. Reading the clock in each
+          # of six platform legs would give the SPA and the binary it ships in different timestamps.
+          #
+          # The short sha is resolved here for the same reason: the binary stamps 7 characters and
+          # the bundle must stamp exactly the same ones, or a page would never recognise itself in
+          # the server's answer and would offer an update it is already running.
+          build_date="$(date -u +%FT%TZ)"
+          short_sha="${sha:0:7}"
           {
             echo "tag=${tag}"
             echo "sha=${sha}"
             echo "owner_lc=${owner_lc}"
             echo "repo_lc=${repo_lc}"
+            echo "short_sha=${short_sha}"
+            echo "build_date=${build_date}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Require the committed release note
+        shell: bash
+        env:
+          VERSION: ${{ steps.t.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # A release ships the note a reader is offered when the portal tells them to update, so a
+          # missing note is a missing part of the release, not a cosmetic gap — and one that would
+          # otherwise be discovered only after publication. Fail here, before six platforms build.
+          . scripts/lib/calver.sh
+          . scripts/lib/release.sh
+          notes_file=$(note_path "$PWD" "${VERSION}")
+          if [ ! -f "${notes_file}" ]; then
+            echo "::error::no release note for ${VERSION} at ${notes_file}"
+            echo "::error::write it first — docs/releases/README.md describes the convention"
+            exit 1
+          fi
+          test -s "${notes_file}" || { echo "::error::${notes_file} is empty"; exit 1; }
+          echo "release note: ${notes_file}"
 
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -190,6 +224,14 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
       - name: Build SPA bundle
         working-directory: web
+        # The bundle carries its own build identity, so a tab can say which build it is RUNNING
+        # rather than assuming the first /api/version answer describes the page it loaded. It is the
+        # same tag, commit and date the binaries are stamped with, which is what makes "the page is
+        # not the build the server is serving" a comparison rather than a guess.
+        env:
+          VITE_BUILD_VERSION: ${{ needs.setup.outputs.tag }}
+          VITE_BUILD_COMMIT: ${{ needs.setup.outputs.short_sha }}
+          VITE_BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: npm run build # vite outputs to ../internal/web/dist for go:embed
       - uses: actions/upload-artifact@v7
         with:
@@ -229,6 +271,21 @@ jobs:
         with:
           name: web-dist
           path: internal/web/dist
+      - name: Package the release note
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The note is compiled into the binary (internal/version's go:embed), so it must be in
+          # place before `go build`. setup already proved it exists; this only needs the path.
+          . scripts/lib/calver.sh
+          . scripts/lib/release.sh
+          notes_file=$(note_path "$PWD" "${VERSION}")
+          cp "${notes_file}" internal/version/releasenote.md
+          # Hand the path to the build step, so the artifact check verifies the SAME file rather
+          # than resolving it a second time.
+          echo "NOTE_FILE=${notes_file}" >> "$GITHUB_ENV"
       - name: Build report-portal
         shell: bash
         env:
@@ -237,12 +294,14 @@ jobs:
           CGO_ENABLED: "0"
           VERSION: ${{ needs.setup.outputs.tag }}
           COMMIT: ${{ needs.setup.outputs.sha }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
           mkdir -p out
           mod=$(go list -m)
-          short_sha="${COMMIT:0:7}"
-          build_date="$(date -u +%FT%TZ)"
+          short_sha="${SHORT_SHA}"
+          build_date="${BUILD_DATE}"
           ldflags="-s -w"
           ldflags+=" -X ${mod}/internal/version.Version=${VERSION}"
           ldflags+=" -X ${mod}/internal/version.Commit=${short_sha}"
@@ -250,8 +309,9 @@ jobs:
           go build -trimpath -ldflags="${ldflags}" -o "out/report-portal${{ matrix.ext }}" ./cmd/report-portal
           # Prove the binary carries the provenance we think it does. go version -m reads it from
           # the binary itself, so a wrong module path (which makes every -X a silent no-op) or a
-          # checkout of the wrong commit cannot pass.
-          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
+          # checkout of the wrong commit cannot pass. The note file is passed so the same check also
+          # proves THIS release's note is inside the artifact.
+          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$NOTE_FILE"
       - uses: actions/upload-artifact@v7
         with:
           name: report-portal-${{ matrix.goos }}-${{ matrix.goarch }}

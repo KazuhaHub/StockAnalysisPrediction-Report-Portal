@@ -5,7 +5,7 @@
 // name, the release notes heading — spells it without one.
 //
 // The tag itself is deliberately NOT trimmed where it is used as an identity. /api/version returns it
-// and useVersionCheck compares it against the running build to notice a deploy or a rollback; that
+// and the update check compares it against the running build to notice a deploy or a rollback; that
 // comparison is an equality check over version, commit and build date, and trimming there would make
 // two different builds of the same number look equal.
 //

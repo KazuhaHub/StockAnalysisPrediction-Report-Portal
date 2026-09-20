@@ -645,6 +645,8 @@ export interface SettingsResp {
   footerText: string
   footerShowInfo: boolean
   footerShowVersion: boolean
+  // How hard an open page is asked to refresh after a deploy.
+  updatePromptPolicy: UpdatePromptPolicy
   pwaEnabled: boolean
   pwaIconUrl: string
   // Retained for one release line with the settings POST that still accepts them; announcements
@@ -658,6 +660,12 @@ export interface SettingsResp {
 }
 
 export type AnnouncementLevel = 'notice' | 'success' | 'warning' | 'error'
+
+// How hard the portal asks a reader to refresh after a deploy (internal/app/update_api.go).
+//   dismissible  a banner the reader may hide for this target, for this tab session
+//   persistent   a banner with no way to hide it that still leaves the page usable
+//   required     the release-note dialog, opened automatically and impossible to dismiss
+export type UpdatePromptPolicy = 'dismissible' | 'persistent' | 'required'
 
 // How the home-page "More" button reveals folded quick links.
 export type HomeMoreStyle = 'expand' | 'modal' | 'popover'

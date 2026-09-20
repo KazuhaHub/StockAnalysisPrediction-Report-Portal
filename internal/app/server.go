@@ -234,6 +234,10 @@ func RunServer(cfgPath string) {
 	// Session-gated, not public: build identity (version/commit) is only shown in the signed-in
 	// app footer, so an anonymous scanner can't fingerprint the build against known CVEs.
 	mux.HandleFunc("GET /api/version", s.requireUserJSON(s.handleVersion))
+	// The deployed build's committed release note, for the update dialog. Session-gated like
+	// /api/version: nothing in it is secret, but the endpoint is app infrastructure, not a public
+	// path to probe.
+	mux.HandleFunc("GET /api/release-notes", s.requireUserJSON(s.handleReleaseNotes))
 	mux.HandleFunc("GET /api/site", s.apiSite) // public: brand title/logo for login + browser chrome
 	// The announcement feed is NOT on /api/site, and the wrapper is the reason (ADR 0025): a row can
 	// be addressed to one OU, and who is being told what is itself disclosure. Polled, so it answers
@@ -660,8 +664,17 @@ func validateSessionSecret(secret string) error {
 // handleVersion returns build identity for the signed-in app footer. It is session-gated
 // (registered behind requireUserJSON) precisely so version/commit are NOT exposed to anonymous
 // callers: commit especially pins the exact public source, making CVE fingerprinting trivial.
+//
+// It also carries the effective update-prompt policy, so the poll that already tells an open tab a
+// deploy landed also tells it how hard the portal is insisting — an admin escalating the policy
+// reaches a tab nobody has reloaded.
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request, user string) {
-	writeJSON(w, map[string]any{"version": version.Version, "commit": version.Commit, "buildDate": version.BuildDate})
+	writeJSON(w, map[string]any{
+		"version":            version.Version,
+		"commit":             version.Commit,
+		"buildDate":          version.BuildDate,
+		"updatePromptPolicy": s.updatePromptPolicy(),
+	})
 }
 
 // AddUser creates or updates an account from the CLI (lockout fallback).
