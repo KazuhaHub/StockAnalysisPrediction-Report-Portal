@@ -48,27 +48,18 @@ way.
 The tag's message is the release note, so a number with no `docs/releases/<YYYY>/<tag>.md` in the
 tagged commit cannot be cut — the script names the file to write and stops.
 
-The note also ships *inside* the release. The workflow copies it to `internal/version/notes/release.md`
-and builds `internal/version/notes/history.json` from the 10 most recent published CalVer notes at or
-before that tag. A committed note with no published GitHub Release, including a draft, is not shown
-as release history. Each history entry carries the GitHub Release maturity captured at build time; the portal
-labels full releases and Beta builds explicitly and never infers maturity from the CalVer revision.
-A full-release note summarizes the user-visible changes since the previous full release, while each
-Beta note remains the incremental test-stage record. The history builder does not concatenate Beta
-notes into the full-release note, because that would duplicate an intentionally curated summary.
-Full-release builds therefore package only full-release milestones. Beta builds package those same
-milestones plus the Beta notes created after the latest full release; Beta notes already covered by
-a later full-release summary are omitted. The resulting list is capped at 10 entries after filtering.
-Both generated files are gitignored paths, because a build input that overwrites a tracked file dirties the worktree and the
-binary would then be stamped `vcs.modified=true`, which the release check refuses. A `go:embed` carries
-them into the artifact. The portal serves the current note and this recent offline history to the
-in-app update dialog, so a reader can browse what changed without leaving the portal or handing it
-GitHub credentials. The setup job fails if the tagged commit has no note, and
-`scripts/check-release-build.sh` searches each built binary for the current and historical content,
-so a release whose update prompt would have nothing to show — or something else's note — cannot be
-published. The GitHub Release page stays the complete published body, including the generated PR list
-and any edits made at publication; the in-app copies are the committed notes, and the two are not
-claimed to be identical.
+The committed note seeds the GitHub Release body, but **GitHub Release is the only source of truth
+after publication**. The portal reads the published releases through GitHub's API and derives both
+the displayed body and `Stable` / `Beta` status from the current `body` and `prerelease` fields. It
+uses conditional requests and a one-minute process cache; when GitHub is temporarily unavailable it
+may serve only the last successful GitHub response, never a compiled or locally inferred fallback.
+
+This makes maturity genuinely mutable. Promoting one release from pre-release to full release keeps
+the same tag, archives and fixed image digest. The portal reflects the new status after its cache
+refresh, and the Release channels workflow reacts to GitHub's `release edited` event to reconcile
+`:latest` and `:beta` against the same metadata. A full-release view shows full-release milestones;
+a Beta view also includes Beta releases after the latest full-release milestone. The displayed list
+is capped at 10 entries after that live filtering.
 
 **The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
 refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one
@@ -104,6 +95,15 @@ the `release` event, and the reconciliation workflow then updates the rolling im
 promoting the bytes that were already published by digest rather than rebuilding them. To re-run that
 by hand after a missed event, dispatch the **Release channels** workflow (with `dry_run` to see the
 decision first).
+
+Promote an already-published Beta without rebuilding it:
+
+```sh
+gh release edit v2026.38.10 --prerelease=false --latest
+```
+
+Demoting the same Release is also a metadata edit (`--prerelease`); channel reconciliation follows
+GitHub's resulting release state. No tag, archive or fixed image is replaced in either direction.
 
 A `release` event runs the workflow **from the tagged commit**, not from the default branch, so a fix
 to `release-channels.yml` takes effect for releases tagged after the fix and reconciliation for an

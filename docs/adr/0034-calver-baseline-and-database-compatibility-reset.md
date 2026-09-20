@@ -41,6 +41,13 @@ Product display is `YYYY.W[.R]`; git and fixed image tags are `vYYYY.W[.R]`.
   week, then builds within that week.
 - **No maturity suffix.** There is no `-beta` / `-rc`. Maturity lives in GitHub Release metadata
   (draft / pre-release / full release / Latest), never in the tag, and never in the binary.
+- **GitHub Release is the sole authority for mutable publication state.** Its current body and
+  `prerelease` field drive the portal's update history and release-maturity labels; its published
+  records also drive the rolling image channels. A committed note seeds the Release at publication
+  time but does not remain a second runtime authority.
+- The portal reads that authority through conditional GitHub API requests and a bounded process
+  cache. During a temporary upstream failure it may serve only its last successful GitHub response,
+  marked stale. It never falls back to compiled notes or infers maturity from a tag.
 - Promotion of an identical artifact set keeps its number; changed artifacts require a new number.
 - Comparison is numeric on the `(YYYY, W, R)` tuple, never lexical. A series keeps its original
   year/week across delayed publication and maintenance.
@@ -153,7 +160,9 @@ cannot be restored into the new baseline and silently lose the columns it never 
   column set now means a changed acceptance contract, and that is a deliberate decision.
 - The development loop is unaffected: delete `data/portal.db` and let it rebuild.
 - Maturity moves out of the tag and into GitHub metadata, so the release workflow gains a
-  reconciliation step that owns the rolling channels and can be re-run after a missed event.
+  reconciliation step that owns the rolling channels and can be re-run after a missed event. The
+  reader and the channel reconciler now consume the same authority, so editing a published Release
+  changes both without replacing its artifacts.
 - Historical releases and tags are untouched. `v0.4.72` has no release-note file (the note
   convention post-dates some tags); that gap is recorded rather than back-filled, because a note
   written now would not match the tag's annotation.

@@ -56,69 +56,53 @@ func (s *Server) updatePromptPolicy() string {
 	return normalizeUpdatePromptPolicy(s.st.GetSetting(updatePromptPolicySetting, ""))
 }
 
-// releaseNotesResp is the /api/release-notes body.
-//
-// The current note and committed CalVer history are packaged into the binary at release time, so
-// browsing old versions does not depend on GitHub availability or browser credentials.
-//
-// `note`/`hasNote` are parameters rather than read here so the rules are testable without a release
-// build; the handler passes the packaged values.
-func releaseNotesResp(reqTag, serverTag, note string, hasNote bool, history []version.ReleaseNote) map[string]any {
+func releaseNotesResp(reqTag, serverTag string, releases []publishedRelease, stale bool) map[string]any {
 	tag := strings.TrimSpace(reqTag)
 	if tag == "" {
 		tag = serverTag
 	}
-	maturity := ""
+	out := map[string]any{"tag": tag, "available": false, "markdown": "", "url": version.ReleaseURL(tag), "maturity": "", "stale": stale}
 	if !version.IsReleaseTag(tag) {
-		maturity = "dev"
-	}
-	for _, entry := range history {
-		if entry.Tag == tag {
-			maturity = entry.Maturity
-			break
-		}
-	}
-	out := map[string]any{"tag": tag, "available": false, "markdown": "", "url": version.ReleaseURL(tag), "maturity": maturity}
-	if tag == serverTag && hasNote && version.IsReleaseTag(tag) {
-		out["available"] = true
-		out["markdown"] = note
+		out["maturity"] = "dev"
 		return out
 	}
-	for _, entry := range history {
-		if entry.Tag == tag {
+	entry, ok := findPublishedRelease(releases, tag)
+	if ok {
+		out["maturity"] = entry.Maturity
+		if entry.Markdown != "" {
 			out["available"] = true
 			out["markdown"] = entry.Markdown
-			break
 		}
 	}
 	return out
 }
 
-func releaseHistoryResp(serverTag string, hasNote bool, history []version.ReleaseNote) []map[string]string {
-	out := make([]map[string]string, 0, len(history)+1)
-	seen := make(map[string]bool, len(history)+1)
+func releaseHistoryResp(serverTag string, releases []publishedRelease) []map[string]string {
+	history := visibleReleaseHistory(releases, serverTag, 10)
+	out := make([]map[string]string, 0, len(history))
 	for _, entry := range history {
-		if seen[entry.Tag] {
-			continue
-		}
-		seen[entry.Tag] = true
 		out = append(out, map[string]string{"tag": entry.Tag, "title": entry.Title, "url": version.ReleaseURL(entry.Tag), "maturity": entry.Maturity})
 	}
-	if hasNote && version.IsReleaseTag(serverTag) && !seen[serverTag] {
-		out = append([]map[string]string{{"tag": serverTag, "title": "", "url": version.ReleaseURL(serverTag), "maturity": ""}}, out...)
-	}
 	return out
 }
 
-// handleReleaseNotes serves the deployed build's committed release note. Session-gated for the same
-// reason /api/version is: the note is not a secret, but the endpoint is infrastructure a reader
-// reaches through the app, and leaving it open would expose a stable path to probe.
+// handleReleaseNotes serves GitHub's current published Release body and maturity. Session-gated for
+// the same reason /api/version is: the note is not a secret, but the endpoint is infrastructure a
+// reader reaches through the app, and leaving it open would expose a stable path to probe.
 func (s *Server) handleReleaseNotes(w http.ResponseWriter, r *http.Request, user string) {
-	note, ok := version.PackagedNote()
-	writeJSON(w, releaseNotesResp(r.URL.Query().Get("tag"), version.Version, note, ok, version.PackagedHistory()))
+	releases, stale, err := s.releases.list(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "release catalog unavailable")
+		return
+	}
+	writeJSON(w, releaseNotesResp(r.URL.Query().Get("tag"), version.Version, releases, stale))
 }
 
 func (s *Server) handleReleaseHistory(w http.ResponseWriter, r *http.Request, user string) {
-	_, ok := version.PackagedNote()
-	writeJSON(w, map[string]any{"items": releaseHistoryResp(version.Version, ok, version.PackagedHistory())})
+	releases, stale, err := s.releases.list(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusBadGateway, "release catalog unavailable")
+		return
+	}
+	writeJSON(w, map[string]any{"items": releaseHistoryResp(version.Version, releases), "stale": stale})
 }

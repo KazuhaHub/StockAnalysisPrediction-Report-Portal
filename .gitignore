@@ -30,12 +30,6 @@ web/node_modules/
 # placeholder so `go build` compiles the embed even before the SPA is built.
 internal/web/dist/*
 !internal/web/dist/.gitkeep
-# The release note the pipeline injects before `go build` (internal/version). Ignored for the same
-# reason the web bundle above is: a tracked file the build overwrites makes the worktree dirty, and
-# a binary built from a dirty worktree is stamped vcs.modified=true, which the release check refuses.
-internal/version/notes/release.md
-internal/version/notes/history.json
-
 # Editor / tool directories
 .idea/
 .vscode/
