@@ -441,6 +441,43 @@ body {
 .rp-release-notes-body {
   min-width: 0;
 }
+.rp-release-notes-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.rp-release-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-inline-end: 12px;
+  border-inline-end: 1px solid var(--ant-color-border-secondary);
+}
+.rp-release-history > .ant-typography {
+  padding: 4px 8px 8px;
+}
+.rp-release-history .ant-btn {
+  height: auto;
+  min-height: 40px;
+  padding-block: 6px;
+  text-align: start;
+  white-space: normal;
+}
+.rp-release-history .ant-btn > span {
+  display: grid;
+  width: 100%;
+}
+.rp-release-history small {
+  color: var(--ant-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-release-history-mobile {
+  display: none;
+  margin-bottom: 12px;
+}
 .rp-release-notes-state {
   display: grid;
   place-items: center;
@@ -467,6 +504,18 @@ body {
   }
   .rp-release-notes-footer__external {
     margin-inline-end: auto;
+  }
+  .rp-release-notes-layout {
+    display: block;
+  }
+  .rp-release-history {
+    display: none;
+  }
+  .rp-release-history-mobile {
+    display: block;
+  }
+  .rp-release-history-mobile .ant-select {
+    width: 100%;
   }
 }
 

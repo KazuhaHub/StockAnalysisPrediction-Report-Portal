@@ -664,8 +664,9 @@ export type AnnouncementLevel = 'notice' | 'success' | 'warning' | 'error'
 // How hard the portal asks a reader to refresh after a deploy (internal/app/update_api.go).
 //   dismissible  a banner the reader may hide for this target, for this tab session
 //   persistent   a banner with no way to hide it that still leaves the page usable
-//   required     the release-note dialog, opened automatically and impossible to dismiss
-export type UpdatePromptPolicy = 'dismissible' | 'persistent' | 'required'
+//   required     a closable release-note dialog, followed by a persistent banner
+//   automatic    refresh immediately, then confirm the build that loaded
+export type UpdatePromptPolicy = 'dismissible' | 'persistent' | 'required' | 'automatic'
 
 // How the home-page "More" button reveals folded quick links.
 export type HomeMoreStyle = 'expand' | 'modal' | 'popover'

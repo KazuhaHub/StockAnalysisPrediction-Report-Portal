@@ -19,7 +19,7 @@ func TestUpdatePromptPolicyIsOneValidatedEnum(t *testing.T) {
 	if got := s.updatePromptPolicy(); got != "dismissible" {
 		t.Errorf("default policy = %q; an existing database with no stored value must not surprise the reader", got)
 	}
-	for _, p := range []string{"dismissible", "persistent", "required"} {
+	for _, p := range []string{"dismissible", "persistent", "required", "automatic"} {
 		if code := settingsRoundTrip(t, s, `{"updatePromptPolicy":"`+p+`"}`); code != http.StatusOK {
 			t.Fatalf("saving policy %q → %d", p, code)
 		}
@@ -32,14 +32,14 @@ func TestUpdatePromptPolicyIsOneValidatedEnum(t *testing.T) {
 	if code := settingsRoundTrip(t, s, `{"updatePromptPolicy":"always"}`); code != http.StatusBadRequest {
 		t.Errorf("saving an unknown policy → %d, want 400", code)
 	}
-	if got := s.updatePromptPolicy(); got != "required" {
+	if got := s.updatePromptPolicy(); got != "automatic" {
 		t.Errorf("a refused save changed the stored policy to %q", got)
 	}
 	// A payload that does not mention the policy leaves it alone (per-field merge).
 	if code := settingsRoundTrip(t, s, `{"siteTitle":"x"}`); code != http.StatusOK {
 		t.Fatalf("an unrelated save → %d", code)
 	}
-	if got := s.updatePromptPolicy(); got != "required" {
+	if got := s.updatePromptPolicy(); got != "automatic" {
 		t.Errorf("an unrelated save rewrote the policy to %q", got)
 	}
 }
@@ -75,12 +75,35 @@ func TestVersionPayloadCarriesTheUpdatePolicy(t *testing.T) {
 	}
 }
 
+func TestAutomaticUpdateUsesRequiredAsTheLegacyFallback(t *testing.T) {
+	s := tenancyServer(t)
+	if err := s.st.SetSetting(updatePromptPolicySetting, policyAutomatic); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.handleVersion(rec, httptest.NewRequest("GET", "/api/version", nil), "alice")
+
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["updatePromptPolicy"] != policyPersistent || out["automaticUpdate"] != true {
+		t.Fatalf("automatic version payload = %v, want persistent compatibility plus automatic flag", out)
+	}
+}
+
 func TestReleaseNotesRequireASession(t *testing.T) {
 	srv := &Server{}
-	rec := httptest.NewRecorder()
-	srv.requireUserJSON(srv.handleReleaseNotes)(rec, httptest.NewRequest(http.MethodGet, "/api/release-notes", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous GET /api/release-notes = %d, want 401", rec.Code)
+	for _, path := range []string{"/api/release-notes", "/api/release-history"} {
+		rec := httptest.NewRecorder()
+		handler := srv.handleReleaseNotes
+		if path == "/api/release-history" {
+			handler = srv.handleReleaseHistory
+		}
+		srv.requireUserJSON(handler)(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous GET %s = %d, want 401", path, rec.Code)
+		}
 	}
 }
 
@@ -91,14 +114,13 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 	url := version.ReleaseNotesBaseURL + "/releases/tag/v2026.38.1"
 
 	// The deployed build answers with its own note.
-	got := releaseNotesResp("", "v2026.38.1", note, true)
+	got := releaseNotesResp("", "v2026.38.1", note, true, nil)
 	if got["tag"] != "v2026.38.1" || got["available"] != true || got["markdown"] != note || got["url"] != url {
 		t.Errorf("served payload = %v", got)
 	}
-	// A page still running the previous build asks for ITS version. The server has not packaged
-	// that note, so it says so and offers the exact release link instead of the new body under the
-	// old number.
-	got = releaseNotesResp("v2026.38", "v2026.38.1", note, true)
+	// When the requested version is absent from the packaged recent history, the server says so and
+	// offers the exact release link instead of showing the new body under the old number.
+	got = releaseNotesResp("v2026.38", "v2026.38.1", note, true, nil)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("a mismatched tag served a body: %v", got)
 	}
@@ -109,13 +131,13 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 		t.Errorf("the response must name the tag it is about: %v", got)
 	}
 	// A diagnostic build has no note and no release page: no link is invented.
-	got = releaseNotesResp("", "dev", "", false)
+	got = releaseNotesResp("", "dev", "", false, nil)
 	if got["available"] != false || got["url"] != "" {
 		t.Errorf("a diagnostic build fabricated notes or a link: %v", got)
 	}
 	// A release tag whose note step did not run is reported as unavailable, never as a link-only
 	// success with an empty body.
-	got = releaseNotesResp("", "v2026.38.1", "", false)
+	got = releaseNotesResp("", "v2026.38.1", "", false, nil)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("a missing note reported success: %v", got)
 	}
@@ -124,12 +146,26 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 	}
 }
 
+func TestHistoricalReleaseNoteIsServedFromTheOfflineArchive(t *testing.T) {
+	history := []version.ReleaseNote{
+		{Tag: "v2026.38.2", Title: "Second", Markdown: "# v2026.38.2\n\nOlder changes"},
+	}
+	got := releaseNotesResp("v2026.38.2", "v2026.38.4", "# current", true, history)
+	if got["available"] != true || got["markdown"] != history[0].Markdown {
+		t.Fatalf("historical note response = %v", got)
+	}
+	items := releaseHistoryResp("v2026.38.4", true, history)
+	if len(items) != 2 || items[0]["tag"] != "v2026.38.4" || items[1]["tag"] != "v2026.38.2" {
+		t.Fatalf("release history = %v", items)
+	}
+}
+
 // The note is matched by the tag VERBATIM, which is what keeps a neighbouring number from being
 // served as this one's. The one-digit boundary is where a prefix test would betray it: v2026.9 is a
 // string prefix of nothing that follows, v2026.10 is week ten, and the two must never be conflated.
 func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
 	const note = "## week ten\n"
-	got := releaseNotesResp("v2026.9", "v2026.10", note, true)
+	got := releaseNotesResp("v2026.9", "v2026.10", note, true, nil)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("asking for v2026.9 served v2026.10's note: %v", got)
 	}
@@ -138,13 +174,13 @@ func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
 	}
 
 	// And the revision position behaves the same way.
-	got = releaseNotesResp("v2026.9.9", "v2026.9.10", note, true)
+	got = releaseNotesResp("v2026.9.9", "v2026.9.10", note, true, nil)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("asking for v2026.9.9 served v2026.9.10's note: %v", got)
 	}
 
 	// The exact match still works, so the rule above is a boundary and not a blanket refusal.
-	got = releaseNotesResp("v2026.10", "v2026.10", note, true)
+	got = releaseNotesResp("v2026.10", "v2026.10", note, true, nil)
 	if got["available"] != true || got["markdown"] != note {
 		t.Errorf("the deployed build's own tag must be served: %v", got)
 	}

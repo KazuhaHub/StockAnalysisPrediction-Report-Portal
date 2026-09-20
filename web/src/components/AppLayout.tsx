@@ -540,9 +540,8 @@ function AppShell() {
 
       {/* New-version banner: sticky right under the header, driven by the shared coordinator. The
           info-colored bar spans full width while the notice itself — icon, text, actions — is one
-          centred group. Under a `required` policy it draws nothing: the release-note dialog is the
-          prompt, and stacking a second presentation of one decision on top of it is exactly the
-          duplicate overlay the shared coordinator exists to prevent. */}
+          centred group. Dialog policies hide it initially; closing the dialog turns it into the
+          persistent site-wide fallback. */}
       <UpdateBanner maxWidth={onChat ? 'none' : contentMaxWidth} compact={compact} />
 
       {/* Site-wide announcements: a full-width tinted strip under the header, collapsed to one line,

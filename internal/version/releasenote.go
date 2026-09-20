@@ -2,6 +2,7 @@ package version
 
 import (
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"strings"
 )
@@ -31,10 +32,18 @@ const (
 	// and a fresh clone compiles. Its text is never served — a build that has not had a note
 	// injected reports no note at all.
 	placeholderFile = "notes/placeholder.md"
+	historyFile     = "notes/history.json"
 )
 
-//go:embed notes/*.md
+//go:embed notes/*.md notes/*.json
 var notes embed.FS
+
+// ReleaseNote is one committed entry in the offline history shipped with a release build.
+type ReleaseNote struct {
+	Tag      string `json:"tag"`
+	Title    string `json:"title"`
+	Markdown string `json:"markdown"`
+}
 
 // IsReleaseTag reports whether tag is a well-formed CalVer release tag, vYYYY.W[.R]. The rules
 // mirror scripts/lib/calver.sh — the component that actually cuts the tag — so a link is only ever
@@ -101,6 +110,36 @@ func PackagedNote() (string, bool) {
 		return "", false
 	}
 	return text, true
+}
+
+// PackagedHistory returns the CalVer notes committed no later than this build. The release pipeline
+// generates the archive from docs/releases before compiling; diagnostic builds have no archive.
+func PackagedHistory() []ReleaseNote {
+	body, err := fs.ReadFile(notes, historyFile)
+	if err != nil {
+		return nil
+	}
+	return parseReleaseHistory(body)
+}
+
+func parseReleaseHistory(body []byte) []ReleaseNote {
+	var entries []ReleaseNote
+	if json.Unmarshal(body, &entries) != nil {
+		return nil
+	}
+	out := make([]ReleaseNote, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		entry.Tag = strings.TrimSpace(entry.Tag)
+		entry.Title = strings.TrimSpace(entry.Title)
+		entry.Markdown = strings.TrimSpace(entry.Markdown)
+		if !IsReleaseTag(entry.Tag) || entry.Markdown == "" || seen[entry.Tag] {
+			continue
+		}
+		seen[entry.Tag] = true
+		out = append(out, entry)
+	}
+	return out
 }
 
 func allDigits(s string) bool {

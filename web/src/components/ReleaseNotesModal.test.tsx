@@ -84,6 +84,28 @@ describe('ReleaseNotesModal', () => {
     expect(screen.queryByText(/update.currentVersion/)).toBeNull()
   })
 
+  it('browses older packaged notes without offering a downgrade refresh', async () => {
+    get.mockImplementation((url: string) => {
+      if (url === '/api/release-history') {
+        return Promise.resolve({ items: [
+          { tag: 'v2026.38', title: 'Current', url: 'https://example/current' },
+          { tag: 'v2026.37.2', title: 'Older', url: 'https://example/older' },
+        ] })
+      }
+      if (url?.includes('v2026.37.2')) {
+        return Promise.resolve(notes({ tag: 'v2026.37.2', markdown: '# Older changes', url: 'https://example/older' }))
+      }
+      return Promise.resolve(notes({ tag: 'v2026.38', markdown: '# Current changes' }))
+    })
+    open({ target: page, onRefresh: undefined })
+    const older = await screen.findByRole('button', { name: /2026\.37\.2/ })
+    await userEvent.click(older)
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/release-notes?tag=v2026.37.2'))
+    expect((await screen.findByTestId('md')).textContent).toContain('Older changes')
+    expect(screen.getByText('update.notesTitle:2026.37.2')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /update.refreshTo/ })).toBeNull()
+  })
+
   // A failed note fetch must never take the way out with it.
   it('keeps the refresh action when the notes cannot be loaded, and offers a retry', async () => {
     get.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(notes())
@@ -115,27 +137,25 @@ describe('ReleaseNotesModal under a required policy', () => {
   const required = (props: Partial<Parameters<typeof ReleaseNotesModal>[0]> = {}) =>
     open({ policy: 'required', ...props })
 
-  it('removes every way out except refreshing', async () => {
+  it('keeps close controls alongside the refresh action', async () => {
     get.mockResolvedValue(notes())
-    required()
+    const onClose = vi.fn()
+    required({ onClose })
     await screen.findByTestId('md')
-    expect(screen.queryByRole('button', { name: 'common.close' })).toBeNull()
-    // The header X is the other exit, and antd draws it from `closable`.
-    expect(document.querySelector('.ant-modal-close')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'common.close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('.ant-modal-close')).toBeTruthy()
     expect(screen.getByRole('button', { name: /update.refreshTo/ })).toBeTruthy()
-    // The external link is not a way out of the dialog — it is the full published note.
     expect(screen.getByRole('link', { name: /update.viewOnGithub/ })).toBeTruthy()
   })
 
-  it('ignores Escape and a click on the mask', async () => {
+  it('lets Escape close the reminder', async () => {
     get.mockResolvedValue(notes())
     const onClose = vi.fn()
     required({ onClose })
     await screen.findByTestId('md')
     fireEvent.keyDown(document, { key: 'Escape', keyCode: 27 })
-    const wrap = document.querySelector<HTMLElement>('.ant-modal-wrap')
-    if (wrap) fireEvent.mouseDown(wrap)
-    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
   it('warns that unsaved work goes with the page', async () => {

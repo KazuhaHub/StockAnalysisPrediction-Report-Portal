@@ -49,15 +49,17 @@ The tag's message is the release note, so a number with no `docs/releases/<YYYY>
 tagged commit cannot be cut — the script names the file to write and stops.
 
 The note also ships *inside* the release. The workflow copies it to `internal/version/notes/release.md`
-before compiling — a gitignored path, because a build input that overwrites a tracked file dirties the
-worktree and the binary would then be stamped `vcs.modified=true`, which the release check refuses —
-and a `go:embed` carries it into the artifact. The portal serves it to the in-app update dialog from
-`GET /api/release-notes`, so a reader who is told to refresh can read what changed without leaving the
-portal or handing it GitHub credentials. The setup job fails if the tagged commit has no note, and
-`scripts/check-release-build.sh` searches each built binary for the note itself, so a release whose
-update prompt would have nothing to show — or something else's note — cannot be published. The GitHub
-Release page stays the complete published body, including the generated PR list and any edits made at
-publication; the in-app copy is the committed note, and the two are not claimed to be identical.
+and builds `internal/version/notes/history.json` from the 10 most recent CalVer notes at or before
+that tag. Both are gitignored paths, because a build input that overwrites a tracked file dirties the worktree and the
+binary would then be stamped `vcs.modified=true`, which the release check refuses. A `go:embed` carries
+them into the artifact. The portal serves the current note and this recent offline history to the
+in-app update dialog, so a reader can browse what changed without leaving the portal or handing it
+GitHub credentials. The setup job fails if the tagged commit has no note, and
+`scripts/check-release-build.sh` searches each built binary for the current and historical content,
+so a release whose update prompt would have nothing to show — or something else's note — cannot be
+published. The GitHub Release page stays the complete published body, including the generated PR list
+and any edits made at publication; the in-app copies are the committed notes, and the two are not
+claimed to be identical.
 
 **The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
 refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one

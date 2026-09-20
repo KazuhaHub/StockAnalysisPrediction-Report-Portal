@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Space, Spin, Typography } from 'antd'
+import { Alert, Button, Modal, Select, Space, Spin, Typography } from 'antd'
 import { ExportOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
@@ -15,11 +15,11 @@ import Markdown from './Markdown'
 // what a working dialog looks like, and a second, independently-styled one would read as a different
 // product bolted on.
 //
-// It is also the surface a `required` policy escalates to. That case is the SAME dialog with its
-// exits removed, not a second, blocking prompt stacked on top: two overlays fighting over the same
-// page is how a reader ends up with one they cannot read and one they cannot close.
+// It is also the surface a `required` policy escalates to. The reader can close it; the coordinator
+// then keeps the update visible in the site-wide banner instead of trapping work behind an overlay.
 
 export type ReleaseNotes = { tag: string; available: boolean; markdown: string; url: string }
+export type ReleaseHistoryItem = { tag: string; title: string; url: string }
 
 type NotesState =
   | { status: 'loading' }
@@ -49,19 +49,41 @@ export default function ReleaseNotesModal({
   const { t, i18n } = useTranslation()
   const [state, setState] = useState<NotesState>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const required = policy === 'required'
+  const [selectedTag, setSelectedTag] = useState(target?.version ?? '')
+  const [history, setHistory] = useState<ReleaseHistoryItem[]>([])
+  const reminder = policy === 'required'
   const tag = target?.version ?? ''
   const targetKey = target ? buildKey(target) : ''
+  const browseHistory = !onRefresh
 
   useEffect(() => {
-    if (!open || !tag) return
+    if (open) setSelectedTag(tag)
+  }, [open, tag, targetKey])
+
+  useEffect(() => {
+    if (!open || !browseHistory) return
+    let live = true
+    api.get<{ items: ReleaseHistoryItem[] }>('/api/release-history')
+      .then((result) => {
+        if (live) setHistory(result.items ?? [])
+      })
+      .catch(() => {
+        if (live) setHistory([])
+      })
+    return () => {
+      live = false
+    }
+  }, [browseHistory, open])
+
+  useEffect(() => {
+    if (!open || !selectedTag) return
     let live = true
     setState({ status: 'loading' })
     // The tag is passed through the query string, not interpolated into a path: it is compared
     // against the server's own tag server-side, and a value that is not a release tag simply has no
     // note to serve.
     api
-      .get<ReleaseNotes>(`/api/release-notes?tag=${encodeURIComponent(tag)}`)
+      .get<ReleaseNotes>(`/api/release-notes?tag=${encodeURIComponent(selectedTag)}`)
       // `live` is the whole guard: the target moving (a second deploy) changes a dependency, so this
       // effect is torn down and a slow answer for the previous target can never be painted under the
       // new one's version label.
@@ -76,26 +98,24 @@ export default function ReleaseNotesModal({
     return () => {
       live = false
     }
-  }, [open, tag, targetKey, attempt])
+  }, [open, selectedTag, attempt])
 
   const label = (b: BuildIdentity) => productVersionLabel(b.version)
   const notes = state.status === 'loaded' ? state.notes : null
-  const titleVersion = target ? label(target) : ''
-  const showCurrent = !!target && buildKey(target) !== buildKey(current)
+  const titleVersion = productVersionLabel(selectedTag)
+  const showCurrent = !browseHistory && !!target && buildKey(target) !== buildKey(current)
+  const historyVisible = browseHistory && history.length > 1
 
   return (
     <Modal
       open={open}
-      onCancel={required ? undefined : onClose}
+      onCancel={onClose}
       title={t('update.notesTitle', { version: titleVersion })}
       width={980}
       className="rp-run-analysis-modal rp-release-notes-modal"
-      // Required mode: no X, no Escape, no mask dismissal. antd draws the X from `closable`, and
-      // `keyboard`/`mask.closable` are the other two ways out; all three have to go together or the
-      // "must refresh" policy is only a suggestion.
-      closable={!required}
-      keyboard={!required}
-      mask={{ closable: !required }}
+      closable
+      keyboard
+      mask={{ closable: true }}
       destroyOnHidden
       footer={
         <div className="rp-release-notes-footer">
@@ -109,9 +129,7 @@ export default function ReleaseNotesModal({
             ) : null}
           </span>
           <Space>
-            {!required && (
-              <Button onClick={onClose}>{t('common.close')}</Button>
-            )}
+            <Button onClick={onClose}>{t('common.close')}</Button>
             {onRefresh && (
               <Button type="primary" loading={refreshing} onClick={onRefresh}>
                 {t('update.refreshTo', { version: titleVersion })}
@@ -121,7 +139,7 @@ export default function ReleaseNotesModal({
         </div>
       }
     >
-      {required && (
+      {reminder && (
         <Alert
           type="warning"
           showIcon
@@ -136,7 +154,39 @@ export default function ReleaseNotesModal({
           {t('update.currentVersion', { version: label(current) })}
         </Typography.Text>
       )}
-      <div className="rp-release-notes-body">
+      {historyVisible && (
+        <div className="rp-release-history-mobile">
+          <Select
+            aria-label={t('update.history')}
+            value={selectedTag}
+            onChange={setSelectedTag}
+            options={history.map((item) => ({
+              value: item.tag,
+              label: productVersionLabel(item.tag),
+            }))}
+          />
+        </div>
+      )}
+      <div className={historyVisible ? 'rp-release-notes-layout' : undefined}>
+        {historyVisible && (
+          <nav className="rp-release-history" aria-label={t('update.history')}>
+            <Typography.Text strong>{t('update.history')}</Typography.Text>
+            {history.map((item) => (
+              <Button
+                key={item.tag}
+                type={item.tag === selectedTag ? 'default' : 'text'}
+                block
+                onClick={() => setSelectedTag(item.tag)}
+              >
+                <span>
+                  <strong>{productVersionLabel(item.tag)}</strong>
+                  {item.title && <small>{item.title}</small>}
+                </span>
+              </Button>
+            ))}
+          </nav>
+        )}
+        <div className="rp-release-notes-body">
         {state.status === 'loading' && (
           <div className="rp-release-notes-state">
             <Spin />
@@ -171,6 +221,7 @@ export default function ReleaseNotesModal({
           />
         )}
         {state.status === 'loaded' && notes?.available && <Markdown md={notes.markdown} />}
+        </div>
       </div>
     </Modal>
   )

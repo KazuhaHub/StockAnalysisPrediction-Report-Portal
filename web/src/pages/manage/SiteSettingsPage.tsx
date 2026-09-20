@@ -23,7 +23,7 @@ function tzOptions(systemLabel: string) {
 }
 
 // The update-prompt policies, in the order the page presents them: least intrusive first.
-const UPDATE_POLICIES: UpdatePromptPolicy[] = ['dismissible', 'persistent', 'required']
+const UPDATE_POLICIES: UpdatePromptPolicy[] = ['dismissible', 'persistent', 'required', 'automatic']
 
 // Site branding, PWA, footer, panel timezone and the update prompt. Announcement lives on
 // its own page now; each page posts only its own fields and the settings API merges
