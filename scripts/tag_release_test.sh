@@ -100,8 +100,39 @@ else
     sed -n '1,20p' "$tmp/diff.txt" >&2
 fi
 
+# ---------- an external note can tag an already-green commit ----------
+cat > "$tmp/external-note.md" <<EOF
+# v${week}.7 — supplied at release time
+
+## Changed
+
+- no repository commit is needed for this note
+EOF
+run --notes-file "$tmp/external-note.md" "v${week}.7"
+expect_status 0 "an external release note succeeds"
+git cat-file tag "v${week}.7" | sed '1,/^$/d' > "$tmp/external-annotation.txt"
+if diff -u "$tmp/external-note.md" "$tmp/external-annotation.txt" > "$tmp/external-diff.txt" 2>&1; then
+    ok
+else
+    bad "the external note is not the tag annotation"
+fi
+if git cat-file -e "HEAD:${notes_dir}/v${week}.7.md" 2>/dev/null; then
+    bad "the external note unexpectedly became part of the tagged commit"
+else
+    ok
+fi
+
+run --notes-file "$tmp/missing-note.md" "v${week}.71"
+expect_status 1 "a missing external note is refused"
+contains "no release note" "the missing external note is named"
+
+: > "$tmp/empty-note.md"
+run --notes-file "$tmp/empty-note.md" "v${week}.72"
+expect_status 1 "an empty external note is refused"
+contains "is empty" "the empty external note is explained"
+
 # ---------- a version whose note is absent ----------
-run "v${week}.7"
+run "v${week}.8"
 expect_status 1 "a number with no note is refused"
 contains "no release note" "the refusal names the missing file"
 
@@ -109,11 +140,11 @@ contains "no release note" "the refusal names the missing file"
 # Notes are filed under the tag's own year. One left at the old flat path is not where the helper
 # looks, and tagging anyway would publish a tag whose note the working tree appears to have — which
 # is the drift this layout exists to make impossible.
-printf '# v%s.8 — at the retired path\n' "$week" > "docs/releases/v${week}.8.md"
-run "v${week}.8"
+printf '# v%s.9 — at the retired path\n' "$week" > "docs/releases/v${week}.9.md"
+run "v${week}.9"
 expect_status 1 "a note at the retired flat path is refused"
 contains "no release note" "the refusal says the file is not there"
-rm -f "docs/releases/v${week}.8.md"
+rm -f "docs/releases/v${week}.9.md"
 
 # ---------- a duplicate ----------
 run "$tag"
@@ -121,14 +152,14 @@ expect_status 1 "an existing tag is refused"
 contains "already exists" "the refusal says the tag exists"
 
 # ---------- a note that is not in the tagged commit ----------
-cat > "${notes_dir}/v${week}.9.md" <<EOF
-# v${week}.9 — not committed
+cat > "${notes_dir}/v${week}.10.md" <<EOF
+# v${week}.10 — not committed
 
 ## Changed
 
 - nothing, this file is deliberately untracked
 EOF
-run "v${week}.9"
+run "v${week}.10"
 expect_status 1 "a note outside the commit is refused"
 contains "does not contain" "the refusal explains the note is not in the commit"
 

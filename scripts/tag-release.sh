@@ -1,15 +1,15 @@
 #!/bin/sh
 # Cut an annotated release tag from its release note.
 #
-# The convention this encodes (see docs/releases/README.md): a release tag is ANNOTATED and its
-# message is the release note verbatim, so `git tag -n99 vYYYY.W[.R]` and the file in docs/releases/
-# — filed by the tag's own year, docs/releases/<YYYY>/<tag>.md — say the same thing. Placed on the
-# commit where that release's work is complete — usually the merge that brought it into main.
+# A release tag is ANNOTATED and its message is the release note verbatim. `--notes-file` keeps that
+# note on the tag so the already-green merge commit can be released without a second PR. Omitting the
+# option preserves the archived convention: read docs/releases/<YYYY>/<tag>.md from the commit.
 #
 # Until now that lived in whoever cut the last one's memory, which is why v0.4.42 and v0.4.43 sat on
 # main untagged.
 #
-#   scripts/tag-release.sh                 derives this week's number and tags HEAD
+#   scripts/tag-release.sh --notes-file /tmp/release.md
+#                                          derives this week's number and tags HEAD
 #   scripts/tag-release.sh dacc4328        the same, on that commit
 #   scripts/tag-release.sh --next          prints the number it would derive, and changes nothing
 #   scripts/tag-release.sh v2026.38.2      that exact number, without deriving anything
@@ -34,9 +34,9 @@ here=$(dirname -- "$0")
 . "$here/lib/release.sh"
 
 usage() {
-    echo "usage: $0 [--next] [version] [commit]" >&2
-    echo "  version is optional: without it the number is derived from this week and the tags and" >&2
-    echo "  release notes this checkout already has. This week is $(calver_current_week)." >&2
+    echo "usage: $0 [--next] [--notes-file path] [version] [commit]" >&2
+    echo "  version is optional: without it the number is derived from this week's local tags and" >&2
+    echo "  any archived release notes this checkout already has. This week is $(calver_current_week)." >&2
     echo "  e.g. $0            # derive, tag HEAD" >&2
     echo "       $0 dacc4328   # derive, tag that commit" >&2
     echo "       $0 --next     # just print the number" >&2
@@ -47,10 +47,18 @@ next_only=0
 explicit=0
 version=""
 commit="HEAD"
+notes_file=""
 
-for arg in "$@"; do
+while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
     case "$arg" in
         --next) next_only=1 ;;
+        --notes-file)
+            [ "$#" -gt 0 ] || usage
+            notes_file=$1
+            shift
+            ;;
         -h | --help) usage ;;
         # A version is the only argument that starts with a v; anything else is a revision.
         v*)
@@ -120,17 +128,6 @@ if [ "$next_only" = 1 ]; then
     exit 0
 fi
 
-note=$(note_path "$root" "$version")
-# Relative, because a git object spec takes a repo-relative path: "$sha:docs/releases/..." and never
-# an absolute one.
-note_rel=${note#"$root"/}
-
-[ -f "$note" ] || {
-    echo "error: no release note at $note_rel" >&2
-    echo "       write it, commit it, then run this again — the tag's message is that file" >&2
-    exit 1
-}
-
 if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
     echo "error: tag $version already exists locally" >&2
     exit 1
@@ -138,25 +135,40 @@ fi
 
 sha=$(git rev-parse --verify "$commit^{commit}") || exit 1
 
-# The note has to be reachable from the commit being tagged, or the tag describes a release whose
-# own notes are not in it — which is how a tag ends up pointing at the wrong thing.
-if ! git cat-file -e "$sha:$note_rel" 2>/dev/null; then
-    echo "error: $commit does not contain $note_rel" >&2
-    echo "       the tag would describe a release the commit predates" >&2
-    exit 1
-fi
-
-# The annotation is taken from the COMMIT, not from the working tree. The tag has to keep saying what
-# the tagged commit says even if the note has uncommitted edits, which is exactly the case where
-# tagging from the file quietly publishes text no commit contains.
-if ! git show "$sha:$note_rel" | diff -q - "$note" >/dev/null 2>&1; then
-    echo "warning: $note_rel differs from the copy in $commit" >&2
-    echo "         tagging the committed version; commit the working-tree edits and re-tag to change it" >&2
-fi
-
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT INT TERM
-git show "$sha:$note_rel" > "$notes"
+if [ -n "$notes_file" ]; then
+    [ -f "$notes_file" ] || {
+        echo "error: no release note at $notes_file" >&2
+        exit 1
+    }
+    [ -s "$notes_file" ] || {
+        echo "error: release note at $notes_file is empty" >&2
+        exit 1
+    }
+    cat "$notes_file" > "$notes"
+else
+    note=$(note_path "$root" "$version")
+    # Relative, because a git object spec takes a repo-relative path:
+    # "$sha:docs/releases/..." and never an absolute one.
+    note_rel=${note#"$root"/}
+    [ -f "$note" ] || {
+        echo "error: no release note at $note_rel" >&2
+        echo "       write and commit it, or pass --notes-file with the note to store on the tag" >&2
+        exit 1
+    }
+    # Without --notes-file, keep the archival-file contract: the note must belong to the commit.
+    if ! git cat-file -e "$sha:$note_rel" 2>/dev/null; then
+        echo "error: $commit does not contain $note_rel" >&2
+        echo "       commit it, or pass --notes-file to keep the note on the tag only" >&2
+        exit 1
+    fi
+    if ! git show "$sha:$note_rel" | diff -q - "$note" >/dev/null 2>&1; then
+        echo "warning: $note_rel differs from the copy in $commit" >&2
+        echo "         tagging the committed version; use --notes-file to tag another note" >&2
+    fi
+    git show "$sha:$note_rel" > "$notes"
+fi
 # --cleanup=verbatim, not the default. `git tag -a -F` strips every line starting with '#' unless
 # told otherwise, which silently deleted each Markdown heading from the annotation — and any command
 # example with a shell comment in it. The convention is that the annotation IS the note, so the note
@@ -167,5 +179,5 @@ echo "created $version -> $(git rev-parse --short "$sha")  $(git log -1 --format
 echo
 echo "review:  git tag -n99 $version | head"
 echo "push:    git push origin $version"
-echo "publish: the tag push prepares a DRAFT release; maturity (pre-release / full release) and the"
-echo "         :latest and :beta channels are set at publication, never by the tag name."
+echo "publish: the tag push publishes a pre-release; promote the same GitHub Release to Stable"
+echo "         without rebuilding it. Maturity is GitHub metadata, never part of the tag name."

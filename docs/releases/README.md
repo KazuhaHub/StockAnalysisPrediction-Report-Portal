@@ -1,8 +1,12 @@
 # Release notes
 
-One file per release, the same text as the annotated git tag (`git tag -n99 <tag>`). The tag is
-still where a release is cut; these exist so the notes are readable in the repo and in a diff,
-which a tag message is not.
+The annotated tag carries the release note that seeds the GitHub Release. This lets a maintainer tag
+the already-green merge commit without adding a release-only commit to protected `main`. After
+publication, the GitHub Release body is the live source for both the portal and operators.
+
+Files under this directory are the archive for releases that committed their notes before this flow
+was introduced. They remain readable and can still be used by the tag helper, but a new release does
+not need to add one.
 
 ## Layout
 
@@ -13,10 +17,8 @@ release, so the top of `docs/releases/` stays this runbook and two directories.
 The retired v0.x line is the exception: it is not CalVer, and its notes were materialised from their
 tags after the fact, so they sit together under `docs/releases/0.x/`.
 
-The path is resolved by `note_path` in `scripts/lib/release.sh`. The tag helper, the derivation and
-the release workflow's body step all call it, so the three cannot disagree about where a note is —
-which is the failure that would otherwise publish an empty release body, or tag a number whose note
-the helper never looked for.
+The path is resolved by `note_path` in `scripts/lib/release.sh`. It remains the default input when
+`scripts/tag-release.sh` is called without `--notes-file`, preserving the archived workflow.
 
 Filing the notes into those directories moved them, and the relative links inside the moved ones were
 rebased to the new depth. An archived file is therefore no longer byte-identical to its tag
@@ -29,11 +31,11 @@ helper passed `--cleanup=verbatim` lost its Markdown headings — and any shell 
 command example — while the file kept them. Tags already cut are left as they are; the next one
 onward says what its file says.
 
-Cutting one — the version and the commit are both optional:
+Cutting one from an already-green merge commit:
 
 ```sh
-scripts/tag-release.sh --next     # print the number it would use, change nothing
-scripts/tag-release.sh            # derive that number, tag HEAD
+scripts/tag-release.sh --next
+scripts/tag-release.sh --notes-file /tmp/release.md
 git push origin v2026.38
 ```
 
@@ -45,10 +47,11 @@ revision. It reads local tags and the working tree only, so a clone that has not
 tag cut elsewhere; naming the version explicitly is the escape hatch, and it is validated the same
 way.
 
-The tag's message is the release note, so a number with no `docs/releases/<YYYY>/<tag>.md` in the
-tagged commit cannot be cut — the script names the file to write and stops.
+`--notes-file` deliberately stores the supplied text on the annotated tag without requiring the file
+in the tagged commit. Without that option, the helper retains the archival behavior: it reads
+`docs/releases/<YYYY>/<tag>.md` from the tagged commit and refuses an absent or uncommitted note.
 
-The committed note seeds a reader-note section inside the GitHub Release body, delimited by the
+The annotated note seeds a reader-note section inside the GitHub Release body, delimited by the
 invisible `<!-- portal-notes:start -->` and `<!-- portal-notes:end -->` comments. Container pull and
 verification instructions plus GitHub's generated pull-request list remain outside that section,
 so they stay on the GitHub page without appearing in the portal's reader dialog. Releases published
@@ -71,16 +74,14 @@ is capped at 10 entries after that live filtering.
 **The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
 refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one
 from a push to `main` or from a manual dispatch, and requires the whole suite, race lane included;
-the race lane does not run on a pull request. So the note belongs in the pull request that lands the
-release, and the squash merge is the commit to tag. A note committed straight to `main` after that
-merge can be tagged too, and is the way out when a dependabot branch would not hold it — a commit
-that only exists locally has no run of its own, and the guard says so.
+the race lane does not run on a pull request. The normal target is therefore the squash merge commit
+from the feature PR after its main-branch run finishes. The note changes the tag object, not that
+commit, so publishing needs no second PR and does not invalidate the completed CI result.
 
 The push is a separate, deliberate command because it is the irreversible step; the script never
-pushes. It refuses a version with no note, a tag that already exists, a tag that is not CalVer, and —
-the mistake worth catching — a commit that does not contain its own release note, which is how a tag
-ends up describing a release the commit predates. The tag's annotation is taken from that commit, not
-from the working tree.
+pushes. It refuses an empty note, a tag that already exists, and a tag that is not CalVer. With the
+archival-file flow it also refuses a commit that does not contain its note; with `--notes-file`, the
+specified file is copied verbatim into the annotation.
 
 No trailing `#` comments in that block, on purpose. zsh does not treat `#` as a comment in an
 interactive shell unless `INTERACTIVE_COMMENTS` is set, so a copied line with an explanation after it
