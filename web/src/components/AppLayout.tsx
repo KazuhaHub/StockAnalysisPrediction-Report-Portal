@@ -266,23 +266,27 @@ function AppShell() {
         )}
 
         {/* On mobile the search drops to its own full-width row (order:2) below the controls.
-            On the home page there is no header search, so don't force that empty row —
-            otherwise the phantom line pushes the control row off-center in the header. */}
-        <div
-          className="rp-header-search"
-          style={{
-            flex: onHome ? '0 0 auto' : 1,
-            minWidth: compact && !onHome && !chatFocus ? '100%' : 0,
-            order: compact ? 2 : 0,
-            display: chatFocus ? 'none' : 'flex',
-          }}
-        >
-          {!onHome && !chatFocus && (
+            The home page has no header search, and this wrapper is not rendered there: an empty
+            flex item still counts for line breaking, so once the control row came within one gap
+            of full — a phone at 393px carrying a real version pill does exactly that — the empty
+            wrapper wrapped onto a line of its own, and that phantom line's row-gap plus the
+            stretch a single line gets from a taller min-height header pulled the visible controls
+            ~6px above the header's middle. */}
+        {!onHome && !chatFocus && (
+          <div
+            className="rp-header-search"
+            style={{
+              flex: 1,
+              minWidth: compact ? '100%' : 0,
+              order: compact ? 2 : 0,
+              display: 'flex',
+            }}
+          >
             <div style={{ width: '100%', maxWidth: compact ? undefined : 420 }}>
               <Omnibox size="middle" />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Vertical gap (14) clears the queue badge's overhang so a 2-digit count (10+)
             doesn't collide with the button on the wrapped row above it. */}
