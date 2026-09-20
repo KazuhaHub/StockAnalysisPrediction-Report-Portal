@@ -174,18 +174,6 @@ jobs:
           test -s "${notes_file}" || { echo "::error::${notes_file} is empty"; exit 1; }
           echo "release note: ${notes_file}"
 
-      - name: Snapshot published release maturity
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: gh release list --repo "${REPO}" --limit 1000 --json tagName,isDraft,isPrerelease > release-maturities.json
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-maturities
-          path: release-maturities.json
-          if-no-files-found: error
-          retention-days: 1
-
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -289,13 +277,6 @@ jobs:
         with:
           name: web-dist
           path: internal/web/dist
-      - name: Download release maturity snapshot
-        uses: actions/download-artifact@v8
-        with:
-          name: release-maturities
-          # Release build inputs that are not tracked or gitignored must stay outside the checkout;
-          # otherwise Go correctly stamps vcs.modified=true and the provenance gate rejects them.
-          path: ${{ runner.temp }}/release-metadata
       - name: Build report-portal
         shell: bash
         env:
@@ -306,26 +287,10 @@ jobs:
           COMMIT: ${{ needs.setup.outputs.sha }}
           SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
-          TARGET_MATURITY: ${{ inputs.maturity || 'prerelease' }}
         run: |
           set -euo pipefail
-          # The release note is compiled into the binary (internal/version's go:embed), so it has to
-          # be in place before the build. It goes to a GITIGNORED path on purpose: a build input that
-          # overwrites a tracked file dirties the worktree, and `go build` then stamps the binary
-          # vcs.modified=true, which the artifact check below refuses. setup proved the note exists;
-          # this only needs the path, and the same value is handed to that check so both read one file.
-          . scripts/lib/calver.sh
-          . scripts/lib/release.sh
-          note_file=$(note_path "$PWD" "${VERSION}")
-          cp "${note_file}" internal/version/notes/release.md
-          history_file=internal/version/notes/history.json
-          python3 scripts/build-release-history.py \
-            --root "$PWD" \
-            --through "${VERSION}" \
-            --limit 10 \
-            --maturities "${RUNNER_TEMP}/release-metadata/release-maturities.json" \
-            --target-maturity "${TARGET_MATURITY}" \
-            --output "$history_file"
+          # The committed note seeds the GitHub Release body. The running portal reads that Release
+          # back from GitHub, which remains the sole authority if its body or maturity changes later.
           mkdir -p out
           mod=$(go list -m)
           short_sha="${SHORT_SHA}"
@@ -337,9 +302,8 @@ jobs:
           go build -trimpath -ldflags="${ldflags}" -o "out/report-portal${{ matrix.ext }}" ./cmd/report-portal
           # Prove the binary carries the provenance we think it does. go version -m reads it from
           # the binary itself, so a wrong module path (which makes every -X a silent no-op) or a
-          # checkout of the wrong commit cannot pass. The note file is passed so the same check also
-          # proves THIS release's note is inside the artifact.
-          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$note_file" "$history_file"
+          # checkout of the wrong commit cannot pass.
+          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
       - uses: actions/upload-artifact@v7
         with:
           name: report-portal-${{ matrix.goos }}-${{ matrix.goarch }}

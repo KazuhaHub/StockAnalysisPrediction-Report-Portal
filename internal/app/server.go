@@ -70,6 +70,7 @@ type Server struct {
 	dekOnce            dekCache                                                                   // lazily unwrapped data key for stored auth secrets (ADR 0023)
 	captchaSvc         *captcha.Service                                                           // public-form captcha (login / forgot password / registration)
 	health             healthCache                                                                // memoized /healthz database verdict, so a public probe cannot be a query amplifier
+	releases           releaseCatalog                                                             // GitHub Releases is the sole authority for notes and maturity
 }
 
 // statusRecorder records the response status code for use in request logging.

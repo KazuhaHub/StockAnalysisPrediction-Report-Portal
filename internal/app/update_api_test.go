@@ -107,20 +107,16 @@ func TestReleaseNotesRequireASession(t *testing.T) {
 	}
 }
 
-// The body is built from a packaged note plus the server's own tag, so the rules — which tag may be
-// served, and when a GitHub link exists — are exercised here without a release build.
 func TestReleaseNotesResponseRules(t *testing.T) {
 	const note = "## Fixed\n\n- the thing\n"
 	url := version.ReleaseNotesBaseURL + "/releases/tag/v2026.38.1"
+	releases := []publishedRelease{{Tag: "v2026.38.1", Markdown: note, Maturity: "beta"}}
 
-	// The deployed build answers with its own note.
-	got := releaseNotesResp("", "v2026.38.1", note, true, nil)
-	if got["tag"] != "v2026.38.1" || got["available"] != true || got["markdown"] != note || got["url"] != url {
+	got := releaseNotesResp("", "v2026.38.1", releases, false)
+	if got["tag"] != "v2026.38.1" || got["available"] != true || got["markdown"] != note || got["url"] != url || got["maturity"] != "beta" {
 		t.Errorf("served payload = %v", got)
 	}
-	// When the requested version is absent from the packaged recent history, the server says so and
-	// offers the exact release link instead of showing the new body under the old number.
-	got = releaseNotesResp("v2026.38", "v2026.38.1", note, true, nil)
+	got = releaseNotesResp("v2026.38", "v2026.38.1", releases, true)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("a mismatched tag served a body: %v", got)
 	}
@@ -130,39 +126,42 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 	if got["tag"] != "v2026.38" {
 		t.Errorf("the response must name the tag it is about: %v", got)
 	}
+	if got["stale"] != true {
+		t.Errorf("a cached GitHub response lost its stale marker: %v", got)
+	}
 	// A diagnostic build has no note and no release page: no link is invented.
-	got = releaseNotesResp("", "dev", "", false, nil)
+	got = releaseNotesResp("", "dev", releases, false)
 	if got["available"] != false || got["url"] != "" || got["maturity"] != "dev" {
 		t.Errorf("a diagnostic build fabricated notes or a link: %v", got)
 	}
-	// A release tag whose note step did not run is reported as unavailable, never as a link-only
-	// success with an empty body.
-	got = releaseNotesResp("", "v2026.38.1", "", false, nil)
+	got = releaseNotesResp("", "v2026.38.2", releases, false)
 	if got["available"] != false || got["markdown"] != "" {
-		t.Errorf("a missing note reported success: %v", got)
+		t.Errorf("an unpublished tag reported success: %v", got)
 	}
-	if got["url"] != url {
-		t.Errorf("a missing note dropped the usable release link: %v", got)
+	if got["url"] != version.ReleaseNotesBaseURL+"/releases/tag/v2026.38.2" {
+		t.Errorf("an unpublished tag dropped its canonical release link: %v", got)
+	}
+	got = releaseNotesResp("", "v2026.38.2", []publishedRelease{{Tag: "v2026.38.2", Maturity: "release"}}, false)
+	if got["available"] != false || got["markdown"] != "" || got["maturity"] != "release" {
+		t.Errorf("an empty published body should retain maturity without claiming notes exist: %v", got)
 	}
 }
 
-func TestHistoricalReleaseNoteIsServedFromTheOfflineArchive(t *testing.T) {
-	history := []version.ReleaseNote{
-		{Tag: "v2026.38.2", Title: "Second", Markdown: "# v2026.38.2\n\nOlder changes", Maturity: "beta"},
+func TestReleaseHistoryUsesCurrentGitHubMaturity(t *testing.T) {
+	releases := []publishedRelease{
+		{Tag: "v2026.38.4", Title: "Current", Markdown: "current", Maturity: "beta"},
+		{Tag: "v2026.38.3", Title: "Candidate", Markdown: "candidate", Maturity: "beta"},
+		{Tag: "v2026.38", Title: "Baseline", Markdown: "baseline", Maturity: "release"},
 	}
-	got := releaseNotesResp("v2026.38.2", "v2026.38.4", "# current", true, history)
-	if got["available"] != true || got["markdown"] != history[0].Markdown {
-		t.Fatalf("historical note response = %v", got)
+	items := releaseHistoryResp("v2026.38.4", releases)
+	if len(items) != 3 || items[0]["tag"] != "v2026.38.4" || items[2]["tag"] != "v2026.38" {
+		t.Fatalf("beta release history = %v", items)
 	}
-	if got["maturity"] != "beta" {
-		t.Fatalf("historical note maturity = %v", got)
-	}
-	items := releaseHistoryResp("v2026.38.4", true, history)
-	if len(items) != 2 || items[0]["tag"] != "v2026.38.4" || items[1]["tag"] != "v2026.38.2" {
-		t.Fatalf("release history = %v", items)
-	}
-	if items[1]["maturity"] != "beta" {
-		t.Fatalf("release history maturity = %v", items)
+	// Promoting the same GitHub Release changes the view without rebuilding the tag.
+	releases[0].Maturity = "release"
+	items = releaseHistoryResp("v2026.38.4", releases)
+	if len(items) != 2 || items[0]["tag"] != "v2026.38.4" || items[1]["tag"] != "v2026.38" {
+		t.Fatalf("stable release history = %v", items)
 	}
 }
 
@@ -171,7 +170,8 @@ func TestHistoricalReleaseNoteIsServedFromTheOfflineArchive(t *testing.T) {
 // string prefix of nothing that follows, v2026.10 is week ten, and the two must never be conflated.
 func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
 	const note = "## week ten\n"
-	got := releaseNotesResp("v2026.9", "v2026.10", note, true, nil)
+	releases := []publishedRelease{{Tag: "v2026.10", Markdown: note, Maturity: "release"}}
+	got := releaseNotesResp("v2026.9", "v2026.10", releases, false)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("asking for v2026.9 served v2026.10's note: %v", got)
 	}
@@ -180,22 +180,27 @@ func TestReleaseNotesAreMatchedByExactTag(t *testing.T) {
 	}
 
 	// And the revision position behaves the same way.
-	got = releaseNotesResp("v2026.9.9", "v2026.9.10", note, true, nil)
+	got = releaseNotesResp("v2026.9.9", "v2026.9.10", releases, false)
 	if got["available"] != false || got["markdown"] != "" {
 		t.Errorf("asking for v2026.9.9 served v2026.9.10's note: %v", got)
 	}
 
 	// The exact match still works, so the rule above is a boundary and not a blanket refusal.
-	got = releaseNotesResp("v2026.10", "v2026.10", note, true, nil)
+	got = releaseNotesResp("v2026.10", "v2026.10", releases, false)
 	if got["available"] != true || got["markdown"] != note {
 		t.Errorf("the deployed build's own tag must be served: %v", got)
 	}
 }
 
-func TestHandleReleaseNotesServesTheUnavailableState(t *testing.T) {
+func TestHandleReleaseNotesReadsGitHub(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, []githubRelease{{Tag: "v2026.38.1", Body: "# live", Prerelease: true}})
+	}))
+	defer upstream.Close()
 	s := tenancyServer(t)
+	s.releases = releaseCatalog{client: upstream.Client(), apiURL: upstream.URL}
 	rec := httptest.NewRecorder()
-	s.handleReleaseNotes(rec, httptest.NewRequest(http.MethodGet, "/api/release-notes", nil), "alice")
+	s.handleReleaseNotes(rec, httptest.NewRequest(http.MethodGet, "/api/release-notes?tag=v2026.38.1", nil), "alice")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /api/release-notes → %d", rec.Code)
 	}
@@ -203,15 +208,8 @@ func TestHandleReleaseNotesServesTheUnavailableState(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	// The test binary is built without -ldflags, so there is no packaged note: the honest answer.
-	if out["available"] != false {
-		t.Errorf("available = %v in a diagnostic build; want false", out["available"])
-	}
-	if out["tag"] != version.Version {
-		t.Errorf("tag = %v, want this build's own %q", out["tag"], version.Version)
-	}
-	if _, ok := out["markdown"]; !ok {
-		t.Error("the payload must carry the markdown field even when empty, so a client need not branch on its absence")
+	if out["available"] != true || out["markdown"] != "# live" || out["maturity"] != "beta" {
+		t.Errorf("GitHub release payload = %v", out)
 	}
 }
 
