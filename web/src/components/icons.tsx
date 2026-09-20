@@ -31,12 +31,15 @@ export function MoonIcon({ style, className }: IconProps) {
   )
 }
 
-// Follow system: half-filled circle (auto/contrast)
+// Follow system: a display. The half-filled circle this used to be is the "contrast" idea, which
+// reads as a brightness setting rather than as "whatever this device is set to" — and at 14px the
+// half-fill was the least legible of the three glyphs. A display is what the operating systems and
+// browsers use for the same choice.
 export function AutoIcon({ style, className }: IconProps) {
   return (
-    <svg {...base(style)} className={className} fill="none" stroke="currentColor" strokeWidth={2}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" />
+    <svg {...base(style)} className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+      <rect x="3" y="4" width="18" height="12.5" rx="2" />
+      <path d="M9 20.5h6M12 16.5v4" />
     </svg>
   )
 }

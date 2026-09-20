@@ -599,7 +599,6 @@ body {
   justify-content: center;
 }
 .rp-theme-segmented .ant-segmented-item-icon svg {
-  vertical-align: 0;
   margin-block-end: 0;
 }
 
