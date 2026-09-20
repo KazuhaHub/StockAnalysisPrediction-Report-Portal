@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { deferredTarget, deferTarget, normalizePolicy, useUpdateState } from './updateState'
+import {
+  automaticAttempt,
+  automaticAttemptedTarget,
+  completedAutomaticUpdate,
+  deferredTarget,
+  deferTarget,
+  normalizePolicy,
+  useUpdateState,
+} from './updateState'
 
 const get = vi.fn()
 vi.mock('../api/client', () => ({ api: { get: (...a: unknown[]) => get(...a) } }))
@@ -92,6 +100,12 @@ describe('useUpdateState', () => {
     await waitFor(() => expect(result.current.policy).toBe('required'))
   })
 
+  it('recognizes automatic mode while old bundles receive its persistent fallback', async () => {
+    get.mockResolvedValue({ ...a, updatePromptPolicy: 'persistent', automaticUpdate: true })
+    const { result } = poll()
+    await waitFor(() => expect(result.current.policy).toBe('automatic'))
+  })
+
   it('treats an unreadable policy as the default rather than forcing a refresh', async () => {
     get.mockResolvedValue({ ...a, updatePromptPolicy: 'whatever' })
     const { result } = poll()
@@ -119,13 +133,42 @@ describe('useUpdateState', () => {
 })
 
 describe('normalizePolicy', () => {
-  it('accepts the three policies and degrades anything else to the default', () => {
+  it('accepts the four policies and degrades anything else to the default', () => {
     expect(normalizePolicy('dismissible')).toBe('dismissible')
     expect(normalizePolicy('persistent')).toBe('persistent')
     expect(normalizePolicy('required')).toBe('required')
+    expect(normalizePolicy('automatic')).toBe('automatic')
     for (const bad of ['', null, undefined, 'always', 7, {}]) {
       expect(normalizePolicy(bad), String(bad)).toBe('dismissible')
     }
+  })
+})
+
+describe('automatic refresh handover', () => {
+  const target = { version: 'v2026.38.2', commit: 'bbbbbbb', buildDate: '2026-08-11T00:00:00Z' }
+
+  it('records one attempt and consumes it only after the target build loads', () => {
+    automaticAttempt(a, target)
+    expect(automaticAttemptedTarget()).toBe('v2026.38.2@bbbbbbb@2026-08-11T00:00:00Z')
+    expect(completedAutomaticUpdate(a)).toBeNull()
+    expect(automaticAttemptedTarget()).toBe('v2026.38.2@bbbbbbb@2026-08-11T00:00:00Z')
+
+    expect(completedAutomaticUpdate(target)).toBe('v2026.38.2')
+    expect(automaticAttemptedTarget()).toBeNull()
+    expect(completedAutomaticUpdate(target)).toBeNull()
+  })
+
+  it('supports a worker-only handover with a generic completion', () => {
+    automaticAttempt(a, null)
+    expect(automaticAttemptedTarget()).toBe('worker')
+    expect(completedAutomaticUpdate({ ...a, commit: 'worker-build' })).toBe('v2026.38.1')
+    expect(automaticAttemptedTarget()).toBeNull()
+  })
+
+  it('reports the build that actually loaded when another deploy overtakes the target', () => {
+    automaticAttempt(a, target)
+    const later = { version: 'v2026.38.3', commit: 'ccccccc', buildDate: '2026-08-12T00:00:00Z' }
+    expect(completedAutomaticUpdate(later)).toBe('v2026.38.3')
   })
 })
 

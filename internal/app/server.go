@@ -238,6 +238,7 @@ func RunServer(cfgPath string) {
 	// /api/version: nothing in it is secret, but the endpoint is app infrastructure, not a public
 	// path to probe.
 	mux.HandleFunc("GET /api/release-notes", s.requireUserJSON(s.handleReleaseNotes))
+	mux.HandleFunc("GET /api/release-history", s.requireUserJSON(s.handleReleaseHistory))
 	mux.HandleFunc("GET /api/site", s.apiSite) // public: brand title/logo for login + browser chrome
 	// The announcement feed is NOT on /api/site, and the wrapper is the reason (ADR 0025): a row can
 	// be addressed to one OU, and who is being told what is itself disclosure. Polled, so it answers
@@ -669,11 +670,20 @@ func validateSessionSecret(secret string) error {
 // deploy landed also tells it how hard the portal is insisting — an admin escalating the policy
 // reaches a tab nobody has reloaded.
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request, user string) {
+	policy := s.updatePromptPolicy()
+	clientPolicy := policy
+	automatic := policy == policyAutomatic
+	// Bundles released before automatic mode cannot refresh themselves. Give them the persistent
+	// banner fallback; current bundles read the explicit flag and refresh themselves.
+	if automatic {
+		clientPolicy = policyPersistent
+	}
 	writeJSON(w, map[string]any{
 		"version":            version.Version,
 		"commit":             version.Commit,
 		"buildDate":          version.BuildDate,
-		"updatePromptPolicy": s.updatePromptPolicy(),
+		"updatePromptPolicy": clientPolicy,
+		"automaticUpdate":    automatic,
 	})
 }
 

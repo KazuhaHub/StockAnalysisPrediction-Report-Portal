@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { App } from 'antd'
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import type { UpdateState } from '../lib/updateState'
@@ -28,14 +29,17 @@ vi.mock('../lib/swUpdate', () => ({ applyUpdate: () => applied() }))
 // A stub standing in for the dialog: this file is about which presentation the policy calls for and
 // that there is never more than one. The dialog's own behaviour is covered by its own test.
 vi.mock('./ReleaseNotesModal', () => ({
-  default: (p: { open: boolean; policy: string; target: BuildIdentity | null; onRefresh?: () => void }) => (
-    <div
-      data-testid="notes-modal"
-      data-open={String(p.open)}
-      data-policy={p.policy}
-      data-target={p.target?.version ?? ''}
-      data-refresh={String(!!p.onRefresh)}
-    />
+  default: (p: { open: boolean; policy: string; target: BuildIdentity | null; onClose: () => void; onRefresh?: () => void }) => (
+    <div>
+      <div
+        data-testid="notes-modal"
+        data-open={String(p.open)}
+        data-policy={p.policy}
+        data-target={p.target?.version ?? ''}
+        data-refresh={String(!!p.onRefresh)}
+      />
+      {p.open && <button onClick={p.onClose}>close-reminder</button>}
+    </div>
   ),
 }))
 
@@ -49,7 +53,7 @@ const state = (over: Partial<UpdateState> = {}): UpdateState => ({
   ...over,
 })
 
-const show = (ui: React.ReactNode) => render(<UpdateProvider>{ui}</UpdateProvider>)
+const show = (ui: React.ReactNode) => render(<App><UpdateProvider>{ui}</UpdateProvider></App>)
 const banner = () => show(<UpdateBanner maxWidth={1240} compact={false} />)
 const modal = () => screen.getByTestId('notes-modal')
 
@@ -57,8 +61,12 @@ beforeEach(() => {
   applied.mockReset()
   sessionStorage.clear()
   updateState.value = state()
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
+})
 
 describe('UpdateBanner', () => {
   it('says nothing while the page matches the server', () => {
@@ -123,7 +131,7 @@ describe('the administrator’s policy', () => {
     expect(screen.getByRole('button', { name: 'update.viewNotes' })).toBeTruthy()
   })
 
-  it('required: the dialog IS the prompt, with no banner beside it', () => {
+  it('required: starts with the dialog and falls back to the persistent banner when closed', async () => {
     updateState.value = state({ policy: 'required' })
     const { container } = banner()
     expect(container.querySelector('.rp-update-banner')).toBeNull()
@@ -132,8 +140,12 @@ describe('the administrator’s policy', () => {
     expect(modal().dataset.policy).toBe('required')
     expect(modal().dataset.target).toBe('v2026.38.1')
     expect(modal().dataset.refresh).toBe('true')
-    // Exactly one overlay: the dialog and the banner are never both drawn.
+    // Exactly one overlay: the dialog and the banner are never both drawn initially.
     expect(screen.getAllByTestId('notes-modal')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'close-reminder' }))
+    expect(modal().dataset.open).toBe('false')
+    expect(container.querySelector('.rp-update-banner')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'update.later' })).toBeNull()
   })
 
   it('relaxing the policy stops insisting without trapping the reader', async () => {
@@ -162,6 +174,43 @@ describe('the administrator’s policy', () => {
     expect(screen.getAllByTestId('notes-modal')).toHaveLength(1)
     expect(modal().dataset.target).toBe('v2026.38.2')
   })
+
+  it('automatic: refreshes once without drawing a banner or dialog', async () => {
+    updateState.value = state({ policy: 'automatic' })
+    const { container } = banner()
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1))
+    expect(container.querySelector('.rp-update-banner')).toBeNull()
+    expect(modal().dataset.open).toBe('false')
+    expect(sessionStorage.getItem('rp.update.automatic.attempted')).toBe('v2026.38.1@bbbbbbb@2026-08-10T00:00:00Z')
+  })
+
+  it('automatic: falls back to the reminder dialog instead of looping after a failed handover', async () => {
+    sessionStorage.setItem('rp.update.automatic.attempted', 'v2026.38.1@bbbbbbb@2026-08-10T00:00:00Z')
+    sessionStorage.setItem('rp.update.automatic.pending', JSON.stringify({
+      key: 'v2026.38.1@bbbbbbb@2026-08-10T00:00:00Z',
+      version: 'v2026.38.1',
+      from: 'v2026.38@aaaaaaa@2026-08-01T00:00:00Z',
+    }))
+    updateState.value = state({ policy: 'automatic' })
+    banner()
+    await waitFor(() => expect(modal().dataset.open).toBe('true'))
+    expect(modal().dataset.policy).toBe('required')
+    expect(applied).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'close-reminder' }))
+    expect(screen.getByText(/update\.newTitle/)).toBeTruthy()
+  })
+
+  it('automatic: confirms the version after the refreshed build loads', async () => {
+    sessionStorage.setItem('rp.update.automatic.attempted', 'v2026.38@aaaaaaa@2026-08-01T00:00:00Z')
+    sessionStorage.setItem('rp.update.automatic.pending', JSON.stringify({
+      key: 'v2026.38@aaaaaaa@2026-08-01T00:00:00Z',
+      version: 'v2026.38',
+      from: 'v2026.37@old@2026-07-01T00:00:00Z',
+    }))
+    updateState.value = state({ target: null, kind: null, policy: 'automatic' })
+    show(<div />)
+    expect(await screen.findByText('update.updatedTo:2026.38')).toBeTruthy()
+  })
 })
 
 describe('VersionLabel', () => {
@@ -179,6 +228,16 @@ describe('VersionLabel', () => {
     expect(modal().dataset.open).toBe('true')
     expect(modal().dataset.target).toBe('v2026.38')
     expect(modal().dataset.refresh).toBe('false')
+  })
+
+  it('opens notes without moving the page away from its reading position', async () => {
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(12)
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
+    const scrollTo = vi.mocked(window.scrollTo)
+    show(<VersionLabel />)
+    await userEvent.click(screen.getByRole('button', { name: 'version.label:2026.38' }))
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(12, 640))
+    expect(applied).not.toHaveBeenCalled()
   })
 
   it('renders as plain text outside a provider', () => {

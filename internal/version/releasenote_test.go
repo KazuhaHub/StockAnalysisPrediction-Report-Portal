@@ -1,6 +1,7 @@
 package version
 
 import (
+	"encoding/json"
 	"io/fs"
 	"testing"
 )
@@ -112,3 +113,18 @@ func TestPackagedNoteNeedsTheInjectedFileNotJustAReleaseTag(t *testing.T) {
 	}
 }
 
+func TestPackagedHistoryFiltersInvalidAndDuplicateEntries(t *testing.T) {
+	body, err := json.Marshal([]ReleaseNote{
+		{Tag: "v2026.38.2", Title: " New ", Markdown: " # v2026.38.2 "},
+		{Tag: "v2026.38.2", Title: "duplicate", Markdown: "duplicate"},
+		{Tag: "v0.4.72", Markdown: "retired line"},
+		{Tag: "v2026.38.1", Markdown: ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := parseReleaseHistory(body)
+	if len(got) != 1 || got[0].Tag != "v2026.38.2" || got[0].Title != "New" || got[0].Markdown != "# v2026.38.2" {
+		t.Fatalf("PackagedHistory() = %#v", got)
+	}
+}

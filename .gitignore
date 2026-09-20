@@ -34,6 +34,7 @@ internal/web/dist/*
 # reason the web bundle above is: a tracked file the build overwrites makes the worktree dirty, and
 # a binary built from a dirty worktree is stamped vcs.modified=true, which the release check refuses.
 internal/version/notes/release.md
+internal/version/notes/history.json
 
 # Editor / tool directories
 .idea/

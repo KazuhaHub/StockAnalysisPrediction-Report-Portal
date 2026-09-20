@@ -50,11 +50,14 @@ func TestHandleVersionReportsBuildIdentity(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("handleVersion → %d", rec.Code)
 	}
-	var out map[string]string
+	var out struct {
+		Version, Commit, BuildDate string
+		AutomaticUpdate            bool
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out["version"] == "" || out["commit"] == "" || out["buildDate"] == "" {
+	if out.Version == "" || out.Commit == "" || out.BuildDate == "" {
 		t.Fatalf("version payload = %v", out)
 	}
 }

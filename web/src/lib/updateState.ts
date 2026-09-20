@@ -13,13 +13,15 @@ import { useSWUpdateReady } from './swUpdate'
 // and the effective update-prompt policy. Failure is not an update: an offline blip or a transient
 // 401 answers nothing, and nothing is what the state records.
 
-export type UpdatePolicy = 'dismissible' | 'persistent' | 'required'
+export type UpdatePolicy = 'dismissible' | 'persistent' | 'required' | 'automatic'
 export const DEFAULT_UPDATE_POLICY: UpdatePolicy = 'dismissible'
 
 // normalizePolicy maps whatever the server sent onto a policy. An unreadable value degrades to the
 // default rather than to `required`, so a corrupt settings row cannot start blocking every reader.
 export function normalizePolicy(raw: unknown): UpdatePolicy {
-  return raw === 'persistent' || raw === 'required' || raw === 'dismissible' ? raw : DEFAULT_UPDATE_POLICY
+  return raw === 'persistent' || raw === 'required' || raw === 'automatic' || raw === 'dismissible'
+    ? raw
+    : DEFAULT_UPDATE_POLICY
 }
 
 type VersionResp = {
@@ -27,6 +29,7 @@ type VersionResp = {
   commit: string
   buildDate: string
   updatePromptPolicy?: string
+  automaticUpdate?: boolean
 }
 
 export type UpdateState = {
@@ -47,6 +50,55 @@ export type UpdateState = {
 // different target — or a reload — prompts again. localStorage would let a reader silence updates
 // for every future session, and a variable would forget the choice on the next navigation.
 const DEFERRED_KEY = 'rp.update.deferred'
+const AUTOMATIC_ATTEMPTED_KEY = 'rp.update.automatic.attempted'
+const AUTOMATIC_PENDING_KEY = 'rp.update.automatic.pending'
+
+type AutomaticPending = { key: string; version: string; from: string }
+
+/** Record the target before reloading. Returning false means storage is unavailable, so an
+ * automatic reload would have no loop guard and must not start. */
+export function automaticAttempt(page: BuildIdentity, target: BuildIdentity | null): boolean {
+  const pending: AutomaticPending = {
+    key: target ? buildKey(target) : 'worker',
+    version: target?.version ?? '',
+    from: buildKey(page),
+  }
+  try {
+    sessionStorage.setItem(AUTOMATIC_ATTEMPTED_KEY, pending.key)
+    sessionStorage.setItem(AUTOMATIC_PENDING_KEY, JSON.stringify(pending))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function automaticAttemptedTarget(): string | null {
+  try {
+    return sessionStorage.getItem(AUTOMATIC_ATTEMPTED_KEY)
+  } catch {
+    return null
+  }
+}
+
+/** Consume a pending handover only after its target build is running. An empty version is a
+ * worker-only update whose target identity was unavailable. */
+export function completedAutomaticUpdate(page: BuildIdentity): string | null {
+  try {
+    const raw = sessionStorage.getItem(AUTOMATIC_PENDING_KEY)
+    if (!raw) return null
+    const pending = JSON.parse(raw) as Partial<AutomaticPending>
+    if (typeof pending.key !== 'string' || typeof pending.version !== 'string' || typeof pending.from !== 'string') return null
+    const loaded = buildKey(page)
+    if (loaded === pending.from) return null
+    sessionStorage.removeItem(AUTOMATIC_PENDING_KEY)
+    if (sessionStorage.getItem(AUTOMATIC_ATTEMPTED_KEY) === pending.key) {
+      sessionStorage.removeItem(AUTOMATIC_ATTEMPTED_KEY)
+    }
+    return loaded === pending.key ? pending.version : page.version
+  } catch {
+    return null
+  }
+}
 
 export function deferredTarget(): string | null {
   try {
@@ -102,7 +154,7 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
       answered = mine
       if (info) {
         setFailed(false)
-        setPolicy(normalizePolicy(info.updatePromptPolicy))
+        setPolicy(info.automaticUpdate === true ? 'automatic' : normalizePolicy(info.updatePromptPolicy))
         const server = { version: info.version, commit: info.commit, buildDate: info.buildDate }
         // Re-evaluated every tick, in both directions: a second deploy moves the target, and a
         // rollback to the page's own build clears it.

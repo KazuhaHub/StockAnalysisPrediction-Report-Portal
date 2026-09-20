@@ -110,13 +110,13 @@ describe('SiteSettingsPage', () => {
     renderPage()
 
     const persisted = await screen.findByRole('radio', { name: /settings\.policy\.persistent/ })
-    const required = screen.getByRole('radio', { name: /settings\.policy\.required/ })
+    const automatic = screen.getByRole('radio', { name: /settings\.policy\.automatic/ })
     expect((persisted as HTMLInputElement).checked).toBe(true)
 
-    await user.click(required)
+    await user.click(automatic)
     await user.click(screen.getByRole('button', { name: /common\.save/ }))
 
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
-    expect(apiMock.post.mock.calls[0][1].updatePromptPolicy).toBe('required')
+    expect(apiMock.post.mock.calls[0][1].updatePromptPolicy).toBe('automatic')
   })
 })

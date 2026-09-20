@@ -298,6 +298,8 @@ jobs:
           . scripts/lib/release.sh
           note_file=$(note_path "$PWD" "${VERSION}")
           cp "${note_file}" internal/version/notes/release.md
+          history_file=internal/version/notes/history.json
+          python3 scripts/build-release-history.py --root "$PWD" --through "${VERSION}" --limit 10 --output "$history_file"
           mkdir -p out
           mod=$(go list -m)
           short_sha="${SHORT_SHA}"
@@ -311,7 +313,7 @@ jobs:
           # the binary itself, so a wrong module path (which makes every -X a silent no-op) or a
           # checkout of the wrong commit cannot pass. The note file is passed so the same check also
           # proves THIS release's note is inside the artifact.
-          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$note_file"
+          sh scripts/check-release-build.sh "out/report-portal${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT" "$note_file" "$history_file"
       - uses: actions/upload-artifact@v7
         with:
           name: report-portal-${{ matrix.goos }}-${{ matrix.goarch }}
