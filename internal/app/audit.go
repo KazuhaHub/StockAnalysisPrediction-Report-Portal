@@ -145,6 +145,28 @@ func (s *Store) WriteAudit(e AuditEntry) {
 		VALUES(?,?,?,?,?,?,?,?)`, at, e.Actor, e.ActorOU, e.Action, e.TargetType, e.TargetID, e.Detail, e.IP)
 }
 
+// auditTokenDetail snapshots the authenticated key's label without retaining its secret.
+// Existing detail storage preserves the label after the key is renamed or deleted.
+func (s *Server) auditTokenDetail(r *http.Request, actor string, detail map[string]any) map[string]any {
+	if r == nil || actor != "" {
+		return detail
+	}
+	raw := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if !s.st.TokenValid(raw, "") {
+		return detail
+	}
+	var name string
+	if err := s.st.queryRow("SELECT COALESCE(name,'') FROM api_tokens WHERE token_hash=? OR token=?", tokenDigest(raw), raw).Scan(&name); err != nil || strings.TrimSpace(name) == "" {
+		return detail
+	}
+	snapshot := make(map[string]any, len(detail)+1)
+	for k, v := range detail {
+		snapshot[k] = v
+	}
+	snapshot["token_name"] = name
+	return snapshot
+}
+
 // recordChange records an administrative action: one principal acting on something that is not
 // its own credentials. r may be nil for a writer with no request (CLI, scheduler).
 //
@@ -154,7 +176,7 @@ func (s *Server) recordChange(r *http.Request, actor, action, targetType, target
 	s.st.WriteAudit(AuditEntry{
 		Actor: actor, ActorOU: s.st.PrimaryGroupOf(actor), Action: action,
 		TargetType: targetType, TargetID: targetID,
-		Detail: auditJSON(detail), IP: s.auditIP(r),
+		Detail: auditJSON(s.auditTokenDetail(r, actor, detail)), IP: s.auditIP(r),
 	})
 }
 

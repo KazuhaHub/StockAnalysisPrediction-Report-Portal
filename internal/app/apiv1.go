@@ -53,16 +53,11 @@ func (s *Server) v1ReportByPathID(id string, sc *ownerScope) *Rep {
 // non-restricted logged-in user, so every downloadable app reads reports through here, and those
 // reads were invisible.
 //
-// The actor is the cookie user when there is one and "" for a token — which the console already
-// renders as "(API token)" — and `via` says which door it came through, so an operator can tell an
-// app's fetch from a person opening the page.
+// The actor is the cookie user when there is one and empty for a token. The detail
+// snapshots a persistent token label and records the API entry point.
 func (s *Server) recordV1Read(r *http.Request, rep Rep) {
-	s.st.WriteAudit(AuditEntry{
-		Actor: s.currentActiveUser(r), ActorOU: s.st.PrimaryGroupOf(s.currentActiveUser(r)),
-		Action: AuditReportRead, TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
-		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title, "via": "api"}),
-		IP:     s.auditIP(r),
-	})
+	s.recordChange(r, s.currentActiveUser(r), AuditReportRead, "report", strconv.FormatInt(rep.ID, 10),
+		map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title, "via": "api"})
 }
 
 // ingestInstant is the real time-of-day stamped onto a report's sent_at. It is a

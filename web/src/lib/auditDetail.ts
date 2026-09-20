@@ -182,7 +182,7 @@ export function auditDetail(action: string, raw: string, t: TFunction, ctx?: Det
   }
 
   const parts: DetailPart[] = []
-  const used = new Set<string>()
+  const used = new Set<string>(['token_name']) // Shown as the actor; retained in the raw detail.
   // The lead is built from the parts that are actually there rather than from one template with a
   // slot per field: a report with no date would otherwise render its separator around nothing.
   const lead = (field: string, s: string) => {
