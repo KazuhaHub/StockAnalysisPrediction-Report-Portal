@@ -68,7 +68,14 @@ func releaseNotesResp(reqTag, serverTag, note string, hasNote bool, history []ve
 	if tag == "" {
 		tag = serverTag
 	}
-	out := map[string]any{"tag": tag, "available": false, "markdown": "", "url": version.ReleaseURL(tag)}
+	maturity := ""
+	for _, entry := range history {
+		if entry.Tag == tag {
+			maturity = entry.Maturity
+			break
+		}
+	}
+	out := map[string]any{"tag": tag, "available": false, "markdown": "", "url": version.ReleaseURL(tag), "maturity": maturity}
 	if tag == serverTag && hasNote && version.IsReleaseTag(tag) {
 		out["available"] = true
 		out["markdown"] = note
@@ -92,10 +99,10 @@ func releaseHistoryResp(serverTag string, hasNote bool, history []version.Releas
 			continue
 		}
 		seen[entry.Tag] = true
-		out = append(out, map[string]string{"tag": entry.Tag, "title": entry.Title, "url": version.ReleaseURL(entry.Tag)})
+		out = append(out, map[string]string{"tag": entry.Tag, "title": entry.Title, "url": version.ReleaseURL(entry.Tag), "maturity": entry.Maturity})
 	}
 	if hasNote && version.IsReleaseTag(serverTag) && !seen[serverTag] {
-		out = append([]map[string]string{{"tag": serverTag, "title": "", "url": version.ReleaseURL(serverTag)}}, out...)
+		out = append([]map[string]string{{"tag": serverTag, "title": "", "url": version.ReleaseURL(serverTag), "maturity": ""}}, out...)
 	}
 	return out
 }

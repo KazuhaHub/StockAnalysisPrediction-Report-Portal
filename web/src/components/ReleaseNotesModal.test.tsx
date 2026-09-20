@@ -25,11 +25,12 @@ function show(ui: ReactNode) {
 
 const page: BuildIdentity = { version: 'v2026.38', commit: 'aaaaaaa', buildDate: '2026-08-01T00:00:00Z' }
 const target: BuildIdentity = { version: 'v2026.38.1', commit: 'bbbbbbb', buildDate: '2026-08-10T00:00:00Z' }
-const notes = (over: Partial<{ tag: string; available: boolean; markdown: string; url: string }> = {}) => ({
+const notes = (over: Partial<{ tag: string; available: boolean; markdown: string; url: string; maturity: 'release' | 'beta' | '' }> = {}) => ({
   tag: 'v2026.38.1',
   available: true,
   markdown: '## Fixed\n\n- the thing',
   url: 'https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/releases/tag/v2026.38.1',
+  maturity: 'beta' as const,
   ...over,
 })
 
@@ -54,8 +55,23 @@ describe('ReleaseNotesModal', () => {
     get.mockResolvedValue(notes())
     open()
     expect(await screen.findByText('update.notesTitle:2026.38.1')).toBeTruthy()
+    expect(screen.getByText('update.beta')).toBeTruthy()
     // The reader is told what they are running as well as what they would get.
     expect(screen.getByText('update.currentVersion:2026.38')).toBeTruthy()
+  })
+
+  it('renders inline so opening it does not lock and collapse the document body', async () => {
+    get.mockResolvedValue(notes())
+    const { container } = open()
+    await screen.findByTestId('md')
+    expect(container.querySelector('.ant-modal-root')).toBeTruthy()
+  })
+
+  it('does not show an unsaved-work warning when the footer opens current-version history', async () => {
+    get.mockResolvedValue(notes({ tag: page.version }))
+    open({ target: page, policy: 'required', onRefresh: undefined })
+    await screen.findByTestId('md')
+    expect(screen.queryByText('update.requiredWarning')).toBeNull()
   })
 
   it('renders the fetched note and links to the published release', async () => {
@@ -88,8 +104,8 @@ describe('ReleaseNotesModal', () => {
     get.mockImplementation((url: string) => {
       if (url === '/api/release-history') {
         return Promise.resolve({ items: [
-          { tag: 'v2026.38', title: 'Current', url: 'https://example/current' },
-          { tag: 'v2026.37.2', title: 'Older', url: 'https://example/older' },
+          { tag: 'v2026.38', title: 'Current', url: 'https://example/current', maturity: 'release' },
+          { tag: 'v2026.37.2', title: 'Older', url: 'https://example/older', maturity: 'beta' },
         ] })
       }
       if (url?.includes('v2026.37.2')) {
@@ -103,6 +119,8 @@ describe('ReleaseNotesModal', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith('/api/release-notes?tag=v2026.37.2'))
     expect((await screen.findByTestId('md')).textContent).toContain('Older changes')
     expect(screen.getByText('update.notesTitle:2026.37.2')).toBeTruthy()
+    expect(screen.getAllByText('update.beta').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('update.release').length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /update.refreshTo/ })).toBeNull()
   })
 

@@ -61,7 +61,6 @@ beforeEach(() => {
   applied.mockReset()
   sessionStorage.clear()
   updateState.value = state()
-  vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
 })
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -230,13 +229,11 @@ describe('VersionLabel', () => {
     expect(modal().dataset.refresh).toBe('false')
   })
 
-  it('opens notes without moving the page away from its reading position', async () => {
-    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(12)
-    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(640)
-    const scrollTo = vi.mocked(window.scrollTo)
+  it('opens notes without trying to rewrite the page scroll position', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
     show(<VersionLabel />)
     await userEvent.click(screen.getByRole('button', { name: 'version.label:2026.38' }))
-    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(12, 640))
+    expect(scrollTo).not.toHaveBeenCalled()
     expect(applied).not.toHaveBeenCalled()
   })
 

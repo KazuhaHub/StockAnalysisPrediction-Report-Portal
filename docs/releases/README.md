@@ -49,8 +49,14 @@ The tag's message is the release note, so a number with no `docs/releases/<YYYY>
 tagged commit cannot be cut — the script names the file to write and stops.
 
 The note also ships *inside* the release. The workflow copies it to `internal/version/notes/release.md`
-and builds `internal/version/notes/history.json` from the 10 most recent CalVer notes at or before
-that tag. Both are gitignored paths, because a build input that overwrites a tracked file dirties the worktree and the
+and builds `internal/version/notes/history.json` from the 10 most recent published CalVer notes at or
+before that tag. A committed note with no published GitHub Release, including a draft, is not shown
+as release history. Each history entry carries the GitHub Release maturity captured at build time; the portal
+labels full releases and Beta builds explicitly and never infers maturity from the CalVer revision.
+A full-release note summarizes the user-visible changes since the previous full release, while each
+Beta note remains the incremental test-stage record. The history builder does not concatenate Beta
+notes into the full-release note, because that would duplicate an intentionally curated summary.
+Both generated files are gitignored paths, because a build input that overwrites a tracked file dirties the worktree and the
 binary would then be stamped `vcs.modified=true`, which the release check refuses. A `go:embed` carries
 them into the artifact. The portal serves the current note and this recent offline history to the
 in-app update dialog, so a reader can browse what changed without leaving the portal or handing it
