@@ -148,30 +148,11 @@ func (s *Store) classifySchema() (schemaState, error) {
 	return schemaCurrent, nil
 }
 
-// ensureColumns is the additive-column step of the upgrade ladder: the place an ALTER TABLE ADD
-// COLUMN is written when a release adds a column and has to carry an older database forward.
-//
-// The step is EMPTY, and that is the design rather than an oversight. The runtime sits at a database
-// baseline and converts nothing, so there is no column for it to add: a database missing one is
-// refused by verifyBaseSchema above, and the release notes name the version it has to be taken
-// through instead. The ladder below (and upgrade_v04.go's shape, had it survived) is what stays —
-// entry points that a major change writes a step into and clears again, so that adding one is a
-// function body and a call, never a new startup path.
-func (s *Store) ensureColumns() error { return nil }
-
-// duplicateColumnErr reports whether an ADD COLUMN failed only because the column already exists —
-// the idempotency signal an additive step needs, since the same column may be added on a database
-// that already has it.
-//
-// Unused today because every additive step is empty. Kept, with its linter exemption, because it
-// belongs to those steps and not to this release: writing one back is meant to be a body and a call
-// rather than a re-derivation of how to detect a duplicate column on two drivers.
-//
-//lint:ignore U1000 the additive steps of the upgrade ladder are empty for now
-func duplicateColumnErr(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists")
-}
+// The upgrade ladder's additive step is the migration runner now (migrate_steps.go). It used to be an
+// empty placeholder here: the runtime sat at a database baseline and converted nothing, so a database
+// missing a column was refused rather than carried forward. The refusal is unchanged — a database
+// that does not satisfy the baseline is still refused before any statement runs — and what changed is
+// that the baseline is frozen instead of final, with everything since it expressed as ordered steps.
 
 // verifyBaseSchema is the accepted-baseline check: every table, every column and every index
 // baseSchemaStmts declares must already exist. It is what replaced the ADD COLUMN reconciliation that
@@ -269,59 +250,20 @@ func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// tableExists reports whether a table is present.
-// The Postgres path assumes the default `public` schema — consistent with the rest of the
-// store, which issues only unqualified DDL/DML and never sets a custom search_path.
-func (s *Store) tableExists(name string) bool {
-	var n int
-	if s.driver == "postgres" {
-		s.queryRow(`SELECT COUNT(*) FROM information_schema.tables
-			WHERE table_schema='public' AND table_name=?`, name).Scan(&n)
-	} else {
-		s.queryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
-	}
-	return n > 0
-}
+// The three schema probes below are the pooled shorthand for the migExec ones (migrate_steps.go),
+// which are the only implementation. A migration must probe through ITS OWN transaction — on SQLite
+// the pool is a single connection, so probing through the pool while a transaction holds that
+// connection is a deadlock, not a wait — and having one implementation is what keeps the two paths
+// from answering differently about the same database.
+//
+// The Postgres path assumes the default `public` schema — consistent with the rest of the store,
+// which issues only unqualified DDL/DML and never sets a custom search_path.
+func (s *Store) tableExists(name string) bool { return s.poolExec().tableExists(name) }
 
-func (s *Store) indexExists(name string) bool {
-	var n int
-	if s.driver == "postgres" {
-		s.queryRow(`SELECT COUNT(*) FROM pg_indexes WHERE schemaname='public' AND indexname=?`, name).Scan(&n)
-	} else {
-		s.queryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&n)
-	}
-	return n > 0
-}
+func (s *Store) indexExists(name string) bool { return s.poolExec().indexExists(name) }
 
-// columnExists reports whether table.col is present. Only ever called with hardcoded internal
-// identifiers, so the SQLite PRAGMA path inlines the table name safely (no user input).
-func (s *Store) columnExists(table, col string) bool {
-	if s.driver == "postgres" {
-		var n int
-		s.queryRow(`SELECT COUNT(*) FROM information_schema.columns
-			WHERE table_schema='public' AND table_name=? AND column_name=?`, table, col).Scan(&n)
-		return n > 0
-	}
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false
-	}
-	defer rows.Close()
-	found := false
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, ctype string
-		var dflt sql.NullString
-		if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == col {
-			found = true
-			break
-		}
-	}
-	if rows.Err() != nil {
-		return false
-	}
-	return found
-}
+// columnExists reports whether table.col is present.
+func (s *Store) columnExists(table, col string) bool { return s.poolExec().columnExists(table, col) }
 
 // schemaCol is one parsed column: its name and its full definition.
 type schemaCol struct{ name, def string }
