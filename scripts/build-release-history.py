@@ -71,18 +71,31 @@ def build(
             raise ValueError(f"empty release note: {path}")
         first = markdown.splitlines()[0].removeprefix("# ").strip()
         title = first.split(" — ", 1)[1].strip() if " — " in first else ""
-        items.append({"tag": tag, "title": title, "markdown": markdown})
-    items.sort(key=lambda item: version_key(item["tag"]), reverse=True)
-    if not any(item["tag"] == through for item in items):
-        raise ValueError(f"release history does not contain target {through}")
-    selected = items[:limit]
-    for item in selected:
-        tag = item["tag"]
         maturity = target_maturity if tag == through else maturities.get(tag)
         if maturity not in {"release", "beta"}:
             raise ValueError(f"no release maturity for {tag}")
-        item["maturity"] = maturity
-    return selected
+        items.append({"tag": tag, "title": title, "markdown": markdown, "maturity": maturity})
+    items.sort(key=lambda item: version_key(item["tag"]), reverse=True)
+    if not any(item["tag"] == through for item in items):
+        raise ValueError(f"release history does not contain target {through}")
+
+    releases = [item for item in items if item["maturity"] == "release"]
+    if target_maturity == "release":
+        return releases[:limit]
+
+    # A Beta history starts at the latest full-release baseline. Older Beta notes describe test
+    # stages that have already been incorporated into a later full-release summary, so repeating
+    # them makes the history noisy and obscures the milestones a reader is trying to compare.
+    latest_release = version_key(releases[0]["tag"]) if releases else None
+    active_betas = [
+        item
+        for item in items
+        if item["maturity"] == "beta"
+        and (latest_release is None or version_key(item["tag"]) > latest_release)
+    ]
+    selected = releases + active_betas
+    selected.sort(key=lambda item: version_key(item["tag"]), reverse=True)
+    return selected[:limit]
 
 
 def main() -> None:
