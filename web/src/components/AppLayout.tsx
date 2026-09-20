@@ -19,6 +19,7 @@ import QueueDrawer from './QueueDrawer'
 import SiteAnnouncement, { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
+import UserAvatar from './UserAvatar'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -508,6 +509,7 @@ function AppShell() {
                 <div style={{ fontSize: 12, color: token.colorTextTertiary, margin: '2px 4px 6px' }}>{t('nav.theme')}</div>
                 <Segmented
                   block
+                  className="rp-theme-segmented"
                   value={mode}
                   onChange={(v) => setMode(v as 'light' | 'dark' | 'auto')}
                   options={[
@@ -547,7 +549,15 @@ function AppShell() {
               </div>
             }
           >
-            <Button type="text" icon={<UserOutlined />} aria-label={name || user || t('nav.account')} title={name || user || undefined}>
+            <Button
+              type="text"
+              // The account's own avatar rather than a generic bust: the same name-derived letters and
+              // colour the user list draws, so the header says which account is signed in at a glance
+              // and matches the row that account appears in under 账号管理.
+              icon={<UserAvatar size="small" name={name || user || ''} seed={user || undefined} />}
+              aria-label={name || user || t('nav.account')}
+              title={name || user || undefined}
+            >
               {!compact && (name || user)}
             </Button>
           </Popover>

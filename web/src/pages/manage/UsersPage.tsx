@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   App,
-  Avatar,
   Button,
   Card,
   DatePicker,
@@ -34,26 +33,12 @@ import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
 import CompactNumberInput from '../../components/CompactNumberInput'
+import UserAvatar from '../../components/UserAvatar'
 import OrgUnitDetail from './OrgUnitDetail'
 import LoadGate from '../../components/LoadGate'
 import type { BatchConfig, Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
 
-// A deterministic avatar colour from a name, so each user reads distinctly.
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
-const AVATAR_COLORS = ['#1677ff', '#52c41a', '#faad14', '#eb2f96', '#722ed1', '#13c2c2', '#fa541c']
-function avatarColor(s: string) {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]
-}
-function initials(s: string) {
-  const t = s.trim()
-  if (!t) return '?'
-  // First glyph works for CJK; for latin words take up to two initials.
-  const parts = t.split(/\s+/)
-  if (parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return t.slice(0, /[一-龥]/.test(t) ? 1 : 2).toUpperCase()
-}
 
 export default function UsersPage() {
   const { t } = useTranslation()
@@ -224,7 +209,7 @@ export default function UsersPage() {
       dataIndex: 'username',
       render: (_, u) => (
         <Space>
-          <Avatar style={{ backgroundColor: avatarColor(u.username), flexShrink: 0 }}>{initials(u.display_name || u.username)}</Avatar>
+          <UserAvatar name={u.display_name || u.username} seed={u.username} />
           <div style={{ lineHeight: 1.3 }}>
             <Space size={6}>
               <Typography.Text strong>{u.display_name || u.username}</Typography.Text>

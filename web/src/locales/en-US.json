@@ -1334,7 +1334,7 @@
   "settings.footerShowVersion": "Show version",
   "settings.versionDisplay": "Version number placement",
   "settings.versionDisplay.hidden": "Do not show",
-  "settings.versionDisplay.footer": "Show in footer (default)",
+  "settings.versionDisplay.footer": "Show in footer",
   "settings.versionDisplay.header": "Show beside the site name",
   "settings.footerText": "Footer info (HTML)",
   "settings.footerTextHint": "Supports safe lightweight HTML such as a, strong, and br. Blank = use the site title.",

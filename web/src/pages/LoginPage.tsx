@@ -223,6 +223,7 @@ export default function LoginPage() {
               <Space style={{ justifyContent: 'flex-end' }} wrap>
                 <Segmented
                   size="small"
+                  className="rp-theme-segmented"
                   value={mode}
                   onChange={(v) => setMode(v as any)}
                   options={[
