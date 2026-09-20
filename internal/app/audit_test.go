@@ -257,3 +257,59 @@ func TestAuditIsAdminOnly(t *testing.T) {
 		t.Error("the role registry no longer says what this handler assumes")
 	}
 }
+
+func TestAuditSnapshotsTokenName(t *testing.T) {
+	s := newV1Server(t)
+	r := httptest.NewRequest("POST", "/api/v1/reports", nil)
+	r.Header.Set("Authorization", "Bearer tok-all")
+	s.recordChange(r, "", AuditReportIngest, "report", "9", nil)
+	s.recordV1Read(r, Rep{ID: 9})
+	s.st.exec("DELETE FROM api_tokens")
+	rows, total := s.st.ListAudit(AuditFilter{})
+	if total != 2 {
+		t.Fatalf("got %d entries", total)
+	}
+	for _, row := range rows {
+		if !strings.Contains(row.Detail, `"token_name":"test"`) {
+			t.Errorf("missing token name snapshot: %s", row.Detail)
+		}
+		if strings.Contains(row.Detail, "tok-all") {
+			t.Fatal("audit contains token secret")
+		}
+		if row.Actor != "" {
+			t.Fatal("token name must not impersonate a user")
+		}
+	}
+}
+
+func TestAuditTokenDetailFallbacks(t *testing.T) {
+	s := newV1Server(t)
+	for _, tc := range []struct{ name, raw, actor string }{
+		{"unknown key", "invalid", ""},
+		{"user identity", "tok-all", "alice"},
+		{"no key", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/v1/reports/9", nil)
+			r.Header.Set("Authorization", "Bearer "+tc.raw)
+			detail := map[string]any{"symbol": "600519"}
+			got := s.auditTokenDetail(r, tc.actor, detail)
+			if _, ok := got["token_name"]; ok {
+				t.Fatal("unexpected token identity")
+			}
+			if got["symbol"] != "600519" {
+				t.Fatal("lost report detail")
+			}
+		})
+	}
+	r := httptest.NewRequest("GET", "/api/v1/reports/9", nil)
+	r.Header.Set("Authorization", "Bearer tok-all")
+	detail := map[string]any{"symbol": "600519"}
+	got := s.auditTokenDetail(r, "", detail)
+	if got["token_name"] != "test" || got["symbol"] != "600519" {
+		t.Fatalf("unexpected snapshot: %v", got)
+	}
+	if _, ok := detail["token_name"]; ok {
+		t.Fatal("mutated caller detail")
+	}
+}

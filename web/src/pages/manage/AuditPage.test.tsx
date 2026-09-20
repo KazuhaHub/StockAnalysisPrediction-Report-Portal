@@ -319,3 +319,13 @@ describe('AuditPage', () => {
     expect(apiMock.get.mock.calls.length).toBe(1)
   })
 })
+
+describe('token identity', () => {
+  it.each([true, false])('shows the saved token note (desktop=%s)', async (wide) => {
+    screenWidth(wide)
+    apiMock.get.mockResolvedValue({ ...RESP, items: [{ ...RESP.items[0], detail: '{"token_name":"Dify production"}' }] })
+    mount()
+    expect(await screen.findByText('Dify production')).toBeTruthy()
+    expect(screen.queryByText('audit.machine')).toBeNull()
+  })
+})

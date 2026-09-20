@@ -49,6 +49,11 @@ function actorOf(r: AuditEntry, t: TFunc): string {
   // The attempted account, which the server records as the target for exactly this reason: an
   // account's timeline is one target filter whether the actor was its holder or nobody.
   if (PRE_AUTH_ACTIONS.has(r.action)) return r.target_id || '—'
+  try {
+    const detail: unknown = JSON.parse(r.detail)
+    if (detail && typeof detail === 'object' && 'token_name' in detail &&
+        typeof detail.token_name === 'string' && detail.token_name.trim()) return detail.token_name
+  } catch { /* Older records may have plain-text details. */ }
   return t('audit.machine')
 }
 
@@ -304,7 +309,7 @@ export default function AuditPage() {
           {/* Under the actor, because on a failed sign-in it is the only identity there is: no
               account has authenticated, and the address is who to look at. Click to filter. */}
           {r.ip && (
-            <Space size={4} wrap>
+            <Space orientation="vertical" size={0}>
               <Typography.Link
                 style={{ fontSize: 11 }}
                 {...clickable(() => {
@@ -494,25 +499,27 @@ export default function AuditPage() {
               {ouNames[String(r.actor_ou)] ?? `OU ${r.actor_ou}`}
             </Typography.Text>
           )}
-          {r.ip && (
-            <Typography.Link
-              style={{ fontSize: 12 }}
-              // The address filters the log; the card opens the record. Without this, tapping the
-              // address does both and the modal covers the result.
-              {...clickable((e) => {
-                e.stopPropagation()
-                setIP(r.ip ?? '')
-                setPage(1)
-              })}
-            >
-              {r.ip}
-            </Typography.Link>
-          )}
-          {region && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {region}
-            </Typography.Text>
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', flexBasis: '100%' }}>
+            {r.ip && (
+              <Typography.Link
+                style={{ fontSize: 12 }}
+                // The address filters the log; the card opens the record. Without this, tapping the
+                // address does both and the modal covers the result.
+                {...clickable((e) => {
+                  e.stopPropagation()
+                  setIP(r.ip ?? '')
+                  setPage(1)
+                })}
+              >
+                {r.ip}
+              </Typography.Link>
+            )}
+            {region && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {region}
+              </Typography.Text>
+            )}
+          </div>
         </div>
         {detail.length > 0 && (
           <div className="rp-audit-row__detail">
