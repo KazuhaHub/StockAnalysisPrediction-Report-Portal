@@ -434,6 +434,12 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.rp-release-notes-modal--history .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  height: min(720px, calc(100dvh - 280px));
+  overflow: hidden;
+}
 .rp-release-notes-current {
   display: block;
   margin-bottom: 12px;
@@ -445,7 +451,16 @@ body {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.rp-release-notes-layout > .rp-release-history,
+.rp-release-notes-layout > .rp-release-notes-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .rp-release-history {
   display: flex;
@@ -508,6 +523,9 @@ body {
   .rp-release-notes-modal .ant-modal-body {
     max-height: calc(100dvh - 240px);
   }
+  .rp-release-notes-modal--history .ant-modal-body {
+    height: calc(100dvh - 240px);
+  }
   /* The actions keep their width and drop below the link rather than shrinking into an ellipsis;
      the primary Refresh stays the last thing in the row wherever the row breaks. */
   .rp-release-notes-footer {
@@ -518,6 +536,10 @@ body {
   }
   .rp-release-notes-layout {
     display: block;
+    overflow-y: auto;
+  }
+  .rp-release-notes-layout > .rp-release-notes-body {
+    overflow: visible;
   }
   .rp-release-history {
     display: none;

@@ -25,7 +25,7 @@ function show(ui: ReactNode) {
 
 const page: BuildIdentity = { version: 'v2026.38', commit: 'aaaaaaa', buildDate: '2026-08-01T00:00:00Z' }
 const target: BuildIdentity = { version: 'v2026.38.1', commit: 'bbbbbbb', buildDate: '2026-08-10T00:00:00Z' }
-const notes = (over: Partial<{ tag: string; available: boolean; markdown: string; url: string; maturity: 'release' | 'beta' | '' }> = {}) => ({
+const notes = (over: Partial<{ tag: string; available: boolean; markdown: string; url: string; maturity: 'release' | 'beta' | 'dev' | '' }> = {}) => ({
   tag: 'v2026.38.1',
   available: true,
   markdown: '## Fixed\n\n- the thing',
@@ -113,8 +113,11 @@ describe('ReleaseNotesModal', () => {
       }
       return Promise.resolve(notes({ tag: 'v2026.38', markdown: '# Current changes' }))
     })
-    open({ target: page, onRefresh: undefined })
+    const { container } = open({ target: page, onRefresh: undefined })
     const older = await screen.findByRole('button', { name: /2026\.37\.2/ })
+    expect(container.querySelector('.rp-release-notes-modal--history')).toBeTruthy()
+    expect(container.querySelector('.rp-release-history')).toBeTruthy()
+    expect(container.querySelector('.rp-release-notes-body')).toBeTruthy()
     await userEvent.click(older)
     await waitFor(() => expect(get).toHaveBeenCalledWith('/api/release-notes?tag=v2026.37.2'))
     expect((await screen.findByTestId('md')).textContent).toContain('Older changes')
@@ -144,9 +147,10 @@ describe('ReleaseNotesModal', () => {
   })
 
   it('invents neither a note nor a link for a build that has no release', async () => {
-    get.mockResolvedValue({ tag: 'dev', available: false, markdown: '', url: '' })
+    get.mockResolvedValue({ tag: 'dev', available: false, markdown: '', url: '', maturity: 'dev' })
     open({ target: { version: 'dev', commit: 'none', buildDate: 'unknown' } })
     expect(await screen.findByText('update.notesUnavailable')).toBeTruthy()
+    expect(screen.getByText('update.dev')).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
   })
 })

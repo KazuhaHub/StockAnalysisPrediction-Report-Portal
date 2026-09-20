@@ -132,7 +132,7 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 	}
 	// A diagnostic build has no note and no release page: no link is invented.
 	got = releaseNotesResp("", "dev", "", false, nil)
-	if got["available"] != false || got["url"] != "" {
+	if got["available"] != false || got["url"] != "" || got["maturity"] != "dev" {
 		t.Errorf("a diagnostic build fabricated notes or a link: %v", got)
 	}
 	// A release tag whose note step did not run is reported as unavailable, never as a link-only
