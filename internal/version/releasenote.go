@@ -43,6 +43,7 @@ type ReleaseNote struct {
 	Tag      string `json:"tag"`
 	Title    string `json:"title"`
 	Markdown string `json:"markdown"`
+	Maturity string `json:"maturity"`
 }
 
 // IsReleaseTag reports whether tag is a well-formed CalVer release tag, vYYYY.W[.R]. The rules
@@ -133,13 +134,18 @@ func parseReleaseHistory(body []byte) []ReleaseNote {
 		entry.Tag = strings.TrimSpace(entry.Tag)
 		entry.Title = strings.TrimSpace(entry.Title)
 		entry.Markdown = strings.TrimSpace(entry.Markdown)
-		if !IsReleaseTag(entry.Tag) || entry.Markdown == "" || seen[entry.Tag] {
+		entry.Maturity = strings.TrimSpace(entry.Maturity)
+		if !IsReleaseTag(entry.Tag) || entry.Markdown == "" || !isReleaseMaturity(entry.Maturity) || seen[entry.Tag] {
 			continue
 		}
 		seen[entry.Tag] = true
 		out = append(out, entry)
 	}
 	return out
+}
+
+func isReleaseMaturity(maturity string) bool {
+	return maturity == "release" || maturity == "beta"
 }
 
 func allDigits(s string) bool {

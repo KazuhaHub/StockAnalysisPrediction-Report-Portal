@@ -174,6 +174,18 @@ jobs:
           test -s "${notes_file}" || { echo "::error::${notes_file} is empty"; exit 1; }
           echo "release note: ${notes_file}"
 
+      - name: Snapshot published release maturity
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh release list --repo "${REPO}" --limit 1000 --json tagName,isDraft,isPrerelease > release-maturities.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-maturities
+          path: release-maturities.json
+          if-no-files-found: error
+          retention-days: 1
+
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -277,6 +289,11 @@ jobs:
         with:
           name: web-dist
           path: internal/web/dist
+      - name: Download release maturity snapshot
+        uses: actions/download-artifact@v8
+        with:
+          name: release-maturities
+          path: .release-metadata
       - name: Build report-portal
         shell: bash
         env:
@@ -287,6 +304,7 @@ jobs:
           COMMIT: ${{ needs.setup.outputs.sha }}
           SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+          TARGET_MATURITY: ${{ inputs.maturity || 'prerelease' }}
         run: |
           set -euo pipefail
           # The release note is compiled into the binary (internal/version's go:embed), so it has to
@@ -299,7 +317,13 @@ jobs:
           note_file=$(note_path "$PWD" "${VERSION}")
           cp "${note_file}" internal/version/notes/release.md
           history_file=internal/version/notes/history.json
-          python3 scripts/build-release-history.py --root "$PWD" --through "${VERSION}" --limit 10 --output "$history_file"
+          python3 scripts/build-release-history.py \
+            --root "$PWD" \
+            --through "${VERSION}" \
+            --limit 10 \
+            --maturities .release-metadata/release-maturities.json \
+            --target-maturity "${TARGET_MATURITY}" \
+            --output "$history_file"
           mkdir -p out
           mod=$(go list -m)
           short_sha="${SHORT_SHA}"

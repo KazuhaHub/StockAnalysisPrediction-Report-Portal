@@ -148,15 +148,21 @@ func TestReleaseNotesResponseRules(t *testing.T) {
 
 func TestHistoricalReleaseNoteIsServedFromTheOfflineArchive(t *testing.T) {
 	history := []version.ReleaseNote{
-		{Tag: "v2026.38.2", Title: "Second", Markdown: "# v2026.38.2\n\nOlder changes"},
+		{Tag: "v2026.38.2", Title: "Second", Markdown: "# v2026.38.2\n\nOlder changes", Maturity: "beta"},
 	}
 	got := releaseNotesResp("v2026.38.2", "v2026.38.4", "# current", true, history)
 	if got["available"] != true || got["markdown"] != history[0].Markdown {
 		t.Fatalf("historical note response = %v", got)
 	}
+	if got["maturity"] != "beta" {
+		t.Fatalf("historical note maturity = %v", got)
+	}
 	items := releaseHistoryResp("v2026.38.4", true, history)
 	if len(items) != 2 || items[0]["tag"] != "v2026.38.4" || items[1]["tag"] != "v2026.38.2" {
 		t.Fatalf("release history = %v", items)
+	}
+	if items[1]["maturity"] != "beta" {
+		t.Fatalf("release history maturity = %v", items)
 	}
 }
 

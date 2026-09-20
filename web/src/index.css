@@ -468,6 +468,17 @@ body {
   display: grid;
   width: 100%;
 }
+.rp-release-history__version {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.rp-release-history__version .ant-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
 .rp-release-history small {
   color: var(--ant-color-text-tertiary);
   overflow: hidden;

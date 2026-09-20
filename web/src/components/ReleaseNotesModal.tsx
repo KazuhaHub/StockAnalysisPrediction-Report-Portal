@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Select, Space, Spin, Typography } from 'antd'
+import { Alert, Button, Modal, Select, Space, Spin, Tag, Typography } from 'antd'
 import { ExportOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
@@ -18,8 +18,9 @@ import Markdown from './Markdown'
 // It is also the surface a `required` policy escalates to. The reader can close it; the coordinator
 // then keeps the update visible in the site-wide banner instead of trapping work behind an overlay.
 
-export type ReleaseNotes = { tag: string; available: boolean; markdown: string; url: string }
-export type ReleaseHistoryItem = { tag: string; title: string; url: string }
+type ReleaseMaturity = 'release' | 'beta'
+export type ReleaseNotes = { tag: string; available: boolean; markdown: string; url: string; maturity: ReleaseMaturity | '' }
+export type ReleaseHistoryItem = { tag: string; title: string; url: string; maturity: ReleaseMaturity }
 
 type NotesState =
   | { status: 'loading' }
@@ -108,12 +109,19 @@ export default function ReleaseNotesModal({
   const titleVersion = productVersionLabel(selectedTag)
   const showCurrent = !browseHistory && !!target && buildKey(target) !== buildKey(current)
   const historyVisible = browseHistory && history.length > 1
+  const selectedHistoryItem = history.find((item) => item.tag === selectedTag)
+  const maturity = selectedHistoryItem?.maturity ?? (notes?.tag === selectedTag ? notes.maturity : '')
+  const maturityTag = maturity ? (
+    <Tag color={maturity === 'release' ? 'green' : 'blue'} bordered={false}>
+      {t(maturity === 'release' ? 'update.release' : 'update.beta')}
+    </Tag>
+  ) : null
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
-      title={t('update.notesTitle', { version: titleVersion })}
+      title={<Space size={8}>{t('update.notesTitle', { version: titleVersion })}{maturityTag}</Space>}
       width={980}
       className="rp-run-analysis-modal rp-release-notes-modal"
       // Rendering under the application root avoids Ant Design's body scroll lock. In this app,
@@ -169,7 +177,7 @@ export default function ReleaseNotesModal({
             onChange={setSelectedTag}
             options={history.map((item) => ({
               value: item.tag,
-              label: productVersionLabel(item.tag),
+              label: `${productVersionLabel(item.tag)} · ${t(item.maturity === 'release' ? 'update.release' : 'update.beta')}`,
             }))}
           />
         </div>
@@ -186,7 +194,12 @@ export default function ReleaseNotesModal({
                 onClick={() => setSelectedTag(item.tag)}
               >
                 <span>
-                  <strong>{productVersionLabel(item.tag)}</strong>
+                  <span className="rp-release-history__version">
+                    <strong>{productVersionLabel(item.tag)}</strong>
+                    <Tag color={item.maturity === 'release' ? 'green' : 'blue'} bordered={false}>
+                      {t(item.maturity === 'release' ? 'update.release' : 'update.beta')}
+                    </Tag>
+                  </span>
                   {item.title && <small>{item.title}</small>}
                 </span>
               </Button>
