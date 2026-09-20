@@ -107,7 +107,8 @@ func TestPublicSiteSettingsKeySetIsFrozen(t *testing.T) {
 
 	want := map[string]bool{
 		"siteTitle": true, "siteLogoUrl": true, "homeMoreStyle": true, "footerText": true,
-		"footerShowInfo": true, "footerShowVersion": true, "pwaEnabled": true, "pwaIconUrl": true,
+		"footerShowInfo": true, "footerShowVersion": true, "versionDisplay": true,
+		"pwaEnabled": true, "pwaIconUrl": true,
 	}
 	got := publicSiteSettings(t, s)
 	for k := range got {

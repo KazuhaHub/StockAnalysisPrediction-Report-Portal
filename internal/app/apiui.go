@@ -166,6 +166,41 @@ func normalizeHomeMoreStyle(v string) string {
 	}
 }
 
+const (
+	versionDisplayHidden = "hidden"
+	versionDisplayFooter = "footer"
+	versionDisplayHeader = "header"
+)
+
+func normalizeVersionDisplay(v string) string {
+	switch strings.TrimSpace(strings.ToLower(v)) {
+	case versionDisplayHidden:
+		return versionDisplayHidden
+	case versionDisplayHeader:
+		return versionDisplayHeader
+	default:
+		return versionDisplayFooter
+	}
+}
+
+func validVersionDisplay(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == versionDisplayHidden || v == versionDisplayFooter || v == versionDisplayHeader
+}
+
+// versionDisplay preserves the old footer_show_version switch as the fallback for deployments that
+// have not saved the new placement yet. The compatibility key also lets an older binary or an open
+// pre-upgrade frontend keep the closest possible behavior during a rolling update.
+func (s *Server) versionDisplay() string {
+	if raw := s.st.GetSetting("version_display", ""); raw != "" {
+		return normalizeVersionDisplay(raw)
+	}
+	if !settingBool(s.st.GetSetting("footer_show_version", ""), true) {
+		return versionDisplayHidden
+	}
+	return versionDisplayFooter
+}
+
 // siteSettingsJSON is the PUBLIC brand payload: /api/site serves it with no auth so the login page
 // can paint the right title and logo, and apiAdminSettings merges it into the admin payload.
 //
@@ -174,13 +209,17 @@ func normalizeHomeMoreStyle(v string) string {
 // portal's front door, so a per-audience message can never come back to it. Adding a key means
 // deciding, deliberately, that an anonymous visitor may have it.
 func (s *Server) siteSettingsJSON() map[string]any {
+	versionDisplay := s.versionDisplay()
 	return map[string]any{
-		"siteTitle":         s.st.GetSetting("site_title", ""),
-		"siteLogoUrl":       s.st.GetSetting("site_logo_url", ""),
-		"homeMoreStyle":     normalizeHomeMoreStyle(s.st.GetSetting("home_more_style", "")),
-		"footerText":        s.st.GetSetting("footer_text", ""),
-		"footerShowInfo":    settingBool(s.st.GetSetting("footer_show_info", ""), true),
-		"footerShowVersion": settingBool(s.st.GetSetting("footer_show_version", ""), true),
+		"siteTitle":      s.st.GetSetting("site_title", ""),
+		"siteLogoUrl":    s.st.GetSetting("site_logo_url", ""),
+		"homeMoreStyle":  normalizeHomeMoreStyle(s.st.GetSetting("home_more_style", "")),
+		"footerText":     s.st.GetSetting("footer_text", ""),
+		"footerShowInfo": settingBool(s.st.GetSetting("footer_show_info", ""), true),
+		// footerShowVersion is retained for old frontend bundles open across an upgrade. Header maps
+		// to visible there, whose closest supported placement is the footer.
+		"footerShowVersion": versionDisplay != versionDisplayHidden,
+		"versionDisplay":    versionDisplay,
 		"pwaEnabled":        settingBool(s.st.GetSetting("pwa_enabled", ""), true),
 		"pwaIconUrl":        s.st.GetSetting("pwa_icon_url", ""),
 	}
@@ -1232,10 +1271,10 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 	// they write into the table. They stay only so an operator who rolls back mid-upgrade still has
 	// a working settings save. Delete them, and their three error codes, at the next release line.
 	var in struct {
-		OldBase, OldUser, OldPass, Timezone, SiteTitle, SiteLogoUrl, FooterText, PwaIconUrl   *string
-		PublicUrl                                                                             *string
-		AnnouncementLevel, AnnouncementTitle, AnnouncementContent, HomeMoreStyle              *string
-		FooterShowInfo, FooterShowVersion, PwaEnabled, AnnouncementEnabled, AnnouncementPopup *bool
+		OldBase, OldUser, OldPass, Timezone, SiteTitle, SiteLogoUrl, FooterText, PwaIconUrl      *string
+		PublicUrl                                                                                *string
+		AnnouncementLevel, AnnouncementTitle, AnnouncementContent, HomeMoreStyle, VersionDisplay *string
+		FooterShowInfo, FooterShowVersion, PwaEnabled, AnnouncementEnabled, AnnouncementPopup    *bool
 		// How hard the update prompt insists (dismissible / persistent / required / automatic). One enum, not a
 		// pair of switches: see update_api.go.
 		UpdatePromptPolicy *string
@@ -1298,6 +1337,11 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 			"更新提示策略必须是 dismissible、persistent、required 或 automatic 之一")
 		return
 	}
+	if in.VersionDisplay != nil && !validVersionDisplay(*in.VersionDisplay) {
+		jsonErrorCode(w, http.StatusBadRequest, "bad_version_display",
+			"版本号位置必须是 hidden、footer 或 header 之一")
+		return
+	}
 	if in.OldBase != nil {
 		s.st.SetSetting("old_base", strings.TrimSpace(*in.OldBase))
 	}
@@ -1330,6 +1374,18 @@ func (s *Server) apiSettingsSave(w http.ResponseWriter, r *http.Request, user st
 	}
 	if in.FooterShowVersion != nil {
 		s.st.SetSetting("footer_show_version", strconv.FormatBool(*in.FooterShowVersion))
+		if in.VersionDisplay == nil {
+			placement := versionDisplayFooter
+			if !*in.FooterShowVersion {
+				placement = versionDisplayHidden
+			}
+			s.st.SetSetting("version_display", placement)
+		}
+	}
+	if in.VersionDisplay != nil {
+		placement := normalizeVersionDisplay(*in.VersionDisplay)
+		s.st.SetSetting("version_display", placement)
+		s.st.SetSetting("footer_show_version", strconv.FormatBool(placement != versionDisplayHidden))
 	}
 	if in.PwaEnabled != nil {
 		s.st.SetSetting("pwa_enabled", strconv.FormatBool(*in.PwaEnabled))

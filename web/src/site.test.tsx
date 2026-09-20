@@ -48,6 +48,7 @@ describe('SiteProvider', () => {
       footerText: ' <strong>备案</strong> ',
       footerShowInfo: false,
       footerShowVersion: false,
+      versionDisplay: 'header',
       pwaEnabled: false,
       pwaIconUrl: ' /brand/app.png ',
       // The announcement no longer travels on this payload (ADR 0025). A server still sending the
@@ -71,7 +72,7 @@ describe('SiteProvider', () => {
       siteLogoUrl: '/brand/logo.png',
       footerText: '<strong>备案</strong>',
       footerShowInfo: false,
-      footerShowVersion: false,
+      versionDisplay: 'header',
       pwaEnabled: false,
       pwaIconUrl: '/brand/app.png',
     })
@@ -83,6 +84,20 @@ describe('SiteProvider', () => {
       expect(document.title).toBe('智研平台')
       expect(document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.href).toContain('/brand/logo.png')
     })
+  })
+
+  it('maps the old visibility flag onto the new placement when the server has not sent it yet', async () => {
+    apiMock.get.mockResolvedValue({ footerShowVersion: false })
+
+    render(
+      <MemoryRouter>
+        <SiteProvider>
+          <SiteProbe />
+        </SiteProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(settings().versionDisplay).toBe('hidden'))
   })
 
   it('refreshes settings on demand and falls back to the localized brand title when unset', async () => {

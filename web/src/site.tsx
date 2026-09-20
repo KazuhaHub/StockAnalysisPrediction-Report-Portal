@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router'
 import { api } from './api/client'
-import type { HomeMoreStyle, SiteSettings } from './api/types'
+import type { HomeMoreStyle, SiteSettings, VersionDisplay } from './api/types'
 import { BrandIcon } from './components/icons'
 import { clearSWUpdate, trackSWUpdates } from './lib/swUpdate'
 import { pageTitle, routeTitle } from './lib/pageTitle'
@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
   homeMoreStyle: 'expand',
   footerText: '',
   footerShowInfo: true,
-  footerShowVersion: true,
+  versionDisplay: 'footer',
   pwaEnabled: true,
   pwaIconUrl: '',
 }
@@ -31,13 +31,22 @@ const Ctx = createContext<SiteCtx | null>(null)
 
 function normalizeSettings(s?: Partial<SiteSettings> | null): SiteSettings {
   const moreStyle = String(s?.homeMoreStyle ?? '').trim().toLowerCase()
+  const rawVersionDisplay = String(s?.versionDisplay ?? '').trim().toLowerCase()
+  const legacyShowVersion = (s as Partial<SiteSettings> & { footerShowVersion?: boolean } | null | undefined)?.footerShowVersion
+  const versionDisplay = (
+    ['hidden', 'footer', 'header'].includes(rawVersionDisplay)
+      ? rawVersionDisplay
+      : legacyShowVersion === false
+        ? 'hidden'
+        : 'footer'
+  ) as VersionDisplay
   return {
     siteTitle: (s?.siteTitle ?? '').trim(),
     siteLogoUrl: (s?.siteLogoUrl ?? '').trim(),
     homeMoreStyle: (['expand', 'modal', 'popover'].includes(moreStyle) ? moreStyle : 'expand') as HomeMoreStyle,
     footerText: (s?.footerText ?? '').trim(),
     footerShowInfo: s?.footerShowInfo !== false,
-    footerShowVersion: s?.footerShowVersion !== false,
+    versionDisplay,
     pwaEnabled: s?.pwaEnabled !== false,
     pwaIconUrl: (s?.pwaIconUrl ?? '').trim(),
   }

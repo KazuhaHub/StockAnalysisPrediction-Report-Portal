@@ -175,6 +175,7 @@ func TestSiteSettings(t *testing.T) {
 	pub := get(s.apiSite, "/api/site")
 	if pub["siteTitle"] != "" || pub["siteLogoUrl"] != "" || pub["footerText"] != "" ||
 		pub["footerShowInfo"] != true || pub["footerShowVersion"] != true ||
+		pub["versionDisplay"] != "footer" ||
 		pub["pwaEnabled"] != true || pub["pwaIconUrl"] != "" {
 		t.Fatalf("default site settings = %v, want empty overrides", pub)
 	}
@@ -212,12 +213,14 @@ func TestSiteSettings(t *testing.T) {
 	admin := get(func(w http.ResponseWriter, r *http.Request) { s.apiAdminSettings(w, r, "admin") }, "/api/admin/settings")
 	if admin["siteTitle"] != "智研平台" || admin["siteLogoUrl"] != "/brand/logo.png" ||
 		admin["footerText"] != "© 智研平台" || admin["footerShowInfo"] != false || admin["footerShowVersion"] != false ||
+		admin["versionDisplay"] != "hidden" ||
 		admin["pwaEnabled"] != true || admin["pwaIconUrl"] != "/brand/app.png" {
 		t.Errorf("admin settings missing site fields: %v", admin)
 	}
 	pub = get(s.apiSite, "/api/site")
 	if pub["siteTitle"] != "智研平台" || pub["siteLogoUrl"] != "/brand/logo.png" ||
 		pub["footerText"] != "© 智研平台" || pub["footerShowInfo"] != false || pub["footerShowVersion"] != false ||
+		pub["versionDisplay"] != "hidden" ||
 		pub["pwaEnabled"] != true || pub["pwaIconUrl"] != "/brand/app.png" {
 		t.Errorf("public site settings = %v", pub)
 	}

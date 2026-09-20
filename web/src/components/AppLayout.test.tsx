@@ -12,7 +12,7 @@ const queueState = vi.hoisted(() => ({ answer: null as unknown }))
 const UNCHANGED = vi.hoisted(() => Symbol('unchanged'))
 const forgetTags = vi.hoisted(() => vi.fn())
 const siteState = vi.hoisted(() => ({
-  settings: { footerText: '', footerShowInfo: false, footerShowVersion: false },
+  settings: { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' },
 }))
 
 vi.mock('react-i18next', () => ({
@@ -210,7 +210,7 @@ describe('AppLayout desktop navigation', () => {
 describe('AppLayout mobile chat focus mode', () => {
   beforeEach(() => {
     updateState.value = noUpdate
-    siteState.settings = { footerText: '', footerShowInfo: false, footerShowVersion: false }
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' }
   })
 
   it('removes global search, actions, breadcrumbs, and content gutters on mobile chat', async () => {
@@ -245,7 +245,7 @@ describe('AppLayout mobile chat focus mode', () => {
   // one inline flow, no part boxed off in its own flex container. The 1.25px → 0 measurement
   // itself was made in a browser.
   it('lays the whole footer out in one inline flow so its parts share a baseline', async () => {
-    siteState.settings = { footerText: '', footerShowInfo: true, footerShowVersion: true }
+    siteState.settings = { footerText: '', footerShowInfo: true, versionDisplay: 'footer' }
     vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
     const { container } = renderAt('/queue')
 
@@ -258,6 +258,26 @@ describe('AppLayout mobile chat focus mode', () => {
     const flexed = [...footer!.querySelectorAll<HTMLElement>('*')].filter((el) => el.style.display.includes('flex'))
     expect(flexed.map((el) => el.textContent)).toEqual([])
     expect(container.querySelector('[data-testid="site-logo"]')).not.toBeNull()
+  })
+
+  it('places the version beside the site name without also rendering it in the footer', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: true, versionDisplay: 'header' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+
+    const label = await screen.findByText('version.label:2026.38.1')
+    expect(label.closest('#rp-app-header')).not.toBeNull()
+    expect(container.querySelector('.ant-layout-footer .rp-version-label')).toBeNull()
+  })
+
+  it('keeps the portal version hidden while the management rail remains responsible for its own label', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: true, versionDisplay: 'hidden' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/manage')
+
+    expect(await screen.findByText('manage-body')).toBeTruthy()
+    expect(container.querySelector('#rp-app-header .rp-version-label')).toBeNull()
+    expect(container.querySelector('.ant-layout-footer')).toBeNull()
   })
 
   it('draws the update banner from the shared coordinator, with no close affordance stacked on it', async () => {
