@@ -81,14 +81,18 @@ Releases are CalVer: `vYYYY.W[.R]`, where `YYYY` is the ISO week-numbering year,
 the series starts in, and `R` an optional revision that starts at 1 and rises for every changed set of
 artifacts. Leave the revision off for the first release of a week — `v2026.38` — and add one when a
 second artifact set lands in the same week. They are different numbers, so ordering never ties. There
-is no `-beta`: whether a release is a pre-release or a full release is GitHub Release metadata, set
-when the draft is published, and it is what moves `:latest`. See
+is no `-beta`: whether a release is a pre-release or a full release is GitHub Release metadata, never
+the tag, and it is what moves the rolling channels. See
 [ADR 0034](../adr/0034-calver-baseline-and-database-compatibility-reset.md).
 
-The tag push prepares a **draft** release. Publish it from the GitHub UI as a pre-release or a full
-release; the reconciliation workflow then updates the rolling image channels, promoting the bytes that
-were already published by digest rather than rebuilding them. To re-run that by hand after a missed
-event, dispatch the **Release channels** workflow (with `dry_run` to see the decision first).
+**A tag publishes a pre-release.** The pipeline builds, attaches the archives and the image digest, and
+then publishes the release itself: a release that stopped at a draft was one no channel could follow,
+which is what made a tag look like it had done nothing. `workflow_dispatch` can ask for a full release
+(`maturity: release`) or leave the release unpublished for review (`maturity: draft`). Publishing fires
+the `release` event, and the reconciliation workflow then updates the rolling image channels,
+promoting the bytes that were already published by digest rather than rebuilding them. To re-run that
+by hand after a missed event, dispatch the **Release channels** workflow (with `dry_run` to see the
+decision first).
 
 A `release` event runs the workflow **from the tagged commit**, not from the default branch, so a fix
 to `release-channels.yml` takes effect for releases tagged after the fix and reconciliation for an
@@ -233,7 +237,9 @@ Release preparation requires successful full CI for the exact commit. If no push
 (for example on a maintenance branch), dispatch `test.yml` on that branch and wait for it.
 Different release tags may build concurrently; attempts for the same tag are serialized.
 
-Once the fixed image exists, rebuilding or replacing draft archives is refused before publication.
+Once the fixed image exists, rebuilding or replacing the archives is refused. Once the release has been
+published the whole preparation step is refused — published bytes are never replaced, so a mistake
+after publication means a new number, not a re-run.
 If the image push succeeded but uploading `release-metadata.json` failed, recover only that file:
 
 ```sh

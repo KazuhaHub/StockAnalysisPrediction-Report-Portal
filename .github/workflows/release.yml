@@ -1,6 +1,6 @@
 name: Release
 
-# One pipeline produces the release archives, the fixed ghcr.io image tag, and a DRAFT GitHub
+# One pipeline produces the release archives, the fixed ghcr.io image tag, and a published GitHub
 # Release from one batch of binaries:
 #
 #   setup   → resolve the tag, refuse anything that is not a CalVer tag, resolve the peeled commit
@@ -11,11 +11,16 @@ name: Release
 #   release → tar/zip + SHA256SUMS, then create or update the DRAFT GitHub Release
 #   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag, then
 #             attach the durable identity (commit + image digest) to the draft
+#   publish → publish that draft, as a pre-release unless the operator asked for a full release
 #
-# Nothing here decides maturity, and nothing here moves a rolling channel. Whether this release is a
-# pre-release or a full release is GitHub Release metadata chosen at publication, and :latest / :beta
-# are owned by release-channels.yml, which promotes the already-published bytes by digest and never
-# rebuilds. Tag spelling selects nothing. See docs/adr/0034.
+# **A tag publishes a pre-release.** A release that stopped at a draft was one no channel could
+# follow, which is what made a tag look like it had not done anything; the default now is the one an
+# operator would pick anyway. `workflow_dispatch` can ask for a full release, or for a draft when a
+# release needs to be looked at before it is public.
+#
+# Maturity is still GitHub Release metadata, never the tag and never the binary: tag spelling selects
+# nothing, and :latest / :beta are owned by release-channels.yml, which promotes the already-published
+# bytes by digest and never rebuilds. See docs/adr/0034.
 #
 # A binary verified from the Release is byte-for-byte the one in the image (the same artifact).
 
@@ -29,17 +34,18 @@ on:
         required: true
         type: string
       maturity:
-        # Optional, and only an initializer: the maintainer sets the real value when publishing the
-        # draft. This exists so a rehearsal can exercise the pre-release path without clicking.
-        description: "Initial GitHub Release maturity"
+        # What the release is published as. The default is the one a maintainer would choose anyway,
+        # so an ordinary tag needs no input; `draft` is the escape hatch for a release that has to be
+        # looked at before it is public, and it is never undone by this workflow.
+        description: "Published maturity. A tag publishes a pre-release unless this says otherwise."
         required: false
         type: choice
-        default: "unset"
-        options: ["unset", "prerelease", "release"]
+        default: "prerelease"
+        options: ["prerelease", "release", "draft"]
 
-# Least privilege by default; the two jobs that write override it (release -> GitHub Release,
-# docker -> ghcr.io). Everything else inherits contents: read, so a compromised build step cannot
-# push to the repository.
+# Least privilege by default; the three jobs that write override it (release and publish -> GitHub
+# Release, docker -> ghcr.io). Everything else inherits contents: read, so a compromised build step
+# cannot push to the repository.
 permissions:
   contents: read
 
@@ -396,9 +402,9 @@ jobs:
           else
             : > release_notes.md
           fi
-          # The fixed tag only. This body cannot promise :latest, because at draft time nobody has
-          # decided whether this is a pre-release or a full release — that decision moves the
-          # channel, and it happens at publication, not here.
+          # The fixed tag only. This body is written before the release is published, so it states
+          # the channel rules rather than this release's outcome: :beta follows the newest published
+          # release, and :latest follows the newest FULL one, so a pre-release does not move it.
           cat <<EOF >> release_notes.md
           ### Container image (ghcr.io)
 
@@ -406,9 +412,9 @@ jobs:
           docker pull ghcr.io/${OWNER_LC}/${REPO_LC}:${VERSION}
           \`\`\`
 
-          This fixed tag is this artifact set and is never repointed. Whether it also becomes
-          \`:latest\` is decided when this release is published as a full release; \`:beta\` follows
-          the newest published release.
+          This fixed tag is this artifact set and is never repointed. \`:beta\` follows the newest
+          published release; \`:latest\` follows the newest full release, so a release published as a
+          pre-release does not move it.
 
           ### Verify
 
@@ -438,10 +444,10 @@ jobs:
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
           name: ${{ needs.setup.outputs.tag }}
-          # Always a draft. Maturity is chosen by the maintainer when publishing, and release-channels
-          # reacts to that. Tag spelling never decides it, which is why there is no contains("-") here.
+          # Still a draft here, and deliberately: the publish job is the last one, so the rolling
+          # channels cannot be moved before the image digest is recorded on this release. Maturity
+          # is set there.
           draft: true
-          prerelease: ${{ inputs.maturity == 'prerelease' }}
           # Deliberate: the note above is the changelog a maintainer writes, and GitHub's own
           # "What's Changed" list follows it — the action pre-pends the body we pass to the notes it
           # generates, so the order is our note, the container/verify blocks, then the PR list.
@@ -462,8 +468,9 @@ jobs:
     permissions:
       contents: write
       packages: write
-    # Runs after the draft exists: the draft is invisible until a human publishes it, while a pushed
-    # image tag is public immediately, so the irreversible step goes second. The image build also
+    # Runs before publication, and that order carries weight: the release must not be published
+    # before this job has pushed the image and recorded its digest on it, or release-channels could
+    # be asked to point a rolling channel at bytes that do not exist yet. The image build also
     # runs the glyph gate (scripts/probe-font-coverage.sh, in the runtime-base stage of
     # Dockerfile.release) on both arches — test.yml's docker-image job gates amd64 pre-merge, so by
     # tag time this is re-verification except on arm64, which is first checked here.
@@ -550,3 +557,48 @@ jobs:
           cat release-metadata.json
           # --clobber so a retry of this step converges instead of failing on the file it wrote.
           gh release upload "$VERSION" release-metadata.json --clobber
+
+  publish:
+    name: Publish the Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # Last, and the order is load-bearing. Publishing is what a reader sees and what
+    # release-channels reacts to, and reconciliation reads the image digest the docker job records
+    # on this release — so publishing any earlier could point :beta at an image that is not pushed.
+    needs: [setup, docker]
+    steps:
+      - name: Publish the prepared draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.setup.outputs.tag }}
+          # `inputs` is empty on a tag push, and empty means the default: a pre-release.
+          MATURITY: ${{ inputs.maturity || 'prerelease' }}
+        run: |
+          set -euo pipefail
+          case "${MATURITY}" in
+            prerelease) flags="--prerelease" ;;
+            release) flags="--prerelease=false" ;;
+            draft)
+              # The escape hatch, and a deliberate outcome rather than a skipped step: a release
+              # that has to be read before it is public stays invisible until someone publishes it.
+              echo "maturity=draft — leaving ${VERSION} unpublished"
+              exit 0
+              ;;
+            *)
+              echo "::error::unknown maturity '${MATURITY}' (prerelease | release | draft)"
+              exit 1
+              ;;
+          esac
+          # Publishing fires the `published` release event, which is the only thing that starts
+          # release-channels. A failure here leaves the release a draft, which is the safe end: no
+          # channel moves on a release nobody can see.
+          gh release edit "${VERSION}" --repo "${REPO}" --draft=false ${flags}
+          # Read it back, so a release that is still invisible reports itself instead of a green
+          # pipeline leaving the channels where they were.
+          state=$(gh release view "${VERSION}" --repo "${REPO}" \
+            --json isDraft,isPrerelease --jq '"draft=\(.isDraft) prerelease=\(.isPrerelease)"')
+          echo "published ${VERSION}: ${state}"
