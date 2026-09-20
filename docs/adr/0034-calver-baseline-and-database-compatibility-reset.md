@@ -45,6 +45,9 @@ Product display is `YYYY.W[.R]`; git and fixed image tags are `vYYYY.W[.R]`.
   `prerelease` field drive the portal's update history and release-maturity labels; its published
   records also drive the rolling image channels. A committed note seeds the Release at publication
   time but does not remain a second runtime authority.
+- The reader-facing part of the body is bounded by invisible `portal-notes` comments. The portal
+  renders only that section; container, verification and generated pull-request sections remain on
+  the GitHub page. Older unbounded bodies are trimmed at those known operational headings.
 - The portal reads that authority through conditional GitHub API requests and a bounded process
   cache. During a temporary upstream failure it may serve only its last successful GitHub response,
   marked stale. It never falls back to compiled notes or infers maturity from a tag.

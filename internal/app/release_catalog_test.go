@@ -82,6 +82,68 @@ func TestNormalizePublishedReleasesUsesOnlyPublishedGitHubMetadata(t *testing.T)
 	}
 }
 
+func TestReleaseCatalogKeepsOnlyTheReaderNoteInsideExplicitBoundaries(t *testing.T) {
+	body := `<!-- portal-notes:start -->
+# v2026.38.11 — Reader changes
+
+- Fix the visible behavior.
+<!-- portal-notes:end -->
+
+### Container image (ghcr.io)
+
+` + "```shell\ndocker pull example:v2026.38.11\n```" + `
+
+## What's Changed
+
+* Internal pull request`
+	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.11", Body: body}})
+	if len(items) != 1 {
+		t.Fatalf("normalized releases = %#v", items)
+	}
+	want := "# v2026.38.11 — Reader changes\n\n- Fix the visible behavior."
+	if items[0].Markdown != want || items[0].Title != "Reader changes" {
+		t.Fatalf("reader note = %#v", items[0])
+	}
+}
+
+func TestReleaseCatalogTrimsOperationalSectionsFromOlderBodies(t *testing.T) {
+	body := `# v2026.38.10 — Reader changes
+
+- Keep this note.
+
+### Container image (ghcr.io)
+
+docker pull example:v2026.38.10
+
+### Verify
+
+sha256sum -c SHA256SUMS.txt
+
+## What's Changed
+
+* Internal pull request`
+	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.10", Body: body}})
+	want := "# v2026.38.10 — Reader changes\n\n- Keep this note."
+	if len(items) != 1 || items[0].Markdown != want {
+		t.Fatalf("legacy reader note = %#v", items)
+	}
+}
+
+func TestReleaseCatalogDoesNotTreatOrdinaryProseAsAnOperationalBoundary(t *testing.T) {
+	body := "# Reader changes\n\nThe Container image label remains searchable in prose."
+	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.9", Body: body}})
+	if len(items) != 1 || items[0].Markdown != body {
+		t.Fatalf("ordinary reader note was truncated: %#v", items)
+	}
+}
+
+func TestReleaseCatalogDoesNotExposeGeneratedNotesWithoutAReaderNote(t *testing.T) {
+	items := normalizePublishedReleases([]githubRelease{{Tag: "v2026.38.8", Body: "## What's Changed\n\n* Internal pull request"}})
+	if len(items) != 1 || items[0].Markdown != "" {
+		t.Fatalf("generated notes leaked into the reader payload: %#v", items)
+	}
+}
+
 func TestVisibleHistoryChangesWhenOneReleaseIsPromoted(t *testing.T) {
 	items := []publishedRelease{
 		{Tag: "v2026.38.9", Maturity: "beta"},

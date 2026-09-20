@@ -20,6 +20,8 @@ const (
 	githubReleasesAPI = "https://api.github.com/repos/KazuhaHub/StockAnalysisPrediction-Report-Portal/releases?per_page=100"
 	releaseCacheTTL   = time.Minute
 	maxReleasePayload = 4 << 20
+	portalNotesStart  = "<!-- portal-notes:start -->"
+	portalNotesEnd    = "<!-- portal-notes:end -->"
 )
 
 // publishedRelease is the part of a GitHub Release the reader needs. GitHub Release metadata is
@@ -147,7 +149,7 @@ func normalizePublishedReleases(raw []githubRelease) []publishedRelease {
 			continue
 		}
 		seen[tag] = true
-		body := strings.TrimSpace(item.Body)
+		body := releaseReaderMarkdown(item.Body)
 		title := strings.TrimSpace(item.Name)
 		if title == tag {
 			title = ""
@@ -163,6 +165,49 @@ func normalizePublishedReleases(raw []githubRelease) []publishedRelease {
 	}
 	sort.Slice(items, func(i, j int) bool { return releaseTagLess(items[j].Tag, items[i].Tag) })
 	return items
+}
+
+// releaseReaderMarkdown separates the reader-facing changelog from operational material that
+// belongs on the GitHub Release page. New releases carry explicit HTML-comment boundaries. Older
+// releases predate those boundaries, so their known generated sections are trimmed at a heading;
+// ordinary prose containing the same words remains untouched.
+func releaseReaderMarkdown(body string) string {
+	body = strings.TrimSpace(body)
+	if start := strings.Index(body, portalNotesStart); start >= 0 {
+		noteStart := start + len(portalNotesStart)
+		if end := strings.Index(body[noteStart:], portalNotesEnd); end >= 0 {
+			return strings.TrimSpace(body[noteStart : noteStart+end])
+		}
+		// A hand-edited Release may temporarily have only the opening marker. Keep its note readable
+		// while the legacy heading boundary below prevents operational sections from leaking in.
+		body = strings.TrimSpace(body[noteStart:])
+	}
+
+	cut := len(body)
+	for _, heading := range []string{
+		"### Container image (ghcr.io)",
+		"## What's Changed",
+		"**Full Changelog**:",
+	} {
+		if i := markdownLineIndex(body, heading); i >= 0 && i < cut {
+			cut = i
+		}
+	}
+	body = strings.TrimSpace(body[:cut])
+	if end := strings.Index(body, portalNotesEnd); end >= 0 {
+		body = strings.TrimSpace(body[:end])
+	}
+	return body
+}
+
+func markdownLineIndex(body, line string) int {
+	if strings.HasPrefix(body, line) {
+		return 0
+	}
+	if i := strings.Index(body, "\n"+line); i >= 0 {
+		return i
+	}
+	return -1
 }
 
 func releaseBodyTitle(body string) string {

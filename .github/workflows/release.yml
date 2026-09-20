@@ -388,12 +388,13 @@ jobs:
           . scripts/lib/calver.sh
           . scripts/lib/release.sh
           notes_file=$(note_path "$PWD" "${VERSION}")
+          # The portal renders only this bounded section. Deployment, verification and generated
+          # pull-request material stay useful on GitHub without leaking into the reader dialog.
+          printf '%s\n' '<!-- portal-notes:start -->' > release_notes.md
           if [ -f "${notes_file}" ]; then
-            cat "${notes_file}" > release_notes.md
-            printf '\n' >> release_notes.md
-          else
-            : > release_notes.md
+            cat "${notes_file}" >> release_notes.md
           fi
+          printf '\n%s\n\n' '<!-- portal-notes:end -->' >> release_notes.md
           # The fixed tag only. This body is written before the release is published, so it states
           # the channel rules rather than this release's outcome: :beta follows the newest published
           # release, and :latest follows the newest FULL one, so a pre-release does not move it.

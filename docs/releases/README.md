@@ -48,11 +48,18 @@ way.
 The tag's message is the release note, so a number with no `docs/releases/<YYYY>/<tag>.md` in the
 tagged commit cannot be cut — the script names the file to write and stops.
 
-The committed note seeds the GitHub Release body, but **GitHub Release is the only source of truth
-after publication**. The portal reads the published releases through GitHub's API and derives both
-the displayed body and `Stable` / `Beta` status from the current `body` and `prerelease` fields. It
-uses conditional requests and a one-minute process cache; when GitHub is temporarily unavailable it
-may serve only the last successful GitHub response, never a compiled or locally inferred fallback.
+The committed note seeds a reader-note section inside the GitHub Release body, delimited by the
+invisible `<!-- portal-notes:start -->` and `<!-- portal-notes:end -->` comments. Container pull and
+verification instructions plus GitHub's generated pull-request list remain outside that section,
+so they stay on the GitHub page without appearing in the portal's reader dialog. Releases published
+before the delimiters were introduced are trimmed at those known operational headings.
+
+**GitHub Release is the only source of truth after publication.** The portal reads the published
+releases through GitHub's API and derives both the displayed reader-note section and `Stable` /
+`Beta` status from the current `body` and `prerelease` fields. Editing the text between the comments
+therefore changes what the portal shows. It uses conditional requests and a one-minute process
+cache; when GitHub is temporarily unavailable it may serve only the last successful GitHub
+response, never a compiled or locally inferred fallback.
 
 This makes maturity genuinely mutable. Promoting one release from pre-release to full release keeps
 the same tag, archives and fixed image digest. The portal reflects the new status after its cache
