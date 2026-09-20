@@ -1334,7 +1334,7 @@
   "settings.footerShowVersion": "显示版本号",
   "settings.versionDisplay": "版本号位置",
   "settings.versionDisplay.hidden": "不显示",
-  "settings.versionDisplay.footer": "底部显示（默认）",
+  "settings.versionDisplay.footer": "底部显示",
   "settings.versionDisplay.header": "站点名称右侧显示",
   "settings.footerText": "底部信息（HTML）",
   "settings.footerTextHint": "支持安全的轻量 HTML（如 a、strong、br）；留空时默认显示站点标题。",
