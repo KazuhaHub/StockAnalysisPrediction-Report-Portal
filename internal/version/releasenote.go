@@ -1,7 +1,8 @@
 package version
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
 	"strings"
 )
 
@@ -10,9 +11,9 @@ import (
 // The update prompt offers to show what changed. Fetching that from GitHub would put the primary
 // reading experience behind a third party's availability, the reader's GitHub credentials and an
 // unauthenticated rate limit — none of which the portal can promise. So the note a build ships is
-// compiled into it: the release pipeline writes the tagged commit's own committed note,
-// `docs/releases/<YYYY>/<tag>.md`, into releaseNoteFile before `go build`, and a release whose note
-// is missing fails in the setup job rather than shipping without one.
+// compiled into it: the release pipeline copies the tagged commit's own committed note,
+// `docs/releases/<YYYY>/<tag>.md`, to releaseNoteFile before `go build`, and a release whose note is
+// missing fails in the setup job rather than shipping without one.
 //
 // The in-app body is that committed note, and the GitHub link is the published release page: the two
 // are deliberately not claimed to be identical, because GitHub's page also carries its generated PR
@@ -21,13 +22,19 @@ import (
 // ReleaseNotesBaseURL is the public repository whose release pages the notes link to.
 const ReleaseNotesBaseURL = "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal"
 
-// placeholderMarker identifies the committed placeholder that ships in every non-release build.
-// The placeholder exists so `go build` works on a fresh clone; treating its text as release notes
-// would show a developer the placeholder's own explanation of itself.
-const placeholderMarker = "<!--rp-release-note-placeholder-->"
+const (
+	// releaseNoteFile is where the pipeline injects the tagged commit's note. It is gitignored, and
+	// it has to be: `go build` stamps a binary built from a dirty worktree with `vcs.modified=true`,
+	// and the release check refuses that. The same reasoning already governs internal/web/dist.
+	releaseNoteFile = "notes/release.md"
+	// placeholderFile is tracked, only so that the embed pattern always matches at least one file
+	// and a fresh clone compiles. Its text is never served — a build that has not had a note
+	// injected reports no note at all.
+	placeholderFile = "notes/placeholder.md"
+)
 
-//go:embed releasenote.md
-var releaseNote []byte
+//go:embed notes/*.md
+var notes embed.FS
 
 // IsReleaseTag reports whether tag is a well-formed CalVer release tag, vYYYY.W[.R]. The rules
 // mirror scripts/lib/calver.sh — the component that actually cuts the tag — so a link is only ever
@@ -78,24 +85,22 @@ func ReleaseURL(tag string) string {
 	return ReleaseNotesBaseURL + "/releases/tag/" + tag
 }
 
-// noteAvailable is the shared rule: only a CalVer release tag can carry a packaged note, and the
-// packaged bytes must not still be the placeholder.
-func noteAvailable(tag string) bool {
-	if !IsReleaseTag(tag) {
-		return false
-	}
-	body := strings.TrimSpace(string(releaseNote))
-	return body != "" && !strings.Contains(body, placeholderMarker)
-}
-
 // PackagedNote returns the release note compiled into this binary, and whether there is one. A
-// diagnostic build, a retired tag, or a release build whose note step somehow did not run all
-// answer "no note" — the update prompt says so rather than showing an empty success state.
+// diagnostic build, a retired tag, and a release build whose note step did not run all answer "no
+// note" — the update prompt says so rather than showing an empty success state or the placeholder.
 func PackagedNote() (string, bool) {
-	if !noteAvailable(Version) {
+	if !IsReleaseTag(Version) {
 		return "", false
 	}
-	return strings.TrimSpace(string(releaseNote)), true
+	body, err := fs.ReadFile(notes, releaseNoteFile)
+	if err != nil {
+		return "", false
+	}
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return "", false
+	}
+	return text, true
 }
 
 func allDigits(s string) bool {

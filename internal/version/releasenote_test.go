@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"io/fs"
+	"testing"
+)
 
 func TestIsReleaseTag(t *testing.T) {
 	cases := []struct {
@@ -72,26 +75,40 @@ func TestReleaseURLDoesNotConfuseOneDigitNeighbours(t *testing.T) {
 	}
 }
 
-// The embedded note is the placeholder unless a release build replaced it, so an ordinary build
-// reports "no note" rather than shipping the placeholder's own text as release notes.
-func TestPackagedNoteIsAbsentWithoutAReleaseTag(t *testing.T) {
+// A build that has not had a note injected reports no note. The placeholder is embedded — it has to
+// be, or the pattern would match nothing and a fresh clone would not compile — and it must never be
+// served: only the injected path is read, so the placeholder is unreachable by construction rather
+// than by a sentinel check that a stray edit could defeat.
+func TestPackagedNoteIsAbsentWithoutAnInjectedNote(t *testing.T) {
 	if Version != "dev" {
 		t.Skipf("built with version %q; this asserts the un-stamped default", Version)
 	}
 	if body, ok := PackagedNote(); ok {
 		t.Errorf("a diagnostic build reported release notes: %q", body)
 	}
+	if _, err := fs.ReadFile(notes, placeholderFile); err != nil {
+		t.Fatalf("the placeholder must be embedded for the pattern to match: %v", err)
+	}
 	if got := ReleaseURL(Version); got != "" {
 		t.Errorf("ReleaseURL(%q) = %q, want empty for a diagnostic build", Version, got)
 	}
 }
 
-// noteAvailable is the rule the endpoint and PackagedNote share, so it can be exercised for tags
-// this dev binary is not built as — the retired v0.x line in particular, which has no committed
-// note convention and must never be presented as one.
-func TestNoteAvailableNeedsAReleaseTagAndARealNote(t *testing.T) {
-	if noteAvailable("dev") || noteAvailable("v0.4.72") || noteAvailable("2026.38") || noteAvailable("") {
-		t.Error("only a CalVer release tag can carry a packaged note")
+// A release tag with no injected note is unavailable, not a link-only success — a binary built
+// without the pipeline's copy step must say so instead of presenting the placeholder.
+func TestPackagedNoteNeedsTheInjectedFileNotJustAReleaseTag(t *testing.T) {
+	if Version != "dev" {
+		t.Skipf("built with version %q; a release build has the file and cannot exercise this", Version)
+	}
+	// Same binary, reported as a release tag: still no note, because notes/release.md is absent.
+	orig := Version
+	Version = "v2026.38.3"
+	defer func() { Version = orig }()
+	if body, ok := PackagedNote(); ok {
+		t.Errorf("a release tag without the injected file reported notes: %q", body)
+	}
+	if got := ReleaseURL(Version); got == "" {
+		t.Error("a well-formed release tag must still have a release link")
 	}
 }
 

@@ -48,14 +48,16 @@ way.
 The tag's message is the release note, so a number with no `docs/releases/<YYYY>/<tag>.md` in the
 tagged commit cannot be cut — the script names the file to write and stops.
 
-The note also ships *inside* the release. The workflow copies it into `internal/version/releasenote.md`
-before compiling, where a `go:embed` carries it into the binary, and the portal serves it to the
-in-app update dialog from `GET /api/release-notes` — so a reader who is told to refresh can read what
-changed without leaving the portal or handing it GitHub credentials. The setup job fails if the tagged
-commit has no note, so a release whose update prompt would have nothing to show cannot be published.
-The GitHub Release page stays the complete published body, including the generated PR list and any
-edits made at publication; the in-app copy is the committed note, and the two are not claimed to be
-identical.
+The note also ships *inside* the release. The workflow copies it to `internal/version/notes/release.md`
+before compiling — a gitignored path, because a build input that overwrites a tracked file dirties the
+worktree and the binary would then be stamped `vcs.modified=true`, which the release check refuses —
+and a `go:embed` carries it into the artifact. The portal serves it to the in-app update dialog from
+`GET /api/release-notes`, so a reader who is told to refresh can read what changed without leaving the
+portal or handing it GitHub credentials. The setup job fails if the tagged commit has no note, and
+`scripts/check-release-build.sh` searches each built binary for the note itself, so a release whose
+update prompt would have nothing to show — or something else's note — cannot be published. The GitHub
+Release page stays the complete published body, including the generated PR list and any edits made at
+publication; the in-app copy is the committed note, and the two are not claimed to be identical.
 
 **The tag must go on a commit that has a fully green `test` run of its own** — the release workflow
 refuses to publish otherwise: it looks for a completed run against that exact commit, accepting one

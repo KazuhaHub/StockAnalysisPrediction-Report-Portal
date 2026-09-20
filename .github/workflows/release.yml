@@ -284,12 +284,14 @@ jobs:
         run: |
           set -euo pipefail
           # The release note is compiled into the binary (internal/version's go:embed), so it has to
-          # be in place before the build. setup proved it exists; this only needs the path, and the
-          # same value is handed to the artifact check below so both look at one file.
+          # be in place before the build. It goes to a GITIGNORED path on purpose: a build input that
+          # overwrites a tracked file dirties the worktree, and `go build` then stamps the binary
+          # vcs.modified=true, which the artifact check below refuses. setup proved the note exists;
+          # this only needs the path, and the same value is handed to that check so both read one file.
           . scripts/lib/calver.sh
           . scripts/lib/release.sh
           note_file=$(note_path "$PWD" "${VERSION}")
-          cp "${note_file}" internal/version/releasenote.md
+          cp "${note_file}" internal/version/notes/release.md
           mkdir -p out
           mod=$(go list -m)
           short_sha="${SHORT_SHA}"
