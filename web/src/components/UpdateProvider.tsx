@@ -59,13 +59,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const autoOpened = useRef<string | null>(null)
 
   const openNotes = useCallback((target: BuildIdentity | null) => {
-    const left = window.scrollX
-    const top = window.scrollY
     setNotesTarget(target ?? state.page)
     setNotesOpen(true)
-    // Opening a portalled modal changes the document's scroll lock. Restore the exact reading
-    // position after that lock is applied so a version click never jumps a long page to the top.
-    window.requestAnimationFrame(() => window.scrollTo(left, top))
   }, [state.page])
 
   // Set the moment the reader asks to refresh, and cleared only if the handover does not complete

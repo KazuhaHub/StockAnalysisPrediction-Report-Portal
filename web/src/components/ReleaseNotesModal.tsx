@@ -51,7 +51,10 @@ export default function ReleaseNotesModal({
   const [attempt, setAttempt] = useState(0)
   const [selectedTag, setSelectedTag] = useState(target?.version ?? '')
   const [history, setHistory] = useState<ReleaseHistoryItem[]>([])
-  const reminder = policy === 'required'
+  // The site policy may be `required` while the reader manually browses the current version from
+  // the footer. Only an actual update handover has a refresh action and needs the unsaved-work
+  // warning; ordinary history browsing must not inherit the site's reminder policy.
+  const reminder = policy === 'required' && !!onRefresh
   const tag = target?.version ?? ''
   const targetKey = target ? buildKey(target) : ''
   const browseHistory = !onRefresh
@@ -113,6 +116,10 @@ export default function ReleaseNotesModal({
       title={t('update.notesTitle', { version: titleVersion })}
       width={980}
       className="rp-run-analysis-modal rp-release-notes-modal"
+      // Rendering under the application root avoids Ant Design's body scroll lock. In this app,
+      // html/body/#root are all height:100%; locking body collapses the document to one viewport
+      // and forces a long page to scroll to zero before the dialog appears.
+      getContainer={false}
       closable
       keyboard
       mask={{ closable: true }}

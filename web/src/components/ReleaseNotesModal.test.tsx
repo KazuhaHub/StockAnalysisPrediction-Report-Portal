@@ -58,6 +58,20 @@ describe('ReleaseNotesModal', () => {
     expect(screen.getByText('update.currentVersion:2026.38')).toBeTruthy()
   })
 
+  it('renders inline so opening it does not lock and collapse the document body', async () => {
+    get.mockResolvedValue(notes())
+    const { container } = open()
+    await screen.findByTestId('md')
+    expect(container.querySelector('.ant-modal-root')).toBeTruthy()
+  })
+
+  it('does not show an unsaved-work warning when the footer opens current-version history', async () => {
+    get.mockResolvedValue(notes({ tag: page.version }))
+    open({ target: page, policy: 'required', onRefresh: undefined })
+    await screen.findByTestId('md')
+    expect(screen.queryByText('update.requiredWarning')).toBeNull()
+  })
+
   it('renders the fetched note and links to the published release', async () => {
     get.mockResolvedValue(notes())
     open()
