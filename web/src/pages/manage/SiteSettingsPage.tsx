@@ -3,7 +3,7 @@ import { App, Button, Divider, Form, Input, Radio, Select, Space, Switch, Typogr
 import { DeleteOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-import type { SettingsResp, UpdatePromptPolicy } from '../../api/types'
+import type { SettingsResp, UpdatePromptPolicy, VersionDisplay } from '../../api/types'
 import { useSite } from '../../site'
 import { BrandIcon } from '../../components/icons'
 import LoadGate from '../../components/LoadGate'
@@ -24,6 +24,7 @@ function tzOptions(systemLabel: string) {
 
 // The update-prompt policies, in the order the page presents them: least intrusive first.
 const UPDATE_POLICIES: UpdatePromptPolicy[] = ['dismissible', 'persistent', 'required', 'automatic']
+const VERSION_DISPLAYS: VersionDisplay[] = ['hidden', 'footer', 'header']
 
 // Site branding, PWA, footer, panel timezone and the update prompt. Announcement lives on
 // its own page now; each page posts only its own fields and the settings API merges
@@ -48,7 +49,7 @@ export default function SiteSettingsPage() {
           siteLogoUrl: r.siteLogoUrl || '',
           footerText: r.footerText || '',
           footerShowInfo: r.footerShowInfo !== false,
-          footerShowVersion: r.footerShowVersion !== false,
+          versionDisplay: r.versionDisplay || 'footer',
           updatePromptPolicy: r.updatePromptPolicy || 'dismissible',
           pwaEnabled: r.pwaEnabled !== false,
           pwaIconUrl: r.pwaIconUrl || '',
@@ -76,7 +77,7 @@ export default function SiteSettingsPage() {
         siteLogoUrl: v.siteLogoUrl || '',
         footerText: v.footerText || '',
         footerShowInfo: v.footerShowInfo !== false,
-        footerShowVersion: v.footerShowVersion !== false,
+        versionDisplay: v.versionDisplay || 'footer',
         updatePromptPolicy: v.updatePromptPolicy || 'dismissible',
         pwaEnabled: v.pwaEnabled !== false,
         pwaIconUrl: v.pwaIconUrl || '',
@@ -211,8 +212,16 @@ export default function SiteSettingsPage() {
             placeholder={t('settings.footerTextPlaceholder')}
           />
         </Form.Item>
-        <Form.Item name="footerShowVersion" label={t('settings.footerShowVersion')} valuePropName="checked">
-          <Switch />
+        <Form.Item name="versionDisplay" label={t('settings.versionDisplay')}>
+          <Radio.Group>
+            <Space orientation="vertical" size={8}>
+              {VERSION_DISPLAYS.map((placement) => (
+                <Radio key={placement} value={placement}>
+                  {t(`settings.versionDisplay.${placement}`)}
+                </Radio>
+              ))}
+            </Space>
+          </Radio.Group>
         </Form.Item>
         {/* One radio group, not a pair of switches: "may the reader defer" and "must they refresh"
             are the same decision, and two booleans can describe a state nobody chose. */}

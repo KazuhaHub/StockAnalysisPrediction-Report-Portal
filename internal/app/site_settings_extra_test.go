@@ -110,6 +110,45 @@ func TestSiteSettingsSplitPagesDoNotClobberEachOther(t *testing.T) {
 	}
 }
 
+func TestVersionDisplayPlacementIsValidatedAndKeepsLegacyReadersCompatible(t *testing.T) {
+	s := newV1Server(t)
+
+	if got := publicSiteSettings(t, s)["versionDisplay"]; got != "footer" {
+		t.Fatalf("default versionDisplay=%v, want footer", got)
+	}
+	rec := postSettingsJSON(t, s, map[string]any{"versionDisplay": "header"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save header placement status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting("version_display", ""); got != "header" {
+		t.Fatalf("stored version_display=%q", got)
+	}
+	if !settingBool(s.st.GetSetting("footer_show_version", ""), false) {
+		t.Fatal("the legacy visibility flag must stay true for an old frontend")
+	}
+	got := publicSiteSettings(t, s)
+	if got["versionDisplay"] != "header" || got["footerShowVersion"] != true {
+		t.Fatalf("header placement payload=%v", got)
+	}
+
+	rec = postSettingsJSON(t, s, map[string]any{"siteTitle": "must not save", "versionDisplay": "somewhere"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid placement status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting("site_title", ""); got != "" {
+		t.Fatalf("invalid placement half-applied site title %q", got)
+	}
+
+	// An older settings page still maps its boolean onto the new three-state setting.
+	rec = postSettingsJSON(t, s, map[string]any{"footerShowVersion": false})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy hide status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := publicSiteSettings(t, s)["versionDisplay"]; got != "hidden" {
+		t.Fatalf("legacy false mapped to %v, want hidden", got)
+	}
+}
+
 func TestAnnouncementSettingsRejectLongFieldsAtomically(t *testing.T) {
 	s := newV1Server(t)
 	rec := postSettingsJSON(t, s, map[string]any{

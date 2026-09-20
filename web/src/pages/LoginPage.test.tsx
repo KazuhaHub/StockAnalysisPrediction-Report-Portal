@@ -45,7 +45,12 @@ vi.mock('../lib/hardNavigate', () => navMock)
 vi.mock('../prefs', () => ({
   usePrefs: () => ({ mode: 'light', setMode: vi.fn(), lang: 'en-US', setLang: vi.fn(), langs: [] }),
 }))
-vi.mock('../site', () => ({ useSite: () => ({ title: 'Portal' }), SiteLogo: () => null }))
+vi.mock('../site', () => ({
+  // Public site settings are loaded before authentication so the login page can use the configured
+  // brand. A header placement must still never expose the product version on this route.
+  useSite: () => ({ title: 'Portal', settings: { versionDisplay: 'header' } }),
+  SiteLogo: () => null,
+}))
 // i18next echoes a key it has no string for, and ssoReason branches on exactly that — so an
 // always-echoing mock cannot tell "translated" from "missing" and every code would look unknown.
 // This mock owns one real string, which is enough to exercise both sides.
@@ -84,6 +89,14 @@ describe('LoginPage', () => {
     renderLogin()
     await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/sso/providers'))
     expect(screen.queryByText('login.ssoDivider')).toBeNull()
+  })
+
+  it('never shows the product version before sign-in', async () => {
+    apiMock.get.mockResolvedValue({ providers: [] })
+    const { container } = renderLogin()
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/sso/providers'))
+    expect(container.querySelector('.rp-version-label')).toBeNull()
+    expect(container.textContent).not.toContain('version.label')
   })
 
   it('offers a button per enabled provider', async () => {

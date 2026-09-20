@@ -644,7 +644,7 @@ export interface SettingsResp {
   homeMoreStyle: HomeMoreStyle
   footerText: string
   footerShowInfo: boolean
-  footerShowVersion: boolean
+  versionDisplay: VersionDisplay
   // How hard an open page is asked to refresh after a deploy.
   updatePromptPolicy: UpdatePromptPolicy
   pwaEnabled: boolean
@@ -671,6 +671,9 @@ export type UpdatePromptPolicy = 'dismissible' | 'persistent' | 'required' | 'au
 // How the home-page "More" button reveals folded quick links.
 export type HomeMoreStyle = 'expand' | 'modal' | 'popover'
 
+// Reader-facing placement of the build label. The management console always keeps its own copy.
+export type VersionDisplay = 'hidden' | 'footer' | 'header'
+
 // The PUBLIC brand payload from GET /api/site — served with no auth, so the login page can paint
 // the right title and logo. Announcements deliberately left it (ADR 0025): a per-audience message
 // cannot live on an endpoint anonymous visitors can read and poll. See AnnouncementsProvider.
@@ -680,7 +683,7 @@ export interface SiteSettings {
   homeMoreStyle: HomeMoreStyle
   footerText: string
   footerShowInfo: boolean
-  footerShowVersion: boolean
+  versionDisplay: VersionDisplay
   pwaEnabled: boolean
   pwaIconUrl: string
 }

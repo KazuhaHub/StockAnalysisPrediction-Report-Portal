@@ -198,10 +198,11 @@ function AppShell() {
   const footerText = settings.footerText || title
   const footerHtml = settings.footerText ? sanitizeFooterHtml(settings.footerText) : ''
   const showFooterInfo = settings.footerShowInfo
-  // The footer's version is the build THIS page is running, which the bundle always knows — unlike
-  // before, when the footer waited on a server answer and a portal whose /api/version failed showed
-  // no version at all.
-  const showFooterVersion = settings.footerShowVersion
+  // The reader-facing version is the build THIS page is running, which the bundle always knows —
+  // unlike before, when the footer waited on a server answer and a portal whose /api/version failed
+  // showed no version at all. Management keeps its own rail label regardless of this placement.
+  const showHeaderVersion = settings.versionDisplay === 'header' && !onManage
+  const showFooterVersion = settings.versionDisplay === 'footer'
   const showFooter = showFooterInfo || showFooterVersion
   const workbenchItems = [
     ...(canRun
@@ -252,6 +253,17 @@ function AppShell() {
           <SiteLogo size={22} color={token.colorPrimary} />
           {!compact ? title : chatFocus ? t('nav.chat') : null}
         </Link>
+        {showHeaderVersion && !chatFocus && (
+          <VersionLabel
+            size={11}
+            style={{
+              padding: '1px 7px',
+              borderRadius: 999,
+              lineHeight: 1.7,
+              background: token.colorFillTertiary,
+            }}
+          />
+        )}
 
         {/* On mobile the search drops to its own full-width row (order:2) below the controls.
             On the home page there is no header search, so don't force that empty row —
