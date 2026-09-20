@@ -1,5 +1,11 @@
 # ADR 0027 — Backup and restore: one logical dump, both drivers
 
+> **Amended by [ADR 0035](0035-migrations-after-a-frozen-baseline.md).** An older dump loading into a
+> newer schema is now guarded rather than blanket: the dump header carries the migration level its
+> data satisfies, a column may be absent only when the dump does not claim the step that added it and
+> that step allows an older dump, and columns belonging to the baseline are still all required. This
+> restores the intent recorded below, which the implementation had drifted from.
+
 ## Context
 
 Everything the portal owns lives in the database. Accounts, groups and the OU tree, report bodies,
