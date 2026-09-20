@@ -394,10 +394,6 @@ body {
 }
 
 @media (max-width: 767px) {
-  .rp-run-analysis-modal .ant-modal-body {
-    max-height: calc(100dvh - 180px);
-    overflow-y: auto;
-  }
   .rp-run-analysis-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 22px;
@@ -520,11 +516,32 @@ body {
   padding-inline: 0;
 }
 @media (max-width: 767px) {
-  .rp-release-notes-modal .ant-modal-body {
-    max-height: calc(100dvh - 240px);
+  /* Cap the dialog to the viewport and lay its shell out as a column, so the body takes the
+     leftover height and scrolls while the actions stay on screen. A body max-height on its own
+     counted neither the header, nor the footer, nor antd's 100px top offset: at 393x852 a
+     full-length body ran the dialog past the fold, and the reader had to scroll the dialog itself
+     to reach 关闭. Run Analysis shares the shell, so both are capped by the same rules. */
+  .rp-run-analysis-modal.ant-modal,
+  .rp-release-notes-modal.ant-modal {
+    top: 8px;
   }
+  .rp-run-analysis-modal .ant-modal-container,
+  .rp-release-notes-modal .ant-modal-container {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 24px);
+  }
+  .rp-run-analysis-modal .ant-modal-body,
+  .rp-release-notes-modal .ant-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+  /* The history variant sets a height for its two-pane desktop layout; in the capped column it
+     takes the height the column gives it instead. */
   .rp-release-notes-modal--history .ant-modal-body {
-    height: calc(100dvh - 240px);
+    height: auto;
   }
   /* The actions keep their width and drop below the link rather than shrinking into an ellipsis;
      the primary Refresh stays the last thing in the row wherever the row breaks. */
