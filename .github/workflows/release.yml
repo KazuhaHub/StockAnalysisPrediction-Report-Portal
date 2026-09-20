@@ -293,7 +293,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: release-maturities
-          path: .release-metadata
+          # Release build inputs that are not tracked or gitignored must stay outside the checkout;
+          # otherwise Go correctly stamps vcs.modified=true and the provenance gate rejects them.
+          path: ${{ runner.temp }}/release-metadata
       - name: Build report-portal
         shell: bash
         env:
@@ -321,7 +323,7 @@ jobs:
             --root "$PWD" \
             --through "${VERSION}" \
             --limit 10 \
-            --maturities .release-metadata/release-maturities.json \
+            --maturities "${RUNNER_TEMP}/release-metadata/release-maturities.json" \
             --target-maturity "${TARGET_MATURITY}" \
             --output "$history_file"
           mkdir -p out
