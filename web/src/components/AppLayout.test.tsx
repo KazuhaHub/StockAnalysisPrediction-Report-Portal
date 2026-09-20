@@ -238,6 +238,39 @@ describe('AppLayout mobile chat focus mode', () => {
     expect(screen.getByText('nav.home')).toBeTruthy()
   })
 
+describe('AppLayout header centring', () => {
+  beforeEach(() => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' }
+  })
+
+  // The header's search wrapper is a flex item even when the home page leaves it empty, and an empty
+  // item still counts for line breaking: at a phone's CSS width carrying a real version pill the
+  // control row came within one gap of full, the empty wrapper wrapped onto a line of its own, and
+  // that phantom line's row-gap plus the stretch a single line gets from a taller min-height header
+  // centred the visible controls ~6px above the header's middle (measured at 393px in a browser).
+  // jsdom has no layout, so what is asserted here is the arrangement that caused it: no empty
+  // wrapper in the home header at all.
+  it('renders no empty search row on the home header', async () => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/')
+
+    expect(container.querySelector('#rp-app-header .rp-header-search')).toBeNull()
+  })
+
+  it('keeps the full-width search row on pages that have a header search', async () => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+
+    const wrap = container.querySelector<HTMLElement>('#rp-app-header .rp-header-search')
+    expect(wrap).not.toBeNull()
+    // Full-width own row below the controls on mobile, not a shrunken leftover beside them.
+    expect(wrap!.style.minWidth).toBe('100%')
+    expect(wrap!.style.order).toBe('2')
+    expect(wrap!.querySelector('input[aria-label="global-search"]')).not.toBeNull()
+  })
+})
+
   // The footer's name and version sat at different heights: the name and logo were grouped in an
   // inline-flex box inside a flex row, an inline-flex box takes its baseline from its first flex
   // item (here a replaced <img>), and centring that taller box left its text 1.25px above the
