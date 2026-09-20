@@ -508,6 +508,7 @@ function AppShell() {
                 <div style={{ fontSize: 12, color: token.colorTextTertiary, margin: '2px 4px 6px' }}>{t('nav.theme')}</div>
                 <Segmented
                   block
+                  className="rp-theme-segmented"
                   value={mode}
                   onChange={(v) => setMode(v as 'light' | 'dark' | 'auto')}
                   options={[
