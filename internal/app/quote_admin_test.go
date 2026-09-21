@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -133,17 +132,21 @@ func TestQuoteAdminRoutesAreAdminOnly(t *testing.T) {
 	}
 
 	// The mux above is this test's own, so everything so far proves only that the gate works when it
-	// is there. What it cannot see is server.go registering one of these behind requireUserJSON by
-	// accident — which is the mistake that would actually ship — so the registration itself is read
-	// out of the file, the way openapi_test.go reads its route table.
-	src, err := os.ReadFile("server.go")
-	if err != nil {
-		t.Fatalf("read server.go: %v", err)
+	// is there. What it cannot see is the server registering one of these behind a SESSION-only gate
+	// by accident — which is the mistake that would actually ship. The route table answers that
+	// directly, and better than reading server.go for a spelling did: it is what the registration
+	// produced, so a rewording or a moved line cannot make it pass while the class is wrong.
+	//
+	// wireRoutes is one function for exactly this: the production registration, run against a mux a
+	// test owns, so what it records can be asked about.
+	s.wireRoutes(http.NewServeMux())
+	table := map[string]authClass{}
+	for _, row := range s.routeTable {
+		table[row.pattern] = row.class
 	}
 	for _, rt := range routes {
-		want := `mux.HandleFunc("` + rt.method + " " + rt.path + `", s.requireAdminJSON(`
-		if !strings.Contains(string(src), want) {
-			t.Errorf("server.go does not register %s %s behind requireAdminJSON", rt.method, rt.path)
+		if got := table[rt.method+" "+rt.path]; got != authAdmin {
+			t.Errorf("%s %s is registered as class %v, want authAdmin", rt.method, rt.path, got)
 		}
 	}
 }

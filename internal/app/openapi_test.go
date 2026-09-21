@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -168,21 +166,27 @@ func TestOpenAPIDocumentsEveryV1Route(t *testing.T) {
 		}
 	}
 
-	src, err := os.ReadFile("server.go")
-	if err != nil {
-		t.Fatalf("read server.go: %v", err)
+	// The served routes come from the route table rather than from reading server.go for a spelling:
+	// the registrations moved, the classes are what the registration PRODUCED, and a spec that drifts
+	// from the router is the failure this test exists to catch.
+	s := routeTableServer(t)
+	s.wireRoutes(http.NewServeMux())
+	var registered []string
+	for _, row := range s.routeTable {
+		if _, path, ok := strings.Cut(row.pattern, " "); ok && strings.HasPrefix(path, "/api/v1/") {
+			registered = append(registered, row.pattern)
+		}
 	}
-	registered := regexp.MustCompile(`v1\("([^"]+)"`).FindAllStringSubmatch(string(src), -1)
 	if len(registered) < 8 {
 		// A scan that silently matches nothing would pass every assertion below for ever.
 		t.Fatalf("found only %d v1 routes; the scan is broken, not the spec", len(registered))
 	}
 
-	for _, m := range registered {
-		if !documented[m[1]] {
-			t.Errorf("%s is served but not in openapi.json — a machine consumer cannot find it", m[1])
+	for _, pattern := range registered {
+		if !documented[pattern] {
+			t.Errorf("%s is served but not in openapi.json — a machine consumer cannot find it", pattern)
 		}
-		delete(documented, m[1])
+		delete(documented, pattern)
 	}
 	// Whatever is left must be a deliberate non-v1 entry, not a route that has been removed.
 	for route := range documented {
