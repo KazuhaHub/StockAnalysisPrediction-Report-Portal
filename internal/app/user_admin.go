@@ -48,6 +48,12 @@ type UserGroup struct {
 	DailyRunQuota       int    // run cap for members over QuotaPeriod; 0 = unlimited
 	QuotaPeriod         string // day | week | month | total; "" = day
 	DailyQuotaInherit   bool
+	// Login-protection overrides (security_policy.go): may this OU's members add a second factor.
+	// Same value-plus-inherit shape as the governance columns above.
+	TOTPEnroll           bool
+	TOTPEnrollInherit    bool
+	PasskeyEnroll        bool
+	PasskeyEnrollInherit bool
 }
 
 // ---------- profile ----------
@@ -229,12 +235,12 @@ func (s *Store) ListUserGroups() []UserGroup {
 	rows, err := s.query(`SELECT g.id, g.name, COALESCE(g.description,''), COALESCE(g.created_at,''),
 			COALESCE(g.is_default,0), g.weight, g.urgent_unlimited, g.allow_urgent, g.max_queued, g.run_window,
 			COALESCE(g.priority,''), COALESCE(g.restricted,0), g.daily_run_quota,
-			COALESCE(g.run_quota_period,''), g.parent_id, COUNT(u.username)
+			COALESCE(g.run_quota_period,''), g.parent_id, g.totp_enroll, g.passkey_enroll, COUNT(u.username)
 		FROM user_groups g
 		LEFT JOIN users u ON u.group_id=g.id
 		GROUP BY g.id, g.name, g.description, g.created_at, g.is_default, g.weight, g.urgent_unlimited,
 			g.allow_urgent, g.max_queued, g.run_window, g.priority, g.restricted, g.daily_run_quota,
-			g.run_quota_period, g.parent_id
+			g.run_quota_period, g.parent_id, g.totp_enroll, g.passkey_enroll
 		ORDER BY g.is_default DESC, g.name`)
 	if err != nil {
 		return nil
@@ -246,11 +252,11 @@ func (s *Store) ListUserGroups() []UserGroup {
 	for rows.Next() {
 		var g UserGroup
 		var isDefault, restricted int
-		var weight, urgent, allowUrgent, maxQueued, dailyQuota, parent sql.NullInt64
+		var weight, urgent, allowUrgent, maxQueued, dailyQuota, parent, totpEnroll, passkeyEnroll sql.NullInt64
 		var runWindow, quotaPeriod sql.NullString
 		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.Created, &isDefault, &weight, &urgent,
 			&allowUrgent, &maxQueued, &runWindow, &g.Priority, &restricted, &dailyQuota, &quotaPeriod,
-			&parent, &g.Members); err != nil {
+			&parent, &totpEnroll, &passkeyEnroll, &g.Members); err != nil {
 			continue
 		}
 		g.IsDefault = isDefault != 0
@@ -267,6 +273,10 @@ func (s *Store) ListUserGroups() []UserGroup {
 			g.QuotaPeriod = QuotaDay // a row written before the column existed meant per-day
 		}
 		g.ParentID = parent.Int64
+		// Value-plus-inherit, like AllowUrgent above: while the OU sets nothing the value reads as the
+		// permissive default, and Inherit says it is not this OU's own answer.
+		g.TOTPEnroll, g.TOTPEnrollInherit = !totpEnroll.Valid || totpEnroll.Int64 != 0, !totpEnroll.Valid && !g.IsDefault
+		g.PasskeyEnroll, g.PasskeyEnrollInherit = !passkeyEnroll.Valid || passkeyEnroll.Int64 != 0, !passkeyEnroll.Valid && !g.IsDefault
 		parents[g.ID], restrictedOwn[g.ID] = parent.Int64, g.Restricted
 		out = append(out, g)
 	}

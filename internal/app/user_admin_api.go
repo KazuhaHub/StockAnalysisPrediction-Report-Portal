@@ -38,6 +38,15 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 		if g.DailyQuotaInherit {
 			dailyQuota = nil
 		}
+		// nil = this OU sets nothing and inherits, which is what the InheritField renders as
+		// "inherited" — the same convention daily_run_quota uses above.
+		var totpEnroll, passkeyEnroll any = g.TOTPEnroll, g.PasskeyEnroll
+		if g.TOTPEnrollInherit {
+			totpEnroll = nil
+		}
+		if g.PasskeyEnrollInherit {
+			passkeyEnroll = nil
+		}
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "description": g.Description,
 			"is_default": g.IsDefault, "weight": weight, "urgent_unlimited": urgent,
@@ -48,6 +57,8 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 			"restricted": g.Restricted, "restricted_effective": g.RestrictedEffective,
 			"daily_run_quota":  dailyQuota,
 			"run_quota_period": g.QuotaPeriod,
+			// Per-OU second-factor enrolment (security_policy.go).
+			"totp_enroll": totpEnroll, "passkey_enroll": passkeyEnroll,
 			// parent_id so the admin UI can render the tree it is editing (ADR 0022).
 			"parent_id": g.ParentID,
 		})
@@ -83,6 +94,10 @@ type groupInput struct {
 	// inherited behaviour (restricted stickiness, quota inheritance, the run allow-list's and the
 	// version grants' nearest-ancestor resolution) unreachable through the product.
 	ParentID *int64 `json:"parent_id"`
+	// The login-protection overrides. Always sent by the form — the endpoint replaces an OU's whole
+	// configuration — so nil means "inherit the parent OU", exactly as daily_run_quota reads.
+	TOTPEnroll    *bool `json:"totp_enroll"`
+	PasskeyEnroll *bool `json:"passkey_enroll"`
 }
 
 // applyParent moves an OU, refusing a move that would make it its own ancestor. groupChain survives
@@ -264,6 +279,10 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 		s.st.SetGroupRestricted(id, *restricted)
 	}
 	s.st.SetGroupDailyQuota(id, quota, in.quotaPeriod()) // nil quota = inherit the parent OU
+	if err := s.st.SetGroupEnrolment(id, in.TOTPEnroll, in.PasskeyEnroll); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := s.applyParent(id, in.ParentID); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -273,7 +292,8 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 	// named; the row says which knobs moved, not their whole prior state.
 	s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), map[string]any{
 		"name": name, "parent": in.ParentID, "restricted": restricted,
-		"quota": quota, "quota_period": in.quotaPeriod(), "priority": in.Priority})
+		"quota": quota, "quota_period": in.quotaPeriod(), "priority": in.Priority,
+		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll})
 	writeJSON(w, okJSON)
 }
 

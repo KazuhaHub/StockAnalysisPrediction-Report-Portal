@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 )
@@ -204,6 +205,18 @@ func (s *Server) apiAdminSecurity(w http.ResponseWriter, r *http.Request, user s
 		// Session lifetime and the two request ceilings (limits.go). Resolved rather than raw, so
 		// the form shows what the portal is doing even on one that has never saved them.
 		"limits": s.limitsJSON(),
+		// The second-factor and lockout policy (security_policy.go). The 2FA switches mean ALLOW TO
+		// ENROL: the per-OU rules live on the OU itself and are edited there.
+		"twofa": map[string]any{
+			"totp_enroll":    s.switchOn(setTOTPEnroll, true),
+			"passkey_enroll": s.switchOn(setPasskeyEnroll, true),
+		},
+		"recovery": map[string]any{"enabled": s.passwordRecoveryEnabled()},
+		"lockout": map[string]any{
+			"enabled":      s.lockoutEnabled(),
+			"duration_min": int(s.lockoutDuration() / time.Minute),
+			"scope":        s.lockoutScope(),
+		},
 		// Registration with verification on cannot work without SMTP, and an admin who cannot see
 		// that will only learn it from a user who never got their email.
 		"email_configured": s.emailEnabled(),
@@ -239,6 +252,9 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 		// A pointer for the same reason `login` is one: these are not toggles that mean "off" when
 		// absent. A session lifetime cleared by omission would sign the portal out.
 		Limits *limitsInput `json:"limits"`
+		// The policy blocks are inline rather than behind one pointer, because each is optional on
+		// its own: the page sends the cards it changed, and a block it omits is left alone.
+		securityPolicyInput
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -247,6 +263,9 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 	// Validated and stored before anything else touches the store, and it answers 400 itself: a
 	// ceiling nobody meant must not land, and it must not land next to a captcha change that did.
 	if in.Limits != nil && !s.applyLimits(w, in.Limits) {
+		return
+	}
+	if !s.applySecurityPolicy(w, &in.securityPolicyInput) {
 		return
 	}
 	provider := strings.ToLower(strings.TrimSpace(in.Captcha.Provider))
@@ -329,6 +348,8 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 		"captcha_provider": provider, "captcha_login": in.Captcha.Login,
 		"captcha_forgot": in.Captcha.Forgot, "captcha_register": in.Captcha.Register,
 		"registration": in.Registration.Enabled,
+		"totp_enroll":  s.switchOn(setTOTPEnroll, true), "passkey_enroll": s.switchOn(setPasskeyEnroll, true),
+		"recovery": s.passwordRecoveryEnabled(), "lockout": s.lockoutEnabled(), "lockout_scope": s.lockoutScope(),
 	})
 	writeJSON(w, okJSON)
 }
