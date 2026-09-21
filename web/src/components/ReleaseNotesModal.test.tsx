@@ -15,6 +15,24 @@ vi.mock('react-i18next', () => ({
 }))
 vi.mock('./Markdown', () => ({ default: ({ md }: { md?: string }) => <div data-testid="md">{md}</div> }))
 
+// A bilingual note: one release written twice, marked by locale. The dialog shows the reader their
+// own language rather than both, which is what the markers exist for.
+const bilingual = `<zh-CN>
+
+## 修复
+
+- 中文说明
+
+</zh-CN>
+
+<en-US>
+
+## Fixed
+
+- English note
+
+</en-US>`
+
 const get = vi.fn()
 vi.mock('../api/client', () => ({ api: { get: (...a: unknown[]) => get(...a) } }))
 
@@ -184,5 +202,20 @@ describe('ReleaseNotesModal under a required policy', () => {
     get.mockResolvedValue(notes())
     required()
     expect(await screen.findByText('update.requiredWarning')).toBeTruthy()
+  })
+})
+
+// The wiring, rather than the parser (which has its own tests): a convention nothing consults is a
+// convention nobody follows.
+describe('ReleaseNotesModal with bilingual notes', () => {
+  beforeEach(() => {
+    get.mockReset()
+    get.mockResolvedValue(notes({ markdown: bilingual }))
+  })
+
+  it('renders only the section for the reader’s language', async () => {
+    open()
+    await waitFor(() => expect(screen.getByTestId('md').textContent).toContain('English note'))
+    expect(screen.getByTestId('md').textContent).not.toContain('中文说明')
   })
 })
