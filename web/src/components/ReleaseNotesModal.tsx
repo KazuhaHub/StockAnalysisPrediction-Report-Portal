@@ -7,6 +7,7 @@ import { buildKey, type BuildIdentity } from '../lib/buildIdentity'
 import { productVersionLabel } from '../lib/productVersionLabel'
 import type { UpdatePolicy } from '../lib/updateState'
 import Markdown from './Markdown'
+import { selectNotesLanguage } from '../lib/releaseNotes'
 
 // The one place the portal shows release notes.
 //
@@ -244,7 +245,12 @@ export default function ReleaseNotesModal({
             }
           />
         )}
-        {state.status === 'loaded' && notes?.available && <Markdown md={notes.markdown} />}
+        {/* Bilingual notes carry one section per language (lib/releaseNotes.ts), and the reader is
+            shown the section for the language they are using rather than both. A note with no
+            markers — every release published before this convention — arrives unchanged. */}
+        {state.status === 'loaded' && notes?.available && (
+          <Markdown md={selectNotesLanguage(notes.markdown, i18n.language)} />
+        )}
         </div>
       </div>
     </Modal>

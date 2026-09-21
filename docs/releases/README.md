@@ -8,6 +8,47 @@ Files under this directory are the archive for releases that committed their not
 was introduced. They remain readable and can still be used by the tag helper, but a new release does
 not need to add one.
 
+## A note is written in both languages
+
+Every release note carries a Chinese section and an English one, marked by locale:
+
+```markdown
+<zh-CN>
+
+# v2026.38.12
+
+## 更新内容
+
+- 一句中文说明。
+
+</zh-CN>
+
+<en-US>
+
+# v2026.38.12
+
+## What changed
+
+- One line of English.
+
+</en-US>
+```
+
+Why a marker rather than one language per Release: the same text is the GitHub Release body AND the
+portal's update dialog, and the two want opposite things from it. On GitHub the tag renders as nothing,
+so the release page reads as the release written twice, which is what a reader there wants. In the
+portal exactly one section is kept — `selectNotesLanguage` in `web/src/lib/releaseNotes.ts` — chosen by
+the language the reader is using, so the dialog does not double in length for nobody's benefit.
+
+The chain is: the reader's exact locale; then another locale of the same language, so a `zh-TW` reader
+is shown the Simplified section rather than the English one; then the first section, because a note in
+some other language is still the note. A note with no markers is rendered exactly as written, which is
+how every release published before this convention keeps working, and what an operator gets if they
+forget the markers — the right text twice, not the wrong text once.
+
+The workflow does not enforce the markers. Forgetting them costs a longer dialog, not a broken one, and
+the failure that matters — a reader who cannot read the note at all — is what the sections are for.
+
 ## Layout
 
 Notes are filed by the tag's own year — `docs/releases/<YYYY>/<tag>.md`, where `YYYY` is the year
