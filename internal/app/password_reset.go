@@ -101,7 +101,11 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 	// A federated account has no local password, so a reset link would be meaningless — and
 	// following one would silently give it a password that the SSO login path then refuses. The
 	// response is unchanged either way, so this is not an oracle for which accounts are federated.
-	eligible := u != nil && u.Active && !u.IsFederated() && u.Email != "" && s.emailEnabled()
+	//
+	// The portal's own switch is part of the same condition rather than a separate refusal for the
+	// reason above it: with recovery off the answer has to stay a constant ok, or switching it off
+	// would turn this endpoint into a way to ask which accounts exist.
+	eligible := u != nil && u.Active && !u.IsFederated() && u.Email != "" && s.emailEnabled() && s.passwordRecoveryEnabled()
 	// Rate-limit per resolved account so a flood of POSTs can't spam a victim's inbox or pile up SMTP
 	// goroutines/sockets. Only a real, eligible account ever spawns a send, so a per-account cap fully
 	// bounds it; the response stays a constant okJSON either way (no account-existence leak).
@@ -139,6 +143,13 @@ func (s *Server) sendResetEmail(u *User, link string) error {
 
 // apiResetPassword sets a new password given a valid reset token.
 func (s *Server) apiResetPassword(w http.ResponseWriter, r *http.Request) {
+	// A link minted before recovery was switched off must not still work, or the switch would only
+	// stop new requests. The refusal says nothing about any account: it is a fact about the site, and
+	// the token is not even looked at.
+	if !s.passwordRecoveryEnabled() {
+		jsonError(w, http.StatusForbidden, "password recovery is turned off on this portal")
+		return
+	}
 	var in struct {
 		Token    string `json:"token"`
 		Password string `json:"password"`

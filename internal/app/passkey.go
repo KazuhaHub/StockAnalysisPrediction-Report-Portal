@@ -218,6 +218,9 @@ func (s *Server) passkeyService(kind string) (*passkey.Service, error) {
 
 // POST /api/me/passkeys/register/begin
 func (s *Server) apiPasskeyRegisterBegin(w http.ResponseWriter, r *http.Request, user string) {
+	if !s.requirePasskeyEnrolment(w, user) {
+		return
+	}
 	// Step-up: a live session alone must not be enough to add a credential. Otherwise a stolen
 	// cookie becomes permanent access — the attacker registers their own authenticator and keeps
 	// getting in after the cookie is revoked and the password changed.
@@ -242,6 +245,9 @@ func (s *Server) apiPasskeyRegisterBegin(w http.ResponseWriter, r *http.Request,
 
 // POST /api/me/passkeys/register/finish
 func (s *Server) apiPasskeyRegisterFinish(w http.ResponseWriter, r *http.Request, user string) {
+	if !s.requirePasskeyEnrolment(w, user) {
+		return
+	}
 	token := r.URL.Query().Get("token")
 	svc, err := s.passkeyService("webauthn-reg")
 	if err != nil {

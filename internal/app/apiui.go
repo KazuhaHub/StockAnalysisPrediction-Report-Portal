@@ -258,6 +258,10 @@ func (s *Server) meJSON(user string) map[string]any {
 		// password change to a federated account, or enrolment to someone already enrolled, is a
 		// dead end they would otherwise only discover on failure.
 		"federated": federated, "totp_enabled": totpEnabled, "passkeys": len(s.st.PasskeyList(user)),
+		// The resolved enrolment policy, for the same reason: whether this account MAY add a factor
+		// is decided by its OU and the portal's switch, and the page hides what would only fail.
+		"totp_allowed": s.totpEnrolAllowed(user), "passkey_allowed": s.passkeyEnrolAllowed(user),
+		"password_recovery": s.passwordRecoveryEnabled(),
 	}
 }
 
@@ -276,13 +280,32 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 	if !s.requireCaptcha(w, r, ctxLogin, uname, in.captchaProof) {
 		return
 	}
-	ipKey, userKey := "ip:"+clientIP(r, s.trustedNets), "u:"+uname
+	ip := clientIP(r, s.trustedNets)
+	// The account component is lowercased so every reader of an account key agrees: the captcha's
+	// after_failures trigger already reads `u:<lower>`, and a lockout that recorded the name as typed
+	// would never be seen by the check that looks for it.
+	userKey := "u:" + strings.ToLower(uname)
+	ipKey := "ip:" + ip
+	// Recorded on every failure so the default lockout scope has a key to bind to. Nothing consults the
+	// pair unless the scope names it.
+	pairKey := "ipu:" + ip + "|" + strings.ToLower(uname)
 	now := time.Now()
 	thr := s.loginThr
 	// Hard-block a flooding IP BEFORE the expensive bcrypt (CPU-exhaustion + single-source brute
 	// force). This is keyed by the real peer IP, so a legit user is only affected if they share the
 	// abuser's IP (a short-lived window), never by someone else attacking their account.
 	if thr != nil && thr.blocked(ipKey, now) {
+		jsonErrorCode(w, http.StatusTooManyRequests, "rate_limited", "尝试过于频繁，请稍后再试")
+		return
+	}
+	// The operator's lockout, on top of the brake above and never instead of it — the brake is what
+	// prices bcrypt and it runs whatever the scope says. The scope decides which key the LOCK binds to,
+	// and `account` is the one that refuses a correct password for its duration. The response reuses
+	// the translated "too many attempts" the brake already returns: the difference is in the audit row
+	// (which names the scope) and in how long it lasts, neither of which the sign-in page can usefully
+	// express.
+	if thr != nil && s.lockoutEnabled() && thr.blocked(s.lockoutKey(ip, uname), now) {
+		s.recordAuth(r, AuditLockout, "", uname, map[string]any{"scope": s.lockoutScope()})
 		jsonErrorCode(w, http.StatusTooManyRequests, "rate_limited", "尝试过于频繁，请稍后再试")
 		return
 	}
@@ -305,6 +328,7 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		if thr != nil {
 			thr.record(ipKey, now)
 			thr.record(userKey, now)
+			thr.record(pairKey, now)
 			// An account under sustained wrong-password pressure rejects further WRONG guesses; a
 			// correct password would have passed above, so this only rate-limits an attacker.
 			if thr.blocked(userKey, now) {
@@ -337,6 +361,7 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 	if thr != nil {
 		thr.reset(ipKey)
 		thr.reset(userKey)
+		thr.reset(pairKey)
 	}
 	// With 2FA on, the password is only the first leg: park the login behind a single-use pending
 	// token and issue no session until a code is proven (ADR 0023).

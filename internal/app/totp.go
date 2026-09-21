@@ -53,6 +53,11 @@ func (s *Server) totpIssuer() string {
 // self-service way back. The enable step below needs a secret that only a stepped-up setup ever
 // returns, so gating the mint gates the whole enrolment.
 func (s *Server) apiTOTPSetup(w http.ResponseWriter, r *http.Request, user string) {
+	// The policy first: whether this account may add a factor at all is a fact about its OU, and no
+	// amount of proving who it is changes it.
+	if !s.requireTOTPEnrolment(w, user) {
+		return
+	}
 	// The preconditions come first so the caller gets the accurate message about their OWN account
 	// rather than a confusing "confirm with your password" for a state no proof could change. They
 	// leak nothing: the caller is already authenticated as this account.
@@ -88,6 +93,9 @@ func (s *Server) apiTOTPSetup(w http.ResponseWriter, r *http.Request, user strin
 
 // POST /api/me/2fa/enable — prove a code, then switch 2FA on and hand back the recovery codes.
 func (s *Server) apiTOTPEnable(w http.ResponseWriter, r *http.Request, user string) {
+	if !s.requireTOTPEnrolment(w, user) {
+		return
+	}
 	var in struct {
 		Code string `json:"code"`
 	}
