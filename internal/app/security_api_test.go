@@ -177,10 +177,10 @@ func TestTheGroupAPICarriesTheEnrolmentOverrides(t *testing.T) {
 	if got := row()["passkey_enroll"]; got != nil {
 		t.Errorf("an override that was not sent must read as inherited, got %v", got)
 	}
-	if s.st.SecuritySettings("member").TOTPAllowed {
+	if securityOf(t, s.st, "member").TOTPAllowed {
 		t.Error("the OU's own member may still enrol TOTP")
 	}
-	if !s.st.SecuritySettings("member").PasskeyAllowed {
+	if !securityOf(t, s.st, "member").PasskeyAllowed {
 		t.Error("passkeys were not touched and must stay allowed")
 	}
 
@@ -191,7 +191,7 @@ func TestTheGroupAPICarriesTheEnrolmentOverrides(t *testing.T) {
 	if got := row()["totp_enroll"]; got != nil {
 		t.Errorf("after clearing, totp_enroll = %v, want nil (inherited)", got)
 	}
-	if !s.st.SecuritySettings("member").TOTPAllowed {
+	if !securityOf(t, s.st, "member").TOTPAllowed {
 		t.Error("clearing the override must restore the inherited answer")
 	}
 }

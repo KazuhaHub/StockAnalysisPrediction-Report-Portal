@@ -155,6 +155,8 @@ go run ./cmd/report-portal adduser <name> <password> admin
 go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
+go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
+go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out
 go run ./cmd/report-portal recompute-kinds
 go run ./cmd/report-portal freeze-names
 go run ./cmd/report-portal version

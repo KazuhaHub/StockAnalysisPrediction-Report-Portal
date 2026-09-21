@@ -40,12 +40,15 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 		}
 		// nil = this OU sets nothing and inherits, which is what the InheritField renders as
 		// "inherited" — the same convention daily_run_quota uses above.
-		var totpEnroll, passkeyEnroll any = g.TOTPEnroll, g.PasskeyEnroll
+		var totpEnroll, passkeyEnroll, require2fa any = g.TOTPEnroll, g.PasskeyEnroll, g.Require2FA
 		if g.TOTPEnrollInherit {
 			totpEnroll = nil
 		}
 		if g.PasskeyEnrollInherit {
 			passkeyEnroll = nil
+		}
+		if g.Require2FAInherit {
+			require2fa = nil
 		}
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "description": g.Description,
@@ -58,7 +61,7 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 			"daily_run_quota":  dailyQuota,
 			"run_quota_period": g.QuotaPeriod,
 			// Per-OU second-factor enrolment (security_policy.go).
-			"totp_enroll": totpEnroll, "passkey_enroll": passkeyEnroll,
+			"totp_enroll": totpEnroll, "passkey_enroll": passkeyEnroll, "require_2fa": require2fa,
 			// parent_id so the admin UI can render the tree it is editing (ADR 0022).
 			"parent_id": g.ParentID,
 		})
@@ -98,6 +101,7 @@ type groupInput struct {
 	// configuration — so nil means "inherit the parent OU", exactly as daily_run_quota reads.
 	TOTPEnroll    *bool `json:"totp_enroll"`
 	PasskeyEnroll *bool `json:"passkey_enroll"`
+	Require2FA    *bool `json:"require_2fa"`
 }
 
 // applyParent moves an OU, refusing a move that would make it its own ancestor. groupChain survives
@@ -274,12 +278,29 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 	} else {
 		s.st.SetGroupPriority(id, s.groupPriorityValid(in.Priority))
 	}
+	// A mandate with no method enabled is refused here for the same reason as on the settings page:
+	// it is a lockout rather than a policy, and this OU is where it would take effect. The check is on
+	// the effective state, so it also covers a MOVE — re-parenting this OU under one that mandates a
+	// factor is caught by the ancestor's own flag.
+	if in.Require2FA != nil {
+		stuck, err := s.unsatisfiableMandates(proposedPolicy{ouID: id, ouRequire: in.Require2FA})
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, "the security policy could not be read")
+			return
+		}
+		if len(stuck) > 0 {
+			jsonErrorCode(w, http.StatusBadRequest, "unsatisfiable_mandate",
+				"requiring a second factor here would leave it unsatisfiable with no method enabled: "+
+					strings.Join(stuck, ", "))
+			return
+		}
+	}
 	restricted, quota := in.tenancy(isDefault)
 	if restricted != nil {
 		s.st.SetGroupRestricted(id, *restricted)
 	}
 	s.st.SetGroupDailyQuota(id, quota, in.quotaPeriod()) // nil quota = inherit the parent OU
-	if err := s.st.SetGroupEnrolment(id, in.TOTPEnroll, in.PasskeyEnroll); err != nil {
+	if err := s.st.SetGroupEnrolment(id, in.TOTPEnroll, in.PasskeyEnroll, in.Require2FA); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -293,8 +314,16 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 	s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), map[string]any{
 		"name": name, "parent": in.ParentID, "restricted": restricted,
 		"quota": quota, "quota_period": in.quotaPeriod(), "priority": in.Priority,
-		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll})
-	writeJSON(w, okJSON)
+		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll, "require_2fa": in.Require2FA})
+	// The count, not just the flag: turning a mandate on asks people to do something at their next
+	// sign-in, and how many is the difference between a policy and a surprise.
+	pending := 0
+	if s.st.GroupRequires2FA(id) {
+		if n, err := s.st.membersWithoutFactor(id); err == nil {
+			pending = n
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "pending_enrolment": pending})
 }
 
 // apiGroupTargets returns one OU's run allow-list (ADR 0022 R3) alongside every target, so the

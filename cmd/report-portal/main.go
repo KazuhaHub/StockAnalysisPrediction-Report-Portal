@@ -52,6 +52,15 @@ func main() {
 			}
 			fmt.Printf("user saved: %s (role=%s)\n", os.Args[2], role)
 			return
+		case "security": // report-portal security <show|set <key> <value>|clear-mandate> — enrolment policy
+			out, err := app.SecurityCommand(configPath(), os.Args[2:])
+			if out != "" {
+				fmt.Print(out)
+			}
+			if err != nil {
+				log.Fatalf("security: %v", err)
+			}
+			return
 		case "backup": // report-portal backup <file|-> — dump the whole database to a portable file
 			path := "-"
 			if len(os.Args) > 2 {
