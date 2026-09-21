@@ -16,6 +16,8 @@ export interface Me {
   // OU has withdrawn enrolment keeps the factor it already has, so the page reads both.
   totp_allowed?: boolean
   passkey_allowed?: boolean
+  /** The account must set up a second factor before it can use the portal (see the enrolment gate). */
+  must_enroll_2fa?: boolean
 }
 
 // ---- Batch-run feature ----
@@ -441,6 +443,8 @@ export interface UserGroupRow {
   // with it whatever this says.
   totp_enroll?: boolean | null
   passkey_enroll?: boolean | null
+  /** Members of this OU must have a second factor. Sticky down the tree. */
+  require_2fa?: boolean | null
 }
 
 // Per-OU run allow-list matrix (ADR 0022 R3): which workflows a group may run, on which surfaces.

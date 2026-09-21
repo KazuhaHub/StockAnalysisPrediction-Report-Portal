@@ -36,6 +36,10 @@ export interface OUSettings {
   /** May this OU's members add an authenticator app, or a passkey. */
   totpAllowed: Resolved<boolean>
   passkeyAllowed: Resolved<boolean>
+  /** Must this OU's members have a second factor. STICKY down the tree, so it is never "inherited"
+   *  from the Default group the way the governance fields are: any ancestor that requires one makes
+   *  this OU require it too. */
+  require2fa: Resolved<boolean>
 }
 
 /**
@@ -73,6 +77,7 @@ export function resolveOU(g: UserGroupRow, def?: UserGroupRow, groups?: UserGrou
     // an OU may allow what its parent withdrew, because the answer is about its own members.
     totpAllowed: own(g.totp_enroll, def?.totp_enroll ?? true),
     passkeyAllowed: own(g.passkey_enroll, def?.passkey_enroll ?? true),
+    ...mandateOf(g, groups),
     weight,
     maxQueued: own(g.max_queued, def?.max_queued ?? 0),
     runWindow: own(g.run_window, def?.run_window ?? ''),
@@ -80,6 +85,31 @@ export function resolveOU(g: UserGroupRow, def?: UserGroupRow, groups?: UserGrou
     priority: g.priority ? { value: Number(g.priority), inherited: false } : { value: null, inherited: true },
     ...quotaOf(g, groups),
   }
+}
+
+/**
+ * mandateOf resolves the second-factor requirement the same way the server does: STICKY, so a parent
+ * that requires one cannot be un-required by a child. It walks the tree itself rather than reading
+ * the Default group, because the flag is not a fallback baseline — an OU three levels down is bound
+ * by a great-grandparent that set it, and nothing in between can clear it.
+ */
+function mandateOf(g: UserGroupRow, groups?: UserGroupRow[]): Pick<OUSettings, 'require2fa'> {
+  if (g.require_2fa) {
+    return { require2fa: { value: true, inherited: false } } // this OU is where it comes from
+  }
+  const byId = new Map((groups ?? []).map((x) => [x.id, x]))
+  const seen = new Set<number>([g.id]) // the server refuses cycles; this runs on whatever it sent
+  let cur = g.parent_id ? byId.get(g.parent_id) : undefined
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    if (cur.require_2fa) {
+      return { require2fa: { value: true, inherited: true } }
+    }
+    cur = cur.parent_id ? byId.get(cur.parent_id) : undefined
+  }
+  // Nobody above requires one. It is still "this OU's own answer" when the OU is the Default, which
+  // inherits from nobody.
+  return { require2fa: { value: false, inherited: !g.is_default } }
 }
 
 /**

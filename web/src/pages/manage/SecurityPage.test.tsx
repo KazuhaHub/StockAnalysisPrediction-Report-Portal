@@ -27,7 +27,7 @@ const policy = {
   registration: { enabled: false, require_verify: true, domains: '', default_group: '', expiry_days: '' },
   login: { mode: 'dual', effective: 'dual', sso_only: false, sso_available: false },
   limits: { session_ttl_hours: 168, login_fail_max: 10, login_fail_window_min: 15, apiv1_rate_per_min: 0 },
-  twofa: { totp_enroll: true, passkey_enroll: true },
+  twofa: { totp_enroll: true, passkey_enroll: true, require_staff: false },
   recovery: { enabled: true },
   lockout: { enabled: false, duration_min: 30, scope: 'ip_account' },
   groups: [],
@@ -63,7 +63,7 @@ describe('the login-protection page', () => {
     await userEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
     const body = apiMock.post.mock.calls[0][1] as Record<string, any>
-    expect(body.twofa).toEqual({ totp_enroll: true, passkey_enroll: true })
+    expect(body.twofa).toEqual({ totp_enroll: true, passkey_enroll: true, require_staff: false })
     expect(body.recovery).toEqual({ enabled: true })
     expect(body.lockout).toEqual({ enabled: false, duration_min: 30, scope: 'ip_account' })
   })
@@ -98,3 +98,12 @@ describe('the login-protection page', () => {
     expect(await screen.findByText('security.recoveryNeedsEmail')).toBeTruthy()
   })
 })
+
+  it('sends the mandate with the methods it needs', async () => {
+    mount({ twofa: { totp_enroll: true, passkey_enroll: true, require_staff: true } })
+    await screen.findByText('security.twofaTitle')
+    await userEvent.click(screen.getByText('common.save'))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
+    const body = apiMock.post.mock.calls[0][1] as Record<string, any>
+    expect(body.twofa.require_staff).toBe(true)
+  })

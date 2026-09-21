@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router'
+import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { App as AntdApp, ConfigProvider, Spin, theme } from 'antd'
 import { PrefsProvider, usePrefs } from './prefs'
 import { AuthProvider, useAuth } from './auth'
@@ -63,9 +63,14 @@ function FullSpin() {
 }
 
 function Protected({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+  const { user, loading, mustEnroll } = useAuth()
+  const loc = useLocation()
   if (loading) return <FullSpin />
   if (!user) return <Navigate to="/login" replace />
+  // The enrolment wall. The server refuses everything else, so the alternative to sending them here
+  // is a portal where every page answers 403 — which reads as broken rather than as "do this one
+  // thing". The account page says why, and what to do about it.
+  if (mustEnroll && loc.pathname !== '/account') return <Navigate to="/account" replace />
   // The announcement feed lives here rather than beside SiteProvider because it is per-reader and
   // needs the session: SiteProvider is mounted above AuthProvider so /login can paint the brand.
   // key={user} so signing in as somebody else on a shared machine builds a fresh provider instead

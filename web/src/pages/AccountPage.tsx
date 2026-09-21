@@ -39,7 +39,7 @@ interface Passkey {
 
 export default function AccountPage() {
   const { t } = useTranslation()
-  const { user, name, federated, totpEnabled, totpAllowed, passkeyCount, passkeyAllowed, refresh } = useAuth()
+  const { user, name, federated, totpEnabled, totpAllowed, passkeyCount, passkeyAllowed, mustEnroll, refresh } = useAuth()
   const [passkeys, setPasskeys] = useState<Passkey[]>([])
 
   const loadPasskeys = useCallback(() => {
@@ -60,6 +60,16 @@ export default function AccountPage() {
       </div>
 
       {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}
+      {/* Why the rest of the portal is refusing: an administrator required a second factor of this
+          account. Without this the reader sees every page fail and no reason for it. */}
+      {mustEnroll && (
+        <Alert
+          type="warning"
+          showIcon
+          title={t('account.mustEnrollTitle')}
+          description={!totpAllowed && !passkeyAllowed ? t('account.mustEnrollNoMethod') : t('account.mustEnrollBody')}
+        />
+      )}
 
       {!federated && <PasswordCard />}
       {/* Shown while the account MAY enrol, and also while it still has a factor to remove: an OU

@@ -153,3 +153,39 @@ describe('resolveOU — who may add a second factor', () => {
     expect(r.totpAllowed.inherited).toBe(false)
   })
 })
+
+// The mandate. It is STICKY rather than deeper-wins, and the difference is the whole point: a parent
+// that requires a second factor of its division cannot be un-required by a child, so an OU reads
+// "required, inherited" from an ancestor rather than falling back to the Default group.
+describe('resolveOU — who must have a second factor', () => {
+  it('is not required by default', () => {
+    const r = resolveOU(g({ id: 2 }), DEF)
+    expect(r.require2fa).toEqual({ value: false, inherited: true })
+  })
+
+  it('reads its own flag as its own answer', () => {
+    const r = resolveOU(g({ id: 2, require_2fa: true }), DEF)
+    expect(r.require2fa).toEqual({ value: true, inherited: false })
+  })
+
+  it('inherits a requirement from an ancestor, not from the Default group', () => {
+    const top = g({ id: 2, require_2fa: true })
+    const mid = g({ id: 3, parent_id: 2 })
+    const leaf = g({ id: 4, parent_id: 3 })
+    const r = resolveOU(leaf, DEF, [DEF, top, mid, leaf])
+    expect(r.require2fa).toEqual({ value: true, inherited: true })
+  })
+
+  it('cannot be cleared by a child that sets the flag off', () => {
+    const top = g({ id: 2, require_2fa: true })
+    const child = g({ id: 3, parent_id: 2, require_2fa: false })
+    const r = resolveOU(child, DEF, [DEF, top, child])
+    expect(r.require2fa.value).toBe(true)
+    expect(r.require2fa.inherited).toBe(true)
+  })
+
+  it('the Default OU inherits from nobody', () => {
+    const r = resolveOU(g({ id: 1, is_default: true }), DEF, [DEF])
+    expect(r.require2fa).toEqual({ value: false, inherited: false })
+  })
+})
