@@ -16,6 +16,7 @@ const { apiMock, authMock, webauthnMock } = vi.hoisted(() => ({
     // What the account MAY add, as opposed to what it HAS (security_policy.go).
     totpAllowed: true,
     passkeyAllowed: true,
+    mustEnroll: false,
     refresh: vi.fn(),
   },
   webauthnMock: { createCredential: vi.fn(), passkeySupported: vi.fn(() => true) },
@@ -54,6 +55,25 @@ describe('AccountPage', () => {
     authMock.passkeyCount = 0
     authMock.totpAllowed = true
     authMock.passkeyAllowed = true
+    authMock.mustEnroll = false
+  })
+
+  // The wall, said out loud. Without it every other page answers 403 and the reader has no way to
+  // know what is being asked of them — or, when no method is enabled at all, who can unblock it.
+  it('explains the enrolment requirement the rest of the portal is enforcing', () => {
+    authMock.mustEnroll = true
+    renderPage()
+    expect(screen.getByText('account.mustEnrollTitle')).toBeTruthy()
+    expect(screen.getByText('account.mustEnrollBody')).toBeTruthy()
+    expect(screen.queryByText('account.mustEnrollNoMethod')).toBeNull()
+  })
+
+  it('says who can unblock it when no method is enabled', () => {
+    authMock.mustEnroll = true
+    authMock.totpAllowed = false
+    authMock.passkeyAllowed = false
+    renderPage()
+    expect(screen.getByText('account.mustEnrollNoMethod')).toBeTruthy()
   })
 
   // An OU that withdraws enrolment must not strand an account inside the factor it already holds:

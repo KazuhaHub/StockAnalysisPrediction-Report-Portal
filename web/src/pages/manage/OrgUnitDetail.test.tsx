@@ -116,6 +116,15 @@ describe('OrgUnitDetail', () => {
     expect(screen.getByText('ou.sectionSecurity')).toBeTruthy()
   })
 
+  // The mandate rides with the OU too, and its "inherit" is an ancestor rather than the Default group.
+  it('saves the second-factor requirement', async () => {
+    mount(g({ id: 2, require_2fa: true }))
+    fireEvent.click(screen.getByText('common.save'))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const body = put.mock.calls[0][1] as Record<string, unknown>
+    expect(body.require_2fa).toBe(true)
+  })
+
   // The quota is a number AND a window, and both have to survive the round trip together — the
   // server refuses to inherit one without the other, so a panel that sent only the number would
   // silently reset a monthly cap to daily.

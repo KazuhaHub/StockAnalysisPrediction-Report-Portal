@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -54,6 +55,9 @@ type UserGroup struct {
 	TOTPEnrollInherit    bool
 	PasskeyEnroll        bool
 	PasskeyEnrollInherit bool
+	// The mandate: this OU's members must have a second factor. Off unless set.
+	Require2FA        bool
+	Require2FAInherit bool
 }
 
 // ---------- profile ----------
@@ -235,12 +239,13 @@ func (s *Store) ListUserGroups() []UserGroup {
 	rows, err := s.query(`SELECT g.id, g.name, COALESCE(g.description,''), COALESCE(g.created_at,''),
 			COALESCE(g.is_default,0), g.weight, g.urgent_unlimited, g.allow_urgent, g.max_queued, g.run_window,
 			COALESCE(g.priority,''), COALESCE(g.restricted,0), g.daily_run_quota,
-			COALESCE(g.run_quota_period,''), g.parent_id, g.totp_enroll, g.passkey_enroll, COUNT(u.username)
+			COALESCE(g.run_quota_period,''), g.parent_id, g.totp_enroll, g.passkey_enroll, g.require_2fa,
+			COUNT(u.username)
 		FROM user_groups g
 		LEFT JOIN users u ON u.group_id=g.id
 		GROUP BY g.id, g.name, g.description, g.created_at, g.is_default, g.weight, g.urgent_unlimited,
 			g.allow_urgent, g.max_queued, g.run_window, g.priority, g.restricted, g.daily_run_quota,
-			g.run_quota_period, g.parent_id, g.totp_enroll, g.passkey_enroll
+			g.run_quota_period, g.parent_id, g.totp_enroll, g.passkey_enroll, g.require_2fa
 		ORDER BY g.is_default DESC, g.name`)
 	if err != nil {
 		return nil
@@ -252,11 +257,11 @@ func (s *Store) ListUserGroups() []UserGroup {
 	for rows.Next() {
 		var g UserGroup
 		var isDefault, restricted int
-		var weight, urgent, allowUrgent, maxQueued, dailyQuota, parent, totpEnroll, passkeyEnroll sql.NullInt64
+		var weight, urgent, allowUrgent, maxQueued, dailyQuota, parent, totpEnroll, passkeyEnroll, require2fa sql.NullInt64
 		var runWindow, quotaPeriod sql.NullString
 		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.Created, &isDefault, &weight, &urgent,
 			&allowUrgent, &maxQueued, &runWindow, &g.Priority, &restricted, &dailyQuota, &quotaPeriod,
-			&parent, &totpEnroll, &passkeyEnroll, &g.Members); err != nil {
+			&parent, &totpEnroll, &passkeyEnroll, &require2fa, &g.Members); err != nil {
 			continue
 		}
 		g.IsDefault = isDefault != 0
@@ -277,6 +282,9 @@ func (s *Store) ListUserGroups() []UserGroup {
 		// permissive default, and Inherit says it is not this OU's own answer.
 		g.TOTPEnroll, g.TOTPEnrollInherit = !totpEnroll.Valid || totpEnroll.Int64 != 0, !totpEnroll.Valid && !g.IsDefault
 		g.PasskeyEnroll, g.PasskeyEnrollInherit = !passkeyEnroll.Valid || passkeyEnroll.Int64 != 0, !passkeyEnroll.Valid && !g.IsDefault
+		// The mandate is off unless set: unlike the two above, "this OU says nothing" must not read as
+		// "required", or every OU would inherit a requirement from a portal that never asked for one.
+		g.Require2FA, g.Require2FAInherit = require2fa.Valid && require2fa.Int64 != 0, !require2fa.Valid && !g.IsDefault
 		parents[g.ID], restrictedOwn[g.ID] = parent.Int64, g.Restricted
 		out = append(out, g)
 	}
@@ -435,6 +443,47 @@ func (s *Store) groupChain(username string) []int64 {
 		leaf = def
 	}
 	return s.groupAncestry(leaf, def)
+}
+
+// groupChainErr is groupChain with the store's failures surfaced instead of swallowed.
+//
+// The lenient form is right for the display paths — an unreadable group list there is an empty one —
+// and wrong for the enrolment gate, which must not read a closed or unhappy database as "this account
+// inherits nothing". Inheriting nothing means no mandate, and no mandate is the fail-open direction.
+func (s *Store) groupChainErr(username string) ([]int64, error) {
+	var def sql.NullInt64
+	if err := s.queryRow("SELECT id FROM user_groups WHERE is_default=1 ORDER BY id LIMIT 1").Scan(&def); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	var leafID sql.NullInt64
+	if err := s.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&leafID); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	leaf := leafID.Int64
+	if leaf == 0 {
+		leaf = def.Int64
+	}
+	var up []int64
+	seen := map[int64]bool{}
+	for gid := leaf; gid != 0 && !seen[gid] && len(up) < 64; {
+		seen[gid] = true
+		up = append(up, gid)
+		var parent sql.NullInt64
+		if err := s.queryRow("SELECT parent_id FROM user_groups WHERE id=?", gid).Scan(&parent); err != nil &&
+			!errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		gid = parent.Int64
+	}
+	if def.Valid && def.Int64 != 0 && !seen[def.Int64] {
+		up = append(up, def.Int64)
+	}
+	for i, j := 0, len(up)-1; i < j; i, j = i+1, j-1 {
+		up[i], up[j] = up[j], up[i]
+	}
+	return up, nil
 }
 
 // groupAncestry walks leaf up to the root and returns the chain root→leaf, with the Default group

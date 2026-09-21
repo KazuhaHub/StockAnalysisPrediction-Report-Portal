@@ -39,6 +39,8 @@ interface Draft {
   totpAllowed: boolean
   passkeyInherit: boolean
   passkeyAllowed: boolean
+  requireInherit: boolean
+  require2fa: boolean
 }
 
 // One announcement that names the OU being deleted. `orphaned` means this OU is its ONLY recipient,
@@ -74,6 +76,8 @@ function draftOf(g: UserGroupRow, def: UserGroupRow | undefined, groups: UserGro
     totpAllowed: r.totpAllowed.value,
     passkeyInherit: !isDefault && g.passkey_enroll == null,
     passkeyAllowed: r.passkeyAllowed.value,
+    requireInherit: !isDefault && g.require_2fa == null,
+    require2fa: r.require2fa.value,
   }
 }
 
@@ -108,6 +112,7 @@ export default function OrgUnitDetail({
       priority: '',
       totp_enroll: null,
       passkey_enroll: null,
+      require_2fa: null,
     } as UserGroupRow,
     def,
     groups,
@@ -132,7 +137,7 @@ export default function OrgUnitDetail({
   const save = async () => {
     setSaving(true)
     try {
-      await api.put(`/api/admin/groups/${group.id}`, {
+      const res = await api.put<{ pending_enrolment?: number }>(`/api/admin/groups/${group.id}`, {
         name: d.name,
         description: d.description,
         // The urgent policy is one control mapped back onto three stored fields, so "allowed" and
@@ -149,9 +154,16 @@ export default function OrgUnitDetail({
         // null = inherit the parent OU, the same reading daily_run_quota has just above.
         totp_enroll: d.totpInherit ? null : d.totpAllowed,
         passkey_enroll: d.passkeyInherit ? null : d.passkeyAllowed,
+        require_2fa: d.requireInherit ? null : d.require2fa,
         ...(isDefault ? {} : { parent_id: d.parent_id }),
       })
-      message.success(t('common.saved'))
+      // Turning a mandate on asks people to do something at their next sign-in, and how many is the
+      // difference between a policy and a surprise.
+      if (res?.pending_enrolment) {
+        message.warning(t('ou.mandatePending', { count: res.pending_enrolment }))
+      } else {
+        message.success(t('common.saved'))
+      }
       onChanged()
     } catch (e) {
       message.error(errText(e, t))
@@ -343,6 +355,18 @@ export default function OrgUnitDetail({
           onInheritingChange={(v) => set('passkeyInherit', v)}
         >
           <Switch checked={d.passkeyAllowed} onChange={(v) => set('passkeyAllowed', v)} />
+        </InheritField>
+        {/* The mandate. It reads "inherit" from an ANCESTOR rather than from the Default group,
+            which is what sticky means and what the hint says. */}
+        <InheritField
+          label={t('ou.require2fa')}
+          hint={t('ou.require2faHint')}
+          from={t('users.parentOu')}
+          inherited={wouldInherit.require2fa.value ? t('ou.required') : t('ou.notRequired')}
+          inheriting={d.requireInherit}
+          onInheritingChange={(v) => set('requireInherit', v)}
+        >
+          <Switch checked={d.require2fa} onChange={(v) => set('require2fa', v)} />
         </InheritField>
       </Card>
 

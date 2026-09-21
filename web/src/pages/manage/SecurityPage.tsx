@@ -45,6 +45,7 @@ interface LoginCfg {
 interface TwoFACfg {
   totp_enroll: boolean
   passkey_enroll: boolean
+  require_staff: boolean
 }
 interface LockoutCfg {
   enabled: boolean
@@ -263,6 +264,11 @@ export default function SecurityPage() {
           </Row>
           <Row label={t('security.allowPasskey')} hint={t('security.allowPasskeyHint')}>
             <Switch checked={twofa.passkey_enroll} onChange={(v) => setTwofa({ ...twofa, passkey_enroll: v })} />
+          </Row>
+          {/* The mandate. It sits with the methods because the two are one decision: a requirement
+              with no method enabled is a wall nobody can climb, and the server refuses that pair. */}
+          <Row label={t('security.requireStaff')} hint={t('security.requireStaffHint')}>
+            <Switch checked={twofa.require_staff} onChange={(v) => setTwofa({ ...twofa, require_staff: v })} />
           </Row>
           {/* Said once, in the card rather than beside each switch: it is a property of both. */}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('security.twofaLocalOnly')}</Typography.Text>

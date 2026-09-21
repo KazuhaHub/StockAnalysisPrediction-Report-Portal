@@ -19,6 +19,9 @@ interface AuthCtx {
   // both — `enabled` to show the state, `allowed` to offer the action.
   totpAllowed: boolean
   passkeyAllowed: boolean
+  /** The account is required to have a second factor and has none: the server refuses everything
+   *  else, so the app sends them to the page that can fix it. */
+  mustEnroll: boolean
   refresh: () => Promise<void> // re-read /api/me after a credential change
   // The session ended while the page was open, rather than never having existed. The login form
   // says so; without it, being thrown back to a blank login page reads as the app losing its place.
@@ -95,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Absent from an older server reads as allowed: that is what such a server does.
       totpAllowed: me?.totp_allowed ?? true,
       passkeyAllowed: me?.passkey_allowed ?? true,
+      mustEnroll: me?.must_enroll_2fa ?? false,
       refresh: async () => {
         try {
           setMe(await api.get<Me>('/api/me'))

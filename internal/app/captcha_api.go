@@ -210,6 +210,7 @@ func (s *Server) apiAdminSecurity(w http.ResponseWriter, r *http.Request, user s
 		"twofa": map[string]any{
 			"totp_enroll":    s.switchOn(setTOTPEnroll, true),
 			"passkey_enroll": s.switchOn(setPasskeyEnroll, true),
+			"require_staff":  s.switchOn(setRequire2FAForStaff, false),
 		},
 		"recovery": map[string]any{"enabled": s.passwordRecoveryEnabled()},
 		"lockout": map[string]any{
