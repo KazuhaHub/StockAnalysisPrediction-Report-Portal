@@ -14,6 +14,11 @@ interface AuthCtx {
   federated: boolean // credentials are the IdP's: local password / 2FA controls do not apply
   totpEnabled: boolean
   passkeyCount: number
+  // Whether this account MAY add a factor (security_policy.go). It is policy rather than state: an
+  // account whose OU has withdrawn enrolment keeps whatever factor it already has, so the page needs
+  // both — `enabled` to show the state, `allowed` to offer the action.
+  totpAllowed: boolean
+  passkeyAllowed: boolean
   refresh: () => Promise<void> // re-read /api/me after a credential change
   // The session ended while the page was open, rather than never having existed. The login form
   // says so; without it, being thrown back to a blank login page reads as the app losing its place.
@@ -87,6 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       federated: me?.federated ?? false,
       totpEnabled: me?.totp_enabled ?? false,
       passkeyCount: me?.passkeys ?? 0,
+      // Absent from an older server reads as allowed: that is what such a server does.
+      totpAllowed: me?.totp_allowed ?? true,
+      passkeyAllowed: me?.passkey_allowed ?? true,
       refresh: async () => {
         try {
           setMe(await api.get<Me>('/api/me'))

@@ -124,3 +124,32 @@ describe('resolveOU — the quota inherits down the OU tree, not from Default', 
     expect(resolveOU(a, ROOT, [a, b]).dailyQuota.value).toBe(0)
   })
 })
+
+// The second-factor switches (security_policy.go). Deeper wins, like the run governance above, and
+// the answer is about an OU's OWN members — which is why a child may allow what its parent withdrew.
+describe('resolveOU — who may add a second factor', () => {
+  it('an OU that sets nothing allows both, and says it inherited', () => {
+    const r = resolveOU(g({ id: 2 }), DEF)
+    expect(r.totpAllowed).toEqual({ value: true, inherited: true })
+    expect(r.passkeyAllowed).toEqual({ value: true, inherited: true })
+  })
+
+  it('an OU that withdraws one says so and leaves the other alone', () => {
+    const r = resolveOU(g({ id: 2, totp_enroll: false }), DEF)
+    expect(r.totpAllowed).toEqual({ value: false, inherited: false })
+    expect(r.passkeyAllowed).toEqual({ value: true, inherited: true })
+  })
+
+  it('a child may allow what its parent withdrew', () => {
+    const parent = g({ id: 2, totp_enroll: false })
+    const child = g({ id: 3, parent_id: 2, totp_enroll: true })
+    const r = resolveOU(child, parent)
+    expect(r.totpAllowed).toEqual({ value: true, inherited: false })
+  })
+
+  it('the Default OU inherits from nobody: unset there reads as the permissive default, not as inherited', () => {
+    const r = resolveOU(g({ id: 1, is_default: true }), DEF)
+    expect(r.totpAllowed.value).toBe(true)
+    expect(r.totpAllowed.inherited).toBe(false)
+  })
+})

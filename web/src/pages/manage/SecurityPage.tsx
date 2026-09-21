@@ -37,6 +37,21 @@ interface LoginCfg {
   sso_available: boolean
 }
 
+// The second-factor and lockout policy (internal/app/security_policy.go).
+//
+// The 2FA switches mean ALLOW TO ENROL, and the page has to say so: turning one off does not
+// disable a factor that is already registered, and an admin who reads it as "turn 2FA off" would
+// believe they had done something they have not. The per-OU rules live on the OU itself.
+interface TwoFACfg {
+  totp_enroll: boolean
+  passkey_enroll: boolean
+}
+interface LockoutCfg {
+  enabled: boolean
+  duration_min: number
+  scope: string
+}
+
 // The session lifetime and the two request ceilings (internal/app/limits.go). Every value the
 // server reports is the one in force, including on a portal that has never saved them, so the form
 // opens on what the portal is doing rather than on this file's idea of it.
@@ -60,6 +75,9 @@ export default function SecurityPage() {
   const [reg, setReg] = useState<RegCfg | null>(null)
   const [login, setLogin] = useState<LoginCfg | null>(null)
   const [limits, setLimits] = useState<LimitsCfg | null>(null)
+  const [twofa, setTwofa] = useState<TwoFACfg | null>(null)
+  const [recovery, setRecovery] = useState(false)
+  const [lockout, setLockout] = useState<LockoutCfg | null>(null)
   const [groups, setGroups] = useState<GroupRow[]>([])
   const [emailOK, setEmailOK] = useState(true)
   const [secret, setSecret] = useState<string | null>(null) // null = leave the stored one alone
@@ -74,6 +92,9 @@ export default function SecurityPage() {
         registration: RegCfg
         login: LoginCfg
         limits: LimitsCfg
+        twofa: TwoFACfg
+        recovery: { enabled: boolean }
+        lockout: LockoutCfg
         groups: GroupRow[]
         email_configured: boolean
       }>('/api/admin/security')
@@ -82,6 +103,9 @@ export default function SecurityPage() {
         setReg(r.registration)
         setLogin(r.login)
         setLimits(r.limits)
+        setTwofa(r.twofa)
+        setRecovery(r.recovery.enabled)
+        setLockout(r.lockout)
         setGroups(r.groups ?? [])
         setEmailOK(r.email_configured)
         setSecret(null)
@@ -95,7 +119,7 @@ export default function SecurityPage() {
   useEffect(load, [load])
 
   const save = async () => {
-    if (!captcha || !reg || !login || !limits) return
+    if (!captcha || !reg || !login || !limits || !twofa || !lockout) return
     setBusy(true)
     try {
       await api.post('/api/admin/security', {
@@ -114,6 +138,9 @@ export default function SecurityPage() {
         registration: reg,
         login: { mode: login.mode, sso_only: login.sso_only },
         limits,
+        twofa,
+        recovery: { enabled: recovery },
+        lockout,
       })
       message.success(t('common.saved'))
       load()
@@ -126,7 +153,7 @@ export default function SecurityPage() {
 
   // Loading, not "nothing here": this used to render null, so a slow link showed a blank panel
   // with no explanation and a failed load looked identical to a page with no settings on it.
-  if (!captcha || !reg || !login || !limits) {
+  if (!captcha || !reg || !login || !limits || !twofa || !lockout) {
     return (
       <LoadGate loading={!loadErr} error={loadErr} onRetry={load}>
         {null}
@@ -228,6 +255,30 @@ export default function SecurityPage() {
         </Space>
       </Card>
 
+      <Card title={t('security.twofaTitle')}>
+        <Typography.Paragraph type="secondary">{t('security.twofaDesc')}</Typography.Paragraph>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+          <Row label={t('security.allowTOTP')} hint={t('security.allowTOTPHint')}>
+            <Switch checked={twofa.totp_enroll} onChange={(v) => setTwofa({ ...twofa, totp_enroll: v })} />
+          </Row>
+          <Row label={t('security.allowPasskey')} hint={t('security.allowPasskeyHint')}>
+            <Switch checked={twofa.passkey_enroll} onChange={(v) => setTwofa({ ...twofa, passkey_enroll: v })} />
+          </Row>
+          {/* Said once, in the card rather than beside each switch: it is a property of both. */}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('security.twofaLocalOnly')}</Typography.Text>
+        </Space>
+      </Card>
+
+      <Card title={t('security.recoveryTitle')}>
+        <Typography.Paragraph type="secondary">{t('security.recoveryDesc')}</Typography.Paragraph>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+          {recovery && !emailOK && <Alert type="error" showIcon title={t('security.recoveryNeedsEmail')} />}
+          <Row label={t('security.recoveryEnabled')} hint={t('security.recoveryEnabledHint')}>
+            <Switch checked={recovery} onChange={setRecovery} />
+          </Row>
+        </Space>
+      </Card>
+
       <Card title={t('security.regTitle')}>
         <Typography.Paragraph type="secondary">{t('security.regDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -269,6 +320,48 @@ export default function SecurityPage() {
               onChange={(v) => setReg({ ...reg, expiry_days: v ? String(v) : '' })}
             />
           </Row>
+        </Space>
+      </Card>
+
+      {/* The lockout sits with the ceilings because that is what it extends: it is the failure
+          ceiling below, held for longer than the window it was reached in. It is off by default —
+          the window alone is what every deployment had before this existed. */}
+      <Card title={t('security.lockoutTitle')}>
+        <Typography.Paragraph type="secondary">{t('security.lockoutDesc')}</Typography.Paragraph>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+          <Row label={t('security.lockoutEnabled')} hint={t('security.lockoutEnabledHint')}>
+            <Switch checked={lockout.enabled} onChange={(v) => setLockout({ ...lockout, enabled: v })} />
+          </Row>
+          {lockout.enabled && (
+            <>
+              <Row label={t('security.lockoutDuration')} hint={t('security.lockoutDurationHint')}>
+                <CompactNumberInput
+                  min={1}
+                  max={7 * 24 * 60}
+                  value={lockout.duration_min}
+                  onChange={(v) => setLockout({ ...lockout, duration_min: v || 1 })}
+                  after={t('security.minutes')}
+                />
+              </Row>
+              <Row label={t('security.lockoutScope')} hint={t('security.lockoutScopeHint')}>
+                <Select
+                  value={lockout.scope}
+                  style={{ width: '100%' }}
+                  onChange={(v) => setLockout({ ...lockout, scope: v })}
+                  options={[
+                    { value: 'ip_account', label: t('security.lockoutScopeIPAccount') },
+                    { value: 'ip', label: t('security.lockoutScopeIP') },
+                    { value: 'account', label: t('security.lockoutScopeAccount') },
+                  ]}
+                />
+              </Row>
+              {/* The one scope that can refuse a correct password. It is not hidden — it is a
+                  deliberate policy an operator may want — but it has to be labelled as what it is. */}
+              {lockout.scope === 'account' && (
+                <Alert type="warning" showIcon title={t('security.lockoutAccountWarning')} />
+              )}
+            </>
+          )}
         </Space>
       </Card>
 

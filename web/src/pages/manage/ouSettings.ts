@@ -33,6 +33,9 @@ export interface OUSettings {
   dailyQuota: Resolved<number>
   /** The window dailyQuota covers. Always resolved from the same OU as the number. */
   quotaPeriod: Resolved<string>
+  /** May this OU's members add an authenticator app, or a passkey. */
+  totpAllowed: Resolved<boolean>
+  passkeyAllowed: Resolved<boolean>
 }
 
 /**
@@ -66,6 +69,10 @@ export function resolveOU(g: UserGroupRow, def?: UserGroupRow, groups?: UserGrou
 
   return {
     urgent: { value: policy, inherited: policyInherited },
+    // The second-factor switches (security_policy.go). Deeper wins, like the run governance above:
+    // an OU may allow what its parent withdrew, because the answer is about its own members.
+    totpAllowed: own(g.totp_enroll, def?.totp_enroll ?? true),
+    passkeyAllowed: own(g.passkey_enroll, def?.passkey_enroll ?? true),
     weight,
     maxQueued: own(g.max_queued, def?.max_queued ?? 0),
     runWindow: own(g.run_window, def?.run_window ?? ''),

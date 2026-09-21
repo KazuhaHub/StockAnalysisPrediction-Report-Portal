@@ -39,7 +39,7 @@ interface Passkey {
 
 export default function AccountPage() {
   const { t } = useTranslation()
-  const { user, name, federated, totpEnabled, passkeyCount, refresh } = useAuth()
+  const { user, name, federated, totpEnabled, totpAllowed, passkeyCount, passkeyAllowed, refresh } = useAuth()
   const [passkeys, setPasskeys] = useState<Passkey[]>([])
 
   const loadPasskeys = useCallback(() => {
@@ -62,11 +62,16 @@ export default function AccountPage() {
       {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}
 
       {!federated && <PasswordCard />}
-      {!federated && <TwoFactorCard enabled={totpEnabled} onChange={refresh} />}
+      {/* Shown while the account MAY enrol, and also while it still has a factor to remove: an OU
+          that withdraws enrolment must not strand an account inside the factor it already holds. */}
+      {!federated && (totpAllowed || totpEnabled) && (
+        <TwoFactorCard enabled={totpEnabled} allowed={totpAllowed} onChange={refresh} />
+      )}
       <PasskeyCard
         passkeys={passkeys}
         federated={federated}
         totpEnabled={totpEnabled}
+        allowed={passkeyAllowed}
         count={passkeyCount}
         onChange={() => {
           loadPasskeys()
@@ -143,7 +148,7 @@ function PasswordCard() {
 
 // ---------- two-factor ----------
 
-function TwoFactorCard({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
+function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allowed: boolean; onChange: () => void }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [stage, setStage] = useState<'idle' | 'proof' | 'confirm'>('idle')
@@ -208,6 +213,7 @@ function TwoFactorCard({ enabled, onChange }: { enabled: boolean; onChange: () =
       extra={enabled ? <Tag color="green">{t('account.on')}</Tag> : <Tag>{t('account.off')}</Tag>}
     >
       <Typography.Paragraph type="secondary">{t('account.totpHint')}</Typography.Paragraph>
+      {!allowed && <Alert type="info" showIcon title={t('account.totpEnrolOff')} />}
       {enabled ? (
         <Button danger loading={busy} onClick={() => setStage('proof')}>
           {t('account.totpDisable')}
@@ -282,12 +288,14 @@ function PasskeyCard({
   passkeys,
   federated,
   totpEnabled,
+  allowed,
   count,
   onChange,
 }: {
   passkeys: Passkey[]
   federated: boolean
   totpEnabled: boolean
+  allowed: boolean
   count: number
   onChange: () => void
 }) {
@@ -350,6 +358,7 @@ function PasskeyCard({
       <Typography.Paragraph type="secondary">{t('account.passkeyHint')}</Typography.Paragraph>
       {!supported && <Alert type="warning" showIcon title={t('account.passkeyUnsupported')} />}
       {federated && <Alert type="info" showIcon title={t('account.passkeyFederated')} />}
+      {!allowed && !federated && <Alert type="info" showIcon title={t('account.passkeyEnrolOff')} />}
       {passkeys.length > 0 && (
         <div className="rp-plain-list" role="list" style={{ marginBottom: 12 }}>
           {passkeys.map((k) => (
@@ -373,7 +382,7 @@ function PasskeyCard({
       )}
       <Button
         type="primary"
-        disabled={!supported || federated}
+        disabled={!supported || federated || !allowed}
         loading={busy}
         onClick={() => setProofFor('register')}
       >

@@ -12,6 +12,10 @@ export interface Me {
   federated?: boolean // credentials live at the IdP: no local password, no local second factor
   totp_enabled?: boolean
   passkeys?: number
+  // Whether this account may ADD a factor (security_policy.go). Policy, not state: an account whose
+  // OU has withdrawn enrolment keeps the factor it already has, so the page reads both.
+  totp_allowed?: boolean
+  passkey_allowed?: boolean
 }
 
 // ---- Batch-run feature ----
@@ -432,6 +436,11 @@ export interface UserGroupRow {
   daily_run_quota?: number | null // run cap for members; null = inherit the parent OU, 0 = unlimited
   /** The window daily_run_quota is measured over: day | week | month | total. '' means day. */
   run_quota_period?: string
+  // The per-OU second-factor policy (security_policy.go): null = inherit the parent OU. These say
+  // whether the OU's members may ADD a factor — an account that already has one keeps signing in
+  // with it whatever this says.
+  totp_enroll?: boolean | null
+  passkey_enroll?: boolean | null
 }
 
 // Per-OU run allow-list matrix (ADR 0022 R3): which workflows a group may run, on which surfaces.
