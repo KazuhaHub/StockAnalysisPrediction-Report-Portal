@@ -83,6 +83,11 @@ func (s *Server) requireUserJSON(h handler) http.HandlerFunc {
 			jsonErrorCode(w, http.StatusUnauthorized, "session_expired", "登录已过期，请重新登录")
 			return
 		}
+		// Identity first, then the policy: an anonymous caller is told they are not signed in, not
+		// that they are at a wall they cannot see.
+		if !s.gateEnrolment(w, r, u) {
+			return
+		}
 		// Recorded HERE rather than in the handlers, so "last activity" means every authenticated
 		// call and not a list of endpoints somebody has to remember to extend.
 		s.touchSeen(u, time.Now())
@@ -124,6 +129,9 @@ func (s *Server) requireAdminJSON(h handler) http.HandlerFunc {
 			jsonError(w, http.StatusForbidden, "forbidden")
 			return
 		}
+		if !s.gateEnrolment(w, r, u) {
+			return
+		}
 		h(w, r, u)
 	}
 }
@@ -139,6 +147,9 @@ func (s *Server) requirePermJSON(perm string, h handler) http.HandlerFunc {
 		}
 		if !s.hasPerm(u, perm) {
 			jsonError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if !s.gateEnrolment(w, r, u) {
 			return
 		}
 		h(w, r, u)
@@ -239,7 +250,20 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	// /api/me is how the SPA LEARNS it is at the wall, so it is on the reachable list — but the call
+	// belongs here anyway: a list entry nobody consults is a list that can rot.
+	if !s.gateEnrolment(w, r, u) {
+		return
+	}
 	writeJSON(w, s.meJSON(u))
+}
+
+// mustEnrollForPage is the wall's state as a payload field. A policy that could not be read reads as
+// "not held": /api/me is answering, so the page has to render something, and the gate — not this
+// field — is what refuses the routes that matter.
+func (s *Server) mustEnrollForPage(user string) bool {
+	must, err := s.mustEnroll(user)
+	return err == nil && must
 }
 
 // meJSON is the shared "who am I" payload for /api/me and /api/login (email +
@@ -261,6 +285,10 @@ func (s *Server) meJSON(user string) map[string]any {
 		// The resolved enrolment policy, for the same reason: whether this account MAY add a factor
 		// is decided by its OU and the portal's switch, and the page hides what would only fail.
 		"totp_allowed": s.totpEnrolAllowed(user), "passkey_allowed": s.passkeyEnrolAllowed(user),
+		// Whether the account is held at the enrolment wall right now, so the account page can say
+		// why it cannot go anywhere else (see mustEnrollForPage).
+		"must_enroll_2fa": s.mustEnrollForPage(user),
+
 		"password_recovery": s.passwordRecoveryEnabled(),
 	}
 }

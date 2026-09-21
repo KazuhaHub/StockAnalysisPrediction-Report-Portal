@@ -675,6 +675,11 @@ func (s *Server) requireUser(h handler) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
+		// The report pages are inside the same wall as the API: a mandated account is sent to the
+		// account page rather than shown a report it should not be reading yet.
+		if !s.gateEnrolmentPage(w, r, u) {
+			return
+		}
 		h(w, r, u)
 	}
 }
@@ -1033,6 +1038,11 @@ func writeJSONIfChanged(w http.ResponseWriter, r *http.Request, v any) {
 func (s *Server) apiSymbols(w http.ResponseWriter, r *http.Request) {
 	if !s.canQuery(r) { // Bearer(query) or a logged-in browser session
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Gated only when a session is what the caller used: this route also serves the machine surface,
+	// and a Dify query token is not a reader to be held at an enrolment wall.
+	if u := s.currentActiveUser(r); u != "" && !s.gateEnrolment(w, r, u) {
 		return
 	}
 	q := r.URL.Query()

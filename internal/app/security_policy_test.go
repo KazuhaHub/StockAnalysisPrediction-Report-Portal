@@ -53,6 +53,17 @@ func policyServer(t *testing.T) policyEnv {
 
 func boolPtr(v bool) *bool { return &v }
 
+// securityOf is the resolved policy, with a read failure failing the test rather than the assertions
+// below it: a nil error is the whole contract of this call.
+func securityOf(t *testing.T, st *Store, user string) SecuritySettings {
+	t.Helper()
+	sts, err := st.SecuritySettings(user)
+	if err != nil {
+		t.Fatalf("SecuritySettings(%s): %v", user, err)
+	}
+	return sts
+}
+
 // ---------- resolution ----------
 
 // With nothing configured, every account may enrol — which is what the portal did before this
@@ -60,7 +71,7 @@ func boolPtr(v bool) *bool { return &v }
 func TestEnrolmentDefaultsToAllowed(t *testing.T) {
 	env := policyServer(t)
 	for _, u := range []string{"root-user", "child-user", "nobody-at-all"} {
-		got := env.s.st.SecuritySettings(u)
+		got := securityOf(t, env.s.st, u)
 		if !got.TOTPAllowed || !got.PasskeyAllowed {
 			t.Errorf("%s defaults to %+v, want both allowed", u, got)
 		}
@@ -70,16 +81,16 @@ func TestEnrolmentDefaultsToAllowed(t *testing.T) {
 // An OU that withdraws enrolment does so for its members, and for nobody else.
 func TestAnOUWithdrawsEnrolmentFromItsMembersOnly(t *testing.T) {
 	env := policyServer(t)
-	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := env.s.st.SecuritySettings("child-user"); got.TOTPAllowed {
+	if got := securityOf(t, env.s.st, "child-user"); got.TOTPAllowed {
 		t.Error("the child OU withdrew TOTP enrolment; its member still has it")
 	}
-	if got := env.s.st.SecuritySettings("child-user"); !got.PasskeyAllowed {
+	if got := securityOf(t, env.s.st, "child-user"); !got.PasskeyAllowed {
 		t.Error("passkeys were not withdrawn and must stay allowed (NULL = inherit)")
 	}
-	if got := env.s.st.SecuritySettings("root-user"); !got.TOTPAllowed {
+	if got := securityOf(t, env.s.st, "root-user"); !got.TOTPAllowed {
 		t.Error("an account outside that OU must be unaffected")
 	}
 }
@@ -89,16 +100,16 @@ func TestAnOUWithdrawsEnrolmentFromItsMembersOnly(t *testing.T) {
 func TestADeeperOUSettingWins(t *testing.T) {
 	env := policyServer(t)
 	// Default withdraws TOTP; the child re-allows it.
-	if err := env.s.st.SetGroupEnrolment(env.defaultID, boolPtr(false), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.defaultID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(true), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(true), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := env.s.st.SecuritySettings("root-user"); got.TOTPAllowed {
+	if got := securityOf(t, env.s.st, "root-user"); got.TOTPAllowed {
 		t.Error("the Default OU withdrew TOTP enrolment; an account directly in it must be refused")
 	}
-	if got := env.s.st.SecuritySettings("child-user"); !got.TOTPAllowed {
+	if got := securityOf(t, env.s.st, "child-user"); !got.TOTPAllowed {
 		t.Error("the child OU re-allowed it and must win over its parent")
 	}
 }
@@ -106,10 +117,10 @@ func TestADeeperOUSettingWins(t *testing.T) {
 // An OU with no setting of its own takes its parent's, all the way up to the Default.
 func TestAnOUWithNoSettingInheritsItsParent(t *testing.T) {
 	env := policyServer(t)
-	if err := env.s.st.SetGroupEnrolment(env.defaultID, nil, boolPtr(false)); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.defaultID, nil, boolPtr(false), nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := env.s.st.SecuritySettings("child-user"); got.PasskeyAllowed {
+	if got := securityOf(t, env.s.st, "child-user"); got.PasskeyAllowed {
 		t.Error("the child sets nothing itself, so it inherits the Default's withdrawal")
 	}
 }
@@ -121,10 +132,10 @@ func TestAnOUWithNoSettingInheritsItsParent(t *testing.T) {
 func TestTheGlobalSwitchOverridesEveryOU(t *testing.T) {
 	env := policyServer(t)
 	env.s.st.SetSetting(setTOTPEnroll, "0")
-	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(true), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(true), nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !env.s.st.SecuritySettings("child-user").TOTPAllowed {
+	if !securityOf(t, env.s.st, "child-user").TOTPAllowed {
 		t.Fatal("the OU is set to allow, so the OU layer must say allowed")
 	}
 	if env.s.totpEnrolAllowed("child-user") {
@@ -146,7 +157,7 @@ func TestTOTPEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
 	// Enrol first, while it is allowed, so the second half of this test has a real credential to
 	// remove rather than a staged one.
 	secret, _ := enrol(t, env.s, "child-user")
-	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	rec := postAs(t, env.s.apiTOTPSetup, "child-user", `{}`)
@@ -166,7 +177,7 @@ func TestTOTPEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
 
 func TestPasskeyEnrolmentIsRefusedWhereItIsWithdrawn(t *testing.T) {
 	env := policyServer(t)
-	if err := env.s.st.SetGroupEnrolment(env.childID, nil, boolPtr(false)); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, nil, boolPtr(false), nil); err != nil {
 		t.Fatal(err)
 	}
 	rec := postAs(t, env.s.apiPasskeyRegisterBegin, "child-user", `{}`)
@@ -188,7 +199,7 @@ func TestAnEnrolledFactorStillSignsInWhenEnrolmentIsWithdrawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	secret, _ := enrol(t, s, "alice")
-	if err := s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil); err != nil {
+	if err := s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The password leg demands the second factor...
@@ -216,7 +227,7 @@ func TestAnEnrolledFactorStillSignsInWhenEnrolmentIsWithdrawn(t *testing.T) {
 // /api/me carries the resolved policy so the account page can hide what would only fail on submit.
 func TestMeReportsTheResolvedEnrolmentPolicy(t *testing.T) {
 	env := policyServer(t)
-	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil); err != nil {
+	if err := env.s.st.SetGroupEnrolment(env.childID, boolPtr(false), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	read := func(user string) map[string]any {
