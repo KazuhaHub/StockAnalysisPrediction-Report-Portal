@@ -35,6 +35,10 @@ interface Draft {
   quotaInherit: boolean
   dailyQuota: number
   quotaPeriod: string
+  totpInherit: boolean
+  totpAllowed: boolean
+  passkeyInherit: boolean
+  passkeyAllowed: boolean
 }
 
 // One announcement that names the OU being deleted. `orphaned` means this OU is its ONLY recipient,
@@ -66,6 +70,10 @@ function draftOf(g: UserGroupRow, def: UserGroupRow | undefined, groups: UserGro
     quotaInherit: !isDefault && g.daily_run_quota == null,
     dailyQuota: r.dailyQuota.value,
     quotaPeriod: r.quotaPeriod.value,
+    totpInherit: !isDefault && g.totp_enroll == null,
+    totpAllowed: r.totpAllowed.value,
+    passkeyInherit: !isDefault && g.passkey_enroll == null,
+    passkeyAllowed: r.passkeyAllowed.value,
   }
 }
 
@@ -98,6 +106,8 @@ export default function OrgUnitDetail({
       daily_run_quota: null,
       run_quota_period: '',
       priority: '',
+      totp_enroll: null,
+      passkey_enroll: null,
     } as UserGroupRow,
     def,
     groups,
@@ -136,6 +146,9 @@ export default function OrgUnitDetail({
         restricted: isDefault ? false : d.restricted,
         daily_run_quota: d.quotaInherit ? null : d.dailyQuota,
         run_quota_period: d.quotaPeriod,
+        // null = inherit the parent OU, the same reading daily_run_quota has just above.
+        totp_enroll: d.totpInherit ? null : d.totpAllowed,
+        passkey_enroll: d.passkeyInherit ? null : d.passkeyAllowed,
         ...(isDefault ? {} : { parent_id: d.parent_id }),
       })
       message.success(t('common.saved'))
@@ -304,6 +317,32 @@ export default function OrgUnitDetail({
           onInheritingChange={(v) => set('priority', v ? null : 50)}
         >
           <InputNumber size="small" min={0} max={100} value={d.priority ?? undefined} onChange={(v) => set('priority', v ?? 0)} />
+        </InheritField>
+      </Card>
+
+      {/* Whether this OU's members may add a second factor. It is a policy about its own members,
+          so a child may allow what its parent withdrew — and withdrawing it never removes a factor
+          someone already has, which is what stops this from being a lockout. */}
+      <Card size="small" title={t('ou.sectionSecurity')}>
+        <InheritField
+          label={t('ou.allowTOTP')}
+          hint={t('ou.allowTOTPHint')}
+          from={from}
+          inherited={wouldInherit.totpAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
+          inheriting={d.totpInherit}
+          onInheritingChange={(v) => set('totpInherit', v)}
+        >
+          <Switch checked={d.totpAllowed} onChange={(v) => set('totpAllowed', v)} />
+        </InheritField>
+        <InheritField
+          label={t('ou.allowPasskey')}
+          hint={t('ou.allowPasskeyHint')}
+          from={from}
+          inherited={wouldInherit.passkeyAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
+          inheriting={d.passkeyInherit}
+          onInheritingChange={(v) => set('passkeyInherit', v)}
+        >
+          <Switch checked={d.passkeyAllowed} onChange={(v) => set('passkeyAllowed', v)} />
         </InheritField>
       </Card>
 

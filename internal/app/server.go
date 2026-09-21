@@ -189,6 +189,9 @@ func RunServer(cfgPath string) {
 	// reader rather than the numbers is what makes a change on the settings page apply to the next
 	// attempt instead of at the next restart.
 	s.loginThr.limits = s.loginLimits
+	// The lockout is the same shape: a reader, so turning it on or off takes effect on the next
+	// attempt rather than at the next restart.
+	s.loginThr.lockout = s.loginLockout
 	s.names = LoadNames(config.DirOf(cfg.DBPath), st)
 	s.geo = newGeoService(config.DirOf(cfg.DBPath))
 	s.geo.st = st

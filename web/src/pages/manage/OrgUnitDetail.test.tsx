@@ -98,6 +98,24 @@ describe('OrgUnitDetail', () => {
     expect(screen.queryByText('ou.deleteOu')).toBeNull()
   })
 
+  // The second-factor overrides ride with the OU, because that is where they are edited. null is
+  // "inherit the parent OU", which is what the InheritField's radio means.
+  it('saves the second-factor overrides, with null for the ones left inheriting', async () => {
+    mount(g({ id: 2, totp_enroll: false }))
+    fireEvent.click(screen.getByText('common.save'))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const body = put.mock.calls[0][1] as Record<string, unknown>
+    expect(body.totp_enroll).toBe(false)
+    expect(body.passkey_enroll).toBeNull()
+  })
+
+  // The card renders on every OU, including the Default one: the portal-wide switches are global,
+  // but the Default OU is still an OU and its members still resolve through it.
+  it('offers the second-factor card on the Default OU too', () => {
+    mount(DEF, [DEF])
+    expect(screen.getByText('ou.sectionSecurity')).toBeTruthy()
+  })
+
   // The quota is a number AND a window, and both have to survive the round trip together — the
   // server refuses to inherit one without the other, so a panel that sent only the number would
   // silently reset a monthly cap to daily.

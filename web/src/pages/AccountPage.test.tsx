@@ -13,6 +13,9 @@ const { apiMock, authMock, webauthnMock } = vi.hoisted(() => ({
     federated: false,
     totpEnabled: false,
     passkeyCount: 0,
+    // What the account MAY add, as opposed to what it HAS (security_policy.go).
+    totpAllowed: true,
+    passkeyAllowed: true,
     refresh: vi.fn(),
   },
   webauthnMock: { createCredential: vi.fn(), passkeySupported: vi.fn(() => true) },
@@ -49,6 +52,31 @@ describe('AccountPage', () => {
     authMock.federated = false
     authMock.totpEnabled = false
     authMock.passkeyCount = 0
+    authMock.totpAllowed = true
+    authMock.passkeyAllowed = true
+  })
+
+  // An OU that withdraws enrolment must not strand an account inside the factor it already holds:
+  // the card stays (with its remove button) and only the ADD affordance goes.
+  it('keeps the removal path when enrolment is withdrawn, and drops the add', () => {
+    authMock.totpEnabled = true
+    authMock.totpAllowed = false
+    authMock.passkeyAllowed = false
+    renderPage()
+    expect(screen.getByText('account.totpTitle')).toBeTruthy()
+    expect(screen.getByText('account.totpDisable')).toBeTruthy()
+    expect(screen.getByText('account.totpEnrolOff')).toBeTruthy()
+    expect(screen.queryByText('account.totpEnable')).toBeNull()
+    // The passkey card keeps its list and revoke buttons; only "add" is disabled.
+    const add = screen.getByText('account.passkeyAdd').closest('button')
+    expect(add?.hasAttribute('disabled')).toBe(true)
+  })
+
+  // With no factor and no permission there is nothing the card could do, so it is not drawn at all.
+  it('draws no second-factor card when the account may not enrol and has none', () => {
+    authMock.totpAllowed = false
+    renderPage()
+    expect(screen.queryByText('account.totpTitle')).toBeNull()
   })
 
   // Under force-SSO the portal has stopped accepting a password at the front door. Drawing a

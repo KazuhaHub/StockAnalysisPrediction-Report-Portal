@@ -9,12 +9,20 @@ import (
 	"time"
 )
 
-// loginThrottle rate-limits failed logins per IP and per account, in memory (single binary). It
-// blunts online password brute-force and the bcrypt-per-request CPU-exhaustion vector: after
-// loginFailMax failures against a key within loginFailWindow, that key is refused until the window
-// rolls over. Critically, the caller (apiLogin) checks the password BEFORE consulting the per-account
-// key, so a correct password always succeeds and clears the counters — a per-account limit can never
-// lock a legitimate owner out of their own account (only the IP key hard-blocks before bcrypt).
+// loginThrottle rate-limits failed logins per IP, per account, and per address+account pair, in
+// memory (single binary). It blunts online password brute-force and the bcrypt-per-request
+// CPU-exhaustion vector: after loginFailMax failures against a key within loginFailWindow, that key is
+// refused until the window rolls over.
+//
+// On top of that window sits an optional LOCKOUT (security_policy.go): when the operator has turned it
+// on, the key that reaches the ceiling stays refused for a duration of its own, which may outlive the
+// window it was taken in. Two properties are deliberate and are tested as such:
+//
+//   - the caller checks the password BEFORE consulting the per-account key, so within the ceiling a
+//     correct password always succeeds and clears the counters. A lockout at scope `account` breaks
+//     that on purpose — it refuses a correct password for its duration — which is why it is opt-in.
+//   - the IP key is checked BEFORE bcrypt and stays that way whatever the scope is: it is what prices
+//     the CPU, and a lockout replaces it with nothing.
 type loginThrottle struct {
 	mu   sync.Mutex
 	recs map[string]*failRec
@@ -23,6 +31,9 @@ type loginThrottle struct {
 	// settings page applies to the next attempt instead of at the next restart. Left nil the
 	// constants stand, which is what the throttle did before it was configurable.
 	limits func() (int, time.Duration)
+	// lockout, when set, reports whether a key that reaches the ceiling is locked, and for how long.
+	// Nil means no lockout, which is what every deployment had before the setting existed.
+	lockout func() (bool, time.Duration)
 }
 
 // ceiling resolves the failure ceiling and the window in force right now.
@@ -33,9 +44,21 @@ func (l *loginThrottle) ceiling() (int, time.Duration) {
 	return loginFailMax, loginFailWindow
 }
 
+// lockFor resolves the lockout in force right now: whether to lock, and for how long.
+func (l *loginThrottle) lockFor() (bool, time.Duration) {
+	if l.lockout == nil {
+		return false, 0
+	}
+	return l.lockout()
+}
+
 type failRec struct {
 	n       int
 	resetAt time.Time
+	// lockedUntil is when a lockout taken at the ceiling expires; the zero value means no lock. It is
+	// deliberately independent of resetAt: a lock may outlive the window it was taken in, which is the
+	// difference between this and the window counter.
+	lockedUntil time.Time
 }
 
 // The shipped ceiling, still the fallback whenever no setting is wired in (tests, and any
@@ -47,40 +70,70 @@ const (
 
 func newLoginThrottle() *loginThrottle { return &loginThrottle{recs: map[string]*failRec{}} }
 
-// blocked reports whether key has reached the failure ceiling within the current window.
+// blocked reports whether key is refused right now: either it has reached the failure ceiling within
+// the current window, or it is serving a lockout.
 func (l *loginThrottle) blocked(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	r := l.recs[key]
+	if r == nil {
+		return false
+	}
+	if now.Before(r.lockedUntil) {
+		return true
+	}
 	max, _ := l.ceiling()
-	return r != nil && now.Before(r.resetAt) && r.n >= max
+	return now.Before(r.resetAt) && r.n >= max
 }
 
-// record counts one failed attempt against key, (re)starting the window if it had lapsed. It also
-// opportunistically prunes lapsed entries so the map can't grow unbounded with distinct attacker IPs.
+// record counts one failed attempt against key, (re)starting the window if it had lapsed, and takes a
+// lockout when the attempt reaches the ceiling. It also opportunistically prunes lapsed entries so the
+// map can't grow unbounded with distinct attacker IPs.
 func (l *loginThrottle) record(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if len(l.recs) > 4096 {
-		for k, r := range l.recs {
-			if now.After(r.resetAt) {
-				delete(l.recs, k)
-			}
-		}
-		// If a burst of distinct live keys still exceeds the cap (nothing lapsed to prune), drop the
-		// whole table rather than run an O(n) scan under the lock on every subsequent insert. This
-		// only happens under a >4096-distinct-source flood; losing partial counters then is acceptable.
-		if len(l.recs) > 4096 {
-			l.recs = make(map[string]*failRec)
-		}
-	}
+	l.prune(now)
+	max, window := l.ceiling()
 	r := l.recs[key]
-	if r == nil || now.After(r.resetAt) {
-		_, window := l.ceiling()
-		l.recs[key] = &failRec{n: 1, resetAt: now.Add(window)}
+	if r == nil || (now.After(r.resetAt) && !now.Before(r.lockedUntil)) {
+		r = &failRec{resetAt: now.Add(window)}
+		l.recs[key] = r
+	}
+	// Counted here rather than in the branches above, so a first failure — the one that can reach a
+	// ceiling of 1 — takes its lockout like any other.
+	r.n++
+	if lock, dur := l.lockFor(); lock && r.n >= max && !now.Before(r.lockedUntil) {
+		r.lockedUntil = now.Add(dur)
+	}
+}
+
+// prune bounds the map. The bound must never take a lock with it: a lock is a decision the operator
+// asked for, and a flood of distinct sources — exactly when an attacker would want it gone — is the
+// case that used to drop the whole table.
+func (l *loginThrottle) prune(now time.Time) {
+	const maxEntries = 4096
+	if len(l.recs) <= maxEntries {
 		return
 	}
-	r.n++
+	for k, r := range l.recs {
+		if now.After(r.resetAt) && !now.Before(r.lockedUntil) {
+			delete(l.recs, k)
+		}
+	}
+	if len(l.recs) <= maxEntries {
+		return
+	}
+	// A burst of distinct live keys (nothing lapsed, nothing unlocked): keep the locked ones and drop
+	// the rest. Losing partial window counters under a >4096-source flood is the lesser evil next to
+	// running an O(n) scan under the lock on every subsequent insert — and the locks, which are the
+	// part that is a policy rather than a counter, are exactly what is kept.
+	kept := make(map[string]*failRec)
+	for k, r := range l.recs {
+		if now.Before(r.lockedUntil) {
+			kept[k] = r
+		}
+	}
+	l.recs = kept
 }
 
 // fails reports how many failures a key has accumulated inside the current window, which is what
