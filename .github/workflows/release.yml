@@ -49,6 +49,15 @@ on:
 permissions:
   contents: read
 
+# EVERY ACTION NOT PUBLISHED BY GITHUB IS PINNED TO A COMMIT, not to a tag. The release and docker
+# jobs hold RELEASE_PAT, the credential that also edits and publishes releases and writes the
+# CHANNEL_* variables deciding what :latest points at, and packages: write on ghcr.io. A tag can be
+# moved by whoever controls the action's repository, and a step can read every secret its job
+# references out of the runner's memory, not only the ones handed to it: the
+# tj-actions/changed-files compromise (March 2025) did exactly that and printed them into the build
+# log. Dependabot's github-actions updates bump the commit and the version comment beside it
+# together. release-channels.yml follows the same rule.
+
 # Publisher jobs run with no go.work and no silent toolchain switch, mirroring test.yml.
 env:
   GOWORK: "off"
@@ -185,8 +194,8 @@ jobs:
           fi
           echo "release note: annotated tag ${VERSION}"
 
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -398,8 +407,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/release_guard.py guard-draft "$VERSION" --repo "$REPO"
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -488,7 +497,7 @@ jobs:
             echo "::error::tag ${VERSION} moved during the build; refusing publication"
             exit 1
           }
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           # The default GITHUB_TOKEN (github-actions[bot]) is blocked from creating releases on
           # this repo (403 "Resource not accessible by integration") despite contents:write, so
@@ -550,8 +559,8 @@ jobs:
             echo "::error::tag ${VERSION} moved during the build; refusing publication"
             exit 1
           }
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -566,7 +575,7 @@ jobs:
           python3 scripts/release_guard.py guard "${IMAGE}:${VERSION}"
       - name: Build and push the fixed multi-arch image
         id: push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile.release
