@@ -62,8 +62,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      # Pinned to a commit for the reason release.yml gives: this job holds RELEASE_PAT and
+      # packages: write, and a moved tag would run inside it.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

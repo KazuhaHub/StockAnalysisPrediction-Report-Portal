@@ -46,9 +46,41 @@ jobs:
       TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
     steps:
       - uses: actions/checkout@v6
+      # EACH GO JOB KEEPS ITS OWN BUILD CACHE, AND setup-go KEEPS NONE. setup-go's `cache: true`
+      # stores one entry per toolchain and go.sum for every job in this file, and a key cannot be
+      # written twice, so whichever job finished first owned it for all of them. That was workflow
+      # lint, whose only Go work is compiling actionlint: every job restored its 24 MB and compiled
+      # the rest from source (`go build` 34s and staticcheck 30s here, ~100s of each race shard's
+      # step, 26-38s of docker-image's binary) on every run since go.sum last changed in #41.
+      # Modules are left to the proxy: downloading all of them takes ~3s.
+      #
+      # RESTORED ON EVERY EVENT, SAVED ONLY FROM A MAIN PUSH. A save from a pull request is visible
+      # only to later runs of that same PR, while a save from main is one every PR can read, so
+      # main is the only place a save earns its upload. The save is the job's last step and
+      # carries the implicit success(), so a run that failed writes nothing.
+      #
+      # THE KEY ENDS IN THE RUN ID, NOT AT go.sum. A key cannot be overwritten, so a go.sum key
+      # would freeze at the first main push after a dependency change: at that commit's packages,
+      # and at its toolchain, so a Go patch bump in go.mod would turn every entry into a miss that
+      # nothing could replace until go.sum next moved. A key per run lets every main push leave
+      # the newest cache for the next run to restore by prefix. Superseded keys are never read
+      # again and age out of the repository's cache storage; what the newest key carries is
+      # bounded by the trim before each save (below). A prefix restore is safe because the cache
+      # is content-addressed: a stale entry is a miss, never a wrong build. staticcheck's
+      # analysis cache rides along in this job's key.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-test-${{ runner.os }}-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
       # staticcheck: static analysis beyond go vet (real bugs, dead code, simplifications).
@@ -60,7 +92,7 @@ jobs:
       # module graph back onto a vulnerable version without CI noticing. Pinned so a new advisory
       # database release is the only thing that can change this gate's verdict.
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-      # -count=1 disables Go's test result cache: setup-go restores GOCACHE between runs, and a
+      # -count=1 disables Go's test result cache: the build cache is restored between runs, and a
       # cached "ok" from a previous run would let a flaky test report green without executing.
       - name: Test
         run: |
@@ -73,6 +105,29 @@ jobs:
           name: go-test-output
           path: go-test-output.txt
           retention-days: 7
+      # A SAVE KEEPS ONLY WHAT ITS RUN USED. Each save carries forward all that its restore
+      # brought, and Go's own trim drops only what went unused for five days: that bounds an
+      # object's age, not the cache's size. Nearly every main push rebuilds internal/app (its
+      # non-race archive alone is 13.9 MB) and main has taken twenty-odd pushes in a day, so five
+      # days of objects no run reads again would swell each key that every job downloads before
+      # it starts, and crowd buildx's image layers out of the repository's 10 GB of cache.
+      # Go refreshes an entry's mtime when it uses one over an hour old, and the restore keeps
+      # the saved mtimes, so all a run used is under 90 minutes old at its save (no job here may
+      # run past 30); an entry three hours old went unused. The match is Go's own trim's: only
+      # the -a and -d entries of the 256 subdirectories, and a cached `go run` binary (staticcheck,
+      # govulncheck) goes whole, since its directory carries the refreshed mtime and not the file.
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          find ~/.cache/go-build ~/.cache/staticcheck -mindepth 2 -maxdepth 2 \
+            \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
   # The race detector on the concurrent core, split by event: full `-race ./...` is dominated by
   # internal/app (one big test binary), which used to put 6+ minutes on every PR. A PR runs the
@@ -86,9 +141,20 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+      # The build cache pair go-test explains, restore half only: this job never runs on main, so
+      # a key of its own could never be saved. It reads the full shards' key, whose race objects
+      # for internal/app and its dependencies are most of what it compiles.
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-race-app-${{ runner.os }}-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - name: Race the concurrency packages and the app scheduler tests
         run: |
           set -o pipefail
@@ -115,7 +181,9 @@ jobs:
   # balanced as tests are added and is self-maintaining: a new test lands in exactly one shard
   # without editing this file. Four is the point of diminishing returns: every shard pays the same
   # ~45s race-instrumented compile, so eight shards saved only ~20s more wall clock at twice the
-  # jobs. (Measured on main: 4x~3m, 8x~2m40s, unsplit 6m30s.)
+  # jobs. (Measured on main: 4x~3m, 8x~2m40s, unsplit 6m30s.) Those numbers predate the per-job
+  # build cache (see go-test), which takes most of that compile off every shard; the count has
+  # not been retuned since.
   go-race-others:
     name: go race full (other packages)
     if: github.event_name != 'pull_request'
@@ -123,9 +191,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      # The build cache pair go-test explains, under a key of its own: no other job builds these
+      # packages' race-instrumented tests.
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-others-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-race-others-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-race-others-${{ runner.os }}-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - name: Race the other packages
         run: |
           set -o pipefail
@@ -137,6 +215,14 @@ jobs:
           name: go-race-others-output
           path: go-race-others.txt
           retention-days: 7
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-others-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
   go-race-full:
     name: go race full (${{ matrix.shard }}/4)
@@ -149,9 +235,20 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
+      # The build cache pair go-test explains, one key for all four shards: they compile the same
+      # objects, since the partition changes only which tests run, so shard 1 alone saves it. The
+      # PR-only go race job restores this key too.
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-race-app-${{ runner.os }}-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - name: Race shard ${{ matrix.shard }}/4 of internal/app
         shell: bash
         run: |
@@ -166,6 +263,14 @@ jobs:
           name: go-race-shard-${{ matrix.shard }}-output
           path: go-race-shard-${{ matrix.shard }}.txt
           retention-days: 7
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1
+        run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shard == 1
+        with:
+          path: ~/.cache/go-build
+          key: go-build-race-app-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
   # The project's own tests passing does not prove the workflow YAML is valid. actionlint checks
   # expressions, matrix and job dependencies, and shell-checks the embedded run: scripts with the
@@ -179,6 +284,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          # Uncached, and that is the fix rather than an omission. This job finishes first, so with
+          # setup-go's cache on it saved the key every Go job shared, and froze 24 MB of actionlint
+          # objects as their build cache (see go-test). Compiling actionlint cold costs it ~10s.
+          cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Release script tests
         # The CalVer rules and the rolling-channel decision are pure shell, and they are tested as
@@ -226,9 +335,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # The build cache pair go-test explains, under a key of its own: CGO_ENABLED=0 and -trimpath
+      # give this binary's objects action IDs no other job produces.
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-docker-image-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-docker-image-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-docker-image-${{ runner.os }}-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: false
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -319,3 +438,11 @@ jobs:
       - name: Remove test container
         if: always()
         run: docker rm -f rp-smoke || true
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-docker-image-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
