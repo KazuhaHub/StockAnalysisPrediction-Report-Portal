@@ -126,6 +126,12 @@ the race lane does not run on a pull request. The normal target is therefore the
 from the feature PR after its main-branch run finishes. The note changes the tag object, not that
 commit, so publishing needs no second PR and does not invalidate the completed CI result.
 
+**The jobs that must have passed are `main`'s list, not the commit's.** The check runs
+`scripts/release_guard.py` from the default branch, while a `test` run, pushed or dispatched, runs the
+commit's own `test.yml`, which has no job added after it. So a commit from before a job joined the
+list can never be released. `release targets (cross-compile)` is such a job: release from a commit
+that has it, and cherry-pick a hotfix for an older release onto current `main` to release it.
+
 The push is a separate, deliberate command because it is the irreversible step; the script never
 pushes. It refuses an empty note, a tag that already exists, and a tag that is not CalVer. With the
 archival-file flow it also refuses a commit that does not contain its note; with `--notes-file`, the

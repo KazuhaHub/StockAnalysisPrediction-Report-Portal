@@ -409,6 +409,15 @@ jobs:
       - name: Audit production web dependencies
         working-directory: web
         run: npm audit --omit=dev --audit-level=high
+      # THE RELEASE RECIPE, AND THE RELEASE'S OWN CHECK OF IT. The ldflags are release.yml's build
+      # leg with Version=ci, and check-release-build.sh is the script that passes or fails each
+      # release binary, which used to run for the first time during a release (v2026.38.2 and .6
+      # both died in it on vcs.modified=true, from release-only steps). It reads the compiler,
+      # platform, commit, CGO setting and clean worktree back out of the binary, here after the SPA
+      # build has written into the checkout, so a build step that dirties a tracked file fails a PR
+      # instead. On a pull request HEAD is the merge commit, and that is what Go stamps. The probe
+      # below requires the injected commit, which catches an -X that silently stopped applying (a
+      # renamed variable is not a link error). A second or so.
       - name: Build the linux/amd64 binary
         env:
           CGO_ENABLED: "0"
@@ -417,9 +426,13 @@ jobs:
         run: |
           set -euo pipefail
           mod=$(go list -m)
+          sha=$(git rev-parse HEAD)
           mkdir -p bin/linux-amd64
-          go build -trimpath -ldflags "-s -w -X ${mod}/internal/version.Version=ci" \
-            -o bin/linux-amd64/report-portal ./cmd/report-portal
+          ldflags="-s -w -X ${mod}/internal/version.Version=ci"
+          ldflags+=" -X ${mod}/internal/version.Commit=${sha:0:7}"
+          ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
+          go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
+          sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
       - uses: docker/setup-buildx-action@v4
       - name: Build the release image
         uses: docker/build-push-action@v7
@@ -467,9 +480,10 @@ jobs:
             --security-opt no-new-privileges --user 10001:10001 \
             --entrypoint /app/report-portal report-portal:ci version)
           echo "$version_out"
+          sha=$(git rev-parse HEAD)
           case "$version_out" in
-            *ci*) ;;
-            *) echo "::error::version output is missing the injected build id"; exit 1 ;;
+            "ci (${sha:0:7}, "*) ;;
+            *) echo "::error::version output is missing the injected build id or commit"; exit 1 ;;
           esac
       - name: End-to-end checks against the release image
         run: |
@@ -497,3 +511,63 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: go-build-docker-image-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+
+  # THE OTHER FIVE RELEASE TARGETS, COMPILED BEFORE A TAG RATHER THAN BY ONE. docker-image builds
+  # linux/amd64; release.yml also ships linux/arm64, darwin and windows, and nothing compiled those
+  # until a release did. The repository has no build tags, so the realistic break is a dependency:
+  # modernc.org/sqlite and libc carry generated code per GOOS/GOARCH, and Dependabot bumps them
+  # weekly. So this runs on a main push, where release_guard waits for it, and on Dependabot's Go
+  # module PRs, where such a break is introduced; other PRs skip it. Each binary gets the release's
+  # ldflags and check-release-build.sh, as in docker-image. Not a required check.
+  #
+  # THE CACHE KEY IS go.mod AND go.sum, NOT THE RUN ID. Nearly all the compile is the dependencies,
+  # the five platforms' modernc code above all (~35s a target cold, ~280 MB of cache each), and they
+  # change only with those two files, which also carry the toolchain version. This repository's own
+  # packages recompile in ~3s a target on top of warm dependencies. A per-run key would upload
+  # ~400 MB compressed on every main push to save those seconds; this one is written once per
+  # dependency change, and a PR that bumps one restores main's entry by prefix.
+  release-targets:
+    name: release targets (cross-compile)
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'dependabot/go_modules/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-release-targets-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: |
+            go-build-release-targets-${{ runner.os }}-
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build and verify each target
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mod=$(go list -m)
+          sha=$(git rev-parse HEAD)
+          ldflags="-s -w -X ${mod}/internal/version.Version=ci"
+          ldflags+=" -X ${mod}/internal/version.Commit=${sha:0:7}"
+          ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
+          for target in linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            case "$goos" in windows) ext=.exe ;; *) ext= ;; esac
+            out="bin/${goos}-${goarch}/report-portal${ext}"
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
+            sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
+          done
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-release-targets-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}

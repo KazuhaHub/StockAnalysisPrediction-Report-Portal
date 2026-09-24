@@ -27,6 +27,9 @@ def push_run_jobs(workflow):
         cond = cond[1] if cond else None
         if cond == "github.event_name == 'pull_request'":
             continue
+        # `!= 'pull_request' || <more>` runs on every push whatever <more> says.
+        if cond is not None and cond.startswith("github.event_name != 'pull_request' ||"):
+            cond = "github.event_name != 'pull_request'"
         if cond not in (None, "github.event_name != 'pull_request'"):
             raise AssertionError(f'teach push_run_jobs whether a push runs {name!r} (if: {cond})')
         shards = re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)
@@ -104,7 +107,7 @@ class GuardTests(unittest.TestCase):
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
                 ['go-test','web typecheck + build','workflow lint','docker image (font gate + smoke)',
-                 'go race full (other packages)']]
+                 'go race full (other packages)','release targets (cross-compile)']]
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertTrue(ci_ready(jobs))
@@ -138,6 +141,29 @@ class GuardTests(unittest.TestCase):
         self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
         self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
         self.assertIn('test -n "$regex"', block)
+
+    def test_ci_compiles_every_release_target(self):
+        # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
+        # them before a tag: linux/amd64 in docker-image, the rest in release-targets. A platform
+        # added to the release and not here would first compile during a release, which is what
+        # release-targets exists to prevent. Both jobs must also run the release's own provenance
+        # check on what they build.
+        release = set(re.findall(r'^\s+- \{ goos: (\w+), goarch: (\w+),', read_workflow('release.yml'), re.M))
+        self.assertEqual(len(release), 6, release)
+        workflow = read_workflow('test.yml')
+        docker = job_block(workflow, 'docker-image')
+        cross = job_block(workflow, 'release-targets')
+        loop = re.search(r'^\s+for target in ([^;]+); do$', cross, re.M)[1].split()
+        compiled = {tuple(t.split('/')) for t in loop}
+        self.assertEqual(len(compiled), len(loop), loop)
+        self.assertIn('GOOS: linux', docker)
+        self.assertIn('GOARCH: amd64', docker)
+        compiled.add(('linux', 'amd64'))
+        self.assertEqual(compiled, release)
+        self.assertEqual({f'{goos}_{goarch}' for goos, goarch in release},
+                         {n.split('_', 2)[2].split('.')[0] for n in expected_assets('vX') if n.startswith('report-portal_')})
+        for block in (docker, cross):
+            self.assertIn('sh scripts/check-release-build.sh', block)
 
     def test_expected_assets_satisfy_channel_decision(self):
         # The release asset list is kept twice: expected_assets, which verify-target holds a
