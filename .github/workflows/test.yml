@@ -81,6 +81,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # gofmt was a step in the release checklist, run by hand ("vet and gofmt"), and nothing here
+      # enforced it. Passwall-Sub-Panel gates on it after an unformatted file passed its CI and
+      # failed a sibling's instead; the same hands edit this tree. Under a second.
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
       # staticcheck: static analysis beyond go vet (real bugs, dead code, simplifications).
@@ -289,6 +296,14 @@ jobs:
           # objects as their build cache (see go-test). Compiling actionlint cold costs it ~10s.
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      # actionlint's shellcheck sees only the run: blocks, not the scripts they call. Those carry
+      # the release (scripts/lib/*.sh is sourced by release.yml, check-release-build.sh passes or
+      # fails every binary) and the image's entrypoint, which starts as root and drops privileges.
+      # They are POSIX sh and run under dash here and in debian-slim, where a bashism that works in
+      # a developer's shell fails, and the tests above exercise only the paths they call. -x with
+      # SCRIPTDIR follows each `. lib/...` the way the script resolves it. About a second.
+      - name: Shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x -P SCRIPTDIR
       - name: Release script tests
         # The CalVer rules and the rolling-channel decision are pure shell, and they are tested as
         # shell: YAML parsing cannot check whether a year carries an ISO week 53, whether v2026.9.2
