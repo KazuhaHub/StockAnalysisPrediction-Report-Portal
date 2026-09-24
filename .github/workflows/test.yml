@@ -92,7 +92,9 @@ jobs:
       - run: go vet ./...
       # staticcheck: static analysis beyond go vet (real bugs, dead code, simplifications).
       # Pinned; the tree already passes it clean. See docs/adr/0016-app-package-architecture.md.
-      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+      # Nothing bumps a pin in a run: line, Dependabot included, so it is bumped by hand: a release
+      # a year and a half old analyses today's Go without knowing it (2025.1.1 until 2026.2.1).
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
       # govulncheck: fails on a known vulnerability reachable from our code. A hard gate rather than
       # advisory because we own an XML signature verifier (SAML, ADR 0023): its signing dependencies
       # have shipped signature-bypass CVEs, and a routine `go mod tidy` must not be able to walk the
