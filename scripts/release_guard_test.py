@@ -36,6 +36,21 @@ def push_run_jobs(workflow):
             names.add(name)
     return names
 
+
+def read_workflow(name):
+    with open(os.path.join(HERE, '..', '.github', 'workflows', name)) as f:
+        return f.read()
+
+
+def job_block(workflow, job_id):
+    """The lines of one job in `workflow`, up to the next job."""
+    jobs = workflow.split('\njobs:\n', 1)[1]
+    match = re.search(rf'^  {re.escape(job_id)}:[ \t]*\n(.*?)(?=^  [A-Za-z0-9_-]+:[ \t]*$|\Z)', jobs, re.M | re.S)
+    if not match:
+        raise AssertionError(f'no job {job_id!r} in the workflow')
+    return match[1]
+
+
 class GuardTests(unittest.TestCase):
     @patch('release_guard.subprocess.run')
     def test_registry_failure_is_not_absence(self, run):
@@ -106,6 +121,23 @@ class GuardTests(unittest.TestCase):
         for missing in sorted(names):
             with self.subTest(missing=missing):
                 self.assertFalse(ci_ready([{'name': n, 'conclusion': 'success'} for n in names - {missing}]))
+
+    def test_race_shards_agree_on_their_count(self):
+        # The count is written twice in test.yml, the matrix and the "(N/4)" in the job name that
+        # ci_ready waits for, and the partition that deals the tests out reads it from the matrix.
+        # The name must say the same: once ci_ready is edited to match it, a name left at /4 over a
+        # three-shard matrix passes the test above, and every check misreports its share. The
+        # shards must be numbered 1..N, because only then does `NR % m == s % m` give each residue
+        # to exactly one shard, and a shard dealt no tests must fail rather than race nothing green.
+        block = job_block(read_workflow('test.yml'), 'go-race-full')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        partition = re.search(r'awk -v s="\$\{\{ matrix\.shard \}\}" -v m=("[^"]*"|\S+)', block)
+        self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
+        self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
+        self.assertIn('test -n "$regex"', block)
 
     def test_expected_assets_satisfy_channel_decision(self):
         # The release asset list is kept twice: expected_assets, which verify-target holds a

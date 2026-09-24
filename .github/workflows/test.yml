@@ -256,12 +256,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Race shard ${{ matrix.shard }}/4 of internal/app
+      # The list is built with -race, the same flags as the run, so the run reuses its compile and
+      # only relinks. Listed without -race it compiled internal/app a second time, uninstrumented,
+      # for nothing but its test names. The shard count comes from the matrix (strategy.job-total),
+      # so the partition cannot fall out of step with it, and a shard with no tests fails rather
+      # than passing green with nothing raced. release_guard_test.py holds the job name, this
+      # matrix and release_guard.ci_ready to one count.
+      - name: Race shard ${{ matrix.shard }}/${{ strategy.job-total }} of internal/app
         shell: bash
         run: |
           set -euo pipefail
-          tests=$(go test -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
-          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m=4 'NR % m == s % m' | paste -sd'|' -)
+          tests=$(go test -race -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
+          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
+          test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -race -count=1 -timeout=10m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
         if: failure()
