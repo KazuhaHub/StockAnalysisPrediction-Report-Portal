@@ -43,9 +43,13 @@ on:
         default: "beta"
         options: ["beta", "stable", "draft"]
 
-# Least privilege by default; tag, release, docker and publish request write permissions only for
-# their own mutations. Everything else inherits contents: read, so a compromised build step cannot
-# push to the repository.
+# Least privilege by default. GITHUB_TOKEN writes to the repository in one place, tag's `git push`,
+# and only tag asks it for contents: write. Every other repository mutation (the draft, its assets,
+# publication) goes through RELEASE_PAT, because GITHUB_TOKEN is refused release creation here (see
+# the release job), so release and docker read contents, docker's one write scope is packages for
+# the image push, and publish asks for nothing. The scope matters where it would sit unused:
+# actions/checkout leaves the token in .git/config, beside third-party actions. Everything else
+# inherits contents: read, so a compromised build step cannot push to the repository.
 permissions:
   contents: read
 
@@ -385,7 +389,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
       packages: read
     needs: [setup, build, ci, tag]
     steps:
@@ -528,7 +532,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
       packages: write
     # Runs before publication, and that order carries weight: the release must not be published
     # before this job has pushed the image and recorded its digest on it, or release-channels could
@@ -624,8 +628,8 @@ jobs:
     name: Publish the Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
+    # Nothing: the one step speaks to GitHub as RELEASE_PAT, and there is no checkout.
+    permissions: {}
     # Last, and the order is load-bearing. Publishing is what a reader sees and what
     # release-channels reacts to, and reconciliation reads the image digest the docker job records
     # on this release — so publishing any earlier could point :beta at an image that is not pushed.
