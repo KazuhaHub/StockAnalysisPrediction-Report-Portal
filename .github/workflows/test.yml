@@ -391,6 +391,22 @@ jobs:
         run: |
           npm ci
           npm run build
+      # The web half of go-test's govulncheck gate. dompurify sanitises report HTML and mermaid
+      # parses report diagrams, content the portal did not author (.github/dependabot.yml reviews
+      # their bumps one at a time), and nothing kept a merge from landing while either carried a
+      # published advisory: Dependabot reports one beside the merge, not in its way. Production
+      # dependencies only, at high or critical, so the dev toolchain's advisories stay out. As with
+      # govulncheck, a newly published advisory can turn an unrelated PR red, which is when it
+      # should be seen. Here rather than in the web job, which is the PR critical path.
+      # IT HOLDS RELEASES TOO, on purpose: release_guard.ci_ready requires this job. Unlike
+      # govulncheck, npm audit cannot tell whether the advisory reaches our code, so the way out
+      # is written here. When a fixed release exists but a parent's range keeps it out, pin it with
+      # an `overrides` entry in web/package.json. When none exists yet, lower this step to
+      # --audit-level=critical (for a critical, comment it out) with a dated comment naming the
+      # advisory, and restore it when the fix ships. An unreachable registry fails it too: re-run.
+      - name: Audit production web dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
       - name: Build the linux/amd64 binary
         env:
           CGO_ENABLED: "0"
