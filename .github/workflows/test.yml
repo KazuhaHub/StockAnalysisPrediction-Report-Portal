@@ -315,6 +315,17 @@ jobs:
       - name: Install deps
         working-directory: web
         run: npm ci
+      # THE RULES OF HOOKS ARE A GATE, AND LITTLE ELSE IS LINTED. A hook called after an early
+      # return type-checks and passes every test that never reaches a second render, then blanks the
+      # page with "rendered more hooks than during the previous render": StockPage.test.tsx guards
+      # that one page against it (Grid.useBreakpoint), and no test guards the rest. oxlint does not
+      # load the `typescript` package, so the native TypeScript 7 compiler is no obstacle, and it
+      # reads all of src in under a second. exhaustive-deps only warns (web/.oxlintrc.json): a
+      # missing dependency is sometimes the intent, and the source's eslint-disable directives for
+      # it now suppress a rule that actually runs.
+      - name: Lint (rules of hooks)
+        working-directory: web
+        run: npm run lint
       - name: Typecheck # tsc --noEmit: catches type errors the build would tolerate
         working-directory: web
         run: npm run typecheck
