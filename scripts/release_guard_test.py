@@ -165,6 +165,23 @@ class GuardTests(unittest.TestCase):
         for block in (docker, cross):
             self.assertIn('sh scripts/check-release-build.sh', block)
 
+    def test_arm64_binary_runs_before_the_tag_and_the_image(self):
+        # test.yml compiles linux/arm64 and never runs it, so release.yml's smoke-arm64 is the one
+        # place that binary executes before it ships. It has to run the release's own artifact on an
+        # arm64 runner, and the tag and docker jobs have to wait for it: a pushed version tag cannot
+        # be cut again and a fixed image tag is never replaced, so a smoke that finished after either
+        # would be too late to matter. The draft Release needs the tag, so it waits too.
+        workflow = read_workflow('release.yml')
+        smoke = job_block(workflow, 'smoke-arm64')
+        self.assertIn('    runs-on: ubuntu-24.04-arm\n', smoke)
+        self.assertIn('name: report-portal-linux-arm64,', smoke)
+        self.assertIn('http://127.0.0.1:18790/healthz', smoke)
+        for job in ('tag', 'docker'):
+            needs = re.search(r'^    needs: \[([^\]]*)\]', job_block(workflow, job), re.M)[1]
+            self.assertIn('smoke-arm64', [n.strip() for n in needs.split(',')], job)
+        needs = re.search(r'^    needs: \[([^\]]*)\]', job_block(workflow, 'release'), re.M)[1]
+        self.assertIn('tag', [n.strip() for n in needs.split(',')])
+
     def test_release_events_only_relay_to_the_default_branch(self):
         # A release event runs release-channels.yml from the release's tag, so whatever job such an
         # event starts runs the copy that tag was cut with, and no later fix reaches it. The one job

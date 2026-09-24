@@ -9,6 +9,7 @@ name: Release
 #             matrix leg would be wasted work)
 #   build   → matrix cross-compiles 6 platforms, downloads the web bundle into web/internal/dist and
 #             //go:embed-s it into the binary
+#   smoke-arm64 → start the linux/arm64 binary on an arm64 runner before the tag, draft or image
 #   release → tar/zip + SHA256SUMS, then create or update the DRAFT GitHub Release
 #   docker  → reuse the linux amd64/arm64 binaries to push the FIXED multi-arch image tag, then
 #             attach the durable identity (commit + image digest) to the draft
@@ -234,7 +235,8 @@ jobs:
     name: Create or verify the annotated tag
     # Keep tag creation late: a failed platform build must not leave behind a version with no
     # publishable artifact set. The build itself needs only setup's resolved version and commit.
-    needs: [setup, ci, build]
+    # An arm64 binary that builds but cannot start is such a failure, so the smoke gates this too.
+    needs: [setup, ci, build, smoke-arm64]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -383,6 +385,64 @@ jobs:
           path: out/report-portal${{ matrix.ext }}
           if-no-files-found: error
           retention-days: 1
+
+  # THE ARM64 BINARY RUNS BEFORE A TAG IS CREATED. test.yml executes only linux/amd64 (the image
+  # smoke) and compiles the other five targets without running them, and the docker job below only
+  # copies the arm64 binary into the image. So an arm64 binary that cannot start, from a fault in
+  # the runtime or in modernc's per-GOARCH sqlite code, say, would first run on a user's machine.
+  # This starts the release's own artifact natively on an arm64 runner, free for a public repository
+  # (a private one would need a larger runner or QEMU): `version` must print exactly the identity
+  # setup stamped, and a first start in an empty directory must answer /healthz, which queries the
+  # database. The tag job waits for it, and the draft and the image wait for the tag: setup refuses
+  # a version whose tag exists, so a tag on a binary that cannot start spends that version, and a
+  # fixed image tag is never replaced. That puts about 20-30s on the critical path once per
+  # release, as `ci` is usually done in seconds (6s in run 35551784386, a minute before the build
+  # was). docker names it as well, so its own reason does not rest on the tag job's needs.
+  smoke-arm64:
+    name: Start the linux/arm64 binary
+    needs: [setup, build]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { name: report-portal-linux-arm64, path: bin }
+      - name: Run version and probe /healthz
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          SHORT_SHA: ${{ needs.setup.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64 || { echo "::error::runner is $(uname -m), not aarch64"; exit 1; }
+          bin="$PWD/bin/report-portal"
+          chmod +x "$bin"
+          got=$("$bin" version)
+          want="${VERSION#v} (${SHORT_SHA}, ${BUILD_DATE})"
+          echo "$got"
+          if [ "$got" != "$want" ]; then
+            echo "::error::version printed '${got}', want '${want}'"
+            exit 1
+          fi
+          # No config and no database: the binary writes both, as on a first install.
+          work=$(mktemp -d)
+          cd "$work"
+          RP_CONFIG="$work/config.yaml" RP_LISTEN=127.0.0.1:18790 "$bin" > server.log 2>&1 &
+          pid=$!
+          for _ in $(seq 1 30); do
+            if health=$(curl -fs http://127.0.0.1:18790/healthz); then
+              echo "$health"
+              kill "$pid"
+              wait "$pid" || true
+              exit 0
+            fi
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::the server exited, or /healthz did not answer within 30s"
+          # The first start prints the new admin's password; it is a throwaway, but the log is public.
+          sed 's/password: .*/password: (redacted)/' server.log
+          exit 1
 
   release:
     name: Prepare the draft Release
@@ -540,7 +600,7 @@ jobs:
     # runs the glyph gate (scripts/probe-font-coverage.sh, in the runtime-base stage of
     # Dockerfile.release) on both arches — test.yml's docker-image job gates amd64 pre-merge, so by
     # tag time this is re-verification except on arm64, which is first checked here.
-    needs: [setup, build, release]
+    needs: [setup, build, release, smoke-arm64]
     steps:
       - uses: actions/checkout@v6
         with:
