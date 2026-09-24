@@ -165,6 +165,30 @@ class GuardTests(unittest.TestCase):
         for block in (docker, cross):
             self.assertIn('sh scripts/check-release-build.sh', block)
 
+    def test_release_events_only_relay_to_the_default_branch(self):
+        # A release event runs release-channels.yml from the release's tag, so whatever job such an
+        # event starts runs the copy that tag was cut with, and no later fix reaches it. The one job
+        # a release event may start is the relay: no secret, no action, nothing but actions: write,
+        # and a dispatch of this file on the default branch. Every other job holds RELEASE_PAT or
+        # packages: write, so it must run only for a dispatch on the default branch, where the file
+        # is main's own.
+        workflow = read_workflow('release-channels.yml')
+        ids = re.findall(r'^  ([A-Za-z0-9_-]+):[ \t]*$', workflow.split('\njobs:\n', 1)[1], re.M)
+        self.assertIn('relay', ids)
+        relay = job_block(workflow, 'relay')
+        self.assertIn("    if: github.event_name == 'release'\n", relay)
+        self.assertRegex(relay, r'\n    permissions:\n      actions: write\n    [a-z]')
+        self.assertNotIn('secrets.', relay)
+        self.assertNotIn('uses:', relay)
+        self.assertIn('REF: ${{ github.event.repository.default_branch }}', relay)
+        self.assertIn('gh workflow run release-channels.yml --repo "$REPO" --ref "$REF"', relay)
+        gate = ("    if: github.event_name == 'workflow_dispatch' && "
+                "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)\n")
+        for job in ids:
+            if job != 'relay':
+                with self.subTest(job=job):
+                    self.assertIn(gate, job_block(workflow, job))
+
     def test_expected_assets_satisfy_channel_decision(self):
         # The release asset list is kept twice: expected_assets, which verify-target holds a
         # Release to, and assets_complete in channel_targets.sh, which picks what the channels

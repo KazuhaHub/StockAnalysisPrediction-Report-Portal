@@ -655,9 +655,9 @@ jobs:
               exit 1
               ;;
           esac
-          # Publishing fires the `published` release event, which is the only thing that starts
-          # release-channels. A failure here leaves the release a draft, which is the safe end: no
-          # channel moves on a release nobody can see.
+          # Publishing fires the `published` release event; release-channels relays it to a
+          # reconcile run on the default branch. A failure here leaves the release a draft, which is
+          # the safe end: no channel moves on a release nobody can see.
           gh release edit "${VERSION}" --repo "${REPO}" --draft=false ${flags}
           # Read it back, so a release that is still invisible reports itself instead of a green
           # pipeline leaving the channels where they were.
