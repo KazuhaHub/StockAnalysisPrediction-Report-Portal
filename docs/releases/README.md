@@ -126,6 +126,12 @@ the race lane does not run on a pull request. The normal target is therefore the
 from the feature PR after its main-branch run finishes. The note changes the tag object, not that
 commit, so publishing needs no second PR and does not invalidate the completed CI result.
 
+**The jobs that must have passed are `main`'s list, not the commit's.** The check runs
+`scripts/release_guard.py` from the default branch, while a `test` run, pushed or dispatched, runs the
+commit's own `test.yml`, which has no job added after it. So a commit from before a job joined the
+list can never be released. `release targets (cross-compile)` is such a job: release from a commit
+that has it, and cherry-pick a hotfix for an older release onto current `main` to release it.
+
 The push is a separate, deliberate command because it is the irreversible step; the script never
 pushes. It refuses an empty note, a tag that already exists, and a tag that is not CalVer. With the
 archival-file flow it also refuses a commit that does not contain its note; with `--notes-file`, the
@@ -159,12 +165,34 @@ gh release edit v2026.38.10 --prerelease=false --latest
 Demoting the same Release is also a metadata edit (`--prerelease`); channel reconciliation follows
 GitHub's resulting release state. No tag, archive or fixed image is replaced in either direction.
 
-A `release` event runs the workflow **from the tagged commit**, not from the default branch, so a fix
-to `release-channels.yml` takes effect for releases tagged after the fix and reconciliation for an
-already-cut tag keeps running the copy that tag carries. Dispatch that workflow when an existing
-release needs the newer logic. If it moves a channel, `CHANNEL_LATEST_TAG` / `CHANNEL_BETA_TAG` in the
-repository variables record where the channel was last put; an operator override lives in
-`CHANNEL_LATEST_OVERRIDE` / `CHANNEL_BETA_OVERRIDE` beside them, and reconciliation never clears it.
+A `release` event runs the workflow **from the tagged commit**, not from the default branch: GitHub
+takes both the workflow file and the checkout from the tag. So the copy a tag carries does nothing but
+relay. It dispatches **Release channels** on `main`, and reconciliation always runs `main`'s workflow
+and scripts, which means a fix to `release-channels.yml`, `scripts/channel_targets.sh` or
+`scripts/release_guard.py` covers every release as soon as it merges. Dispatch it by hand from `main`
+too; a dispatch from any other branch skips the reconcile job. If it moves a channel,
+`CHANNEL_LATEST_TAG` / `CHANNEL_BETA_TAG` in the repository variables record where the channel was last
+put; an operator override lives in `CHANNEL_LATEST_OVERRIDE` / `CHANNEL_BETA_OVERRIDE` beside them, and
+reconciliation never clears it.
+
+Tags cut before the relay existed still reconcile with their own copy when their Release is
+published, edited, deleted or unpublished. For `v2026.38.1` through `v2026.39` that copy applies
+today's rules. **`v2026.38` carries an older one**: it marks GitHub's Latest whether or not it
+already is, reads the channel variables fail-open, and points a channel by re-resolving the image
+tag rather than by the digest recorded on the Release. Two rules follow.
+
+- **Never set `CHANNEL_LATEST_OVERRIDE` or `CHANNEL_BETA_OVERRIDE` to `v2026.38`.** With `:latest`
+  pinned there, reconciliation marks v2026.38 as Latest; that edit runs v2026.38's copy, which marks
+  it again, and every mark is another edit. It is the same loop that ran on 2026-09-19 (31 runs in
+  six minutes), and it does not end on its own.
+- **After editing the v2026.38 Release**, notes or maturity, dispatch Release channels from `main`, so
+  the channels are decided again by the current rules — which put an operator pin back if the old
+  copy's fail-open read missed it.
+
+To stop a loop, clear the override that names v2026.38. The next run then aligns Latest with a newer
+release, whose own copy compares before it writes, and the chain ends there. If it has to stop at
+once, `gh workflow disable release-channels.yml` stops every copy (a workflow is disabled by its path,
+whatever ref its runs come from); enable it again afterwards and dispatch from `main`.
 
 ## The v2026.38 database boundary
 

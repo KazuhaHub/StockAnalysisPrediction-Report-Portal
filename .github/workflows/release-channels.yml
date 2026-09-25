@@ -18,6 +18,17 @@ name: Release channels
 #   CHANNEL_LATEST_OVERRIDE   operator pin; while set, :latest must equal it (withdrawal / rollback)
 #   CHANNEL_BETA_OVERRIDE     operator pin for :beta
 # An override is never undone by reconciliation. To release the pin, clear the variable yourself.
+#
+# A RELEASE EVENT RUNS THIS FILE FROM THE RELEASE'S TAG, NOT FROM main: GitHub takes the workflow and
+# the checkout from the tagged commit. A `release` trigger that did the work itself would run the
+# copy each tag was cut with, scripts included, with RELEASE_PAT and packages: write, and a fix here
+# would protect only the releases tagged after it. That has already happened twice: v2026.38's copy
+# still sends the Latest PATCH unconditionally, the step that fed itself 31 times, and the thirteen
+# tags after it run their docker actions by version tag, not by the commit pins added since. So a
+# release event only relays. `relay` holds nothing but actions: write and asks for a dispatch of
+# this file on the default branch; `reconcile` runs for such a dispatch and for nothing else. Every
+# reconciliation then runs main's workflow and main's scripts. Tags cut before the relay still run
+# their own copy; docs/releases/README.md says what that means for v2026.38.
 
 on:
   release:
@@ -48,13 +59,45 @@ env:
 # Serialize every channel writer. Serialization is necessary but not sufficient — two jobs running
 # one after another can still apply an older decision second — so the ordering is rechecked inside
 # scripts/channel_targets.sh against the applied state, not just against run order here.
+#
+# At the workflow level, and under the name the older tags' copies also use, so those still queue
+# with main's. A relay run queues here too, which costs its dispatch a few seconds' wait. A pending
+# run that GitHub cancels in favour of a newer one loses nothing: the newer one starts later, and
+# every run reads the releases and the channel state afresh.
 concurrency:
   group: release-channels-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
+  # The release-event half of the header's rule. No checkout, no action and no secret, so nothing a
+  # tag carries runs here except this step. GITHUB_TOKEN is allowed to start a workflow_dispatch
+  # run, one of the two events it can trigger, and actions: write is all that takes. The inputs are
+  # spelled out: a relayed run is never a dry run and never forced. Not meant as a required check.
+  relay:
+    name: Relay to the default branch
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch reconciliation on the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.event.repository.default_branch }}
+          ACTION: ${{ github.event.action }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run release-channels.yml --repo "$REPO" --ref "$REF" -f dry_run=false -f force=false
+          echo "release ${ACTION} on ${TAG}: reconciliation dispatched on ${REF}"
+
   reconcile:
     name: Reconcile rolling channels
+    # A dispatch on the default branch only: the relay's, or an operator's. A dispatch from another
+    # branch runs that branch's copy, which may be behind main or unreviewed, so the job is skipped.
+    if: github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -27,6 +27,9 @@ def push_run_jobs(workflow):
         cond = cond[1] if cond else None
         if cond == "github.event_name == 'pull_request'":
             continue
+        # `!= 'pull_request' || <more>` runs on every push whatever <more> says.
+        if cond is not None and cond.startswith("github.event_name != 'pull_request' ||"):
+            cond = "github.event_name != 'pull_request'"
         if cond not in (None, "github.event_name != 'pull_request'"):
             raise AssertionError(f'teach push_run_jobs whether a push runs {name!r} (if: {cond})')
         shards = re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)
@@ -35,6 +38,21 @@ def push_run_jobs(workflow):
         else:
             names.add(name)
     return names
+
+
+def read_workflow(name):
+    with open(os.path.join(HERE, '..', '.github', 'workflows', name)) as f:
+        return f.read()
+
+
+def job_block(workflow, job_id):
+    """The lines of one job in `workflow`, up to the next job."""
+    jobs = workflow.split('\njobs:\n', 1)[1]
+    match = re.search(rf'^  {re.escape(job_id)}:[ \t]*\n(.*?)(?=^  [A-Za-z0-9_-]+:[ \t]*$|\Z)', jobs, re.M | re.S)
+    if not match:
+        raise AssertionError(f'no job {job_id!r} in the workflow')
+    return match[1]
+
 
 class GuardTests(unittest.TestCase):
     @patch('release_guard.subprocess.run')
@@ -89,7 +107,7 @@ class GuardTests(unittest.TestCase):
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
                 ['go-test','web typecheck + build','workflow lint','docker image (font gate + smoke)',
-                 'go race full (other packages)']]
+                 'go race full (other packages)','release targets (cross-compile)']]
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertTrue(ci_ready(jobs))
@@ -106,6 +124,87 @@ class GuardTests(unittest.TestCase):
         for missing in sorted(names):
             with self.subTest(missing=missing):
                 self.assertFalse(ci_ready([{'name': n, 'conclusion': 'success'} for n in names - {missing}]))
+
+    def test_race_shards_agree_on_their_count(self):
+        # The count is written twice in test.yml, the matrix and the "(N/4)" in the job name that
+        # ci_ready waits for, and the partition that deals the tests out reads it from the matrix.
+        # The name must say the same: once ci_ready is edited to match it, a name left at /4 over a
+        # three-shard matrix passes the test above, and every check misreports its share. The
+        # shards must be numbered 1..N, because only then does `NR % m == s % m` give each residue
+        # to exactly one shard, and a shard dealt no tests must fail rather than race nothing green.
+        block = job_block(read_workflow('test.yml'), 'go-race-full')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        partition = re.search(r'awk -v s="\$\{\{ matrix\.shard \}\}" -v m=("[^"]*"|\S+)', block)
+        self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
+        self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
+        self.assertIn('test -n "$regex"', block)
+
+    def test_ci_compiles_every_release_target(self):
+        # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
+        # them before a tag: linux/amd64 in docker-image, the rest in release-targets. A platform
+        # added to the release and not here would first compile during a release, which is what
+        # release-targets exists to prevent. Both jobs must also run the release's own provenance
+        # check on what they build.
+        release = set(re.findall(r'^\s+- \{ goos: (\w+), goarch: (\w+),', read_workflow('release.yml'), re.M))
+        self.assertEqual(len(release), 6, release)
+        workflow = read_workflow('test.yml')
+        docker = job_block(workflow, 'docker-image')
+        cross = job_block(workflow, 'release-targets')
+        loop = re.search(r'^\s+for target in ([^;]+); do$', cross, re.M)[1].split()
+        compiled = {tuple(t.split('/')) for t in loop}
+        self.assertEqual(len(compiled), len(loop), loop)
+        self.assertIn('GOOS: linux', docker)
+        self.assertIn('GOARCH: amd64', docker)
+        compiled.add(('linux', 'amd64'))
+        self.assertEqual(compiled, release)
+        self.assertEqual({f'{goos}_{goarch}' for goos, goarch in release},
+                         {n.split('_', 2)[2].split('.')[0] for n in expected_assets('vX') if n.startswith('report-portal_')})
+        for block in (docker, cross):
+            self.assertIn('sh scripts/check-release-build.sh', block)
+
+    def test_arm64_binary_runs_before_the_tag_and_the_image(self):
+        # test.yml compiles linux/arm64 and never runs it, so release.yml's smoke-arm64 is the one
+        # place that binary executes before it ships. It has to run the release's own artifact on an
+        # arm64 runner, and the tag and docker jobs have to wait for it: a pushed version tag cannot
+        # be cut again and a fixed image tag is never replaced, so a smoke that finished after either
+        # would be too late to matter. The draft Release needs the tag, so it waits too.
+        workflow = read_workflow('release.yml')
+        smoke = job_block(workflow, 'smoke-arm64')
+        self.assertIn('    runs-on: ubuntu-24.04-arm\n', smoke)
+        self.assertIn('name: report-portal-linux-arm64,', smoke)
+        self.assertIn('http://127.0.0.1:18790/healthz', smoke)
+        for job in ('tag', 'docker'):
+            needs = re.search(r'^    needs: \[([^\]]*)\]', job_block(workflow, job), re.M)[1]
+            self.assertIn('smoke-arm64', [n.strip() for n in needs.split(',')], job)
+        needs = re.search(r'^    needs: \[([^\]]*)\]', job_block(workflow, 'release'), re.M)[1]
+        self.assertIn('tag', [n.strip() for n in needs.split(',')])
+
+    def test_release_events_only_relay_to_the_default_branch(self):
+        # A release event runs release-channels.yml from the release's tag, so whatever job such an
+        # event starts runs the copy that tag was cut with, and no later fix reaches it. The one job
+        # a release event may start is the relay: no secret, no action, nothing but actions: write,
+        # and a dispatch of this file on the default branch. Every other job holds RELEASE_PAT or
+        # packages: write, so it must run only for a dispatch on the default branch, where the file
+        # is main's own.
+        workflow = read_workflow('release-channels.yml')
+        ids = re.findall(r'^  ([A-Za-z0-9_-]+):[ \t]*$', workflow.split('\njobs:\n', 1)[1], re.M)
+        self.assertIn('relay', ids)
+        relay = job_block(workflow, 'relay')
+        self.assertIn("    if: github.event_name == 'release'\n", relay)
+        self.assertRegex(relay, r'\n    permissions:\n      actions: write\n    [a-z]')
+        self.assertNotIn('secrets.', relay)
+        self.assertNotIn('uses:', relay)
+        self.assertIn('REF: ${{ github.event.repository.default_branch }}', relay)
+        self.assertIn('gh workflow run release-channels.yml --repo "$REPO" --ref "$REF"', relay)
+        gate = ("    if: github.event_name == 'workflow_dispatch' && "
+                "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)\n")
+        for job in ids:
+            if job != 'relay':
+                with self.subTest(job=job):
+                    self.assertIn(gate, job_block(workflow, job))
 
     def test_expected_assets_satisfy_channel_decision(self):
         # The release asset list is kept twice: expected_assets, which verify-target holds a

@@ -81,11 +81,20 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      # gofmt was a step in the release checklist, run by hand ("vet and gofmt"), and nothing here
+      # enforced it. Passwall-Sub-Panel gates on it after an unformatted file passed its CI and
+      # failed a sibling's instead; the same hands edit this tree. Under a second.
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
       # staticcheck: static analysis beyond go vet (real bugs, dead code, simplifications).
       # Pinned; the tree already passes it clean. See docs/adr/0016-app-package-architecture.md.
-      - run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+      # Nothing bumps a pin in a run: line, Dependabot included, so it is bumped by hand: a release
+      # a year and a half old analyses today's Go without knowing it (2025.1.1 until 2026.2.1).
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
       # govulncheck: fails on a known vulnerability reachable from our code. A hard gate rather than
       # advisory because we own an XML signature verifier (SAML, ADR 0023): its signing dependencies
       # have shipped signature-bypass CVEs, and a routine `go mod tidy` must not be able to walk the
@@ -249,12 +258,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Race shard ${{ matrix.shard }}/4 of internal/app
+      # The list is built with -race, the same flags as the run, so the run reuses its compile and
+      # only relinks. Listed without -race it compiled internal/app a second time, uninstrumented,
+      # for nothing but its test names. The shard count comes from the matrix (strategy.job-total),
+      # so the partition cannot fall out of step with it, and a shard with no tests fails rather
+      # than passing green with nothing raced. release_guard_test.py holds the job name, this
+      # matrix and release_guard.ci_ready to one count.
+      - name: Race shard ${{ matrix.shard }}/${{ strategy.job-total }} of internal/app
         shell: bash
         run: |
           set -euo pipefail
-          tests=$(go test -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
-          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m=4 'NR % m == s % m' | paste -sd'|' -)
+          tests=$(go test -race -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
+          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
+          test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -race -count=1 -timeout=10m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-race-shard-${{ matrix.shard }}.txt"
       - name: Upload race output
         if: failure()
@@ -289,6 +305,14 @@ jobs:
           # objects as their build cache (see go-test). Compiling actionlint cold costs it ~10s.
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      # actionlint's shellcheck sees only the run: blocks, not the scripts they call. Those carry
+      # the release (scripts/lib/*.sh is sourced by release.yml, check-release-build.sh passes or
+      # fails every binary) and the image's entrypoint, which starts as root and drops privileges.
+      # They are POSIX sh and run under dash here and in debian-slim, where a bashism that works in
+      # a developer's shell fails, and the tests above exercise only the paths they call. -x with
+      # SCRIPTDIR follows each `. lib/...` the way the script resolves it. About a second.
+      - name: Shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x -P SCRIPTDIR
       - name: Release script tests
         # The CalVer rules and the rolling-channel decision are pure shell, and they are tested as
         # shell: YAML parsing cannot check whether a year carries an ISO week 53, whether v2026.9.2
@@ -315,6 +339,17 @@ jobs:
       - name: Install deps
         working-directory: web
         run: npm ci
+      # THE RULES OF HOOKS ARE A GATE, AND LITTLE ELSE IS LINTED. A hook called after an early
+      # return type-checks and passes every test that never reaches a second render, then blanks the
+      # page with "rendered more hooks than during the previous render": StockPage.test.tsx guards
+      # that one page against it (Grid.useBreakpoint), and no test guards the rest. oxlint does not
+      # load the `typescript` package, so the native TypeScript 7 compiler is no obstacle, and it
+      # reads all of src in under a second. exhaustive-deps only warns (web/.oxlintrc.json): a
+      # missing dependency is sometimes the intent, and the source's eslint-disable directives for
+      # it now suppress a rule that actually runs.
+      - name: Lint (rules of hooks)
+        working-directory: web
+        run: npm run lint
       - name: Typecheck # tsc --noEmit: catches type errors the build would tolerate
         working-directory: web
         run: npm run typecheck
@@ -358,6 +393,31 @@ jobs:
         run: |
           npm ci
           npm run build
+      # The web half of go-test's govulncheck gate. dompurify sanitises report HTML and mermaid
+      # parses report diagrams, content the portal did not author (.github/dependabot.yml reviews
+      # their bumps one at a time), and nothing kept a merge from landing while either carried a
+      # published advisory: Dependabot reports one beside the merge, not in its way. Production
+      # dependencies only, at high or critical, so the dev toolchain's advisories stay out. As with
+      # govulncheck, a newly published advisory can turn an unrelated PR red, which is when it
+      # should be seen. Here rather than in the web job, which is the PR critical path.
+      # IT HOLDS RELEASES TOO, on purpose: release_guard.ci_ready requires this job. Unlike
+      # govulncheck, npm audit cannot tell whether the advisory reaches our code, so the way out
+      # is written here. When a fixed release exists but a parent's range keeps it out, pin it with
+      # an `overrides` entry in web/package.json. When none exists yet, lower this step to
+      # --audit-level=critical (for a critical, comment it out) with a dated comment naming the
+      # advisory, and restore it when the fix ships. An unreachable registry fails it too: re-run.
+      - name: Audit production web dependencies
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      # THE RELEASE RECIPE, AND THE RELEASE'S OWN CHECK OF IT. The ldflags are release.yml's build
+      # leg with Version=ci, and check-release-build.sh is the script that passes or fails each
+      # release binary, which used to run for the first time during a release (v2026.38.2 and .6
+      # both died in it on vcs.modified=true, from release-only steps). It reads the compiler,
+      # platform, commit, CGO setting and clean worktree back out of the binary, here after the SPA
+      # build has written into the checkout, so a build step that dirties a tracked file fails a PR
+      # instead. On a pull request HEAD is the merge commit, and that is what Go stamps. The probe
+      # below requires the injected commit, which catches an -X that silently stopped applying (a
+      # renamed variable is not a link error). A second or so.
       - name: Build the linux/amd64 binary
         env:
           CGO_ENABLED: "0"
@@ -366,9 +426,13 @@ jobs:
         run: |
           set -euo pipefail
           mod=$(go list -m)
+          sha=$(git rev-parse HEAD)
           mkdir -p bin/linux-amd64
-          go build -trimpath -ldflags "-s -w -X ${mod}/internal/version.Version=ci" \
-            -o bin/linux-amd64/report-portal ./cmd/report-portal
+          ldflags="-s -w -X ${mod}/internal/version.Version=ci"
+          ldflags+=" -X ${mod}/internal/version.Commit=${sha:0:7}"
+          ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
+          go build -trimpath -ldflags "${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
+          sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
       - uses: docker/setup-buildx-action@v4
       - name: Build the release image
         uses: docker/build-push-action@v7
@@ -416,9 +480,10 @@ jobs:
             --security-opt no-new-privileges --user 10001:10001 \
             --entrypoint /app/report-portal report-portal:ci version)
           echo "$version_out"
+          sha=$(git rev-parse HEAD)
           case "$version_out" in
-            *ci*) ;;
-            *) echo "::error::version output is missing the injected build id"; exit 1 ;;
+            "ci (${sha:0:7}, "*) ;;
+            *) echo "::error::version output is missing the injected build id or commit"; exit 1 ;;
           esac
       - name: End-to-end checks against the release image
         run: |
@@ -446,3 +511,63 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: go-build-docker-image-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+
+  # THE OTHER FIVE RELEASE TARGETS, COMPILED BEFORE A TAG RATHER THAN BY ONE. docker-image builds
+  # linux/amd64; release.yml also ships linux/arm64, darwin and windows, and nothing compiled those
+  # until a release did. The repository has no build tags, so the realistic break is a dependency:
+  # modernc.org/sqlite and libc carry generated code per GOOS/GOARCH, and Dependabot bumps them
+  # weekly. So this runs on a main push, where release_guard waits for it, and on Dependabot's Go
+  # module PRs, where such a break is introduced; other PRs skip it. Each binary gets the release's
+  # ldflags and check-release-build.sh, as in docker-image. Not a required check.
+  #
+  # THE CACHE KEY IS go.mod AND go.sum, NOT THE RUN ID. Nearly all the compile is the dependencies,
+  # the five platforms' modernc code above all (~35s a target cold, ~280 MB of cache each), and they
+  # change only with those two files, which also carry the toolchain version. This repository's own
+  # packages recompile in ~3s a target on top of warm dependencies. A per-run key would upload
+  # ~400 MB compressed on every main push to save those seconds; this one is written once per
+  # dependency change, and a PR that bumps one restores main's entry by prefix.
+  release-targets:
+    name: release targets (cross-compile)
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'dependabot/go_modules/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-release-targets-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: |
+            go-build-release-targets-${{ runner.os }}-
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build and verify each target
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          mod=$(go list -m)
+          sha=$(git rev-parse HEAD)
+          ldflags="-s -w -X ${mod}/internal/version.Version=ci"
+          ldflags+=" -X ${mod}/internal/version.Commit=${sha:0:7}"
+          ldflags+=" -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
+          for target in linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            case "$goos" in windows) ext=.exe ;; *) ext= ;; esac
+            out="bin/${goos}-${goarch}/report-portal${ext}"
+            GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "${ldflags}" -o "$out" ./cmd/report-portal
+            sh scripts/check-release-build.sh "$out" "$goos" "$goarch" "$sha"
+          done
+      - name: Trim the build cache to what this run used
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        run: find ~/.cache/go-build -mindepth 2 -maxdepth 2 \( -name '*-a' -o -name '*-d' \) -mmin +180 -exec rm -rf {} +
+      - uses: actions/cache/save@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/go-build
+          key: go-build-release-targets-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}

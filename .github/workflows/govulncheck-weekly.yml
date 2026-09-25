@@ -1,0 +1,42 @@
+name: govulncheck (weekly)
+
+# go-test runs govulncheck on every push and pull request, so a verdict is only ever as fresh as the
+# last commit. An advisory published during a quiet week against something main already ships (the
+# SAML signing chain of ADR 0023, goxmldsig and etree, go-webauthn, x/crypto) is not reported until
+# someone happens to push. This is the same check against main on a timer, and nothing else: no
+# build, no tests, no cache. It never runs on a pull request, so no check name depends on it.
+#
+# A red run here means main already carries the vulnerability; the fix is a dependency bump through
+# a normal PR, whose go-test will show the same finding until it is gone. GitHub notifies whoever
+# last edited the cron line of a failed scheduled run, and disables the schedule after 60 days
+# without repository activity.
+
+on:
+  schedule:
+    # Mondays 04:23 UTC, off the hour: scheduled runs at :00 queue behind everyone else's.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The same toolchain rules as test.yml: the installed Go must satisfy the go directive exactly.
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Uncached, as workflow lint is: compiling govulncheck cold costs about ten seconds once a
+          # week, less than a cache entry here would cost the keys test.yml restores on every run.
+          cache: false
+      # The pin go-test uses, so the two can only disagree about the database, never the tool.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
