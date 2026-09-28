@@ -66,6 +66,7 @@ type LoginActivity struct {
 	IP     string          `json:"ip"`
 	Geo    *geoip.Location `json:"geo,omitempty"`
 	Method string          `json:"method,omitempty"`
+	Client *ClientSummary  `json:"client,omitempty"`
 }
 
 // The action vocabulary the portal itself writes. Kept as constants so a rename is a compile error
@@ -199,7 +200,7 @@ func (s *Server) recordAuth(r *http.Request, action, actor, account string, deta
 	s.st.WriteAudit(AuditEntry{
 		Actor: actor, ActorOU: s.st.PrimaryGroupOf(actor), Action: action,
 		TargetType: "user", TargetID: account,
-		Detail: auditJSON(detail), IP: s.auditIP(r),
+		Detail: auditJSON(authDetailWithClient(r, detail)), IP: s.auditIP(r),
 	})
 }
 
@@ -690,10 +691,12 @@ func (s *Server) apiLoginActivity(w http.ResponseWriter, r *http.Request, user s
 	for _, row := range rows {
 		item := LoginActivity{ID: row.ID, At: row.At, IP: row.IP}
 		var detail struct {
-			Method string `json:"method"`
+			Method string     `json:"method"`
+			Client ClientInfo `json:"client"`
 		}
 		if json.Unmarshal([]byte(row.Detail), &detail) == nil {
 			item.Method = detail.Method
+			item.Client = detail.Client.Summary()
 		}
 		if loc := s.geo.Lookup(row.IP); !loc.Empty() {
 			item.Geo = &loc

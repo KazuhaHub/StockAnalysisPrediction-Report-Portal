@@ -82,6 +82,39 @@ func TestFailedAndSuccessfulSignInsAreBothRecorded(t *testing.T) {
 	}
 }
 
+func TestAuthenticationAuditCapturesClientDetailsWithoutMutatingCallerDetail(t *testing.T) {
+	s := auditServer(t)
+	detail := map[string]any{"method": "password"}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+	req.Header.Set("Sec-CH-UA-Platform", `"macOS"`)
+	req.Header.Set("Sec-CH-UA-Mobile", "?0")
+
+	s.recordAuth(req, AuditLogin, "kazuha", "kazuha", detail)
+	if _, changed := detail["client"]; changed {
+		t.Fatal("recordAuth mutated the detail map supplied by its caller")
+	}
+	rows := auditRows(t, s, AuditLogin)
+	if len(rows) != 1 {
+		t.Fatalf("authentication rows = %d, want 1", len(rows))
+	}
+	var got struct {
+		Client ClientInfo `json:"client"`
+	}
+	if err := json.Unmarshal([]byte(rows[0].Detail), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Client.Browser != "Chrome" || got.Client.OS != "macOS" || got.Client.DeviceType != "desktop" {
+		t.Errorf("client summary = %+v", got.Client)
+	}
+	if got.Client.UserAgent != req.UserAgent() {
+		t.Errorf("user agent = %q, want the request value", got.Client.UserAgent)
+	}
+	if got.Client.ClientHints["Sec-CH-UA-Platform"] != `"macOS"` || got.Client.ClientHints["Sec-CH-UA-Mobile"] != "?0" {
+		t.Errorf("client hints = %#v", got.Client.ClientHints)
+	}
+}
+
 // A failed sign-in against a name nobody holds still records the attempt. Refusing to log it would
 // hide exactly the enumeration sweep the log exists to reveal, and the row is not an oracle: it is
 // only visible to an admin who can already list the accounts.

@@ -62,7 +62,13 @@ describe('AccountPage', () => {
     apiMock.get.mockImplementation((url: string) => {
       if (url === '/api/me/login-activity?limit=10') {
         return Promise.resolve({
-          items: [{ id: 42, at: '2026-09-27T19:00:00Z', ip: '198.51.100.7', method: 'password' }],
+          items: [{
+            id: 42,
+            at: '2026-09-27T19:00:00Z',
+            ip: '198.51.100.7',
+            method: 'password',
+            client: { browser: 'Chrome', browser_version: '128.0', os: 'macOS', os_version: '14.6', device: 'Mac', device_type: 'desktop' },
+          }],
           total: 1,
           timezone: 'America/Los_Angeles',
         })
@@ -74,6 +80,7 @@ describe('AccountPage', () => {
     expect(screen.getByRole('tab', { name: 'account.securityTab' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'account.loginActivityTab' }).getAttribute('aria-selected')).toBe('true')
     expect(await screen.findByText('198.51.100.7')).toBeTruthy()
+    expect(screen.getByText('Chrome 128.0 · macOS 14.6 · Mac')).toBeTruthy()
     expect(screen.getByText('account.loginMethod.password')).toBeTruthy()
     expect(screen.queryByText('account.passwordTitle')).toBeNull()
   })

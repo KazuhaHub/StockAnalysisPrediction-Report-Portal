@@ -10,6 +10,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/mileusna/useragent v1.3.5
 	github.com/pquerna/otp v1.5.0
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
