@@ -113,6 +113,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// Session-gated, not public: build identity (version/commit) is only shown in the signed-in
 	// app footer, so an anonymous scanner can't fingerprint the build against known CVEs.
 	s.session(mux, "GET /api/version", s.handleVersion)
+	s.session(mux, "POST /api/me/version-use", s.handleVersionUse)
 	// The deployed build's committed release note, for the update dialog. Session-gated like
 	// /api/version: nothing in it is secret, but the endpoint is app infrastructure, not a public
 	// path to probe.

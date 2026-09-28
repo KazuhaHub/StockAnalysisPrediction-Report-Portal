@@ -45,6 +45,7 @@ vi.mock('./ReleaseNotesModal', () => ({
 
 const state = (over: Partial<UpdateState> = {}): UpdateState => ({
   page,
+  firstUse: null,
   target,
   kind: 'newer',
   policy: 'dismissible',
@@ -121,6 +122,18 @@ describe('deferral under a dismissible policy', () => {
 })
 
 describe('the administrator’s policy', () => {
+  it('opens the loaded release notes once when the account first uses that version', async () => {
+    updateState.value = state({ target: null, kind: null, firstUse: page })
+    const { rerender } = show(<div />)
+    await waitFor(() => expect(modal().dataset.open).toBe('true'))
+    expect(modal().dataset.target).toBe(page.version)
+    expect(modal().dataset.refresh).toBe('false')
+
+    await userEvent.click(screen.getByRole('button', { name: 'close-reminder' }))
+    rerender(<App><UpdateProvider><div /></UpdateProvider></App>)
+    expect(modal().dataset.open).toBe('false')
+  })
+
   it('persistent: no way to hide the reminder, and the page stays usable', () => {
     updateState.value = state({ policy: 'persistent' })
     banner()
