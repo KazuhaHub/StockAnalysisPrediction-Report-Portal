@@ -8,7 +8,10 @@ const apiGet = vi.hoisted(() => vi.fn())
 
 vi.mock('../api/client', () => ({ api: { get: apiGet } }))
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${JSON.stringify(o)}` : k) }),
+  useTranslation: () => ({
+    t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${JSON.stringify(o)}` : k),
+    i18n: { language: 'zh-CN', resolvedLanguage: 'zh-CN' },
+  }),
 }))
 
 describe('LoginActivityNotice', () => {
@@ -39,5 +42,13 @@ describe('LoginActivityNotice', () => {
     localStorage.setItem('rp:login-activity-seen:alice', '41')
     render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
     expect(await screen.findByText('loginActivity.newNotice')).toBeTruthy()
+  })
+
+  it('stays visible and clears the responsive header', async () => {
+    render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
+    await screen.findByText('loginActivity.recentNotice')
+    const notice = document.querySelector<HTMLElement>('.ant-notification-notice')
+    expect(notice?.style.marginTop).toContain('var(--rp-header-h')
+    expect(notice?.classList.contains('rp-login-activity-notice')).toBe(true)
   })
 })

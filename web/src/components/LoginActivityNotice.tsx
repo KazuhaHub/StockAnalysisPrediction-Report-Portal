@@ -20,7 +20,7 @@ export function maskLoginIP(ip: string): string {
 }
 
 export default function LoginActivityNotice({ user }: { user: string }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { notification } = App.useApp()
   const navigate = useNavigate()
 
@@ -49,13 +49,17 @@ export default function LoginActivityNotice({ user }: { user: string }) {
     } catch {
       // See the read above: persistence is an optimization, never a security boundary.
     }
-    const place = formatRegion(latest.geo)
+    const place = formatRegion(latest.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
     const when = auditTime(latest.at, data.timezone).text
     const ip = maskLoginIP(latest.ip)
     notification.open({
       key: `login-activity:${user}`,
+      className: 'rp-login-activity-notice',
       placement: 'topRight',
-      duration: 8,
+      duration: 0,
+      style: {
+        marginTop: 'calc(var(--rp-header-h, 64px) + env(safe-area-inset-top, 0px) + 12px)',
+      },
       icon: <SafetyCertificateOutlined style={{ color: '#1677ff' }} />,
       message:
         seen === 0
@@ -81,7 +85,7 @@ export default function LoginActivityNotice({ user }: { user: string }) {
         </Space>
       ),
     })
-  }, [navigate, notification, t, user])
+  }, [i18n?.language, i18n?.resolvedLanguage, navigate, notification, t, user])
 
   useEffect(() => startVisiblePoll(check, POLL_MS), [check])
   return null

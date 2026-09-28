@@ -1005,6 +1005,11 @@ export interface GeoLocation {
   country?: string
   region?: string
   city?: string
+  localized_names?: {
+    country?: Record<string, string>
+    region?: Record<string, string>
+    city?: Record<string, string>
+  }
 }
 
 export interface LoginActivityEntry {

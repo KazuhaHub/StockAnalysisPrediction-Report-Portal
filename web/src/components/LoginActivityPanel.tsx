@@ -8,7 +8,7 @@ import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
 
 export default function LoginActivityPanel() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { token } = theme.useToken()
   const [data, setData] = useState<LoginActivityResponse | null>(null)
   const [failed, setFailed] = useState(false)
@@ -38,7 +38,7 @@ export default function LoginActivityPanel() {
       <div role="list" style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, overflow: 'hidden' }}>
         {data.items.map((item, index) => {
           const at = auditTime(item.at, data.timezone)
-          const place = formatRegion(item.geo)
+          const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
           const methodKey = `account.loginMethod.${item.method || 'unknown'}`
           return (
             <div

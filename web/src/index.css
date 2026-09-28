@@ -1551,3 +1551,9 @@ body {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+@media (max-width: 575px) {
+  .rp-login-activity-notice.ant-notification-notice {
+    width: min(384px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+  }
+}
