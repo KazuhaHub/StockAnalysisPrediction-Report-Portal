@@ -164,7 +164,7 @@ type migration struct {
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
-func (s *Store) migrations() []migration { return []migration{migration0001()} }
+func (s *Store) migrations() []migration { return []migration{migration0001(), migration0002()} }
 
 // migration0001 adds the per-OU security policy columns (the login-protection settings).
 //
@@ -189,6 +189,31 @@ func migration0001() migration {
 				if _, err := e.exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.name + ` INTEGER`); err != nil {
 					return fmt.Errorf("add %s.%s: %w", c.table, c.name, err)
 				}
+			}
+			return nil
+		},
+	}
+}
+
+// migration0002 records the highest formal release an account has actually loaded. It is account
+// state rather than browser state: signing in from a new device must not replay notes the account
+// has already seen, while the first loaded page after a deploy must still surface that release.
+//
+// The column is nullable and no existing row needs a backfill. NULL means the account predates this
+// feature and has not yet loaded a formal release through it, so an older dump is safe to restore.
+func migration0002() migration {
+	col := colRef{table: "users", name: "last_used_version"}
+	return migration{
+		id:      "0002",
+		columns: []colRef{col},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			if e.columnExists(col.table, col.name) {
+				return nil
+			}
+			_, err := e.exec(`ALTER TABLE users ADD COLUMN last_used_version TEXT`)
+			if err != nil {
+				return fmt.Errorf("add %s.%s: %w", col.table, col.name, err)
 			}
 			return nil
 		},

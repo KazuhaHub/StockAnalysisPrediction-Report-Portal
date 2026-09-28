@@ -91,6 +91,17 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     message.success(version ? t('update.updatedTo', { version: productVersionLabel(version) }) : t('update.updated'))
   }, [message, state.page, t])
 
+  // Account state, not storage in this browser, decides whether this loaded release is new to the
+  // reader. Keep the local key only as a render-level guard so closing the one dialog stays closed.
+  useEffect(() => {
+    if (!state.firstUse) return
+    const key = buildKey(state.firstUse)
+    if (autoOpened.current === key) return
+    autoOpened.current = key
+    setNotesTarget(state.firstUse)
+    setNotesOpen(true)
+  }, [state.firstUse])
+
   // Automatic mode is deliberately one attempt per target in this tab. If the same old bundle
   // loads again, the stored attempt turns into the required dialog rather than a reload loop.
   useEffect(() => {
