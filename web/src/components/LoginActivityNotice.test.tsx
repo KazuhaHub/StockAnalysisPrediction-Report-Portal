@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
@@ -16,13 +16,31 @@ vi.mock('react-i18next', () => ({
 
 describe('LoginActivityNotice', () => {
   beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+      matches: query === '(max-width: 575px)',
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }))
     localStorage.clear()
     apiGet.mockReset().mockResolvedValue({
-      items: [{ id: 42, at: '2026-09-27T19:00:00Z', ip: '198.51.100.7', method: 'password' }],
+      items: [{
+        id: 42,
+        at: '2026-09-27T19:00:00Z',
+        ip: '198.51.100.7',
+        method: 'password',
+        client: { browser: 'Chrome', browser_version: '128.0', os: 'Android', os_version: '15', device: 'Pixel 9', device_type: 'mobile' },
+      }],
       total: 1,
       timezone: 'America/Los_Angeles',
     })
   })
+
+  afterEach(() => vi.unstubAllGlobals())
 
   it('shows the latest activity once and records the event id per account', async () => {
     const first = render(
@@ -30,6 +48,7 @@ describe('LoginActivityNotice', () => {
     )
     expect(await screen.findByText('loginActivity.recentNotice')).toBeTruthy()
     expect(screen.getByText(/198\.51\.100\.•••/)).toBeTruthy()
+    expect(screen.getByText('Chrome 128.0 · Android 15 · Pixel 9')).toBeTruthy()
     await waitFor(() => expect(localStorage.getItem('rp:login-activity-seen:alice')).toBe('42'))
     first.unmount()
 
@@ -44,11 +63,13 @@ describe('LoginActivityNotice', () => {
     expect(await screen.findByText('loginActivity.newNotice')).toBeTruthy()
   })
 
-  it('stays visible and clears the responsive header', async () => {
+  it('stays visible, clears the responsive header, and uses the centred mobile placement', async () => {
     render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
     await screen.findByText('loginActivity.recentNotice')
     const notice = document.querySelector<HTMLElement>('.ant-notification-notice')
     expect(notice?.style.marginTop).toContain('var(--rp-header-h')
     expect(notice?.classList.contains('rp-login-activity-notice')).toBe(true)
+    expect(document.querySelector('.ant-notification-top')).toBeTruthy()
+    expect(document.querySelector('.ant-notification-topRight')).toBeNull()
   })
 })
