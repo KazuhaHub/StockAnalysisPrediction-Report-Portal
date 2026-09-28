@@ -29,6 +29,7 @@ import { api, errText } from '../../api/client'
 import { auditDetail, headline, listSeparator, type ChangeMember, type DetailPart } from '../../lib/auditDetail'
 import type { AuditEntry, AuditResp } from '../../api/types'
 import { clickable } from '../../lib/clickable'
+import { clientInfoFromDetail, clientLabel } from '../../lib/clientInfo'
 
 // The subset of i18next's t() the detail helpers use. i18next's own type is overloaded in ways that
 // make it awkward to pass down; this is the shape it is assignable to, and the shape both need —
@@ -55,6 +56,13 @@ function actorOf(r: AuditEntry, t: TFunc): string {
         typeof detail.token_name === 'string' && detail.token_name.trim()) return detail.token_name
   } catch { /* Older records may have plain-text details. */ }
   return t('audit.machine')
+}
+
+function ClientSummaryLine({ detail, fontSize, t }: { detail: string; fontSize: number; t: TFunc }) {
+  const client = clientInfoFromDetail(detail)
+  const summary = clientLabel(client, client?.device_type ? t(`loginActivity.deviceType.${client.device_type}`) : '')
+  if (!summary) return null
+  return <Typography.Text type="secondary" style={{ fontSize }}>{summary}</Typography.Text>
 }
 
 // A pair of fields that is one change. Read as two fields it has to be diffed by eye — and the
@@ -327,6 +335,7 @@ export default function AuditPage() {
                   {formatRegion(r.geo, locale)}
                 </Typography.Text>
               )}
+              <ClientSummaryLine detail={r.detail} fontSize={11} t={t} />
             </Space>
           )}
         </Space>
@@ -520,6 +529,7 @@ export default function AuditPage() {
                 {region}
               </Typography.Text>
             )}
+            <ClientSummaryLine detail={r.detail} fontSize={12} t={t} />
           </div>
         </div>
         {detail.length > 0 && (
@@ -543,6 +553,8 @@ export default function AuditPage() {
       </div>
     )
   }
+
+  const rowClient = row ? clientInfoFromDetail(row.detail) : undefined
 
   return (
     <Card
@@ -676,6 +688,23 @@ export default function AuditPage() {
             <Descriptions.Item label={t('audit.ipFilter')}>
               {row.ip ? `${row.ip}${formatRegion(row.geo, locale) ? ` · ${formatRegion(row.geo, locale)}` : ''}` : '—'}
             </Descriptions.Item>
+            {rowClient && (
+              <Descriptions.Item label={t('audit.client')}>
+                <Space orientation="vertical" size={2} style={{ width: '100%' }}>
+                  <Typography.Text>{clientLabel(rowClient, rowClient.device_type ? t(`loginActivity.deviceType.${rowClient.device_type}`) : '') || '—'}</Typography.Text>
+                  {rowClient.user_agent && (
+                    <Typography.Text type="secondary" copyable={{ text: rowClient.user_agent }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                      {t('audit.userAgent')}: {rowClient.user_agent}
+                    </Typography.Text>
+                  )}
+                  {rowClient.client_hints && (
+                    <Typography.Text type="secondary" copyable={{ text: JSON.stringify(rowClient.client_hints) }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                      {t('audit.clientHints')}: {JSON.stringify(rowClient.client_hints)}
+                    </Typography.Text>
+                  )}
+                </Space>
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label={t('audit.action')}>
               <Tag color={ACTION_COLOR[row.action]}>{t(`audit.a.${row.action}`, row.action)}</Tag>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>

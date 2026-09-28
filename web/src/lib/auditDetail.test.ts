@@ -56,6 +56,11 @@ const change = (
 })
 
 describe('auditDetail', () => {
+  it('leaves client evidence to the dedicated administrator-only rendering', () => {
+    const out = auditDetail('auth.login', '{"method":"password","client":{"browser":"Chrome","user_agent":"raw"}}', t)
+    expect(out).toEqual([field('method', 'password')])
+  })
+
   it('says what was read, not which fields the row happens to have', () => {
     const out = auditDetail('report.read', '{"date":"2026-08-10","symbol":"000909","title":"000909 重组舆情分析"}', t)
     // The title already opens with the symbol — repeating it would read as two different things.

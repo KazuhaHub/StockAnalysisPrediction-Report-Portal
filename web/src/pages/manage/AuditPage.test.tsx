@@ -132,6 +132,26 @@ describe('AuditPage', () => {
     expect(detailText(container)).toContain('audit.diff.added audit.t.user client@corp.example')
   })
 
+  it('summarizes the client in the log and keeps raw evidence in the admin detail', async () => {
+    apiMock.get.mockResolvedValue({
+      ...RESP,
+      items: [{
+        id: 3, at: '2026-08-01 10:00:00', actor: 'alice', actor_ou: 0, action: 'auth.login',
+        target_type: 'user', target_id: 'alice', ip: '198.51.100.7',
+        detail: '{"method":"password","client":{"browser":"Chrome","browser_version":"128","os":"macOS","device":"Mac","device_type":"desktop","user_agent":"raw browser evidence","client_hints":{"Sec-CH-UA-Mobile":"?0"}}}',
+      }],
+    })
+    mount()
+    expect(await screen.findByText('Chrome 128 · macOS · Mac')).toBeTruthy()
+    expect(screen.queryByText(/raw browser evidence/)).toBeNull()
+
+    await waitFor(() => expect(reachable(screen.getAllByTitle('audit.details')[0])).toBe(true))
+    await userEvent.click(screen.getAllByTitle('audit.details')[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/audit\.userAgent: raw browser evidence/)).toBeTruthy()
+    expect(within(dialog).getByText(/audit\.clientHints:/)).toBeTruthy()
+  })
+
   // The pair arrives alphabetically ("after" first) because the server stores it in a map. Rendered
   // as a change, the order it was written in stops mattering and the membership is explicit.
   it('marks what a change added and what it removed', async () => {

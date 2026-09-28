@@ -1018,6 +1018,16 @@ export interface LoginActivityEntry {
   ip: string
   geo?: GeoLocation
   method?: string
+  client?: ClientSummary
+}
+
+export interface ClientSummary {
+  browser?: string
+  browser_version?: string
+  os?: string
+  os_version?: string
+  device?: string
+  device_type?: 'desktop' | 'mobile' | 'tablet' | 'bot' | string
 }
 
 export interface LoginActivityResponse {

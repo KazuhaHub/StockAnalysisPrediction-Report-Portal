@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Alert, Empty, Space, Spin, Tag, Typography, theme } from 'antd'
-import { EnvironmentOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import type { LoginActivityResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
+import { clientLabel } from '../lib/clientInfo'
 
 export default function LoginActivityPanel() {
   const { t, i18n } = useTranslation()
@@ -40,6 +41,7 @@ export default function LoginActivityPanel() {
           const at = auditTime(item.at, data.timezone)
           const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
           const methodKey = `account.loginMethod.${item.method || 'unknown'}`
+          const client = clientLabel(item.client, item.client?.device_type ? t(`loginActivity.deviceType.${item.client.device_type}`) : '')
           return (
             <div
               role="listitem"
@@ -59,6 +61,7 @@ export default function LoginActivityPanel() {
                       <EnvironmentOutlined /> {place || t('loginActivity.locationUnknown')}
                     </Typography.Text>
                   </Space>
+                  {client && <Typography.Text type="secondary"><DesktopOutlined /> {client}</Typography.Text>}
                 </Space>
                 <Tag icon={<SafetyCertificateOutlined />}>{t(methodKey)}</Tag>
               </div>
