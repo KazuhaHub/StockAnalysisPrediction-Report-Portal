@@ -70,7 +70,7 @@ function Protected({ children }: { children: React.ReactNode }) {
   // The enrolment wall. The server refuses everything else, so the alternative to sending them here
   // is a portal where every page answers 403 — which reads as broken rather than as "do this one
   // thing". The account page says why, and what to do about it.
-  if (mustEnroll && loc.pathname !== '/account') return <Navigate to="/account" replace />
+  if (mustEnroll && loc.pathname !== '/account' && loc.pathname !== '/account/security') return <Navigate to="/account" replace />
   // The announcement feed lives here rather than beside SiteProvider because it is per-reader and
   // needs the session: SiteProvider is mounted above AuthProvider so /login can paint the brand.
   // key={user} so signing in as somebody else on a shared machine builds a fresh provider instead
@@ -111,6 +111,8 @@ function AppRoutes() {
       >
         <Route path="/" element={<HomePage />} />
         <Route path="/account" element={<AccountPage />} />
+        <Route path="/account/security" element={<AccountPage />} />
+        <Route path="/account/login-activity" element={<AccountPage />} />
         <Route path="/stock/:symbol" element={<StockPage />} />
         <Route path="/run/:key" element={<RunPage />} />
         <Route path="/review" element={<ReviewPage />} />

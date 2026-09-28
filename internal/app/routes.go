@@ -147,6 +147,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "POST /api/login/passkey/begin", s.apiPasskeyLoginBegin)
 	s.public(mux, "POST /api/login/passkey/finish", s.apiPasskeyLoginFinish)
 	s.session(mux, "GET /api/me/passkeys", s.apiPasskeyList)
+	s.session(mux, "GET /api/me/login-activity", s.apiLoginActivity)
 	s.session(mux, "POST /api/me/passkeys/register/begin", s.apiPasskeyRegisterBegin)
 	s.session(mux, "POST /api/me/passkeys/register/finish", s.apiPasskeyRegisterFinish)
 	s.session(mux, "DELETE /api/me/passkeys/{id}", s.apiPasskeyDelete)

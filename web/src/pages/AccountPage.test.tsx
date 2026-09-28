@@ -34,9 +34,9 @@ vi.mock('react-i18next', () => ({
 const modalInput = (selector = 'input') =>
   document.querySelector(`.ant-modal ${selector}`) as HTMLElement
 
-const renderPage = () =>
+const renderPage = (path = '/account') =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <App>
         <AccountPage />
       </App>
@@ -56,6 +56,26 @@ describe('AccountPage', () => {
     authMock.totpAllowed = true
     authMock.passkeyAllowed = true
     authMock.mustEnroll = false
+  })
+
+  it('uses addressable tabs for security settings and login activity', async () => {
+    apiMock.get.mockImplementation((url: string) => {
+      if (url === '/api/me/login-activity?limit=10') {
+        return Promise.resolve({
+          items: [{ id: 42, at: '2026-09-27T19:00:00Z', ip: '198.51.100.7', method: 'password' }],
+          total: 1,
+          timezone: 'America/Los_Angeles',
+        })
+      }
+      return Promise.resolve({ passkeys: [] })
+    })
+    renderPage('/account/login-activity')
+
+    expect(screen.getByRole('tab', { name: 'account.securityTab' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'account.loginActivityTab' }).getAttribute('aria-selected')).toBe('true')
+    expect(await screen.findByText('198.51.100.7')).toBeTruthy()
+    expect(screen.getByText('account.loginMethod.password')).toBeTruthy()
+    expect(screen.queryByText('account.passwordTitle')).toBeNull()
   })
 
   // The wall, said out loud. Without it every other page answers 403 and the reader has no way to

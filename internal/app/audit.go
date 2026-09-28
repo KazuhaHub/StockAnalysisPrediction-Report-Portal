@@ -57,6 +57,17 @@ type AuditFilter struct {
 	Offset     int
 }
 
+// LoginActivity is the small, self-service view of a successful authentication event. The full
+// audit row remains admin-facing; an account holder needs only when, where and how their own
+// session was created.
+type LoginActivity struct {
+	ID     int64           `json:"id"`
+	At     string          `json:"at"`
+	IP     string          `json:"ip"`
+	Geo    *geoip.Location `json:"geo,omitempty"`
+	Method string          `json:"method,omitempty"`
+}
+
 // The action vocabulary the portal itself writes. Kept as constants so a rename is a compile error
 // rather than a filter that silently stops matching.
 // Naming: <object>.<verb>, one dot, lowercase. The verb is create/change/delete/read where CRUD
@@ -655,5 +666,38 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 		// True when a forwarded request arrived from an untrusted peer: every address in this table
 		// is then the proxy's, and the console has to say so rather than let it read as data.
 		"proxy_hint": s.proxyHint(),
+	})
+}
+
+// GET /api/me/login-activity — successful sign-ins for the account holding this session. This is
+// deliberately a separate projection from the admin audit API: accepting a username filter from
+// the browser would turn a self-service security feature into a cross-account audit reader.
+func (s *Server) apiLoginActivity(w http.ResponseWriter, r *http.Request, user string) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	rows, total := s.st.ListAudit(AuditFilter{
+		Actor: user, Action: AuditLogin, TargetType: "user", TargetID: user, Limit: limit,
+	})
+	items := make([]LoginActivity, 0, len(rows))
+	for _, row := range rows {
+		item := LoginActivity{ID: row.ID, At: row.At, IP: row.IP}
+		var detail struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal([]byte(row.Detail), &detail) == nil {
+			item.Method = detail.Method
+		}
+		if loc := s.geo.Lookup(row.IP); !loc.Empty() {
+			item.Geo = &loc
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, map[string]any{
+		"items": items, "total": total, "timezone": s.st.GetSetting("timezone", ""),
 	})
 }
