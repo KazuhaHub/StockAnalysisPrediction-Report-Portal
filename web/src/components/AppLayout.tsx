@@ -20,6 +20,7 @@ import SiteAnnouncement, { AnnouncementPopup, AnnouncementStrip } from './SiteAn
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
+import LoginActivityNotice from './LoginActivityNotice'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -215,6 +216,7 @@ function AppShell() {
 
   return (
     <Layout style={{ minHeight: onChat ? undefined : '100vh', height: onChat ? '100dvh' : undefined, background: token.colorBgLayout }}>
+      {user && <LoginActivityNotice user={user} />}
       <Header
         id="rp-app-header"
         aria-hidden={chatFocus}

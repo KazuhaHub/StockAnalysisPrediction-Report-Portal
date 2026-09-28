@@ -1007,6 +1007,20 @@ export interface GeoLocation {
   city?: string
 }
 
+export interface LoginActivityEntry {
+  id: number
+  at: string
+  ip: string
+  geo?: GeoLocation
+  method?: string
+}
+
+export interface LoginActivityResponse {
+  items: LoginActivityEntry[]
+  total: number
+  timezone: string
+}
+
 export interface AuditEntry {
   id: number
   at: string

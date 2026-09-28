@@ -39,6 +39,8 @@ const EXACT: Record<string, string> = {
   '/forgot': '',
   '/verify': '',
   '/account': 'nav.account',
+  '/account/security': 'nav.account',
+  '/account/login-activity': 'account.loginActivityTab',
   '/review': 'nav.review',
   '/apps': 'nav.apps',
   '/apps/batch': 'nav.batch',

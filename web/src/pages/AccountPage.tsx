@@ -11,19 +11,23 @@ import {
   Space,
   Spin,
   Tag,
+  Tabs,
   Typography,
 } from 'antd'
 import { KeyOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
 import { formatReportDateTime } from '../lib/datetime'
 import SSOIcon from '../components/SSOIcon'
 import type { StepUpPolicy } from '../api/types'
 import { createCredential, passkeySupported } from '../lib/webauthn'
+import LoginActivityPanel from '../components/LoginActivityPanel'
 
 // Self-service account security (ADR 0023). The 2FA, recovery-code and passkey endpoints existed
-// with no way for a user to reach them: enrolment was an admin errand. This page is that way in.
+// with no way for a user to reach them: enrolment was an admin errand. Security settings remain one
+// tab of this account centre; successful login history is the other.
 //
 // Every credential change asks for a proof first — the account password, or a current code once 2FA
 // is on — which the client sends in the X-Step-Up-Proof header. The proof is held only for the
@@ -39,8 +43,11 @@ interface Passkey {
 
 export default function AccountPage() {
   const { t } = useTranslation()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { user, name, federated, totpEnabled, totpAllowed, passkeyCount, passkeyAllowed, mustEnroll, refresh } = useAuth()
   const [passkeys, setPasskeys] = useState<Passkey[]>([])
+  const activeTab = location.pathname.endsWith('/login-activity') ? 'login-activity' : 'security'
 
   const loadPasskeys = useCallback(() => {
     api
@@ -48,10 +55,12 @@ export default function AccountPage() {
       .then((r) => setPasskeys(r.passkeys ?? []))
       .catch(() => setPasskeys([]))
   }, [])
-  useEffect(loadPasskeys, [loadPasskeys])
+  useEffect(() => {
+    if (activeTab === 'security') loadPasskeys()
+  }, [activeTab, loadPasskeys])
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 760 }}>
+    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 960 }}>
       <div>
         <Typography.Title level={3} style={{ marginBottom: 4 }}>
           {t('account.title')}
@@ -59,35 +68,51 @@ export default function AccountPage() {
         <Typography.Text type="secondary">{name || user}</Typography.Text>
       </div>
 
-      {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}
-      {/* Why the rest of the portal is refusing: an administrator required a second factor of this
-          account. Without this the reader sees every page fail and no reason for it. */}
-      {mustEnroll && (
-        <Alert
-          type="warning"
-          showIcon
-          title={t('account.mustEnrollTitle')}
-          description={!totpAllowed && !passkeyAllowed ? t('account.mustEnrollNoMethod') : t('account.mustEnrollBody')}
-        />
-      )}
-
-      {!federated && <PasswordCard />}
-      {/* Shown while the account MAY enrol, and also while it still has a factor to remove: an OU
-          that withdraws enrolment must not strand an account inside the factor it already holds. */}
-      {!federated && (totpAllowed || totpEnabled) && (
-        <TwoFactorCard enabled={totpEnabled} allowed={totpAllowed} onChange={refresh} />
-      )}
-      <PasskeyCard
-        passkeys={passkeys}
-        federated={federated}
-        totpEnabled={totpEnabled}
-        allowed={passkeyAllowed}
-        count={passkeyCount}
-        onChange={() => {
-          loadPasskeys()
-          refresh()
-        }}
+      <Tabs
+        style={{ width: '100%' }}
+        activeKey={activeTab}
+        onChange={(key) => navigate(`/account/${key}`)}
+        items={[
+          { key: 'security', label: t('account.securityTab') },
+          { key: 'login-activity', label: t('account.loginActivityTab') },
+        ]}
       />
+
+      {activeTab === 'login-activity' ? (
+        <LoginActivityPanel />
+      ) : (
+        <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 760 }}>
+          {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}
+          {/* Why the rest of the portal is refusing: an administrator required a second factor of this
+              account. Without this the reader sees every page fail and no reason for it. */}
+          {mustEnroll && (
+            <Alert
+              type="warning"
+              showIcon
+              title={t('account.mustEnrollTitle')}
+              description={!totpAllowed && !passkeyAllowed ? t('account.mustEnrollNoMethod') : t('account.mustEnrollBody')}
+            />
+          )}
+
+          {!federated && <PasswordCard />}
+          {/* Shown while the account MAY enrol, and also while it still has a factor to remove: an OU
+              that withdraws enrolment must not strand an account inside the factor it already holds. */}
+          {!federated && (totpAllowed || totpEnabled) && (
+            <TwoFactorCard enabled={totpEnabled} allowed={totpAllowed} onChange={refresh} />
+          )}
+          <PasskeyCard
+            passkeys={passkeys}
+            federated={federated}
+            totpEnabled={totpEnabled}
+            allowed={passkeyAllowed}
+            count={passkeyCount}
+            onChange={() => {
+              loadPasskeys()
+              refresh()
+            }}
+          />
+        </Space>
+      )}
     </Space>
   )
 }
