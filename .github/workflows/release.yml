@@ -127,6 +127,10 @@ jobs:
               echo "::error::release notes cannot be empty"
               exit 1
             fi
+            if ! printf '%s' "$INPUT_NOTES" | python3 scripts/release_notes.py; then
+              echo "::error::release notes must follow the bilingual format in docs/releases/README.md"
+              exit 1
+            fi
             if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
               echo "::error::tag ${tag} already exists; choose another version"
               exit 1
@@ -195,6 +199,10 @@ jobs:
           if ! grep -q '[^[:space:]]' /tmp/reader-notes.md; then
             echo "::error::annotated tag ${VERSION} has an empty release note"
             echo "::error::cut it with scripts/tag-release.sh --notes-file <path>"
+            exit 1
+          fi
+          if ! python3 scripts/release_notes.py < /tmp/reader-notes.md; then
+            echo "::error::release notes must follow the bilingual format in docs/releases/README.md"
             exit 1
           fi
           echo "release note: annotated tag ${VERSION}"

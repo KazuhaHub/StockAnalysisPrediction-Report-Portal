@@ -16,29 +16,51 @@ export function countryFlag(cc?: string): string {
   return String.fromCodePoint(base + up.charCodeAt(0) - 65, base + up.charCodeAt(1) - 65)
 }
 
-/** countryName prefers the name the database gave, and otherwise localizes the ISO
- *  code into the reader's own language — a country-level database often carries only
- *  the code, and "CN" is a worse label than 中国 for a Chinese reader. */
-export function countryName(g?: GeoLocation): string {
+/** countryName uses a localized database name when available, then localizes the ISO
+ *  code into the selected interface language. The flat database name is the fallback. */
+type PlaceNames = Record<string, string> | undefined
+
+function localizedPlace(names: PlaceNames, locale: string | undefined, fallback: string | undefined): string {
+  if (!names || !locale) return fallback || ''
+  const normalized = locale.replace('_', '-')
+  const language = normalized.split('-')[0].toLowerCase()
+  const keys = Object.keys(names)
+  const find = (candidate: string) => keys.find((key) => key.toLowerCase() === candidate.toLowerCase())
+  const candidates = [normalized]
+  if (language === 'zh') {
+    candidates.push(/-(tw|hk|mo|hant)/i.test(normalized) ? 'zh-TW' : 'zh-CN')
+  }
+  candidates.push(language)
+  for (const candidate of candidates) {
+    const key = find(candidate)
+    if (key && names[key]) return names[key]
+  }
+  return fallback || ''
+}
+
+export function countryName(g?: GeoLocation, locale = navigator.language): string {
   if (!g) return ''
-  if (g.country) return g.country
-  if (!g.country_code) return ''
+  const fromDatabase = localizedPlace(g.localized_names?.country, locale, '')
+  if (fromDatabase) return fromDatabase
+  if (!g.country_code) return g.country || ''
   try {
-    const dn = new Intl.DisplayNames([navigator.language, 'en'], { type: 'region' })
-    return dn.of(g.country_code.toUpperCase()) || g.country_code
+    const dn = new Intl.DisplayNames([locale, 'en'], { type: 'region' })
+    return dn.of(g.country_code.toUpperCase()) || g.country || g.country_code
   } catch {
-    return g.country_code
+    return g.country || g.country_code
   }
 }
 
 /** formatRegion builds the label. A city equal to its region is dropped, because free
  *  databases routinely report both for a municipality and "Shanghai · Shanghai" reads
  *  as a bug rather than as precision. */
-export function formatRegion(g?: GeoLocation): string {
+export function formatRegion(g?: GeoLocation, locale = navigator.language): string {
   if (!g || (!g.country_code && !g.country)) return ''
+  const region = localizedPlace(g.localized_names?.region, locale, g.region)
+  const city = localizedPlace(g.localized_names?.city, locale, g.city)
   const tail: string[] = []
-  if (g.region) tail.push(g.region)
-  if (g.city && g.city !== g.region) tail.push(g.city)
-  const head = [countryFlag(g.country_code), countryName(g)].filter(Boolean).join(' ')
+  if (region) tail.push(region)
+  if (city && city !== region) tail.push(city)
+  const head = [countryFlag(g.country_code), countryName(g, locale)].filter(Boolean).join(' ')
   return tail.length ? `${head} · ${tail.join(' · ')}` : head
 }

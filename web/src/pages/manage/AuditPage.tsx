@@ -208,7 +208,8 @@ const ACTION_COLOR: Record<string, string> = {
  * the same rule the SMTP password and the SSO client secrets already follow.
  */
 export default function AuditPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = i18n?.resolvedLanguage || i18n?.language || navigator.language
   // A phone cannot hold six columns. antd does not refuse — it squeezes them until CJK wraps one
   // character per line and a row becomes a column of glyphs, which is worse than not showing the
   // table at all. On a narrow screen the same rows are rendered as cards: one row per card, each
@@ -321,9 +322,9 @@ export default function AuditPage() {
               </Typography.Link>
               {/* Only when a database resolved it. No database, a LAN address, or an
                   address nobody has mapped all render as the bare address. */}
-              {formatRegion(r.geo) && (
+              {formatRegion(r.geo, locale) && (
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                  {formatRegion(r.geo)}
+                  {formatRegion(r.geo, locale)}
                 </Typography.Text>
               )}
             </Space>
@@ -465,7 +466,7 @@ export default function AuditPage() {
   // tap target the size of the row is the one a thumb hits.
   const rowCard = (r: AuditEntry) => {
     const at = auditTime(r.at, data?.timezone ?? '')
-    const region = formatRegion(r.geo)
+    const region = formatRegion(r.geo, locale)
     // The card is a bigger target than a table cell, not a bigger view: it shows the same headline
     // and opens the same record, so the two layouts cannot drift into telling different stories.
     const detail = headline(auditDetail(r.action, r.detail, t, { ouNames }))
@@ -673,7 +674,7 @@ export default function AuditPage() {
               {row.actor_ou > 0 ? ` · ${ouNames[String(row.actor_ou)] ?? `OU ${row.actor_ou}`}` : ''}
             </Descriptions.Item>
             <Descriptions.Item label={t('audit.ipFilter')}>
-              {row.ip ? `${row.ip}${formatRegion(row.geo) ? ` · ${formatRegion(row.geo)}` : ''}` : '—'}
+              {row.ip ? `${row.ip}${formatRegion(row.geo, locale) ? ` · ${formatRegion(row.geo, locale)}` : ''}` : '—'}
             </Descriptions.Item>
             <Descriptions.Item label={t('audit.action')}>
               <Tag color={ACTION_COLOR[row.action]}>{t(`audit.a.${row.action}`, row.action)}</Tag>

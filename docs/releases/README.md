@@ -46,8 +46,11 @@ some other language is still the note. A note with no markers is rendered exactl
 how every release published before this convention keeps working, and what an operator gets if they
 forget the markers — the right text twice, not the wrong text once.
 
-The workflow does not enforce the markers. Forgetting them costs a longer dialog, not a broken one, and
-the failure that matters — a reader who cannot read the note at all — is what the sections are for.
+The release workflow enforces one non-empty `zh-CN` section and one non-empty `en-US` section for
+both the GitHub form and manually pushed tags. `scripts/release_notes.py` is the shared validator;
+the release stops before any tag or artifact is created when either section is absent, empty, or
+duplicated. Older releases without markers remain readable because the portal's parser retains its
+unmarked-note fallback.
 
 ## Layout
 
