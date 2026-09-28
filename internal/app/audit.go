@@ -312,7 +312,10 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 		return nil, total
 	}
 	defer rows.Close()
-	out := make([]AuditEntry, 0, limit)
+	// Keep allocation independent of the request even though limit is clamped above. Besides making
+	// the memory bound structural, a small fixed headroom fits the common admin and self-service
+	// pages while append still grows safely for the allowed larger page.
+	out := make([]AuditEntry, 0, 100)
 	for rows.Next() {
 		var e AuditEntry
 		var ou sql.NullInt64
