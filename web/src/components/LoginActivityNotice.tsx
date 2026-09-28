@@ -1,15 +1,17 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { App, Button, Space, Typography } from 'antd'
-import { SafetyCertificateOutlined } from '@ant-design/icons'
+import { DesktopOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import type { LoginActivityResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
+import { clientLabel } from '../lib/clientInfo'
 import { startVisiblePoll } from '../lib/visiblePoll'
 
 const POLL_MS = 5 * 60 * 1000
+const MOBILE_QUERY = '(max-width: 575px)'
 
 export function maskLoginIP(ip: string): string {
   if (!ip) return ''
@@ -23,6 +25,25 @@ export default function LoginActivityNotice({ user }: { user: string }) {
   const { t, i18n } = useTranslation()
   const { notification } = App.useApp()
   const navigate = useNavigate()
+  const [mobile, setMobile] = useState(() => {
+    try {
+      return window.matchMedia(MOBILE_QUERY).matches
+    } catch {
+      return false
+    }
+  })
+
+  useEffect(() => {
+    let media: MediaQueryList
+    try {
+      media = window.matchMedia(MOBILE_QUERY)
+    } catch {
+      return
+    }
+    const onChange = () => setMobile(media.matches)
+    media.addEventListener?.('change', onChange)
+    return () => media.removeEventListener?.('change', onChange)
+  }, [])
 
   const check = useCallback(async () => {
     let data: LoginActivityResponse
@@ -52,10 +73,14 @@ export default function LoginActivityNotice({ user }: { user: string }) {
     const place = formatRegion(latest.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
     const when = auditTime(latest.at, data.timezone).text
     const ip = maskLoginIP(latest.ip)
+    const client = clientLabel(
+      latest.client,
+      latest.client?.device_type ? t(`loginActivity.deviceType.${latest.client.device_type}`) : '',
+    )
     notification.open({
       key: `login-activity:${user}`,
       className: 'rp-login-activity-notice',
-      placement: 'topRight',
+      placement: mobile ? 'top' : 'topRight',
       duration: 0,
       style: {
         marginTop: 'calc(var(--rp-header-h, 64px) + env(safe-area-inset-top, 0px) + 12px)',
@@ -70,6 +95,7 @@ export default function LoginActivityNotice({ user }: { user: string }) {
       description: (
         <Space orientation="vertical" size={4}>
           <Typography.Text>{[when, place].filter(Boolean).join(' · ')}</Typography.Text>
+          {client && <Typography.Text type="secondary"><DesktopOutlined /> {client}</Typography.Text>}
           {ip && <Typography.Text type="secondary">{t('loginActivity.ip')}: {ip}</Typography.Text>}
           <Button
             type="link"
@@ -85,7 +111,7 @@ export default function LoginActivityNotice({ user }: { user: string }) {
         </Space>
       ),
     })
-  }, [i18n?.language, i18n?.resolvedLanguage, navigate, notification, t, user])
+  }, [i18n?.language, i18n?.resolvedLanguage, mobile, navigate, notification, t, user])
 
   useEffect(() => startVisiblePoll(check, POLL_MS), [check])
   return null
