@@ -600,3 +600,18 @@ describe('the report categories on a card', () => {
     expect(screen.getByText('+2')).toBeTruthy()
   })
 })
+
+describe('the entry buttons', () => {
+  it('name a blank shortcut in the reader language and keep written text as written', async () => {
+    state.resp = {
+      ...base,
+      links: [
+        { id: 1, label: '', url: 'rp:apps:builtin:batch', ord: 0 },
+        { id: 2, label: 'Research desk', url: 'rp:apps:builtin:recurring', ord: 1 },
+      ],
+    }
+    renderHome()
+    expect(await screen.findByText('nav.batch')).toBeTruthy()
+    expect(screen.getByText('Research desk')).toBeTruthy()
+  })
+})

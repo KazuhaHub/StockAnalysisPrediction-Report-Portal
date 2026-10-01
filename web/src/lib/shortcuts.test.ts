@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { shortcutOfUrl, shortcutUrl, triggerShortcut, shortcutPerm, builtinAppOptions, RUN_ANALYSIS_EVENT } from './shortcuts'
+import { shortcutOfUrl, shortcutUrl, triggerShortcut, shortcutPerm, builtinAppOptions, linkDisplayLabel, RUN_ANALYSIS_EVENT } from './shortcuts'
 
 describe('shortcutOfUrl', () => {
   it('returns undefined for a plain URL or empty', () => {
@@ -136,5 +136,31 @@ describe('builtinAppOptions', () => {
     expect(values).toContain('builtin:recurring')
     expect(values).toContain('builtin:batch')
     expect(opts.find((o) => o.value === 'builtin:recurring')?.label).toBe('nav.recurring')
+  })
+})
+
+describe('linkDisplayLabel', () => {
+  const t = (k: string) => `T(${k})`
+
+  it('shows the stored text verbatim when the admin wrote one', () => {
+    expect(linkDisplayLabel({ label: '批量执行', url: 'rp:apps:builtin:batch' }, t)).toBe('批量执行')
+    expect(linkDisplayLabel({ label: 'GitHub', url: 'https://github.com' }, t)).toBe('GitHub')
+  })
+
+  it('names a blank built-in app pin by that app, in the reader language', () => {
+    expect(linkDisplayLabel({ label: '', url: 'rp:apps:builtin:batch' }, t)).toBe('T(nav.batch)')
+    expect(linkDisplayLabel({ label: '  ', url: 'rp:apps:builtin:recurring' }, t)).toBe('T(nav.recurring)')
+  })
+
+  it('names any other blank shortcut by its action', () => {
+    expect(linkDisplayLabel({ label: '', url: 'rp:run-analysis' }, t)).toBe('T(nav.runAnalysis)')
+    expect(linkDisplayLabel({ label: '', url: 'rp:run-analysis:42' }, t)).toBe('T(nav.runAnalysis)')
+    expect(linkDisplayLabel({ label: '', url: 'rp:apps:deep-research' }, t)).toBe('T(nav.apps)')
+    // An unknown built-in key has no name of its own; the action is still a truthful label.
+    expect(linkDisplayLabel({ label: '', url: 'rp:apps:builtin:gone' }, t)).toBe('T(nav.apps)')
+  })
+
+  it('falls back to the URL for a blank plain link rather than an empty button', () => {
+    expect(linkDisplayLabel({ label: '', url: 'https://example.com' }, t)).toBe('https://example.com')
   })
 })
