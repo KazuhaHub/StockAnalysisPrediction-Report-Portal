@@ -94,3 +94,25 @@ export function shortcutPerm(res: ResolvedShortcut): string | undefined {
 export function builtinAppOptions(label: (titleKey: string) => string): { value: string; label: string }[] {
   return BUILTIN_APPS.map((a) => ({ value: BUILTIN_PIN_PREFIX + a.key, label: label(a.titleKey) }))
 }
+
+// shortcutLabelKey is the i18n key naming what a shortcut link opens: the pinned built-in app's own
+// name when it pins one, otherwise the action's. A pinned Dify target or downloadable app has no
+// translatable name (its name is admin data), so it is named by the action.
+export function shortcutLabelKey(res: ResolvedShortcut): string {
+  if (res.shortcut.key === 'apps' && res.param?.startsWith(BUILTIN_PIN_PREFIX)) {
+    const app = builtinAppByKey(res.param.slice(BUILTIN_PIN_PREFIX.length))
+    if (app) return app.titleKey
+  }
+  return res.shortcut.labelKey
+}
+
+// linkDisplayLabel is the text an entry button shows. Admin-written text is shown as written; a
+// blank one on a shortcut follows the reader's language via shortcutLabelKey, which is how an entry
+// to a built-in feature stays translated without a per-language column. A blank plain link shows
+// its URL rather than an empty button.
+export function linkDisplayLabel(l: { label: string; url: string }, t: (key: string) => string): string {
+  const label = l.label.trim()
+  if (label) return label
+  const res = shortcutOfUrl(l.url)
+  return res ? t(shortcutLabelKey(res)) : l.url
+}

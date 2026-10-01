@@ -755,6 +755,8 @@
   "links.icon": "圖示",
   "links.iconPlaceholder": "選擇圖示（可選）",
   "links.label": "按鈕文字",
+  "links.labelAuto": "跟隨語言",
+  "links.labelAutoHint": "留空則依介面語言顯示內建名稱；填寫後各語言都顯示所填文字。",
   "links.mode.expand": "內聯展開",
   "links.mode.modal": "彈窗",
   "links.mode.popover": "懸浮",

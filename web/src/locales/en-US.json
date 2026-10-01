@@ -755,6 +755,8 @@
   "links.icon": "Icon",
   "links.iconPlaceholder": "Pick an icon (optional)",
   "links.label": "Button text",
+  "links.labelAuto": "Follows language",
+  "links.labelAutoHint": "Leave blank to show the built-in name in each reader's language; text entered here is shown as written in every language.",
   "links.mode.expand": "Inline expand",
   "links.mode.modal": "Popup",
   "links.mode.popover": "Floating",
