@@ -389,6 +389,7 @@ var auditVocabulary = []string{
 	AuditReportRead, AuditReportIngest, AuditReportCreate, AuditReportEdit, AuditReportRestore,
 	AuditReportDelete,
 	AuditLogin, AuditLoginFailed, AuditLockout, AuditLogout,
+	AuditSessionRevoke, AuditSessionsRevoke, AuditLoginHistoryRetention,
 	AuditPasswordChange, AuditPasswordReset, AuditMFAChange,
 	AuditIdentityLink, AuditIdentityUnlink, AuditStepUp,
 	AuditUserCreate, AuditUserChange, AuditUserDelete,

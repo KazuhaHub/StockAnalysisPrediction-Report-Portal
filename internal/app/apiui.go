@@ -422,7 +422,7 @@ func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 		}
 		s.recordAuth(r, AuditLogout, u, u, nil)
 	}
-	clearSessionCookie(w)
+	s.clearSessionCookie(w, r)
 	writeJSON(w, okJSON)
 }
 

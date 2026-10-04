@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,6 +11,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSessionCookieSecurityForHTTPSAndTrustedProxies(t *testing.T) {
+	_, trusted, err := net.ParseCIDR("10.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{trustedNets: []*net.IPNet{trusted}}
+	for _, tc := range []struct {
+		name, url, remote, forwarded string
+		secure                       bool
+	}{
+		{"TLS", "https://portal.example/", "192.0.2.1:1234", "", true},
+		{"trusted proxy", "http://portal.example/", "10.0.0.1:1234", "https", true},
+		{"untrusted proxy", "http://portal.example/", "192.0.2.1:1234", "https", false},
+		{"plain HTTP", "http://portal.example/", "192.0.2.1:1234", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, tc.url, nil)
+			r.RemoteAddr = tc.remote
+			r.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			w := httptest.NewRecorder()
+			s.writeSessionCookie(w, r, "signed-value", time.Now().Add(time.Hour).Unix())
+			issued := w.Result().Cookies()[0]
+			w = httptest.NewRecorder()
+			s.clearSessionCookie(w, r)
+			cleared := w.Result().Cookies()[0]
+			if issued.Secure != tc.secure || cleared.Secure != tc.secure || !issued.HttpOnly || !cleared.HttpOnly {
+				t.Fatalf("cookie flags: issued=%+v cleared=%+v", issued, cleared)
+			}
+			if cleared.Value != "" || cleared.MaxAge >= 0 || issued.SameSite != http.SameSiteLaxMode || cleared.SameSite != issued.SameSite || cleared.Path != issued.Path {
+				t.Fatalf("cookie deletion: issued=%+v cleared=%+v", issued, cleared)
+			}
+		})
+	}
+}
 
 func managedTestCookie(t *testing.T, s *Server, user, agent string, ttl time.Duration) string {
 	t.Helper()

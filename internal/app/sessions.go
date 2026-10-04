@@ -76,8 +76,9 @@ func (s *Server) writeSessionCookie(w http.ResponseWriter, r *http.Request, valu
 	setRequestSession(r, value)
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+		Secure: requestIsHTTPS(r, s.trustedNets), SameSite: http.SameSiteLaxMode})
 }
 
 func (s *Server) newManagedSession(w http.ResponseWriter, r *http.Request, u User, exp int64, id string) bool {
@@ -220,7 +221,7 @@ func (s *Server) apiSessionDelete(w http.ResponseWriter, r *http.Request, user s
 	}
 	current := id == sessionID(r)
 	if current {
-		clearSessionCookie(w)
+		s.clearSessionCookie(w, r)
 	}
 	s.recordAuth(r, AuditSessionRevoke, user, user, map[string]any{"session_id": id})
 	writeJSON(w, map[string]any{"ok": true, "signed_out": current})
@@ -280,7 +281,7 @@ func (s *Server) apiSessionsRevoke(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 	if in.Scope == "all" {
-		clearSessionCookie(w)
+		s.clearSessionCookie(w, r)
 	} else {
 		u.SessionRev++
 		s.writeSessionCookie(w, r, s.managedCookie(*u, id, exp), exp)
