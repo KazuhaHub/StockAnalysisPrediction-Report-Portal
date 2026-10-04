@@ -34,7 +34,30 @@ func preMigrationDump(t *testing.T) []byte {
 		`INSERT INTO user_groups(id,name,description,created_at,weight,urgent_unlimited,is_default)
 			VALUES(1,'安禅内部','', '2026-01-01T00:00:00Z',0,0,1)`,
 	)
-	return dumpOf(t, st)
+	// A fixture for the old release must dump only the frozen baseline. The
+	// current dumper also includes tables added by later migration steps.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	names := []string{}
+	for _, stmt := range st.baseSchemaStmts() {
+		if name, _, ok := parseCreateTable(stmt); ok {
+			names = append(names, name)
+		}
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := enc.Encode(backupHeader{Format: backupFormat, Version: backupFormatVersion, SchemaVersion: 2, Driver: "sqlite", Tables: names}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		if _, err := dumpTable(tx, enc, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return buf.Bytes()
 }
 
 // withHeaderMigrations rewrites the first line's migration list, which is how a hand-edited or

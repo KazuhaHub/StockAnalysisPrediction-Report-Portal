@@ -376,7 +376,9 @@ func (s *Server) apiPasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "that sign-in attempt has expired; start again")
 		return
 	}
-	s.setSessionCookie(w, r, *u)
+	if !s.setSessionCookie(w, r, *u) {
+		return
+	}
 	s.st.TouchLastLogin(username)
 	s.recordAuth(r, AuditLogin, username, username, map[string]any{"method": "passkey"})
 	log.Printf("login %s (passkey)", username)

@@ -255,6 +255,9 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	if !s.gateEnrolment(w, r, u) {
 		return
 	}
+	if !s.ensureManagedSession(w, r, u) {
+		return
+	}
 	writeJSON(w, s.meJSON(u))
 }
 
@@ -397,7 +400,9 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		s.beginTOTPChallenge(w, u.Username)
 		return
 	}
-	s.setSessionCookie(w, r, *u)
+	if !s.setSessionCookie(w, r, *u) {
+		return
+	}
 	s.st.TouchLastLogin(u.Username)
 	s.recordAuth(r, AuditLogin, u.Username, u.Username, map[string]any{"method": "password"})
 	log.Printf("login %s", u.Username)
@@ -408,9 +413,16 @@ func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 	// Read before the cookie is cleared: after it, there is nobody to attribute the row to. A
 	// request with no valid session logs nothing rather than an anonymous sign-out.
 	if u := s.currentActiveUser(r); u != "" {
+		if !s.ensureManagedSession(w, r, u) {
+			return
+		}
+		if _, err := s.st.exec(`UPDATE user_sessions SET revoked=1 WHERE id=? AND username=?`, sessionID(r), u); err != nil {
+			jsonError(w, 500, "could not revoke session")
+			return
+		}
 		s.recordAuth(r, AuditLogout, u, u, nil)
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1})
+	s.clearSessionCookie(w, r)
 	writeJSON(w, okJSON)
 }
 
