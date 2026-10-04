@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"reflect"
@@ -93,15 +94,18 @@ const (
 	AuditPolicyChange = "policy.change"
 
 	// Authentication — the principal acting on its own credentials.
-	AuditLogin          = "auth.login"
-	AuditLoginFailed    = "auth.login_failed"
-	AuditLockout        = "auth.lockout"
-	AuditLogout         = "auth.logout"
-	AuditPasswordChange = "auth.password_change"
-	AuditPasswordReset  = "auth.password_reset"
-	AuditMFAChange      = "auth.mfa_change"
-	AuditIdentityLink   = "auth.identity_link"
-	AuditIdentityUnlink = "auth.identity_unlink"
+	AuditLogin                 = "auth.login"
+	AuditLoginFailed           = "auth.login_failed"
+	AuditLockout               = "auth.lockout"
+	AuditLogout                = "auth.logout"
+	AuditSessionRevoke         = "auth.session_revoke"
+	AuditSessionsRevoke        = "auth.sessions_revoke"
+	AuditLoginHistoryRetention = "auth.login_history_retention"
+	AuditPasswordChange        = "auth.password_change"
+	AuditPasswordReset         = "auth.password_reset"
+	AuditMFAChange             = "auth.mfa_change"
+	AuditIdentityLink          = "auth.identity_link"
+	AuditIdentityUnlink        = "auth.identity_unlink"
 	// A completed re-authentication at the identity provider. Its own action rather than a
 	// second "auth.login": no session was issued, and reading it as a sign-in would put a login
 	// in the log for a browser that was already signed in.
@@ -153,6 +157,13 @@ func (s *Store) WriteAudit(e AuditEntry) {
 		// which nothing recorded. The client renders it in the panel timezone.
 		at = time.Now().UTC().Format(time.RFC3339)
 	}
+	if e.Action == AuditLogin && e.Actor != "" && e.TargetType == "user" && e.TargetID == e.Actor {
+		if err := s.writeLoginAudit(e, at); err == nil {
+			return
+		} else {
+			log.Printf("login history: %v", err)
+		}
+	}
 	s.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,?,?,?,?,?,?,?)`, at, e.Actor, e.ActorOU, e.Action, e.TargetType, e.TargetID, e.Detail, e.IP)
 }
@@ -197,6 +208,10 @@ func (s *Server) recordChange(r *http.Request, actor, action, targetType, target
 // an administrator — and for a FAILED sign-in the actor may be empty while the target is not, which
 // is the case that matters: nobody has authenticated yet, but a name was tried.
 func (s *Server) recordAuth(r *http.Request, action, actor, account string, detail map[string]any) {
+	if action == AuditLogin && r != nil {
+		method, _ := detail["method"].(string)
+		s.st.exec(`UPDATE user_sessions SET method=? WHERE id=? AND username=?`, method, sessionID(r), actor)
+	}
 	s.st.WriteAudit(AuditEntry{
 		Actor: actor, ActorOU: s.st.PrimaryGroupOf(actor), Action: action,
 		TargetType: "user", TargetID: account,
@@ -684,9 +699,11 @@ func (s *Server) apiLoginActivity(w http.ResponseWriter, r *http.Request, user s
 	if limit > 20 {
 		limit = 20
 	}
-	rows, total := s.st.ListAudit(AuditFilter{
-		Actor: user, Action: AuditLogin, TargetType: "user", TargetID: user, Limit: limit,
-	})
+	rows, total, keep, err := s.st.listLoginHistory(user, limit)
+	if err != nil {
+		jsonError(w, 500, "could not read login history")
+		return
+	}
 	items := make([]LoginActivity, 0, len(rows))
 	for _, row := range rows {
 		item := LoginActivity{ID: row.ID, At: row.At, IP: row.IP}
@@ -704,6 +721,6 @@ func (s *Server) apiLoginActivity(w http.ResponseWriter, r *http.Request, user s
 		items = append(items, item)
 	}
 	writeJSON(w, map[string]any{
-		"items": items, "total": total, "timezone": s.st.GetSetting("timezone", ""),
+		"items": items, "total": total, "keep": keep, "timezone": s.st.GetSetting("timezone", ""),
 	})
 }

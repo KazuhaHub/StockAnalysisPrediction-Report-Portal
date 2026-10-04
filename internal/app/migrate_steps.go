@@ -164,7 +164,51 @@ type migration struct {
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
-func (s *Store) migrations() []migration { return []migration{migration0001(), migration0002()} }
+func (s *Store) migrations() []migration {
+	return []migration{migration0001(), migration0002(), migration0003()}
+}
+
+// Independent sessions and personal login history. Older backups need no data upgrade:
+// history is copied lazily from their audit rows the first time an account accesses it.
+func migration0003() migration {
+	cols := []colRef{{"users", "login_history_keep"}, {"users", "login_history_initialized"}}
+	products := append([]colRef{}, cols...)
+	for _, name := range []string{"id", "username", "revision", "created_at", "last_seen", "expires_at", "ip", "client", "method", "revoked"} {
+		products = append(products, colRef{"user_sessions", name})
+	}
+	for _, name := range []string{"id", "username", "at", "ip", "detail"} {
+		products = append(products, colRef{"login_history", name})
+	}
+	return migration{
+		id: "0003", columns: products, tables: []string{"user_sessions", "login_history"},
+		indices: []string{"idx_user_sessions_owner", "idx_login_history_owner"},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			for i, c := range cols {
+				if !e.columnExists(c.table, c.name) {
+					def := "100"
+					if i == 1 {
+						def = "0"
+					}
+					if _, err := e.exec("ALTER TABLE users ADD COLUMN " + c.name + " INTEGER NOT NULL DEFAULT " + def); err != nil {
+						return err
+					}
+				}
+			}
+			for _, q := range []string{
+				`CREATE TABLE IF NOT EXISTS user_sessions(id TEXT PRIMARY KEY, username TEXT NOT NULL, revision BIGINT NOT NULL, created_at BIGINT NOT NULL, last_seen BIGINT NOT NULL, expires_at BIGINT NOT NULL, ip TEXT NOT NULL, client TEXT NOT NULL, method TEXT NOT NULL DEFAULT '', revoked INTEGER NOT NULL DEFAULT 0)`,
+				`CREATE INDEX IF NOT EXISTS idx_user_sessions_owner ON user_sessions(username,revision,expires_at)`,
+				`CREATE TABLE IF NOT EXISTS login_history(id BIGINT PRIMARY KEY, username TEXT NOT NULL, at TEXT NOT NULL, ip TEXT NOT NULL, detail TEXT NOT NULL)`,
+				`CREATE INDEX IF NOT EXISTS idx_login_history_owner ON login_history(username,id)`,
+			} {
+				if _, err := e.exec(q); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+}
 
 // migration0001 adds the per-OU security policy columns (the login-protection settings).
 //

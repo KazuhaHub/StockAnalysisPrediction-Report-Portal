@@ -172,7 +172,7 @@ jobs:
             # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
             # webhook delivery and chat gate are the paths a race detector can actually catch here.
             go test -race -count=1 -timeout=10m ./internal/app/ \
-              -run 'Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify'
+              -run 'Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout'
           } 2>&1 | tee go-race-output.txt
       - name: Upload race output
         if: failure()

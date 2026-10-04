@@ -189,7 +189,9 @@ func (s *Server) apiLoginTOTP(w http.ResponseWriter, r *http.Request) {
 	if s.loginThr != nil {
 		s.loginThr.reset(key)
 	}
-	s.setSessionCookie(w, r, *u)
+	if !s.setSessionCookie(w, r, *u) {
+		return
+	}
 	s.st.TouchLastLogin(u.Username)
 	s.recordAuth(r, AuditLogin, u.Username, u.Username, map[string]any{"method": "totp"})
 	log.Printf("login %s (2fa)", u.Username)

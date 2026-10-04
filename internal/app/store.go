@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -18,11 +20,15 @@ import (
 
 func nowStr() string { return time.Now().Format("2006-01-02 15:04:05") }
 
-// newSessionEpoch is the starting session revision for a newly created account: the current time in
-// microseconds, so no two account instances sharing a username can start at the same value. Not
-// secret and not a nonce — it only has to differ from whatever the previous holder's cookies carry,
-// and it stays well inside int64 for the next several thousand years.
-func newSessionEpoch() int64 { return time.Now().UnixMicro() }
+// Account instances need different revisions even when a delete/recreate happens
+// within one clock tick (notably on Windows). Leave headroom for revision bumps.
+func newSessionEpoch() int64 {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
+	return int64(binary.BigEndian.Uint64(b[:])&((1<<62)-1)) + 1
+}
 
 // boolInt maps a bool to the 0/1 integer stored in SQLite/Postgres.
 func boolInt(b bool) int {
@@ -937,7 +943,7 @@ func (s *Store) UpsertUser(u User) error {
 	// session_rev already invalidates old cookies when a password changes, but it could not survive
 	// a DELETION: a recreated row is a fresh INSERT, so it restarted at zero and the previous
 	// holder's still-valid cookie — usernames are re-registerable — authenticated them as the new
-	// account, with its OU, its role and its reports. Seeding from the clock makes the revision
+	// account, with its OU, its role and its reports. Random seeding makes the revision
 	// unique per account INSTANCE, so the old cookie's revision simply no longer matches.
 	//
 	// Only on INSERT. The conflict branch keeps its +1, so an ordinary password change is still a
@@ -946,8 +952,8 @@ func (s *Store) UpsertUser(u User) error {
 	//
 	// created_at is stamped here too — it was declared and never written, and "when was this
 	// account created" is worth answering in the admin UI.
-	_, err := s.exec(`INSERT INTO users(username,password_hash,role,created_at,session_rev)
-			VALUES(?,?,?,?,?)
+	_, err := s.exec(`INSERT INTO users(username,password_hash,role,created_at,session_rev,login_history_initialized)
+			VALUES(?,?,?,?,?,1)
 		ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash,role=excluded.role,
 			session_rev=COALESCE(users.session_rev,0)+1`,
 		u.Username, u.PasswordHash, u.EffRole(), nowStr(), newSessionEpoch())
@@ -1012,6 +1018,8 @@ func (s *Store) DeleteUser(name string) error {
 		// Pending TOTP / passkey / reset / email-verify ceremonies. Short-lived, but a live token
 		// resolves by username and would act on the account that holds the name when it is redeemed.
 		{"DELETE FROM auth_requests WHERE username=?", name},
+		{"DELETE FROM user_sessions WHERE username=?", name},
+		{"DELETE FROM login_history WHERE username=?", name},
 		// The portal's index of the person's chat threads (Dify holds the messages themselves).
 		{"DELETE FROM chat_conversations WHERE created_by=?", name},
 		// A favorite is a personal preference. A surviving row would make a later holder of this

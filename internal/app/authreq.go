@@ -147,6 +147,9 @@ const authStateSweepInterval = 15 * time.Minute
 // hygiene the operator never opted into and should not have to.
 func (s *Server) authSweepLoop() {
 	for {
+		if err := s.st.purgeSessions(time.Now()); err != nil {
+			log.Printf("session sweep: %v", err)
+		}
 		if reqs, seen, err := s.st.PurgeExpiredAuthState(time.Now()); err != nil {
 			log.Printf("auth sweep: %v", err)
 		} else if reqs+seen > 0 {
