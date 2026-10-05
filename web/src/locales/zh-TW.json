@@ -1873,5 +1873,8 @@
   "sessions.revoke": "踢出",
   "sessions.revokeConfirm": "踢出此登入？該裝置下次請求時需要重新登入。",
   "sessions.revoked": "所選登入已退出。",
-  "sessions.title": "有效登入會話"
+  "sessions.title": "有效登入會話",
+  "storage.loginHistoryTitle": "個人登入歷史",
+  "storage.loginHistoryHint": "此上限統一套用於所有帳戶，儲存後立即清理超出數量的個人登入歷史。範圍為 1–10000，預設 100 筆。不會登出或刪除管理員稽核紀錄，提高上限不能恢復已清理的歷史。",
+  "storage.loginHistoryConfirm": "將所有帳戶統一設定為保留最新 {{count}} 筆登入歷史？"
 }

@@ -4,26 +4,52 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 const defaultLoginHistoryKeep = 100
 const maxLoginHistoryKeep = 10000
+const setLoginHistoryKeep = "login_history_keep"
+
+func loginHistoryKeep(e migExec, exclusive bool) (int, error) {
+	if _, err := e.exec(`INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO NOTHING`, setLoginHistoryKeep, strconv.Itoa(defaultLoginHistoryKeep)); err != nil {
+		return 0, err
+	}
+	q := `SELECT v FROM meta WHERE k=?`
+	if e.s.driver == "postgres" {
+		if exclusive {
+			q += " FOR UPDATE"
+		} else {
+			q += " FOR SHARE"
+		}
+	}
+	var raw string
+	if err := e.queryRow(q, setLoginHistoryKeep).Scan(&raw); err != nil {
+		return 0, err
+	}
+	keep, err := strconv.Atoi(raw)
+	if err != nil || keep < 1 || keep > maxLoginHistoryKeep {
+		keep = defaultLoginHistoryKeep
+	}
+	return keep, nil
+}
 
 // Serialize an account's history writes on its users row in Postgres. SQLite's
 // single connection serializes the transaction. Initialization runs once, so rows
 // removed from personal history cannot return from the administrator's audit log.
 func prepareLoginHistory(e migExec, user string) (int, error) {
-	keep, initialized := defaultLoginHistoryKeep, 0
-	q := `SELECT login_history_keep,login_history_initialized FROM users WHERE username=?`
+	keep, err := loginHistoryKeep(e, false)
+	if err != nil {
+		return 0, err
+	}
+	initialized := 0
+	q := `SELECT login_history_initialized FROM users WHERE username=?`
 	if e.s.driver == "postgres" {
 		q += " FOR UPDATE"
 	}
-	err := e.queryRow(q, user).Scan(&keep, &initialized)
+	err = e.queryRow(q, user).Scan(&initialized)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, err
-	}
-	if keep < 1 || keep > maxLoginHistoryKeep {
-		keep = defaultLoginHistoryKeep
 	}
 	if initialized == 0 {
 		if _, err := e.exec(`INSERT INTO login_history(id,username,at,ip,detail)
@@ -91,6 +117,9 @@ func (s *Store) listLoginHistory(user string, limit int) ([]AuditEntry, int, int
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	if err = pruneLoginHistory(e, user, keep); err != nil {
+		return nil, 0, 0, err
+	}
 	var total int
 	if err = e.queryRow(`SELECT COUNT(*) FROM login_history WHERE username=?`, user).Scan(&total); err != nil {
 		return nil, 0, 0, err
@@ -131,11 +160,38 @@ func (s *Server) apiLoginHistoryRetention(w http.ResponseWriter, r *http.Request
 	}
 	defer tx.Rollback()
 	e := migExec{s: s.st, ex: tx}
-	if _, err = prepareLoginHistory(e, user); err == nil {
-		_, err = e.exec(`UPDATE users SET login_history_keep=? WHERE username=?`, *in.Keep, user)
+	if _, err = loginHistoryKeep(e, true); err == nil {
+		_, err = e.exec(`UPDATE meta SET v=? WHERE k=?`, strconv.Itoa(*in.Keep), setLoginHistoryKeep)
 	}
+	// Lock policy before account rows, matching sign-in writes. This waits for
+	// in-flight writes and makes pruning all accounts atomic with the policy change.
 	if err == nil {
-		err = pruneLoginHistory(e, user, *in.Keep)
+		var rows *sql.Rows
+		rows, err = e.query(`SELECT username FROM users ORDER BY username`)
+		var users []string
+		if err == nil {
+			for rows.Next() {
+				var name string
+				if err = rows.Scan(&name); err != nil {
+					break
+				}
+				users = append(users, name)
+			}
+			if err == nil {
+				err = rows.Err()
+			}
+			rows.Close()
+		}
+		if err == nil {
+			for _, name := range users {
+				if _, err = prepareLoginHistory(e, name); err != nil {
+					break
+				}
+				if err = pruneLoginHistory(e, name, *in.Keep); err != nil {
+					break
+				}
+			}
+		}
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -144,6 +200,15 @@ func (s *Server) apiLoginHistoryRetention(w http.ResponseWriter, r *http.Request
 		jsonError(w, 500, "could not save retention")
 		return
 	}
-	s.recordAuth(r, AuditLoginHistoryRetention, user, user, map[string]any{"keep": *in.Keep})
+	s.recordChange(r, user, AuditLoginHistoryRetention, "login_history_retention", "", map[string]any{"keep": *in.Keep})
 	writeJSON(w, okJSON)
+}
+
+func (s *Server) apiLoginHistoryRetentionGet(w http.ResponseWriter, r *http.Request, user string) {
+	raw := s.st.GetSetting(setLoginHistoryKeep, strconv.Itoa(defaultLoginHistoryKeep))
+	keep, err := strconv.Atoi(raw)
+	if err != nil || keep < 1 || keep > maxLoginHistoryKeep {
+		keep = defaultLoginHistoryKeep
+	}
+	writeJSON(w, map[string]any{"keep": keep})
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Empty, InputNumber, Popconfirm, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Alert, Empty, Space, Spin, Tag, Typography, theme } from 'antd'
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../api/client'
+import { api } from '../api/client'
 import type { LoginActivityResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
@@ -13,16 +13,13 @@ export default function LoginActivityPanel() {
   const { token } = theme.useToken()
   const [data, setData] = useState<LoginActivityResponse | null>(null)
   const [failed, setFailed] = useState(false)
-  const { message } = App.useApp()
-  const [keep, setKeep] = useState<number | null>(100)
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let live = true
     api
       .get<LoginActivityResponse>('/api/me/login-activity?limit=10')
       .then((r) => {
-        if (live) { setData(r); setKeep(r.keep ?? 100) }
+        if (live) setData(r)
       })
       .catch(() => {
         if (live) setFailed(true)
@@ -35,28 +32,9 @@ export default function LoginActivityPanel() {
   if (failed) return <Alert type="error" showIcon title={t('loginActivity.loadFailed')} />
   if (!data) return <div style={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><Spin /></div>
 
-  const saveRetention = async () => {
-    if (keep === null || !Number.isInteger(keep) || keep < 1 || keep > 10000) return
-    setSaving(true)
-    try {
-      await api.put('/api/me/login-activity/retention', { keep })
-      setData(await api.get<LoginActivityResponse>('/api/me/login-activity?limit=10'))
-      message.success(t('loginActivity.retentionSaved'))
-    } catch (e) { message.error(errText(e, t)) }
-    finally { setSaving(false) }
-  }
-
   return (
     <div style={{ width: '100%' }}>
       <Typography.Paragraph type="secondary">{t('loginActivity.hint')}</Typography.Paragraph>
-      <Space wrap style={{ marginBottom: 8 }}>
-        <Typography.Text>{t('loginActivity.keep')}</Typography.Text>
-        <InputNumber aria-label={t('loginActivity.keep')} min={1} max={10000} precision={0} value={keep} onChange={setKeep} disabled={saving} />
-        <Popconfirm title={t('loginActivity.retentionConfirm', { count: keep })} onConfirm={saveRetention}>
-          <Button loading={saving} disabled={keep === null || !Number.isInteger(keep) || keep < 1 || keep > 10000 || keep === (data.keep ?? 100)}>{t('common.save')}</Button>
-        </Popconfirm>
-      </Space>
-      <Typography.Paragraph type="secondary">{t('loginActivity.retentionHint')}</Typography.Paragraph>
       {!data.items?.length && <Empty description={t('loginActivity.empty')} />}
       <div role="list" style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, overflow: 'hidden' }}>
         {data.items.map((item, index) => {

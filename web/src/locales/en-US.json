@@ -1874,5 +1874,8 @@
   "sessions.revoke": "Sign out",
   "sessions.revokeConfirm": "Sign out this session? The device must sign in again on its next request.",
   "sessions.revoked": "The selected sessions have been signed out.",
-  "sessions.title": "Active sign-in sessions"
+  "sessions.title": "Active sign-in sessions",
+  "storage.loginHistoryTitle": "Personal sign-in history",
+  "storage.loginHistoryHint": "Apply this limit to every account and immediately remove excess personal sign-in history. Choose 1–10000; the default is 100. Sessions and administrator audit records are unaffected. Increasing the limit cannot restore removed history.",
+  "storage.loginHistoryConfirm": "Keep the latest {{count}} sign-ins per account for all accounts?"
 }

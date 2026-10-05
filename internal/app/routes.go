@@ -149,7 +149,6 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "POST /api/login/passkey/finish", s.apiPasskeyLoginFinish)
 	s.session(mux, "GET /api/me/passkeys", s.apiPasskeyList)
 	s.session(mux, "GET /api/me/login-activity", s.apiLoginActivity)
-	s.session(mux, "PUT /api/me/login-activity/retention", s.apiLoginHistoryRetention)
 	s.session(mux, "GET /api/me/sessions", s.apiSessions)
 	s.session(mux, "DELETE /api/me/sessions/{id}", s.apiSessionDelete)
 	s.session(mux, "POST /api/me/sessions/revoke", s.apiSessionsRevoke)
@@ -366,6 +365,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 
 	// ---- Storage cleanup console (docs/adr/0017-storage-cleanup.md): admin-only (PermManage) ----
 	s.admin(mux, "GET /api/admin/cleanup/config", s.apiCleanupConfigGet)
+	s.admin(mux, "GET /api/admin/login-activity/retention", s.apiLoginHistoryRetentionGet)
+	s.admin(mux, "PUT /api/admin/login-activity/retention", s.apiLoginHistoryRetention)
 	s.admin(mux, "POST /api/admin/cleanup/config", s.apiCleanupConfigSave)
 	s.admin(mux, "GET /api/admin/cleanup/usage", s.apiCleanupUsage)
 	s.admin(mux, "POST /api/admin/cleanup/preview", s.apiCleanupPreview)

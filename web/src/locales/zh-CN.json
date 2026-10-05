@@ -1874,5 +1874,8 @@
   "sessions.revoke": "踢出",
   "sessions.revokeConfirm": "踢出此登录？该设备下次请求时需要重新登录。",
   "sessions.revoked": "所选登录已退出。",
-  "sessions.title": "有效登录会话"
+  "sessions.title": "有效登录会话",
+  "storage.loginHistoryTitle": "个人登录历史",
+  "storage.loginHistoryHint": "此上限统一应用于所有账户，保存后立即清理超出数量的个人登录历史。范围为 1–10000，默认 100 条。不会退出登录或删除管理员审计记录，提高上限不能恢复已清理的历史。",
+  "storage.loginHistoryConfirm": "将所有账户统一设置为保留最新 {{count}} 条登录历史？"
 }
