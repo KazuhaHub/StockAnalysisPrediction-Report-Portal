@@ -55,6 +55,9 @@ func TestLoginHistoryRetentionDeletesPersonalRowsWithoutAuditOrSessionLoss(t *te
 	if s.currentActiveUser(reqWith(a)) != "alice" {
 		t.Fatal("history cleanup revoked a session")
 	}
+	if n := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE actor='alice' AND action=? AND target_type='login_history_retention'`, AuditLoginHistoryRetention); n != 1 {
+		t.Fatalf("global retention change not audited: %d", n)
+	}
 	_, total, keep, err = s.st.listLoginHistory("alice", 20)
 	if err != nil || total != 3 || keep != 3 {
 		t.Fatalf("saved retention: %d %d %v", total, keep, err)

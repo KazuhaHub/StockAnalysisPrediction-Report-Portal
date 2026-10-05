@@ -200,7 +200,7 @@ func (s *Server) apiLoginHistoryRetention(w http.ResponseWriter, r *http.Request
 		jsonError(w, 500, "could not save retention")
 		return
 	}
-	s.recordChange(r, user, AuditPolicyChange, "login_history_retention", "", map[string]any{"keep": *in.Keep})
+	s.recordChange(r, user, AuditLoginHistoryRetention, "login_history_retention", "", map[string]any{"keep": *in.Keep})
 	writeJSON(w, okJSON)
 }
 
