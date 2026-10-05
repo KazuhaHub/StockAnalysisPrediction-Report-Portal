@@ -69,6 +69,20 @@ const open = (props: Partial<Parameters<typeof ReleaseNotesModal>[0]> = {}) =>
 beforeEach(() => get.mockReset())
 
 describe('ReleaseNotesModal', () => {
+  it('only records notes that were fetched successfully for the requested target', async () => {
+    const onViewed = vi.fn()
+    get.mockResolvedValue(notes())
+    open({ onViewed })
+    await waitFor(() => expect(onViewed).toHaveBeenCalledWith(target))
+  })
+
+  it('does not record unavailable notes as viewed', async () => {
+    const onViewed = vi.fn()
+    get.mockResolvedValue(notes({ available: false }))
+    open({ onViewed })
+    await screen.findByText('update.notesUnavailable')
+    expect(onViewed).not.toHaveBeenCalled()
+  })
   it('names the target version, and the page it is being compared against', async () => {
     get.mockResolvedValue(notes())
     open()

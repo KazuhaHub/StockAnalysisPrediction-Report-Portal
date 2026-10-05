@@ -29,7 +29,7 @@ vi.mock('../lib/swUpdate', () => ({ applyUpdate: () => applied() }))
 // A stub standing in for the dialog: this file is about which presentation the policy calls for and
 // that there is never more than one. The dialog's own behaviour is covered by its own test.
 vi.mock('./ReleaseNotesModal', () => ({
-  default: (p: { open: boolean; policy: string; target: BuildIdentity | null; onClose: () => void; onRefresh?: () => void }) => (
+  default: (p: { open: boolean; policy: string; target: BuildIdentity | null; onClose: () => void; onRefresh?: () => void; onViewed?: (target: BuildIdentity) => void }) => (
     <div>
       <div
         data-testid="notes-modal"
@@ -39,6 +39,8 @@ vi.mock('./ReleaseNotesModal', () => ({
         data-refresh={String(!!p.onRefresh)}
       />
       {p.open && <button onClick={p.onClose}>close-reminder</button>}
+      {p.open && p.target && <button onClick={() => p.onViewed?.(p.target!)}>notes-loaded</button>}
+      {p.open && p.onRefresh && <button onClick={p.onRefresh}>refresh-notes</button>}
     </div>
   ),
 }))
@@ -69,6 +71,40 @@ afterEach(() => {
 })
 
 describe('UpdateBanner', () => {
+  it('does not reopen successfully viewed target notes after the refresh, but keeps manual browsing', async () => {
+    updateState.value = state({ policy: 'required' })
+    const before = banner()
+    await userEvent.click(screen.getByRole('button', { name: 'notes-loaded' }))
+    await userEvent.click(screen.getByRole('button', { name: 'refresh-notes' }))
+    expect(applied).toHaveBeenCalledTimes(1)
+    before.unmount()
+    updateState.value = state({ page: target, firstUse: target, target: null, kind: null })
+    show(<VersionLabel />)
+    expect(modal().dataset.open).toBe('false')
+    await userEvent.click(screen.getByRole('button', { name: 'version.label:2026.38.1' }))
+    expect(modal().dataset.open).toBe('true')
+  })
+
+  it('still opens first-use notes when the target was never displayed', () => {
+    updateState.value = state({ page: target, firstUse: target, target: null, kind: null })
+    banner()
+    expect(modal().dataset.open).toBe('true')
+  })
+
+  it('does not hide another build or another account with a viewed receipt', async () => {
+    updateState.value = state({ policy: 'required' })
+    const before = show(<div />)
+    await userEvent.click(screen.getByRole('button', { name: 'notes-loaded' }))
+    before.unmount()
+    const newer = { ...target, version: 'v2026.38.2', commit: 'ccccccc' }
+    updateState.value = state({ page: newer, firstUse: newer, target: null, kind: null })
+    const after = banner()
+    expect(modal().dataset.open).toBe('true')
+    after.unmount()
+    updateState.value = state({ page: target, firstUse: target, target: null, kind: null })
+    render(<App><UpdateProvider user="another-account"><div /></UpdateProvider></App>)
+    expect(modal().dataset.open).toBe('true')
+  })
   it('says nothing while the page matches the server', () => {
     updateState.value = state({ target: null, kind: null })
     const { container } = banner()

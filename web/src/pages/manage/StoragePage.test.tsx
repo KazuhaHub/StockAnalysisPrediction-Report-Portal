@@ -9,7 +9,7 @@ const apiMock = vi.hoisted(() => ({
   post: vi.fn(),
 }))
 
-vi.mock('../../api/client', () => ({ api: apiMock }))
+vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
 
 // Same convention as every other test file here: an interpolated string keeps its arguments, so a
 // test can assert the NUMBERS a confirm dialog states, not merely that a dialog appeared.
@@ -62,6 +62,7 @@ describe('StoragePage', () => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()
     apiMock.get.mockImplementation((url: string) => {
+      if (url === '/api/admin/login-activity/retention') return Promise.resolve({ keep: 100 })
       if (url.includes('/cleanup/config')) return Promise.resolve({ ...config })
       if (url.includes('/cleanup/usage')) return Promise.resolve({ ...usage })
       if (url.includes('/cleanup/history')) return Promise.resolve({ ...history })
@@ -136,7 +137,7 @@ describe('StoragePage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('storage.cat.batch')
-    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+    await user.click(screen.getAllByRole('button', { name: /common\.save/ }).find((button) => !(button as HTMLButtonElement).disabled)!)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith(
         '/api/admin/cleanup/config',

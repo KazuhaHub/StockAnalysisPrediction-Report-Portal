@@ -60,6 +60,22 @@ const DEFERRED_KEY = 'rp.update.deferred'
 const AUTOMATIC_ATTEMPTED_KEY = 'rp.update.automatic.attempted'
 const AUTOMATIC_PENDING_KEY = 'rp.update.automatic.pending'
 
+// A receipt for notes actually rendered before handover. The account's version-use
+// write still happens after loading; this only prevents its first-use dialog repeating
+// the notes that this same reader already saw in this tab.
+export function rememberViewedNotes(user: string, target: BuildIdentity): void {
+  try { sessionStorage.setItem(`rp.update.viewed.${user}`, buildKey(target)) } catch { /* optional receipt */ }
+}
+
+export function consumeViewedNotes(user: string, page: BuildIdentity): boolean {
+  try {
+    const key = `rp.update.viewed.${user}`
+    if (sessionStorage.getItem(key) !== buildKey(page)) return false
+    sessionStorage.removeItem(key)
+    return true
+  } catch { return false }
+}
+
 type AutomaticPending = { key: string; version: string; from: string }
 
 /** Record the target before reloading. Returning false means storage is unavailable, so an

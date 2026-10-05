@@ -10,6 +10,8 @@ import {
   completedAutomaticUpdate,
   deferTarget,
   deferredTarget,
+  consumeViewedNotes,
+  rememberViewedNotes,
   useUpdateState,
   type UpdateState,
 } from '../lib/updateState'
@@ -45,7 +47,7 @@ export function useUpdate(): UpdateCtxValue | null {
 // after a handover that will not complete.
 const REFRESH_UNLOCK_MS = 6000
 
-export function UpdateProvider({ children }: { children: ReactNode }) {
+export function UpdateProvider({ children, user = '' }: { children: ReactNode; user?: string }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const state = useUpdateState()
@@ -62,6 +64,10 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     setNotesTarget(target ?? state.page)
     setNotesOpen(true)
   }, [state.page])
+
+  const notesViewed = useCallback((target: BuildIdentity) => {
+    if (buildKey(target) !== buildKey(state.page)) rememberViewedNotes(user, target)
+  }, [state.page, user])
 
   // Set the moment the reader asks to refresh, and cleared only if the handover does not complete
   // (see REFRESH_UNLOCK_MS). A ref, not the state below: a state updater must be pure, and React
@@ -92,15 +98,16 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   }, [message, state.page, t])
 
   // Account state, not storage in this browser, decides whether this loaded release is new to the
-  // reader. Keep the local key only as a render-level guard so closing the one dialog stays closed.
+  // reader. A tab-local receipt avoids repeating notes already viewed before this build loaded.
   useEffect(() => {
     if (!state.firstUse) return
     const key = buildKey(state.firstUse)
     if (autoOpened.current === key) return
     autoOpened.current = key
+    if (consumeViewedNotes(user, state.firstUse)) return
     setNotesTarget(state.firstUse)
     setNotesOpen(true)
-  }, [state.firstUse])
+  }, [state.firstUse, user])
 
   // Automatic mode is deliberately one attempt per target in this tab. If the same old bundle
   // loads again, the stored attempt turns into the required dialog rather than a reload loop.
@@ -160,6 +167,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         policy={automaticFallback ? 'required' : state.policy}
         refreshing={refreshing}
         onClose={closeNotes}
+        onViewed={notesViewed}
         onRefresh={automaticFallback || isUpdateTarget ? refresh : undefined}
       />
     </Ctx.Provider>

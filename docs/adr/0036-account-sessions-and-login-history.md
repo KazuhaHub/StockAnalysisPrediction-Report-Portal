@@ -52,17 +52,25 @@ Routes (session authentication, owner scope, normal enrolment gate):
 
 `login_history` is a separate account-facing copy of successful authentication
 events, keyed by audit id. It keeps the newest **100** rows per account by default.
-An owner can set **1–10000** through
-`PUT /api/me/login-activity/retention` with `keep`. Saving prunes immediately,
+An administrator with management permission sets the global **1–10000** cap in
+Storage management through `GET/PUT /api/admin/login-activity/retention` with
+`keep`. Account owners can only view history. Saving prunes every account immediately,
 and every subsequent successful sign-in prunes in the same transaction that
 writes its audit and history rows. Equal timestamps use the audit id as the
-stable newest-first ordering. A PostgreSQL account-row lock serializes concurrent
-writes and retention changes; SQLite uses the existing single-connection pool.
+stable newest-first ordering. PostgreSQL writers take a shared policy-row lock
+before the account-row lock; a policy change takes the exclusive policy lock
+before pruning all accounts in one transaction. SQLite uses the existing
+single-connection pool.
 
 Changing this cap neither ends sessions nor removes administrator audit events.
 The audit log retains its existing, separately configured day-based policy.
 Increasing the personal cap cannot recover deleted personal history. UI display
 remains the latest ten records (API maximum twenty), independently of storage.
+
+The global cap is stored in `meta.login_history_keep` and is included in backups.
+The former per-user field from v2026.40.6 is retained for migration compatibility
+but no longer read. Upgrading to v2026.40.7 starts with the global default of 100
+unless a global policy already exists; prior personal caps are not promoted.
 
 On first access, existing accounts copy up to their cap from the existing audit
 trail and persist an initialization flag. This happens once, including after a

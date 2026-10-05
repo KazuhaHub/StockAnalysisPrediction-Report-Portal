@@ -236,7 +236,7 @@ func TestSessionsAndPersonalRetentionSurviveRestartAndBackup(t *testing.T) {
 	b := managedTestCookie(t, s, "alice", "Firefox/128.0", time.Hour)
 	s.st.exec(`UPDATE user_sessions SET revoked=1 WHERE id=?`, sessionID(reqWith(b)))
 	s.st.WriteAudit(historyEntry("alice"))
-	s.st.exec(`UPDATE users SET login_history_keep=7 WHERE username='alice'`)
+	s.st.SetSetting(setLoginHistoryKeep, "7")
 	path := filepath.Join(t.TempDir(), "restored.db")
 	dump := dumpOf(t, s.st)
 	s.st.Close()
