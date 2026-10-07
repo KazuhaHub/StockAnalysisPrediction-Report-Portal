@@ -5,7 +5,7 @@ import AccountSessionsPanel from './AccountSessionsPanel'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { resolvedLanguage: 'en-US' } }) }))
 const sessions = [
   { id: 'current', created_at: 1791100000, last_seen: 1791100000, expires_at: 1791186400, ip: '198.51.100.1', current: true, client: { browser: 'Chrome' } },
   { id: 'other', created_at: 1791100000, last_seen: 1791100000, expires_at: 1791186400, ip: '198.51.100.2', current: false, client: { browser: 'Firefox' } },
@@ -18,6 +18,17 @@ describe('AccountSessionsPanel', () => {
     apiMock.get.mockReset().mockResolvedValue({ items: sessions, timezone: 'UTC' })
     apiMock.post.mockReset().mockResolvedValue({ signed_out: false })
     apiMock.del.mockReset().mockResolvedValue({ signed_out: false })
+  })
+  it('shows each session IP with its resolved country, region and city', async () => {
+    apiMock.get.mockResolvedValue({ items: [
+      { ...sessions[0], geo: { country_code: 'US', country: 'United States', region: 'California', city: 'Los Angeles' } },
+      sessions[1],
+    ], timezone: 'UTC' })
+    mount()
+    expect(await screen.findByText('🇺🇸 United States · California · Los Angeles')).toBeTruthy()
+    expect(screen.getByText('198.51.100.1')).toBeTruthy()
+    expect(screen.getByText('198.51.100.2')).toBeTruthy()
+    expect(screen.getByText('loginActivity.locationUnknown')).toBeTruthy()
   })
   it('marks the current device and revokes another only after confirmation', async () => {
     mount()
