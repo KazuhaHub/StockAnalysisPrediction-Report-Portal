@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, App, Button, Card, Empty, Popconfirm, Space, Spin, Tag, Typography } from 'antd'
-import { DesktopOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
 import type { AccountSessionsResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { clientLabel } from '../lib/clientInfo'
+import { formatRegion } from '../lib/geo'
 
 export default function AccountSessionsPanel() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { message } = App.useApp()
   const [data, setData] = useState<AccountSessionsResponse | null>(null)
   const [failed, setFailed] = useState(false)
@@ -52,24 +53,32 @@ export default function AccountSessionsPanel() {
       </Space>
       {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <Spin /> : !data.items.length ? <Empty /> : (
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-          {data.items.map((item) => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: '12px 0', borderTop: '1px solid var(--ant-color-border-secondary)' }}>
-              <Space orientation="vertical" size={3}>
-                <Space wrap>
-                  <Typography.Text strong><DesktopOutlined /> {clientLabel(item.client, item.client?.device_type ? t(`loginActivity.deviceType.${item.client.device_type}`) : '') || t('loginActivity.unknown')}</Typography.Text>
-                  {item.current && <Tag color="blue">{t('sessions.current')}</Tag>}
-                  {item.method && <Tag>{t(`account.loginMethod.${item.method}`)}</Tag>}
+          {data.items.map((item) => {
+            const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
+            return (
+              <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: '12px 0', borderTop: '1px solid var(--ant-color-border-secondary)' }}>
+                <Space orientation="vertical" size={3}>
+                  <Space wrap>
+                    <Typography.Text strong><DesktopOutlined /> {clientLabel(item.client, item.client?.device_type ? t(`loginActivity.deviceType.${item.client.device_type}`) : '') || t('loginActivity.unknown')}</Typography.Text>
+                    {item.current && <Tag color="blue">{t('sessions.current')}</Tag>}
+                    {item.method && <Tag>{t(`account.loginMethod.${item.method}`)}</Tag>}
+                  </Space>
+                  <Space wrap size={12}>
+                    <Typography.Text><GlobalOutlined /> {item.ip || t('loginActivity.unknown')}</Typography.Text>
+                    <Typography.Text type={place ? undefined : 'secondary'}>
+                      <EnvironmentOutlined /> {place || t('loginActivity.locationUnknown')}
+                    </Typography.Text>
+                  </Space>
+                  <Typography.Text type="secondary">{t('sessions.created', { time: stamp(item.created_at) })}</Typography.Text>
+                  <Typography.Text type="secondary">{t('sessions.lastSeen', { time: stamp(item.last_seen) })}</Typography.Text>
+                  <Typography.Text type="secondary">{t('sessions.expires', { time: stamp(item.expires_at) })}</Typography.Text>
                 </Space>
-                <Typography.Text>{item.ip || t('loginActivity.unknown')}</Typography.Text>
-                <Typography.Text type="secondary">{t('sessions.created', { time: stamp(item.created_at) })}</Typography.Text>
-                <Typography.Text type="secondary">{t('sessions.lastSeen', { time: stamp(item.last_seen) })}</Typography.Text>
-                <Typography.Text type="secondary">{t('sessions.expires', { time: stamp(item.expires_at) })}</Typography.Text>
-              </Space>
-              <Popconfirm title={t(item.current ? 'sessions.currentConfirm' : 'sessions.revokeConfirm')} onConfirm={() => revoke(item.id, false)}>
-                <Button danger disabled={busy}>{t(item.current ? 'sessions.logoutCurrent' : 'sessions.revoke')}</Button>
-              </Popconfirm>
-            </div>
-          ))}
+                <Popconfirm title={t(item.current ? 'sessions.currentConfirm' : 'sessions.revokeConfirm')} onConfirm={() => revoke(item.id, false)}>
+                  <Button danger disabled={busy}>{t(item.current ? 'sessions.logoutCurrent' : 'sessions.revoke')}</Button>
+                </Popconfirm>
+              </div>
+            )
+          })}
         </Space>
       )}
     </Card>

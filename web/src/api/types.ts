@@ -1038,6 +1038,7 @@ export interface LoginActivityResponse {
 }
 
 export interface AccountSession {
+  geo?: GeoLocation
   id: string
   created_at: number
   last_seen: number

@@ -2,10 +2,12 @@ package app
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -307,5 +309,58 @@ func TestPostgresManagedSessionRevocation(t *testing.T) {
 	}
 	if s.currentActiveUser(reqWith(fresh)) != "" {
 		t.Fatal("Postgres logout-all retained a session")
+	}
+}
+
+// The synthetic one-node IPv4 MMDB maps both branches to US / Test State / Testville.
+// It exercises read-time resolution without a remote service or production database.
+func TestSessionsResolveLocationAtReadTime(t *testing.T) {
+	s := tenancyServer(t)
+	s.st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"})
+	cookie := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
+	if _, err := s.st.exec(`UPDATE user_sessions SET ip=? WHERE username=?`, "192.0.2.1", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	s.geo = newGeoService(t.TempDir())
+	s.geo.st = s.st
+	t.Cleanup(func() {
+		if s.geo.reader != nil {
+			s.geo.reader.Close()
+		}
+	})
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	read := func() map[string]any {
+		t.Helper()
+		w := sessionTestRequest(mux, "GET", "/api/me/sessions", cookie, "")
+		var out struct {
+			Items []map[string]any `json:"items"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Items) != 1 {
+			t.Fatalf("sessions: %d %s", w.Code, w.Body.String())
+		}
+		return out.Items[0]
+	}
+	if got := read(); got["geo"] != nil {
+		t.Fatalf("uninstalled database: %+v", got)
+	}
+	raw, err := base64.StdEncoding.DecodeString("AAARAAARAAAAAAAAAAAAAAAAAAAAAONHY291bnRyeeJIaXNvX2NvZGVCVVNFbmFtZXPhQmVuTVVuaXRlZCBTdGF0ZXNEY2l0eeFFbmFtZXPhQmVuSVRlc3R2aWxsZUxzdWJkaXZpc2lvbnMBBOFFbmFtZXPhQmVuSlRlc3QgU3RhdGWrze9NYXhNaW5kLmNvbelKbm9kZV9jb3VudMEBS3JlY29yZF9zaXplwRhKaXBfdmVyc2lvbsEETWRhdGFiYXNlX3R5cGVMU2Vzc2lvbi1UZXN0SWxhbmd1YWdlcwEEQmVuW2JpbmFyeV9mb3JtYXRfbWFqb3JfdmVyc2lvbsECW2JpbmFyeV9mb3JtYXRfbWlub3JfdmVyc2lvbsEAS2J1aWxkX2Vwb2NowQFLZGVzY3JpcHRpb27hQmVuT1Nlc3Npb24gZml4dHVyZQ==")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(s.geo.Dir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.geo.Dir(), "fixture.mmdb"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got := read()
+	geo, ok := got["geo"].(map[string]any)
+	if !ok || geo["country_code"] != "US" || geo["region"] != "Test State" || geo["city"] != "Testville" || got["ip"] != "192.0.2.1" {
+		t.Fatalf("resolved session: %+v", got)
+	}
+	s.st.SetSetting(setGeoEnabled, "0")
+	if got := read(); got["geo"] != nil {
+		t.Fatalf("disabled lookup: %+v", got)
 	}
 }

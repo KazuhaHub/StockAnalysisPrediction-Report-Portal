@@ -12,17 +12,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/geoip"
 )
 
 type AccountSession struct {
-	ID        string         `json:"id"`
-	CreatedAt int64          `json:"created_at"`
-	LastSeen  int64          `json:"last_seen"`
-	ExpiresAt int64          `json:"expires_at"`
-	IP        string         `json:"ip"`
-	Client    *ClientSummary `json:"client,omitempty"`
-	Method    string         `json:"method,omitempty"`
-	Current   bool           `json:"current"`
+	ID        string          `json:"id"`
+	CreatedAt int64           `json:"created_at"`
+	LastSeen  int64           `json:"last_seen"`
+	ExpiresAt int64           `json:"expires_at"`
+	IP        string          `json:"ip"`
+	Geo       *geoip.Location `json:"geo,omitempty"`
+	Client    *ClientSummary  `json:"client,omitempty"`
+	Method    string          `json:"method,omitempty"`
+	Current   bool            `json:"current"`
 }
 
 func (s *Server) managedCookie(u User, id string, exp int64) string {
@@ -203,6 +206,13 @@ func (s *Server) apiSessions(w http.ResponseWriter, r *http.Request, user string
 	if rows.Err() != nil {
 		jsonError(w, 500, "could not read sessions")
 		return
+	}
+	// Release SQLite's single connection before resolving location settings.
+	rows.Close()
+	for i := range items {
+		if loc := s.geo.Lookup(items[i].IP); !loc.Empty() {
+			items[i].Geo = &loc
+		}
 	}
 	writeJSON(w, map[string]any{"items": items, "timezone": s.st.GetSetting("timezone", "")})
 }
