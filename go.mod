@@ -1,6 +1,6 @@
 module github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/KazuhaHub/authcore v0.6.0
@@ -51,7 +51,7 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/image v0.43.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	modernc.org/libc v1.75.7 // indirect
