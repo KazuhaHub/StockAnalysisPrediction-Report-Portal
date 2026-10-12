@@ -819,6 +819,33 @@ body {
   color: inherit;
 }
 
+/* The seam between two joined solid buttons is antd's 1px `::before` overlay. On a display whose
+   device pixel ratio doesn't divide the CSS pixel evenly (1.25 on Windows at 125%, 1.5 at 150%)
+   that overlay lands half a device pixel outside the button it is supposed to sit inside, so a
+   hairline pokes past the button's top and bottom edges — visible on the header's Run-analysis
+   split control.
+
+   The trailing button already carries a 1px `transparent` border from the solid variant, and a
+   border can never paint outside its own box. Painting that border instead of adding a box keeps
+   the seam exactly as tall as the button, at any ratio, with no change to layout: the border is
+   already there, only its color changes. */
+.ant-space-compact
+  .ant-btn-compact-item.ant-btn-variant-solid:not([disabled])
+  + .ant-btn-variant-solid:not([disabled])::before {
+  display: none;
+}
+.ant-space-compact
+  .ant-btn-compact-item.ant-btn-variant-solid:not([disabled])
+  + .ant-btn-variant-solid:not([disabled]) {
+  border-inline-start-color: var(--ant-btn-compact-connect-border-color);
+}
+/* antd hides the seam on hover so the button reads as one surface; keep that behavior. */
+.ant-space-compact
+  .ant-btn-compact-item.ant-btn-variant-solid:not([disabled])
+  + .ant-btn-variant-solid:not([disabled]):hover {
+  border-inline-start-color: transparent;
+}
+
 /* markdown body typography (works with antd Typography).
    --md-fs / --md-fw are set by the reading pages from the reader prefs (the "Aa"
    popover); headings/tables/code are all em-relative so they scale off the base. */
