@@ -330,6 +330,9 @@
             },
             "description": "假设/跟踪项；非空时整体覆盖该报告的项。"
           },
+          "predictions": {
+            "$ref": "#/components/schemas/PredictionPayload"
+          },
           "version": {
             "type": "string",
             "description": "版本，如 对外版/客户版。同一篇分析的不同写法，各由各自的运行产出。参与身份键：身份 =（symbol + date + subtype + title + version）。留空即默认版本，与今天的行为完全一致。未注册的版本名会自动登记，且默认不授予任何人可见。「manual」是保留版本名，专供门户中手写的报告；推送该版本会被拒绝（400 invalid_param），以确保工作流无法覆盖手写的内容。",
@@ -341,6 +344,138 @@
                 "description": "版本，如 對外版/客戶版。同一篇分析的不同寫法，各由各自的執行產出。參與身分鍵：身分 =（symbol + date + subtype + title + version）。留空即預設版本，與今天的行為完全一致。未註冊的版本名會自動登記，且預設不授予任何人可見。「manual」是保留版本名，專供入口網站中手寫的報告；推送該版本會被拒絕（400 invalid_param），以確保工作流無法覆蓋手寫的內容。"
               }
             }
+          }
+        }
+      },
+      "PredictionPayload": {
+        "type": "object",
+        "required": ["schema"],
+        "properties": {
+          "schema": {
+            "type": "string",
+            "enum": ["predictions.v1"],
+            "description": "契约版本。当前只有 predictions.v1。"
+          },
+          "emitter": {
+            "type": "object",
+            "description": "来源标识：哪个应用、哪个版本、哪个计算器版本。用于把一批预测追溯到产出它的工作流版本。",
+            "properties": {
+              "app": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "calculator": {
+                "type": "string"
+              },
+              "decision_schema": {
+                "type": "string"
+              }
+            }
+          },
+          "policy_version": {
+            "type": "string",
+            "description": "产出这批预测所用的策略版本。策略变更后，统计可按此分段。"
+          },
+          "probability_method": {
+            "type": "string",
+            "enum": ["approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable"],
+            "description": "情景概率的来源。approved_policy_default 表示用的是策略默认值（25/50/25），概率校准统计会排除这类样本。"
+          },
+          "probability_transform": {
+            "type": "string",
+            "description": "若对概率做过校准，这里是校准规则 ID；未校准则留空。"
+          },
+          "decision_status": {
+            "type": "string",
+            "enum": ["eligible", "no_trade"],
+            "description": "只有这两类状态会写入预测。研究层只给出建议买入价（当时没有现价）的运行不发预测，因为没有基准价可结算。"
+          },
+          "decision_quality": {
+            "type": "string",
+            "enum": ["normal", "degraded", "repaired"],
+            "description": "仲裁质量。只有 normal 参与统计。"
+          },
+          "information_cutoff": {
+            "type": "string",
+            "format": "date-time",
+            "description": "信息截止时刻，UTC RFC3339。明显早于门户收到报告的时刻（超过 72 小时）时，本次运行记为回测运行：只存档、不计分。"
+          },
+          "baseline": {
+            "type": "object",
+            "description": "报告当时的基准价。收益与成交判定都以门户自己取到的价格为准，这个值只用于核对一致性。",
+            "properties": {
+              "price": {
+                "$ref": "#/components/schemas/PredictionPrice"
+              },
+              "as_of": {
+                "type": "string",
+                "description": "基准价对应的日期，YYYY-MM-DD。"
+              },
+              "source": {
+                "type": "string",
+                "description": "基准价出处（如 company_quote）。仅记录，不据此判分。"
+              }
+            }
+          },
+          "horizon_end": {
+            "type": "string",
+            "description": "预测期限，YYYY-MM-DD，必须晚于门户收到报告的日期（按上海时区）。"
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictionClaim"
+            },
+            "description": "结构化预测项。必须包含 stance 和 terminal_value 各一项，以及 bull/base/bear 三个情景；情景概率之和必须正好等于 1.0000（按万分之一整数相加，无浮点容差）。"
+          }
+        }
+      },
+      "PredictionPrice": {
+        "type": "string",
+        "pattern": "^(\\d{1,7})(?:\\.(\\d{1,2}))?$",
+        "description": "价格，以字符串传输，最多两位小数（如 \"8.65\"）。不接受 JSON 数字：浮点会在传输中改变数值，也无法精确比对。负号、指数形式和三位小数一律拒绝。",
+        "examples": ["8.65"]
+      },
+      "PredictionProbability": {
+        "type": "string",
+        "pattern": "^(?:0(?:\\.(\\d{1,4}))?|1(?:\\.(0{1,4}))?)$",
+        "description": "概率或权重，以字符串传输，取值 [0,1]，最多四位小数，按万分之一整数存储。不接受 JSON 数字。",
+        "examples": ["0.2500"]
+      },
+      "PredictionClaim": {
+        "type": "object",
+        "required": ["key", "kind"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "该项在本次预测内的唯一标识。"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"],
+            "description": "预测项类型。stop_loss 为保留值：在代码节点能算出止损价之前一律拒绝。"
+          },
+          "stance": {
+            "type": "string",
+            "enum": ["long", "no_position"]
+          },
+          "label": {
+            "type": "string",
+            "enum": ["bull", "base", "bear"]
+          },
+          "price": {
+            "$ref": "#/components/schemas/PredictionPrice"
+          },
+          "probability": {
+            "$ref": "#/components/schemas/PredictionProbability"
+          },
+          "p_profit": {
+            "$ref": "#/components/schemas/PredictionProbability"
+          },
+          "target_weight": {
+            "$ref": "#/components/schemas/PredictionProbability"
           }
         }
       },

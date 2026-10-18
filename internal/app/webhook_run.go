@@ -17,6 +17,10 @@ import (
 const (
 	EventReportIngested = "report.ingested"
 	EventBatchFinished  = "batch.job.finished"
+	// A structured-prediction payload the ledger could not use (ADR 0029 §3). Its own event rather
+	// than a flag on report.ingested, because it is the one outcome a subscriber should alert on and
+	// the report itself is stored and looks normal.
+	EventPredictionsRejected = "predictions.rejected"
 )
 
 const (

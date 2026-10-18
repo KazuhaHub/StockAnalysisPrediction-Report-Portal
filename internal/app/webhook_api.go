@@ -12,7 +12,9 @@ import (
 // Admin HTTP handlers for managing outbound webhooks (PermManage). The secret is
 // write-only: it is never returned to the browser (only has_secret).
 
-func availableEvents() []string { return []string{EventReportIngested, EventBatchFinished} }
+func availableEvents() []string {
+	return []string{EventReportIngested, EventBatchFinished, EventPredictionsRejected}
+}
 
 func webhookJSON(w Webhook) map[string]any {
 	return map[string]any{

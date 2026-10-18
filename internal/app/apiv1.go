@@ -181,7 +181,13 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 		Time     string `json:"time"`
 		BodyMD   string `json:"body_md"`
 		BodyHTML string `json:"body_html"`
-		Tracking []struct {
+		// Predictions (ADR 0029): the structured claims this report makes, projected from the
+		// producer's code nodes. Kept raw rather than decoded, because the classifier has to see the
+		// bytes — an object and a string are both valid JSON, and the difference between them is the
+		// single most likely producer bug (Dify renders an object parameter from a template and
+		// passes a string when the rendered text is not valid JSON).
+		Predictions json.RawMessage `json:"predictions"`
+		Tracking    []struct {
 			IType       string `json:"itype"`
 			Content     string `json:"content"`
 			Status      string `json:"status"`
@@ -236,6 +242,23 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 			"version \""+manualVersionName+"\" is reserved for hand-written reports and cannot be ingested")
 		return
 	}
+	// The ledger's classification runs BEFORE RegisterType, and it is pure: no DB, no clock of its own.
+	//
+	// Order matters twice over. RegisterType below writes report_types, and a payload that turns out
+	// to be unusable must not have caused a write; and the store's SQLite side is a single-connection
+	// pool, so a classifier that reached for the store here would deadlock against the transaction it
+	// is meant to precede. See forecast_ingest.go.
+	//
+	// The symbol it sees is the NORMALISED one, so a producer that sent " 600160 " is classified on
+	// the value that will actually be stored and scored.
+	predSet, predClaims, predErrs := classifyPredictions(predInput{
+		Raw:       in.Predictions,
+		Rtype:     rtype,
+		Symbol:    in.Symbol,
+		MadeAt:    time.Now().UTC(),
+		BodySHA:   sha256Hex([]byte(in.BodyMD + "\x00" + in.BodyHTML)),
+		BenchCode: s.st.ForecastBench(),
+	})
 	kind := in.Kind
 	if kind == "" {
 		kind = s.st.TypeKind(rtype)
@@ -306,6 +329,44 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 		}
 		s.st.SetTracking(id, in.Symbol, items)
 	}
+	// The ledger write. It is a transaction of its own (see forecast_store.go) and its failure is
+	// reported in the response rather than as an HTTP error: the report is already stored, so a 5xx
+	// would make the producer retry a whole run whose report exists, and the batch rule is that a
+	// started run is never re-run. The coverage page is where a "store_failed" shows up instead.
+	predStatus := ""
+	if predSet != nil {
+		predSet.Version, predSet.Title, predSet.ReportDate = version, in.Title, in.Date
+		// Retried once, and then reported rather than raised. On SQLite a transient "database is
+		// locked" is the common cause and a second attempt is cheap next to a lost set; if it still
+		// fails, the response says store_failed and the ingest stays a success. Raising here would
+		// make the producer retry a run whose report already exists, and a started run is never
+		// re-run.
+		predStatus = predSet.State
+		_, _, first := s.st.InsertPredictionSet(id, predSet, predClaims)
+		if first != nil {
+			if _, _, again := s.st.InsertPredictionSet(id, predSet, predClaims); again != nil {
+				predStatus = "store_failed"
+				logPredictionsStoreFailed(id, again)
+				s.recordChange(r, "", AuditPredictionsStoreFailed, "report", strconv.FormatInt(id, 10),
+					map[string]any{"error": again.Error()})
+			}
+		}
+	}
+	// A rejection is the producer's bug, and it is the only thing here that a person has to be told
+	// about: the report reads normally, so nothing else would surface it. Audited (with the IP and
+	// token the request arrived on) and broadcast, so a subscriber can alert on it.
+	if predStatus == predStateRejected {
+		details := make([]map[string]any, 0, len(predErrs))
+		for _, e := range predErrs {
+			details = append(details, map[string]any{"reason": e.Reason, "path": e.Path, "detail": e.Detail})
+		}
+		s.recordChange(r, "", AuditPredictionsRejected, "report", strconv.FormatInt(id, 10),
+			map[string]any{"errors": details, "symbol": in.Symbol, "rtype": rtype})
+		s.fireEvent(EventPredictionsRejected, map[string]any{
+			"report_id": id, "symbol": in.Symbol, "rtype": rtype,
+			"made_at": predSet.MadeAt, "errors": details,
+		})
+	}
 	log.Printf("v1 ingest %s %s id=%d created=%v", in.Symbol, in.Date, id, created)
 	// version and author are here so this payload and the hand-written one (announceReport) are the
 	// same shape. author is empty for everything a workflow produced, which is the honest answer:
@@ -318,6 +379,18 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	// symbol is echoed as STORED, not as sent, so a caller can tell that its value was normalized or
 	// discarded without going and reading the row back.
 	out := map[string]any{"ok": true, "id": id, "created": created, "symbol": in.Symbol}
+	// predictions_status is always present, including "none": a producer comparing a run's response
+	// against what it sent needs a field that distinguishes "nothing was sent" from "the portal had
+	// nowhere to put it". It is informational — the HTTP status is 200 whatever it says (ADR 0029
+	// §5.5, D3: a payload the ledger cannot use never costs a report).
+	out["predictions_status"] = predStatusValue(predStatus, predSet)
+	if predStatus == predStateRejected {
+		errsOut := make([]map[string]any, 0, len(predErrs))
+		for _, e := range predErrs {
+			errsOut = append(errsOut, map[string]any{"reason": e.Reason, "path": e.Path, "detail": e.Detail})
+		}
+		out["predictions_errors"] = errsOut
+	}
 	if symbolDropped {
 		out["note"] = "symbol " + strconv.Quote(symbolRaw) + " is not a 6-digit code and was dropped; the report is stored without one"
 	}

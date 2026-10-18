@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -227,5 +228,70 @@ func TestHealthzSpecMatchesTheHandler(t *testing.T) {
 	s.health = healthCache{}
 	if code, _ := healthGET(t, s); code != http.StatusServiceUnavailable {
 		t.Fatalf("database down → %d", code)
+	}
+}
+
+// TestOpenAPIPredictionEnumsMatchTheGoVocabulary keeps the spec and the validator from drifting apart.
+//
+// The two are read by different audiences — a producer reads the spec to decide what to send, the
+// classifier decides what it will take — and nothing else compares them. A value added to one and not
+// the other is either a claim refused despite the documentation, or a value the documentation invites
+// and the portal throws away. Both are silent.
+func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
+	var spec map[string]any
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+
+	enumOf := func(schema string, path ...string) []string {
+		cur, _ := schemas[schema].(map[string]any)
+		for _, key := range path {
+			cur, _ = cur[key].(map[string]any)
+		}
+		raw, _ := cur["enum"].([]any)
+		out := make([]string, 0, len(raw))
+		for _, v := range raw {
+			out = append(out, v.(string))
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name   string
+		got    []string
+		want   []string
+		schema string
+	}{
+		{"decision_status", enumOf("PredictionPayload", "properties", "decision_status"), predDecisionStatuses, "PredictionPayload.decision_status"},
+		{"decision_quality", enumOf("PredictionPayload", "properties", "decision_quality"), predDecisionQualities, "PredictionPayload.decision_quality"},
+		{"probability_method", enumOf("PredictionPayload", "properties", "probability_method"), predProbabilityMethods, "PredictionPayload.probability_method"},
+		{"claim kind", enumOf("PredictionClaim", "properties", "kind"), predClaimKinds, "PredictionClaim.kind"},
+		{"stance", enumOf("PredictionClaim", "properties", "stance"), predStances, "PredictionClaim.stance"},
+		{"label", enumOf("PredictionClaim", "properties", "label"), predLabels, "PredictionClaim.label"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := append([]string(nil), tc.got...)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(got)
+			sort.Strings(want)
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("%s enum = %v, Go vocabulary = %v", tc.schema, tc.got, tc.want)
+			}
+		})
+	}
+
+	// The schema version and the price/probability patterns are the other half of the contract, and
+	// the patterns are the ones a producer will copy into their own validation.
+	if got := enumOf("PredictionPayload", "properties", "schema"); len(got) != 1 || got[0] != predSchemaV1 {
+		t.Errorf("schema enum = %v, want [%s]", got, predSchemaV1)
+	}
+	pricePat, _ := schemas["PredictionPrice"].(map[string]any)["pattern"].(string)
+	if pricePat != rePrice.String() {
+		t.Errorf("PredictionPrice.pattern = %q, Go pattern = %q", pricePat, rePrice.String())
+	}
+	probPat, _ := schemas["PredictionProbability"].(map[string]any)["pattern"].(string)
+	if probPat != reProb.String() {
+		t.Errorf("PredictionProbability.pattern = %q, Go pattern = %q", probPat, reProb.String())
 	}
 }

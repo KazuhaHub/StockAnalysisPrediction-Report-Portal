@@ -117,7 +117,7 @@ func TestPostgresDeleteReportNullsPredictionSets(t *testing.T) {
 func seedPgReport(t *testing.T, st *Store, symbol, date string) int64 {
 	t.Helper()
 	id, _, err := st.UpsertReport(Rep{
-		Symbol: symbol, Date: date, RType: predictionTestRtype, Kind: "投资决策",
+		Symbol: symbol, Date: date, RType: predTestRtype, Kind: "投资决策",
 		Title: "投资决策建议 pg", MD: "body",
 	})
 	if err != nil {
