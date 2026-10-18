@@ -1972,6 +1972,123 @@
         }
       }
     },
+    "/api/v1/reports/{id}/predictions": {
+      "get": {
+        "tags": [
+          "forecast"
+        ],
+        "operationId": "reportPredictions",
+        "summary": "一份报告的结构化预测及其结算结果",
+        "x-scope": "query",
+        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "报告数字 ID。"
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["payload"]
+            },
+            "description": "传 payload 时返回入库时的 predictions 原文。列表接口默认不返回，因为每集约 2KB。"
+          }
+        ],
+        "x-i18n": {
+          "en-US": {
+            "summary": "A report's structured predictions and their settled results",
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do."
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prediction sets"
+          },
+          "401": {
+            "description": "No valid query credentials"
+          },
+          "404": {
+            "description": "No such report, or one this caller may not read"
+          }
+        }
+      }
+    },
+    "/api/v1/predictions": {
+      "get": {
+        "tags": [
+          "forecast"
+        ],
+        "operationId": "queryPredictions",
+        "summary": "按股票与日期范围查询结构化预测",
+        "x-scope": "query",
+        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "六位股票代码。"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "起始日期 YYYY-MM-DD（含）。"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "结束日期 YYYY-MM-DD（含）。"
+          },
+          {
+            "name": "rtype",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "报告小类，默认不限。subtype 为其别名。"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "返回条数，默认 50，上限 200。"
+          }
+        ],
+        "x-i18n": {
+          "en-US": {
+            "summary": "Query structured predictions by symbol and date range",
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required."
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prediction sets"
+          },
+          "401": {
+            "description": "No valid query credentials"
+          }
+        }
+      }
+    },
     "/api/v1/now": {
       "get": {
         "tags": [
