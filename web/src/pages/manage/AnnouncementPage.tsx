@@ -31,7 +31,7 @@ import type {
   AnnouncementLevel,
   AnnouncementScope,
 } from '../../api/types'
-import { AnnouncementAlert } from '../../components/SiteAnnouncement'
+import { AnnouncementRow } from '../../components/SiteAnnouncement'
 import type { Principal } from '../../api/types'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import { principalName, principalOptions } from '../../components/principals'
@@ -229,11 +229,6 @@ export default function AnnouncementPage() {
     await refreshed()
   }
 
-  // Only the first popup-eligible announcement actually interrupts a reader, so the switches below
-  // it are decorative this page load. Saying so on the row is the point: an ignored setting should
-  // be visible where it is set, not discovered by an operator wondering why nothing popped up.
-  const firstPopupId = items.find((a) => a.popup && a.enabled)?.id
-
   // Two groups, the way the report-versions picker does it, so an admin who has used one knows
   // this one. Shared with the report editor, which addresses the same principals.
   const audienceOptions = principalOptions(groups, users, {
@@ -330,11 +325,6 @@ export default function AnnouncementPage() {
             </Tag>
           </Tooltip>
         )}
-        {a.popup && a.enabled && a.id !== firstPopupId && (
-          <Tooltip title={t('announcementAdmin.popupSkippedHint')}>
-            <Tag>{t('announcementAdmin.popupSkipped')}</Tag>
-          </Tooltip>
-        )}
         {a.popup && <Tag color="purple">{t('announcementAdmin.popupTag')}</Tag>}
         {stale > 0 && (
           <Tooltip title={t('announcementAdmin.staleHint')}>
@@ -367,7 +357,7 @@ export default function AnnouncementPage() {
           const content = String(getFieldValue('content') || '').trim()
           if (!title && !content) return null
           return (
-            <AnnouncementAlert
+            <AnnouncementRow
               announcement={{
                 level: getFieldValue('level') || 'notice',
                 title,
@@ -442,7 +432,7 @@ export default function AnnouncementPage() {
               ) : (
                 <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   {preview.map((a) => (
-                    <AnnouncementAlert key={a.id} announcement={a} />
+                    <AnnouncementRow key={a.id} announcement={a} />
                   ))}
                 </Space>
               )}

@@ -98,8 +98,6 @@
   "announcementAdmin.grantsTruncated": "賬號列表只列出前 {{count}} 個；如需其他賬號，請先把他們歸入一個分組。",
   "announcementAdmin.hint": "拖動可調整讀者看到的順序，每條獨立儲存，無需統一點儲存。",
   "announcementAdmin.popup": "彈窗提醒",
-  "announcementAdmin.popupSkipped": "本次不會彈出",
-  "announcementAdmin.popupSkippedHint": "每次開啟頁面最多彈出一條，只有排在最前面的那條會彈。",
   "announcementAdmin.popupTag": "彈窗",
   "announcementAdmin.previewAs": "預覽為…",
   "announcementAdmin.previewEmpty": "該物件當前看不到任何公告",

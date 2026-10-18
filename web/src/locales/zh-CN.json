@@ -98,8 +98,6 @@
   "announcementAdmin.grantsTruncated": "账号列表只列出前 {{count}} 个；如需其他账号，请先把他们归入一个分组。",
   "announcementAdmin.hint": "拖动可调整读者看到的顺序，每条独立保存，无需统一点保存。",
   "announcementAdmin.popup": "弹窗提醒",
-  "announcementAdmin.popupSkipped": "本次不会弹出",
-  "announcementAdmin.popupSkippedHint": "每次打开页面最多弹出一条，只有排在最前面的那条会弹。",
   "announcementAdmin.popupTag": "弹窗",
   "announcementAdmin.previewAs": "预览为…",
   "announcementAdmin.previewEmpty": "该对象当前看不到任何公告",

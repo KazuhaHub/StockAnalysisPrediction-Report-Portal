@@ -140,24 +140,11 @@ export function useAnnouncements(): AnnouncementsCtx {
 }
 
 /**
- * Every announcement that belongs on the route currently rendered, whatever its scope. This is the
- * set the popup queue draws from; the two functions below split it by where it is DRAWN.
+ * Every announcement that belongs on the route currently rendered: app-scoped ones everywhere, plus
+ * home-scoped ones on the home page. One list, in the operator's order — the strip draws it, and the
+ * popup queue draws from the same set.
  */
 export function inScope(items: Announcement[], pathname: string): Announcement[] {
   const onHome = pathname === '/'
   return items.filter((a) => (a.scope === 'app' ? true : onHome))
-}
-
-/** Home-scoped announcements, which get the roomy alert stack — on the home page and nowhere else. */
-export function bandItems(items: Announcement[], pathname: string): Announcement[] {
-  return pathname === '/' ? items.filter((a) => a.scope === 'home') : []
-}
-
-/**
- * App-scoped announcements, which follow the reader onto every page and therefore get the compact
- * strip instead. The two sets are disjoint by construction, so nothing renders twice on the home
- * page.
- */
-export function stripItems(items: Announcement[]): Announcement[] {
-  return items.filter((a) => a.scope === 'app')
 }

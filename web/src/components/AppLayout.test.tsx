@@ -53,7 +53,6 @@ vi.mock('./Omnibox', () => ({ default: () => <input aria-label="global-search" /
 vi.mock('./RunAnalysisModal', () => ({ default: () => null }))
 vi.mock('./QueueDrawer', () => ({ default: () => null }))
 vi.mock('./SiteAnnouncement', () => ({
-  default: () => null,
   AnnouncementStrip: () => null,
   AnnouncementPopup: () => null,
 }))

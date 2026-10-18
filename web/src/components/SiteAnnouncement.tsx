@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Alert, Button, Space, Modal, Typography, theme } from 'antd'
-import type { AlertProps } from 'antd'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type TransitionEvent } from 'react'
+import { Button, Space, Modal, Typography, theme } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -13,7 +12,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router'
 import { useAuth } from '../auth'
-import { bandItems, inScope, stripItems, useAnnouncements } from '../announcements'
+import { inScope, useAnnouncements } from '../announcements'
 import {
   announcementSig,
   dismissBanner,
@@ -24,17 +23,6 @@ import {
 } from '../lib/announcementDismissal'
 import type { Announcement, AnnouncementLevel } from '../api/types'
 
-const ALERT_TYPES: Record<AnnouncementLevel, AlertProps['type']> = {
-  notice: 'info',
-  success: 'success',
-  warning: 'warning',
-  error: 'error',
-}
-
-export function announcementAlertType(level?: string): AlertProps['type'] {
-  return ALERT_TYPES[level as AnnouncementLevel] || 'info'
-}
-
 const LEVEL_ICON: Record<AnnouncementLevel, typeof InfoCircleFilled> = {
   notice: InfoCircleFilled,
   success: CheckCircleFilled,
@@ -42,11 +30,10 @@ const LEVEL_ICON: Record<AnnouncementLevel, typeof InfoCircleFilled> = {
   error: CloseCircleFilled,
 }
 
-// antd token names per level, for the strip. The alert stack gets these from antd itself. A strip
-// announcement is painted entirely from ITS OWN level — background, icon, close button and body
-// text — and the band itself is neutral, so a blue notice can never land on the loudest row's amber.
-// That mismatch (band tinted by the loudest, icon by its own level) is what made a mixed-level strip
-// read as if the icon had been dropped onto the wrong row.
+// antd token names per level. An announcement is painted entirely from ITS OWN level — background,
+// icon, close button and body text. The band around it is neutral, so a blue notice can never land on
+// the loudest row's amber; that mismatch (band tinted by the loudest, icon by its own level) is what
+// made a mixed-level strip read as if the icon had been dropped onto the wrong row.
 const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string; text: string }> = {
   notice: { bg: 'colorInfoBg', fg: 'colorInfo', text: 'colorInfoText' },
   success: { bg: 'colorSuccessBg', fg: 'colorSuccess', text: 'colorSuccessText' },
@@ -54,14 +41,12 @@ const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string; text: st
   error: { bg: 'colorErrorBg', fg: 'colorError', text: 'colorErrorText' },
 }
 
-// How many banners stack before the rest fold behind a counter. A phone has room for fewer, and an
-// unbounded stack is worse than a truncated one: five warnings above the fold teaches the reader to
-// scroll past the band entirely, which is the failure this whole feature exists to avoid.
-const MAX_STACKED = 3
-const MAX_STACKED_COMPACT = 2
-
-/** One announcement rendered as the roomy banner. Shared with the admin preview. */
-export function AnnouncementAlert({
+/**
+ * One announcement, as a self-contained block: its own level colour, icon, optional close. This is
+ * the single rendering every surface uses — the strip and both admin previews — so the console can
+ * never show an operator something a reader will not see.
+ */
+export function AnnouncementRow({
   announcement,
   onClose,
   style,
@@ -70,31 +55,70 @@ export function AnnouncementAlert({
   onClose?: () => void
   style?: CSSProperties
 }) {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const palette = token as unknown as Record<string, string>
+  const Icon = LEVEL_ICON[announcement.level]
+  const tokens = LEVEL_TOKENS[announcement.level]
   const title = announcement.title.trim()
   const content = announcement.content.trim()
-  const message = title ? <Typography.Text style={{ fontWeight: 700 }}>{title}</Typography.Text> : undefined
-  const description = content ? (
-    <Typography.Text type="secondary" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-      {content}
-    </Typography.Text>
-  ) : undefined
   return (
-    <Alert
-      className="rp-announcement"
-      showIcon
-      type={announcementAlertType(announcement.level)}
-      title={message || description}
-      description={message ? description : undefined}
-      closable={announcement.dismissible ? { closeIcon: true } : undefined}
-      onClose={onClose}
-      style={{ borderRadius: 8, paddingBlock: 8, ...style }}
-    />
+    <div
+      className="rp-announce-item"
+      style={{
+        // align-items:center puts the icon and the close button against the CENTRE of the
+        // title+body block, instead of the close floating up at the first line.
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '7px 10px',
+        borderRadius: 8,
+        background: palette[tokens.bg],
+        ...style,
+      }}
+    >
+      <Icon style={{ color: palette[tokens.fg], fontSize: 15, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {title && (
+          <div style={{ color: token.colorText, fontSize: 14, fontWeight: content ? 600 : 400 }}>{title}</div>
+        )}
+        {content && (
+          <Typography.Text style={{ color: palette[tokens.text], whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+            {content}
+          </Typography.Text>
+        )}
+      </div>
+      {announcement.dismissible && onClose && (
+        <Button
+          type="text"
+          size="small"
+          aria-label={t('announcement.close')}
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          style={{ flexShrink: 0, color: palette[tokens.fg], opacity: 0.75 }}
+        />
+      )}
+    </div>
   )
 }
 
+// The fold animation. The overflow stays mounted while it collapses so the grid can run 1fr→0fr,
+// then unmounts once the transition ends; expansion mounts it first and lets the grid run 0fr→1fr. A
+// grid row transition animates height without measuring the content.
+function useFold(expanded: boolean) {
+  const [mounted, setMounted] = useState(expanded)
+  useEffect(() => {
+    if (expanded) setMounted(true)
+  }, [expanded])
+  const onEnd = (e: TransitionEvent) => {
+    if (e.propertyName !== 'grid-template-rows') return
+    if (!expanded) setMounted(false)
+  }
+  return { mounted, onEnd }
+}
+
 // Shared plumbing: the reader's dismissal state for whatever set of announcements is on offer, and
-// the local record of what they have closed in this render. Both surfaces need exactly this, and
-// they render disjoint sets, so each gets its own instance rather than a shared one.
+// the local record of what they have closed in this render.
 function useReaderState(items: Announcement[]) {
   const { user } = useAuth()
   const [closed, setClosed] = useState<Record<number, boolean>>({})
@@ -115,65 +139,30 @@ function useReaderState(items: Announcement[]) {
 }
 
 /**
- * The home page's announcement band: home-scoped announcements, stacked, in the operator's order.
- */
-export default function SiteAnnouncement({ style, compact = false }: { style?: CSSProperties; compact?: boolean }) {
-  const { t } = useTranslation()
-  const loc = useLocation()
-  const { items, collapse } = useAnnouncements()
-  const [expanded, setExpanded] = useState(false)
-  const mine = useMemo(() => bandItems(items, loc.pathname), [items, loc.pathname])
-  const { open, close } = useReaderState(mine)
-
-  if (!open.length) return null
-  const limit = compact ? MAX_STACKED_COMPACT : MAX_STACKED
-  const shown = collapse && !expanded ? open.slice(0, limit) : open
-  const hidden = open.length - shown.length
-
-  return (
-    <Space orientation="vertical" size={8} style={{ width: '100%', ...style }}>
-      {shown.map((a) => (
-        <AnnouncementAlert key={a.id} announcement={a} onClose={() => close(a)} />
-      ))}
-      {hidden > 0 && (
-        <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setExpanded(true)}>
-          {t('announcement.showMore', { count: hidden })}
-        </Button>
-      )}
-    </Space>
-  )
-}
-
-/**
- * The site-wide announcement strip: app-scoped announcements, on every page.
+ * The announcement strip: every announcement in scope — app-scoped everywhere, home-scoped on the
+ * home page — as one list in the operator's order, on a neutral band under the header.
  *
- * One self-contained block per announcement, each painted with its own level's colour, on a neutral
- * band. The band used to be tinted by the loudest announcement while each row's icon kept its own
- * level's colour, so a blue notice sitting under an amber warning looked like a mispainted icon. Per
- * row is also the honest reading of the data: an announcement has a level, not the band.
- *
- * Collapsed to one line by design. This band follows the reader everywhere, so it is chrome and has
- * to cost what chrome costs — three stacked alerts would be ~150px of every screen in the portal,
- * against ~36px here. Clicking the toggle expands the full list in place rather than opening a
- * popover (360px of floating panel is unusable on a 375px phone) or a drawer (a scrim over the whole
- * app to read two sentences).
+ * One self-contained block per announcement, each painted with its own level's colour. This band
+ * follows the reader onto every page, so folding is how it stays chrome-sized: the lead stays, the
+ * rest fold behind a "N more" toggle that expands in place with a height transition.
  */
 export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boolean; maxWidth?: number | string }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  const loc = useLocation()
   const { items, collapse } = useAnnouncements()
   const [expanded, setExpanded] = useState(false)
-  const mine = useMemo(() => stripItems(items), [items])
+  const mine = useMemo(() => inScope(items, loc.pathname), [items, loc.pathname])
   const { open, close } = useReaderState(mine)
+  const { mounted, onEnd } = useFold(!collapse || expanded)
 
   if (!open.length) return null
-  const palette = token as unknown as Record<string, string>
-  // Folded is opt-in and off by default. It shows one line, and while folded it is the ONLY place
-  // the lead appears — the previous version kept that line visible after expanding, so the first
-  // announcement was drawn twice and the band looked broken.
-  const folded = collapse && !expanded
-  const shown = folded ? open.slice(0, 1) : open
-  const hidden = open.length - shown.length
+  // Folded is opt-in and off by default. Folding hides the OVERFLOW, not the lead: the first
+  // announcement keeps its title AND body, and only the ones after it collapse behind the "N more"
+  // link. An earlier version truncated the lead to one bare line, which hid the very thing the
+  // operator wanted read; folding is about how many messages show, not how much of one shows.
+  const [lead, ...rest] = open
+  const revealed = !collapse || expanded
 
   return (
     <div className="rp-announce-strip">
@@ -184,99 +173,56 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
           padding: compact ? '8px 12px' : '8px 20px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 6,
         }}
       >
-        {shown.map((a) => {
-          const Icon = LEVEL_ICON[a.level]
-          const tokens = LEVEL_TOKENS[a.level]
-          return (
+        <AnnouncementRow announcement={lead} onClose={() => close(lead)} />
+        {rest.length > 0 && (
+          <>
             <div
-              key={a.id}
-              className="rp-announce-item"
+              aria-hidden={collapse && !expanded ? true : undefined}
+              onTransitionEnd={collapse ? onEnd : undefined}
               style={{
-                // align-items:center puts the icon and the close button against the CENTRE of the
-                // title+body block, instead of the close floating up at the first line.
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '7px 10px',
-                borderRadius: 8,
-                background: palette[tokens.bg],
+                display: 'grid',
+                gridTemplateRows: revealed ? '1fr' : '0fr',
+                transition: collapse ? 'grid-template-rows 220ms ease' : undefined,
               }}
             >
-              <Icon style={{ color: palette[tokens.fg], fontSize: 15, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {a.title && (
-                  <div
-                    style={{
-                      color: token.colorText,
-                      fontSize: 14,
-                      fontWeight: a.content ? 600 : 400,
-                      ...(folded ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}),
-                    }}
-                  >
-                    {a.title}
-                  </div>
-                )}
-                {a.content && !folded && (
-                  <Typography.Text style={{ color: palette[tokens.text], whiteSpace: 'pre-line', lineHeight: 1.5 }}>
-                    {a.content}
-                  </Typography.Text>
-                )}
-                {!a.title && folded && (
-                  <div
-                    style={{
-                      color: token.colorText,
-                      fontSize: 14,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {a.content.split('\n')[0]}
+              <div style={{ overflow: collapse ? 'hidden' : undefined, minHeight: 0 }}>
+                {mounted && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 6 }}>
+                    {rest.map((a) => (
+                      <AnnouncementRow key={a.id} announcement={a} onClose={() => close(a)} />
+                    ))}
                   </div>
                 )}
               </div>
-              {a.dismissible && (
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t('announcement.close')}
-                  icon={<CloseOutlined />}
-                  onClick={() => close(a)}
-                  style={{ flexShrink: 0, color: palette[tokens.fg], opacity: 0.75 }}
-                />
-              )}
             </div>
-          )
-        })}
-
-        {/* Only ever rendered when the site opted into folding: with the default there is nothing
-            left over to reveal. */}
-        {collapse && open.length > 1 && (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
-            style={{
-              alignSelf: 'flex-start',
-              marginLeft: 25,
-              background: 'none',
-              border: 0,
-              padding: 0,
-              cursor: 'pointer',
-              color: token.colorTextSecondary,
-              font: 'inherit',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            {hidden > 0 ? t('announcement.showMore', { count: hidden }) : t('announcement.showLess')}
-            {expanded ? <UpOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
-          </button>
+            {collapse && (
+              <button
+                type="button"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((v) => !v)}
+                style={{
+                  alignSelf: 'flex-start',
+                  marginLeft: 25,
+                  marginTop: 6,
+                  background: 'none',
+                  border: 0,
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: token.colorTextSecondary,
+                  font: 'inherit',
+                  fontSize: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {expanded ? t('announcement.showLess') : t('announcement.showMore', { count: rest.length })}
+                {expanded ? <UpOutlined style={{ fontSize: 10 }} /> : <DownOutlined style={{ fontSize: 10 }} />}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -284,57 +230,75 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
 }
 
 /**
- * The one announcement popup.
+ * The announcement popup: every eligible announcement in one dialog, a list of their titles down the
+ * left and the selected one's full text on the right — the release-notes dialog's shape, because that
+ * is the portal's one idea of a dialog that can hold several things a reader picks between.
  *
- * At most one per page load, the first eligible in the operator's order, over every announcement in
- * scope regardless of which surface draws its banner. Advancing to the next after it closes would
- * make a reader dismiss two modals in one interaction and would contradict what the admin page
- * says, so the admin list labels the popup switches that will not fire instead — an ignored setting
- * should be visible where it is set, not discovered later.
+ * One dialog, not one per announcement. Firing them in turn would make the reader dismiss two modals
+ * in one sitting, and the footer acts on the WHOLE dialog: "Got it" silences all of them for this
+ * session, "don't show again" silences all for good. A reader who wants one to keep interrupting can
+ * still find it in the strip.
+ *
+ * It offers the same in-scope set the strip draws, so a row shown there is the row offered here.
  */
 export function AnnouncementPopup() {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const loc = useLocation()
   const { items } = useAnnouncements()
-  const [popup, setPopup] = useState<Announcement | null>(null)
   const visible = useMemo(() => inScope(items, loc.pathname), [items, loc.pathname])
   const { dismissals, identity, user } = useReaderState(visible)
-  // Keyed by id AND signature, not id alone: if the operator fixes a typo while a tab is open, the
-  // corrected announcement is a different thing to have offered, and this tab should offer it.
-  const fired = useRef(new Set<string>())
+  // Offer the whole batch once per signature set, then never again in this tab: [identity] is what
+  // re-arms it, and closing the dialog does not change identity, so dismissal sticks.
+  const offered = useRef('')
+
+  const eligible = useMemo(
+    () =>
+      visible.filter(
+        (a) => a.popup && !dismissals.popupDismissed(a) && !dismissals.seenThisSession(a),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity IS the dependency on `visible`
+    [identity, dismissals],
+  )
+  const [open, setOpen] = useState(false)
+  const [activeId, setActiveId] = useState<number | null>(null)
 
   useEffect(() => {
-    const next = visible.find(
-      (a) =>
-        a.popup &&
-        !fired.current.has(`${a.id}:${announcementSig(a)}`) &&
-        !dismissals.popupDismissed(a) &&
-        !dismissals.seenThisSession(a),
-    )
-    if (!next) return
-    fired.current.add(`${next.id}:${announcementSig(next)}`)
-    setPopup(next)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity IS the dependency on `visible`
-  }, [identity, dismissals])
+    if (!eligible.length) return
+    const key = eligible.map((a) => `${a.id}:${announcementSig(a)}`).join(',')
+    if (offered.current === key) return
+    offered.current = key
+    setActiveId(eligible[0].id)
+    setOpen(true)
+  }, [eligible])
 
-  // "Got it" stops the popup for this session; "don't show again" stops it for good. Both stop only
-  // the POPUP, and only this one: the banner stays, so the notice is still readable and only the
-  // interruption ends.
+  // "Got it" stops the popup for this session; "don't show again" stops it for good. Both act on
+  // EVERY announcement the dialog is showing — it is one interruption, so it takes one answer.
   const closePopup = (forGood: boolean) => {
-    if (popup) {
-      if (forGood) dismissPopup(user, popup)
-      else markSeen(user, popup)
+    for (const a of eligible) {
+      if (forGood) dismissPopup(user, a)
+      else markSeen(user, a)
     }
-    setPopup(null)
+    setOpen(false)
   }
 
+  const active = eligible.find((a) => a.id === activeId) ?? eligible[0]
+  const accent = active ? (token as unknown as Record<string, string>)[LEVEL_TOKENS[active.level].fg] : token.colorPrimary
   return (
     <Modal
-      rootClassName="rp-announce-popup"
-      open={!!popup}
+      rootClassName="rp-announce-popup rp-release-notes-modal"
+      open={open && !!eligible.length}
+      width={880}
       title={
-        <Typography.Text style={{ fontWeight: 700 }}>{popup?.title || t('announcement.popupTitle')}</Typography.Text>
+        <Space size={8}>
+          <InfoCircleFilled style={{ color: accent }} />
+          {t('announcement.popupTitle')}
+        </Space>
       }
+      // No built-in corner X: the footer already offers "Got it" (this session) and "Don't show
+      // again" (for good), and a third exit that means one of those two is a worse choice, not a
+      // shortcut.
+      closable={false}
       onCancel={() => closePopup(false)}
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
@@ -346,9 +310,42 @@ export function AnnouncementPopup() {
       }
       destroyOnHidden
     >
-      {popup?.content && (
-        <Typography.Paragraph style={{ whiteSpace: 'pre-line', marginBottom: 0 }}>{popup.content}</Typography.Paragraph>
-      )}
+      {/* Two panes once there is something to pick between; a single announcement renders as one
+          row, the same block the strip shows. */}
+      <div className={eligible.length > 1 ? 'rp-announce-popup-layout' : undefined}>
+        {eligible.length > 1 && (
+          <nav className="rp-announce-popup-list" aria-label={t('announcement.popupTitle')}>
+            {eligible.map((a) => {
+              const Icon = LEVEL_ICON[a.level]
+              return (
+                <Button
+                  key={a.id}
+                  type={a.id === active?.id ? 'default' : 'text'}
+                  block
+                  onClick={() => setActiveId(a.id)}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                    <Icon style={{ color: (token as unknown as Record<string, string>)[LEVEL_TOKENS[a.level].fg] }} />
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        textAlign: 'start',
+                      }}
+                    >
+                      {a.title || a.content.split('\n')[0]}
+                    </span>
+                  </span>
+                </Button>
+              )
+            })}
+          </nav>
+        )}
+        <div className="rp-announce-popup-body">
+          {active && <AnnouncementRow announcement={active} />}
+        </div>
+      </div>
     </Modal>
   )
 }

@@ -109,7 +109,7 @@ describe('AnnouncementPage', () => {
     await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
     const title = await screen.findByPlaceholderText('settings.announcementTitlePlaceholder')
     await user.type(title, '节点已恢复')
-    expect(document.querySelector('.rp-announcement')).not.toBeNull() // preview follows the form
+    expect(document.querySelector('.rp-announce-item')).not.toBeNull() // preview follows the form
 
     await user.click(screen.getByRole('button', { name: /common\.save/ }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
@@ -148,7 +148,9 @@ describe('AnnouncementPage', () => {
     expect(apiMock.put).not.toHaveBeenCalled()
   })
 
-  it('labels the popup switches that will not actually fire', async () => {
+  // Every popup switch fires now: one dialog offers all of them, so there is no "only the first
+  // one pops" caveat to label.
+  it('tags every popup announcement as popping up', async () => {
     apiMock.get.mockResolvedValue({
       items: [
         announcement({ id: 1, title: '第一条', popup: true }),
@@ -158,9 +160,8 @@ describe('AnnouncementPage', () => {
     renderPage()
 
     await screen.findByText('第二条')
-    // Only one row carries the "will not pop up" tag: the second.
-    const tags = screen.getAllByText('announcementAdmin.popupSkipped')
-    expect(tags).toHaveLength(1)
+    const tags = screen.getAllByText('announcementAdmin.popupTag')
+    expect(tags).toHaveLength(2)
   })
 
   it('nudges about an enabled announcement with no end date that has been up for weeks', async () => {

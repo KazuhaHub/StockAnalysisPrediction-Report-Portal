@@ -98,8 +98,6 @@
   "announcementAdmin.grantsTruncated": "Only the first {{count}} accounts are listed. To reach others, put them in a group.",
   "announcementAdmin.hint": "Drag to set the order readers see. Each row saves on its own — there is no page-level Save.",
   "announcementAdmin.popup": "Show as a popup",
-  "announcementAdmin.popupSkipped": "Will not pop up",
-  "announcementAdmin.popupSkippedHint": "At most one popup per page load, and only the topmost one gets it.",
   "announcementAdmin.popupTag": "Popup",
   "announcementAdmin.previewAs": "Preview as…",
   "announcementAdmin.previewEmpty": "This recipient currently sees no announcements",
