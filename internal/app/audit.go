@@ -119,7 +119,12 @@ const (
 
 	// Reports and runs.
 	AuditReportIngest = "report.ingest"
-	AuditReportDelete = "report.delete"
+	// Forecast verification (ADR 0029 §3). Rejected is the producer's bug — the report reads normally,
+	// so nothing else would surface it. StoreFailed is the portal's: the report is stored and the set
+	// is not, which is visible on the storage page as an unrecorded report.
+	AuditPredictionsRejected    = "predictions.reject"
+	AuditPredictionsStoreFailed = "predictions.store_failed"
+	AuditReportDelete           = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -400,6 +405,7 @@ var auditVocabulary = []string{
 	AuditAppInstall, AuditAppDelete,
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
+	AuditPredictionsRejected, AuditPredictionsStoreFailed,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present
