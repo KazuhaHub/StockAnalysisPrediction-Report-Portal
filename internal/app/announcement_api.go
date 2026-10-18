@@ -167,7 +167,7 @@ func (s *Server) visibleFor(readerPrincipals []string) []Announcement {
 func readerAnnouncementJSON(a Announcement) map[string]any {
 	return map[string]any{
 		"id": a.ID, "level": a.Level, "title": a.Title, "content": a.Content,
-		"popup": a.Popup, "dismissible": a.Dismissible, "scope": a.Scope, "endsAt": a.EndsAt,
+		"display": a.Display, "dismissible": a.Dismissible, "scope": a.Scope, "endsAt": a.EndsAt,
 	}
 }
 
@@ -201,7 +201,7 @@ func adminAnnouncementJSON(a Announcement) map[string]any {
 	}
 	return map[string]any{
 		"id": a.ID, "level": a.Level, "title": a.Title, "content": a.Content,
-		"ord": a.Ord, "enabled": a.Enabled, "popup": a.Popup, "dismissible": a.Dismissible,
+		"ord": a.Ord, "enabled": a.Enabled, "display": a.Display, "dismissible": a.Dismissible,
 		"scope": a.Scope, "audience": a.Audience, "grants": grants,
 		"startsAt": a.StartsAt, "endsAt": a.EndsAt,
 		"createdAt": a.CreatedAt, "createdBy": a.CreatedBy, "updatedAt": a.UpdatedAt,
@@ -319,9 +319,9 @@ func (s *Server) apiAnnouncementPreview(w http.ResponseWriter, r *http.Request, 
 // sharper one: a nil there has to keep the existing principals, so that no partial write can
 // silently empty an announcement's audience.
 type announcementInput struct {
-	Level, Title, Content, Scope, Audience, StartsAt, EndsAt, UpdatedAt *string
-	Enabled, Popup, Dismissible                                         *bool
-	Grants                                                              *[]string
+	Level, Title, Content, Scope, Audience, StartsAt, EndsAt, UpdatedAt, Display *string
+	Enabled, Popup, Dismissible                                                  *bool
+	Grants                                                                       *[]string
 }
 
 func str(p *string) string {
@@ -393,6 +393,25 @@ func (s *Server) validateAnnouncement(w http.ResponseWriter, in announcementInpu
 	} else if a.Scope == "" {
 		a.Scope = "home"
 	}
+	// display is the mode the reader obeys (strip / popup / both). `popup` is accepted for one
+	// release line as an input alias — display wins when both are sent — so a client still posting
+	// the old boolean keeps working; the writer stores both, in sync, for a rolled-back binary.
+	if in.Display != nil {
+		if v := strings.ToLower(str(in.Display)); !validAnnouncementDisplay(v) {
+			jsonErrorCode(w, http.StatusBadRequest, "bad_announcement_display", "无效的公告展示方式")
+			return a, false
+		}
+		a.Display = strings.ToLower(str(in.Display))
+	} else if in.Popup != nil {
+		if *in.Popup {
+			a.Display = displayBoth
+		} else {
+			a.Display = displayStrip
+		}
+	} else if a.Display == "" {
+		a.Display = displayFrom("", a.Popup)
+	}
+	a.Popup = a.Display != displayStrip
 	if in.Audience != nil {
 		if v := strings.ToLower(str(in.Audience)); v != "all" && v != "grant" {
 			jsonErrorCode(w, http.StatusBadRequest, "bad_announcement_audience", "无效的公告受众")
@@ -425,7 +444,6 @@ func (s *Server) validateAnnouncement(w http.ResponseWriter, in announcementInpu
 		return a, false
 	}
 	a.Enabled = boolOr(in.Enabled, cur == nil || a.Enabled)
-	a.Popup = boolOr(in.Popup, cur != nil && a.Popup)
 	a.Dismissible = boolOr(in.Dismissible, cur != nil && a.Dismissible)
 	return a, true
 }
@@ -614,34 +632,43 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
-// apiAnnouncementToggle serves the two inline switches in the list, and only them. A whole-row PUT
-// would work — it is what LinksPage does — but a link row carries nothing but decoration, and one
-// of these rows carries an audience. Re-sending it to flip a switch is a disclosure change wearing
-// the costume of a convenience.
+// apiAnnouncementToggle serves the inline switches in the list: the enabled switch and the display
+// mode. A whole-row PUT would work — it is what LinksPage does — but a link row carries nothing but
+// decoration, and one of these rows carries an audience. Re-sending it to flip a switch is a
+// disclosure change wearing the costume of a convenience.
 func (s *Server) apiAnnouncementToggle(w http.ResponseWriter, r *http.Request, user string) {
 	id := pathID(r, "id")
 	if s.st.GetAnnouncement(id) == nil {
 		jsonError(w, http.StatusNotFound, "not found")
 		return
 	}
-	var in struct{ Enabled, Popup *bool }
+	var in struct {
+		Enabled *bool
+		Display *string
+	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
 	detail := map[string]any{"op": "toggle"}
-	for _, f := range []struct {
-		name string
-		val  *bool
-	}{{"enabled", in.Enabled}, {"popup", in.Popup}} {
-		if f.val == nil {
-			continue
-		}
-		if err := s.st.SetAnnouncementFlag(id, f.name, *f.val); err != nil {
+	if in.Enabled != nil {
+		if err := s.st.SetAnnouncementEnabled(id, *in.Enabled); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		detail[f.name] = *f.val
+		detail["enabled"] = *in.Enabled
+	}
+	if in.Display != nil {
+		display := strings.ToLower(strings.TrimSpace(*in.Display))
+		if !validAnnouncementDisplay(display) {
+			jsonErrorCode(w, http.StatusBadRequest, "bad_announcement_display", "无效的公告展示方式")
+			return
+		}
+		if err := s.st.SetAnnouncementDisplay(id, display); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		detail["display"] = display
 	}
 	s.recordChange(r, user, AuditPolicyChange, "announcement", strconv.FormatInt(id, 10), detail)
 	writeJSON(w, okJSON)

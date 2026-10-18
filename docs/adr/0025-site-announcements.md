@@ -33,6 +33,16 @@ starts_at, ends_at, created_at, created_by, updated_at)`, plus a side table
 arrive on existing databases through `createBaseTables` / `ensureColumns` — additive only, no
 hand-written migration, per the project's standing schema rule.
 
+The `display` column was added later, and it is the first change here to go through the migration
+ledger (ADR 0035, `migration0005`) rather than the frozen baseline: `display TEXT`, nullable with no
+default. It replaces the `popup` boolean as the thing the reader obeys — `strip` (band only), `popup`
+(dialog only), `both` — because "band", "popup" and "band and popup" are three states and a boolean
+can hold two. `popup` is **kept and kept in sync** (`popup = display != strip`) for one release line,
+so a binary rolled back across this change still shows a row where it did; a row written before the
+column existed carries NULL, and `displayFrom` derives its mode from `popup`, which makes a
+pre-migration backup load untouched rather than needing a back-fill.
+
+
 The whole column set is declared from the first release that has the table, including the columns
 whose write paths open in later phases. A column costs nothing here, and declaring it late would
 mean a second DDL change plus a second `ensureColumns` pass for no gain.
@@ -49,7 +59,7 @@ set is now pinned by a test — the way this regresses is not somebody re-adding
 `announcementTitle`, it is somebody adding a sixth field that "obviously" belongs with the
 branding.
 
-The reader payload carries `id, level, title, content, popup, dismissible, scope, endsAt` and
+The reader payload carries `id, level, title, content, display, dismissible, scope, endsAt` and
 deliberately **not** `audience`, `grants`, `ord` or `enabled`. Telling a reader that a targeted
 announcement exists, even without naming its target, discloses the shape of the OU tree.
 

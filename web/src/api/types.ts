@@ -737,6 +737,10 @@ export type AnnouncementScope = 'home' | 'app'
 // announcement_grants. The reader payload never carries this — see Announcement.
 export type AnnouncementAudience = 'all' | 'grant'
 
+// How an announcement is shown to a reader. 'strip' = in the band under the header only; 'popup' =
+// a dialog on arrival only; 'both' = the band AND the dialog.
+export type AnnouncementDisplay = 'strip' | 'popup' | 'both'
+
 // One announcement as the READER sees it (GET /api/announcements). It carries no audience, no
 // grants and no ord on purpose: which OUs are being addressed is the shape of the org chart.
 // endsAt is included so a tab left open in the background — where polling stops — can retire an
@@ -746,7 +750,7 @@ export interface Announcement {
   level: AnnouncementLevel
   title: string
   content: string
-  popup: boolean
+  display: AnnouncementDisplay
   dismissible: boolean
   scope: AnnouncementScope
   endsAt: string

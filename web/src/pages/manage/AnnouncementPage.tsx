@@ -28,6 +28,7 @@ import type {
   AdminAnnouncement,
   Announcement,
   AnnouncementAudience,
+  AnnouncementDisplay,
   AnnouncementLevel,
   AnnouncementScope,
 } from '../../api/types'
@@ -61,11 +62,11 @@ const CROWDED = 5
 
 interface FormValues {
   enabled: boolean
-  popup: boolean
   dismissible: boolean
   level: AnnouncementLevel
   scope: AnnouncementScope
   audience: AnnouncementAudience
+  display: AnnouncementDisplay
   grants: string[]
   title: string
   content: string
@@ -153,7 +154,7 @@ export default function AnnouncementPage() {
     setEditing(a)
     form.setFieldsValue({
       enabled: a ? a.enabled : true,
-      popup: a ? a.popup : false,
+      display: a ? a.display : 'strip',
       dismissible: a ? a.dismissible : false,
       level: a?.level || 'notice',
       scope: a?.scope || 'home',
@@ -171,7 +172,7 @@ export default function AnnouncementPage() {
     const [from, to] = v.window ?? [null, null]
     const payload = {
       enabled: v.enabled === true,
-      popup: v.popup === true,
+      display: v.display || 'strip',
       dismissible: v.dismissible === true,
       level: v.level || 'notice',
       scope: v.scope || 'home',
@@ -198,12 +199,12 @@ export default function AnnouncementPage() {
     }
   }
 
-  // The inline switches PATCH one field. Re-sending the whole row to flip one would write back the
+  // The inline controls PATCH one field. Re-sending the whole row to flip one would write back the
   // title and body this page loaded, silently reverting another operator's edit.
-  const toggle = async (a: AdminAnnouncement, field: 'enabled' | 'popup', on: boolean) => {
-    setItems((prev) => prev.map((x) => (x.id === a.id ? { ...x, [field]: on } : x)))
+  const toggle = async (a: AdminAnnouncement, patch: { enabled?: boolean; display?: AnnouncementDisplay }) => {
+    setItems((prev) => prev.map((x) => (x.id === a.id ? { ...x, ...patch } : x)))
     try {
-      await api.patch(`/api/admin/announcements/${a.id}`, { [field]: on })
+      await api.patch(`/api/admin/announcements/${a.id}`, patch)
       forgetTags('/api/announcements')
     } catch (e) {
       message.error(errText(e, t))
@@ -325,7 +326,7 @@ export default function AnnouncementPage() {
             </Tag>
           </Tooltip>
         )}
-        {a.popup && <Tag color="purple">{t('announcementAdmin.popupTag')}</Tag>}
+        {a.display !== 'strip' && <Tag color="purple">{t('announcementAdmin.popupTag')}</Tag>}
         {stale > 0 && (
           <Tooltip title={t('announcementAdmin.staleHint')}>
             <Tag color="orange">{t('announcementAdmin.stale', { count: stale })}</Tag>
@@ -336,7 +337,7 @@ export default function AnnouncementPage() {
             size="small"
             aria-label={t('announcementAdmin.enabled')}
             checked={a.enabled}
-            onChange={(v) => toggle(a, 'enabled', v)}
+            onChange={(v) => toggle(a, { enabled: v })}
           />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(a)} aria-label={t('common.edit')} />
@@ -484,13 +485,19 @@ export default function AnnouncementPage() {
             <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked" noStyle={false} style={{ marginBottom: 0 }}>
               <Switch />
             </Form.Item>
-            <Form.Item name="popup" label={t('announcementAdmin.popup')} valuePropName="checked" style={{ marginBottom: 0 }}>
-              <Switch />
-            </Form.Item>
             <Form.Item name="dismissible" label={t('announcementAdmin.dismissible')} valuePropName="checked" style={{ marginBottom: 0 }}>
               <Switch />
             </Form.Item>
           </Space>
+          <Form.Item name="display" label={t('announcementAdmin.display')} extra={t('announcementAdmin.displayHint')}>
+            <Segmented
+              options={[
+                { value: 'strip', label: t('announcementAdmin.display.strip') },
+                { value: 'popup', label: t('announcementAdmin.display.popup') },
+                { value: 'both', label: t('announcementAdmin.display.both') },
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="level" label={t('settings.announcementLevel')}>
             <Select
               options={ANNOUNCEMENT_LEVELS.map((level) => ({

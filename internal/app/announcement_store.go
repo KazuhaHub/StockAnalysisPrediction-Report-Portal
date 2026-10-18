@@ -30,6 +30,7 @@ type Announcement struct {
 	Ord         int
 	Enabled     bool
 	Popup       bool
+	Display     string
 	Dismissible bool
 	Scope       string
 	Audience    string
@@ -42,14 +43,14 @@ type Announcement struct {
 }
 
 const announcementCols = `id,COALESCE(level,''),COALESCE(title,''),COALESCE(content,''),
-	COALESCE(ord,0),COALESCE(enabled,1),COALESCE(popup,0),COALESCE(dismissible,0),
+	COALESCE(ord,0),COALESCE(enabled,1),COALESCE(popup,0),COALESCE(display,''),COALESCE(dismissible,0),
 	COALESCE(scope,''),COALESCE(audience,''),COALESCE(starts_at,''),COALESCE(ends_at,''),
 	COALESCE(created_at,''),COALESCE(created_by,''),COALESCE(updated_at,'')`
 
 func scanAnnouncement(sc interface{ Scan(...any) error }) (Announcement, error) {
 	var a Announcement
 	var enabled, popup, dismissible sql.NullInt64
-	err := sc.Scan(&a.ID, &a.Level, &a.Title, &a.Content, &a.Ord, &enabled, &popup, &dismissible,
+	err := sc.Scan(&a.ID, &a.Level, &a.Title, &a.Content, &a.Ord, &enabled, &popup, &a.Display, &dismissible,
 		&a.Scope, &a.Audience, &a.StartsAt, &a.EndsAt, &a.CreatedAt, &a.CreatedBy, &a.UpdatedAt)
 	// NULL reads as the permissive default for enabled and the restrictive one for the rest, which is
 	// what a row written before the column existed should mean.
@@ -59,7 +60,39 @@ func scanAnnouncement(sc interface{ Scan(...any) error }) (Announcement, error) 
 	a.Level = normalizeAnnouncementLevel(a.Level)
 	a.Scope = normalizeAnnouncementScope(a.Scope)
 	a.Audience = normalizeAnnouncementAudience(a.Audience)
+	a.Display = displayFrom(a.Display, a.Popup)
 	return a, err
+}
+
+// displayFrom resolves the display mode. A row written before the `display` column existed carries
+// NULL (migration 0005 leaves it so), and the mode it meant is exactly what `popup` said: popup on
+// was "strip and popup", off was "strip only". Deriving it here rather than back-filling keeps every
+// such row correct and lets a pre-migration backup load untouched.
+func displayFrom(raw string, popup bool) string {
+	if validAnnouncementDisplay(raw) {
+		return raw
+	}
+	if popup {
+		return displayBoth
+	}
+	return displayStrip
+}
+
+// The three display modes. `popup` is kept in sync on write (see AddAnnouncement) so a binary
+// rolled back across this release still behaves: its boolean is exactly "is this not strip-only".
+const (
+	displayStrip = "strip"
+	displayPopup = "popup"
+	displayBoth  = "both"
+)
+
+func validAnnouncementDisplay(raw string) bool {
+	switch raw {
+	case displayStrip, displayPopup, displayBoth:
+		return true
+	default:
+		return false
+	}
 }
 
 // Announcements returns every row in display order. ord first, then id, so two rows that were
@@ -164,36 +197,43 @@ func (s *Store) nextAnnouncementOrd() int {
 func (s *Store) AddAnnouncement(a Announcement) (int64, error) {
 	now := time.Now().UTC().Format(announcementStamp)
 	return s.insertID(`INSERT INTO announcements(
-		level,title,content,ord,enabled,popup,dismissible,scope,audience,
+		level,title,content,ord,enabled,popup,display,dismissible,scope,audience,
 		starts_at,ends_at,created_at,created_by,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.Level, a.Title, a.Content, s.nextAnnouncementOrd(),
-		boolInt(a.Enabled), boolInt(a.Popup), boolInt(a.Dismissible), a.Scope, a.Audience,
+		boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display, boolInt(a.Dismissible), a.Scope, a.Audience,
 		a.StartsAt, a.EndsAt, now, a.CreatedBy, now)
 }
 
 // UpdateAnnouncement replaces every editable field except ord, which only the drag owns.
 func (s *Store) UpdateAnnouncement(a Announcement) error {
-	_, err := s.exec(`UPDATE announcements SET level=?,title=?,content=?,enabled=?,popup=?,
+	_, err := s.exec(`UPDATE announcements SET level=?,title=?,content=?,enabled=?,popup=?,display=?,
 		dismissible=?,scope=?,audience=?,starts_at=?,ends_at=?,updated_at=? WHERE id=?`,
-		a.Level, a.Title, a.Content, boolInt(a.Enabled), boolInt(a.Popup), boolInt(a.Dismissible),
+		a.Level, a.Title, a.Content, boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display, boolInt(a.Dismissible),
 		a.Scope, a.Audience, a.StartsAt, a.EndsAt, time.Now().UTC().Format(announcementStamp), a.ID)
 	return err
 }
 
-// SetAnnouncementFlag flips one boolean from the list row's inline switch. It is deliberately NOT
-// a whole-row PUT: re-sending a row to toggle a switch would also write back the title, body and
+// SetAnnouncementEnabled flips the list row's inline enabled switch. It is deliberately NOT a
+// whole-row PUT: re-sending a row to toggle a switch would also write back the title, body and
 // audience the admin's page loaded minutes ago, quietly reverting another admin's edit — and on a
 // row that carries an audience, that turns a decorative toggle into a disclosure change.
 // updated_at is left alone for the same reason the reader keys dismissal on content: flipping a
 // switch is not an edit of what the announcement says.
-func (s *Store) SetAnnouncementFlag(id int64, field string, on bool) error {
-	switch field { // never interpolate a caller's string into DDL/DML
-	case "enabled", "popup":
-	default:
+func (s *Store) SetAnnouncementEnabled(id int64, on bool) error {
+	_, err := s.exec("UPDATE announcements SET enabled=? WHERE id=?", boolInt(on), id)
+	return err
+}
+
+// SetAnnouncementDisplay rewrites a row's display mode, keeping the legacy `popup` column in sync
+// (popup = display != strip) so a binary rolled back across this release still shows the row where
+// it did before. One guarded switch, never an interpolated caller string.
+func (s *Store) SetAnnouncementDisplay(id int64, display string) error {
+	if !validAnnouncementDisplay(display) {
 		return sql.ErrNoRows
 	}
-	_, err := s.exec("UPDATE announcements SET "+field+"=? WHERE id=?", boolInt(on), id)
+	_, err := s.exec("UPDATE announcements SET display=?,popup=? WHERE id=?",
+		display, boolInt(display != displayStrip), id)
 	return err
 }
 

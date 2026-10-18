@@ -38,7 +38,7 @@ function announcement(over: Partial<AdminAnnouncement> = {}): AdminAnnouncement 
     content: '今晚 22:00 开始维护。',
     ord: 0,
     enabled: true,
-    popup: false,
+    display: 'strip',
     dismissible: false,
     scope: 'home',
     audience: 'all',
@@ -114,7 +114,23 @@ describe('AnnouncementPage', () => {
     await user.click(screen.getByRole('button', { name: /common\.save/ }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
     expect(apiMock.post.mock.calls[0][0]).toBe('/api/admin/announcements')
-    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '节点已恢复', enabled: true, popup: false })
+    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '节点已恢复', enabled: true, display: 'strip' })
+  })
+
+  // The display mode is a three-way choice now, not a popup boolean: popup-only row that never
+  // appears in the band is a state the boolean could not express.
+  it('saves the chosen display mode', async () => {
+    apiMock.get.mockResolvedValue({ items: [] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+    await user.type(await screen.findByPlaceholderText('settings.announcementTitlePlaceholder'), '仅弹窗')
+    await user.click(await screen.findByText('announcementAdmin.display.popup'))
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '仅弹窗', display: 'popup' })
   })
 
   // Optimistic concurrency: without the token a second admin's save silently reverts the first.
@@ -153,8 +169,8 @@ describe('AnnouncementPage', () => {
   it('tags every popup announcement as popping up', async () => {
     apiMock.get.mockResolvedValue({
       items: [
-        announcement({ id: 1, title: '第一条', popup: true }),
-        announcement({ id: 2, title: '第二条', popup: true }),
+        announcement({ id: 1, title: '第一条', display: 'both' }),
+        announcement({ id: 2, title: '第二条', display: 'both' }),
       ],
     })
     renderPage()

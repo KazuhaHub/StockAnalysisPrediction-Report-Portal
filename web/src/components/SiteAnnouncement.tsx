@@ -12,7 +12,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router'
 import { useAuth } from '../auth'
-import { inScope, useAnnouncements } from '../announcements'
+import { popupItems, stripItems, useAnnouncements } from '../announcements'
 import {
   announcementSig,
   dismissBanner,
@@ -152,7 +152,7 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
   const loc = useLocation()
   const { items, collapse } = useAnnouncements()
   const [expanded, setExpanded] = useState(false)
-  const mine = useMemo(() => inScope(items, loc.pathname), [items, loc.pathname])
+  const mine = useMemo(() => stripItems(items, loc.pathname), [items, loc.pathname])
   const { open, close } = useReaderState(mine)
   const { mounted, onEnd } = useFold(!collapse || expanded)
 
@@ -246,17 +246,14 @@ export function AnnouncementPopup() {
   const { token } = theme.useToken()
   const loc = useLocation()
   const { items } = useAnnouncements()
-  const visible = useMemo(() => inScope(items, loc.pathname), [items, loc.pathname])
+  const visible = useMemo(() => popupItems(items, loc.pathname), [items, loc.pathname])
   const { dismissals, identity, user } = useReaderState(visible)
   // Offer the whole batch once per signature set, then never again in this tab: [identity] is what
   // re-arms it, and closing the dialog does not change identity, so dismissal sticks.
   const offered = useRef('')
 
   const eligible = useMemo(
-    () =>
-      visible.filter(
-        (a) => a.popup && !dismissals.popupDismissed(a) && !dismissals.seenThisSession(a),
-      ),
+    () => visible.filter((a) => !dismissals.popupDismissed(a) && !dismissals.seenThisSession(a)),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- identity IS the dependency on `visible`
     [identity, dismissals],
   )

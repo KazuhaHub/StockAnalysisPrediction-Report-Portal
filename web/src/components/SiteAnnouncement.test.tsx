@@ -37,7 +37,7 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
     level: 'warning',
     title: '维护通知',
     content: '今晚 22:00 开始维护。',
-    popup: false,
+    display: 'strip',
     dismissible: false,
     scope: 'home',
     endsAt: '',
@@ -193,8 +193,8 @@ describe('SiteAnnouncement', () => {
   // one after another would make a reader dismiss two modals in one sitting.
   it('offers every eligible popup in one dialog', async () => {
     feed.items = [
-      announcement({ id: 1, title: '第一条', popup: true }),
-      announcement({ id: 2, title: '第二条', popup: true }),
+      announcement({ id: 1, title: '第一条', display: 'both' }),
+      announcement({ id: 2, title: '第二条', display: 'both' }),
     ]
     renderAt('/')
     await screen.findByText('announcement.dontShowAgain')
@@ -208,8 +208,8 @@ describe('SiteAnnouncement', () => {
   // announcement the dialog was showing, and none of them comes back on reload.
   it('"don\'t show again" silences every announcement in the dialog at once', async () => {
     feed.items = [
-      announcement({ id: 1, title: '第一条', popup: true }),
-      announcement({ id: 2, title: '第二条', popup: true }),
+      announcement({ id: 1, title: '第一条', display: 'both' }),
+      announcement({ id: 2, title: '第二条', display: 'both' }),
     ]
     const user = userEvent.setup()
     renderAt('/')
@@ -226,7 +226,7 @@ describe('SiteAnnouncement', () => {
   // The reader keys dismissal on (id, wording). Reordering changes neither, so a drag in the admin
   // console must not re-interrupt everyone who already dismissed the popup.
   it('does not re-fire a dismissed popup when the announcements are reordered', async () => {
-    const a = announcement({ id: 1, title: '第一条', popup: true })
+    const a = announcement({ id: 1, title: '第一条', display: 'both' })
     const b = announcement({ id: 2, title: '第二条' })
     feed.items = [a, b]
     const user = userEvent.setup()
@@ -241,19 +241,19 @@ describe('SiteAnnouncement', () => {
   })
 
   it('re-fires when the operator edits what the announcement says', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.dontShowAgain'))
 
     cleanup()
-    feed.items = [announcement({ id: 1, popup: true, content: '维护推迟到明晚。' })]
+    feed.items = [announcement({ id: 1, display: 'both', content: '维护推迟到明晚。' })]
     renderAt('/')
     expect(await screen.findByText('announcement.dontShowAgain')).toBeTruthy()
   })
 
   it('"got it" silences the popup for the session only, and never the banner', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.gotIt'))
@@ -287,7 +287,7 @@ describe('SiteAnnouncement', () => {
   // three surfaces below each see only their own slice, and one of them consuming the key against a
   // partial list is how every reader gets re-interrupted on upgrade day.
   it('carries the pre-upgrade dismissal across, once', async () => {
-    const a = announcement({ id: 7, popup: true })
+    const a = announcement({ id: 7, display: 'both' })
     window.localStorage.setItem(LEGACY_KEY, announcementSig(a))
     feed.items = [a]
     migrateLegacyDismissal('alice', feed.items)
@@ -299,7 +299,7 @@ describe('SiteAnnouncement', () => {
   })
 
   it('keeps one reader’s dismissals off another reader’s screen', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.dontShowAgain'))
