@@ -23,13 +23,18 @@ var predictionIndices = []string{
 }
 
 // windBackToBeforeTheForecastStep removes what the forecast step adds, leaving a database the release
-// before it could have written.
+// before it could have written. cleanup_runs is a BASELINE table, so winding back means dropping the
+// column the step added to it as well as the tables it created — leave the column and the database
+// still carries this step's shape while claiming not to have run it.
 func windBackToBeforeTheForecastStep(t *testing.T, st *Store) {
 	t.Helper()
 	for _, tbl := range predictionTables {
 		if _, err := st.exec(`DROP TABLE IF EXISTS ` + tbl); err != nil {
 			t.Fatalf("winding back %s: %v", tbl, err)
 		}
+	}
+	if _, err := st.exec(`ALTER TABLE cleanup_runs DROP COLUMN IF EXISTS predictions_deleted`); err != nil {
+		t.Fatalf("winding back cleanup_runs: %v", err)
 	}
 	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(predictionMigrationID)); err != nil {
 		t.Fatal(err)
@@ -58,8 +63,10 @@ func seedPredictionSet(t *testing.T, st *Store, reportID sql.NullInt64, payloadS
 	if reportID.Valid {
 		v = reportID.Int64
 	}
-	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, made_at, made_on, cohort, state, payload_sha256)
-		VALUES(?,?,?,?,?,?)`, v, "2026-10-16T14:40:12Z", "2026-10-16", "2026-10", predStateAccepted, payloadSHA)
+	// rtype is set because the purge unit is (rtype, cohort): a set with an empty rtype would sit in a
+	// month of its own and never be purged with the reports it came from.
+	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
+		VALUES(?,?,?,?,?,?,?)`, v, "投资决策建议", "2026-10-16T14:40:12Z", "2026-10-16", "2026-10", predStateAccepted, payloadSHA)
 	if err != nil {
 		t.Fatalf("seed prediction set: %v", err)
 	}
@@ -355,5 +362,10 @@ func backToTheBaseline(t *testing.T, path string) {
 		`DROP TABLE IF EXISTS user_sessions`,
 		`DROP TABLE IF EXISTS login_history`,
 		`ALTER TABLE users DROP COLUMN login_history_keep`,
-		`ALTER TABLE users DROP COLUMN login_history_initialized`)
+		`ALTER TABLE users DROP COLUMN login_history_initialized`,
+		// Step 0004's tables and its column on the baseline table cleanup_runs.
+		`DROP TABLE IF EXISTS prediction_sets`,
+		`DROP TABLE IF EXISTS prediction_claims`,
+		`DROP TABLE IF EXISTS prediction_marks`,
+		`ALTER TABLE cleanup_runs DROP COLUMN predictions_deleted`)
 }

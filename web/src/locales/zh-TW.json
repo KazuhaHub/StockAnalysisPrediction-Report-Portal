@@ -1637,7 +1637,7 @@
   "storage.predictionsTarget": "預測驗證賬本（危險區）",
   "storage.predictionsDanger": "刪除賬本記錄不可恢復",
   "storage.predictionsWarn": "只刪除報告已被清除、且所有檢查點都已結算、且結算時間超過保留期的預測記錄。未結算的、或報告仍在的記錄永不刪除。預設關閉。",
-  "storage.predictionsHint": "最少 {{n}} 天。安全性由篩選條件保證，不由天數保證。",
+  "storage.predictionsHint": "最少 {{n}} 天。安全性由篩選條件保證，不由天數保證；刪除以「整月」為單位，未結算或報告仍在的月份永不刪除。需同時開啟上面的研報清理，否則本目標永遠不會命中。",
   "storage.confirmPredictionsTitle": "確認清理預測驗證賬本",
   "storage.confirmPredictionsBody": "將刪除 {{count}} 條已結算且報告已清除的預測記錄（保留期 {{days}} 天）。賬本記錄的是當時做出的預測，刪除後無法重建。",
   "storage.resultLine": "批次 {{batch}} · 令牌 {{tokens}} · 研報 {{reports}} · 審計 {{audit}} · 歷史 {{revisions}} · 賬本 {{predictions}}",

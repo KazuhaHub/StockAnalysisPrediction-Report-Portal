@@ -219,111 +219,190 @@ func (s *Store) DeleteReportsIngestedBefore(cutoff time.Time) (int64, error) {
 	return total, nil
 }
 
-// predictionsBefore scans the ledger for sets eligible for retention deletion at cutoff.
+// predictionPurgeMonths returns the (rtype, cohort) months eligible for retention deletion at cutoff.
 //
-// The predicate is three conditions, and it is deliberately the narrowest of the six targets:
+// The unit is a WHOLE MONTH OF ONE REPORT TYPE, not a set, and that is the load-bearing decision:
 //
-//	report_id IS NULL        the report is already gone, so no live link points at this set
-//	no non-terminal mark     nothing is pending or retryable, so the set can never change again
-//	MAX(resolved_at) < cut   the newest thing that happened to it is older than the cutoff
+//   - A mature cell must never change (ADR 0029 §9), and the monthly page is citable precisely because
+//     of that. Deleting some sets of a month would move that month's n and every metric on it while the
+//     page kept showing the same label.
+//   - Worse, membership is "the earliest accepted set per (symbol, group) decides" (D4). Deleting only
+//     the earliest set of a symbol would PROMOTE a later rerun as the member — exactly the
+//     selection-by-rerun that D4 exists to forbid.
 //
-// The first two are what make this target safe enough to ship with a 180-day floor while reports keep
-// a 365-day one: they are properties of the ledger's structure rather than of a number an admin
-// chooses. A set whose report exists is not eligible however old it is, and an unsettled set is not
-// eligible however long it has been unsettled. A row is required to have a mark at all, so an
-// accepted-but-unscored set (no checkpoints written) is also left alone.
-func (s *Store) predictionsBefore(cutoff time.Time) ([]int64, error) {
-	rows, err := s.query(`SELECT ps.id FROM prediction_sets ps
-		WHERE ps.report_id IS NULL
-		  AND EXISTS (SELECT 1 FROM prediction_marks m WHERE m.set_id = ps.id)
-		  AND NOT EXISTS (SELECT 1 FROM prediction_marks m
-		      WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
-		  AND (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id) < ?
-		ORDER BY ps.id`, cutoff.UTC().Format(time.RFC3339))
+// So a month is eligible only when EVERY set in it is eligible. The month's numbers then disappear as a
+// unit and are marked purged, rather than quietly changing.
+//
+// Per set, the predicate is:
+//
+//	report_id IS NULL     the report is gone, so no live link points at this set
+//	no non-terminal mark  nothing is pending or retryable, so the set can never change again
+//	settled < cutoff      when the set became final (see below)
+//
+// settled is substr(COALESCE(MAX(resolved_at), made_on), 1, 10) — the DATE a set became final — rather
+// than MAX(resolved_at) alone, because two of the four set shapes have no resolved_at at all:
+//
+//   - absent / rejected / backtest carry no marks, so "every mark is terminal" is vacuously true and
+//     MAX(resolved_at) is NULL. Under a bare `<` those rows would never be eligible and would grow for
+//     ever; under a COALESCE to a constant they would be eligible the moment their report was purged.
+//   - accepted sets whose every mark ended refused_final DO have marks, and resolved_at is stamped on
+//     that transition — the evaluator writes it whenever a mark becomes terminal, whichever way it
+//     landed (ADR 0029 §6.3).
+//
+// Falling back to made_on gives those shapes their own age, so purging a report never makes its sets
+// immediately eligible. The truncation to 10 characters is what makes the two spellings comparable:
+// resolved_at is an RFC3339 instant and made_on is a civil date, and comparing a full instant against
+// a date cutoff would put everything inside the cutoff day on the wrong side.
+//
+// The per-set columns are computed in a subquery rather than inside the aggregate because a correlated
+// subquery on ps.id is not valid in HAVING — ps.id is not functionally dependent on (rtype, cohort).
+func (s *Store) predictionPurgeMonths(cutoff time.Time) ([][2]string, error) {
+	rows, err := s.query(`SELECT t.rtype, t.cohort FROM (
+			SELECT ps.rtype AS rtype, ps.cohort AS cohort, ps.id AS id,
+			  CASE WHEN ps.report_id IS NULL THEN 1 ELSE 0 END AS orphan,
+			  CASE WHEN EXISTS (SELECT 1 FROM prediction_marks m
+			        WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
+			       THEN 1 ELSE 0 END AS live,
+			  substr(COALESCE(
+			    (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id),
+			    ps.made_on), 1, 10) AS settled
+			FROM prediction_sets ps
+		) t
+		GROUP BY t.rtype, t.cohort
+		HAVING SUM(t.orphan) = COUNT(*) AND SUM(t.live) = 0 AND MAX(t.settled) < ?
+		ORDER BY t.rtype, t.cohort`, cutoff.UTC().Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var ids []int64
+	var out [][2]string
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var rtype, cohort string
+		if err := rows.Scan(&rtype, &cohort); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		out = append(out, [2]string{rtype, cohort})
 	}
-	return ids, rows.Err()
+	return out, rows.Err()
 }
 
-// CountPredictionsBefore counts ledger sets eligible for retention deletion at cutoff (dry-run / usage).
+// monthIsPurgeable re-asserts the whole-month predicate for one (rtype, cohort) inside a transaction.
+// The scan above ran on its own snapshot, so a set whose report came back in the gap must not be
+// deleted on a stale read.
+func (s *Store) monthIsPurgeable(tx *sql.Tx, rtype, cohort, cutoffDate string) (bool, error) {
+	var all, orphan, live int64
+	var newest sql.NullString
+	err := tx.QueryRow(s.bind(`SELECT COUNT(*),
+		  SUM(CASE WHEN ps.report_id IS NULL THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN EXISTS (SELECT 1 FROM prediction_marks m
+		        WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
+		       THEN 1 ELSE 0 END),
+		  MAX(substr(COALESCE(
+		    (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id),
+		    ps.made_on), 1, 10))
+		FROM prediction_sets ps WHERE ps.rtype=? AND ps.cohort=?`), rtype, cohort).
+		Scan(&all, &orphan, &live, &newest)
+	if err != nil {
+		return false, err
+	}
+	if all == 0 {
+		return false, nil // nothing left to purge
+	}
+	if orphan != all || live != 0 {
+		return false, nil
+	}
+	return newest.Valid && newest.String < cutoffDate, nil
+}
+
+// CountPredictionsBefore counts the ledger SETS a purge at cutoff would remove (dry-run / usage). The
+// unit of a pass is a month, but the number an admin sees is rows, matching every other target.
 func (s *Store) CountPredictionsBefore(cutoff time.Time) (int64, error) {
-	ids, err := s.predictionsBefore(cutoff)
-	return int64(len(ids)), err
-}
-
-// DeletePredictionsBefore deletes eligible sets with their claims and marks, in bounded chunks of one
-// transaction each, so a large purge does not hold the single SQLite connection for the whole run.
-// Each chunk RE-ASSERTS the predicate rather than trusting the scan: a set that gained a mark, or
-// whose report came back, no longer matches and is preserved. Returns the number of SETS deleted
-// (partial count on error) — the claims and marks are consequences of a set going.
-func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
-	ids, err := s.predictionsBefore(cutoff)
-	if err != nil || len(ids) == 0 {
+	months, err := s.predictionPurgeMonths(cutoff)
+	if err != nil || len(months) == 0 {
 		return 0, err
 	}
 	var total int64
-	for i := 0; i < len(ids); i += reportsDeleteChunk {
-		end := i + reportsDeleteChunk
-		if end > len(ids) {
-			end = len(ids)
-		}
-		n, err := s.deletePredictionChunk(ids[i:end], cutoff)
-		total += n
-		if err != nil {
+	for _, m := range months {
+		var n int64
+		if err := s.queryRow(`SELECT COUNT(*) FROM prediction_sets WHERE rtype=? AND cohort=?`,
+			m[0], m[1]).Scan(&n); err != nil {
 			return total, err
 		}
+		total += n
 	}
 	return total, nil
 }
 
-// deletePredictionChunk removes one chunk of eligible sets in a single transaction. Children first,
-// so a failure halfway cannot leave a claim or a mark pointing at a set that is still there.
-func (s *Store) deletePredictionChunk(ids []int64, cutoff time.Time) (int64, error) {
+// DeletePredictionsBefore purges eligible months and records a marker for each.
+//
+// One transaction for the whole pass rather than the chunked shape the reports target uses: a month is
+// the atomic unit, and a pass that deleted half a month would produce exactly the state this design
+// exists to prevent.
+func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
+	months, err := s.predictionPurgeMonths(cutoff)
+	if err != nil || len(months) == 0 {
+		return 0, err
+	}
+	cutoffDate := cutoff.UTC().Format("2006-01-02")
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
-	stamp := cutoff.UTC().Format(time.RFC3339)
-	var n int64
-	for _, id := range ids {
-		// The re-asserted predicate: the same three conditions the scan applied, so a set that
-		// changed in the gap is skipped rather than deleted on a stale read.
-		res, err := tx.Exec(s.bind(`DELETE FROM prediction_sets WHERE id=? AND report_id IS NULL
-			AND EXISTS (SELECT 1 FROM prediction_marks m WHERE m.set_id = prediction_sets.id)
-			AND NOT EXISTS (SELECT 1 FROM prediction_marks m
-			    WHERE m.set_id = prediction_sets.id AND m.status NOT IN ('resolved','refused_final'))
-			AND (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = prediction_sets.id) < ?`),
-			id, stamp)
+	var total int64
+	for _, m := range months {
+		rtype, cohort := m[0], m[1]
+		ok, err := s.monthIsPurgeable(tx, rtype, cohort, cutoffDate)
 		if err != nil {
-			return n, err
+			return total, err
 		}
-		c, _ := res.RowsAffected()
-		if c == 0 {
-			continue // no longer eligible — keep its claims and marks with it
+		if !ok {
+			continue // the month changed under us — leave it whole
 		}
-		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_claims WHERE set_id=?`), id); err != nil {
-			return n, err
+		// Children first, so a failure cannot leave a claim or a mark pointing at a set that is gone.
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_claims WHERE set_id IN
+			(SELECT id FROM prediction_sets WHERE rtype=? AND cohort=?)`), rtype, cohort); err != nil {
+			return total, err
 		}
-		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_marks WHERE set_id=?`), id); err != nil {
-			return n, err
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_marks WHERE set_id IN
+			(SELECT id FROM prediction_sets WHERE rtype=? AND cohort=?)`), rtype, cohort); err != nil {
+			return total, err
 		}
-		n += c
+		res, err := tx.Exec(s.bind(`DELETE FROM prediction_sets WHERE rtype=? AND cohort=?`), rtype, cohort)
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		// The marker is what makes the deletion visible. Without it a purged month reads as a month in
+		// which nothing was ever predicted, which is a different and far better-looking claim.
+		if _, err := tx.Exec(s.bind(`INSERT INTO prediction_purges(rtype, cohort, purged_at, sets_removed)
+			VALUES(?,?,?,?)`), rtype, cohort, nowStr(), n); err != nil {
+			return total, err
+		}
+		total += n
 	}
 	if err := tx.Commit(); err != nil {
-		return n, err
+		return total, err
 	}
-	return n, nil
+	return total, nil
+}
+
+// PurgedPredictionMonths returns the months a pass has purged, keyed by (rtype, cohort), so the monthly
+// page can label them "purged" instead of recomputing them as months with no predictions.
+func (s *Store) PurgedPredictionMonths() map[[2]string]string {
+	out := map[[2]string]string{}
+	rows, err := s.query(`SELECT rtype, cohort, purged_at FROM prediction_purges`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rtype, cohort, at string
+		if rows.Scan(&rtype, &cohort, &at) == nil {
+			out[[2]string{rtype, cohort}] = at
+		}
+	}
+	return out
 }
 
 // deleteReportChunk deletes one chunk of reports (+ their tracking_items) in a single transaction,

@@ -1638,7 +1638,7 @@
   "storage.predictionsTarget": "Forecast verification ledger (danger zone)",
   "storage.predictionsDanger": "Deleting ledger records cannot be undone",
   "storage.predictionsWarn": "Removes only sets whose report has been purged, whose every checkpoint has settled, and whose last settlement is older than the retention period. A set that is still unsettled, or whose report still exists, is never removed. Off by default.",
-  "storage.predictionsHint": "At least {{n}} days. The predicate is what makes this safe, not the day count.",
+  "storage.predictionsHint": "At least {{n}} days. The predicate is what makes this safe, not the day count. Deletion is per whole month: a month with anything unsettled, or whose report still exists, is never removed. Requires the reports cleanup above to be on, or this target can never match.",
   "storage.confirmPredictionsTitle": "Clean the forecast verification ledger?",
   "storage.confirmPredictionsBody": "This deletes {{count}} settled sets whose reports are already gone (retention {{days}} days). A ledger record is what was claimed at a moment that has passed, and it cannot be rebuilt.",
   "storage.resultLine": "batch {{batch}} · tokens {{tokens}} · reports {{reports}} · audit {{audit}} · history {{revisions}} · ledger {{predictions}}",

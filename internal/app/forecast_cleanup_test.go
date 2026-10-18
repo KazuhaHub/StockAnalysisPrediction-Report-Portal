@@ -86,7 +86,7 @@ func TestCleanupPredictionPredicateNeverTouchesAnUnsettledSet(t *testing.T) {
 }
 
 // TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet is the positive case, and it is
-// deliberately narrow: orphaned AND fully terminal AND older than the cutoff.
+// deliberately narrow: every set in the month is orphaned AND fully terminal AND older than the cutoff.
 func TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet(t *testing.T) {
 	st := newTestStore(t)
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
@@ -106,10 +106,127 @@ func TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet(t *testing.T) {
 	if n != 1 {
 		t.Errorf("deleted = %d, want 1", n)
 	}
-	// All three tables go together: an orphaned claim or mark is a row nothing can ever reach.
+	// The children go with the set: an orphaned claim or mark is a row nothing can ever reach.
 	for _, tbl := range []string{"prediction_sets", "prediction_claims", "prediction_marks"} {
 		if c := scalar[int](t, st, `SELECT COUNT(*) FROM `+tbl); c != 0 {
 			t.Errorf("%s still has %d rows after the purge", tbl, c)
+		}
+	}
+	// And the month is marked purged, so the page can say so rather than recompute it as empty.
+	purged := st.PurgedPredictionMonths()
+	if _, ok := purged[[2]string{"投资决策建议", "2026-10"}]; !ok {
+		t.Errorf("no purge marker was written; got %v", purged)
+	}
+}
+
+// TestCleanupPredictionsNeverDeletesPartOfAMonth is the review's first hole, and it is the reason the
+// unit of deletion is a month rather than a set.
+//
+// Membership is "the earliest accepted set per (symbol, group) decides" (D4). If a pass could remove
+// the earliest set of a symbol while a later rerun of the same symbol stayed, that rerun would be
+// PROMOTED to member — precisely the selection-by-rerun D4 exists to forbid. And deleting part of a
+// month would move that month's n and every metric on it while the page kept the same label, breaking
+// the immutability a mature cell is cited for.
+func TestCleanupPredictionsNeverDeletesPartOfAMonth(t *testing.T) {
+	st := newTestStore(t)
+	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
+
+	// A symbol with two terminal orphaned sets: the earliest (the member) and a later rerun.
+	seedFinishedPredictionSet(t, st, old)
+	seedFinishedPredictionSet(t, st, old)
+
+	// A second symbol in the SAME month whose set is still unsettled, so the whole month is protected.
+	unsettled := seedPredictionSet(t, st, sql.NullInt64{}, "sha-active")
+	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status)
+		VALUES(?,'d5','pending')`, unsettled); err != nil {
+		t.Fatal(err)
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)
+	if n, _ := st.CountPredictionsBefore(cutoff); n != 0 {
+		t.Errorf("a month with one unsettled set counted %d eligible sets, want 0", n)
+	}
+	if _, err := st.DeletePredictionsBefore(cutoff); err != nil {
+		t.Fatal(err)
+	}
+	// One set survives with its report gone, so the D4 member is still the same set it always was.
+	if n := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_sets`); n != 3 {
+		t.Errorf("sets after the pass = %d, want 3 (nothing deleted from a partly-eligible month)", n)
+	}
+	if n := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_purges`); n != 0 {
+		t.Errorf("a month that was not purged got a marker")
+	}
+}
+
+// TestCleanupPredictionsAgesSetsWithNoMarks is the second hole: absent / rejected / backtest sets carry
+// no marks at all, so "every mark is terminal" is vacuously true and MAX(resolved_at) is NULL. Under a
+// bare comparison against the cutoff those rows are never eligible and grow for ever; under a
+// COALESCE to a constant they would be deleted the moment their report was purged. Their own made_on
+// is the age that makes both cases right.
+func TestCleanupPredictionsAgesSetsWithNoMarks(t *testing.T) {
+	st := newTestStore(t)
+	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)
+
+	// Two mark-less sets in one month, aged by made_on. Both orphaned, both in the same cohort.
+	for _, madeOn := range []string{"2022-03-04", "2022-03-19"} {
+		if _, err := st.exec(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
+			VALUES(NULL,'投资决策建议',?,?,?,?,?)`, madeOn+"T14:40:12Z", madeOn, "2022-03", predStateRejected, "sha-"+madeOn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := st.CountPredictionsBefore(cutoff); err != nil || n != 2 {
+		t.Fatalf("mark-less sets eligible = %d (err=%v), want 2", n, err)
+	}
+
+	// A mark-less set from last week is NOT eligible: purging its report must not make it fair game.
+	if _, err := st.exec(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
+		VALUES(NULL,'投资决策建议',?,?,?,?,?)`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format("2006-01-02"),
+		time.Now().UTC().Format("2006-01"), predStateAbsent, "sha-fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := st.CountPredictionsBefore(cutoff); n != 2 {
+		t.Errorf("eligible = %d after adding a fresh mark-less set, want 2 (the fresh one must not age out)", n)
+	}
+}
+
+// TestCleanupPredictionsRefusedFinalCountsAsSettled: a mark that ended refused_final is terminal and
+// stamps resolved_at, so a set whose every mark landed that way ages out normally rather than being
+// stuck un-scored for ever.
+func TestCleanupPredictionsRefusedFinalCountsAsSettled(t *testing.T) {
+	st := newTestStore(t)
+	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
+	setID := seedPredictionSet(t, st, sql.NullInt64{}, "sha-refused")
+	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, resolved_at)
+		VALUES(?,'d5','refused_final',?)`, setID, old); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)
+	if n, _ := st.CountPredictionsBefore(cutoff); n != 1 {
+		t.Errorf("a fully refused_final set counted %d, want 1 (it is terminal)", n)
+	}
+}
+
+// TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible: without the marker a purged month reads as a
+// month in which nothing was ever predicted.
+func TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible(t *testing.T) {
+	s := routeTableServer(t)
+	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
+	seedFinishedPredictionSet(t, s.st, old)
+
+	if res := s.runCleanup("manual", false, cleanupTargets{Predictions: true}); !res.OK || res.Predictions != 1 {
+		t.Fatalf("pass: ok=%v n=%d err=%s", res.OK, res.Predictions, res.Error)
+	}
+	purged := s.st.PurgedPredictionMonths()
+	if len(purged) != 1 {
+		t.Fatalf("purge markers = %v, want exactly one month", purged)
+	}
+	for month, at := range purged {
+		if month[0] != "投资决策建议" || month[1] == "" {
+			t.Errorf("marker names %v, want the (rtype, cohort) of the purged month", month)
+		}
+		if at == "" {
+			t.Error("the purge marker carries no date, so the page cannot say when")
 		}
 	}
 }
@@ -249,9 +366,8 @@ func TestCleanupRunRoundTripCarriesPredictions(t *testing.T) {
 // refuse every existing database. It is a step instead, and an older dump must still load.
 func TestMigration0004AddsCleanupRunsColumn(t *testing.T) {
 	path := fileStore(t, "pre-cleanup-pred.db")
+	// backToTheBaseline already winds back this step's tables and its cleanup_runs column.
 	backToTheBaseline(t, path)
-	// Wind cleanup_runs back to the baseline shape: the column belongs to this step.
-	mutateFile(t, path, `ALTER TABLE cleanup_runs DROP COLUMN predictions_deleted`)
 
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -263,27 +379,27 @@ func TestMigration0004AddsCleanupRunsColumn(t *testing.T) {
 	}
 }
 
-// TestPostgresCleanupPredictionsPredicate mirrors the predicate on the driver production runs.
+// TestPostgresCleanupPredictionsPredicate mirrors the month predicate on the driver production runs:
+// a month whose every set is orphaned, terminal and old is purged whole, and a month holding anything
+// still live or still unsettled is left alone.
 func TestPostgresCleanupPredictionsPredicate(t *testing.T) {
-	st := pgStore(t, "prediction_sets", "prediction_claims", "prediction_marks", "cleanup_runs")
+	st := pgStore(t, "prediction_sets", "prediction_claims", "prediction_marks", "prediction_purges")
 	old := time.Now().UTC().AddDate(0, 0, -(predDefaultPredictionsDays + 100)).Format(time.RFC3339)
 	cutoff := time.Now().UTC().AddDate(0, 0, -predDefaultPredictionsDays)
 
-	// One orphaned terminal set (eligible), one unsettled (not), one with a live report (not).
-	eligible := seedFinishedPredictionSet(t, st, old)
-	settled := seedPredictionSet(t, st, sql.NullInt64{}, "sha-pg-pending")
+	// A month of the report type that is entirely purged, aged past the cutoff.
+	gone := seedFinishedPredictionSet(t, st, old)
+
+	// A DIFFERENT month of the same report type, holding one unsettled set: the whole month is protected.
+	// (The unit is the month, so a single live set shields its siblings — that is the point.)
+	settled := seedPredictionSetForKey(t, st, "2025-01", sql.NullInt64{}, "sha-pg-pending")
 	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status) VALUES(?,'d5','pending')`, settled); err != nil {
 		t.Fatal(err)
 	}
-	live := seedPgReport(t, st, "000002", "2020-01-01")
-	liveSet := seedPredictionSet(t, st, sql.NullInt64{Int64: live, Valid: true}, "sha-pg-live")
-	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, resolved_at)
-		VALUES(?,'d5','resolved',?)`, liveSet, old); err != nil {
-		t.Fatal(err)
-	}
+	protected := seedFinishedPredictionSetForKey(t, st, "2025-01", old)
 
 	if n, err := st.CountPredictionsBefore(cutoff); err != nil || n != 1 {
-		t.Fatalf("eligible = %d (err=%v), want 1", n, err)
+		t.Fatalf("eligible = %d (err=%v), want 1 (only the fully eligible month)", n, err)
 	}
 	n, err := st.DeletePredictionsBefore(cutoff)
 	if err != nil {
@@ -292,10 +408,45 @@ func TestPostgresCleanupPredictionsPredicate(t *testing.T) {
 	if n != 1 {
 		t.Errorf("deleted = %d, want 1", n)
 	}
-	if c := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_sets WHERE id=?`, eligible); c != 0 {
-		t.Error("the eligible set survived")
+	if c := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_sets WHERE id=?`, gone); c != 0 {
+		t.Error("the eligible month was not purged")
 	}
-	if c := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_sets WHERE id IN (?,?)`, settled, liveSet); c != 2 {
-		t.Error("a protected set was deleted")
+	if c := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_sets WHERE id IN (?,?)`, settled, protected); c != 2 {
+		t.Error("a protected month's set was deleted")
 	}
+	if c := scalar[int](t, st, `SELECT COUNT(*) FROM prediction_purges`); c != 1 {
+		t.Errorf("purge markers = %d, want 1", c)
+	}
+}
+
+// seedFinishedPredictionSetForKey is seedFinishedPredictionSet in an explicit (rtype, cohort) month, so
+// a test can put two months of one report type side by side and assert that only the fully eligible one
+// is purged.
+func seedFinishedPredictionSetForKey(t *testing.T, st *Store, cohort string, resolvedAt string) int64 {
+	t.Helper()
+	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
+		VALUES(NULL,'投资决策建议',?,?,?,?,?)`, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, "sha-"+cohort+"-"+resolvedAt)
+	if err != nil {
+		t.Fatalf("seed set for %s: %v", cohort, err)
+	}
+	if _, err := st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, resolved_at)
+		VALUES(?,'d5','resolved',?)`, res, resolvedAt); err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// seedPredictionSetForKey is seedPredictionSet in an explicit (rtype, cohort) month.
+func seedPredictionSetForKey(t *testing.T, st *Store, cohort string, reportID sql.NullInt64, payloadSHA string) int64 {
+	t.Helper()
+	v := any(nil)
+	if reportID.Valid {
+		v = reportID.Int64
+	}
+	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
+		VALUES(?,'投资决策建议',?,?,?,?,?)`, v, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, payloadSHA)
+	if err != nil {
+		t.Fatalf("seed set for %s: %v", cohort, err)
+	}
+	return res
 }

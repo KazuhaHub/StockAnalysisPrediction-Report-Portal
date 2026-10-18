@@ -190,11 +190,11 @@ func migration0004() migration {
 		// migrated.
 		columns: []colRef{{table: "cleanup_runs", name: "predictions_deleted"}},
 		tables: []string{
-			"prediction_sets", "prediction_claims", "prediction_marks",
+			"prediction_sets", "prediction_claims", "prediction_marks", "prediction_purges",
 		},
 		indices: []string{
 			"idx_pred_sets_idem", "idx_pred_sets_group", "idx_pred_sets_symbol",
-			"idx_pred_claims_key", "idx_pred_marks_cp", "idx_pred_marks_due",
+			"idx_pred_claims_key", "idx_pred_marks_cp", "idx_pred_marks_due", "idx_pred_purges_month",
 		},
 		restore: restoreRule{olderDumpOK: true},
 		up: func(e migExec) error {
@@ -297,6 +297,17 @@ func migration0004() migration {
 					source TEXT NOT NULL DEFAULT '')`,
 				`CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_marks_cp ON prediction_marks(set_id, checkpoint)`,
 				`CREATE INDEX IF NOT EXISTS idx_pred_marks_due ON prediction_marks(status, next_attempt_at)`,
+
+				// One row per (rtype, cohort) month a retention pass removed. This is what lets the
+				// monthly page say "purged on <date>" instead of recomputing the month as one where
+				// nothing was predicted — a materially different and much better-looking claim.
+				`CREATE TABLE IF NOT EXISTS prediction_purges(
+					id ` + pk + `,
+					rtype TEXT NOT NULL,
+					cohort TEXT NOT NULL,
+					purged_at TEXT NOT NULL DEFAULT '',
+					sets_removed INTEGER NOT NULL DEFAULT 0)`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_purges_month ON prediction_purges(rtype, cohort)`,
 			} {
 				if _, err := e.exec(q); err != nil {
 					return err
