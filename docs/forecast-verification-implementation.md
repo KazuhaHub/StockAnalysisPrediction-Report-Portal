@@ -446,10 +446,24 @@ classifier, plus HTTP tests through `v1Ingest`.
 
 ### 4.1 Routes
 
-**Machine routes**, in `routes.go`, registered with `v1(...)` (`s.bearer`). The v1 surface is
-**token-only**: `routes.go:33` says "a token opens it, a session does not", and
-`TestTheMachineSurfaceIsNotASessionClass` (`routes_test.go:123`) enforces that. Document both in
-`openapi.json` with `"x-scope": "query"`.
+**Machine routes**, in `routes.go`, registered with `v1(...)` (`s.bearer`). Their class is
+`authBearer`, and `TestTheMachineSurfaceIsNotASessionClass` (`routes_test.go:123`) requires every
+`/api/v1` pattern to stay that way.
+
+**Correction (found while building PR 2).** An earlier revision of this section said a session does
+not open `/api/v1` at all. That is wrong, and the difference matters here. The route CLASS is
+`authBearer`, so `/api/v1` is outside `sessionRoutes()` and the whole-portal session policy never
+covers it — but the handlers do not stop at the class: `v1QueryReports` and its siblings call
+`s.canQuery(r)` (`apiui.go:160`), which returns true for **any logged-in browser session** as well as
+for a Bearer `query` token, and `queryScope` (`apiv1.go:332`) then applies that user's read scope.
+The comment on `queryScope` says so in full: "a restricted external user's own cookie reaches these
+otherwise-machine endpoints — they MUST be scoped exactly like the cookie SPA API."
+
+So a browser CAN call these read routes, and the ledger's read routes inherit both properties: they
+are scoped correctly, and they are NOT covered by the enrolment gate or any other whole-portal session
+policy. The browser route below is still the right answer for the SPA — it gets the gate, it is where
+the session class belongs, and it keeps the SPA off the machine surface — but it is a decision about
+where a browser call belongs, not about whether one is possible.
 
 | Route | Handler | Returns |
 |---|---|---|
@@ -1215,7 +1229,7 @@ Use **预测验证** as the zh-CN name everywhere and *Forecast verification* in
 
 | # | Finding | Change |
 |---|---|---|
-| 1 | `/api/v1` is token-only; the SPA cannot use it | Added the browser session route `GET /api/report/{id}/predictions` (§4.1, §8.2) |
+| 1 | The SPA was to read `/api/v1` directly | Added the browser session route `GET /api/report/{id}/predictions` (§4.1, §8.2), so the SPA never touches the machine surface and the enrolment gate covers the call. **The original premise was wrong and is corrected above**: `/api/v1` reads DO admit a cookie session via `canQuery`, they are simply outside `sessionRoutes()` and ungate-able. |
 | 2 | The partial-bar guard used `now`; a cached 14:57 body could resolve at 15:31 | Gate on fetch time **and** vendor `AsOf`; test that a 14:57 body never resolves (§6.3, §6.5) |
 | 3 | `fetchUnder` walks the source chain and the cache | Call `fetchTencentRange` directly under `s.quotes.acquire`; no cache; record the source (§6.2) |
 | 4 | A JSON number would fail at decode as `bad_schema` | Price and probability fields typed `json.RawMessage` (§3.2) |
