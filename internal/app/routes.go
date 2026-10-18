@@ -113,6 +113,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// Session-gated, not public: build identity (version/commit) is only shown in the signed-in
 	// app footer, so an anonymous scanner can't fingerprint the build against known CVEs.
 	s.session(mux, "GET /api/version", s.handleVersion)
+	s.session(mux, "POST /api/me/version-use", s.handleVersionUse)
 	// The deployed build's committed release note, for the update dialog. Session-gated like
 	// /api/version: nothing in it is secret, but the endpoint is app infrastructure, not a public
 	// path to probe.
@@ -148,6 +149,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "POST /api/login/passkey/finish", s.apiPasskeyLoginFinish)
 	s.session(mux, "GET /api/me/passkeys", s.apiPasskeyList)
 	s.session(mux, "GET /api/me/login-activity", s.apiLoginActivity)
+	s.session(mux, "GET /api/me/sessions", s.apiSessions)
+	s.session(mux, "DELETE /api/me/sessions/{id}", s.apiSessionDelete)
+	s.session(mux, "POST /api/me/sessions/revoke", s.apiSessionsRevoke)
 	s.session(mux, "POST /api/me/passkeys/register/begin", s.apiPasskeyRegisterBegin)
 	s.session(mux, "POST /api/me/passkeys/register/finish", s.apiPasskeyRegisterFinish)
 	s.session(mux, "DELETE /api/me/passkeys/{id}", s.apiPasskeyDelete)
@@ -361,6 +365,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 
 	// ---- Storage cleanup console (docs/adr/0017-storage-cleanup.md): admin-only (PermManage) ----
 	s.admin(mux, "GET /api/admin/cleanup/config", s.apiCleanupConfigGet)
+	s.admin(mux, "GET /api/admin/login-activity/retention", s.apiLoginHistoryRetentionGet)
+	s.admin(mux, "PUT /api/admin/login-activity/retention", s.apiLoginHistoryRetention)
 	s.admin(mux, "POST /api/admin/cleanup/config", s.apiCleanupConfigSave)
 	s.admin(mux, "GET /api/admin/cleanup/usage", s.apiCleanupUsage)
 	s.admin(mux, "POST /api/admin/cleanup/preview", s.apiCleanupPreview)

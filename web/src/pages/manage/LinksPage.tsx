@@ -12,7 +12,8 @@ import { difyModeKind } from '../../lib/batchUi'
 import { DragHandle, SortableItem, useSortableSensors } from './dnd'
 import { LINK_ICON_OPTIONS, linkIconComponent } from '../../components/linkIcons'
 import LoadGate from '../../components/LoadGate'
-import { APP_SHORTCUTS, builtinAppOptions, shortcutOfUrl, shortcutUrl } from '../../lib/shortcuts'
+import { APP_SHORTCUTS, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
+import { BUILTIN_PIN_PREFIX } from '../../lib/builtinApps'
 
 const iconSelectOptions = LINK_ICON_OPTIONS.map(({ value }) => {
   const Icon = linkIconComponent(value)
@@ -236,7 +237,10 @@ export default function LinksPage() {
     // clear it so a stale value can't be saved (e.g. an apps `builtin:recurring` left on run-analysis
     // would serialize to a malformed pin).
     if ('shortcut' in changed) form.setFieldValue('shortcutTarget', undefined)
-    if ('shortcutTarget' in changed && changed.shortcutTarget && !form.getFieldValue('label')) {
+    // Picking a Dify target or downloadable app pre-fills its name, since that name is admin data
+    // with no translation anyway. A built-in app is left blank so the button follows the language.
+    const target = changed.shortcutTarget
+    if (typeof target === 'string' && target && !target.startsWith(BUILTIN_PIN_PREFIX) && !form.getFieldValue('label')) {
       const name = targetOptionsFor(form.getFieldValue('shortcut')).find((o) => o.value === changed.shortcutTarget)?.label
       if (name) form.setFieldValue('label', name)
     }
@@ -331,8 +335,9 @@ export default function LinksPage() {
         <DragHandle label={t('common.reorder')} />
         <Icon />
         <Typography.Text style={{ minWidth: 120, flexShrink: 0 }} ellipsis>
-          {l.label}
+          {linkDisplayLabel(l, t)}
         </Typography.Text>
+        {!l.label.trim() && <Tag style={{ flexShrink: 0 }}>{t('links.labelAuto')}</Tag>}
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
         {l.newTab === false ? null : (
           <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
@@ -414,8 +419,19 @@ export default function LinksPage() {
 
       <Modal open={open} title={editing ? t('common.edit') : t('common.add')} onOk={submit} onCancel={() => setOpen(false)} okText={t('common.save')} cancelText={t('common.cancel')} destroyOnHidden>
         <Form form={form} layout="vertical" onValuesChange={onValuesChange}>
-          <Form.Item name="label" label={t('links.label')} rules={[{ required: true }]}>
-            <Input />
+          {/* A shortcut's text is optional: left blank, the home page names it in the reader's
+              language (linkDisplayLabel). A plain link has no such name, so it stays required. */}
+          <Form.Item noStyle shouldUpdate={(a, b) => a.kind !== b.kind || a.shortcut !== b.shortcut || a.shortcutTarget !== b.shortcutTarget}>
+            {({ getFieldValue }) => {
+              const isShortcut = getFieldValue('kind') === 'shortcut'
+              const key = getFieldValue('shortcut') as ShortcutKey | undefined
+              const auto = isShortcut && key ? linkDisplayLabel({ label: '', url: shortcutUrl(key, getFieldValue('shortcutTarget')) }, t) : ''
+              return (
+                <Form.Item name="label" label={t('links.label')} rules={[{ required: !isShortcut }]} extra={isShortcut ? t('links.labelAutoHint') : undefined}>
+                  <Input placeholder={auto} />
+                </Form.Item>
+              )
+            }}
           </Form.Item>
           <Form.Item name="kind" label={t('links.type')} initialValue="url">
             <Radio.Group optionType="button" buttonStyle="solid">

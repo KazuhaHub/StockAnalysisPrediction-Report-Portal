@@ -32,9 +32,16 @@ type VersionResp = {
   automaticUpdate?: boolean
 }
 
+type VersionUseResp = {
+  version: string
+  firstUse: boolean
+}
+
 export type UpdateState = {
   /** The build the bundle in this tab was compiled from. Never the server's answer. */
   page: BuildIdentity
+  /** The loaded formal release this account is using for the first time. */
+  firstUse: BuildIdentity | null
   /** The build the server is serving, when it differs from the page's. */
   target: BuildIdentity | null
   /** How the target relates to the page, or null when there is nothing to prompt about. */
@@ -52,6 +59,22 @@ export type UpdateState = {
 const DEFERRED_KEY = 'rp.update.deferred'
 const AUTOMATIC_ATTEMPTED_KEY = 'rp.update.automatic.attempted'
 const AUTOMATIC_PENDING_KEY = 'rp.update.automatic.pending'
+
+// A receipt for notes actually rendered before handover. The account's version-use
+// write still happens after loading; this only prevents its first-use dialog repeating
+// the notes that this same reader already saw in this tab.
+export function rememberViewedNotes(user: string, target: BuildIdentity): void {
+  try { sessionStorage.setItem(`rp.update.viewed.${user}`, buildKey(target)) } catch { /* optional receipt */ }
+}
+
+export function consumeViewedNotes(user: string, page: BuildIdentity): boolean {
+  try {
+    const key = `rp.update.viewed.${user}`
+    if (sessionStorage.getItem(key) !== buildKey(page)) return false
+    sessionStorage.removeItem(key)
+    return true
+  } catch { return false }
+}
 
 type AutomaticPending = { key: string; version: string; from: string }
 
@@ -119,6 +142,7 @@ export function deferTarget(key: string): void {
 export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
   const page = useMemo(() => pageBuildIdentity(), [])
   const [target, setTarget] = useState<BuildIdentity | null>(null)
+  const [firstUse, setFirstUse] = useState<BuildIdentity | null>(null)
   const [policy, setPolicy] = useState<UpdatePolicy>(DEFAULT_UPDATE_POLICY)
   const [failed, setFailed] = useState(false)
   const workerReady = useSWUpdateReady()
@@ -131,6 +155,9 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
     // before a stale "you are current" would flicker the prompt away.
     let issued = 0
     let answered = 0
+    // A successful answer is final for this mounted bundle. Failures are retried on the next poll:
+    // dropping this write would otherwise make the account miss its release notes permanently.
+    let recordedPage = false
 
     const schedule = () => {
       if (stopped) return
@@ -145,9 +172,9 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
       inFlight = true
       const mine = ++issued
       const info = await api.get<VersionResp>('/api/version').catch(() => null)
-      inFlight = false
       if (stopped) return
       if (mine < answered) {
+        inFlight = false
         schedule()
         return
       }
@@ -159,9 +186,18 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
         // Re-evaluated every tick, in both directions: a second deploy moves the target, and a
         // rollback to the page's own build clears it.
         setTarget(buildKey(server) === buildKey(page) ? null : server)
+        if (!recordedPage && buildKey(server) === buildKey(page)) {
+          const used = await api.post<VersionUseResp>('/api/me/version-use', { version: page.version }).catch(() => null)
+          if (stopped) return
+          if (used && used.version === page.version) {
+            recordedPage = true
+            if (used.firstUse) setFirstUse(page)
+          }
+        }
       } else {
         setFailed(true)
       }
+      inFlight = false
       schedule()
     }
 
@@ -185,5 +221,5 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
     return workerReady ? 'same' : null
   }, [page, target, workerReady])
 
-  return { page, target, kind, policy, workerReady, failed }
+  return { page, firstUse, target, kind, policy, workerReady, failed }
 }

@@ -30,8 +30,9 @@ const { Header, Content, Footer } = Layout
 // management rail's copy of it all read one piece of state, and so the release-note dialog is
 // mounted exactly once for every route — portal and /manage alike.
 export default function AppLayout() {
+  const { user } = useAuth()
   return (
-    <UpdateProvider>
+    <UpdateProvider user={user ?? ''}>
       <AppShell />
     </UpdateProvider>
   )

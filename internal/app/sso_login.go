@@ -92,9 +92,11 @@ func (s *Server) completeSSOLogin(w http.ResponseWriter, r *http.Request, p SSOP
 		log.Printf("sso: %s/%s could not link identity for %q: %v", p.Kind, p.Slug, username, err)
 	}
 	s.st.TouchLastLogin(username)
+	if !s.issueSession(w, r, *u, p) {
+		return
+	}
 	s.recordAuth(r, AuditLogin, username, username, map[string]any{
 		"method": "sso", "provider": p.Kind, "slug": p.Slug, "created": created})
-	s.issueSession(w, r, *u, p)
 	log.Printf("sso login %s via %s/%s", username, p.Kind, p.Slug)
 	http.Redirect(w, r, safeReturnPath(target), http.StatusFound)
 }
@@ -201,12 +203,12 @@ func (s *Server) resolveSSOAccount(p SSOProvider, id ssoIdentity) (username stri
 // The shortened lifetime is stamped into the SIGNED token, not only into the cookie's MaxAge.
 // MaxAge is a browser-side hint that anyone actually holding the cookie value simply ignores, so a
 // limit expressed only there would be no limit at all against the threat it exists for.
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u User, p SSOProvider) {
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, u User, p SSOProvider) bool {
 	ttl := s.sessionTTL()
 	if p.SessionHours > 0 {
 		ttl = time.Duration(p.SessionHours) * time.Hour
 	}
-	s.setSessionCookieFor(w, r, u, ttl)
+	return s.setSessionCookieFor(w, r, u, ttl)
 }
 
 // Current snapshots the account as the rule engine needs to see it.

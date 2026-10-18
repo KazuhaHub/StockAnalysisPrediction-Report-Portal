@@ -83,7 +83,9 @@ func (s *Server) apiChangePassword(w http.ResponseWriter, r *http.Request, user 
 	// user who was signed in when the policy was switched on could renew here indefinitely and
 	// never touch /api/login again. Admins are exempt, exactly as they are at login.
 	if fresh := s.st.GetUser(user); fresh != nil && !s.localLoginRefused(fresh) {
-		s.setSessionCookie(w, r, *fresh)
+		if !s.setSessionCookie(w, r, *fresh) {
+			return
+		}
 	}
 	writeJSON(w, okJSON)
 }

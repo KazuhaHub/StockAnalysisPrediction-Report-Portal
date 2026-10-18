@@ -1034,6 +1034,24 @@ export interface LoginActivityResponse {
   items: LoginActivityEntry[]
   total: number
   timezone: string
+  keep?: number
+}
+
+export interface AccountSession {
+  geo?: GeoLocation
+  id: string
+  created_at: number
+  last_seen: number
+  expires_at: number
+  ip: string
+  client?: ClientSummary
+  method?: string
+  current: boolean
+}
+
+export interface AccountSessionsResponse {
+  items: AccountSession[]
+  timezone: string
 }
 
 export interface AuditEntry {

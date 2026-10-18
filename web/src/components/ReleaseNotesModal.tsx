@@ -36,6 +36,7 @@ export default function ReleaseNotesModal({
   refreshing,
   onClose,
   onRefresh,
+  onViewed,
 }: {
   open: boolean
   /** The build whose notes to show — the update target, or the page itself when browsing. */
@@ -47,6 +48,7 @@ export default function ReleaseNotesModal({
   onClose: () => void
   /** Omitted when there is nothing to switch to (browsing the current build). */
   onRefresh?: () => void
+  onViewed?: (target: BuildIdentity) => void
 }) {
   const { t, i18n } = useTranslation()
   const [state, setState] = useState<NotesState>({ status: 'loading' })
@@ -107,6 +109,11 @@ export default function ReleaseNotesModal({
 
   const label = (b: BuildIdentity) => productVersionLabel(b.version)
   const notes = state.status === 'loaded' ? state.notes : null
+  useEffect(() => {
+    if (open && target && notes?.available && notes.tag === target.version && selectedTag === target.version) {
+      onViewed?.(target)
+    }
+  }, [open, target, notes, selectedTag, onViewed])
   const titleVersion = productVersionLabel(selectedTag)
   const showCurrent = !browseHistory && !!target && buildKey(target) !== buildKey(current)
   const historyVisible = browseHistory && history.length > 1

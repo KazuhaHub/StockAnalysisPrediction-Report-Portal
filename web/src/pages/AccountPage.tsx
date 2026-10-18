@@ -24,6 +24,7 @@ import SSOIcon from '../components/SSOIcon'
 import type { StepUpPolicy } from '../api/types'
 import { createCredential, passkeySupported } from '../lib/webauthn'
 import LoginActivityPanel from '../components/LoginActivityPanel'
+import AccountSessionsPanel from '../components/AccountSessionsPanel'
 
 // Self-service account security (ADR 0023). The 2FA, recovery-code and passkey endpoints existed
 // with no way for a user to reach them: enrolment was an admin errand. Security settings remain one
@@ -79,7 +80,10 @@ export default function AccountPage() {
       />
 
       {activeTab === 'login-activity' ? (
-        <LoginActivityPanel />
+        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+          <AccountSessionsPanel />
+          <LoginActivityPanel />
+        </Space>
       ) : (
         <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 760 }}>
           {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}

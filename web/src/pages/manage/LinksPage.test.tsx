@@ -11,7 +11,10 @@ vi.mock('../../api/client', () => ({
     get: (url: string) => {
       if (url === '/api/admin/links')
         return Promise.resolve({
-          links: [{ id: 1, label: 'GitHub', url: 'https://github.com', icon: '', newTab: true, groupId: 5, ord: 0 }],
+          links: [
+            { id: 1, label: 'GitHub', url: 'https://github.com', icon: '', newTab: true, groupId: 5, ord: 0 },
+            { id: 2, label: '', url: 'rp:apps:builtin:batch', icon: '', newTab: false, groupId: 0, ord: 1 },
+          ],
           groups: [{ id: 5, name: 'External', mode: 'expand', showLabel: true, ord: 0 }],
         })
       return Promise.resolve({ apps: [], targets: [] })
@@ -39,5 +42,17 @@ describe('LinksPage', () => {
     expect(screen.getByText('External')).toBeTruthy()
     // The add-group action is present.
     expect(screen.getByText('links.addGroup')).toBeTruthy()
+  })
+})
+
+describe('a shortcut entry left blank', () => {
+  it('is listed under the name the home page will show, marked as following the language', async () => {
+    render(
+      <App>
+        <LinksPage />
+      </App>,
+    )
+    expect(await screen.findByText('nav.batch')).toBeTruthy()
+    expect(screen.getByText('links.labelAuto')).toBeTruthy()
   })
 })

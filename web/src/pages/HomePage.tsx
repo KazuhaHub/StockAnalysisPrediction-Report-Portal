@@ -31,7 +31,7 @@ import { useAuth } from '../auth'
 import Omnibox from '../components/Omnibox'
 import ReportCard from '../components/ReportCard'
 import { linkIconComponent } from '../components/linkIcons'
-import { shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
+import { linkDisplayLabel, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import { useHomeQuotes } from '../lib/useHomeQuotes'
 import { versionLabel } from '../lib/versionLabel'
@@ -193,14 +193,14 @@ export default function HomePage() {
       if (perm && !can(perm)) return null
       return (
         <Button key={l.id} icon={<Icon />} onClick={() => triggerShortcut(res.shortcut, navigate, res.param)}>
-          {l.label}
+          {linkDisplayLabel(l, t)}
         </Button>
       )
     }
     const newTab = l.newTab !== false // default: open in a new tab
     return (
       <Button key={l.id} icon={<Icon />} href={l.url} target={newTab ? '_blank' : undefined} rel={newTab ? 'noreferrer' : undefined}>
-        {l.label}
+        {linkDisplayLabel(l, t)}
       </Button>
     )
   }

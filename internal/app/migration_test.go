@@ -115,9 +115,11 @@ func TestAFreshDatabaseRunsAndRecordsEveryStep(t *testing.T) {
 			t.Errorf("step %s ran on a fresh database but was not recorded", m.id)
 		}
 	}
-	for _, c := range steps[0].columns {
-		if !st.columnExists(c.table, c.name) {
-			t.Errorf("0001 is recorded but %s.%s is missing", c.table, c.name)
+	for _, m := range steps {
+		for _, c := range m.columns {
+			if !st.columnExists(c.table, c.name) {
+				t.Errorf("%s is recorded but %s.%s is missing", m.id, c.table, c.name)
+			}
 		}
 	}
 }
@@ -133,7 +135,8 @@ func TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce(t *testing.T) {
 		`DELETE FROM meta WHERE k LIKE 'mig:%'`,
 		`ALTER TABLE user_groups DROP COLUMN totp_enroll`,
 		`ALTER TABLE user_groups DROP COLUMN passkey_enroll`,
-		`ALTER TABLE user_groups DROP COLUMN require_2fa`)
+		`ALTER TABLE user_groups DROP COLUMN require_2fa`,
+		`ALTER TABLE users DROP COLUMN last_used_version`)
 
 	st, err := OpenStore("sqlite", path)
 	if err != nil {
@@ -142,6 +145,9 @@ func TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce(t *testing.T) {
 	first := ledgerPicture(t, st)
 	if !st.columnExists("user_groups", "totp_enroll") {
 		t.Fatal("the step did not run on the accepted database")
+	}
+	if !st.columnExists("users", "last_used_version") {
+		t.Fatal("the account-version step did not run on the accepted database")
 	}
 	st.Close()
 

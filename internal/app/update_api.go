@@ -56,6 +56,31 @@ func (s *Server) updatePromptPolicy() string {
 	return normalizeUpdatePromptPolicy(s.st.GetSetting(updatePromptPolicySetting, ""))
 }
 
+// handleVersionUse records a release only when the bundle making the request is the release this
+// server currently serves. An old tab may discover a new server through /api/version, but discovery
+// is not use: it must load the new bundle before the account advances and the notes become due.
+func (s *Server) handleVersionUse(w http.ResponseWriter, r *http.Request, user string) {
+	var in struct {
+		Version string `json:"version"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if in.Version != version.Version {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"version": version.Version, "firstUse": false,
+		})
+		return
+	}
+	first, err := s.st.RecordUserVersionUse(user, in.Version)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "record version use")
+		return
+	}
+	writeJSON(w, map[string]any{"version": in.Version, "firstUse": first})
+}
+
 func releaseNotesResp(reqTag, serverTag string, releases []publishedRelease, stale bool) map[string]any {
 	tag := strings.TrimSpace(reqTag)
 	if tag == "" {

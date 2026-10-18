@@ -495,19 +495,15 @@ const defaultSessionTTL = 7 * 24 * time.Hour
 // setSessionCookie is the ONE place a portal session cookie is minted. Four call sites used to spell
 // the flags out by hand — password login, the 2FA second leg, the passkey second leg and SSO — and a
 // single one of them forgetting HttpOnly or Secure is a session-theft bug that no test would notice.
-func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, u User) {
-	s.setSessionCookieFor(w, r, u, s.sessionTTL())
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, u User) bool {
+	return s.setSessionCookieFor(w, r, u, s.sessionTTL())
 }
 
-func (s *Server) setSessionCookieFor(w http.ResponseWriter, r *http.Request, u User, ttl time.Duration) {
+func (s *Server) setSessionCookieFor(w http.ResponseWriter, r *http.Request, u User, ttl time.Duration) bool {
 	if ttl <= 0 {
 		ttl = s.sessionTTL()
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: s.signUserFor(u, ttl), Path: "/",
-		HttpOnly: true, Secure: requestIsHTTPS(r, s.trustedNets),
-		SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds()),
-	})
+	return s.newManagedSession(w, r, u, time.Now().Add(ttl).Unix(), "")
 }
 
 func encodeSessionMessage(msg string) string {
@@ -548,14 +544,35 @@ func (s *Server) verify(cookie string) (string, int64) {
 		return "", 0
 	}
 	exp, err := strconv.ParseInt(msg[expSep+1:], 10, 64)
-	if err != nil || time.Now().Unix() > exp {
+	if err != nil || time.Now().Unix() >= exp {
 		return "", 0
+	}
+	if strings.HasPrefix(msg, "v2|") {
+		idSep := strings.LastIndex(msg[:expSep], "|")
+		if idSep < 3 {
+			return "", 0
+		}
+		id := msg[idSep+1 : expSep]
+		revSep := strings.LastIndex(msg[:idSep], "|")
+		if revSep < 3 {
+			return "", 0
+		}
+		user := msg[3:revSep]
+		rev, err := strconv.ParseInt(msg[revSep+1:idSep], 10, 64)
+		if err != nil || s.st == nil {
+			return "", 0
+		}
+		var n int
+		if err := s.st.queryRow(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, rev, exp).Scan(&n); err != nil || n != 1 {
+			return "", 0
+		}
+		return user, rev
 	}
 	// Cookies issued before session revisions used "username|expiry". Keep them valid at
 	// revision zero so this additive change does not force a logout or rewrite stored state.
 	// A later password change increments session_rev and invalidates them normally.
 	if !strings.HasPrefix(msg, "v1|") {
-		return msg[:expSep], 0
+		return s.verifyLegacy(msg[:expSep], 0, cookie, exp)
 	}
 	revSep := strings.LastIndex(msg[:expSep], "|")
 	if revSep < len("v1|") {
@@ -565,7 +582,7 @@ func (s *Server) verify(cookie string) (string, int64) {
 	if err != nil || rev < 0 {
 		return "", 0
 	}
-	return msg[len("v1|"):revSep], rev
+	return s.verifyLegacy(msg[len("v1|"):revSep], rev, cookie, exp)
 }
 
 // ownerTokenPrefix tags the report-attribution token so it can never be confused with a session
@@ -639,6 +656,10 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 	usr := s.st.GetUser(user)
 	if usr == nil || !usr.Active || s.accountExpired(usr) || usr.SessionRev != rev {
 		return ""
+	}
+	if id := sessionID(r); id != "" {
+		now := time.Now().Unix()
+		s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, now-int64(lastSeenInterval.Seconds()))
 	}
 	return user
 }

@@ -11,7 +11,13 @@ import {
 } from './updateState'
 
 const get = vi.fn()
-vi.mock('../api/client', () => ({ api: { get: (...a: unknown[]) => get(...a) } }))
+const post = vi.fn()
+vi.mock('../api/client', () => ({
+  api: {
+    get: (...a: unknown[]) => get(...a),
+    post: (...a: unknown[]) => post(...a),
+  },
+}))
 
 const workerState = { ready: false }
 vi.mock('./swUpdate', () => ({ useSWUpdateReady: () => workerState.ready }))
@@ -21,6 +27,8 @@ const a = { version: 'v2026.38.1', commit: 'aaaaaaa', buildDate: '2026-08-10T00:
 beforeEach(() => {
   get.mockReset()
   get.mockResolvedValue(a) // the baseline: the server serves what this page is running
+  post.mockReset()
+  post.mockResolvedValue({ version: a.version, firstUse: false })
   workerState.ready = false
   sessionStorage.clear()
   // The page's own identity is what the bundle was compiled from; stamp it so the page is a known
@@ -41,6 +49,23 @@ describe('useUpdateState', () => {
     expect(result.current.target).toBeNull()
     expect(result.current.kind).toBeNull()
     expect(result.current.page).toEqual(a)
+    expect(post).toHaveBeenCalledWith('/api/me/version-use', { version: a.version })
+  })
+
+  it('reports the account’s first use of the loaded release', async () => {
+    post.mockResolvedValue({ version: a.version, firstUse: true })
+    const { result } = poll()
+    await waitFor(() => expect(result.current.firstUse).toEqual(a))
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not claim a server release before that bundle is loaded', async () => {
+    const b = { version: 'v2026.38.2', commit: 'bbbbbbb', buildDate: '2026-08-11T00:00:00Z' }
+    get.mockResolvedValue(b)
+    const { result } = poll()
+    await waitFor(() => expect(result.current.target).toEqual(b))
+    expect(post).not.toHaveBeenCalled()
+    expect(result.current.firstUse).toBeNull()
   })
 
   it('names a newer target and keeps it while the prompt is open', async () => {

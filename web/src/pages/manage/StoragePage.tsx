@@ -8,6 +8,7 @@ import type { CleanupConfig, CleanupResult, CleanupRun, CleanupUsage, CleanupUsa
 import LoadGate from '../../components/LoadGate'
 import StickyActionBar from '../../components/StickyActionBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
+import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
 
 // Storage management console (docs/adr/0017-storage-cleanup.md): a per-category usage dashboard (icon
 // cards + a proportion bar), a self-explanatory manual cleanup (the button names what and how old),
@@ -367,6 +368,7 @@ export default function StoragePage() {
         </Space>
       </Card>
 
+      <LoginHistoryRetentionCard />
       <Card title={t('storage.title')}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
           <Divider style={{ margin: '4px 0' }} titlePlacement="left" plain>

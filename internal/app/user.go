@@ -38,7 +38,10 @@ type User struct {
 	// too, and a cookie issued to the previous holder of a reusable username stops resolving.
 	// Empty on rows written before it was stamped; those keep their sessions (see verify).
 	CreatedAt string
-	Groups    []int64 // vestigial (group model B uses a single primary group_id); unused
+	// LastUsedVersion is the highest formal CalVer release this account has loaded. It deliberately
+	// does not record diagnostic builds and never moves backwards during a rollback.
+	LastUsedVersion string
+	Groups          []int64 // vestigial (group model B uses a single primary group_id); unused
 	// Identity source (ADR 0023). Source is local | jit | scim and SourceRef names the provider that
 	// owns the row, so a future sync only ever touches what it created. A row that predates SSO
 	// reconciles to "local", never to federated.

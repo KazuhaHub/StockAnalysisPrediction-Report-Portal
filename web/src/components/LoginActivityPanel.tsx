@@ -31,11 +31,11 @@ export default function LoginActivityPanel() {
 
   if (failed) return <Alert type="error" showIcon title={t('loginActivity.loadFailed')} />
   if (!data) return <div style={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><Spin /></div>
-  if (!data.items?.length) return <Empty description={t('loginActivity.empty')} />
 
   return (
     <div style={{ width: '100%' }}>
       <Typography.Paragraph type="secondary">{t('loginActivity.hint')}</Typography.Paragraph>
+      {!data.items?.length && <Empty description={t('loginActivity.empty')} />}
       <div role="list" style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, overflow: 'hidden' }}>
         {data.items.map((item, index) => {
           const at = auditTime(item.at, data.timezone)
