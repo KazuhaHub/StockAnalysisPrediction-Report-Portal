@@ -124,7 +124,10 @@ const (
 	// is not, which is visible on the storage page as an unrecorded report.
 	AuditPredictionsRejected    = "predictions.reject"
 	AuditPredictionsStoreFailed = "predictions.store_failed"
-	AuditReportDelete           = "report.delete"
+	// Turning the evaluator on or off. A background loop that reaches a third party is exactly the
+	// kind of change an operator wants attributed.
+	AuditForecastAuto = "forecast.auto"
+	AuditReportDelete = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -405,7 +408,7 @@ var auditVocabulary = []string{
 	AuditAppInstall, AuditAppDelete,
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
-	AuditPredictionsRejected, AuditPredictionsStoreFailed,
+	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

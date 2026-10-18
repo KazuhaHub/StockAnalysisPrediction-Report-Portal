@@ -133,6 +133,10 @@ var predTestRtype = func() string {
 // resolves fast enough to catch a broken producer early.
 var predCheckpoints = []string{"d5", "d20", "d60", "d120", "h12"}
 
+// predCheckpointSessions is how many sessions after S0 each session-based checkpoint settles on.
+// h12 is absent on purpose: it is decided by the calendar, not by a count.
+var predCheckpointSessions = map[string]int{"d5": 5, "d20": 20, "d60": 60, "d120": 120}
+
 // predMarkCheckpoints is the checkpoints an accepted set gets marks for. h12 is added only when the
 // horizon is standard (plan §2.2): a caller-supplied six-month or two-year horizon must never mix
 // into the twelve-month column.

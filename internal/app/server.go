@@ -72,6 +72,10 @@ type Server struct {
 	health             healthCache                                                                // memoized /healthz database verdict, so a public probe cannot be a query amplifier
 	releases           releaseCatalog                                                             // GitHub Releases is the sole authority for notes and maturity
 	routeTable         []routeRow                                                                 // every registered route and the credential it accepts (routes.go)
+	// forecastEval is the prediction ledger's evaluator (ADR 0029 §6): a ticker, a single-flight
+	// guard, and two test seams (the clock and the vendor fetch) so its arithmetic and its session
+	// rules are testable without a network.
+	forecastEval forecastEvaluator
 }
 
 // statusRecorder records the response status code for use in request logging.
@@ -233,6 +237,10 @@ func RunServer(cfgPath string) {
 	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
 	go s.recurringLoop() // fire recurring tasks into the run queue on their cadence (ADR 0018)
 	go s.authSweepLoop() // drop expired pending logins + SAML replay entries (ADR 0023)
+	// The forecast evaluator (ADR 0029 §6). The loop checks its own switch every tick, so this starts
+	// a goroutine that does nothing at all until an admin turns it on — which is the same shape
+	// geo_update.go uses, and the reason the switch can be a setting rather than a build flag.
+	go s.forecastEval.loop(s)
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
