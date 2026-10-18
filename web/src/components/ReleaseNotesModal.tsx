@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Modal, Select, Space, Spin, Tag, Typography, theme } from 'antd'
-import { ExportOutlined, InfoCircleFilled } from '@ant-design/icons'
+import { ExportOutlined, HistoryOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { buildKey, type BuildIdentity } from '../lib/buildIdentity'
@@ -136,7 +136,7 @@ export default function ReleaseNotesModal({
       onCancel={onClose}
       title={
         <Space size={8}>
-          <InfoCircleFilled style={{ color: token.colorPrimary }} />
+          <HistoryOutlined style={{ color: token.colorPrimary }} />
           {t('update.notesTitle', { version: titleVersion })}
           {maturityTag}
         </Space>

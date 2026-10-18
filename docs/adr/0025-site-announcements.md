@@ -234,12 +234,14 @@ all have their dismissals erased and be re-interrupted the next morning.
 
 ### One popup dialog per batch, not one popup per announcement
 
-Every eligible announcement is offered in ONE dialog at a time, with the titles in a sidebar and the
-selected one rendered in full. An earlier version fired the first eligible and advanced to the next on
-close, which made a reader dismiss two modals in one sitting and left popup switches below the first
-decorative for that load; the management list had to label those switches to explain a setting that
-was silently ignored. One dialog removes both problems: every switch fires, and there is one answer
-for one interruption.
+Every eligible announcement is offered in ONE dialog at a time, stacked as the same rows the strip
+draws, in the operator's order. An earlier version fired the first eligible and advanced to the next
+on close, which made a reader dismiss two modals in one sitting and left popup switches below the
+first decorative for that load; the management list had to label those switches to explain a setting
+that was silently ignored. One dialog removes both problems: every switch fires, and there is one
+answer for one interruption. A two-pane version (titles in a sidebar, the picked one beside it) was
+tried and rejected — with two or three short rows to read, a picker is a click the reader does not
+need, and the dialog read as a settings panel rather than as a notice.
 
 ### Scope is two values, drawn on one surface, with two exclusions
 
@@ -270,15 +272,15 @@ three. The band itself is transparent: once rows carry their own surface, a tint
 reads as a gray box rather than as the page. The cost is the old signal "this band contains something
 loud"; the loud things carry their own colour and are no longer flattened into the band's.
 
-**The popup is one dialog for the whole batch, the release-notes modal's shape.** Every eligible
-announcement is offered at once — titles down a sidebar, the selected one's full row on the right —
-rather than one modal per announcement in turn, which would make a reader dismiss two dialogs in one
-sitting. Its title is an icon plus "公告", never the level's internal name ("Success"/"Incident"),
-which leaked admin vocabulary into a reader's dialog. The footer acts on the whole dialog: "Got it"
-silences every announcement it was showing for the session, "don't show again" silences them all for
-good — one interruption, one answer. A reader who wants one to keep surfacing finds it in the strip.
-There is no corner close button: the two footer actions are the exits, and a third that duplicates
-one of them is a worse choice, not a shortcut.
+**The popup is one dialog for the whole batch, stacked rows and nothing else.** Every eligible
+announcement is offered at once, each the same `AnnouncementRow` the strip draws, rather than one
+modal per announcement in turn, which would make a reader dismiss two dialogs in one sitting. Its
+title is an icon plus "公告", never the level's internal name ("Success"/"Incident"), which leaked
+admin vocabulary into a reader's dialog. The footer acts on the whole dialog: "Got it" silences every
+announcement it was showing for the session, "don't show again" silences them all for good — one
+interruption, one answer. A reader who wants one to keep surfacing finds it in the strip. There is no
+corner close button: the two footer actions are the exits, and a third that duplicates one of them is
+a worse choice, not a shortcut.
 
 **The strip folds by default only if the site says so.** The strip originally collapsed to a single
 line on the argument that a band on every page is chrome and has to cost what chrome costs — ~36px

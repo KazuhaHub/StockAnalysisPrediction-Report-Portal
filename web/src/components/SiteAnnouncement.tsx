@@ -7,6 +7,7 @@ import {
   DownOutlined,
   ExclamationCircleFilled,
   InfoCircleFilled,
+  NotificationOutlined,
   UpOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -230,16 +231,15 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
 }
 
 /**
- * The announcement popup: every eligible announcement in one dialog, a list of their titles down the
- * left and the selected one's full text on the right — the release-notes dialog's shape, because that
- * is the portal's one idea of a dialog that can hold several things a reader picks between.
+ * The announcement popup: every eligible announcement in one dialog, stacked as rows in the
+ * operator's order — the same blocks the strip shows, just gathered into a dialog.
  *
  * One dialog, not one per announcement. Firing them in turn would make the reader dismiss two modals
  * in one sitting, and the footer acts on the WHOLE dialog: "Got it" silences all of them for this
  * session, "don't show again" silences all for good. A reader who wants one to keep interrupting can
  * still find it in the strip.
  *
- * It offers the same in-scope set the strip draws, so a row shown there is the row offered here.
+ * It offers the popup-eligible set the strip does not, so nothing is shown twice.
  */
 export function AnnouncementPopup() {
   const { t } = useTranslation()
@@ -258,14 +258,12 @@ export function AnnouncementPopup() {
     [identity, dismissals],
   )
   const [open, setOpen] = useState(false)
-  const [activeId, setActiveId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!eligible.length) return
     const key = eligible.map((a) => `${a.id}:${announcementSig(a)}`).join(',')
     if (offered.current === key) return
     offered.current = key
-    setActiveId(eligible[0].id)
     setOpen(true)
   }, [eligible])
 
@@ -279,16 +277,17 @@ export function AnnouncementPopup() {
     setOpen(false)
   }
 
-  const active = eligible.find((a) => a.id === activeId) ?? eligible[0]
-  const accent = active ? (token as unknown as Record<string, string>)[LEVEL_TOKENS[active.level].fg] : token.colorPrimary
+  // The title icon is neutral: it says "this is an announcement", not "this one is urgent". Taking
+  // the first row's level colour made the dialog look like a warning whenever row one happened to be
+  // an error, which is a property of a row, not of the dialog.
   return (
     <Modal
-      rootClassName="rp-announce-popup rp-release-notes-modal"
+      rootClassName="rp-announce-popup"
       open={open && !!eligible.length}
-      width={880}
+      width={720}
       title={
         <Space size={8}>
-          <InfoCircleFilled style={{ color: accent }} />
+          <NotificationOutlined style={{ color: token.colorPrimary }} />
           {t('announcement.popupTitle')}
         </Space>
       }
@@ -307,42 +306,12 @@ export function AnnouncementPopup() {
       }
       destroyOnHidden
     >
-      {/* Two panes once there is something to pick between; a single announcement renders as one
-          row, the same block the strip shows. */}
-      <div className={eligible.length > 1 ? 'rp-announce-popup-layout' : undefined}>
-        {eligible.length > 1 && (
-          <nav className="rp-announce-popup-list" aria-label={t('announcement.popupTitle')}>
-            {eligible.map((a) => {
-              const Icon = LEVEL_ICON[a.level]
-              return (
-                <Button
-                  key={a.id}
-                  type={a.id === active?.id ? 'default' : 'text'}
-                  block
-                  onClick={() => setActiveId(a.id)}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
-                    <Icon style={{ color: (token as unknown as Record<string, string>)[LEVEL_TOKENS[a.level].fg] }} />
-                    <span
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        textAlign: 'start',
-                      }}
-                    >
-                      {a.title || a.content.split('\n')[0]}
-                    </span>
-                  </span>
-                </Button>
-              )
-            })}
-          </nav>
-        )}
-        <div className="rp-announce-popup-body">
-          {active && <AnnouncementRow announcement={active} />}
-        </div>
-      </div>
+      {/* Every announcement as the same row the strip shows, stacked in order. */}
+      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+        {eligible.map((a) => (
+          <AnnouncementRow key={a.id} announcement={a} />
+        ))}
+      </Space>
     </Modal>
   )
 }

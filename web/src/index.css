@@ -1126,45 +1126,6 @@ body {
 .rp-announce-strip {
   background: transparent;
 }
-/* The announcement popup reuses the release-notes shell. Its own two-pane layout and its list
-   mirror .rp-release-notes-layout / .rp-release-history, so a dialog holding several items to pick
-   between looks the same wherever it appears. */
-.rp-announce-popup-layout {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-.rp-announce-popup-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-inline-end: 12px;
-  border-inline-end: 1px solid var(--ant-color-border-secondary);
-}
-.rp-announce-popup-list .ant-btn {
-  height: auto;
-  min-height: 40px;
-  padding-block: 6px;
-  text-align: start;
-  white-space: normal;
-}
-.rp-announce-popup-body {
-  min-width: 0;
-}
-@media (max-width: 767px) {
-  /* One pane on a phone: the list would eat the width the message needs. Readers step through with
-     the picker instead — out of scope for now, so the single-row layout simply stacks. */
-  .rp-announce-popup-layout {
-    display: block;
-  }
-  .rp-announce-popup-list {
-    border-inline-end: 0;
-    padding-inline-end: 0;
-    margin-bottom: 12px;
-  }
-}
-
 /* The announcement popup should always zoom in from the top, not from wherever the user
    last clicked — antd defaults a Modal's transform-origin to the click point, so returning
    home via the top-left "back" button flew the popup in from the corner. */

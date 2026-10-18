@@ -198,9 +198,8 @@ describe('SiteAnnouncement', () => {
     ]
     renderAt('/')
     await screen.findByText('announcement.dontShowAgain')
-    // The first appears in the strip row, the sidebar, and the body (it is the active one); the
-    // second in the strip row and the sidebar only.
-    expect(screen.getAllByText('第一条')).toHaveLength(3)
+    // Each appears in its strip row and in the dialog's stacked row.
+    expect(screen.getAllByText('第一条')).toHaveLength(2)
     expect(screen.getAllByText('第二条')).toHaveLength(2)
   })
 
