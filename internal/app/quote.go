@@ -106,17 +106,26 @@ type QuoteResp struct {
 	// Currency and TZ exist so that the strip cannot print a bare number: 319.97 beside a Chinese
 	// report is a yuan price to every reader who is not told otherwise, and an instant with no zone
 	// is a time the browser will happily render in its own.
-	Currency         string        `json:"currency"`
-	TZ               string        `json:"tz"`
-	Source           string        `json:"source"`
-	Snapshot         QuoteSnapshot `json:"snapshot"`
-	Bars             []QuoteBar    `json:"bars"`
-	BarsSource       string        `json:"barsSource"`
-	BarsUnavailable  string        `json:"barsUnavailable"`
-	Adjusted         bool          `json:"adjusted"`
-	Cached           bool          `json:"cached"`
-	RefreshAfterSecs int           `json:"refreshAfterSecs,omitempty"`
-	RefreshAt        string        `json:"refreshAt,omitempty"`
+	Currency        string        `json:"currency"`
+	TZ              string        `json:"tz"`
+	Source          string        `json:"source"`
+	Snapshot        QuoteSnapshot `json:"snapshot"`
+	Bars            []QuoteBar    `json:"bars"`
+	BarsSource      string        `json:"barsSource"`
+	BarsUnavailable string        `json:"barsUnavailable"`
+	Adjusted        bool          `json:"adjusted"`
+	// ExDates are the dates in this series the vendor marked as ex-events, from the seventh element a
+	// day row carries on an ex-dividend date ({"fh_sh":"3.8","djr":…,"cqr":…}). It is a LIST rather
+	// than a field on QuoteBar because the element is not part of a candle: it describes an event on
+	// the series, and widening the bar with a field the vendor does not send per-row would invite
+	// every other reader of that struct to treat it as one.
+	//
+	// Only cash dividends are named here. A bonus issue (送转) has no element we have ever seen, which
+	// is why the ledger's corporat-action detection also has a gap-based backstop. See ADR 0029 §10.
+	ExDates          []string `json:"exDates,omitempty"`
+	Cached           bool     `json:"cached"`
+	RefreshAfterSecs int      `json:"refreshAfterSecs,omitempty"`
+	RefreshAt        string   `json:"refreshAt,omitempty"`
 }
 
 const (
@@ -1236,6 +1245,7 @@ func parseTencentQuote(market, code string, body []byte, bars int) (*QuoteResp, 
 		snap.Session = quoteMarketSession(m, market0[0])
 	}
 
+	var exDates []string
 	rows := qb.Day
 	if bars > 0 && len(rows) > bars {
 		rows = rows[len(rows)-bars:] // oldest first, so a surplus is trimmed from the front
@@ -1269,6 +1279,13 @@ func parseTencentQuote(market, code string, body []byte, bars int) (*QuoteResp, 
 			return nil, fmt.Errorf("quote: tencent day row %d: %w", i, rd.err)
 		}
 		out = append(out, bar)
+		// The seventh element, when the vendor sends one, marks an ex-event on this date. It is read
+		// rather than merely tolerated here: the day-row loop above already accepts a longer row (the
+		// gate is "at least six fields"), so until now this was the one piece of corporate-action
+		// evidence the unadjusted feed carries and nothing ever looked at it.
+		if date := tencentExDate(row); date != "" {
+			exDates = append(exDates, date)
+		}
 	}
 	// (4) bar sanity.
 	if err := quoteCheckBars(out); err != nil {
@@ -1289,6 +1306,7 @@ func parseTencentQuote(market, code string, body []byte, bars int) (*QuoteResp, 
 		Source:     quoteSourceTencent,
 		Snapshot:   snap,
 		Bars:       out,
+		ExDates:    exDates,
 		BarsSource: quoteSourceTencent,
 	}
 	if len(out) == 0 {
@@ -2317,4 +2335,37 @@ func parseSinaKLine(body []byte) ([]QuoteBar, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// tencentExDate reads the seventh day-row element, which Tencent sends only on an ex-dividend date.
+//
+// The shape is {"nd":"2025","fh_sh":"3.8","djr":"2026-06-25","cqr":"2026-06-26","FHcontent":"10派3.8元"}
+// — cash per ten shares, the 除权日 and the 除息日. Hong Kong uses the same position for a different
+// object entirely (a buyback notice, with no cash field), so the presence of `fh_sh` is what makes a
+// row an ex-event rather than merely a row with an extra column.
+//
+// Returns the ex-date, or "" when there is no element or it describes something else. A row with a
+// malformed element yields "" rather than an error: this is advisory metadata for one feature, and
+// refusing a price series because its dividend annotation changed shape would take the quote strip
+// down with it.
+func tencentExDate(row []json.RawMessage) string {
+	if len(row) < 7 {
+		return ""
+	}
+	var el struct {
+		CQR  string `json:"cqr"` // 除权日
+		DJR  string `json:"djr"` // 除息日
+		FhSh string `json:"fh_sh"`
+		ND   string `json:"nd"`
+	}
+	if err := json.Unmarshal(row[6], &el); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(el.FhSh) == "" {
+		return "" // not a dividend: the Hong Kong buyback element has no cash field
+	}
+	if d := strings.TrimSpace(el.CQR); d != "" {
+		return d
+	}
+	return strings.TrimSpace(el.DJR)
 }

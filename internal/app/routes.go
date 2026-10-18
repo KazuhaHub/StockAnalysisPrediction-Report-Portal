@@ -300,6 +300,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/groups/{id}/targets", s.apiGroupTargets)
 	s.admin(mux, "PUT /api/admin/groups/{id}/targets", s.apiGroupTargetsSave)
 	s.admin(mux, "GET /api/admin/settings", s.apiAdminSettings)
+	s.admin(mux, "GET /api/admin/forecast", s.apiForecastSettings)
+	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
 	// The audit log. requirePermJSON, not requireAdminJSON: see apiAdminAudit.
 	s.perm(mux, "GET /api/admin/audit", PermManage, s.apiAdminAudit)
 	s.admin(mux, "POST /api/admin/settings", s.apiSettingsSave)
