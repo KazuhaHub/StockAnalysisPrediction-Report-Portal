@@ -508,6 +508,27 @@ export interface CleanupConfig {
   last_result: CleanupResult | null
 }
 
+// The evaluator's settings and its current backlog (GET/POST /api/admin/forecast, ADR 0029 §6).
+//
+// `enabled` and `bench` are the only two fields a POST may carry; everything else is a read-only
+// count. It is one shape for both verbs because the GET answers with exactly what the page and the
+// modal between them need, so a save's reload and a fresh open are the same request.
+export interface ForecastSettings {
+  /** Whether the evaluator's background loop runs. Off by default. */
+  enabled: boolean
+  /** The index NEW sets are benchmarked against. Sets already written keep theirs, so changing this
+   *  never re-scores anything on the ledger. */
+  bench: string
+  /**
+   * What the loop would find if it ran now. Cheap counts, not fetches, so an admin can tell "on and
+   * caught up" (a small or zero backlog) from "on and stuck" (a count that is not moving).
+   */
+  due_sets: number
+  pending: number
+  refused: number
+  unsettled_baseline: number
+}
+
 // The outcome of a cleanup pass (also the preview/run response shape).
 export interface CleanupResult {
   at: string

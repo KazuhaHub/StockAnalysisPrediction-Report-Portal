@@ -528,27 +528,34 @@ The deferred version refused any aggregate number for five reasons. They are ans
 - **A bare accuracy percentage** with no null and no `n`.
 - **A periodic whole-market poller.** The evaluator fetches per due set, on demand.
 
-### 12. Open decisions (owner sign-off required)
+### 12. Decisions (settled 2026-10-18)
 
-The architecture above is decided. These are choices *within* it, and a PR whose blocking decision is
-open does not start.
+The architecture above is decided, and so is every choice within it. **All of D1–D5 and D7–D9 were
+confirmed by the owner on 2026-10-18, each taking the recommended default below.** They are recorded
+here in the present tense because they are settled, not because they are provisional — the defaults
+are the answers, not placeholders that happened to ship. Changing one now is a new decision with its
+own consequence, not the filling-in of an open question.
 
-| Decision | Blocks | Recommended default |
+| Decision | Settled | Value |
 |---|---|---|
-| **D1. Benchmark** — one index for all, or chosen by board? | PR 1 (`bench_code` is set at insert) | `sh000852` (CSI 1000) for every set |
-| **D2. Checkpoints** — `d5`/`d20`/`d60`/`d120`/`h12`? | PR 1 (enum), PR 5 | as listed |
-| **D3. Invalid predictions** — keep the report? | PR 2 | Keep it; write a `rejected` set, an audit row and a webhook |
-| **D4. Membership** — earliest set decides, no rerun promotion? | PR 6 | as §9 |
-| **D5. Purge** — does the ledger outlive the report? | PR 1 | Yes (§8) |
-| **D7. 3-5 重组决策** — in or out of v1? | scope only | Out of v1 |
-| **D8. Corporate actions** — dividend element first, qfq fallback? | PR 5 | Yes (§10) |
-| **D9. Corroboration** — one vendor, or two? | PR 5 | One vendor (Tencent) in v1, which overturns the deferred ADR's `sources_disagree` |
+| **D1. Benchmark** — one index for all, or chosen by board? | 2026-10-18 | `sh000852` (CSI 1000) for every set, frozen onto each set at insert. Switching it later is allowed and does not re-score anything already written. |
+| **D2. Checkpoints** — `d5`/`d20`/`d60`/`d120`/`h12`? | 2026-10-18 | As listed. `d5` is the only one that resolves fast enough to catch a broken producer early; `h12` holds standard horizons only. |
+| **D3. Invalid predictions** — keep the report? | 2026-10-18 | Keep it. Write a `rejected` set, an audit row and a webhook; never refuse the report. |
+| **D4. Membership** — earliest set decides, no rerun promotion? | 2026-10-18 | The earliest `accepted` set per `(symbol, group)` decides; a degraded or `mismatch` first set excludes the symbol, and a rerun cannot replace it. |
+| **D5. Purge** — does the ledger outlive the report? | 2026-10-18 | Yes. `report_id` → NULL; sets survive. The ledger also has its own retention target (§8), which deletes a whole month at a time and only when every set in it is orphaned, fully terminal and past the cutoff. |
+| **D7. 3-5 重组决策** — in or out of v1? | 2026-10-18 | Out of v1. Its values come from an LLM agent and its claims are event probabilities, so nothing in the contract would be code-selected. |
+| **D8. Corporate actions** — dividend element first, qfq fallback? | 2026-10-18 | Yes. Evaluate the dividend element first, use the qfq ratio only for the kinds it misses, exclude and count. The fallback is bounded to one detection-only function (§10). |
+| **D9. Corroboration** — one vendor, or two? | 2026-10-18 | One vendor (Tencent) in v1. The quote stack is primary-plus-fallback, not corroboration, so a second source would be a refusal that can never fire. |
 
-Two further questions the implementation plan raises and this ADR does not settle:
+Two further questions the implementation plan raised are also settled:
 
-- whether flipping `forecast_auto` should also write an audit entry. The recommendation is that it
-  should, matching other admin settings that write `audit.t.*`.
-- the exact label text of any UI string not already named in plan §8.3.
+- **Flipping `forecast_auto` writes an audit entry. Implemented.** The writer is
+  `apiForecastSettingsSave` (`internal/app/forecast_admin_api.go`), which calls `recordChange` with
+  `AuditForecastAuto` (`"forecast.auto"`) for the settings target — so the log names who turned a
+  background loop that egresses to a third party on and when, the same way the other admin settings
+  that carry `audit.t.*` do.
+- **The UI strings named in plan §8.3 are the wording.** The PR 7 matrix's strings are still subject
+  to the exact-text review the page gets on build; the key families are fixed.
 
 ## What this replaces
 

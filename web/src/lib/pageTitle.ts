@@ -14,6 +14,7 @@ const MANAGE: Record<string, string> = {
   links: 'nav.links',
   types: 'nav.types',
   versions: 'nav.versions',
+  forecast: 'nav.forecast',
   users: 'nav.users',
   sso: 'nav.sso',
   security: 'nav.security',

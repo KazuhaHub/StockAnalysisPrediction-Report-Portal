@@ -491,6 +491,33 @@ func TestForecastSettingsRoundTrip(t *testing.T) {
 		t.Errorf("bench = %q, want sh000905", s.st.ForecastBench())
 	}
 
+	// Flipping the switch is audited. The settings endpoint is the only writer of forecast_auto, and
+	// what it turns on is a background loop that reaches a third-party vendor on its own — the kind
+	// of change an operator has to be able to find in the log afterwards, together with who made it.
+	// The audit entry is asserted here rather than assumed from the code, because a recordChange that
+	// silently stopped being called would leave every test in this file green.
+	rows := auditRows(t, s, AuditForecastAuto)
+	if len(rows) != 1 {
+		t.Fatalf("audit entries for %s = %d, want 1", AuditForecastAuto, len(rows))
+	}
+	if rows[0].Actor != "admin" || rows[0].TargetType != "settings" || rows[0].TargetID != setForecastAuto {
+		t.Errorf("audit row = %+v, want actor=admin on settings/%s", rows[0], setForecastAuto)
+	}
+
+	// A request that only changes the benchmark does not touch the switch, so it must not file an
+	// audit row for it: the log says a loop was turned on, and it has to keep meaning that.
+	if _, err := s.st.exec(`DELETE FROM audit_log WHERE action=?`, AuditForecastAuto); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast", strBody(`{"bench":"sh000300"}`)), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status %d: %s", rec.Code, rec.Body.String())
+	}
+	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 0 {
+		t.Errorf("a benchmark-only save filed %d audit rows, want 0", len(rows))
+	}
+
 	// A benchmark that cannot be fetched is refused rather than stored: a set written against it
 	// could never be scored.
 	rec = httptest.NewRecorder()
@@ -498,7 +525,7 @@ func TestForecastSettingsRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status for a bad benchmark = %d, want 400", rec.Code)
 	}
-	if s.st.ForecastBench() != "sh000905" {
+	if s.st.ForecastBench() != "sh000300" {
 		t.Error("a refused benchmark was stored anyway")
 	}
 }

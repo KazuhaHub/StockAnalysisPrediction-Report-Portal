@@ -21,9 +21,23 @@ vi.mock('react-i18next', () => ({
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 
+// Hovering a menu item starts that page's page-defining GET so the click lands on a filled page.
+// The prefetch module is mocked rather than fetch, because what is under test is WHICH url a hover
+// asks for: warming the wrong one costs a request and buys nothing, and warming the statistics
+// endpoint — which measures the database — would be real work started by a mouse passing over a
+// menu. The harness records every call so the assertion can be exact.
+const prefetched = vi.hoisted(() => [] as string[])
+vi.mock('../../lib/prefetch', () => ({
+  prefetch: (url: string) => {
+    prefetched.push(url)
+    return Promise.resolve()
+  },
+}))
+
 describe('ManageLayout — grouped rail', () => {
   beforeEach(() => {
     navigate.mockReset()
+    prefetched.length = 0
     localStorage.removeItem(COLLAPSE_KEY)
     vi.stubEnv('VITE_BUILD_VERSION', 'v2026.38')
   })
@@ -55,6 +69,40 @@ describe('ManageLayout — grouped rail', () => {
     render(<ManageLayout />)
     fireEvent.click(screen.getByText('nav.webhooks'))
     expect(navigate).toHaveBeenCalledWith('/manage/webhooks')
+  })
+
+  it('has a 预测验证 entry in the content group', () => {
+    render(<ManageLayout />)
+    expect(screen.getByText('nav.forecast')).toBeTruthy()
+    fireEvent.click(screen.getByText('nav.forecast'))
+    expect(navigate).toHaveBeenCalledWith('/manage/forecast')
+  })
+
+  // The hover prefetch for the verification page warms the SETTINGS GET and nothing else. The page
+  // also reads a statistics endpoint in PR 7, and that one measures the whole ledger — starting it
+  // because a pointer crossed a menu label is exactly the kind of work a hover must never begin.
+  it('warms only the settings GET when the forecast entry is hovered', () => {
+    render(<ManageLayout />)
+    fireEvent.mouseEnter(screen.getByText('nav.forecast'))
+    expect(prefetched).toContain('/api/admin/forecast')
+    expect(prefetched.filter((u) => u.includes('forecast'))).toEqual(['/api/admin/forecast'])
+  })
+
+  // Every entry in the table is a cheap GET, so the rule the forecast case is a special case of:
+  // nothing warmed on hover may be a measuring endpoint.
+  it('never warms a measuring endpoint from a hover', () => {
+    render(<ManageLayout />)
+    for (const key of ['storage', 'batch', 'quotes', 'forecast']) {
+      const labels: Record<string, string> = {
+        storage: 'nav.storage',
+        batch: 'nav.batchAdmin',
+        quotes: 'nav.quoteAdmin',
+        forecast: 'nav.forecast',
+      }
+      fireEvent.mouseEnter(screen.getByText(labels[key]))
+    }
+    expect(prefetched.some((u) => u.includes('/cleanup/usage'))).toBe(false)
+    expect(prefetched.some((u) => u.includes('/forecast/groups'))).toBe(false)
   })
 
   it('collapses the rail and persists the choice', () => {

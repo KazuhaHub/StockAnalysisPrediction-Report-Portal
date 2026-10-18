@@ -11,6 +11,7 @@ import {
   BranchesOutlined,
   ControlOutlined,
   DatabaseOutlined,
+  FundProjectionScreenOutlined,
   LineChartOutlined,
   FileTextOutlined,
   GlobalOutlined,
@@ -46,6 +47,7 @@ const WARM_ON_HOVER: Record<string, string> = {
   links: '/api/admin/links',
   types: '/api/admin/types',
   versions: '/api/admin/versions',
+  forecast: '/api/admin/forecast',
   users: '/api/admin/users',
   sso: '/api/admin/sso/providers',
   security: '/api/admin/security',
@@ -140,6 +142,7 @@ export default function ManageLayout() {
       children: [
         { key: 'types', label: t('nav.types'), icon: <TagsOutlined /> },
         { key: 'versions', label: t('nav.versions'), icon: <BranchesOutlined /> },
+        { key: 'forecast', label: t('nav.forecast'), icon: <FundProjectionScreenOutlined /> },
       ],
     },
     {
