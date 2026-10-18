@@ -38,15 +38,24 @@ evaluator is tested entirely on fixtures with a clock seam and a fetch seam.
 
 ### 2.2 Dify (a different repository, not started here)
 
-`portal-tools/openapi.dify.ingest.json` and the 1-6-4 workflow's projection node. Plan §5. The
-session that was handed this did not get anywhere — **start it fresh, in
-`/Users/kazuha/Codes/StockAnalysisPrediction-Dify`**, and read plan §5 and §0.3 first. Two things
-that will bite whoever picks it up:
+`portal-tools/openapi.dify.ingest.json` and the 1-6-4 workflow's projection node. Plan §5. Work now
+exists: branch **`feat/forecast-projection`** in `/Users/kazuha/Codes/StockAnalysisPrediction-Dify`
+(renamed from `Kazuha/frosty-perlman-32e92e`; commits `c2de38d` and `040ae4e`, both pushed,
+**nothing uploaded or published**). It lives in a worktree at that repo's
+`.claude/worktrees/frosty-perlman-32e92e`, and `ops/forecast-projection/README.md` is its handoff —
+read that first. Two things to know:
 
-- **The local export is stale** (2026-09-18). It maps prod app `15249be5` to the *V2* file, and it
-  contains no node computing the 理想买入价 / 止损价 that recent reports print. Re-pull with
-  `download_dify_apps.py` before trusting any field mapping.
-- **It must not run before PR 2 is deployed.** The projection node talks to a running portal.
+- **The node is written but cannot be sent yet.** It is waiting on §2.4: it must send
+  `scenario_basis` / `scenario_provenance` and an RFC3339 `as_of`, and the portal refuses unknown
+  fields until #100 is deployed. Do not publish before then.
+- **The re-pull changed the picture.** The stale local export (2026-09-18) mapped the prod app to the
+  wrong file and had no 理想买入价 / 止损价. Production is **V3.17** (app `a6481c70`), which is the
+  trade-strategy version. The projection node, its 34 tests and the ingest schema are all committed
+  on that branch.
+
+Two findings in that README that are still open decisions, not bugs: the scenario terminal prices are
+LLM-**extracted** (which is what `scenario_basis` / `scenario_provenance` were added to record rather
+than to hide), and `baseline.as_of` arrives as an instant on some runs (§2.4).
 
 ### 2.3 Decisions still yours
 
@@ -55,7 +64,49 @@ defaults throughout: **D1** CSI 1000 (`sh000852`, frozen onto each set), **D2** 
 **D3** keep the report and record a rejected set. Nothing is hard-coded in a way that makes a
 different answer expensive — except D1 changes what is already written on rows, and D2 is an enum.
 
-Also unanswered: **the table shape** (ADR 0029 §7) needs your sign-off, and the plan's §0.2 list.
+**D1 was re-confirmed in a later session**, along with a decision the ADR did not have: the ledger
+carries `scenario_basis` as a column (§2.4). The table shape (ADR 0029 §7) still needs sign-off, and
+so does the plan's §0.2 list.
+
+### 2.4 The two contract changes that landed in this stack
+
+Both were agreed with the Dify session and had to land on the **portal first**, because the ingest
+decoder is `DisallowUnknownFields`: until `v1Ingest` knows these two fields, a producer sending them
+gets the whole set refused as `bad_schema`. They are in #99 (the column) and #100 (the decoder).
+
+**1. Two set-level fields on the producer contract.**
+
+- `scenario_basis` — a closed enum, one value today: `"estimated"` (the terminal prices were
+  projected from a model, not reported). A **column** on `prediction_sets` (`predColScenarioBasis`),
+  because the statistics will group and exclude on it, the way they do on `probability_method` and
+  `decision_quality`. The alternative considered and rejected was naming the tool (`"llm"`): the tool
+  changes, the statistical meaning does not.
+- `scenario_provenance` — a free-form object, **audit only, never a column**, kept verbatim in
+  `payload`:
+  ```json
+  {"producer": "1-4-2/目标价合成", "producer_node": "1788061256164", "extraction": "llm",
+   "gates": ["unique_labels","positive_prices","ordered_prices","source_scope","horizon_match","symbol_match"],
+   "evidence": {"adoption": "quote"}}
+  ```
+  `producer`, `producer_node`, `extraction` and `gates[]` are free text and are **not** validated.
+  `producer_node` exists because `目标价合成` is the name of **three** nodes in 1-4-2 (`1788061256164`,
+  `1788062279656`, `1788683814270`), so the name alone is not a key.
+  `evidence.adoption` is a closed binary, `"quote"` / `"locator"`, and is the only part with
+  discriminating power: the gate accepts *either* a body quote or a locator, so this field is what
+  lets the statistics separate "adopted with a quote from the report body" from "adopted with a
+  locator only". The earlier name `citation` was withdrawn for exactly that reason — it claimed more
+  than the code checks.
+
+**2. `baseline.as_of` accepts RFC3339 as well as `YYYY-MM-DD`.** `v3decisionadapt` passes through
+whatever the company packet's quote says, and a V3.16.2-shaped run has a full instant
+(`2026-10-09T15:00:00+08:00`) where V3.17 has a civil date. The portal converts an instant to its
+**Shanghai** civil date and stores that in `emitted_base_as_of`; the payload keeps the raw value. It
+must not be truncated to the first ten characters: `2026-10-09T23:30:00Z` is `2026-10-10` in Shanghai,
+and a truncation is off by a day.
+
+`horizon_end` stays `YYYY-MM-DD` and is **not** widened: it is produced by code, the fix there is to
+send a date, and a second accepted shape would only make the horizon comparison vaguer.
+
 
 ## 3. What the reviews found, and what changed because of them
 

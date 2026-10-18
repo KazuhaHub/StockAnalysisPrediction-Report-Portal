@@ -232,6 +232,7 @@ CREATE TABLE IF NOT EXISTS prediction_sets(
   calculator TEXT NOT NULL DEFAULT '', schema_name TEXT NOT NULL DEFAULT '',
   policy_version TEXT NOT NULL DEFAULT '', probability_method TEXT NOT NULL DEFAULT '',
   probability_transform TEXT NOT NULL DEFAULT '',
+  scenario_basis TEXT NOT NULL DEFAULT '',  -- how the scenario prices came to be; "estimated" today
   decision_status TEXT NOT NULL DEFAULT '', decision_quality TEXT NOT NULL DEFAULT '',
   information_cutoff TEXT NOT NULL DEFAULT '',
   horizon_end TEXT NOT NULL DEFAULT '', horizon_std INTEGER NOT NULL DEFAULT 0,
@@ -311,6 +312,19 @@ What each part is for:
 
 The column is `schema_name`, not `schema`, for clarity beside "migration schema". (`schema` is
 non-reserved on Postgres; the rename is not a dialect requirement.)
+
+**`scenario_basis` is the one contract field kept as a column rather than echoed.** Every other
+producer field is either a column already (`policy_version`, `probability_method`,
+`decision_quality`) or read out of `payload`, which is stored verbatim. `scenario_basis` is a column
+because the test for that is whether the statistics will group or exclude on it, and this one
+answers a question the others cannot: *did the three terminal prices come from the valuation source
+the report adopted, or were they estimated?* Today the only value is `estimated`, and it is a closed
+enum the classifier validates and OpenAPI documents like the rest. The trajectory is why it is not
+simply a boolean or an `llm` tag: the tool that computes the prices will change (a code node today in
+some paths, a model in others), while "this was estimated" does not. It is the same reason
+`probability_method` says `approved_valuation_source` and not `from-gpt4`. The producer's other
+provenance fields — `producer`, `producer_node`, `extraction`, `gates[]`, `evidence.adoption` — are
+audit detail nothing queries, so they live in `payload` and nowhere else.
 
 **`prediction_claims`** — one row per claim of an `accepted` or `backtest` set, unique on
 `(set_id, claim_key)`, insert-only. `kind`, `stance` and `label` are enums; `stance` and `label` are
