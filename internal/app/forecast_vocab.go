@@ -47,6 +47,23 @@ var (
 	predClaimKinds = []string{"stance", "terminal_value", "scenario", "entry_price", "stop_loss"}
 	predStances    = []string{"long", "no_position"}
 	predLabels     = []string{"bull", "base", "bear"}
+
+	// scenario_basis says how the scenario prices came to be, in statistical terms rather than in
+	// terms of the tool that produced them. "estimated" means they were projected from a model rather
+	// than reported, which is the only thing true of every set today: an agent in 1-4-2 composes the
+	// target prices and v3valuation restates them, so nothing a code node computed them from is
+	// recorded anywhere else. The vocabulary is closed and short because it is a grouping key — the
+	// statistics will filter and exclude on it the way they do on probability_method. It is open to
+	// more values, and adding one is a change here, in openapi.json, and on the producer.
+	predScenarioBases = []string{"estimated"}
+
+	// evidence.adoption is the one part of scenario_provenance with a closed vocabulary, and the only
+	// part with discriminating power. The gate that admits a scenario set accepts EITHER a quote from
+	// the report body OR a source locator, so a set adopted on a quote and a set adopted on nothing
+	// but a section heading both pass it; this field is what lets a reader tell them apart. The
+	// earlier name "citation" was withdrawn for claiming more than the gate checks: it covered both
+	// branches, so counting it would have counted locator-only sets as cited.
+	predAdoptions = []string{"quote", "locator"}
 )
 
 // Claim kinds the classifier reads by name, because a required claim is identified by its key.

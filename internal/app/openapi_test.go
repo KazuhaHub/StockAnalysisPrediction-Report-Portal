@@ -266,6 +266,8 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 		{"decision_status", enumOf("PredictionPayload", "properties", "decision_status"), predDecisionStatuses, "PredictionPayload.decision_status"},
 		{"decision_quality", enumOf("PredictionPayload", "properties", "decision_quality"), predDecisionQualities, "PredictionPayload.decision_quality"},
 		{"probability_method", enumOf("PredictionPayload", "properties", "probability_method"), predProbabilityMethods, "PredictionPayload.probability_method"},
+		{"scenario_basis", enumOf("PredictionPayload", "properties", "scenario_basis"), predScenarioBases, "PredictionPayload.scenario_basis"},
+		{"evidence.adoption", enumOf("PredictionPayload", "properties", "scenario_provenance", "properties", "evidence", "properties", "adoption"), predAdoptions, "PredictionPayload.scenario_provenance.evidence.adoption"},
 		{"claim kind", enumOf("PredictionClaim", "properties", "kind"), predClaimKinds, "PredictionClaim.kind"},
 		{"stance", enumOf("PredictionClaim", "properties", "stance"), predStances, "PredictionClaim.stance"},
 		{"label", enumOf("PredictionClaim", "properties", "label"), predLabels, "PredictionClaim.label"},

@@ -89,6 +89,7 @@ type predSetRow struct {
 	PolicyVersion        string
 	ProbabilityMethod    string
 	ProbabilityTransform string
+	ScenarioBasis        string
 	DecisionStatus       string
 	DecisionQuality      string
 	InformationCutoff    string
@@ -150,18 +151,53 @@ type predEmitterWire struct {
 	DecisionSchema string `json:"decision_schema"`
 }
 
+// predEvidenceWire is the one part of scenario_provenance whose vocabulary is closed.
+type predEvidenceWire struct {
+	Adoption string `json:"adoption"`
+}
+
+// predScenarioProvenanceWire records where a set's scenario prices came from: the node that produced
+// them, how, which gates they passed, and whether the adoption was supported by a quote or only a
+// locator.
+//
+// It is decoded SEPARATELY from the payload, not as a nested field of predPayloadWire, and that is
+// the whole design. The payload decoder sets DisallowUnknownFields, which applies to nested structs
+// too, so declaring this inline would make every added provenance field a portal change — exactly
+// what this type is meant not to be. The producer owns this object's shape; the portal validates only
+// `evidence.adoption` (closed) and the types of the fields it names, and stores the rest verbatim in
+// `payload`, which is what the producer actually sent.
+//
+// Nothing here is a column: no query groups on it, so it lives in the payload and nowhere else. That
+// is the same test that makes scenario_basis a column and decision_status not one.
+type predScenarioProvenanceWire struct {
+	// Producer is the workflow step that produced the prices, and ProducerNode its node id. The id
+	// matters because the step NAME is not a key: 目标价合成 is the title of three nodes in 1-4-2
+	// (1788061256164, 1788062279656, 1788683814270), so counting by name would merge three producers.
+	Producer     string `json:"producer"`
+	ProducerNode string `json:"producer_node"`
+	// Extraction is how the prices were obtained (llm, code...). Free text on purpose: the tool will
+	// change and a closed enum here would be wrong within a release.
+	Extraction string           `json:"extraction"`
+	Gates      []string         `json:"gates"`
+	Evidence   predEvidenceWire `json:"evidence"`
+}
+
 type predPayloadWire struct {
-	Schema               string           `json:"schema"`
-	Emitter              predEmitterWire  `json:"emitter"`
-	PolicyVersion        string           `json:"policy_version"`
-	ProbabilityMethod    string           `json:"probability_method"`
-	ProbabilityTransform string           `json:"probability_transform"`
-	DecisionStatus       string           `json:"decision_status"`
-	DecisionQuality      string           `json:"decision_quality"`
-	InformationCutoff    string           `json:"information_cutoff"`
-	Baseline             predBaselineWire `json:"baseline"`
-	HorizonEnd           string           `json:"horizon_end"`
-	Claims               []predClaimWire  `json:"claims"`
+	Schema               string          `json:"schema"`
+	Emitter              predEmitterWire `json:"emitter"`
+	PolicyVersion        string          `json:"policy_version"`
+	ProbabilityMethod    string          `json:"probability_method"`
+	ProbabilityTransform string          `json:"probability_transform"`
+	// ScenarioBasis is optional and validated; ScenarioProvenance is optional and held raw so its
+	// internals stay the producer's to extend.
+	ScenarioBasis      string           `json:"scenario_basis"`
+	ScenarioProvenance json.RawMessage  `json:"scenario_provenance"`
+	DecisionStatus     string           `json:"decision_status"`
+	DecisionQuality    string           `json:"decision_quality"`
+	InformationCutoff  string           `json:"information_cutoff"`
+	Baseline           predBaselineWire `json:"baseline"`
+	HorizonEnd         string           `json:"horizon_end"`
+	Claims             []predClaimWire  `json:"claims"`
 }
 
 // ---------- the classifier ----------
@@ -226,6 +262,19 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	if wire.ProbabilityMethod != "" && !containsStr(predProbabilityMethods, wire.ProbabilityMethod) {
 		add(reasonBadEnum, "probability_method", fmt.Sprintf("%q is not one of %s", wire.ProbabilityMethod, strings.Join(predProbabilityMethods, ", ")))
 	}
+	// scenario_basis is optional — a payload from a producer that predates the field is accepted — but
+	// when it is present it has to be one of the closed values, or the statistics would group on a
+	// typo. An empty string is the producer saying nothing, which is not the same as an unknown value.
+	if wire.ScenarioBasis != "" && !containsStr(predScenarioBases, wire.ScenarioBasis) {
+		add(reasonBadEnum, "scenario_basis", fmt.Sprintf("%q is not one of %s", wire.ScenarioBasis, strings.Join(predScenarioBases, ", ")))
+	}
+	// scenario_provenance is audit detail, so its internals are not validated field by field — the
+	// producer owns that shape. Only two things are checked: that it is an object (a string here is
+	// the Dify double-encoding bug, and it would be stored as a blob nobody can read), and that
+	// evidence.adoption, the one closed vocabulary inside it, is one of its two values.
+	if provErr := checkScenarioProvenance(wire.ScenarioProvenance); provErr != nil {
+		errs = append(errs, *provErr)
+	}
 
 	// Dates.
 	madeOn, err := shanghaiDate(in.MadeAt)
@@ -236,8 +285,20 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	if !validReportDate(wire.HorizonEnd) {
 		add(reasonBadDate, "horizon_end", fmt.Sprintf("%q is not a YYYY-MM-DD date", wire.HorizonEnd))
 	}
-	if wire.Baseline.AsOf != "" && !validReportDate(wire.Baseline.AsOf) {
-		add(reasonBadDate, "baseline.as_of", fmt.Sprintf("%q is not a YYYY-MM-DD date", wire.Baseline.AsOf))
+	// baseline.as_of accepts either a civil date or a full RFC3339 instant, and an instant is converted
+	// to its Shanghai civil date rather than truncated. The producer's company packet carries whatever
+	// the quote said, so some runs send 2026-10-09T15:00:00+08:00 where others send 2026-10-09;
+	// refusing the instant would refuse a whole set over a formatting difference in a field the portal
+	// only records for cross-checking. Truncating is not an option either, and not a hypothetical one:
+	// 2026-10-09T23:30:00Z is 2026-10-10 in Shanghai, so the first ten characters name the wrong day.
+	baselineAsOf := ""
+	if wire.Baseline.AsOf != "" {
+		if d, ok := asOfShanghaiDate(wire.Baseline.AsOf); ok {
+			baselineAsOf = d
+		} else {
+			add(reasonBadDate, "baseline.as_of", fmt.Sprintf(
+				"%q is neither a YYYY-MM-DD date nor an RFC3339 instant", wire.Baseline.AsOf))
+		}
 	}
 	cutoff, cutoffOK := parseRFC3339(wire.InformationCutoff)
 	if wire.InformationCutoff != "" && !cutoffOK {
@@ -283,13 +344,14 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 		set.PolicyVersion = wire.PolicyVersion
 		set.ProbabilityMethod = wire.ProbabilityMethod
 		set.ProbabilityTransform = wire.ProbabilityTransform
+		set.ScenarioBasis = wire.ScenarioBasis
 		set.DecisionStatus = wire.DecisionStatus
 		set.DecisionQuality = wire.DecisionQuality
 		set.InformationCutoff = wire.InformationCutoff
 		set.HorizonEnd = wire.HorizonEnd
 		set.HorizonStd = horizonStd
 		set.EmittedBaseFen = baseFen
-		set.EmittedBaseAsOf = wire.Baseline.AsOf
+		set.EmittedBaseAsOf = baselineAsOf
 		set.EmittedBaseSrc = wire.Baseline.Source
 		set.EmitterApp, set.EmitterVersion = wire.Emitter.App, wire.Emitter.Version
 		set.Calculator, set.SchemaName = wire.Emitter.Calculator, wire.Emitter.DecisionSchema
@@ -314,6 +376,7 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	rej.Calculator, rej.SchemaName = wire.Emitter.Calculator, wire.Emitter.DecisionSchema
 	rej.DecisionStatus, rej.DecisionQuality = wire.DecisionStatus, wire.DecisionQuality
 	rej.PolicyVersion, rej.ProbabilityMethod = wire.PolicyVersion, wire.ProbabilityMethod
+	rej.ScenarioBasis = wire.ScenarioBasis
 	rej.HorizonEnd, rej.HorizonStd = wire.HorizonEnd, horizonStd
 	rej.State = predStateRejected
 	rej.Errors = marshalErrors(errs)
@@ -597,6 +660,57 @@ func parseRFC3339(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+// asOfShanghaiDate normalises baseline.as_of to a Shanghai civil date. It accepts either a
+// YYYY-MM-DD date (returned unchanged, already civil) or an RFC3339 instant, which it converts with
+// the offset the producer sent and then re-reads in the exchange's zone.
+//
+// The conversion is done in two steps on purpose, and the second is not redundant. `time.Parse`
+// returns the instant in the offset it came with (+08:00 above), where .Format would already give the
+// right Shanghai day; but an instant sent as 2026-10-09T23:30:00Z — which is what a Dify sandbox
+// running in UTC produces — is 2026-10-10 in Shanghai, and only .In(chinaZone) says so. Truncating
+// the string would get that case wrong by a day, which is the mistake this function exists to prevent.
+func asOfShanghaiDate(s string) (string, bool) {
+	if validReportDate(s) {
+		return s, true
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return "", false
+	}
+	return t.In(chinaZone).Format("2006-01-02"), true
+}
+
+// checkScenarioProvenance validates the two things about scenario_provenance the portal owns: that it
+// is a JSON object at all, and that evidence.adoption is one of its closed values.
+//
+// Everything else in the object is the producer's, and this is deliberate. The field records auditing
+// detail — which node produced the prices, how, and which gates admitted them — and the gates
+// vocabulary is expected to change as the Dify graph changes. Validating it here would mean a portal
+// release every time a gate is renamed, for a field nothing queries. A `null` (the producer's way of
+// saying it has nothing to report) is accepted and means the same as absent.
+func checkScenarioProvenance(raw json.RawMessage) *predError {
+	t := bytes.TrimSpace(raw)
+	if len(t) == 0 || string(t) == "null" {
+		return nil
+	}
+	if t[0] != '{' {
+		// The Dify string-creep bug, one level down: a rendered object parameter arrives as a JSON
+		// string. Storing it verbatim would keep a blob no reader can interpret, so it is refused with
+		// the same message shape the top level uses.
+		return &predError{Reason: reasonNotObject, Path: "scenario_provenance",
+			Detail: "scenario_provenance is not a JSON object (got " + firstKind(t) + ")"}
+	}
+	var prov predScenarioProvenanceWire
+	if err := json.Unmarshal(t, &prov); err != nil {
+		return &predError{Reason: reasonBadSchema, Path: "scenario_provenance", Detail: err.Error()}
+	}
+	if prov.Evidence.Adoption != "" && !containsStr(predAdoptions, prov.Evidence.Adoption) {
+		return &predError{Reason: reasonBadEnum, Path: "scenario_provenance.evidence.adoption",
+			Detail: fmt.Sprintf("%q is not one of %s", prov.Evidence.Adoption, strings.Join(predAdoptions, ", "))}
+	}
+	return nil
 }
 
 var (

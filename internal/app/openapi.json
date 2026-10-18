@@ -387,6 +387,47 @@
             "type": "string",
             "description": "若对概率做过校准，这里是校准规则 ID；未校准则留空。"
           },
+          "scenario_basis": {
+            "type": "string",
+            "enum": ["estimated"],
+            "description": "情景价的来源口径，按统计含义命名，不按工具命名。estimated 表示三个情景终值由模型推算而非引用已实现的数据。统计页面按此分段与剔除样本，所以取值是封闭枚举；以后新增取值需同时修改门户。省略等同于未声明。"
+          },
+          "scenario_provenance": {
+            "type": "object",
+            "description": "情景价的溯源明细，仅供审计留档，不参与统计。门户按原样存储，只校验 evidence.adoption；其余字段由发送方自行扩展，不必先改门户。",
+            "properties": {
+              "producer": {
+                "type": "string",
+                "description": "产出情景价的工作流步骤名，如 1-4-2/目标价合成。"
+              },
+              "producer_node": {
+                "type": "string",
+                "description": "该步骤的节点 ID。步骤名会重名（目标价合成 在 1-4-2 里有三个节点），统计不能只靠名字，所以请一并带上。"
+              },
+              "extraction": {
+                "type": "string",
+                "description": "产出的方式，如 llm / code。自由文本：工具会变，写死枚举很快就会过时。"
+              },
+              "gates": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "该情景集通过的全部硬闸门，如实填写。自由文本，门户不校验。"
+              },
+              "evidence": {
+                "type": "object",
+                "description": "采纳依据落在哪一边。这条才有区分度：闸门同时接受正文原句和定位，只有它能把两者分开。",
+                "properties": {
+                  "adoption": {
+                    "type": "string",
+                    "enum": ["quote", "locator"],
+                    "description": "quote 表示正文里引到了原句，locator 表示只有章节定位。"
+                  }
+                }
+              }
+            }
+          },
           "decision_status": {
             "type": "string",
             "enum": ["eligible", "no_trade"],
@@ -411,7 +452,7 @@
               },
               "as_of": {
                 "type": "string",
-                "description": "基准价对应的日期，YYYY-MM-DD。"
+                "description": "基准价对应的日期。接受 YYYY-MM-DD，也接受完整的 RFC3339 时刻（如 2026-10-09T15:00:00+08:00）；门户按上海时区换算成日期后入库。请勿自行截断字符串：2026-10-09T23:30:00Z 在上海是 10-10。"
               },
               "source": {
                 "type": "string",

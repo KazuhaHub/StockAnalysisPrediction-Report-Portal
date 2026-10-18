@@ -426,3 +426,60 @@ func TestV1IngestSymbolScopeRefusesOnlyThePredictions(t *testing.T) {
 		t.Errorf("reports = %d, want 1", reports)
 	}
 }
+
+// TestV1IngestWritesScenarioBasisToItsColumn: the field is stored as a COLUMN, not only echoed into
+// the payload. The distinction matters because it is a future grouping key — a statistics query
+// filters on the column, and a value that only ever landed in the payload would make that query
+// silently see nothing.
+func TestV1IngestWritesScenarioBasisToItsColumn(t *testing.T) {
+	s := newV1Server(t)
+	payload := predWire(func(m map[string]any) {
+		m["scenario_basis"] = "estimated"
+		m["scenario_provenance"] = map[string]any{
+			"producer": "1-4-2/目标价合成", "producer_node": "1788061256164",
+			"extraction": "llm", "gates": []any{"unique_labels"},
+			"evidence": map[string]any{"adoption": "locator"},
+		}
+	})
+	code, m := ingestPost(t, s, ingestBody(string(payload)))
+	if code != http.StatusOK || m["predictions_status"] != predStateAccepted {
+		t.Fatalf("ingest = %d %v", code, m)
+	}
+
+	var basis, storedPayload string
+	if err := s.st.queryRow(`SELECT scenario_basis, payload FROM prediction_sets`).Scan(&basis, &storedPayload); err != nil {
+		t.Fatalf("read the set: %v", err)
+	}
+	if basis != "estimated" {
+		t.Errorf("scenario_basis column = %q, want estimated", basis)
+	}
+	// provenance is NOT a column; it survives because the payload is stored verbatim, and the payload
+	// holds exactly what arrived rather than a reconstructed subset of it.
+	if !strings.Contains(storedPayload, "1788061256164") {
+		t.Error("scenario_provenance did not survive into the payload column")
+	}
+	if !strings.Contains(storedPayload, `"adoption":"locator"`) {
+		t.Error("the payload column did not keep the adoption value it arrived with")
+	}
+}
+
+// TestV1IngestBaselineAsOfInstantIsConvertedThroughTheDatabase: the Shanghai conversion has to happen
+// on the write path, not only in the classifier, so the column holds a civil date even when the
+// producer sent an instant.
+func TestV1IngestBaselineAsOfInstantIsConvertedThroughTheDatabase(t *testing.T) {
+	s := newV1Server(t)
+	payload := predWire(func(m map[string]any) {
+		m["baseline"].(map[string]any)["as_of"] = "2026-10-09T23:30:00Z"
+	})
+	code, m := ingestPost(t, s, ingestBody(string(payload)))
+	if code != http.StatusOK {
+		t.Fatalf("status = %d: %v", code, m)
+	}
+	var asOf string
+	if err := s.st.queryRow(`SELECT emitted_base_as_of FROM prediction_sets`).Scan(&asOf); err != nil {
+		t.Fatalf("read the set: %v", err)
+	}
+	if asOf != "2026-10-10" {
+		t.Errorf("emitted_base_as_of = %q, want 2026-10-10 (the Shanghai day, not the first ten chars)", asOf)
+	}
+}

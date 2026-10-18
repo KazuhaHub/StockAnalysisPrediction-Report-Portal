@@ -8,6 +8,7 @@ package app
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,6 +127,13 @@ func TestClassifyPredictionsRefusalReasons(t *testing.T) {
 		{"wrong schema", predWire(func(m map[string]any) { m["schema"] = "predictions.v2" }), reasonBadSchema},
 		{"unknown decision_status", predWire(func(m map[string]any) { m["decision_status"] = "maybe" }), reasonBadEnum},
 		{"unknown probability_method", predWire(func(m map[string]any) { m["probability_method"] = "vibes" }), reasonBadEnum},
+		{"unknown scenario_basis", predWire(func(m map[string]any) { m["scenario_basis"] = "vibes" }), reasonBadEnum},
+		{"unknown adoption", predWire(func(m map[string]any) {
+			m["scenario_provenance"] = map[string]any{"evidence": map[string]any{"adoption": "vibes"}}
+		}), reasonBadEnum},
+		{"provenance as a string", predWire(func(m map[string]any) {
+			m["scenario_provenance"] = `{"producer":"1-4-2/目标价合成"}`
+		}), reasonNotObject},
 		{"unknown claim kind", predWire(func(m map[string]any) {
 			claim(m, "entry_price", func(c map[string]any) { c["kind"] = "vibes" })
 		}), reasonBadEnum},
@@ -522,4 +530,144 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// TestClassifyPredictionsScenarioBasisAndProvenance: the two set-level fields the producer sends about
+// where its scenario prices came from. scenario_basis is a closed enum the portal stores as a COLUMN;
+// scenario_provenance is audit detail the portal stores verbatim and does not police.
+func TestClassifyPredictionsScenarioBasisAndProvenance(t *testing.T) {
+	t.Run("absent on an older producer's payload", func(t *testing.T) {
+		// Neither field is required: a producer that predates them keeps working. That is what makes
+		// this an additive change rather than a contract break.
+		set, _, errs := classify(t, predWire(nil), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("a payload without either field was refused: %+v", errs)
+		}
+		if set.ScenarioBasis != "" {
+			t.Errorf("scenario_basis = %q, want empty when the producer said nothing", set.ScenarioBasis)
+		}
+	})
+
+	t.Run("basis is carried through", func(t *testing.T) {
+		set, _, errs := classify(t, predWire(func(m map[string]any) { m["scenario_basis"] = "estimated" }), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("refused: %+v", errs)
+		}
+		if set.ScenarioBasis != "estimated" {
+			t.Errorf("scenario_basis = %q, want estimated", set.ScenarioBasis)
+		}
+	})
+
+	t.Run("provenance is accepted whatever it carries", func(t *testing.T) {
+		// The point of this payload: it has a field the portal does not know about, nested inside a
+		// field it does. DisallowUnknownFields applies at the payload's own level, and it must NOT
+		// reach inside scenario_provenance — if it did, the gates vocabulary could not grow without a
+		// portal release, which is the whole reason the object is held raw.
+		set, _, errs := classify(t, predWire(func(m map[string]any) {
+			m["scenario_provenance"] = map[string]any{
+				"producer":      "1-4-2/目标价合成",
+				"producer_node": "1788061256164",
+				"extraction":    "llm",
+				"gates": []any{"unique_labels", "positive_prices", "ordered_prices",
+					"source_scope", "horizon_match", "symbol_match"},
+				"evidence":                     map[string]any{"adoption": "quote"},
+				"a_field_a_later_release_adds": map[string]any{"nested": []any{1, 2, 3}},
+			}
+		}), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("a provenance object with an unknown member was refused: %+v", errs)
+		}
+		if set.State != predStateAccepted {
+			t.Errorf("state = %q, want %q", set.State, predStateAccepted)
+		}
+		// Stored verbatim, which is what makes the unknown member survivable: the payload column is
+		// where it lives, and it holds exactly what arrived.
+		if !strings.Contains(set.Payload, `"a_field_a_later_release_adds"`) {
+			t.Error("the payload was not stored verbatim: the unknown provenance member is missing")
+		}
+		if !strings.Contains(set.Payload, `"adoption":"quote"`) {
+			t.Error("the payload did not keep the adoption value it arrived with")
+		}
+	})
+
+	t.Run("provenance may be null", func(t *testing.T) {
+		set, _, errs := classify(t, predWire(func(m map[string]any) { m["scenario_provenance"] = nil }), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("an explicit null was refused: %+v", errs)
+		}
+		if set.State != predStateAccepted {
+			t.Errorf("state = %q, want %q", set.State, predStateAccepted)
+		}
+	})
+
+	t.Run("an empty adoption is the producer saying nothing", func(t *testing.T) {
+		// An empty string is "not stated", which is accepted; it is not an unknown value, and
+		// refusing it would punish a producer that filled the object in partially.
+		_, _, errs := classify(t, predWire(func(m map[string]any) {
+			m["scenario_provenance"] = map[string]any{"producer": "x", "evidence": map[string]any{"adoption": ""}}
+		}), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("an empty adoption was refused: %+v", errs)
+		}
+	})
+
+	t.Run("both adoption values are accepted", func(t *testing.T) {
+		for _, v := range predAdoptions {
+			_, _, errs := classify(t, predWire(func(m map[string]any) {
+				m["scenario_provenance"] = map[string]any{"evidence": map[string]any{"adoption": v}}
+			}), predTestRtype)
+			if len(errs) != 0 {
+				t.Errorf("adoption %q was refused: %+v", v, errs)
+			}
+		}
+	})
+}
+
+// TestBaselineAsOfAcceptsAnInstant: baseline.as_of arrives as a civil date from one producer version
+// and a full instant from another, and the portal takes both. This is the change that stopped the
+// Dify node needing to truncate a field that is not its to normalise.
+func TestBaselineAsOfAcceptsAnInstant(t *testing.T) {
+	asOf := func(v any) string {
+		t.Helper()
+		set, _, errs := classify(t, predWire(func(m map[string]any) {
+			m["baseline"].(map[string]any)["as_of"] = v
+		}), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("as_of %v was refused: %+v", v, errs)
+		}
+		return set.EmittedBaseAsOf
+	}
+
+	// The date case is unchanged, and is returned as sent rather than re-derived.
+	if got := asOf("2026-10-16"); got != "2026-10-16" {
+		t.Errorf("a civil date came back as %q", got)
+	}
+	// An instant keeps its offset: 15:00+08:00 is 07:00Z, the same Shanghai day either way.
+	if got := asOf("2026-10-09T15:00:00+08:00"); got != "2026-10-09" {
+		t.Errorf("an instant with a +08:00 offset came back as %q, want 2026-10-09", got)
+	}
+	// The load-bearing case, and the reason truncation is forbidden: 23:30Z on the 9th is already the
+	// 10th in Shanghai. Taking the first ten characters would answer 2026-10-09 and be wrong by a day.
+	if got := asOf("2026-10-09T23:30:00Z"); got != "2026-10-10" {
+		t.Errorf("a UTC instant after Shanghai midnight came back as %q, want 2026-10-10", got)
+	}
+	// The mirror case, an offset that names the PREVIOUS Shanghai day: 20:00-08:00 is 04:00Z on the 10th.
+	if got := asOf("2026-10-09T20:00:00-08:00"); got != "2026-10-10" {
+		t.Errorf("an instant crossing midnight the other way came back as %q, want 2026-10-10", got)
+	}
+}
+
+// TestBaselineAsOfRefusesNonsense pins what is still refused, so widening the field did not widen it
+// into accepting anything.
+func TestBaselineAsOfRefusesNonsense(t *testing.T) {
+	for _, bad := range []string{"16-10-2026", "2026-13-01", "2026-10-09T15:00", "no", "2026-10-09 15:00:00"} {
+		t.Run(bad, func(t *testing.T) {
+			_, _, errs := classify(t, predWire(func(m map[string]any) {
+				m["baseline"].(map[string]any)["as_of"] = bad
+			}), predTestRtype)
+			if got := onlyReason(t, errs); got != reasonBadDate {
+				t.Errorf("reason = %q, want %q", got, reasonBadDate)
+			}
+		})
+	}
 }
