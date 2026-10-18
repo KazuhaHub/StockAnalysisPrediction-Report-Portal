@@ -197,6 +197,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// is classed authBearer, so it sits outside sessionRoutes() and no whole-portal session policy
 	// covers it. Same handler body, same scope rules.
 	s.session(mux, "GET /api/report/{id}/predictions", s.apiReportPredictions)
+	// The reading page asks for the symbol's other sets. Session-scoped, because the SPA must not
+	// use /api/v1 and the viewer scope is what a browser read is gated by.
+	s.session(mux, "GET /api/predictions", s.apiQueryPredictions)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.
@@ -302,6 +305,10 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/settings", s.apiAdminSettings)
 	s.admin(mux, "GET /api/admin/forecast", s.apiForecastSettings)
 	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
+	// The verification page's aggregate. PermManage, not admin: the ledger's statistics are a
+	// management view, and a bridge query token must never reach them (ADR 0029 §7).
+	s.perm(mux, "GET /api/admin/forecast/groups", PermManage, s.apiForecastGroups)
+	s.perm(mux, "GET /api/admin/forecast/groups/members", PermManage, s.apiForecastGroupMembers)
 	// The audit log. requirePermJSON, not requireAdminJSON: see apiAdminAudit.
 	s.perm(mux, "GET /api/admin/audit", PermManage, s.apiAdminAudit)
 	s.admin(mux, "POST /api/admin/settings", s.apiSettingsSave)

@@ -313,3 +313,40 @@ func TestReportPredictionsRouteRefusesAnUnreadableReportAtHTTPLevel(t *testing.T
 		t.Fatalf("status for an unknown report = %d, want 404", rec.Code)
 	}
 }
+
+// TestSymbolRouteIsASessionRoute: the reading page's "other predictions" list is a browser read, so
+// it must sit under the session class like the per-report route, not under the machine surface.
+func TestSymbolRouteIsASessionRoute(t *testing.T) {
+	s := routeTableServer(t)
+	s.wireRoutes(http.NewServeMux())
+	for _, row := range s.routeTable {
+		if row.pattern == "GET /api/predictions" {
+			if row.class != authSession {
+				t.Errorf("class = %v, want authSession", row.class)
+			}
+			return
+		}
+	}
+	t.Fatal("GET /api/predictions is not registered")
+}
+
+func TestSymbolPredictionsSessionRouteReturnsSets(t *testing.T) {
+	s := newV1Server(t)
+	seedLedgerFor(t, s, "600160", "2026-10-17", "# v1")
+	seedLedgerFor(t, s, "600160", "2026-10-16", "# v2")
+
+	rec := httptest.NewRecorder()
+	s.apiQueryPredictions(rec, httptest.NewRequest("GET", "/api/predictions?symbol=600160&limit=20", nil), "someone")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Sets []PredictionSet `json:"sets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Sets) != 2 {
+		t.Fatalf("sets = %d, want 2", len(out.Sets))
+	}
+}

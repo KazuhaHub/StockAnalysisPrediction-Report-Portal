@@ -76,6 +76,11 @@ type Server struct {
 	// guard, and two test seams (the clock and the vendor fetch) so its arithmetic and its session
 	// rules are testable without a network.
 	forecastEval forecastEvaluator
+	// forecastGroupsCache holds the official (monthly) cells that have matured. A mature cell's
+	// inputs are all terminal, so it can never change; that is what makes memoizing it correct
+	// rather than just fast. Only monthly mode writes here (plan §7.5).
+	forecastGroupsMu    sync.Mutex
+	forecastGroupsCache map[string]*forecastCell
 }
 
 // statusRecorder records the response status code for use in request logging.
