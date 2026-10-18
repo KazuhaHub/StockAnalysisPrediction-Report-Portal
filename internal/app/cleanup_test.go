@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +157,50 @@ func TestNoOpCleanupWritesNoHistory(t *testing.T) {
 	// it just is not worth a row per day. That is the whole distinction being drawn here.
 	if st.GetSetting("cleanup_last_result", "") == "" {
 		t.Errorf("cleanup_last_result blob not written, so the page cannot say when it last ran")
+	}
+}
+
+// TestReadTargetsCoversEveryTarget walks cleanupTargets by reflection, so the next field someone adds
+// fails here until it is also reachable by name.
+//
+// This is the shape of bug it exists for: `Predictions` was added to the struct and to
+// scheduledTargets, but not to readTargets' switch. A scheduled pass then worked and (v0.1.45's
+// mistake, repeated) the manual path did not — pressing the danger-zone button on the storage page
+// deleted nothing, counted nothing and reported success. A described invariant would not have caught
+// it; a walk over the struct does, and it does so on the day the field is added rather than the day
+// an admin notices a zero.
+func TestReadTargetsCoversEveryTarget(t *testing.T) {
+	s := &Server{}
+	typ := reflect.TypeOf(cleanupTargets{})
+
+	// The name a caller sends for each field. Lower-case field name is the convention readTargets
+	// uses; anything that ever needs to differ states it here rather than failing silently.
+	wire := map[string]string{}
+
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		name, ok := wire[field.Name]
+		if !ok {
+			name = strings.ToLower(field.Name)
+		}
+
+		t.Run(name, func(t *testing.T) {
+			sel := s.readTargets(httptest.NewRequest("POST", "/x",
+				strings.NewReader(`{"targets":["`+name+`"]}`)))
+			got := reflect.ValueOf(sel).FieldByName(field.Name).Bool()
+			if !got {
+				t.Errorf("readTargets(%q) left %s unset — the target is unreachable from the manual "+
+					"run and preview path, which fail silently", name, field.Name)
+			}
+		})
+	}
+
+	// An empty body means every target, and "every" has to grow with the struct too: the scheduled
+	// path and a bare manual run both go through this branch.
+	all := reflect.ValueOf(s.readTargets(httptest.NewRequest("POST", "/x", strings.NewReader(`{}`))))
+	for i := 0; i < typ.NumField(); i++ {
+		if !all.Field(i).Bool() {
+			t.Errorf("an empty target list left %s unset; it means all targets", typ.Field(i).Name)
+		}
 	}
 }

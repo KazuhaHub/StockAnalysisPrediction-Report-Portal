@@ -1915,6 +1915,16 @@ func (s *Store) DeleteReport(id int64) (int64, error) {
 		tx.Rollback()
 		return 0, err
 	}
+	// The forecast ledger is NULLED, not deleted (ADR 0029 §8). A set outlives its report by design:
+	// the reports retention floor is 365 days while a set's h12 mark resolves twelve months after it
+	// was made, so a floor-scoped ledger would lose every set on the day its long-horizon mark became
+	// answerable. Nulling is also what keeps the id-reuse argument above true for these rows — the
+	// ledger keeps the report identity it was written with, for display only, and never joins on it
+	// for access once the link is gone.
+	if _, err := tx.Exec(s.bind("UPDATE prediction_sets SET report_id=NULL WHERE report_id=?"), id); err != nil {
+		tx.Rollback()
+		return 0, err
+	}
 	n, _ := res.RowsAffected()
 	return n, tx.Commit()
 }

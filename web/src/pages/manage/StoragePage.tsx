@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, App, Button, Card, Divider, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
-import { AuditOutlined, DatabaseOutlined, FileTextOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { AuditOutlined, DatabaseOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -24,6 +24,7 @@ const CAT_COLOR: Record<string, { light: string; dark: string }> = {
   chat: { light: '#008300', dark: '#008300' }, // green
   audit: { light: '#8452d6', dark: '#9366e0' }, // violet
   revisions: { light: '#c8447a', dark: '#d65a8c' }, // magenta — the next slot in the ordered set
+  predictions: { light: '#6b7fd6', dark: '#8395e0' }, // indigo
 }
 const CAT_ICON: Record<string, React.ReactNode> = {
   batch: <ThunderboltOutlined />,
@@ -32,6 +33,7 @@ const CAT_ICON: Record<string, React.ReactNode> = {
   chat: <MessageOutlined />,
   audit: <AuditOutlined />,
   revisions: <HistoryOutlined />,
+  predictions: <FundProjectionScreenOutlined />,
 }
 
 // fmtBytes renders an approximate byte count in human units.
@@ -92,6 +94,11 @@ export default function StoragePage() {
   const [revisionsFloor, setRevisionsFloor] = useState(14)
   // 0 is a real value here, not "unset": it means keep every version, and it is the shipped state.
   const [revisionsKeep, setRevisionsKeep] = useState(0)
+  // The forecast ledger. 1095 days (three years) is past h12 for every set that can be fully
+  // settled, so the default never truncates a live horizon.
+  const [predictionsEnabled, setPredictionsEnabled] = useState(false)
+  const [predictionsDays, setPredictionsDays] = useState(1095)
+  const [predictionsFloor, setPredictionsFloor] = useState(180)
   const [revisionsKeepMax, setRevisionsKeepMax] = useState(1000)
   const [cfg, setCfg] = useState<CleanupConfig | null>(null) // last-saved view, drives the usage cards
   const [usage, setUsage] = useState<CleanupUsage | null>(null)
@@ -126,6 +133,9 @@ export default function StoragePage() {
         setRevisionsFloor(r.revisions_floor)
         setRevisionsKeep(r.revisions_keep)
         setRevisionsKeepMax(r.revisions_keep_max)
+        setPredictionsEnabled(r.predictions_enabled)
+        setPredictionsDays(r.predictions_days)
+        setPredictionsFloor(r.predictions_floor)
       })
       .then(() => setLoaded(true))
       .catch((e) => setLoadErr(errText(e, t)))
@@ -164,6 +174,8 @@ export default function StoragePage() {
       revisions_enabled: revisionsEnabled,
       revisions_days: revisionsDays,
       revisions_keep: revisionsKeep,
+      predictions_enabled: predictionsEnabled,
+      predictions_days: predictionsDays,
     })
     message.success(t('common.saved'))
     loadConfig()
@@ -203,6 +215,29 @@ export default function StoragePage() {
     })
   }
 
+  // The ledger is the second danger-zone target, and for a stronger reason than reports: a report
+  // that is deleted can be re-ingested from the workflow that produced it, while a set records what
+  // was claimed at a moment that has passed. Confirmed like reports, with its own wording.
+  const guardPredictions = async (onConfirm: () => void) => {
+    const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: ['predictions'] })
+    modal.confirm({
+      title: t('storage.confirmPredictionsTitle'),
+      content: t('storage.confirmPredictionsBody', { count: r.predictions, days: cfg?.predictions_days ?? predictionsDays }),
+      okText: t('storage.doClean'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      onOk: onConfirm,
+    })
+  }
+
+  const onTogglePredictions = (checked: boolean) => {
+    if (!checked) {
+      setPredictionsEnabled(false)
+      return
+    }
+    guardPredictions(() => setPredictionsEnabled(true))
+  }
+
   const onToggleReports = (checked: boolean) => {
     if (!checked) {
       setReportsEnabled(false)
@@ -218,11 +253,15 @@ export default function StoragePage() {
       guardReports(() => doRun(['reports']))
       return
     }
+    if (key === 'predictions') {
+      guardPredictions(() => doRun(['predictions']))
+      return
+    }
     const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: [key] })
     // Keyed, not a ternary. With two targets a two-way choice was total; the third and fourth
     // silently fell through to the tokens count, so the audit confirm promised to delete however
     // many TOKENS had expired.
-    const n = r[key as 'batch' | 'tokens' | 'reports' | 'audit' | 'revisions'] ?? 0
+    const n = r[key as 'batch' | 'tokens' | 'reports' | 'audit' | 'revisions' | 'predictions'] ?? 0
     modal.confirm({
       title: t('storage.confirmTitle'),
       content: t('storage.confirmBody', { n, days, cat: t(`storage.cat.${key}`) }),
@@ -243,6 +282,7 @@ export default function StoragePage() {
       audit: cfg?.audit_days ?? auditDays,
       revisions: cfg?.revisions_days ?? revisionsDays,
       reports: cfg?.reports_days ?? reportsDays,
+      predictions: cfg?.predictions_days ?? predictionsDays,
     })[key] ?? 0
 
   const cats = usage?.categories ?? []
@@ -272,9 +312,9 @@ export default function StoragePage() {
             </Tag>
             <Button
               size="small"
-              danger={c.key === 'reports'}
-              type={c.key === 'reports' ? 'default' : 'primary'}
-              ghost={c.key !== 'reports'}
+              danger={c.key === 'reports' || c.key === 'predictions'}
+              type={c.key === 'reports' || c.key === 'predictions' ? 'default' : 'primary'}
+              ghost={c.key !== 'reports' && c.key !== 'predictions'}
               onClick={() => cleanCategory(c.key, days)}
               style={{ width: 'fit-content' }}
             >
@@ -317,6 +357,7 @@ export default function StoragePage() {
           reports: r.reports_deleted,
           audit: r.audit_deleted ?? 0,
           revisions: r.revisions_deleted ?? 0,
+          predictions: r.predictions_deleted ?? 0,
         }) + ((r.bytes_reclaimed ?? 0) > 0 ? ` · ${t('storage.reclaimedShort', { size: fmtBytes(r.bytes_reclaimed) })}` : ''),
     },
     {
@@ -462,6 +503,19 @@ export default function StoragePage() {
               <CompactNumberInput min={reportsFloor} value={reportsDays} onChange={(v) => setReportsDays(v ?? reportsFloor)} after={t('batch.admin.days')} />
             </Space>,
             t('storage.floorHint', { n: reportsFloor }),
+          )}
+
+          <Divider style={{ margin: '4px 0' }} titlePlacement="left" plain>
+            {t('storage.predictionsTarget')}
+          </Divider>
+          <Alert type="warning" showIcon title={t('storage.predictionsDanger')} description={t('storage.predictionsWarn')} />
+          {row(
+            t('storage.enable'),
+            <Space>
+              <Switch checked={predictionsEnabled} onChange={onTogglePredictions} />
+              <CompactNumberInput min={predictionsFloor} value={predictionsDays} onChange={(v) => setPredictionsDays(v ?? predictionsFloor)} after={t('batch.admin.days')} />
+            </Space>,
+            t('storage.predictionsHint', { n: predictionsFloor }),
           )}
 
           <StickyActionBar>

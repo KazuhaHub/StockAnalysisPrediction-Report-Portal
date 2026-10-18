@@ -57,6 +57,17 @@ const (
 	// off, and that the per-report cap — the bound most portals will actually use — is separate and
 	// unlimited by default.
 	minRevisionsRetentionDays = 14
+	// The forecast ledger's floor (ADR 0029 §8). Short, and deliberately so: the safety of this target
+	// is STRUCTURAL, not numeric. A set still awaiting settlement has a non-terminal mark and never
+	// matches the predicate; a set whose report still exists has a non-null report_id and never
+	// matches either. Neither depends on how many days an operator typed. What this floor defends is
+	// the one thing the predicate cannot: an operator setting the days to 0 and emptying the ledger in
+	// a single pass. 180 days is three settlement quarters of margin past the point where every
+	// checkpoint but h12 has long resolved.
+	minPredictionsRetentionDays = 180
+	// predDefaultPredictionsDays is the shipped retention when the key is unset: three years, past h12
+	// for every set that can be fully settled, so the default never truncates a live horizon.
+	predDefaultPredictionsDays = 1095
 )
 
 // cleanupRunsKeep bounds the audit ring buffer: only the most recent N cleanup_runs rows are kept.
@@ -208,12 +219,205 @@ func (s *Store) DeleteReportsIngestedBefore(cutoff time.Time) (int64, error) {
 	return total, nil
 }
 
+// predictionPurgeMonths returns the (rtype, cohort) months eligible for retention deletion at cutoff.
+//
+// The unit is a WHOLE MONTH OF ONE REPORT TYPE, not a set, and that is the load-bearing decision:
+//
+//   - A mature cell must never change (ADR 0029 §9), and the monthly page is citable precisely because
+//     of that. Deleting some sets of a month would move that month's n and every metric on it while the
+//     page kept showing the same label.
+//   - Worse, membership is "the earliest accepted set per (symbol, group) decides" (D4). Deleting only
+//     the earliest set of a symbol would PROMOTE a later rerun as the member — exactly the
+//     selection-by-rerun that D4 exists to forbid.
+//
+// So a month is eligible only when EVERY set in it is eligible. The month's numbers then disappear as a
+// unit and are marked purged, rather than quietly changing.
+//
+// Per set, the predicate is:
+//
+//	report_id IS NULL     the report is gone, so no live link points at this set
+//	no non-terminal mark  nothing is pending or retryable, so the set can never change again
+//	settled < cutoff      when the set became final (see below)
+//
+// settled is substr(COALESCE(MAX(resolved_at), made_on), 1, 10) — the DATE a set became final — rather
+// than MAX(resolved_at) alone, because two of the four set shapes have no resolved_at at all:
+//
+//   - absent / rejected / backtest carry no marks, so "every mark is terminal" is vacuously true and
+//     MAX(resolved_at) is NULL. Under a bare `<` those rows would never be eligible and would grow for
+//     ever; under a COALESCE to a constant they would be eligible the moment their report was purged.
+//   - accepted sets whose every mark ended refused_final DO have marks, and resolved_at is stamped on
+//     that transition — the evaluator writes it whenever a mark becomes terminal, whichever way it
+//     landed (ADR 0029 §6.3).
+//
+// Falling back to made_on gives those shapes their own age, so purging a report never makes its sets
+// immediately eligible. The truncation to 10 characters is what makes the two spellings comparable:
+// resolved_at is an RFC3339 instant and made_on is a civil date, and comparing a full instant against
+// a date cutoff would put everything inside the cutoff day on the wrong side.
+//
+// The per-set columns are computed in a subquery rather than inside the aggregate because a correlated
+// subquery on ps.id is not valid in HAVING — ps.id is not functionally dependent on (rtype, cohort).
+func (s *Store) predictionPurgeMonths(cutoff time.Time) ([][2]string, error) {
+	rows, err := s.query(`SELECT t.rtype, t.cohort FROM (
+			SELECT ps.rtype AS rtype, ps.cohort AS cohort, ps.id AS id,
+			  CASE WHEN ps.report_id IS NULL THEN 1 ELSE 0 END AS orphan,
+			  CASE WHEN EXISTS (SELECT 1 FROM prediction_marks m
+			        WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
+			       THEN 1 ELSE 0 END AS live,
+			  substr(COALESCE(
+			    (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id),
+			    ps.made_on), 1, 10) AS settled
+			FROM prediction_sets ps
+		) t
+		GROUP BY t.rtype, t.cohort
+		HAVING SUM(t.orphan) = COUNT(*) AND SUM(t.live) = 0 AND MAX(t.settled) < ?
+		ORDER BY t.rtype, t.cohort`, cutoff.UTC().Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]string
+	for rows.Next() {
+		var rtype, cohort string
+		if err := rows.Scan(&rtype, &cohort); err != nil {
+			return nil, err
+		}
+		out = append(out, [2]string{rtype, cohort})
+	}
+	return out, rows.Err()
+}
+
+// monthIsPurgeable re-asserts the whole-month predicate for one (rtype, cohort) inside a transaction.
+// The scan above ran on its own snapshot, so a set whose report came back in the gap must not be
+// deleted on a stale read.
+func (s *Store) monthIsPurgeable(tx *sql.Tx, rtype, cohort, cutoffDate string) (bool, error) {
+	var all, orphan, live int64
+	var newest sql.NullString
+	err := tx.QueryRow(s.bind(`SELECT COUNT(*),
+		  SUM(CASE WHEN ps.report_id IS NULL THEN 1 ELSE 0 END),
+		  SUM(CASE WHEN EXISTS (SELECT 1 FROM prediction_marks m
+		        WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
+		       THEN 1 ELSE 0 END),
+		  MAX(substr(COALESCE(
+		    (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id),
+		    ps.made_on), 1, 10))
+		FROM prediction_sets ps WHERE ps.rtype=? AND ps.cohort=?`), rtype, cohort).
+		Scan(&all, &orphan, &live, &newest)
+	if err != nil {
+		return false, err
+	}
+	if all == 0 {
+		return false, nil // nothing left to purge
+	}
+	if orphan != all || live != 0 {
+		return false, nil
+	}
+	return newest.Valid && newest.String < cutoffDate, nil
+}
+
+// CountPredictionsBefore counts the ledger SETS a purge at cutoff would remove (dry-run / usage). The
+// unit of a pass is a month, but the number an admin sees is rows, matching every other target.
+func (s *Store) CountPredictionsBefore(cutoff time.Time) (int64, error) {
+	months, err := s.predictionPurgeMonths(cutoff)
+	if err != nil || len(months) == 0 {
+		return 0, err
+	}
+	var total int64
+	for _, m := range months {
+		var n int64
+		if err := s.queryRow(`SELECT COUNT(*) FROM prediction_sets WHERE rtype=? AND cohort=?`,
+			m[0], m[1]).Scan(&n); err != nil {
+			return total, err
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DeletePredictionsBefore purges eligible months and records a marker for each.
+//
+// One transaction for the whole pass rather than the chunked shape the reports target uses: a month is
+// the atomic unit, and a pass that deleted half a month would produce exactly the state this design
+// exists to prevent.
+func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
+	months, err := s.predictionPurgeMonths(cutoff)
+	if err != nil || len(months) == 0 {
+		return 0, err
+	}
+	cutoffDate := cutoff.UTC().Format("2006-01-02")
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	var total int64
+	for _, m := range months {
+		rtype, cohort := m[0], m[1]
+		ok, err := s.monthIsPurgeable(tx, rtype, cohort, cutoffDate)
+		if err != nil {
+			return total, err
+		}
+		if !ok {
+			continue // the month changed under us — leave it whole
+		}
+		// Children first, so a failure cannot leave a claim or a mark pointing at a set that is gone.
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_claims WHERE set_id IN
+			(SELECT id FROM prediction_sets WHERE rtype=? AND cohort=?)`), rtype, cohort); err != nil {
+			return total, err
+		}
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_marks WHERE set_id IN
+			(SELECT id FROM prediction_sets WHERE rtype=? AND cohort=?)`), rtype, cohort); err != nil {
+			return total, err
+		}
+		res, err := tx.Exec(s.bind(`DELETE FROM prediction_sets WHERE rtype=? AND cohort=?`), rtype, cohort)
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		// The marker is what makes the deletion visible. Without it a purged month reads as a month in
+		// which nothing was ever predicted, which is a different and far better-looking claim.
+		if _, err := tx.Exec(s.bind(`INSERT INTO prediction_purges(rtype, cohort, purged_at, sets_removed)
+			VALUES(?,?,?,?)`), rtype, cohort, nowStr(), n); err != nil {
+			return total, err
+		}
+		total += n
+	}
+	if err := tx.Commit(); err != nil {
+		return total, err
+	}
+	return total, nil
+}
+
+// PurgedPredictionMonths returns the months a pass has purged, keyed by (rtype, cohort), so the monthly
+// page can label them "purged" instead of recomputing them as months with no predictions.
+func (s *Store) PurgedPredictionMonths() map[[2]string]string {
+	out := map[[2]string]string{}
+	rows, err := s.query(`SELECT rtype, cohort, purged_at FROM prediction_purges`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rtype, cohort, at string
+		if rows.Scan(&rtype, &cohort, &at) == nil {
+			out[[2]string{rtype, cohort}] = at
+		}
+	}
+	return out
+}
+
 // deleteReportChunk deletes one chunk of reports (+ their tracking_items) in a single transaction,
 // re-asserting sent_at so a concurrently re-ingested report is skipped. tracking_items are removed
 // only for reports whose row actually matched (so a preserved report keeps its items), and so are
 // the viewer rows — a viewer row pointing at a deleted report is an access grant with nothing on the
 // other end (ADR 0024) — and so is its edit history, which is whole prior copies of a body that
 // would otherwise stay on disk under an id nothing points at (ADR 0026).
+//
+// prediction_sets is the one child that is NULLED rather than deleted (ADR 0029 §8), and the reason
+// is the same id-reuse argument DeleteReport states in full: ids are reassigned, so a row left
+// pointing at a reused id would count another report's claims as this one's. Deleting them instead
+// would be worse in the other direction — a set outlives its report by design, because the reports
+// retention floor is 365 days while a set's h12 mark resolves twelve months after it was made. So the
+// link goes and the ledger stays, on the same guarded match as the tables above it.
 func (s *Store) deleteReportChunk(keys []reportKey) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -239,6 +443,10 @@ func (s *Store) deleteReportChunk(keys []reportKey) (int64, error) {
 			return n, err
 		}
 		if _, err := tx.Exec(s.bind("DELETE FROM report_revisions WHERE report_id=?"), k.id); err != nil {
+			tx.Rollback()
+			return n, err
+		}
+		if _, err := tx.Exec(s.bind("UPDATE prediction_sets SET report_id=NULL WHERE report_id=?"), k.id); err != nil {
 			tx.Rollback()
 			return n, err
 		}
@@ -308,6 +516,8 @@ type CleanupRun struct {
 	AuditDeleted int64 `json:"audit_deleted"`
 	// The fifth (ADR 0026), same shape again for the same reason.
 	RevisionsDeleted int64 `json:"revisions_deleted"`
+	// The sixth (ADR 0029), same shape again for the same reason.
+	PredictionsDeleted int64 `json:"predictions_deleted"`
 	// Bytes handed back to the filesystem by the pass. Not a target — it is the consequence of the
 	// others, and the number that answers "did this actually free any disk?".
 	BytesReclaimed int64 `json:"bytes_reclaimed"`
@@ -317,11 +527,11 @@ type CleanupRun struct {
 // InsertCleanupRun appends an audit row and trims the ring buffer to the most recent
 // cleanupRunsKeep rows.
 func (s *Store) InsertCleanupRun(c CleanupRun) (int64, error) {
-	id, err := s.insertID(`INSERT INTO cleanup_runs(ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,audit_deleted,revisions_deleted,bytes_reclaimed,duration_ms)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+	id, err := s.insertID(`INSERT INTO cleanup_runs(ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,audit_deleted,revisions_deleted,predictions_deleted,bytes_reclaimed,duration_ms)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.RanAt, c.Trigger, boolInt(c.DryRun), boolInt(c.OK), c.Error,
 		c.BatchDeleted, c.TokensDeleted, c.ReportsDeleted, c.AuditDeleted, c.RevisionsDeleted,
-		c.BytesReclaimed, c.DurationMs)
+		c.PredictionsDeleted, c.BytesReclaimed, c.DurationMs)
 	if err != nil {
 		return 0, err
 	}
@@ -342,7 +552,7 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		limit = cleanupRunsKeep
 	}
 	rows, err := s.query(`SELECT id,ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,
-		COALESCE(audit_deleted,0),COALESCE(revisions_deleted,0),COALESCE(bytes_reclaimed,0),duration_ms
+		COALESCE(audit_deleted,0),COALESCE(revisions_deleted,0),COALESCE(predictions_deleted,0),COALESCE(bytes_reclaimed,0),duration_ms
 		FROM cleanup_runs
 		-- A successful pass that deleted nothing is not history, and builds before v0.4.20 recorded
 		-- one per scheduled run. They are left in the table rather than deleted -- a retention log
@@ -350,6 +560,7 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		-- never match, they are the entire list.
 		WHERE NOT (ok <> 0 AND batch_deleted = 0 AND tokens_deleted = 0
 			AND COALESCE(audit_deleted,0) = 0 AND COALESCE(revisions_deleted,0) = 0
+			AND COALESCE(predictions_deleted,0) = 0
 			AND reports_deleted = 0)
 		ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
@@ -361,7 +572,8 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		var c CleanupRun
 		var dry, ok int64
 		if err := rows.Scan(&c.ID, &c.RanAt, &c.Trigger, &dry, &ok, &c.Error, &c.BatchDeleted, &c.TokensDeleted,
-			&c.ReportsDeleted, &c.AuditDeleted, &c.RevisionsDeleted, &c.BytesReclaimed, &c.DurationMs); err != nil {
+			&c.ReportsDeleted, &c.AuditDeleted, &c.RevisionsDeleted, &c.PredictionsDeleted,
+			&c.BytesReclaimed, &c.DurationMs); err != nil {
 			return nil, err
 		}
 		c.DryRun = dry != 0

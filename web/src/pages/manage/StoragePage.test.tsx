@@ -125,12 +125,26 @@ describe('StoragePage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('storage.cat.batch')
-    // The reports switch is the LAST one: it lives in its own danger section below the others, so
-    // this stays correct when a new retention target is added above it (audit was).
+    // The reports switch is in the first danger section below the ordinary targets, so it is the
+    // second-to-last one: the forecast ledger's danger section follows it. Both are danger targets and
+    // both preview a live count before confirming, so the assertion keys on the target rather than on
+    // being last — the position has moved once already.
     const switches = screen.getAllByRole('switch')
-    await user.click(switches[switches.length - 1])
+    await user.click(switches[switches.length - 2])
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/cleanup/preview', { targets: ['reports'] }))
     expect((await screen.findAllByText('storage.confirmReportsTitle')).length).toBeGreaterThan(0)
+  })
+
+  it('enabling the ledger auto-delete previews the live count and opens the danger confirm', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('storage.cat.batch')
+    // The ledger is the LAST switch: its danger section follows the reports one. It gets the same
+    // preview-then-confirm treatment, because a ledger record cannot be rebuilt.
+    const switches = screen.getAllByRole('switch')
+    await user.click(switches[switches.length - 1])
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/cleanup/preview', { targets: ['predictions'] }))
+    expect((await screen.findAllByText('storage.confirmPredictionsTitle')).length).toBeGreaterThan(0)
   })
 
   it('saves the full config payload', async () => {

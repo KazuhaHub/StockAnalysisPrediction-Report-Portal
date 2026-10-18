@@ -37,19 +37,26 @@ type cleanupConfig struct {
 	// each revision is stamped once and never touched again.
 	RevisionsEnabled bool
 	RevisionsDays    int
+	// Target F: the forecast-verification ledger (ADR 0029 §8). The only target whose rows cannot be
+	// rebuilt from anything: a report can be re-ingested, an audit line re-derived, a revision
+	// recovered from the body it copied — but a set is the record of what was claimed at a moment,
+	// and the moment is gone. That is why it sits in the danger zone with reports (the UI makes the
+	// admin confirm) even though its predicate is the narrowest of the six.
+	PredictionsEnabled bool
+	PredictionsDays    int
 }
 
 // cleanupTargets selects which targets a pass acts on.
-type cleanupTargets struct{ Batch, Tokens, Reports, Audit, Revisions bool }
+type cleanupTargets struct{ Batch, Tokens, Reports, Audit, Revisions, Predictions bool }
 
 func (t cleanupTargets) any() bool {
-	return t.Batch || t.Tokens || t.Reports || t.Audit || t.Revisions
+	return t.Batch || t.Tokens || t.Reports || t.Audit || t.Revisions || t.Predictions
 }
 
 // scheduledTargets is the set of targets a scheduled pass would act on (those enabled in config).
 func (c cleanupConfig) scheduledTargets() cleanupTargets {
 	return cleanupTargets{Batch: c.BatchEnabled, Tokens: c.TokensEnabled, Reports: c.ReportsEnabled,
-		Audit: c.AuditEnabled, Revisions: c.RevisionsEnabled}
+		Audit: c.AuditEnabled, Revisions: c.RevisionsEnabled, Predictions: c.PredictionsEnabled}
 }
 
 // cleanupResult is the outcome of one pass (also the JSON returned by run/preview and the
@@ -65,6 +72,8 @@ type cleanupResult struct {
 	Reports   int64  `json:"reports"`
 	Audit     int64  `json:"audit"`
 	Revisions int64  `json:"revisions"`
+	// The sixth target (ADR 0029): rows removed across prediction_sets/claims/marks.
+	Predictions int64 `json:"predictions"`
 	// Reclaimed is bytes actually returned to the filesystem, which is the number an admin ran the
 	// pass to change — deleting rows on its own moves neither driver's file size. Driver rides along
 	// so a zero can be explained rather than guessed at: on Postgres nothing is attempted at all
@@ -111,6 +120,9 @@ func (s *Server) cleanupConfigLoad() cleanupConfig {
 		// Ships disabled like every other target: nothing starts deleting on upgrade.
 		RevisionsEnabled: s.st.GetSetting("cleanup_revisions_enabled", "0") == "1",
 		RevisionsDays:    atoi("cleanup_revisions_days", 180),
+		// Ships disabled like every other target: nothing starts deleting on upgrade.
+		PredictionsEnabled: s.st.GetSetting("cleanup_predictions_enabled", "0") == "1",
+		PredictionsDays:    atoi("cleanup_predictions_days", predDefaultPredictionsDays),
 	}
 	if c.BatchDays < minBatchRetentionDays {
 		c.BatchDays = minBatchRetentionDays
@@ -124,6 +136,9 @@ func (s *Server) cleanupConfigLoad() cleanupConfig {
 	if c.RevisionsDays < minRevisionsRetentionDays {
 		c.RevisionsDays = minRevisionsRetentionDays
 	}
+	if c.PredictionsDays < minPredictionsRetentionDays {
+		c.PredictionsDays = minPredictionsRetentionDays
+	}
 	if c.TokensGraceDays < 0 {
 		c.TokensGraceDays = 0
 	}
@@ -135,7 +150,7 @@ func (s *Server) cleanupConfigLoad() cleanupConfig {
 // formatted from system-local time (NOT the panel timezone — a panel/container tz mismatch would
 // otherwise delete up to the offset short of the configured retention). reports compares against a
 // parsed UTC instant, so its cutoff is a UTC time.Time. now must be time.Now().
-func (c cleanupConfig) cutoffs(now time.Time) (batchCut, tokenCut string, reportsCut, auditCut, revisionsCut time.Time) {
+func (c cleanupConfig) cutoffs(now time.Time) (batchCut, tokenCut string, reportsCut, auditCut, revisionsCut, predictionsCut time.Time) {
 	batchCut = now.AddDate(0, 0, -c.BatchDays).Format("2006-01-02 15:04:05")
 	tokenCut = now.AddDate(0, 0, -c.TokensGraceDays).Format("2006-01-02 15:04:05")
 	reportsCut = now.UTC().AddDate(0, 0, -c.ReportsDays)
@@ -146,6 +161,10 @@ func (c cleanupConfig) cutoffs(now time.Time) (batchCut, tokenCut string, report
 	// A UTC instant, and exactly comparable: every saved_at is written by manualInstant, so unlike
 	// reports.sent_at there is no legacy spelling to parse around.
 	revisionsCut = now.UTC().AddDate(0, 0, -c.RevisionsDays)
+	// A UTC instant, compared against prediction_marks.resolved_at, which is written from a UTC
+	// instant. The predicate also requires report_id IS NULL and every mark terminal, so this cutoff
+	// is the least of the three conditions rather than the safety property.
+	predictionsCut = now.UTC().AddDate(0, 0, -c.PredictionsDays)
 	return
 }
 
@@ -192,7 +211,7 @@ func (s *Server) runCleanup(trigger string, dryRun bool, sel cleanupTargets) cle
 
 	start := time.Now()
 	c := s.cleanupConfigLoad()
-	batchCut, tokenCut, reportsCut, auditCut, revisionsCut := c.cutoffs(start)
+	batchCut, tokenCut, reportsCut, auditCut, revisionsCut, predictionsCut := c.cutoffs(start)
 	res := cleanupResult{Trigger: trigger, DryRun: dryRun, OK: true}
 
 	if sel.Batch {
@@ -254,10 +273,22 @@ func (s *Server) runCleanup(trigger string, dryRun bool, sel cleanupTargets) cle
 		res.note(err)
 	}
 
+	if sel.Predictions {
+		var n int64
+		var err error
+		if dryRun {
+			n, err = s.st.CountPredictionsBefore(predictionsCut)
+		} else {
+			n, err = s.st.DeletePredictionsBefore(predictionsCut)
+		}
+		res.Predictions, _ = n, err
+		res.note(err)
+	}
+
 	// After the deletions and only on a real pass: VACUUM rewrites the whole file, so it must see
 	// the freed pages, and a preview must not rewrite anything at all.
 	res.Driver = s.st.driver
-	if !dryRun && res.Batch+res.Tokens+res.Reports+res.Audit+res.Revisions > 0 {
+	if !dryRun && res.Batch+res.Tokens+res.Reports+res.Audit+res.Revisions+res.Predictions > 0 {
 		freed, err := s.st.reclaim()
 		res.Reclaimed = freed
 		res.note(err)
@@ -272,13 +303,14 @@ func (s *Server) runCleanup(trigger string, dryRun bool, sel cleanupTargets) cle
 		// rows evict the one an admin would ever come looking for: the pass that actually deleted
 		// their report. The last-run stamp below is written either way, so "the scheduler is alive
 		// and found nothing" is still on the page; it just is not worth a row a day.
-		deleted := res.Batch + res.Tokens + res.Reports + res.Audit + res.Revisions
+		deleted := res.Batch + res.Tokens + res.Reports + res.Audit + res.Revisions + res.Predictions
 		if !res.OK || deleted > 0 {
 			s.st.InsertCleanupRun(CleanupRun{
 				RanAt: nowStr(), Trigger: trigger, DryRun: false, OK: res.OK, Error: res.Error,
 				BatchDeleted: res.Batch, TokensDeleted: res.Tokens, ReportsDeleted: res.Reports,
 				AuditDeleted: res.Audit, RevisionsDeleted: res.Revisions,
-				BytesReclaimed: res.Reclaimed, DurationMs: res.DurationMs,
+				PredictionsDeleted: res.Predictions,
+				BytesReclaimed:     res.Reclaimed, DurationMs: res.DurationMs,
 			})
 		}
 		if b, err := json.Marshal(res); err == nil {
