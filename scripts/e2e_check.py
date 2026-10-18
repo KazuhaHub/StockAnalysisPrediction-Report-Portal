@@ -421,6 +421,84 @@ check("F", "A duplicate email is refused explicitly", sc == 409, f"{sc}")
 sc, _ = Session().req("POST", "/api/register/verify", {"token": "forged"})
 check("F", "A forged confirmation token is refused", sc != 200, f"{sc}")
 
+# ---------------------------------------------------------------- G. ADR 0029
+print("\nG. Forecast verification (ADR 0029)")
+
+HORIZON = sql("SELECT date(?, '+1 year')", TODAY)[0][0]
+
+
+def prediction_payload(mutate=None):
+    p = {
+        "schema": "predictions.v1",
+        "emitter": {"app": "e2e", "version": "V0", "calculator": "e2e", "decision_schema": "decision.v3.4"},
+        "policy_version": "e2e",
+        "probability_method": "approved_policy_default",
+        "decision_status": "eligible",
+        "decision_quality": "normal",
+        "information_cutoff": TODAY + "T15:00:00+08:00",
+        "baseline": {"price": "8.52", "as_of": TODAY, "source": "company_quote"},
+        "horizon_end": HORIZON,
+        "claims": [
+            {"key": "stance", "kind": "stance", "stance": "long", "target_weight": "0.1000"},
+            {"key": "expected_terminal", "kind": "terminal_value", "price": "9.95", "p_profit": "0.7000"},
+            {"key": "scenario.bull", "kind": "scenario", "label": "bull", "price": "14.00", "probability": "0.2500"},
+            {"key": "scenario.base", "kind": "scenario", "label": "base", "price": "10.00", "probability": "0.4500"},
+            {"key": "scenario.bear", "kind": "scenario", "label": "bear", "price": "6.50", "probability": "0.3000"},
+            {"key": "entry_price", "kind": "entry_price", "price": "8.65"},
+        ],
+    }
+    if mutate:
+        mutate(p)
+    return p
+
+
+def ingest_prediction(symbol, title, payload=None):
+    body = {"symbol": symbol, "date": TODAY, "subtype": "投资决策建议", "title": title,
+            "body_md": "## e2e 预测\n正文"}
+    if payload is not None:
+        body["predictions"] = payload
+    return machine.req("POST", "/api/v1/reports", body, token=TOKEN)
+
+
+sc, r = ingest_prediction("300750", "E2E 有效预测", prediction_payload())
+RID_ACCEPTED = r.get("id")
+check("G", "A valid payload is accepted", sc == 200 and r.get("predictions_status") == "accepted", f"{sc} {r}")
+
+def drop_bear(p):
+    p["claims"] = [c for c in p["claims"] if c.get("label") != "bear"]
+
+
+sc, r = ingest_prediction("300751", "E2E 无效预测", prediction_payload(drop_bear))
+RID_REJECTED = r.get("id")
+check("G", "An invalid payload is rejected, and the report still exists",
+      sc == 200 and r.get("predictions_status") == "rejected" and bool(RID_REJECTED), f"{sc} {r}")
+check("G", "The rejected ingest left an audit row",
+      sql("SELECT COUNT(*) FROM audit_log WHERE action='predictions.reject' AND target_id=?",
+          str(RID_REJECTED))[0][0] == 1)
+check("G", "The rejected ingest still stored the report",
+      sql("SELECT COUNT(*) FROM reports WHERE id=?", RID_REJECTED)[0][0] == 1)
+
+sc, r = ingest_prediction("300752", "E2E 无预测")
+check("G", "A covered rtype with no predictions is absent",
+      sc == 200 and r.get("predictions_status") == "absent", f"{sc} {r}")
+
+sc, sets = machine.req("GET", f"/api/v1/reports/{RID_ACCEPTED}/predictions", token=TOKEN)
+accepted_sets = (sets.get("sets") or []) if isinstance(sets, dict) else []
+check("G", "The machine route returns the accepted set",
+      sc == 200 and len(accepted_sets) >= 1 and accepted_sets[0].get("state") == "accepted",
+      f"{sc} {sets}")
+
+sc, groups = admin.req("GET", "/api/admin/forecast/groups")
+check("G", "An admin reads the group statistics", sc == 200 and groups.get("ok") is True, f"{sc} {groups}")
+sc, _ = ext.req("GET", "/api/admin/forecast/groups")
+check("G", "A non-manager is refused the group statistics", sc == 403, f"{sc}")
+
+sc, settings = admin.req("GET", "/api/admin/forecast")
+check("G", "The evaluator reads its settings", sc == 200 and settings.get("enabled") is False, f"{sc} {settings}")
+sc, _ = admin.req("POST", "/api/admin/forecast", {"enabled": False, "bench": settings.get("bench")})
+check("G", "The settings save round-trips", sc == 200, f"{sc}")
+check("G", "Automatic settling stays off", sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "0")
+
 # ---------------------------------------------------------------- restart
 print("\nE. State survives a restart")
 restart()
