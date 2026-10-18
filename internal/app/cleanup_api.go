@@ -24,31 +24,31 @@ func (s *Server) apiCleanupConfigGet(w http.ResponseWriter, r *http.Request, use
 		}
 	}
 	writeJSON(w, map[string]any{
-		"freq":               c.Freq,
-		"time":               c.Time,
-		"weekday":            c.Weekday,
-		"monthday":           c.Monthday,
-		"batch_enabled":      c.BatchEnabled,
-		"batch_days":         c.BatchDays,
-		"tokens_enabled":     c.TokensEnabled,
-		"tokens_grace_days":  c.TokensGraceDays,
-		"reports_enabled":    c.ReportsEnabled,
-		"reports_days":       c.ReportsDays,
-		"audit_enabled":      c.AuditEnabled,
-		"audit_days":         c.AuditDays,
-		"revisions_enabled":  c.RevisionsEnabled,
-		"revisions_days":     c.RevisionsDays,
-		"revisions_keep":     s.reportRevisionsKeep(),
+		"freq":                c.Freq,
+		"time":                c.Time,
+		"weekday":             c.Weekday,
+		"monthday":            c.Monthday,
+		"batch_enabled":       c.BatchEnabled,
+		"batch_days":          c.BatchDays,
+		"tokens_enabled":      c.TokensEnabled,
+		"tokens_grace_days":   c.TokensGraceDays,
+		"reports_enabled":     c.ReportsEnabled,
+		"reports_days":        c.ReportsDays,
+		"audit_enabled":       c.AuditEnabled,
+		"audit_days":          c.AuditDays,
+		"revisions_enabled":   c.RevisionsEnabled,
+		"revisions_days":      c.RevisionsDays,
+		"revisions_keep":      s.reportRevisionsKeep(),
 		"predictions_enabled": c.PredictionsEnabled,
 		"predictions_days":    c.PredictionsDays,
-		"batch_floor":        minBatchRetentionDays,
-		"reports_floor":      minReportsRetentionDays,
-		"audit_floor":        minAuditRetentionDays,
-		"revisions_floor":    minRevisionsRetentionDays,
-		"predictions_floor":  minPredictionsRetentionDays,
-		"revisions_keep_max": maxReportRevisionsKeep,
-		"last_run_period":    s.st.GetSetting("cleanup_last_run_period", ""),
-		"last_result":        last,
+		"batch_floor":         minBatchRetentionDays,
+		"reports_floor":       minReportsRetentionDays,
+		"audit_floor":         minAuditRetentionDays,
+		"revisions_floor":     minRevisionsRetentionDays,
+		"predictions_floor":   minPredictionsRetentionDays,
+		"revisions_keep_max":  maxReportRevisionsKeep,
+		"last_run_period":     s.st.GetSetting("cleanup_last_run_period", ""),
+		"last_result":         last,
 	})
 }
 
@@ -251,13 +251,22 @@ func (s *Server) apiCleanupUsage(w http.ResponseWriter, r *http.Request, user st
 // ---------- preview / run ----------
 
 // readTargets parses an optional {"targets":[...]} body; an empty/absent list means all targets.
+//
+// Two lists have to agree for a target to be reachable here: cleanupTargets (what a pass can act on)
+// and this switch (what a REQUEST can name). They drifted once — the ledger's field was added to the
+// struct and to scheduledTargets, but not to this switch — and the failure was silent in the worst
+// way: runCleanup only touches a target whose selection bit is set, so a manual clean or preview
+// naming "predictions" deleted nothing, counted nothing and reported success. An admin pressing the
+// button got a zero and no error. TestReadTargetsCoversEveryTarget in cleanup_test.go now walks the
+// struct so the next field added cannot repeat it.
 func (s *Server) readTargets(r *http.Request) cleanupTargets {
 	var in struct {
 		Targets []string `json:"targets"`
 	}
 	_ = readJSON(r, &in)
 	if len(in.Targets) == 0 {
-		return cleanupTargets{Batch: true, Tokens: true, Reports: true, Audit: true, Revisions: true}
+		return cleanupTargets{Batch: true, Tokens: true, Reports: true, Audit: true, Revisions: true,
+			Predictions: true}
 	}
 	var t cleanupTargets
 	for _, x := range in.Targets {
@@ -272,6 +281,8 @@ func (s *Server) readTargets(r *http.Request) cleanupTargets {
 			t.Reports = true
 		case "revisions":
 			t.Revisions = true
+		case "predictions":
+			t.Predictions = true
 		}
 	}
 	return t

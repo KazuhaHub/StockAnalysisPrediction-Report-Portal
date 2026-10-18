@@ -310,7 +310,7 @@ func (s *Server) runCleanup(trigger string, dryRun bool, sel cleanupTargets) cle
 				BatchDeleted: res.Batch, TokensDeleted: res.Tokens, ReportsDeleted: res.Reports,
 				AuditDeleted: res.Audit, RevisionsDeleted: res.Revisions,
 				PredictionsDeleted: res.Predictions,
-				BytesReclaimed: res.Reclaimed, DurationMs: res.DurationMs,
+				BytesReclaimed:     res.Reclaimed, DurationMs: res.DurationMs,
 			})
 		}
 		if b, err := json.Marshal(res); err == nil {
