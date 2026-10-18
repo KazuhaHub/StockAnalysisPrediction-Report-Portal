@@ -42,16 +42,16 @@ const LEVEL_ICON: Record<AnnouncementLevel, typeof InfoCircleFilled> = {
   error: CloseCircleFilled,
 }
 
-// Severity order, so a band holding several announcements can be tinted by the loudest rather than
-// by whichever the operator happened to drag to the top.
-const LEVEL_RANK: Record<AnnouncementLevel, number> = { success: 0, notice: 1, warning: 2, error: 3 }
-
-// antd token names per level, for the strip. The alert stack gets these from antd itself.
-const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string }> = {
-  notice: { bg: 'colorInfoBg', fg: 'colorInfo' },
-  success: { bg: 'colorSuccessBg', fg: 'colorSuccess' },
-  warning: { bg: 'colorWarningBg', fg: 'colorWarning' },
-  error: { bg: 'colorErrorBg', fg: 'colorError' },
+// antd token names per level, for the strip. The alert stack gets these from antd itself. A strip
+// announcement is painted entirely from ITS OWN level — background, icon, close button and body
+// text — and the band itself is neutral, so a blue notice can never land on the loudest row's amber.
+// That mismatch (band tinted by the loudest, icon by its own level) is what made a mixed-level strip
+// read as if the icon had been dropped onto the wrong row.
+const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string; text: string }> = {
+  notice: { bg: 'colorInfoBg', fg: 'colorInfo', text: 'colorInfoText' },
+  success: { bg: 'colorSuccessBg', fg: 'colorSuccess', text: 'colorSuccessText' },
+  warning: { bg: 'colorWarningBg', fg: 'colorWarning', text: 'colorWarningText' },
+  error: { bg: 'colorErrorBg', fg: 'colorError', text: 'colorErrorText' },
 }
 
 // How many banners stack before the rest fold behind a counter. A phone has room for fewer, and an
@@ -147,11 +147,16 @@ export default function SiteAnnouncement({ style, compact = false }: { style?: C
 /**
  * The site-wide announcement strip: app-scoped announcements, on every page.
  *
+ * One self-contained block per announcement, each painted with its own level's colour, on a neutral
+ * band. The band used to be tinted by the loudest announcement while each row's icon kept its own
+ * level's colour, so a blue notice sitting under an amber warning looked like a mispainted icon. Per
+ * row is also the honest reading of the data: an announcement has a level, not the band.
+ *
  * Collapsed to one line by design. This band follows the reader everywhere, so it is chrome and has
  * to cost what chrome costs — three stacked alerts would be ~150px of every screen in the portal,
- * against ~36px here. Clicking it expands the full list in place rather than opening a popover
- * (360px of floating panel is unusable on a 375px phone) or a drawer (a scrim over the whole app to
- * read two sentences).
+ * against ~36px here. Clicking the toggle expands the full list in place rather than opening a
+ * popover (360px of floating panel is unusable on a 375px phone) or a drawer (a scrim over the whole
+ * app to read two sentences).
  */
 export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boolean; maxWidth?: number | string }) {
   const { t } = useTranslation()
@@ -163,10 +168,6 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
 
   if (!open.length) return null
   const palette = token as unknown as Record<string, string>
-  // The band is tinted by the loudest announcement in it, not by whichever happens to be first: a
-  // stack whose one incident notice sits third should not read as a calm blue bar.
-  const loudest = open.reduce((worst, a) => (LEVEL_RANK[a.level] > LEVEL_RANK[worst.level] ? a : worst), open[0])
-  const tokens = LEVEL_TOKENS[loudest.level]
   // Folded is opt-in and off by default. It shows one line, and while folded it is the ONLY place
   // the lead appears — the previous version kept that line visible after expanding, so the first
   // announcement was drawn twice and the band looked broken.
@@ -175,7 +176,7 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
   const hidden = open.length - shown.length
 
   return (
-    <div className="rp-announce-strip" style={{ background: palette[tokens.bg] }}>
+    <div className="rp-announce-strip">
       <div
         style={{
           maxWidth,
@@ -188,16 +189,23 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
       >
         {shown.map((a) => {
           const Icon = LEVEL_ICON[a.level]
+          const tokens = LEVEL_TOKENS[a.level]
           return (
-            <div key={a.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <Icon
-                style={{
-                  color: palette[LEVEL_TOKENS[a.level].fg],
-                  fontSize: 15,
-                  flexShrink: 0,
-                  marginTop: 4,
-                }}
-              />
+            <div
+              key={a.id}
+              className="rp-announce-item"
+              style={{
+                // align-items:center puts the icon and the close button against the CENTRE of the
+                // title+body block, instead of the close floating up at the first line.
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '7px 10px',
+                borderRadius: 8,
+                background: palette[tokens.bg],
+              }}
+            >
+              <Icon style={{ color: palette[tokens.fg], fontSize: 15, flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 {a.title && (
                   <div
@@ -212,7 +220,7 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
                   </div>
                 )}
                 {a.content && !folded && (
-                  <Typography.Text type="secondary" style={{ whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+                  <Typography.Text style={{ color: palette[tokens.text], whiteSpace: 'pre-line', lineHeight: 1.5 }}>
                     {a.content}
                   </Typography.Text>
                 )}
@@ -237,7 +245,7 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
                   aria-label={t('announcement.close')}
                   icon={<CloseOutlined />}
                   onClick={() => close(a)}
-                  style={{ flexShrink: 0 }}
+                  style={{ flexShrink: 0, color: palette[tokens.fg], opacity: 0.75 }}
                 />
               )}
             </div>

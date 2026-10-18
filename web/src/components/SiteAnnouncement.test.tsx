@@ -145,6 +145,26 @@ describe('SiteAnnouncement', () => {
     expect(screen.queryByRole('button', { expanded: false })).toBeNull()
   })
 
+  // The band used to be tinted by the loudest announcement while each row's icon kept its own
+  // level's colour, so a blue notice under an amber warning looked like a misplaced icon. Each row
+  // now carries its own background, and the band itself is neutral (styled in index.css).
+  it('paints each strip row with its own level colour, not the loudest', async () => {
+    feed.items = [
+      announcement({ id: 1, level: 'notice', title: '注意', scope: 'app' }),
+      announcement({ id: 2, level: 'warning', title: '警告', scope: 'app' }),
+    ]
+    const { container } = renderAt('/queue')
+    await screen.findByText('警告')
+
+    const band = container.querySelector<HTMLElement>('.rp-announce-strip')!
+    expect(band.getAttribute('style') || '').not.toMatch(/background/)
+    const rows = container.querySelectorAll<HTMLElement>('.rp-announce-item')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].style.background).toBeTruthy()
+    expect(rows[1].style.background).toBeTruthy()
+    expect(rows[0].style.background).not.toBe(rows[1].style.background)
+  })
+
   // The bug this replaced: the folded lead line stayed visible after expanding, so the first
   // announcement was drawn twice and the band looked broken.
   it('never draws the lead twice when the site-wide strip is folded and then expanded', async () => {

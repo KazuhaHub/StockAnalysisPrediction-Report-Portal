@@ -239,10 +239,17 @@ the exclusions below — a `/chat`-scoped row would render on the mobile chat pa
 
 **The two scopes are drawn differently, and that is the point of having two.** A home-scoped
 announcement gets the roomy alert stack, on the page a reader visits deliberately. An app-scoped one
-follows the reader everywhere, so it gets a tinted band under the header — one row per announcement,
-level icon, title, body, an optional close — tinted by the **loudest** announcement in it rather
-than by whichever the operator dragged to the top, so a stack whose one incident notice sits third
-does not read as a calm blue bar.
+follows the reader everywhere, so it gets a band under the header — one row per announcement, level
+icon, title, body, an optional close.
+
+**The band is neutral and each row is painted with its own level colour.** This reverses the original
+"tint the whole band by the loudest announcement" rule, which does not survive a mixed-level strip:
+the band took the loudest row's background while each row's icon kept its own level's colour, so a
+blue notice sitting under an amber warning read as a mispainted icon rather than as two independent
+messages. Per row is also the honest reading of the data — an announcement has a level, the band does
+not — and it keeps the icon, the close button and the body text of a row on one palette instead of
+three. The cost is the old signal "this band contains something loud"; the loud things carry their
+own colour and are no longer flattened into the band's, which is the trade the feedback asked for.
 
 **Neither band folds by default, and that reverses an earlier decision here.** The strip originally
 collapsed to a single line on the argument that a band on every page is chrome and has to cost what

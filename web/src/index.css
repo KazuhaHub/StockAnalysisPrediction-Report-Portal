@@ -1129,6 +1129,13 @@ body {
 .rp-announcement.ant-alert-with-description .ant-alert-message {
   margin-bottom: 2px;
 }
+/* The site-wide strip is a neutral band — the same surface as the header it hangs under — and each
+   announcement paints its own row with its own level colour (see SiteAnnouncement.tsx), instead of
+   the band taking the loudest row's tint. */
+.rp-announce-strip {
+  background: var(--ant-color-bg-container, #fff);
+  border-bottom: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.2));
+}
 /* The announcement popup should always zoom in from the top, not from wherever the user
    last clicked — antd defaults a Modal's transform-origin to the click point, so returning
    home via the top-left "back" button flew the popup in from the corner. */
