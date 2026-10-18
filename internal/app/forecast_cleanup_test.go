@@ -114,7 +114,7 @@ func TestCleanupPredictionPredicateMatchesAnOrphanedTerminalSet(t *testing.T) {
 	}
 	// And the month is marked purged, so the page can say so rather than recompute it as empty.
 	purged := st.PurgedPredictionMonths()
-	if _, ok := purged[[2]string{"投资决策建议", "2026-10"}]; !ok {
+	if _, ok := purged[[2]string{predictionTestRtype, "2026-10"}]; !ok {
 		t.Errorf("no purge marker was written; got %v", purged)
 	}
 }
@@ -170,7 +170,7 @@ func TestCleanupPredictionsAgesSetsWithNoMarks(t *testing.T) {
 	// Two mark-less sets in one month, aged by made_on. Both orphaned, both in the same cohort.
 	for _, madeOn := range []string{"2022-03-04", "2022-03-19"} {
 		if _, err := st.exec(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
-			VALUES(NULL,'投资决策建议',?,?,?,?,?)`, madeOn+"T14:40:12Z", madeOn, "2022-03", predStateRejected, "sha-"+madeOn); err != nil {
+			VALUES(NULL,'"+predictionTestRtype+"',?,?,?,?,?)`, madeOn+"T14:40:12Z", madeOn, "2022-03", predStateRejected, "sha-"+madeOn); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -180,7 +180,7 @@ func TestCleanupPredictionsAgesSetsWithNoMarks(t *testing.T) {
 
 	// A mark-less set from last week is NOT eligible: purging its report must not make it fair game.
 	if _, err := st.exec(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
-		VALUES(NULL,'投资决策建议',?,?,?,?,?)`,
+		VALUES(NULL,'"+predictionTestRtype+"',?,?,?,?,?)`,
 		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format("2006-01-02"),
 		time.Now().UTC().Format("2006-01"), predStateAbsent, "sha-fresh"); err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestCleanupPredictionsPurgeMarkerIsWhatMakesItVisible(t *testing.T) {
 		t.Fatalf("purge markers = %v, want exactly one month", purged)
 	}
 	for month, at := range purged {
-		if month[0] != "投资决策建议" || month[1] == "" {
+		if month[0] != predictionTestRtype || month[1] == "" {
 			t.Errorf("marker names %v, want the (rtype, cohort) of the purged month", month)
 		}
 		if at == "" {
@@ -425,7 +425,7 @@ func TestPostgresCleanupPredictionsPredicate(t *testing.T) {
 func seedFinishedPredictionSetForKey(t *testing.T, st *Store, cohort string, resolvedAt string) int64 {
 	t.Helper()
 	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
-		VALUES(NULL,'投资决策建议',?,?,?,?,?)`, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, "sha-"+cohort+"-"+resolvedAt)
+		VALUES(NULL,'"+predictionTestRtype+"',?,?,?,?,?)`, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, "sha-"+cohort+"-"+resolvedAt)
 	if err != nil {
 		t.Fatalf("seed set for %s: %v", cohort, err)
 	}
@@ -444,7 +444,7 @@ func seedPredictionSetForKey(t *testing.T, st *Store, cohort string, reportID sq
 		v = reportID.Int64
 	}
 	res, err := st.insertID(`INSERT INTO prediction_sets(report_id, rtype, made_at, made_on, cohort, state, payload_sha256)
-		VALUES(?,'投资决策建议',?,?,?,?,?)`, v, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, payloadSHA)
+		VALUES(?,'"+predictionTestRtype+"',?,?,?,?,?)`, v, cohort+"-05T14:40:12Z", cohort+"-05", cohort, predStateAccepted, payloadSHA)
 	if err != nil {
 		t.Fatalf("seed set for %s: %v", cohort, err)
 	}

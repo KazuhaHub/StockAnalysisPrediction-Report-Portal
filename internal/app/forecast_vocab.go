@@ -15,6 +15,28 @@ package app
 // sub-reports are excluded because they feed 1-6-4 and scoring them would count one view twice.
 var predictionRtypes = map[string]bool{"投资决策建议": true}
 
+// predictionTestRtype is the covered report type the tests seed their fake sets with. It is a
+// variable rather than a literal in each test so that the vocabulary above has exactly one
+// declaration: if the covered set ever changes, the tests fail to compile instead of quietly seeding
+// a type the ledger no longer covers and passing against a filter nothing exercises.
+//
+// Test-only, and named so. The classifier (PR 2) is what reads predictionRtypes in production; until
+// it lands, this is the reader that keeps the map from being dead weight — which is why the whole
+// vocabulary lives in one file rather than being scattered into the step that first needs a value.
+var predictionTestRtype = predictionCoveredRtype()
+
+// predictionCoveredRtype returns the single covered rtype, failing loudly if the set stopped being a
+// singleton. Test-only.
+func predictionCoveredRtype() string {
+	if len(predictionRtypes) != 1 {
+		panic("forecast: the covered rtype set is no longer a singleton; update predictionTestRtype")
+	}
+	for rt := range predictionRtypes {
+		return rt
+	}
+	return ""
+}
+
 // predictionMigrationID is the step that declares the ledger's tables. It is 0004 rather than the
 // implementation plan's 0002 because 0002 (users.last_used_version) and 0003 (user_sessions,
 // login_history) were already released; the migration list is append-only.
