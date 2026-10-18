@@ -333,8 +333,84 @@ The nulled-not-deleted shape is also what makes the id-reuse argument true rathe
 rows; `deleteReportChunk`'s doc comment does not repeat it, so **PR 1 adds it there**, naming
 `prediction_sets` and saying it is nulled rather than deleted and why.
 
-**No ledger cleanup target exists in v1.** The storage console's usage list gains a `predictions`
-category with `eligible = 0` (`apiCleanupUsage`, `cleanup_api.go:172`); `cleanupTargets` is unchanged.
+#### The ledger does have a retention period, and the first draft of this section was wrong
+
+An earlier version of this ADR ended §8 by saying the ledger had **no cleanup target in v1** and the
+storage console listed it with `eligible = 0`. That is overturned, and the reasoning that produced it
+is worth recording because it looked sound.
+
+What the argument above actually establishes is that **the ledger must not inherit the report's
+lifetime** — a set outlives its report, which is why the link is nulled rather than cascaded. The
+first draft extended that into "the ledger therefore cannot have a retention period at all", and the
+extension does not follow. These are different claims:
+
+- *A set must not be deleted on its report's schedule.* True, and it is what the nulling is for.
+- *A set must never be deleted.* Not the same statement, and not one anything here defends.
+
+The owner asked for the second to be dropped, and the shape of the target is what makes it safe. It is
+the sixth entry in ADR 0017's cleanup console, and it inherits that ADR's rules: **it ships disabled**,
+it is gated on `PermManage`, and it is a **danger-zone** target in the UI requiring a live-count
+confirmation.
+
+**The predicate does the protecting, not the day count.** A month is eligible only when every one of
+these holds for every set in it:
+
+| Condition | What it rules out |
+|---|---|
+| `report_id IS NULL` | Every set whose report still exists, however old it is. This is why the target can never touch a live report. |
+| No mark that is `pending` or `refused` | Every set whose answer is still coming. An unsettled set is never eligible, however long it has been unsettled. |
+| `settled < cutoff` | Where `settled` is the date the set became final |
+
+The floor is **180 days** (`minPredictionsRetentionDays`) against the reports target's 365, and that
+inversion is deliberate rather than a loosening: **the safety of this target is structural, not
+numeric.** The first two conditions are properties of the ledger's shape, and no number an operator
+types can weaken them. What the floor actually defends is the one thing the predicate cannot — an
+operator setting the days to 0 and emptying the ledger in a single pass. The reports floor has to be
+long because a report's age *is* its protection; this target's age is not.
+
+**The unit of deletion is a whole month of one report type, not a set.** This is the load-bearing
+detail, and it exists because per-set deletion breaks two things:
+
+- **A mature cell's immutability** (§9). Removing some sets of a closed month moves that month's `n`
+  and every metric on it, while the page keeps showing the same label. A number that silently changed
+  is worse than one that disappeared.
+- **Membership (D4).** Membership is "the earliest `accepted` set per `(symbol, group)` decides". Delete
+  only that set and the next-earliest rerun is **promoted** to member — exactly the
+  selection-by-rerun D4 exists to forbid.
+
+So a month is purged only when every set in it is eligible, and the pass writes a marker
+(`prediction_purges`) recording the `(rtype, cohort)` and the date. The monthly page shows a purged
+month as **purged on `<date>`** rather than recomputing it, because a purged month that rendered as a
+month with no predictions would be a different and far better-looking claim. An exploratory range that
+covers a purged month excludes that month and says so.
+
+**No result snapshot.** The numbers disappear as a unit and the page says why. Freezing them first
+would need a table of its own, which is a schema-shape decision; the owner's call for v1 is not to have
+one.
+
+**Two set shapes had to be given an age.** `absent`, `rejected` and `backtest` sets carry no marks at
+all, so "every mark is terminal" is vacuously true and `MAX(resolved_at)` is NULL. Compared against a
+cutoff, such rows are either never eligible (growing for ever) or instantly eligible the moment their
+report is purged. The age is therefore `substr(COALESCE(MAX(resolved_at), made_on), 1, 10)`: a set's own
+age, so purging its report never makes it immediately fair game. The truncation is what makes an
+RFC3339 instant comparable with a civil-date cutoff at all. This also fixes the second shape —
+`accepted` sets whose every mark ended `refused_final` do carry marks, and §6.3 has the evaluator stamp
+`resolved_at` whenever a mark becomes terminal, so those age normally instead of being stuck for ever.
+
+**Two interactions that have to be stated rather than discovered:**
+
+- **This target depends on the reports target.** The predicate requires an already-purged report, so
+  with reports cleanup off it can never match anything. The storage page says so in the target's hint;
+  a target that silently never fires reads as broken.
+- **The mature-cell cache must be invalidated on a purge.** A cached mature cell for a month that a
+  pass just removed is stale by definition. The purge writes its marker in the same transaction, so the
+  cache is keyed on it and a purged month is served as purged.
+
+**And the reason it is a danger-zone target is not "a report can be re-ingested".** That was this
+section's earlier wording and it is wrong twice over: a started run is never re-run (the money
+invariant), and the report body is not reproducible from its row. The honest reason is that **a set
+records what was claimed at a moment that has passed, and that cannot be rebuilt at all** — which makes
+this target harder to undo than the reports target rather than easier.
 
 ### 9. What is quantified, and the four gates in front of it
 

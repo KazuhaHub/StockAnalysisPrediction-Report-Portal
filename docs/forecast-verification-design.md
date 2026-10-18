@@ -316,7 +316,9 @@ transaction, and the change lands in the same commit that adds the tables. Sets,
 survive, and a later report reusing an id inherits nothing.
 
 **Storage.** The storage console's usage list (`cleanup_api.go:195-218`) gains a
-`predictions` category. No ledger cleanup target exists in v1; that is stated in the ADR.
+`predictions` category. The ledger also gets its own retention target (the sixth; see ADR 0029 §8), which
+ships disabled and deletes a whole month at a time — added after review, and the ADR records why the
+original "no cleanup target in v1" reasoning was wrong.
 
 **Size bound.** Payloads are capped at 64 KiB per set. At about 100 reports a month that is
 ≤ 6.4 MB a month in the worst case, and typically about 2 KB per set.
@@ -582,7 +584,7 @@ There is no backfill.
 - **D3. Invalid predictions.** Proposed: keep the report, write a `rejected` set, an audit row and
   a webhook.
 - **D4. Membership.** Proposed: the earliest accepted set per `(symbol, group)` decides; if it is degraded or `mismatch`, the symbol is excluded, never replaced by a rerun.
-- **D5. Purge.** Proposed: the ledger outlives reports, has no cleanup target in v1, and shows in
+- **D5. Purge.** Proposed: the ledger outlives reports, has its own off-by-default retention target, and shows in
   the usage list.
 - **D6. Monthly page.** Settled by §7: a core page, manager only. The page has a monthly tab and a
   custom-range tab (§8.5), and is named 预测验证 (§1.1). Both are settled by the owner on 2026-10-17.
@@ -612,7 +614,7 @@ There is no backfill.
 | 12 | `probability_method` vocabulary was wrong | Real values; exclusion keyed on `approved_policy_default`; transform recorded. |
 | 13 | P-values were invalid (repeats, asymmetry, multiplicity) | One member per `(symbol, cohort)`, label permutation, BH, n ≥ 30. |
 | 14 | Coverage drifted after purge | Every covered ingest writes a set row (`absent` / `rejected` / …). |
-| 15 | The ledger had no storage path, and its payload was unbounded | 64 KiB cap; usage category; "no cleanup target in v1" stated. |
+| 15 | The ledger had no storage path, and its payload was unbounded | 64 KiB cap; usage category; a cleanup target with its own predicate (revised after review — the first version said there was none, see ADR 0029 §8). |
 | 16 | Timezone not pinned (panel tz falls back to UTC in the image) | `Asia/Shanghai` throughout, stored per set. |
 | 17 | 200xxx B-shares passed the symbol check | Refused explicitly. |
 | 18 | ADR 0029's supersede/withdrawal rules were dropped silently | Listed as overturned with reasons (§2). |

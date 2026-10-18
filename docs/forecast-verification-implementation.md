@@ -258,7 +258,8 @@ deleted**, and why.
 ### 2.4 Storage console
 
 In `cleanup_api.go:172` `apiCleanupUsage`, add a category `predictions`: rows and bytes across the
-three tables; `eligible = 0`, because there is no cleanup target in v1. Add i18n
+three tables; `eligible` is the target's own predicate count. The ledger is the sixth cleanup target
+(ADR 0029 §8), off by default. Add i18n
 `storage.cat.predictions`. There is no change to `cleanupTargets`.
 
 ### 2.5 PR 1 tests
