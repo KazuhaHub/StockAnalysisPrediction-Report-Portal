@@ -75,6 +75,17 @@ func (s *Server) v1QueryPredictions(w http.ResponseWriter, r *http.Request) {
 		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
 		return
 	}
+	s.serveQueryPredictions(w, r, s.queryScope(r))
+}
+
+// apiQueryPredictions is the browser twin, for the reading page's "other predictions of this
+// stock" list. The SPA never calls /api/v1: that surface is classed authBearer, and its cookie
+// admission (canQuery) is not a property the session policy covers.
+func (s *Server) apiQueryPredictions(w http.ResponseWriter, r *http.Request, user string) {
+	s.serveQueryPredictions(w, r, s.viewerScope(user))
+}
+
+func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, sc *ownerScope) {
 	q := r.URL.Query()
 	f := PredictionFilter{
 		Symbol: strings.TrimSpace(q.Get("symbol")),
@@ -95,7 +106,7 @@ func (s *Server) v1QueryPredictions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
-	sets, err := s.st.QueryPredictionSets(f, s.queryScope(r))
+	sets, err := s.st.QueryPredictionSets(f, sc)
 	if err != nil {
 		v1err(w, http.StatusInternalServerError, "db_error", "database error")
 		return

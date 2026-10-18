@@ -197,6 +197,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// is classed authBearer, so it sits outside sessionRoutes() and no whole-portal session policy
 	// covers it. Same handler body, same scope rules.
 	s.session(mux, "GET /api/report/{id}/predictions", s.apiReportPredictions)
+	// The reading page asks for the symbol's other sets. Session-scoped, because the SPA must not
+	// use /api/v1 and the viewer scope is what a browser read is gated by.
+	s.session(mux, "GET /api/predictions", s.apiQueryPredictions)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.
