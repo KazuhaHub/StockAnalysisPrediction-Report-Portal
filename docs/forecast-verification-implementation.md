@@ -9,9 +9,10 @@ Where the two disagree, stop and ask the owner; do not pick one.
 This revision folds in an adversarial review of the first version against the code (25 findings;
 §12 lists them).
 
-A static UI mock, `forecast-verification-demo.html`, was handed over alongside this document (it
-lives outside the repo). Treat it as a layout sketch, not a spec: where it and this document differ,
-this document wins.
+A static UI mock, [forecast-verification-demo.html](forecast-verification-demo.html), sits next
+to this document. Open it in a browser. Its monthly page uses made-up numbers, and its report
+section uses real prices for one 2026-09-17 report. Treat it as a layout sketch, not a spec: where
+it and this document differ, this document wins.
 
 ---
 

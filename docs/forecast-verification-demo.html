@@ -1,0 +1,263 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>预测验证界面演示</title>
+<style>
+:root{--bg:#f5f5f5;--card:#fff;--fg:rgba(0,0,0,.88);--fg2:rgba(0,0,0,.65);--fg3:rgba(0,0,0,.45);--line:#f0f0f0;--line2:#d9d9d9;--pri:#1677ff;--pri-bg:#e6f4ff;--ok:#389e0d;--ok-bg:#f6ffed;--bad:#cf1322;--bad-bg:#fff1f0;--warn:#d46b08;--warn-bg:#fff7e6;--mut-bg:#fafafa;--up:#cf1322;--dn:#389e0d;--ev:#d46b08;--hl:rgba(22,119,255,.06)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#000;--card:#141414;--fg:rgba(255,255,255,.85);--fg2:rgba(255,255,255,.65);--fg3:rgba(255,255,255,.45);--line:#303030;--line2:#424242;--pri:#1668dc;--pri-bg:#111a2c;--ok:#49aa19;--ok-bg:#162312;--bad:#dc4446;--bad-bg:#2a1215;--warn:#d89614;--warn-bg:#2b2111;--mut-bg:#1f1f1f;--up:#dc4446;--dn:#49aa19;--ev:#d89614;--hl:rgba(22,104,220,.12)}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5715 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI","Noto Sans SC",sans-serif}
+a{color:var(--pri);text-decoration:none;cursor:pointer}
+.demo{background:repeating-linear-gradient(45deg,var(--warn-bg),var(--warn-bg) 10px,var(--card) 10px,var(--card) 20px);border-bottom:1px solid var(--line2);padding:8px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
+.demo b{color:var(--warn)}.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:var(--card)}.seg button{font:inherit;border:0;background:none;color:var(--fg);padding:4px 14px;cursor:pointer}.seg button+button{border-left:1px solid var(--line2)}.seg button.on{background:var(--pri);color:#fff}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 20px;min-height:64px;flex-wrap:wrap}
+.logo{font-size:18px;font-weight:700;display:flex;gap:8px;align-items:center}.logo i{width:22px;height:22px;border-radius:6px;background:var(--pri);display:inline-block}
+.search{flex:1;max-width:420px;border:1px solid var(--line2);border-radius:8px;padding:4px 11px;color:var(--fg3)}
+.hdr-r{margin-left:auto;display:flex;gap:10px;align-items:center}.btn{font:inherit;border:1px solid var(--line2);background:var(--card);color:var(--fg);border-radius:8px;padding:4px 15px;cursor:pointer}.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.avatar{width:32px;height:32px;border-radius:50%;background:#87d068;color:#fff;display:grid;place-items:center;font-weight:600}
+main{max-width:1240px;margin:0 auto;padding:16px 20px 60px}.crumb{color:var(--fg3);margin:4px 0 12px}.crumb a{color:var(--fg3)}.crumb span{color:var(--fg)}
+h1{font-size:20px;margin:0}h3{font-size:16px;margin:0 0 12px}.sub{color:var(--fg3);font-size:13px}
+.card{background:var(--card);border-radius:8px;border:1px solid var(--line);padding:20px 24px;margin-bottom:16px}
+.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:14px 0 4px}.sel{border:1px solid var(--line2);border-radius:8px;padding:4px 11px;background:var(--card);min-width:120px;display:inline-flex;justify-content:space-between;gap:8px}.sel::after{content:"⌄";color:var(--fg3)}
+.lbl{color:var(--fg3);font-size:13px}
+.alert{background:var(--pri-bg);border:1px solid color-mix(in srgb,var(--pri) 30%,transparent);border-radius:8px;padding:9px 14px;font-size:13px;color:var(--fg2);margin:12px 0}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th{font-weight:600;color:var(--fg);background:var(--mut-bg);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap}td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.mx td.cell{padding:6px;min-width:128px}.cbox{border-radius:6px;padding:8px 10px;height:68px;display:flex;flex-direction:column;justify-content:center;cursor:default}
+.cbox.m{cursor:pointer;border:1px solid transparent}.cbox.m:hover{border-color:var(--pri)}.cbox .v{font-size:18px;font-weight:650}.cbox .s{font-size:11.5px;color:var(--fg3)}
+.cbox.p{background:var(--mut-bg);color:var(--fg3);font-size:12px}.prog{height:4px;background:var(--line2);border-radius:2px;margin-top:6px}.prog i{display:block;height:100%;background:var(--pri);border-radius:2px;opacity:.6}
+.cbox.o{background:var(--mut-bg);color:var(--fg3);font-size:12px;border:1px dashed var(--line2)}
+.cov{display:flex;height:8px;border-radius:4px;overflow:hidden;width:150px;background:var(--line)}.cov i{display:block;height:100%}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg3);margin-top:10px}.legend span{display:inline-flex;gap:5px;align-items:center}.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+.tag{display:inline-block;font-size:12px;line-height:20px;padding:0 7px;border-radius:4px;border:1px solid var(--line2);background:var(--mut-bg);color:var(--fg2);margin-right:6px}
+.tag.ok{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}.tag.bad{color:var(--bad);background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 35%,transparent)}.tag.blue{color:var(--pri);background:var(--pri-bg);border-color:color-mix(in srgb,var(--pri) 35%,transparent)}.tag.warn{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+.drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:none}.drawer{position:fixed;top:0;right:0;bottom:0;width:min(640px,100%);background:var(--card);z-index:21;transform:translateX(100%);transition:transform .25s;display:flex;flex-direction:column}
+.drawer.open{transform:none}.drawer-mask.open{display:block}.dh{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.db{padding:16px 24px;overflow:auto}
+.x{border:0;background:none;font-size:20px;color:var(--fg3);cursor:pointer}
+.pos{color:var(--up)}.neg{color:var(--dn)}.muted{color:var(--fg3)}
+.tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:4px 0 16px}.tabs div{padding:10px 0;color:var(--fg2);cursor:pointer}.tabs .on{color:var(--pri);border-bottom:2px solid var(--pri);font-weight:500}
+.grid2{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13.5px}.kv .k{color:var(--fg3)}
+svg text{font-family:inherit}.chart text{fill:var(--fg3);font-size:11px;paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}
+.band{position:relative;height:46px;margin:6px 0 2px}.band .bar{position:absolute;top:18px;height:10px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--dn) 45%,transparent),color-mix(in srgb,var(--pri) 35%,transparent),color-mix(in srgb,var(--up) 45%,transparent))}
+.band .pt{position:absolute;top:0;transform:translateX(-50%);font-size:11px;color:var(--fg2);white-space:nowrap;text-align:center}.band .pt::after{content:"";display:block;width:1px;height:20px;background:var(--fg3);margin:2px auto 0}
+.band .cur{position:absolute;top:14px;width:3px;height:18px;background:var(--fg);border-radius:2px;transform:translateX(-50%)}
+.steps{display:flex;gap:0;margin:4px 0 4px;flex-wrap:wrap}.step{flex:1;min-width:120px;position:relative;padding-top:18px;font-size:12.5px}.step::before{content:"";position:absolute;top:6px;left:0;right:0;height:2px;background:var(--line2)}.step.done::before{background:var(--pri)}.step i{position:absolute;top:1px;left:0;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--line2)}.step.done i{border-color:var(--pri);background:var(--pri)}
+pre{background:var(--mut-bg);border-radius:6px;padding:12px;font-size:12px;overflow:auto;margin:8px 0 0}
+details summary{cursor:pointer;color:var(--pri)}
+.view{display:none}.view.on{display:block}
+</style></head><body>
+<div class="demo"><b>界面演示（不是真实功能）</b><span>月度页为模拟数据，假设功能已上线 8 个月（今天 = 2027-06-20）；单份报告页使用瑞芯微 2026-09-17 报告的真实行情。</span>
+<span class="seg"><button data-v="cohort" class="on">预测验证（管理）</button><button data-v="report">单份报告 · 预测验证</button></span></div>
+<header><div class="logo"><i></i>研报门户</div><div class="search">搜索股票代码 / 名称 / 报告</div>
+<div class="hdr-r"><button class="btn pri">▶ 运行分析</button><button class="btn">队列</button><button class="btn">管理</button><div class="avatar">K</div></div></header>
+
+<main>
+<!-- ======================= cohort view ======================= -->
+<section class="view on" id="v-cohort">
+<div class="crumb"><a>管理</a> / <a>内容</a> / <span>预测验证</span></div>
+<div class="card">
+ <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
+  <div><h1>预测验证</h1><div class="sub">报告当时的结构化预测 vs 之后的真实走势。每组只在检查点全部到期后才出数字。</div></div>
+  <div style="display:flex;gap:8px"><button class="btn">导出 CSV</button><button class="btn">评估设置</button></div>
+ </div>
+ <div class="tabs" style="margin-top:14px" id="modeTabs"><div class="on" data-mode="month">按月</div><div data-mode="custom">自定义区间</div></div>
+ <div class="toolbar">
+  <span class="lbl">报告类型</span><span class="sel">投资决策建议</span>
+  <span class="lbl">基准</span><span class="sel">中证1000</span>
+  <span id="monthRange"><span class="lbl">区间</span> <span class="sel">2026-11 ～ 2027-06（全部）</span></span>
+  <span id="customRange" style="display:none"><span class="lbl">收到日期</span> <input type="date" id="from" value="2026-12-10" class="sel" style="min-width:0"> ～ <input type="date" id="to" value="2027-04-25" class="sel" style="min-width:0">
+   <span class="lbl" style="margin-left:8px">分组</span> <span class="seg" id="groupSeg"><button data-g="week">周</button><button data-g="month" class="on">月</button><button data-g="quarter">季</button><button data-g="all">整段</button></span></span>
+  <span class="lbl" style="margin-left:8px">指标</span>
+  <span class="seg" id="metricSeg"><button data-m="spread" class="on">多空价差</button><button data-m="ic">排序 IC</button><button data-m="hit">方向命中</button><button data-m="fill">买入价成交</button></span>
+ </div>
+ <div class="alert" id="exploreBanner" style="display:none;background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 40%,transparent)"><b style="color:var(--warn)">探索口径</b>：区间和分组由你自选，结果不是正式记录。p 值未对"选择区间"这件事做校正——换很多个区间总能找到好看的一段。导出的 CSV 会带上区间、分组和"探索"标记。正式结论请看「按月」。</div><div class="alert" id="rangeErr" style="display:none;background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 40%,transparent)"></div>
+ <div class="alert" id="metricHelp"></div>
+ <div style="overflow-x:auto"><table class="mx" id="matrix"></table></div>
+ <div class="legend">
+  <span><i class="sw" style="background:color-mix(in srgb,var(--up) 40%,transparent)"></i>显著为正（各格独立 BH 校正后 q&lt;0.05）</span>
+  <span><i class="sw" style="background:color-mix(in srgb,var(--dn) 40%,transparent)"></i>显著为负</span>
+  <span><i class="sw" style="background:var(--mut-bg);border:1px solid var(--line2)"></i>不显著 / 未到期</span>
+  <span>·　覆盖：</span>
+  <span><i class="sw" style="background:var(--pri)"></i>计入</span><span><i class="sw" style="background:#91caff"></i>重复运行</span><span><i class="sw" style="background:#ffd591"></i>缺少/被拒</span><span><i class="sw" style="background:#d9d9d9"></i>回测/降级/基准不符</span>
+ </div>
+</div>
+<div class="card"><h3>口径说明</h3>
+ <div class="kv">
+  <span class="k">分组</span><span>按报告被门户<b>收到</b>的日期（上海时间）分组。「按月」是正式口径，数字到期后不再变；「自定义区间」可按周/月/季/整段分组，属于探索口径。报告自带的日期不影响分组。</span>
+  <span class="k">成员</span><span>每只股票每批只算最早的一份；仲裁降级、基准价不符、回测运行不计入，但都列在覆盖里。</span>
+  <span class="k">起算点</span><span>收到报告后的第一个收盘价。之前的行情一律不算，避免"事后知道"。</span>
+  <span class="k">超额</span><span>个股涨跌 − 同期中证1000 涨跌；送转、除权的样本剔除并计数，停牌按最后成交价计。</span>
+  <span class="k">显著性</span><span>把预测在同批成员间随机打乱 10,000 次作为零假设，每格内的 p 值做 Benjamini–Hochberg 校正（各格独立）；样本少于 30 不出数字。</span>
+ </div>
+</div>
+</section>
+
+<!-- ======================= report view ======================= -->
+<section class="view" id="v-report">
+<div class="crumb"><a>首页</a> / <span>603893 瑞芯微</span></div>
+<div class="card" style="padding:14px 16px">
+ <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>行情</b>
+  <span><span class="seg"><button>1月</button><button class="on">3月</button><button>1年</button></span>　<label class="sub"><input type="checkbox" checked disabled> 叠加所选报告的预测价位</label></span></div>
+ <div class="sub" style="margin:6px 0 4px">瑞芯微 603893　<b style="color:var(--fg);font-size:16px">171.01</b>　<span class="neg">−2.85%</span>　（演示）</div>
+ <div id="chart"></div>
+ <div class="legend"><span><i class="sw" style="background:var(--fg3)"></i>起算价 S0</span><span><i class="sw" style="background:var(--ev)"></i>概率加权终值</span><span><i class="sw" style="background:var(--pri)"></i>建议买入价</span><span><i class="sw" style="background:var(--hl);border:1px solid var(--line2)"></i>观察窗口</span><span>· 叠加层是对现有 PriceChart 的新增可选属性</span></div>
+</div>
+<div class="card" style="padding:12px 16px"><b>时间线</b>　<span class="tag blue">2026-09-17</span><span class="tag">2026-10-16</span><span class="sub">（现有组件，选中日期决定下面显示哪份报告）</span></div>
+<div style="margin:0 0 12px"><span class="seg"><button class="on">投资决策建议</button><button>行业分析</button><button>估值分析</button><button>财务分析</button><button>舆情分析</button></span></div>
+<div class="card" style="padding-bottom:14px">
+ <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+  <div><h1 id="rTitle"></h1><div class="sub" id="rMeta"></div></div>
+  <div><span class="tag">V3.16.2</span><button class="btn">导出</button></div>
+ </div>
+ <div style="margin-top:12px;display:grid;gap:8px">
+  <div style="height:10px;background:var(--line);border-radius:4px;width:92%"></div><div style="height:10px;background:var(--line);border-radius:4px;width:85%"></div><div style="height:10px;background:var(--line);border-radius:4px;width:60%"></div>
+  <div class="sub">（报告正文，现有内容，此处略）</div></div>
+</div>
+<div class="card">
+ <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="margin:0">预测验证</h3><button class="btn" style="padding:2px 10px">收起</button></div>
+ <div class="sub" style="margin:4px 0 12px">这份报告入账时的结构化预测，以及之后各检查点的真实结果。只有选中的报告带预测时才显示本区块。</div>
+ <div id="badges" style="margin-bottom:14px"></div>
+ <div class="card" style="margin:0;padding:14px 16px"><b>报告当时说</b><div id="said" style="margin-top:10px"></div></div>
+ <div class="card" style="margin:16px 0 0;padding:14px 16px"><b>检查点</b><div class="steps" id="steps" style="margin:12px 0 8px"></div><div style="overflow-x:auto"><table id="marks"></table></div>
+ <div class="sub" id="latestNote" style="margin-top:8px"></div></div>
+ <div class="card" style="margin:16px 0 0;padding:14px 16px"><b>这只股票的其他预测</b><table id="others" style="margin-top:8px"></table></div>
+ <div style="margin:16px 0 0"><details><summary>查看入账原文（predictions JSON）</summary><pre id="payload"></pre></details></div>
+</div>
+</section>
+</main>
+
+<div class="drawer-mask" id="mask"></div>
+<div class="drawer" id="drawer"><div class="dh"><b id="dTitle"></b><button class="x" id="dClose">×</button></div><div class="db" id="dBody"></div></div>
+
+<script>
+const DATA={"months": ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06"], "cps": [["d5", "5 个交易日"], ["d20", "20 个交易日"], ["d60", "60 个交易日"], ["d120", "120 个交易日"], ["h12", "12 个月"]], "cohorts": [{"month": "2026-11", "reports": 108, "members": 79, "cov": {"计入": 79, "重复运行": 22, "缺少预测": 1, "预测被拒": 3, "回测运行": 2, "仲裁降级": 1, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 78, "refused": 0, "corp": 1, "spread": -2.7, "p_spread": 0.321, "ic": 0.04, "p_ic": 0.354, "hit": 0.59, "hit_null": 0.54, "fill": 0.2, "fillret": 2.3, "n_long": 43}, "d20": {"state": "mature", "n": 79, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.325, "ic": 0.08, "p_ic": 0.362, "hit": 0.65, "hit_null": 0.5, "fill": 0.22, "fillret": 3.7, "n_long": 38}, "d60": {"state": "mature", "n": 74, "refused": 1, "corp": 4, "spread": 6.0, "p_spread": 0.011, "ic": 0.25, "p_ic": 0.001, "hit": 0.6, "hit_null": 0.56, "fill": 0.33, "fillret": -0.9, "n_long": 27}, "d120": {"state": "mature", "n": 75, "refused": 0, "corp": 4, "spread": 6.6, "p_spread": 0.059, "ic": 0.36, "p_ic": 0.01, "hit": 0.53, "hit_null": 0.56, "fill": 0.4, "fillret": 3.4, "n_long": 32}, "h12": {"state": "pending", "done": 0, "total": 79, "until": "2027-11 起"}}}, {"month": "2026-12", "reports": 93, "members": 55, "cov": {"计入": 55, "重复运行": 25, "缺少预测": 4, "预测被拒": 2, "回测运行": 2, "仲裁降级": 4, "基准价不符": 1}, "cells": {"d5": {"state": "mature", "n": 51, "refused": 3, "corp": 1, "spread": 1.4, "p_spread": 0.298, "ic": 0.12, "p_ic": 0.398, "hit": 0.54, "hit_null": 0.53, "fill": 0.45, "fillret": -2.8, "n_long": 27}, "d20": {"state": "mature", "n": 52, "refused": 2, "corp": 1, "spread": 2.1, "p_spread": 0.013, "ic": 0.06, "p_ic": 0.403, "hit": 0.52, "hit_null": 0.58, "fill": 0.37, "fillret": -1.3, "n_long": 26}, "d60": {"state": "mature", "n": 49, "refused": 2, "corp": 4, "spread": 9.2, "p_spread": 0.088, "ic": 0.19, "p_ic": 0.085, "hit": 0.57, "hit_null": 0.57, "fill": 0.23, "fillret": 1.8, "n_long": 28}, "d120": {"state": "pending", "done": 25, "total": 55, "until": null}, "h12": {"state": "pending", "done": 0, "total": 55, "until": "2027-12 起"}}}, {"month": "2027-01", "reports": 101, "members": 67, "cov": {"计入": 67, "重复运行": 20, "缺少预测": 2, "预测被拒": 9, "回测运行": 0, "仲裁降级": 2, "基准价不符": 1}, "cells": {"d5": {"state": "mature", "n": 64, "refused": 3, "corp": 0, "spread": 3.5, "p_spread": 0.067, "ic": 0.22, "p_ic": 0.044, "hit": 0.57, "hit_null": 0.54, "fill": 0.46, "fillret": -3.0, "n_long": 37}, "d20": {"state": "mature", "n": 66, "refused": 1, "corp": 0, "spread": 4.6, "p_spread": 0.033, "ic": 0.2, "p_ic": 0.047, "hit": 0.57, "hit_null": 0.58, "fill": 0.22, "fillret": 2.1, "n_long": 42}, "d60": {"state": "mature", "n": 61, "refused": 2, "corp": 4, "spread": -1.5, "p_spread": 0.244, "ic": 0.11, "p_ic": 0.343, "hit": 0.55, "hit_null": 0.56, "fill": 0.43, "fillret": 0.4, "n_long": 42}, "d120": {"state": "pending", "done": 26, "total": 67, "until": null}, "h12": {"state": "pending", "done": 0, "total": 67, "until": "2028-01 起"}}}, {"month": "2027-02", "reports": 113, "members": 88, "cov": {"计入": 88, "重复运行": 17, "缺少预测": 3, "预测被拒": 0, "回测运行": 1, "仲裁降级": 4, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 88, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.286, "ic": 0.16, "p_ic": 0.089, "hit": 0.56, "hit_null": 0.56, "fill": 0.35, "fillret": -3.2, "n_long": 27}, "d20": {"state": "mature", "n": 86, "refused": 1, "corp": 1, "spread": 4.5, "p_spread": 0.079, "ic": 0.23, "p_ic": 0.122, "hit": 0.55, "hit_null": 0.51, "fill": 0.31, "fillret": -7.8, "n_long": 40}, "d60": {"state": "mature", "n": 86, "refused": 2, "corp": 0, "spread": 7.1, "p_spread": 0.017, "ic": 0.32, "p_ic": 0.004, "hit": 0.58, "hit_null": 0.57, "fill": 0.45, "fillret": 1.1, "n_long": 36}, "d120": {"state": "pending", "done": 18, "total": 88, "until": null}, "h12": {"state": "pending", "done": 0, "total": 88, "until": "2028-02 起"}}}, {"month": "2027-03", "reports": 122, "members": 97, "cov": {"计入": 97, "重复运行": 18, "缺少预测": 0, "预测被拒": 2, "回测运行": 2, "仲裁降级": 1, "基准价不符": 2}, "cells": {"d5": {"state": "mature", "n": 95, "refused": 2, "corp": 0, "spread": 1.1, "p_spread": 0.285, "ic": 0.19, "p_ic": 0.037, "hit": 0.51, "hit_null": 0.56, "fill": 0.39, "fillret": -5.0, "n_long": 31}, "d20": {"state": "mature", "n": 95, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.035, "ic": 0.11, "p_ic": 0.39, "hit": 0.52, "hit_null": 0.5, "fill": 0.25, "fillret": 0.3, "n_long": 44}, "d60": {"state": "pending", "done": 79, "total": 97, "until": null}, "d120": {"state": "pending", "done": 42, "total": 97, "until": null}, "h12": {"state": "pending", "done": 0, "total": 97, "until": "2028-03 起"}}}, {"month": "2027-04", "reports": 110, "members": 86, "cov": {"计入": 86, "重复运行": 21, "缺少预测": 2, "预测被拒": 0, "回测运行": 0, "仲裁降级": 1, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 84, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.016, "ic": 0.26, "p_ic": 0.021, "hit": 0.67, "hit_null": 0.55, "fill": 0.2, "fillret": -5.9, "n_long": 28}, "d20": {"state": "mature", "n": 83, "refused": 3, "corp": 0, "spread": 1.7, "p_spread": 0.256, "ic": 0.18, "p_ic": 0.079, "hit": 0.59, "hit_null": 0.58, "fill": 0.29, "fillret": -0.6, "n_long": 27}, "d60": {"state": "pending", "done": 55, "total": 86, "until": null}, "d120": {"state": "pending", "done": 19, "total": 86, "until": null}, "h12": {"state": "pending", "done": 0, "total": 86, "until": "2028-04 起"}}}, {"month": "2027-05", "reports": 96, "members": 71, "cov": {"计入": 71, "重复运行": 16, "缺少预测": 0, "预测被拒": 1, "回测运行": 2, "仲裁降级": 4, "基准价不符": 2}, "cells": {"d5": {"state": "mature", "n": 67, "refused": 3, "corp": 1, "spread": 4.0, "p_spread": 0.052, "ic": 0.23, "p_ic": 0.096, "hit": 0.69, "hit_null": 0.57, "fill": 0.22, "fillret": 1.5, "n_long": 31}, "d20": {"state": "pending", "done": 51, "total": 71, "until": null}, "d60": {"state": "pending", "done": 18, "total": 71, "until": null}, "d120": {"state": "pending", "done": 20, "total": 71, "until": null}, "h12": {"state": "pending", "done": 0, "total": 71, "until": "2028-05 起"}}}, {"month": "2027-06", "reports": 106, "members": 73, "cov": {"计入": 73, "重复运行": 22, "缺少预测": 4, "预测被拒": 1, "回测运行": 2, "仲裁降级": 3, "基准价不符": 1}, "cells": {"d5": {"state": "open"}, "d20": {"state": "open"}, "d60": {"state": "open"}, "d120": {"state": "open"}, "h12": {"state": "open"}}}], "members": [{"code": "603893", "name": "瑞芯微", "stance": "no_position", "up": -6.2, "ex": 1.1, "halted": false, "date": "2027-03-12"}, {"code": "300772", "name": "运达股份", "stance": "no_position", "up": 30.0, "ex": -2.9, "halted": false, "date": "2027-03-27"}, {"code": "002415", "name": "海康威视", "stance": "long", "up": 26.6, "ex": -1.4, "halted": false, "date": "2027-03-01"}, {"code": "688036", "name": "传音控股", "stance": "long", "up": 30.6, "ex": -5.0, "halted": false, "date": "2027-03-05"}, {"code": "300394", "name": "天孚通信", "stance": "long", "up": 15.7, "ex": 7.3, "halted": false, "date": "2027-03-11"}, {"code": "603661", "name": "恒林股份", "stance": "no_position", "up": -7.2, "ex": -7.3, "halted": false, "date": "2027-03-25"}, {"code": "688692", "name": "达梦数据", "stance": "long", "up": 26.2, "ex": 6.9, "halted": false, "date": "2027-03-25"}, {"code": "002273", "name": "水晶光电", "stance": "long", "up": 23.7, "ex": 5.7, "halted": false, "date": "2027-03-03"}, {"code": "300820", "name": "英杰电气", "stance": "no_position", "up": -24.4, "ex": 0.9, "halted": false, "date": "2027-03-17"}, {"code": "300124", "name": "汇川技术", "stance": "long", "up": 9.5, "ex": 5.4, "halted": false, "date": "2027-03-17"}, {"code": "300693", "name": "盛弘股份", "stance": "no_position", "up": 35.8, "ex": -0.5, "halted": false, "date": "2027-03-09"}, {"code": "688676", "name": "金盘科技", "stance": "long", "up": 45.1, "ex": -2.3, "halted": false, "date": "2027-03-14"}, {"code": "300001", "name": "特锐德", "stance": "long", "up": 21.2, "ex": 6.2, "halted": false, "date": "2027-03-03"}, {"code": "603063", "name": "禾望电气", "stance": "long", "up": 8.3, "ex": 5.6, "halted": false, "date": "2027-03-23"}, {"code": "605305", "name": "中际联合", "stance": "no_position", "up": -9.0, "ex": -5.2, "halted": false, "date": "2027-03-05"}, {"code": "688117", "name": "圣诺生物", "stance": "no_position", "up": 19.2, "ex": 0.7, "halted": false, "date": "2027-03-16"}, {"code": "000893", "name": "亚钾国际", "stance": "long", "up": 21.0, "ex": 9.3, "halted": false, "date": "2027-03-17"}, {"code": "300750", "name": "宁德时代", "stance": "no_position", "up": -14.9, "ex": 2.4, "halted": false, "date": "2027-03-03"}], "panel": {"report": {"code": "603893", "name": "瑞芯微", "date": "2026-09-17", "title": "603893 投资研究与决策报告 V3.16.2", "made_at": "2026-09-17 21:14", "made_on": "2026-09-17"}, "claims": {"stance": "long", "weight": 10.0, "terminal": 207.55, "p_profit": 75, "entry": 180.47, "bull": 294.0, "base": 209.3, "bear": 117.6, "pb": 25, "pbase": 50, "pbear": 25, "emitted": 181.21, "emitted_asof": "2026-09-17", "horizon": "2027-09-17", "prob_method": "approved_policy_default", "quality": "normal", "status": "eligible"}, "s0": {"date": "2026-09-18", "close": 190.04}, "marks": [{"cp": "d5", "label": "5 个交易日", "session": "2026-09-28", "status": "resolved", "close": 211.28, "ret": 0.11176594401178708, "bench": -0.05117598623235631, "low": 190.04, "high": 228.74, "halted": false, "corp": false}, {"cp": "d20", "label": "20 个交易日", "session": "2026-10-23（预计）", "status": "pending"}, {"cp": "d60", "label": "60 个交易日", "session": "2026-12-18（预计）", "status": "pending"}, {"cp": "d120", "label": "120 个交易日", "session": "2027-03-26（预计）", "status": "pending"}, {"cp": "h12", "label": "12 个月", "session": "2027-09-17（预计）", "status": "pending"}], "latest": {"date": "2026-10-16", "close": 171.01}, "bars": [["2026-09-01", 205.0, 203.6, 210.94, 201.0], ["2026-09-02", 201.04, 197.49, 207.8, 197.3], ["2026-09-03", 200.0, 193.9, 200.57, 191.88], ["2026-09-04", 196.5, 189.0, 196.92, 186.89], ["2026-09-07", 191.5, 192.68, 194.2, 189.02], ["2026-09-08", 195.0, 188.59, 195.28, 186.99], ["2026-09-09", 189.0, 187.36, 193.26, 186.5], ["2026-09-10", 185.01, 182.66, 186.2, 182.0], ["2026-09-11", 180.0, 180.3, 181.3, 175.6], ["2026-09-14", 177.9, 178.75, 181.71, 176.86], ["2026-09-15", 180.0, 177.2, 180.53, 176.99], ["2026-09-16", 177.1, 180.33, 181.0, 176.0], ["2026-09-17", 178.52, 181.21, 183.0, 178.52], ["2026-09-18", 183.6, 190.04, 192.22, 183.6], ["2026-09-21", 190.04, 198.0, 198.31, 190.04], ["2026-09-22", 203.9, 217.8, 217.8, 203.9], ["2026-09-23", 218.79, 223.01, 227.3, 215.81], ["2026-09-24", 223.0, 219.05, 228.74, 218.51], ["2026-09-28", 219.02, 211.28, 221.5, 209.58], ["2026-09-29", 211.0, 212.94, 213.8, 207.53], ["2026-09-30", 214.39, 215.57, 218.51, 212.0], ["2026-10-08", 211.99, 199.56, 215.39, 198.13], ["2026-10-09", 198.1, 202.72, 207.28, 193.85], ["2026-10-12", 204.0, 199.5, 205.22, 197.0], ["2026-10-13", 193.99, 196.58, 199.3, 188.06], ["2026-10-14", 198.88, 195.5, 203.15, 195.26], ["2026-10-15", 188.0, 190.0, 194.4, 186.5], ["2026-10-16", 191.0, 171.01, 192.0, 171.0]], "other_sets": [{"date": "2026-10-16", "made": "2026-10-16 22:40", "stance": "long", "terminal": 218.9, "entry": 190.34, "state": "accepted", "counted": true, "cohort": "2026-10"}, {"date": "2026-09-17", "made": "2026-09-17 21:14", "stance": "long", "terminal": 207.55, "entry": 180.47, "state": "accepted", "counted": true, "cohort": "2026-09"}]}};
+const $=s=>document.querySelector(s), fmt=(v,d=1)=>(v>0?'+':'')+v.toFixed(d), pct=v=>fmt(v*100,1)+'%';
+document.querySelectorAll('.demo .seg button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.demo .seg button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+b.dataset.v));scrollTo(0,0)});
+// ---------------- cohort matrix ----------------
+const HELP={spread:'<b>多空价差</b>：报告看多（有目标仓位）的股票，平均超额收益比不建议持仓的高出多少个百分点。零假设 = 0。',
+ ic:'<b>排序 IC</b>：报告给的上涨空间（概率加权终值 ÷ 起算价 − 1）排序，与实际超额收益排序的相关系数。0 = 没有排序能力；12 个月前的检查点只算"早期信号"。',
+ hit:'<b>方向命中</b>：上涨空间 ≥5% 或 ≤−5% 的股票里，超额收益方向与报告一致的比例。旁边的"基准率"是同一批全猜同一方向能拿到的命中率，超过它才有意义。',
+ fill:'<b>买入价成交</b>：观察窗口内股价碰到报告建议买入价的比例，以及按买入价成交后到检查点的平均涨跌。买入价由终值按策略推算（÷1.15），不是独立判断。'};
+let metric='spread', mode='month', group='month';
+const TODAY=new Date('2027-06-20'), CPDAYS={d5:7,d20:28,d60:86,d120:172,h12:366};
+function rng(seed){let x=0;for(const c of seed)x=(x*31+c.charCodeAt(0))>>>0;return()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296}}
+function ds(d){const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
+function pd(v){const [y,m,d]=v.split('-').map(Number);return new Date(y,m-1,d)}
+function customGroups(){const f=pd($('#from').value),t=pd($('#to').value);const err=$('#rangeErr');err.style.display='none';
+ if(!(f<=t)){err.style.display='';err.textContent='起始日期必须早于或等于结束日期（range_inverted）';return []}
+ const months=(t.getFullYear()-f.getFullYear())*12+t.getMonth()-f.getMonth();
+ if(months>36){err.style.display='';err.textContent='区间最长 36 个月（range_too_long）';return []}
+ if(group==='week'&&(t-f)/864e5>182){err.style.display='';err.textContent='按周分组时区间最长 26 周（week_range_too_long）';return []}
+ const out=[];let cur=new Date(f);
+ while(cur<=t){let end;
+  if(group==='all')end=new Date(t);
+  else if(group==='week'){end=new Date(cur);end.setDate(end.getDate()+(6-((end.getDay()+6)%7)))}
+  else if(group==='month')end=new Date(cur.getFullYear(),cur.getMonth()+1,0);
+  else end=new Date(cur.getFullYear(),Math.floor(cur.getMonth()/3)*3+3,0);
+  if(end>t)end=new Date(t);
+  const full=group==='month'&&cur.getDate()===1&&end.getDate()===new Date(end.getFullYear(),end.getMonth()+1,0).getDate();
+  const label=full?ds(cur).slice(0,7):ds(cur)+' – '+ds(end);
+  out.push({label,start:new Date(cur),end:new Date(end)});cur=new Date(end);cur.setDate(cur.getDate()+1)}
+ return out}
+function customCohort(g){const r=rng(g.label+group),days=(g.end-g.start)/864e5+1,reports=Math.max(6,Math.round(days*3.6*(0.85+r()*0.3))),dup=Math.round(reports*0.18),ab=Math.round(r()*3),rej=Math.round(r()*2),bt=Math.round(r()*1.5),dg=Math.round(r()*4),mm=Math.round(r()*1.5);
+ const members=reports-dup-ab-rej-bt-dg-mm;const row={month:g.label,start:g.start,reports,members,cov:{计入:members,重复运行:dup,缺少预测:ab,预测被拒:rej,回测运行:bt,仲裁降级:dg,基准价不符:mm},cells:{}};
+ DATA.cps.forEach(([c],ci)=>{const due=new Date(g.end);due.setDate(due.getDate()+CPDAYS[c]);
+  if(g.end>=TODAY){row.cells[c]={state:'open'};return}
+  if(due>TODAY){row.cells[c]=c==='h12'?{state:'pending',until:ds(due).slice(0,7)+' 起'}:{state:'pending',done:Math.round(members*Math.min(.95,Math.max(.05,1-(due-TODAY)/(CPDAYS[c]*864e5)))),total:members};return}
+  if(members<30){row.cells[c]={state:'small',n:members};return}
+  const sp=+((r()-.35)*9+ci).toFixed(1),ic=+((r()-.3)*.4).toFixed(2);
+  row.cells[c]={state:'mature',n:members-1,refused:Math.round(r()*2),corp:Math.round(r()*2),spread:sp,p_spread:+(sp>3?r()*.05:.1+r()*.6).toFixed(3),ic,p_ic:+(ic>.12?r()*.05:.1+r()*.6).toFixed(3),hit:+(.5+r()*.15).toFixed(2),hit_null:+(.5+r()*.08).toFixed(2),fill:+(.15+r()*.3).toFixed(2),fillret:+((r()-.5)*8).toFixed(1)}});
+ return row}
+function cellHTML(c,cp,mi){
+ if(c.state==='open')return '<div class="cbox o">'+(mode==='month'?'本月未结束':'本组未结束')+'</div>';
+ if(c.state==='small')return '<div class="cbox p">样本 '+c.n+' 只 &lt; 30<br>不出数字</div>';
+ if(c.state==='pending'){ if(cp==='h12')return '<div class="cbox p">'+c.until+'</div>';
+   return `<div class="cbox p">已到期 ${c.done}/${c.total}<div class="prog"><i style="width:${c.done/c.total*100}%"></i></div></div>`;}
+ let v,s,p,sig;
+ if(metric==='spread'){v=fmt(c.spread)+' pt';p=c.p_spread;s=`p=${p} · n=${c.n}`;sig=p<0.05?(c.spread>0?1:-1):0}
+ if(metric==='ic'){v=fmt(c.ic,2);p=c.p_ic;s=`p=${p} · n=${c.n}`;sig=p<0.05?(c.ic>0?1:-1):0}
+ if(metric==='hit'){v=(c.hit*100).toFixed(0)+'%';s=`基准率 ${(c.hit_null*100).toFixed(0)}% · n=${c.n}`;sig=c.hit-c.hit_null>0.06?1:(c.hit-c.hit_null<-0.06?-1:0)}
+ if(metric==='fill'){v=(c.fill*100).toFixed(0)+'%';s=`成交后 ${fmt(c.fillret)}% · n=${c.n}`;sig=0}
+ if(mode==='custom'&&s.startsWith('p='))s=s.replace('p=','p*=');
+ const bg=sig>0?'color-mix(in srgb,var(--up) 18%,transparent)':sig<0?'color-mix(in srgb,var(--dn) 18%,transparent)':'var(--mut-bg)';
+ const warn=(c.refused||c.corp)?` · 剔除 ${c.refused+c.corp}`:'';
+ return `<div class="cbox m" style="background:${bg}" data-mi="${mi}" data-cp="${cp}"><div class="v ${sig>0?'pos':sig<0?'neg':''}">${v}</div><div class="s">${s}${warn}</div></div>`;
+}
+function covBar(r){const c=r.cov,t=r.reports,w=k=>(k/t*100)+'%';
+ return `<div class="cov"><i style="width:${w(c['计入'])};background:var(--pri)"></i><i style="width:${w(c['重复运行'])};background:#91caff"></i><i style="width:${w(c['缺少预测']+c['预测被拒'])};background:#ffd591"></i><i style="width:${w(c['回测运行']+c['仲裁降级']+c['基准价不符'])};background:#d9d9d9"></i></div>
+ <div class="s muted" style="font-size:12px;margin-top:3px">计入 ${c['计入']} / 报告 ${t}${c['预测被拒']>5?` · <span style="color:var(--warn)">被拒 ${c['预测被拒']}</span>`:''}</div>`}
+function rows(){return mode==='month'?DATA.cohorts:customGroups().map(customCohort)}
+let CUR=[];
+function renderMatrix(){
+ $('#metricHelp').innerHTML=HELP[metric]+(mode==='custom'?'　<span style="color:var(--warn)">p* = 未对区间选择做校正</span>':'');
+ CUR=rows();
+ let h='<tr><th>'+(mode==='month'?'批次（收到月份）':'分组（收到日期）')+'</th>'+DATA.cps.map(c=>`<th>${c[1]}</th>`).join('')+'<th>覆盖</th></tr>';
+ CUR.slice().reverse().forEach((r)=>{const mi=CUR.indexOf(r);
+  h+=`<tr><td style="white-space:nowrap"><b>${r.month}</b></td>`+DATA.cps.map(c=>`<td class="cell">${cellHTML(r.cells[c[0]],c[0],mi)}</td>`).join('')+`<td>${covBar(r)}</td></tr>`});
+ $('#matrix').innerHTML=h;
+ document.querySelectorAll('.cbox.m').forEach(e=>e.onclick=()=>openCell(+e.dataset.mi,e.dataset.cp));
+}
+document.querySelectorAll('#metricSeg button').forEach(b=>b.onclick=()=>{metric=b.dataset.m;document.querySelectorAll('#metricSeg button').forEach(x=>x.classList.toggle('on',x===b));renderMatrix()});
+function openCell(mi,cp){const r=CUR[mi],c=r.cells[cp],lab=DATA.cps.find(x=>x[0]===cp)[1];
+ $('#dTitle').textContent=`${r.month} ${mode==='month'?'批次':'（探索）'} · ${lab}`;
+ const row=(n,v,nl,p)=>`<tr><td>${n}</td><td><b>${v}</b></td><td class="muted">${nl}</td><td>${p}</td></tr>`;
+ let h=`<div class="sub" style="margin-bottom:10px">成员 ${r.members} · 参与计算 ${c.n} · 数据拒绝 ${c.refused} · 送转/除权剔除 ${c.corp}</div>
+ <table><tr><th>指标</th><th>数值</th><th>零假设</th><th>p（BH 校正）</th></tr>
+ ${row('多空价差',fmt(c.spread)+' pt','0',c.p_spread)}${row('排序 IC',fmt(c.ic,2),'0',c.p_ic)}${row('方向命中',(c.hit*100).toFixed(0)+'%','基准率 '+(c.hit_null*100).toFixed(0)+'%','—')}${row('买入价成交',(c.fill*100).toFixed(0)+'%，成交后 '+fmt(c.fillret)+'%','—','—')}</table>
+ <h3 style="margin-top:22px">成员（示意，前 ${DATA.members.length} 只）</h3>
+ <table><tr><th>股票</th><th>收到</th><th>观点</th><th>上涨空间</th><th>超额</th><th>判定</th></tr>`;
+ DATA.members.forEach(m=>{const view=m.stance==='long'?'看多':'不持仓';const ok=m.stance==='long'?m.ex>0:m.ex<0;
+  h+=`<tr><td>${m.code==='603893'?'<a data-open="1">':''}${m.name}${m.code==='603893'?'</a>':''} <span class="muted">${m.code}</span>${m.halted?' <span class="tag warn">停牌</span>':''}</td><td class="muted">${mode==="month"?r.month+m.date.slice(7):ds(r.start)}</td><td>${view}</td><td>${fmt(m.up)}%</td><td class="${m.ex>0?'pos':'neg'}">${fmt(m.ex)}%</td><td>${ok?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td></tr>`});
+ h+='</table><div class="sub" style="margin-top:8px">点股票名进入该报告的"预测 vs 实际"。</div>';
+ $('#dBody').innerHTML=h;$('#drawer').classList.add('open');$('#mask').classList.add('open');
+ document.querySelectorAll('[data-open]').forEach(a=>a.onclick=()=>{closeD();document.querySelector('.demo .seg button[data-v=report]').click()});
+}
+function closeD(){$('#drawer').classList.remove('open');$('#mask').classList.remove('open')}
+$('#dClose').onclick=closeD;$('#mask').onclick=closeD;
+document.querySelectorAll('#modeTabs div').forEach(t=>t.onclick=()=>{mode=t.dataset.mode;document.querySelectorAll('#modeTabs div').forEach(x=>x.classList.toggle('on',x===t));
+ $('#monthRange').style.display=mode==='month'?'':'none';$('#customRange').style.display=mode==='custom'?'':'none';$('#exploreBanner').style.display=mode==='custom'?'':'none';$('#rangeErr').style.display='none';renderMatrix()});
+document.querySelectorAll('#groupSeg button').forEach(b=>b.onclick=()=>{group=b.dataset.g;document.querySelectorAll('#groupSeg button').forEach(x=>x.classList.toggle('on',x===b));renderMatrix()});
+['#from','#to'].forEach(k=>$(k).onchange=renderMatrix);
+renderMatrix();
+// ---------------- report panel ----------------
+const P=DATA.panel, C=P.claims;
+$('#rTitle').textContent=P.report.title;
+$('#rMeta').textContent=`报告日期 ${P.report.date} · 门户收到 ${P.report.made_at}（上海时间）`;
+$('#badges').innerHTML=`<span class="tag ok">✓ 计入 2026-09 批次统计</span><span class="tag ok">基准价核对一致：报告 ${C.emitted.toFixed(2)} = ${C.emitted_asof} 收盘</span><span class="tag">仲裁质量：正常</span><span class="tag warn">情景概率为策略默认值，不参与概率校准</span>`;
+function chart(){const W=720,H=300,L=46,R=12,T=14,B=26,bars=P.bars;
+ const prices=bars.flatMap(b=>[b[3],b[4]]).concat([C.entry,C.terminal,P.s0.close]);let lo=Math.min(...prices),hi=Math.max(...prices);const pad=(hi-lo)*0.08;lo-=pad;hi+=pad;
+ const bw=(W-L-R)/bars.length,X=i=>L+bw*(i+0.5),Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+ const i0=bars.findIndex(b=>b[0]===P.s0.date),i5=bars.findIndex(b=>b[0]===P.marks[0].session),ir=bars.findIndex(b=>b[0]>=P.report.date);
+ let s=`<svg viewBox="0 0 ${W} ${H}" class="chart" style="width:100%;height:auto">`;
+ s+=`<rect x="${X(i0)}" y="${T}" width="${X(bars.length-1)-X(i0)+bw/2}" height="${H-T-B}" fill="var(--hl)"/>`;
+ for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4;s+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v.toFixed(0)}</text>`}
+ bars.forEach((b,i)=>{const up=b[2]>=b[1],col=up?'var(--up)':'var(--dn)';s+=`<line x1="${X(i)}" x2="${X(i)}" y1="${Y(b[3])}" y2="${Y(b[4])}" stroke="${col}"/><rect x="${X(i)-bw*0.32}" y="${Y(Math.max(b[1],b[2]))}" width="${bw*0.64}" height="${Math.max(1,Math.abs(Y(b[1])-Y(b[2])))}" fill="${col}"/>`;
+  if(i%5===0)s+=`<text x="${X(i)}" y="${H-8}" text-anchor="middle">${b[0].slice(5)}</text>`});
+ const hl=(v,c,t,dash)=>`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-dasharray="${dash}" stroke-width="1.4"/><text x="${W-R-2}" y="${Y(v)-4}" text-anchor="end" style="fill:${c};font-weight:600">${t}</text>`;
+ s+=hl(C.terminal,'var(--ev)','概率加权终值 '+C.terminal,'6 4')+hl(C.entry,'var(--pri)','建议买入 '+C.entry,'6 4')+`<line x1="${X(i0)}" x2="${W-R}" y1="${Y(P.s0.close)}" y2="${Y(P.s0.close)}" stroke="var(--fg3)" stroke-dasharray="2 3"/><text x="${X(i0)+4}" y="${Y(P.s0.close)+14}" style="fill:var(--fg2)">S0 ${P.s0.close}</text>`;
+ const vline=(i,t,c)=>`<line x1="${X(i)}" x2="${X(i)}" y1="${T}" y2="${H-B}" stroke="${c}" stroke-dasharray="3 3"/><text x="${X(i)}" y="${T+10}" text-anchor="middle" style="fill:${c};font-weight:600">${t}</text>`;
+ s+=vline(ir,'报告','var(--fg2)')+vline(i5,'d5','var(--pri)');
+ s+=`<circle cx="${X(i5)}" cy="${Y(P.marks[0].close)}" r="4.5" fill="var(--pri)" stroke="var(--card)" stroke-width="2"/>`;
+ return s+'</svg>'}
+$('#chart').innerHTML=chart();
+const up0=C.terminal/P.s0.close-1, pos=v=>((v-C.bear)/(C.bull-C.bear)*100)+'%';
+$('#said').innerHTML=`<div class="kv">
+ <span class="k">观点</span><span><span class="tag ok" style="margin:0">看多</span>　目标仓位 ${C.weight}%</span>
+ <span class="k">期限</span><span>至 ${C.horizon}（12 个月，标准期限）</span>
+ <span class="k">概率加权终值</span><span><b>${C.terminal}</b>　<span class="muted">较 S0 ${pct(up0)}</span></span>
+ <span class="k">正收益概率</span><span>${C.p_profit}%</span>
+ <span class="k">建议买入价</span><span>${C.entry}　<span class="muted">（由终值按策略推算）</span></span></div>
+ <div style="margin-top:14px" class="lbl">三情景（12 个月）与现价位置</div>
+ <div class="band"><div class="bar" style="left:0;right:0"></div>
+  <div class="pt" style="left:0;transform:none">熊 ${C.bear}<br>${C.pbear}%</div><div class="pt" style="left:${pos(C.base)}">基准 ${C.base}<br>${C.pbase}%</div><div class="pt" style="right:0;left:auto;transform:none;text-align:right">牛 ${C.bull}<br>${C.pb}%</div>
+  <div class="cur" style="left:${pos(P.latest.close)}" title="最新收盘"></div></div>
+ <div class="sub" style="margin-top:22px">黑色竖线 = 最新收盘 ${P.latest.close}（${P.latest.date}）。到 12 个月时看收盘是否落在熊–牛区间内。</div>`;
+const steps=P.marks.map(m=>`<div class="step ${m.status==='resolved'?'done':''}"><i></i><b>${m.cp}</b> · ${m.label}<div class="muted">${m.session}</div></div>`).join('');
+$('#steps').innerHTML=`<div class="step done"><i></i><b>收到</b><div class="muted">${P.report.made_at}</div></div><div class="step done"><i></i><b>S0</b> · 起算<div class="muted">${P.s0.date} 收盘 ${P.s0.close}</div></div>`+steps;
+let mt='<tr><th>检查点</th><th>交易日</th><th>收盘</th><th>自 S0 涨跌</th><th>中证1000</th><th>超额</th><th>建议买入价</th><th>与观点</th></tr>';
+P.marks.forEach(m=>{if(m.status==='resolved'){const ex=m.ret-m.bench;mt+=`<tr><td><b>${m.cp}</b> <span class="muted">${m.label}</span></td><td>${m.session}</td><td>${m.close}</td><td class="${m.ret>0?'pos':'neg'}">${pct(m.ret)}</td><td class="${m.bench>0?'pos':'neg'}">${pct(m.bench)}</td><td class="${ex>0?'pos':'neg'}"><b>${pct(ex)}</b></td><td>${m.low<=C.entry?'已触及':'未触及（最低 '+m.low+'）'}</td><td>${ex>0?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td></tr>`}
+ else mt+=`<tr class="muted"><td><b>${m.cp}</b> ${m.label}</td><td>${m.session}</td><td colspan="6">等待中 · 该交易日收盘（15:30 后）才会结算，结算后不再改变</td></tr>`});
+$('#marks').innerHTML=mt;
+$('#latestNote').innerHTML=`截至最新（${P.latest.date}，不计分）：收盘 ${P.latest.close}，自 S0 ${pct(P.latest.close/P.s0.close-1)}，已在 10 月中旬触及建议买入价 ${C.entry}。只有检查点的结果进入统计。`;
+let ot='<tr><th>报告日期</th><th>收到</th><th>观点</th><th>终值</th><th>建议买入</th><th>状态</th><th></th></tr>';
+P.other_sets.forEach(o=>ot+=`<tr><td>${o.date}</td><td class="muted">${o.made}</td><td>看多</td><td>${o.terminal}</td><td>${o.entry}</td><td><span class="tag ok">计入 ${o.cohort} 批次</span></td><td>${o.date===P.report.date?'<span class="muted">当前</span>':'<a>查看</a>'}</td></tr>`);
+$('#others').innerHTML=ot;
+$('#payload').textContent=JSON.stringify({schema:'predictions.v1',emitter:{app:'1-6-4',version:'V3.16.2',calculator:'scenario-calc-3.5'},probability_method:C.prob_method,decision_status:C.status,decision_quality:C.quality,baseline:{price:C.emitted.toFixed(2),as_of:C.emitted_asof,source:'company_quote'},horizon_end:C.horizon,claims:[{key:'stance',kind:'stance',stance:'long',target_weight:'0.1000'},{key:'expected_terminal',kind:'terminal_value',price:C.terminal.toFixed(2),p_profit:'0.7500'},{key:'scenario.bull',kind:'scenario',label:'bull',price:C.bull.toFixed(2),probability:'0.2500'},{key:'scenario.base',kind:'scenario',label:'base',price:C.base.toFixed(2),probability:'0.5000'},{key:'scenario.bear',kind:'scenario',label:'bear',price:C.bear.toFixed(2),probability:'0.2500'},{key:'entry_price',kind:'entry_price',price:C.entry.toFixed(2)}]},null,2);
+</script></body></html>
