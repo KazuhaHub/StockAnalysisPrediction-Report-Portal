@@ -147,6 +147,20 @@ basis to the new one. Choosing `bfq` now costs a URL segment. Choosing it later 
 says "these are unadjusted" is a claim a consumer can check; the absence of a field is a claim nobody
 made.
 
+> **Amended 2026-10-17 by [ADR 0029](0029-prediction-scoring-deferred.md) §10 — one narrow exception.**
+> `NEVER qfq` governs **displayed** prices, and it is not weakened for them: the quote line, the chart,
+> the chat and every other surface still read `bfq` only. What ADR 0029 adds is a ledger that has to
+> *detect* corporate actions, because a 10-for-10 bonus issue reads as −50 % against a raw close, and
+> the adjustment ratio is the only signal available for every kind. So the exception is bounded to a
+> single function, `fetchTencentAdjustRatio`, which fetches the qfq series over one range and returns
+> the per-date `qfq_close / bfq_close` ratio. Its numbers are never stored, never scored and never
+> displayed — two of them are compared to answer "did an ex-event fall in this window", and the mark is
+> then excluded from metrics and counted instead. The rule this section states is about what a reader
+> is *shown*; the ADR 0029 case is about what a stored mark may be *flagged* by, and the two do not
+> overlap. ADR 0029's D8 prefers to need no exception at all: the seventh element a day row carries on
+> an ex-dividend date (`quote.go:1121`, a fact this document does not otherwise use) may already cover
+> the common kinds, in which case this call is the fallback only.
+
 ### 4. The percentage is the vendor's own string on the primary source, and ours on the fallback
 
 `QuoteSnapshot.ChangePct` is a `string`, carried verbatim from the vendor and rendered verbatim with a
