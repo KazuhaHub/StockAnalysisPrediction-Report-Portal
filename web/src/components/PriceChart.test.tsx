@@ -968,3 +968,57 @@ describe('PriceChart', () => {
     expect(screen.getByTestId('price-tooltip').getAttribute('data-flip')).toBe('right')
   })
 })
+
+describe('forecast overlay', () => {
+  it('draws nothing extra without levels or markers', () => {
+    renderChart(<PriceChart bars={BARS} />)
+    expect(screen.queryAllByTestId('price-level')).toHaveLength(0)
+    expect(screen.queryAllByTestId('price-marker')).toHaveLength(0)
+  })
+
+  it('draws a line for every level inside the domain', () => {
+    renderChart(
+      <PriceChart
+        bars={BARS}
+        levels={[
+          { price: 3400, label: 'forecast.chart.s0', tone: 'neutral' },
+          { price: 3450, label: 'forecast.chart.terminal', tone: 'primary' },
+        ]}
+      />,
+    )
+    expect(screen.getAllByTestId('price-level')).toHaveLength(2)
+    expect(screen.getByText('forecast.chart.s0 34.00')).toBeTruthy()
+  })
+
+  it('does not stretch the y-domain for an off-chart level, and tags it at the edge', () => {
+    const first = renderChart(<PriceChart bars={BARS} />)
+    const before = [...first.container.querySelectorAll('[data-testid="price-candle"] line')]
+      .map((n) => n.getAttribute('y1'))
+      .join(',')
+    first.unmount()
+
+    const second = renderChart(
+      <PriceChart bars={BARS} levels={[{ price: 999999, label: 'far', tone: 'neutral' }]} />,
+    )
+    const after = [...second.container.querySelectorAll('[data-testid="price-candle"] line')]
+      .map((n) => n.getAttribute('y1'))
+      .join(',')
+    expect(after).toBe(before)
+    expect(screen.getByTestId('price-level-edge').textContent).toContain('↑')
+    expect(screen.getByTestId('price-level-edge').textContent).toContain('forecast.chart.outside')
+  })
+
+  it('drops a marker whose date is outside the bars', () => {
+    renderChart(
+      <PriceChart
+        bars={BARS}
+        markers={[
+          { date: '2026-09-02', label: 'd5' },
+          { date: '2027-01-01', label: 'future' },
+        ]}
+      />,
+    )
+    expect(screen.getAllByTestId('price-marker')).toHaveLength(1)
+    expect(screen.getByText('d5')).toBeTruthy()
+  })
+})

@@ -1,42 +1,60 @@
-import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Space, Tag, Typography } from 'antd'
-import { SettingOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Card, DatePicker, Descriptions, Empty, Segmented, Space, Spin, Tabs, Tag, Typography } from 'antd'
+import { DownloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import dayjs, { type Dayjs } from 'dayjs'
 import { api, errText } from '../../api/client'
-import type { ForecastSettings } from '../../api/types'
+import type {
+  ForecastCell,
+  ForecastCheckpoint,
+  ForecastGroup,
+  ForecastGrouping,
+  ForecastGroupsResponse,
+  ForecastMetric,
+  ForecastSettings,
+} from '../../api/types'
 import LoadGate from '../../components/LoadGate'
+import { downloadCSV } from '../../lib/csv'
+import { forecastCsv, groupsQuery, readView } from '../../lib/forecast'
 import { readPrefetched } from '../../lib/prefetch'
+import ForecastCellDrawer from './ForecastCellDrawer'
+import ForecastMatrix from './ForecastMatrix'
 import ForecastSettingsModal from './ForecastSettingsModal'
 
 // 预测验证 (forecast verification): the admin page for the prediction ledger (ADR 0029).
 //
-// This is the page FRAMEWORK — its route, its navigation entry, the evaluator's settings, and the
-// status of what the evaluator has done. The statistical matrix (the monthly view, the custom-range
-// tab, the drawer over a mature cell) is PR 7 and lands inside this page; the endpoint behind it is
-// PR 6. What ships here is everything that does not depend on that number: whether the evaluator
-// runs, what it is catching up on, and the one control an operator needs to turn it on.
+// Two views over one engine (plan §8.5). 按月 is the RECORD: the calendar decides its groups, and a
+// mature cell can never change again. 自定义区间 is EXPLORATORY: it answers "since the prompt change"
+// or "this quarter", but because that freedom lets a reader search for a flattering window, every
+// p in it is marked p* and the export says so in its header. The label is about how the range was
+// chosen, not about the numbers: a custom range that equals whole months returns the same figures.
 //
-// Why the evaluator's own status is on the page at all: the switch is off by default, so a portal
-// where the feature is configured but nothing is settling has to be distinguishable at a glance from
-// one where it is simply switched off (ADR 0029 §6). The counters answer that — "on and caught up"
-// reads as zeros or as a small pending count, while "on and stuck" is a refused or unsettled-baseline
-// count that has stopped moving.
+// The active view lives in the URL, so a view can be linked and reloaded. The server is the
+// authority on every bound; the client checks only what it can tell instantly (an inverted date
+// range), so a reader is not made to wait for a round trip to learn that.
 
 // How stale a hover-prefetched answer may be and still be shown while the real request is in flight.
-// Same window as the run dialog: long enough to cover the hover-to-click gap, short enough that what
-// is on screen is never meaningfully behind what the server holds.
 const WARM_MAX_AGE = 5 * 60_000
+
+const GROUPS = ['week', 'month', 'quarter', 'all'] as const
+const METRICS = ['spread', 'ic', 'hit', 'fill'] as const
 
 export default function ForecastPage() {
   const { t } = useTranslation()
+  const [sp, setSp] = useSearchParams()
+  const view = useMemo(() => readView(sp), [sp])
+
   const [settings, setSettings] = useState<ForecastSettings | null>(null)
   const [loading, setLoading] = useState(true)
-  // Separate from `loading` for the reason the other consoles record: the reload behind a save must
-  // refresh in place. Replacing a page that has just saved with a full-page load error, because the
-  // refresh behind it failed, throws away what the admin was reading.
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+
+  const [groups, setGroups] = useState<ForecastGroupsResponse | null>(null)
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupsErr, setGroupsErr] = useState('')
+  const [drawer, setDrawer] = useState<{ g: ForecastGroup; cp: ForecastCheckpoint; cell: ForecastCell } | null>(null)
 
   const load = () => {
     setLoading(true)
@@ -51,11 +69,10 @@ export default function ForecastPage() {
       .finally(() => setLoading(false))
   }
 
+  // Empty deps on purpose: the request goes out once, and a reload behind a save calls load()
+  // directly. `t` is stable in the app but not under a test double, and a dependency on it would
+  // turn a mocked translation into a fetch loop.
   useEffect(() => {
-    // The shell warms this GET when its menu item is hovered (ManageLayout's WARM_ON_HOVER), so a
-    // warm answer lets the page render filled instead of spinning. It decides only whether this
-    // render waits — the request below goes out either way and replaces it, so a count that moved
-    // since the hover corrects itself on screen.
     const warm = readPrefetched<ForecastSettings>('/api/admin/forecast', WARM_MAX_AGE)
     if (warm) {
       setSettings(warm)
@@ -66,9 +83,75 @@ export default function ForecastPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const row = (label: string, value: React.ReactNode) => (
-    <Descriptions.Item label={label}>{value}</Descriptions.Item>
-  )
+  // The matrix request. A custom view waits until both dates are present, so an empty tab does not
+  // spend a permutation run on the whole ledger.
+  useEffect(() => {
+    if (view.mode === 'custom' && (!view.from || !view.to)) {
+      setGroups(null)
+      setGroupsErr('')
+      return
+    }
+    let cancelled = false
+    setGroupsLoading(true)
+    setGroupsErr('')
+    api
+      .get<ForecastGroupsResponse>(`/api/admin/forecast/groups?${groupsQuery(view.mode, view.from, view.to, view.group)}`)
+      .then((r) => {
+        if (!cancelled) setGroups(r)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setGroups(null)
+          setGroupsErr(errText(e, t))
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // `t` is stable in the app; under a test double it is not, and depending on it turns every
+    // render into another round trip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.mode, view.from, view.to, view.group])
+
+  const patch = (next: Record<string, string>) => {
+    const p = new URLSearchParams(sp)
+    for (const [k, v] of Object.entries(next)) {
+      if (v) p.set(k, v)
+      else p.delete(k)
+    }
+    setSp(p, { replace: true })
+  }
+
+  const setMode = (mode: string) => patch({ mode })
+  const setGroup = (group: ForecastGrouping) => patch({ group })
+  const setMetric = (metric: ForecastMetric) => patch({ metric })
+  const setRange = (v: [Dayjs | null, Dayjs | null] | null) => {
+    patch({
+      from: v?.[0]?.format('YYYY-MM-DD') ?? '',
+      to: v?.[1]?.format('YYYY-MM-DD') ?? '',
+    })
+  }
+
+  const rangeValue: [Dayjs | null, Dayjs | null] | null =
+    view.from && view.to ? [dayjs(view.from), dayjs(view.to)] : null
+
+  // Instant feedback only. The server owns the bounds; this catches the one mistake a reader makes
+  // in the picker itself and spares a round trip for it.
+  const clientRangeErr =
+    view.mode === 'custom' && view.from && view.to && dayjs(view.from).isAfter(dayjs(view.to))
+      ? t('forecast.err.range_inverted')
+      : ''
+
+  const exportCsv = () => {
+    if (!groups) return
+    const name = `forecast-${view.mode}-${groups.range.from || 'monthly'}-${groups.range.to || ''}.csv`
+    downloadCSV(name, forecastCsv(groups, new Date().toISOString()))
+  }
+
+  const row = (label: string, value: React.ReactNode) => <Descriptions.Item label={label}>{value}</Descriptions.Item>
 
   return (
     <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
@@ -81,9 +164,9 @@ export default function ForecastPage() {
             <Typography.Text type="secondary">{t('forecast.page.subtitle')}</Typography.Text>
           </div>
           <Space wrap>
-            {/* Only 评估设置 for now. The plan's other header button is 导出 CSV, and it exports the
-                statistical matrix this PR does not have yet — a button that exported nothing would be
-                worse than its absence, so it arrives with the matrix in PR 7. */}
+            <Button icon={<DownloadOutlined />} disabled={!groups || groups.groups.length === 0} onClick={exportCsv}>
+              {t('forecast.export.button')}
+            </Button>
             <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
               {t('forecast.settings.button')}
             </Button>
@@ -93,23 +176,16 @@ export default function ForecastPage() {
         <Card title={t('forecast.eval.title')}>
           {settings && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* The switch's own state, first and in words. A page whose whole point is "is this
-                  running" must not make an operator read a number to find out. */}
               {settings.enabled ? (
                 <Tag color="green">{t('forecast.eval.on')}</Tag>
               ) : (
                 <Tag>{t('forecast.eval.off')}</Tag>
               )}
-              {/* Off is the shipped state and reads as a fault unless it is explained, which is what
-                  this alert is for: nothing is wrong, the evaluator simply has not been turned on. */}
               {!settings.enabled && <Alert type="info" showIcon title={t('forecast.eval.offHint')} />}
               <Descriptions column={1} size="small" bordered>
                 {row(t('forecast.eval.bench'), <Typography.Text code>{settings.bench}</Typography.Text>)}
                 {row(t('forecast.eval.due'), settings.due_sets)}
                 {row(t('forecast.eval.pending'), settings.pending)}
-                {/* A refusal count is the one number here that can mean work is stuck rather than
-                    waiting, so it is coloured when it is non-zero — the same treatment the audit and
-                    storage consoles give a non-zero count. */}
                 {row(
                   t('forecast.eval.refused'),
                   settings.refused > 0 ? <Tag color="red">{settings.refused}</Tag> : 0,
@@ -128,11 +204,52 @@ export default function ForecastPage() {
           )}
         </Card>
 
-        {/* The matrix is PR 7 and its data is PR 6. Stated on the page rather than left as blank
-            space, so an operator who opened this page expecting numbers is told where they are
-            rather than left to wonder whether the page failed to load. */}
         <Card title={t('forecast.matrix.title')}>
-          <Typography.Text type="secondary">{t('forecast.matrix.pending')}</Typography.Text>
+          <Tabs
+            activeKey={view.mode}
+            onChange={setMode}
+            items={[
+              { key: 'month', label: t('forecast.tab.month') },
+              { key: 'custom', label: t('forecast.tab.custom') },
+            ]}
+          />
+
+          {view.mode === 'custom' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+              <Alert type="warning" showIcon closable={false} title={t('forecast.custom.banner')} />
+              <Space wrap>
+                <DatePicker.RangePicker value={rangeValue} onChange={setRange} allowEmpty={[true, true]} />
+                <Segmented
+                  value={view.group}
+                  onChange={(v) => setGroup(v as ForecastGrouping)}
+                  options={GROUPS.map((g) => ({ value: g, label: t(`forecast.group.${g}`) }))}
+                />
+              </Space>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 12 }}>
+            <Segmented
+              value={view.metric}
+              onChange={(v) => setMetric(v as ForecastMetric)}
+              options={METRICS.map((m) => ({ value: m, label: t(`forecast.metric.${m}`) }))}
+            />
+          </div>
+
+          {clientRangeErr && <Alert type="error" showIcon title={clientRangeErr} style={{ marginBottom: 12 }} />}
+          {groupsErr && <Alert type="error" showIcon title={groupsErr} style={{ marginBottom: 12 }} />}
+          {groupsLoading && <Spin />}
+          {!groupsLoading && groups && groups.groups.length === 0 && (
+            <Empty description={t('forecast.empty')} />
+          )}
+          {!groupsLoading && groups && groups.groups.length > 0 && (
+            <ForecastMatrix
+              resp={groups}
+              metric={view.metric}
+              mode={view.mode}
+              onOpen={(g, cp) => setDrawer({ g, cp, cell: g.cells[cp] })}
+            />
+          )}
         </Card>
       </div>
 
@@ -144,6 +261,18 @@ export default function ForecastPage() {
           onSaved={load}
         />
       )}
+
+      <ForecastCellDrawer
+        open={drawer !== null}
+        onClose={() => setDrawer(null)}
+        mode={view.mode}
+        from={groups?.range.from ?? view.from}
+        to={groups?.range.to ?? view.to}
+        group={view.group}
+        label={drawer?.g.label ?? ''}
+        checkpoint={drawer?.cp ?? 'd5'}
+        cell={drawer?.cell ?? null}
+      />
     </LoadGate>
   )
 }

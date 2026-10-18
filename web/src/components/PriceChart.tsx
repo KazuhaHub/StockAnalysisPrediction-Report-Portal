@@ -90,6 +90,19 @@ interface Props {
    * axis is worse than a bare number.
    */
   currency?: string
+  /**
+   * Horizontal price levels drawn OVER the candles: the report's S0, its terminal value and its
+   * entry. The y-domain stays bar-driven, so the chart reads exactly the same with or without them;
+   * a level outside the domain is drawn as an edge tag rather than stretching the scale, which
+   * would silently change what every candle means.
+   */
+  levels?: { price: number; label: string; tone: 'neutral' | 'primary' | 'warning' }[]
+  /**
+   * Vertical markers at checkpoint dates. A date outside the bars' range is dropped, not clamped:
+   * a checkpoint in the future has no bar to sit on, and drawing it at the right edge would claim
+   * the window covers it.
+   */
+  markers?: { date: string; label: string }[]
 }
 
 const CURRENCY_KEYS = new Set(['CNY', 'HKD', 'USD'])
@@ -370,7 +383,7 @@ const SR_ONLY: CSSProperties = {
   border: 0,
 }
 
-export default function PriceChart({ bars, loading, unavailable, height, currency, interval }: Props) {
+export default function PriceChart({ bars, loading, unavailable, height, currency, interval, levels, markers }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const readoutID = useId()
@@ -807,6 +820,88 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
               </g>
             )
           })
+        )}
+
+        {(levels?.length || markers?.length) && (
+          <g data-testid="price-overlay">
+            {(markers ?? []).map((m) => {
+              const i = bars.findIndex((b) => dayOf(b.d) === m.date)
+              if (i < 0) return null
+              const x = scale.cx(i)
+              return (
+                <g key={`m:${m.date}`} data-testid="price-marker">
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={PAD_T}
+                    y2={scale.volTop + scale.volH}
+                    stroke={token.colorTextTertiary}
+                    strokeDasharray="2 4"
+                    opacity={0.7}
+                  />
+                  <text
+                    x={x}
+                    y={PAD_T - 8}
+                    textAnchor="middle"
+                    fontSize={AXIS_FONT - 1}
+                    fill={token.colorTextTertiary}
+                  >
+                    {m.label}
+                  </text>
+                </g>
+              )
+            })}
+            {(levels ?? []).map((l) => {
+              const y = scale.py(l.price)
+              const colour =
+                l.tone === 'primary' ? token.colorPrimary : l.tone === 'warning' ? token.colorWarning : token.colorTextTertiary
+              if (y < PAD_T || y > PAD_T + scale.priceH) {
+                const above = y < PAD_T
+                return (
+                  <text
+                    key={`l:${l.label}:${l.price}`}
+                    data-testid="price-level-edge"
+                    x={axisRight}
+                    y={above ? PAD_T + AXIS_FONT : PAD_T + scale.priceH - 2}
+                    textAnchor="end"
+                    fontSize={AXIS_FONT}
+                    fill={colour}
+                    stroke={token.colorBgContainer}
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                  >
+                    {above ? '↑' : '↓'} {l.label} {fenToYuan(l.price)} · {t('forecast.chart.outside')}
+                  </text>
+                )
+              }
+              return (
+                <g key={`l:${l.label}:${l.price}`} data-testid="price-level">
+                  <line
+                    x1={scale.padL}
+                    x2={axisRight}
+                    y1={y}
+                    y2={y}
+                    stroke={colour}
+                    strokeDasharray="6 4"
+                    strokeWidth={1.25}
+                    opacity={0.85}
+                  />
+                  <text
+                    x={axisRight - 4}
+                    y={y - 4}
+                    textAnchor="end"
+                    fontSize={AXIS_FONT}
+                    fill={colour}
+                    stroke={token.colorBgContainer}
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                  >
+                    {l.label} {fenToYuan(l.price)}
+                  </text>
+                </g>
+              )
+            })}
+          </g>
         )}
 
         {bars.map((b, i) => {
