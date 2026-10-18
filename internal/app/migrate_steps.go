@@ -213,6 +213,14 @@ func migration0004() migration {
 				// reports because the reports retention floor is 365 days while h12 resolves twelve
 				// months after a set is made, so a floor-scoped ledger would lose every set on the day
 				// its long-horizon mark became answerable.
+				//
+				// scenario_basis is the one contract field kept as a COLUMN rather than echoed into the
+				// payload, and the test is whether the statistics group on it. It says how the scenario
+				// prices came to be — today always "estimated", meaning the numbers were projected from
+				// a model rather than reported — and it is the same class of field as probability_method
+				// and decision_quality, which are columns for the same reason. Everything else the
+				// producer says about provenance is audit detail with no query against it, so it stays
+				// in `payload`, which is stored verbatim.
 				`CREATE TABLE IF NOT EXISTS prediction_sets(
 					id ` + pk + `,
 					report_id BIGINT,
@@ -238,6 +246,7 @@ func migration0004() migration {
 					policy_version TEXT NOT NULL DEFAULT '',
 					probability_method TEXT NOT NULL DEFAULT '',
 					probability_transform TEXT NOT NULL DEFAULT '',
+					scenario_basis TEXT NOT NULL DEFAULT '',
 					decision_status TEXT NOT NULL DEFAULT '',
 					decision_quality TEXT NOT NULL DEFAULT '',
 					information_cutoff TEXT NOT NULL DEFAULT '',

@@ -97,6 +97,13 @@ func TestMigration0004AppliesOnBaseline(t *testing.T) {
 	if !recorded(st, predictionMigrationID) {
 		t.Errorf("step %s ran but was not recorded", predictionMigrationID)
 	}
+	// scenario_basis is the one contract field the ledger carries as a column rather than inside the
+	// payload, because it is a grouping key the statistics will filter and exclude on — the same class
+	// as probability_method. It is DECLARED (as a column of the table this step creates, which the
+	// migration verifies by name), and it must be there even when empty.
+	if !st.columnExists("prediction_sets", predColScenarioBasis) {
+		t.Errorf("prediction_sets.%s is missing after the migration", predColScenarioBasis)
+	}
 	first := ledgerPicture(t, st)
 	st.Close()
 

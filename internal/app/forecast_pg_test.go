@@ -37,6 +37,9 @@ func TestPostgresForecastStepApplies(t *testing.T) {
 	if !recorded(migrated, predictionMigrationID) {
 		t.Errorf("step %s ran but was not recorded", predictionMigrationID)
 	}
+	if !migrated.columnExists("prediction_sets", predColScenarioBasis) {
+		t.Errorf("prediction_sets.%s is missing after the migration", predColScenarioBasis)
+	}
 	first := ledgerPicture(t, migrated)
 	migrated.Close()
 

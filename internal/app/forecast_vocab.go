@@ -42,6 +42,13 @@ func predictionCoveredRtype() string {
 // login_history) were already released; the migration list is append-only.
 const predictionMigrationID = "0004"
 
+// predColScenarioBasis is the ledger's one contract column, as opposed to the fields echoed into the
+// payload. It is a column because it is a grouping key: the statistics filter and exclude on it the
+// way they do on probability_method and decision_quality, and a JSON blob cannot be indexed or
+// compared in SQL. Everything else the producer sends about provenance is audit detail and stays in
+// the payload, which is stored verbatim.
+const predColScenarioBasis = "scenario_basis"
+
 // Set states (ADR 0029 §2). Every covered ingest writes exactly one of these.
 const (
 	predStateAbsent   = "absent"   // a covered rtype arrived with no predictions
