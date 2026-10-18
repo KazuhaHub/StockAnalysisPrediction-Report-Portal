@@ -12,7 +12,7 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
     level: 'warning',
     title: '维护通知',
     content: '今晚 22:00 开始维护。',
-    popup: true,
+    display: 'both',
     dismissible: false,
     scope: 'home',
     endsAt: '',
@@ -27,7 +27,7 @@ describe('announcementSig', () => {
   it('is stable, and covers only what the announcement says', () => {
     const a = announcement()
     expect(announcementSig(a)).toBe(announcementSig(announcement()))
-    expect(announcementSig(announcement({ id: 99, popup: false, scope: 'app', endsAt: 'x' })))
+    expect(announcementSig(announcement({ id: 99, display: 'strip', scope: 'app', endsAt: 'x' })))
       .toBe(announcementSig(a))
     expect(announcementSig(announcement({ content: '推迟到明晚。' }))).not.toBe(announcementSig(a))
     expect(announcementSig(announcement({ level: 'error' }))).not.toBe(announcementSig(a))

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Select, Space, Spin, Tag, Typography } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { Alert, Button, Modal, Select, Space, Spin, Tag, Typography, theme } from 'antd'
+import { ExportOutlined, HistoryOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { buildKey, type BuildIdentity } from '../lib/buildIdentity'
@@ -51,6 +51,7 @@ export default function ReleaseNotesModal({
   onViewed?: (target: BuildIdentity) => void
 }) {
   const { t, i18n } = useTranslation()
+  const { token } = theme.useToken()
   const [state, setState] = useState<NotesState>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
   const [selectedTag, setSelectedTag] = useState(target?.version ?? '')
@@ -133,7 +134,13 @@ export default function ReleaseNotesModal({
     <Modal
       open={open}
       onCancel={onClose}
-      title={<Space size={8}>{t('update.notesTitle', { version: titleVersion })}{maturityTag}</Space>}
+      title={
+        <Space size={8}>
+          <HistoryOutlined style={{ color: token.colorPrimary }} />
+          {t('update.notesTitle', { version: titleVersion })}
+          {maturityTag}
+        </Space>
+      }
       width={980}
       className={`rp-run-analysis-modal rp-release-notes-modal${historyVisible ? ' rp-release-notes-modal--history' : ''}`}
       // Rendering under the application root avoids Ant Design's body scroll lock. In this app,

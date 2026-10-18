@@ -191,7 +191,7 @@ func TestReorderLeavesContentAndTimestampsAlone(t *testing.T) {
 // convenience toggle into a silent disclosure change.
 func TestToggleTouchesOnlyTheFlag(t *testing.T) {
 	s := newV1Server(t)
-	id := mustAddAnnouncement(t, s, `{"title":"原标题","content":"原正文","popup":true}`)
+	id := mustAddAnnouncement(t, s, `{"title":"原标题","content":"原正文","display":"both"}`)
 
 	// Somebody else edits the text while the list page holds a stale copy.
 	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
@@ -209,8 +209,60 @@ func TestToggleTouchesOnlyTheFlag(t *testing.T) {
 	if got.Title != "新标题" {
 		t.Errorf("toggle reverted the other admin's edit: title=%q", got.Title)
 	}
-	if !got.Popup {
-		t.Errorf("toggling enabled also changed popup")
+	if got.Display != displayBoth {
+		t.Errorf("toggling enabled also changed display: %q", got.Display)
+	}
+}
+
+// display is the mode the reader obeys; `popup` is kept in sync so a binary rolled back across this
+// release still shows the row where it did — popup = "not strip-only".
+func TestDisplayModeAndLegacyPopupStayInSync(t *testing.T) {
+	s := newV1Server(t)
+
+	// The old boolean is still accepted as an input: popup=true means "band and popup".
+	both := mustAddAnnouncement(t, s, `{"title":"旧写法","popup":true}`)
+	if got := s.st.GetAnnouncement(both); got.Display != displayBoth || !got.Popup {
+		t.Fatalf("legacy popup=true: display=%q popup=%v, want both/true", got.Display, got.Popup)
+	}
+	strip := mustAddAnnouncement(t, s, `{"title":"旧写法二","popup":false}`)
+	if got := s.st.GetAnnouncement(strip); got.Display != displayStrip || got.Popup {
+		t.Fatalf("legacy popup=false: display=%q popup=%v, want strip/false", got.Display, got.Popup)
+	}
+
+	// A popup-only row is the new capability: it does NOT appear in the strip set, only the dialog.
+	only := mustAddAnnouncement(t, s, `{"title":"只弹窗","display":"popup"}`)
+	if got := s.st.GetAnnouncement(only); got.Display != displayPopup || !got.Popup {
+		t.Fatalf("display=popup: display=%q popup=%v, want popup/true", got.Display, got.Popup)
+	}
+
+	// The inline switch rewrites display and keeps popup in step.
+	if rec := announcementReq(t, s, http.MethodPatch, fmt.Sprintf("/api/admin/announcements/%d", only),
+		`{"display":"strip"}`); rec.Code != http.StatusOK {
+		t.Fatalf("display toggle status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetAnnouncement(only); got.Display != displayStrip || got.Popup {
+		t.Fatalf("display toggle: display=%q popup=%v, want strip/false", got.Display, got.Popup)
+	}
+
+	// An unrecognized mode is refused, not coerced.
+	if rec := announcementReq(t, s, http.MethodPatch, fmt.Sprintf("/api/admin/announcements/%d", only),
+		`{"display":"nonsense"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad display status=%d, want 400", rec.Code)
+	}
+}
+
+// A row written before the display column existed carries NULL; it must read as the mode its popup
+// boolean meant, without a back-fill.
+func TestLegacyRowDerivesDisplayFromPopup(t *testing.T) {
+	if got := displayFrom("", true); got != displayBoth {
+		t.Errorf("legacy popup=true derives %q, want %q", got, displayBoth)
+	}
+	if got := displayFrom("", false); got != displayStrip {
+		t.Errorf("legacy popup=false derives %q, want %q", got, displayStrip)
+	}
+	// A stored value is honoured as-is.
+	if got := displayFrom(displayPopup, true); got != displayPopup {
+		t.Errorf("stored popup mode read as %q", got)
 	}
 }
 

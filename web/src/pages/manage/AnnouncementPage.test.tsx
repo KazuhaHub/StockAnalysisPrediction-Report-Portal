@@ -38,7 +38,7 @@ function announcement(over: Partial<AdminAnnouncement> = {}): AdminAnnouncement 
     content: '今晚 22:00 开始维护。',
     ord: 0,
     enabled: true,
-    popup: false,
+    display: 'strip',
     dismissible: false,
     scope: 'home',
     audience: 'all',
@@ -109,12 +109,28 @@ describe('AnnouncementPage', () => {
     await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
     const title = await screen.findByPlaceholderText('settings.announcementTitlePlaceholder')
     await user.type(title, '节点已恢复')
-    expect(document.querySelector('.rp-announcement')).not.toBeNull() // preview follows the form
+    expect(document.querySelector('.rp-announce-item')).not.toBeNull() // preview follows the form
 
     await user.click(screen.getByRole('button', { name: /common\.save/ }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
     expect(apiMock.post.mock.calls[0][0]).toBe('/api/admin/announcements')
-    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '节点已恢复', enabled: true, popup: false })
+    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '节点已恢复', enabled: true, display: 'strip' })
+  })
+
+  // The display mode is a three-way choice now, not a popup boolean: popup-only row that never
+  // appears in the band is a state the boolean could not express.
+  it('saves the chosen display mode', async () => {
+    apiMock.get.mockResolvedValue({ items: [] })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+    await user.type(await screen.findByPlaceholderText('settings.announcementTitlePlaceholder'), '仅弹窗')
+    await user.click(await screen.findByText('announcementAdmin.display.popup'))
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(apiMock.post.mock.calls[0][1]).toMatchObject({ title: '仅弹窗', display: 'popup' })
   })
 
   // Optimistic concurrency: without the token a second admin's save silently reverts the first.
@@ -148,19 +164,20 @@ describe('AnnouncementPage', () => {
     expect(apiMock.put).not.toHaveBeenCalled()
   })
 
-  it('labels the popup switches that will not actually fire', async () => {
+  // Every popup switch fires now: one dialog offers all of them, so there is no "only the first
+  // one pops" caveat to label.
+  it('tags every popup announcement as popping up', async () => {
     apiMock.get.mockResolvedValue({
       items: [
-        announcement({ id: 1, title: '第一条', popup: true }),
-        announcement({ id: 2, title: '第二条', popup: true }),
+        announcement({ id: 1, title: '第一条', display: 'both' }),
+        announcement({ id: 2, title: '第二条', display: 'both' }),
       ],
     })
     renderPage()
 
     await screen.findByText('第二条')
-    // Only one row carries the "will not pop up" tag: the second.
-    const tags = screen.getAllByText('announcementAdmin.popupSkipped')
-    expect(tags).toHaveLength(1)
+    const tags = screen.getAllByText('announcementAdmin.popupTag')
+    expect(tags).toHaveLength(2)
   })
 
   it('nudges about an enabled announcement with no end date that has been up for weeks', async () => {

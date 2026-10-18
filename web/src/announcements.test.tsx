@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { AnnouncementsProvider, inScope, useAnnouncements } from './announcements'
+import { AnnouncementsProvider, inScope, popupItems, stripItems, useAnnouncements } from './announcements'
 import { ApiError } from './api/client'
 import type { Announcement } from './api/types'
 
@@ -37,7 +37,7 @@ describe('AnnouncementsProvider', () => {
   it('loads the feed and normalizes a hostile payload instead of throwing in the shell', async () => {
     mocks.getIfChanged.mockResolvedValue({
       items: [
-        { id: 1, title: ' 维护 ', level: 'CRITICAL', scope: 'everywhere', popup: 'yes' },
+        { id: 1, title: ' 维护 ', level: 'CRITICAL', scope: 'everywhere', display: 'yes' },
         { title: 'no id' }, // dropped
         null,
       ],
@@ -106,7 +106,7 @@ describe('AnnouncementsProvider', () => {
 
 describe('inScope', () => {
   const a = (over: Partial<Announcement>): Announcement => ({
-    id: 1, level: 'notice', title: '', content: '', popup: false,
+    id: 1, level: 'notice', title: '', content: '', display: 'strip',
     dismissible: false, scope: 'home', endsAt: '', ...over,
   })
 
@@ -115,5 +115,16 @@ describe('inScope', () => {
     const app = a({ id: 2, scope: 'app' })
     expect(inScope([home, app], '/').map((x) => x.id)).toEqual([1, 2])
     expect(inScope([home, app], '/queue').map((x) => x.id)).toEqual([2])
+  })
+
+  // display decides which surface draws a row: a popup-only row is for the dialog alone, so it must
+  // never reach the strip; a strip-only row must never reach the dialog.
+  it('separates strip rows from popup rows by display mode', () => {
+    const strip = a({ id: 1, display: 'strip' })
+    const popup = a({ id: 2, display: 'popup' })
+    const both = a({ id: 3, display: 'both' })
+    const all = [strip, popup, both]
+    expect(stripItems(all, '/').map((x) => x.id)).toEqual([1, 3])
+    expect(popupItems(all, '/').map((x) => x.id)).toEqual([2, 3])
   })
 })

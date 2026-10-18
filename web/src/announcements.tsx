@@ -3,10 +3,11 @@ import { ApiError } from './api/client'
 import { UNCHANGED, forgetTags, getIfChanged } from './lib/conditionalGet'
 import { migrateLegacyDismissal } from './lib/announcementDismissal'
 import { startVisiblePoll } from './lib/visiblePoll'
-import type { Announcement, AnnouncementLevel, AnnouncementScope } from './api/types'
+import type { Announcement, AnnouncementDisplay, AnnouncementLevel, AnnouncementScope } from './api/types'
 
 const URL = '/api/announcements'
 const LEVELS: AnnouncementLevel[] = ['notice', 'success', 'warning', 'error']
+const DISPLAYS: AnnouncementDisplay[] = ['strip', 'popup', 'both']
 
 // The announcement feed, kept live for the signed-in reader.
 //
@@ -38,12 +39,13 @@ function normalize(raw: unknown): Announcement[] {
     if (typeof a?.id !== 'number') continue
     const level = String(a.level ?? '').toLowerCase()
     const scope = String(a.scope ?? '').toLowerCase()
+    const display = String(a.display ?? '').toLowerCase()
     out.push({
       id: a.id,
       level: (LEVELS.includes(level as AnnouncementLevel) ? level : 'notice') as AnnouncementLevel,
       title: String(a.title ?? '').trim(),
       content: String(a.content ?? '').trim(),
-      popup: a.popup === true,
+      display: (DISPLAYS.includes(display as AnnouncementDisplay) ? display : 'strip') as AnnouncementDisplay,
       dismissible: a.dismissible === true,
       scope: (scope === 'app' ? 'app' : 'home') as AnnouncementScope,
       endsAt: String(a.endsAt ?? '').trim(),
@@ -140,24 +142,25 @@ export function useAnnouncements(): AnnouncementsCtx {
 }
 
 /**
- * Every announcement that belongs on the route currently rendered, whatever its scope. This is the
- * set the popup queue draws from; the two functions below split it by where it is DRAWN.
+ * Every announcement that belongs on the route currently rendered, whatever its display: app-scoped
+ * ones everywhere, plus home-scoped ones on the home page. One list, in the operator's order. This is
+ * the set the popup dialog draws from.
  */
 export function inScope(items: Announcement[], pathname: string): Announcement[] {
   const onHome = pathname === '/'
   return items.filter((a) => (a.scope === 'app' ? true : onHome))
 }
 
-/** Home-scoped announcements, which get the roomy alert stack — on the home page and nowhere else. */
-export function bandItems(items: Announcement[], pathname: string): Announcement[] {
-  return pathname === '/' ? items.filter((a) => a.scope === 'home') : []
+/**
+ * The subset of inScope that the strip draws — everything except popup-only rows, which are for the
+ * dialog alone. A `popup` row shown in the band as well would be the opposite of what an operator
+ * chose when they took it out of the band.
+ */
+export function stripItems(items: Announcement[], pathname: string): Announcement[] {
+  return inScope(items, pathname).filter((a) => a.display !== 'popup')
 }
 
-/**
- * App-scoped announcements, which follow the reader onto every page and therefore get the compact
- * strip instead. The two sets are disjoint by construction, so nothing renders twice on the home
- * page.
- */
-export function stripItems(items: Announcement[]): Announcement[] {
-  return items.filter((a) => a.scope === 'app')
+/** The subset of inScope that the popup dialog offers: `popup` and `both` rows. */
+export function popupItems(items: Announcement[], pathname: string): Announcement[] {
+  return inScope(items, pathname).filter((a) => a.display !== 'strip')
 }

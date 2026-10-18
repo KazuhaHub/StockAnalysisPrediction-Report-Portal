@@ -165,7 +165,7 @@ type migration struct {
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
 func (s *Store) migrations() []migration {
-	return []migration{migration0001(), migration0002(), migration0003(), migration0004()}
+	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005()}
 }
 
 // The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).
@@ -417,6 +417,33 @@ func migration0002() migration {
 			_, err := e.exec(`ALTER TABLE users ADD COLUMN last_used_version TEXT`)
 			if err != nil {
 				return fmt.Errorf("add %s.%s: %w", col.table, col.name, err)
+			}
+			return nil
+		},
+	}
+}
+
+// migration0005 adds `display` to announcements: how a row is shown to a reader.
+//
+// The column is a superset of the existing `popup` boolean — strip / popup / both — and it is
+// ADDITIVE and nullable with no default, so a database written before it simply carries NULL, and
+// NULL reads as "derive from popup" (announcement_store.go). That derivation, not a back-fill, is
+// what makes a dump written before this step loadable: the restore never has to invent a value, and
+// the writer keeps `popup` in sync for one release line so a rolled-back older binary still behaves.
+func migration0005() migration {
+	cols := []colRef{{table: "announcements", name: "display"}}
+	return migration{
+		id:      "0005",
+		columns: cols,
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			for _, c := range cols {
+				if e.columnExists(c.table, c.name) {
+					continue // already there: a retry after a crash, or a hand-added column
+				}
+				if _, err := e.exec(`ALTER TABLE ` + c.table + ` ADD COLUMN ` + c.name + ` TEXT`); err != nil {
+					return fmt.Errorf("add %s.%s: %w", c.table, c.name, err)
+				}
 			}
 			return nil
 		},

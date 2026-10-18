@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
-import SiteAnnouncement, { AnnouncementPopup, AnnouncementStrip, announcementAlertType } from './SiteAnnouncement'
+import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
 import { announcementSig, migrateLegacyDismissal } from '../lib/announcementDismissal'
 import type { Announcement } from '../api/types'
 
@@ -37,7 +37,7 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
     level: 'warning',
     title: '维护通知',
     content: '今晚 22:00 开始维护。',
-    popup: false,
+    display: 'strip',
     dismissible: false,
     scope: 'home',
     endsAt: '',
@@ -45,27 +45,16 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
   }
 }
 
-// The three surfaces AppLayout mounts together: the app-scoped strip on every page, the home-page
-// alert stack, and the single popup over both.
+// The two surfaces AppLayout mounts together: the strip (every in-scope row) and the single popup
+// over it. One list now, whatever the scope, so there is no home-only band to mount beside it.
 function renderAt(path = '/') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AnnouncementStrip />
-      <SiteAnnouncement />
       <AnnouncementPopup />
     </MemoryRouter>,
   )
 }
-
-describe('announcementAlertType', () => {
-  it('maps announcement levels to Ant Design alert types', () => {
-    expect(announcementAlertType('notice')).toBe('info')
-    expect(announcementAlertType('success')).toBe('success')
-    expect(announcementAlertType('warning')).toBe('warning')
-    expect(announcementAlertType('error')).toBe('error')
-    expect(announcementAlertType('unknown')).toBe('info')
-  })
-})
 
 describe('SiteAnnouncement', () => {
   beforeEach(() => {
@@ -78,7 +67,7 @@ describe('SiteAnnouncement', () => {
 
   it('renders nothing when the feed is empty', () => {
     const { container } = renderAt('/')
-    expect(container.querySelector('.rp-announcement')).toBeNull()
+    expect(container.querySelector('.rp-announce-item')).toBeNull()
   })
 
   it('stacks every announcement in the operator’s order', async () => {
@@ -93,7 +82,7 @@ describe('SiteAnnouncement', () => {
 
   // Folding is off by default: hiding something an operator decided was worth interrupting people
   // with, behind a click, is not a saving.
-  it('shows every home announcement by default', async () => {
+  it('shows every announcement by default', async () => {
     feed.items = [1, 2, 3, 4, 5].map((id) => announcement({ id, title: `第 ${id} 条` }))
     renderAt('/')
 
@@ -107,9 +96,10 @@ describe('SiteAnnouncement', () => {
     const user = userEvent.setup()
     renderAt('/')
 
-    expect(await screen.findByText('第 3 条')).toBeTruthy()
-    expect(screen.queryByText('第 4 条')).toBeNull()
-    await user.click(screen.getByText('announcement.showMore:2'))
+    // The lead stays; the rest fold behind the counter.
+    expect(await screen.findByText('第 1 条')).toBeTruthy()
+    expect(screen.queryByText('第 2 条')).toBeNull()
+    await user.click(screen.getByText('announcement.showMore:4'))
     expect(await screen.findByText('第 5 条')).toBeTruthy()
   })
 
@@ -121,14 +111,16 @@ describe('SiteAnnouncement', () => {
     const { container } = renderAt('/')
     expect(await screen.findByText('首页公告')).toBeTruthy()
     expect(screen.getByText('全站公告')).toBeTruthy()
-    // Each is drawn once, by the surface that owns its scope — not twice on the home page.
-    expect(container.querySelectorAll('.rp-announcement')).toHaveLength(1)
+    // One list holding both scopes, each row drawn once.
+    expect(container.querySelectorAll('.rp-announce-item')).toHaveLength(2)
     expect(container.querySelector('.rp-announce-strip')).not.toBeNull()
 
     cleanup()
     renderAt('/queue')
     expect(await screen.findByText('全站公告')).toBeTruthy()
     expect(screen.queryByText('首页公告')).toBeNull()
+    // Off the home page only the app-scoped row remains.
+    expect(document.querySelectorAll('.rp-announce-item')).toHaveLength(1)
   })
 
   it('shows every site-wide announcement in full by default', async () => {
@@ -145,6 +137,26 @@ describe('SiteAnnouncement', () => {
     expect(screen.queryByRole('button', { expanded: false })).toBeNull()
   })
 
+  // The band used to be tinted by the loudest announcement while each row's icon kept its own
+  // level's colour, so a blue notice under an amber warning looked like a misplaced icon. Each row
+  // now carries its own background, and the band itself is neutral (styled in index.css).
+  it('paints each strip row with its own level colour, not the loudest', async () => {
+    feed.items = [
+      announcement({ id: 1, level: 'notice', title: '注意', scope: 'app' }),
+      announcement({ id: 2, level: 'warning', title: '警告', scope: 'app' }),
+    ]
+    const { container } = renderAt('/queue')
+    await screen.findByText('警告')
+
+    const band = container.querySelector<HTMLElement>('.rp-announce-strip')!
+    expect(band.getAttribute('style') || '').not.toMatch(/background/)
+    const rows = container.querySelectorAll<HTMLElement>('.rp-announce-item')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].style.background).toBeTruthy()
+    expect(rows[1].style.background).toBeTruthy()
+    expect(rows[0].style.background).not.toBe(rows[1].style.background)
+  })
+
   // The bug this replaced: the folded lead line stayed visible after expanding, so the first
   // announcement was drawn twice and the band looked broken.
   it('never draws the lead twice when the site-wide strip is folded and then expanded', async () => {
@@ -158,7 +170,8 @@ describe('SiteAnnouncement', () => {
 
     expect(await screen.findByText('第一条')).toBeTruthy()
     expect(screen.queryByText('第二条')).toBeNull()
-    expect(screen.queryByText('正文一')).toBeNull() // folded shows the title only
+    // Folding hides the overflow, not the lead: the first announcement keeps its body too.
+    expect(screen.getByText('正文一')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { expanded: false }))
     await screen.findByText('第二条')
@@ -176,39 +189,43 @@ describe('SiteAnnouncement', () => {
     await waitFor(() => expect(container.querySelector('.rp-announce-strip')).toBeNull())
   })
 
-  // One modal per page load. Advancing to the next would make the reader dismiss two in one
-  // interaction and would contradict the hint shown beside the switch on the admin page.
-  it('offers only the first eligible popup', async () => {
+  // One dialog holds every eligible popup, titles in a sidebar, the picked one in full. Firing them
+  // one after another would make a reader dismiss two modals in one sitting.
+  it('offers every eligible popup in one dialog', async () => {
     feed.items = [
-      announcement({ id: 1, title: '第一条', popup: true }),
-      announcement({ id: 2, title: '第二条', popup: true }),
+      announcement({ id: 1, title: '第一条', display: 'both' }),
+      announcement({ id: 2, title: '第二条', display: 'both' }),
     ]
     renderAt('/')
     await screen.findByText('announcement.dontShowAgain')
-    // The first announcement's title appears twice (banner + modal); the second only once.
+    // Each appears in its strip row and in the dialog's stacked row.
     expect(screen.getAllByText('第一条')).toHaveLength(2)
-    expect(screen.getAllByText('第二条')).toHaveLength(1)
+    expect(screen.getAllByText('第二条')).toHaveLength(2)
   })
 
-  it('remembers "don\'t show again" per announcement, not for the whole feed', async () => {
+  // The footer answer is the whole dialog's, not one row's: "don't show again" silences every
+  // announcement the dialog was showing, and none of them comes back on reload.
+  it('"don\'t show again" silences every announcement in the dialog at once', async () => {
     feed.items = [
-      announcement({ id: 1, title: '第一条', popup: true }),
-      announcement({ id: 2, title: '第二条', popup: true }),
+      announcement({ id: 1, title: '第一条', display: 'both' }),
+      announcement({ id: 2, title: '第二条', display: 'both' }),
     ]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.dontShowAgain'))
 
-    // Reload: the first is silenced, so the second gets its turn — the dismissal is not global.
     cleanup()
     renderAt('/')
-    await waitFor(() => expect(screen.getAllByText('第二条')).toHaveLength(2))
+    // Neither re-fires: the dialog is gone, and only the strip rows remain (one title each).
+    await waitFor(() => expect(screen.queryByText('announcement.dontShowAgain')).toBeNull())
+    expect(screen.getAllByText('第一条')).toHaveLength(1)
+    expect(screen.getAllByText('第二条')).toHaveLength(1)
   })
 
   // The reader keys dismissal on (id, wording). Reordering changes neither, so a drag in the admin
   // console must not re-interrupt everyone who already dismissed the popup.
   it('does not re-fire a dismissed popup when the announcements are reordered', async () => {
-    const a = announcement({ id: 1, title: '第一条', popup: true })
+    const a = announcement({ id: 1, title: '第一条', display: 'both' })
     const b = announcement({ id: 2, title: '第二条' })
     feed.items = [a, b]
     const user = userEvent.setup()
@@ -223,19 +240,19 @@ describe('SiteAnnouncement', () => {
   })
 
   it('re-fires when the operator edits what the announcement says', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.dontShowAgain'))
 
     cleanup()
-    feed.items = [announcement({ id: 1, popup: true, content: '维护推迟到明晚。' })]
+    feed.items = [announcement({ id: 1, display: 'both', content: '维护推迟到明晚。' })]
     renderAt('/')
     expect(await screen.findByText('announcement.dontShowAgain')).toBeTruthy()
   })
 
   it('"got it" silences the popup for the session only, and never the banner', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.gotIt'))
@@ -254,9 +271,9 @@ describe('SiteAnnouncement', () => {
       announcement({ id: 2, title: '不可关闭' }),
     ]
     const user = userEvent.setup()
-    const { container } = renderAt('/')
+    renderAt('/')
     await screen.findByText('可关闭')
-    const close = container.querySelector('.ant-alert-close-icon') as HTMLElement
+    const close = screen.getByRole('button', { name: 'announcement.close' })
     expect(close).toBeTruthy()
     await user.click(close)
     await waitFor(() => expect(screen.queryByText('可关闭')).toBeNull())
@@ -269,7 +286,7 @@ describe('SiteAnnouncement', () => {
   // three surfaces below each see only their own slice, and one of them consuming the key against a
   // partial list is how every reader gets re-interrupted on upgrade day.
   it('carries the pre-upgrade dismissal across, once', async () => {
-    const a = announcement({ id: 7, popup: true })
+    const a = announcement({ id: 7, display: 'both' })
     window.localStorage.setItem(LEGACY_KEY, announcementSig(a))
     feed.items = [a]
     migrateLegacyDismissal('alice', feed.items)
@@ -281,7 +298,7 @@ describe('SiteAnnouncement', () => {
   })
 
   it('keeps one reader’s dismissals off another reader’s screen', async () => {
-    feed.items = [announcement({ id: 1, popup: true })]
+    feed.items = [announcement({ id: 1, display: 'both' })]
     const user = userEvent.setup()
     renderAt('/')
     await user.click(await screen.findByText('announcement.dontShowAgain'))

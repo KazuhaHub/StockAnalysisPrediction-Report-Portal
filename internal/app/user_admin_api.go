@@ -442,7 +442,7 @@ func (s *Server) apiGroupDelete(w http.ResponseWriter, r *http.Request, user str
 	disabled := 0
 	if choice == "disable" {
 		for _, aid := range impact.orphaned {
-			if s.st.SetAnnouncementFlag(aid, "enabled", false) == nil {
+			if s.st.SetAnnouncementEnabled(aid, false) == nil {
 				disabled++
 			}
 		}

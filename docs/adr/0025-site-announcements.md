@@ -33,6 +33,16 @@ starts_at, ends_at, created_at, created_by, updated_at)`, plus a side table
 arrive on existing databases through `createBaseTables` / `ensureColumns` — additive only, no
 hand-written migration, per the project's standing schema rule.
 
+The `display` column was added later, and it is the first change here to go through the migration
+ledger (ADR 0035, `migration0005`) rather than the frozen baseline: `display TEXT`, nullable with no
+default. It replaces the `popup` boolean as the thing the reader obeys — `strip` (band only), `popup`
+(dialog only), `both` — because "band", "popup" and "band and popup" are three states and a boolean
+can hold two. `popup` is **kept and kept in sync** (`popup = display != strip`) for one release line,
+so a binary rolled back across this change still shows a row where it did; a row written before the
+column existed carries NULL, and `displayFrom` derives its mode from `popup`, which makes a
+pre-migration backup load untouched rather than needing a back-fill.
+
+
 The whole column set is declared from the first release that has the table, including the columns
 whose write paths open in later phases. A column costs nothing here, and declaring it late would
 mean a second DDL change plus a second `ensureColumns` pass for no gain.
@@ -49,7 +59,7 @@ set is now pinned by a test — the way this regresses is not somebody re-adding
 `announcementTitle`, it is somebody adding a sixth field that "obviously" belongs with the
 branding.
 
-The reader payload carries `id, level, title, content, popup, dismissible, scope, endsAt` and
+The reader payload carries `id, level, title, content, display, dismissible, scope, endsAt` and
 deliberately **not** `audience`, `grants`, `ord` or `enabled`. Telling a reader that a targeted
 announcement exists, even without naming its target, discloses the shape of the OU tree.
 
@@ -222,62 +232,92 @@ and by audience, so "absent" has four meanings and only one is "deleted". An ann
 off for a day, one whose window closed overnight, or a reader whose OU moved and moved back, would
 all have their dismissals erased and be re-interrupted the next morning.
 
-### One popup per page load
+### One popup dialog per batch, not one popup per announcement
 
-The queue takes the first eligible announcement in the operator's order. Advancing to the next one
-after it closes would make a reader dismiss two modals in one interaction. The cost is that popup
-switches below the first are decorative for that load, so the management list labels them —
-an ignored setting should be visible where it is set, not discovered by an operator wondering why
-nothing appeared.
+Every eligible announcement is offered in ONE dialog at a time, stacked as the same rows the strip
+draws, in the operator's order. An earlier version fired the first eligible and advanced to the next
+on close, which made a reader dismiss two modals in one sitting and left popup switches below the
+first decorative for that load; the management list had to label those switches to explain a setting
+that was silently ignored. One dialog removes both problems: every switch fires, and there is one
+answer for one interruption. A two-pane version (titles in a sidebar, the picked one beside it) was
+tried and rejected — with two or three short rows to read, a picker is a click the reader does not
+need, and the dialog read as a settings panel rather than as a notice.
 
-### Scope is two values, drawn on two surfaces, with two exclusions
+### Scope is two values, drawn on one surface, with two exclusions
 
-`home` (the home page, today's behaviour, and the fallback for anything unrecognized) and `app`
-(every page behind the login). There is deliberately no path-prefix third value: it would bypass
-the exclusions below — a `/chat`-scoped row would render on the mobile chat page whose header is
-`display:none` precisely because that surface is stripped to the thread and composer.
+`home` (the home page, the fallback for anything unrecognized) and `app` (every page behind the
+login). There is deliberately no path-prefix third value: it would bypass the exclusions below — a
+`/chat`-scoped row would render on the mobile chat page whose header is `display:none` precisely
+because that surface is stripped to the thread and composer.
 
-**The two scopes are drawn differently, and that is the point of having two.** A home-scoped
-announcement gets the roomy alert stack, on the page a reader visits deliberately. An app-scoped one
-follows the reader everywhere, so it gets a tinted band under the header — one row per announcement,
-level icon, title, body, an optional close — tinted by the **loudest** announcement in it rather
-than by whichever the operator dragged to the top, so a stack whose one incident notice sits third
-does not read as a calm blue bar.
+**Scope decides WHERE, not HOW.** The strip draws every in-scope row as one list in the operator's
+order — `app` rows on every page, `home` rows on the home page — whether or not both kinds are
+present. This replaces the earlier two-surface split (a roomy stack for `home`, a band for `app`),
+which on the home page painted the two sets in separate boxes with a gap and the fold toggle of one
+sitting inside the other. It was one feature cut in half by where its rows happened to show; one
+list, one fold, one place is what it should have been.
 
-**Neither band folds by default, and that reverses an earlier decision here.** The strip originally
-collapsed to a single line on the argument that a band on every page is chrome and has to cost what
-chrome costs — ~36px against ~150px for three stacked alerts. Seen in use, that argument does not
-survive: folding hides, behind a click, something an operator decided was worth interrupting
-everybody with, and a band that conceals its own contents is one readers stop trusting. The saving
-was real and bought the wrong thing.
+**One row component, every surface.** `AnnouncementRow` is the only thing that draws an announcement:
+the strip and both admin previews (the editor's live render and the "what would this OU see" panel).
+Before this the console used antd's `Alert` while the strip used its own markup, so an operator
+previewing a row saw a different widget from the one a reader would get.
 
-Folding is now a site-wide switch (`announcement_collapse`, default off) rather than a fixed rule,
+**The band is neutral and each row is painted with its own level colour.** This reverses the original
+"tint the whole band by the loudest announcement" rule, which does not survive a mixed-level strip:
+the band took the loudest row's background while each row's icon kept its own level's colour, so a
+blue notice sitting under an amber warning read as a mispainted icon rather than as two independent
+messages. Per row is also the honest reading of the data — an announcement has a level, the band does
+not — and it keeps the icon, the close button and the body text of a row on one palette instead of
+three. The band itself is transparent: once rows carry their own surface, a tinted slab behind them
+reads as a gray box rather than as the page. The cost is the old signal "this band contains something
+loud"; the loud things carry their own colour and are no longer flattened into the band's.
+
+**The popup is one dialog for the whole batch, stacked rows and nothing else.** Every eligible
+announcement is offered at once, each the same `AnnouncementRow` the strip draws, rather than one
+modal per announcement in turn, which would make a reader dismiss two dialogs in one sitting. Its
+title is an icon plus "公告", never the level's internal name ("Success"/"Incident"), which leaked
+admin vocabulary into a reader's dialog. The footer acts on the whole dialog: "Got it" silences every
+announcement it was showing for the session, "don't show again" silences them all for good — one
+interruption, one answer. A reader who wants one to keep surfacing finds it in the strip. There is no
+corner close button: the two footer actions are the exits, and a third that duplicates one of them is
+a worse choice, not a shortcut.
+
+**The strip folds by default only if the site says so.** The strip originally collapsed to a single
+line on the argument that a band on every page is chrome and has to cost what chrome costs — ~36px
+against ~150px for three stacked alerts. Seen in use, that argument does not survive: folding hides,
+behind a click, something an operator decided was worth interrupting everybody with, and a band that
+conceals its own contents is one readers stop trusting. The saving was real and bought the wrong
+thing.
+
+Folding is a site-wide switch (`announcement_collapse`, default off) rather than a fixed rule,
 because the right answer depends on how many announcements a portal actually runs at once — which
 only its operator knows. It rides the site-settings endpoint rather than earning one of its own:
 that endpoint merges per field, so the announcements page posts this alone without disturbing the
 branding beside it.
 
-While folded the strip shows the lead **and nothing else**. The first attempt kept the collapsed
-line visible after expanding and listed every announcement beneath it, so the lead was drawn twice
-and the band looked broken — visible in the very first screenshot of it in use.
+**Folding hides the overflow, not the lead, and the reveal is animated.** The visible head keeps its
+title AND body — an earlier version truncated the lead to one bare line, which hid the very thing the
+operator wanted read; folding is about how many messages show, not how much of one shows. The head is
+one row; only the ones after it fold. The overflow collapses with a `grid-template-rows: 0fr⇄1fr`
+transition (a height animation that needs no measurement), unmounting once it reaches zero, so a
+folded band still costs its folded height in the DOM. The head count is a constant, not a setting.
 
-The two sets are disjoint by construction — the strip draws `scope='app'`, the band draws
-`scope='home'` and only on `/` — so nothing appears twice on the home page. The popup queue runs
-over the union of both, in one component mounted once, so only one modal can ever exist.
+The popup queue and the strip draw the same in-scope set, so a home-scoped row the strip is showing
+is the same row the popup offers; only one modal can ever exist because it is one component mounted
+once.
 
-Both surfaces and the popup are suppressed on **mobile chat** (`chatFocus`) and on **the admin
+The strip and the popup are suppressed on **mobile chat** (`chatFocus`) and on **the admin
 console** (`/manage/*`) whatever a row says. The console is full-bleed with a rail positioned off
 the header height, so a band above it adds a scrollbar with nothing to scroll and pushes the rail's
 footer off-screen. `AppLayout` has carried a comment saying the console suppresses this banner since
 before anything actually did; now it does.
 
-Splitting the reader into three components made one thing load-bearing that was not before: the
-one-time migration of the pre-upgrade dismissal **must run over the whole feed**, from the provider,
-not from whichever surface happens to read dismissals first. Each surface sees only the slice it
-draws; the legacy key holds a bare hash with no id beside it and is deleted once read, so a surface
-consuming it against a partial list — or against nothing, before the first fetch lands — would
-throw the dismissal away unmatched and re-interrupt every reader on upgrade day. It refuses an empty
-list for the same reason.
+Collapsing the reader to one list did not remove the one-time dismissal migration's requirement: it
+**must run over the whole feed**, from the provider, not from whichever reader reads dismissals
+first. The legacy key holds a bare hash with no id beside it and is deleted once read, so a consumer
+matching it against a partial list — or against nothing, before the first fetch lands — would throw
+the dismissal away unmatched and re-interrupt every reader on upgrade day. It refuses an empty list
+for the same reason.
 
 ## Consequences
 
