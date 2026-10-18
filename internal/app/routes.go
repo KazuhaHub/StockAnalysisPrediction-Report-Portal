@@ -178,6 +178,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	v1("GET /api/v1/tracking", s.v1Tracking)
 	v1("PATCH /api/v1/tracking/{id}", s.v1TrackingUpdate)
 	v1("GET /api/v1/now", s.v1Now) // authoritative clock: UTC instant + panel-tz civil date
+	v1("GET /api/v1/reports/{id}/predictions", s.v1ReportPredictions)
+	v1("GET /api/v1/predictions", s.v1QueryPredictions)
 
 	// ---- Browser (React SPA) API: signed-cookie session auth ----
 	// A session route like the rest, registered without the shared wrapper because it resolves the
@@ -191,6 +193,10 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "POST /api/password/reset", s.apiResetPassword)
 	s.session(mux, "GET /api/home", s.apiHome)
 	s.session(mux, "GET /api/stock/{symbol}", s.apiStock)
+	// The ledger, for the SPA. The browser needs its own route rather than reusing the v1 one: /api/v1
+	// is classed authBearer, so it sits outside sessionRoutes() and no whole-portal session policy
+	// covers it. Same handler body, same scope rules.
+	s.session(mux, "GET /api/report/{id}/predictions", s.apiReportPredictions)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.
