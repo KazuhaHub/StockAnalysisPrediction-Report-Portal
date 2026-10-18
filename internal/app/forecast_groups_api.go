@@ -94,7 +94,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		}
 	}
 
-	resp.Groups = buildForecastGroups(periods, sets, rtype, today, resp.Official)
+	resp.Groups = s.buildForecastGroups(periods, sets, rtype, today, resp.Official)
 	writeJSON(w, resp)
 }
 
@@ -102,7 +102,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // result depends only on its own members and its own seed — so they run on a worker pool. At the
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
-func buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool) []forecastGroup {
+func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool) []forecastGroup {
 	type job struct {
 		gi      int
 		cp      string
@@ -154,7 +154,18 @@ func buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, toda
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				out <- result{j.gi, j.cp, computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)}
+				key := forecastGroupCellKey(rtype, j.start, j.end, j.cp)
+				if c := s.cachedForecastCell(key); c != nil {
+					out <- result{j.gi, j.cp, c}
+					continue
+				}
+				c := computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
+				// Only the official view writes: an exploratory range must not seed the record,
+				// and a custom group that equals a whole month already hits the monthly key.
+				if official && c.State == "mature" {
+					s.storeForecastCell(key, c)
+				}
+				out <- result{j.gi, j.cp, c}
 			}
 		}()
 	}
@@ -170,4 +181,25 @@ func buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, toda
 		groups[r.gi].Cells[r.cp] = r.cell
 	}
 	return groups
+}
+
+// forecastGroupCellKey is the memo's identity. It deliberately has no `mode`: a whole-month custom
+// group must hit the monthly entry, which is what makes the two answers identical by construction.
+func forecastGroupCellKey(rtype, start, end, cp string) string {
+	return rtype + "\x00" + start + "\x00" + end + "\x00" + cp
+}
+
+func (s *Server) cachedForecastCell(key string) *forecastCell {
+	s.forecastGroupsMu.Lock()
+	defer s.forecastGroupsMu.Unlock()
+	return s.forecastGroupsCache[key]
+}
+
+func (s *Server) storeForecastCell(key string, c *forecastCell) {
+	s.forecastGroupsMu.Lock()
+	defer s.forecastGroupsMu.Unlock()
+	if s.forecastGroupsCache == nil {
+		s.forecastGroupsCache = map[string]*forecastCell{}
+	}
+	s.forecastGroupsCache[key] = c
 }

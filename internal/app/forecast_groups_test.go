@@ -448,8 +448,36 @@ func BenchmarkForecastGroupsMaxBounds(b *testing.B) {
 	for i := range periods {
 		periods[i] = forecastPeriod{Start: "2025-01-01", End: "2025-01-31", Label: "2025-01"}
 	}
+	srv := &Server{} // no cache: this measures the cold computation the first request pays
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		buildForecastGroups(periods, members, predTestRtype, "2026-10-18", true)
+		srv.buildForecastGroups(periods, members, predTestRtype, "2026-10-18", false)
 	}
+}
+
+// TestOnlyOfficialMatureCellsAreCached pins the one optimization whose correctness rests on the
+// immutability argument: if a pending cell were cached it would never finish, and if an exploratory
+// range wrote to the memo it could poison the record.
+func TestOnlyOfficialMatureCellsAreCached(t *testing.T) {
+	s := newV1Server(t)
+	sampleMembers(t, s, predMatureMinN+2, nil)
+
+	first := doGroups(t, s, "/api/admin/forecast/groups?mode=month")
+	if len(s.forecastGroupsCache) == 0 {
+		t.Fatal("a mature monthly cell was not cached")
+	}
+	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "d5")]; !ok || c.State != "mature" {
+		t.Fatalf("d5 entry = %+v, present=%v", c, ok)
+	}
+	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "h12")]; ok {
+		t.Fatalf("a %s cell was cached: %+v", c.State, c)
+	}
+
+	customServer := newV1Server(t)
+	sampleMembers(t, customServer, predMatureMinN+2, nil)
+	doGroups(t, customServer, "/api/admin/forecast/groups?mode=custom&from=2025-06-01&to=2025-06-30&group=month")
+	if len(customServer.forecastGroupsCache) != 0 {
+		t.Fatalf("exploratory mode wrote %d entries", len(customServer.forecastGroupsCache))
+	}
+	_ = first
 }
