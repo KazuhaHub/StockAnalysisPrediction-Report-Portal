@@ -494,11 +494,16 @@ export interface CleanupConfig {
   revisions_enabled: boolean
   revisions_days: number
   revisions_keep: number
+  // The forecast-verification ledger (ADR 0029 §8). Its floor is short on purpose: the safety of this
+  // target is the predicate (orphaned, fully terminal), not the day count.
+  predictions_enabled: boolean
+  predictions_days: number
   batch_floor: number
   reports_floor: number
   audit_floor: number
   revisions_floor: number
   revisions_keep_max: number
+  predictions_floor: number
   last_run_period: string
   last_result: CleanupResult | null
 }
@@ -515,6 +520,7 @@ export interface CleanupResult {
   reports: number
   audit: number
   revisions: number
+  predictions: number
   /** Bytes handed back to the filesystem — the number an admin runs a pass to change. Always 0 on
    *  Postgres, where autovacuum reclaims for reuse and VACUUM FULL would be a full outage. */
   reclaimed: number
@@ -550,6 +556,7 @@ export interface CleanupRun {
   reports_deleted: number
   audit_deleted: number
   revisions_deleted: number
+  predictions_deleted: number
   bytes_reclaimed: number
   duration_ms: number
 }

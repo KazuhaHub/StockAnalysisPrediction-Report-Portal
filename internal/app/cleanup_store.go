@@ -57,6 +57,17 @@ const (
 	// off, and that the per-report cap — the bound most portals will actually use — is separate and
 	// unlimited by default.
 	minRevisionsRetentionDays = 14
+	// The forecast ledger's floor (ADR 0029 §8). Short, and deliberately so: the safety of this target
+	// is STRUCTURAL, not numeric. A set still awaiting settlement has a non-terminal mark and never
+	// matches the predicate; a set whose report still exists has a non-null report_id and never
+	// matches either. Neither depends on how many days an operator typed. What this floor defends is
+	// the one thing the predicate cannot: an operator setting the days to 0 and emptying the ledger in
+	// a single pass. 180 days is three settlement quarters of margin past the point where every
+	// checkpoint but h12 has long resolved.
+	minPredictionsRetentionDays = 180
+	// predDefaultPredictionsDays is the shipped retention when the key is unset: three years, past h12
+	// for every set that can be fully settled, so the default never truncates a live horizon.
+	predDefaultPredictionsDays = 1095
 )
 
 // cleanupRunsKeep bounds the audit ring buffer: only the most recent N cleanup_runs rows are kept.
@@ -208,12 +219,126 @@ func (s *Store) DeleteReportsIngestedBefore(cutoff time.Time) (int64, error) {
 	return total, nil
 }
 
+// predictionsBefore scans the ledger for sets eligible for retention deletion at cutoff.
+//
+// The predicate is three conditions, and it is deliberately the narrowest of the six targets:
+//
+//	report_id IS NULL        the report is already gone, so no live link points at this set
+//	no non-terminal mark     nothing is pending or retryable, so the set can never change again
+//	MAX(resolved_at) < cut   the newest thing that happened to it is older than the cutoff
+//
+// The first two are what make this target safe enough to ship with a 180-day floor while reports keep
+// a 365-day one: they are properties of the ledger's structure rather than of a number an admin
+// chooses. A set whose report exists is not eligible however old it is, and an unsettled set is not
+// eligible however long it has been unsettled. A row is required to have a mark at all, so an
+// accepted-but-unscored set (no checkpoints written) is also left alone.
+func (s *Store) predictionsBefore(cutoff time.Time) ([]int64, error) {
+	rows, err := s.query(`SELECT ps.id FROM prediction_sets ps
+		WHERE ps.report_id IS NULL
+		  AND EXISTS (SELECT 1 FROM prediction_marks m WHERE m.set_id = ps.id)
+		  AND NOT EXISTS (SELECT 1 FROM prediction_marks m
+		      WHERE m.set_id = ps.id AND m.status NOT IN ('resolved','refused_final'))
+		  AND (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = ps.id) < ?
+		ORDER BY ps.id`, cutoff.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// CountPredictionsBefore counts ledger sets eligible for retention deletion at cutoff (dry-run / usage).
+func (s *Store) CountPredictionsBefore(cutoff time.Time) (int64, error) {
+	ids, err := s.predictionsBefore(cutoff)
+	return int64(len(ids)), err
+}
+
+// DeletePredictionsBefore deletes eligible sets with their claims and marks, in bounded chunks of one
+// transaction each, so a large purge does not hold the single SQLite connection for the whole run.
+// Each chunk RE-ASSERTS the predicate rather than trusting the scan: a set that gained a mark, or
+// whose report came back, no longer matches and is preserved. Returns the number of SETS deleted
+// (partial count on error) — the claims and marks are consequences of a set going.
+func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
+	ids, err := s.predictionsBefore(cutoff)
+	if err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	var total int64
+	for i := 0; i < len(ids); i += reportsDeleteChunk {
+		end := i + reportsDeleteChunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		n, err := s.deletePredictionChunk(ids[i:end], cutoff)
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+// deletePredictionChunk removes one chunk of eligible sets in a single transaction. Children first,
+// so a failure halfway cannot leave a claim or a mark pointing at a set that is still there.
+func (s *Store) deletePredictionChunk(ids []int64, cutoff time.Time) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	stamp := cutoff.UTC().Format(time.RFC3339)
+	var n int64
+	for _, id := range ids {
+		// The re-asserted predicate: the same three conditions the scan applied, so a set that
+		// changed in the gap is skipped rather than deleted on a stale read.
+		res, err := tx.Exec(s.bind(`DELETE FROM prediction_sets WHERE id=? AND report_id IS NULL
+			AND EXISTS (SELECT 1 FROM prediction_marks m WHERE m.set_id = prediction_sets.id)
+			AND NOT EXISTS (SELECT 1 FROM prediction_marks m
+			    WHERE m.set_id = prediction_sets.id AND m.status NOT IN ('resolved','refused_final'))
+			AND (SELECT MAX(m.resolved_at) FROM prediction_marks m WHERE m.set_id = prediction_sets.id) < ?`),
+			id, stamp)
+		if err != nil {
+			return n, err
+		}
+		c, _ := res.RowsAffected()
+		if c == 0 {
+			continue // no longer eligible — keep its claims and marks with it
+		}
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_claims WHERE set_id=?`), id); err != nil {
+			return n, err
+		}
+		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_marks WHERE set_id=?`), id); err != nil {
+			return n, err
+		}
+		n += c
+	}
+	if err := tx.Commit(); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
 // deleteReportChunk deletes one chunk of reports (+ their tracking_items) in a single transaction,
 // re-asserting sent_at so a concurrently re-ingested report is skipped. tracking_items are removed
 // only for reports whose row actually matched (so a preserved report keeps its items), and so are
 // the viewer rows — a viewer row pointing at a deleted report is an access grant with nothing on the
 // other end (ADR 0024) — and so is its edit history, which is whole prior copies of a body that
 // would otherwise stay on disk under an id nothing points at (ADR 0026).
+//
+// prediction_sets is the one child that is NULLED rather than deleted (ADR 0029 §8), and the reason
+// is the same id-reuse argument DeleteReport states in full: ids are reassigned, so a row left
+// pointing at a reused id would count another report's claims as this one's. Deleting them instead
+// would be worse in the other direction — a set outlives its report by design, because the reports
+// retention floor is 365 days while a set's h12 mark resolves twelve months after it was made. So the
+// link goes and the ledger stays, on the same guarded match as the tables above it.
 func (s *Store) deleteReportChunk(keys []reportKey) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -239,6 +364,10 @@ func (s *Store) deleteReportChunk(keys []reportKey) (int64, error) {
 			return n, err
 		}
 		if _, err := tx.Exec(s.bind("DELETE FROM report_revisions WHERE report_id=?"), k.id); err != nil {
+			tx.Rollback()
+			return n, err
+		}
+		if _, err := tx.Exec(s.bind("UPDATE prediction_sets SET report_id=NULL WHERE report_id=?"), k.id); err != nil {
 			tx.Rollback()
 			return n, err
 		}
@@ -308,6 +437,8 @@ type CleanupRun struct {
 	AuditDeleted int64 `json:"audit_deleted"`
 	// The fifth (ADR 0026), same shape again for the same reason.
 	RevisionsDeleted int64 `json:"revisions_deleted"`
+	// The sixth (ADR 0029), same shape again for the same reason.
+	PredictionsDeleted int64 `json:"predictions_deleted"`
 	// Bytes handed back to the filesystem by the pass. Not a target — it is the consequence of the
 	// others, and the number that answers "did this actually free any disk?".
 	BytesReclaimed int64 `json:"bytes_reclaimed"`
@@ -317,11 +448,11 @@ type CleanupRun struct {
 // InsertCleanupRun appends an audit row and trims the ring buffer to the most recent
 // cleanupRunsKeep rows.
 func (s *Store) InsertCleanupRun(c CleanupRun) (int64, error) {
-	id, err := s.insertID(`INSERT INTO cleanup_runs(ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,audit_deleted,revisions_deleted,bytes_reclaimed,duration_ms)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+	id, err := s.insertID(`INSERT INTO cleanup_runs(ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,audit_deleted,revisions_deleted,predictions_deleted,bytes_reclaimed,duration_ms)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.RanAt, c.Trigger, boolInt(c.DryRun), boolInt(c.OK), c.Error,
 		c.BatchDeleted, c.TokensDeleted, c.ReportsDeleted, c.AuditDeleted, c.RevisionsDeleted,
-		c.BytesReclaimed, c.DurationMs)
+		c.PredictionsDeleted, c.BytesReclaimed, c.DurationMs)
 	if err != nil {
 		return 0, err
 	}
@@ -342,7 +473,7 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		limit = cleanupRunsKeep
 	}
 	rows, err := s.query(`SELECT id,ran_at,trigger,dry_run,ok,error,batch_deleted,tokens_deleted,reports_deleted,
-		COALESCE(audit_deleted,0),COALESCE(revisions_deleted,0),COALESCE(bytes_reclaimed,0),duration_ms
+		COALESCE(audit_deleted,0),COALESCE(revisions_deleted,0),COALESCE(predictions_deleted,0),COALESCE(bytes_reclaimed,0),duration_ms
 		FROM cleanup_runs
 		-- A successful pass that deleted nothing is not history, and builds before v0.4.20 recorded
 		-- one per scheduled run. They are left in the table rather than deleted -- a retention log
@@ -350,6 +481,7 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		-- never match, they are the entire list.
 		WHERE NOT (ok <> 0 AND batch_deleted = 0 AND tokens_deleted = 0
 			AND COALESCE(audit_deleted,0) = 0 AND COALESCE(revisions_deleted,0) = 0
+			AND COALESCE(predictions_deleted,0) = 0
 			AND reports_deleted = 0)
 		ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
@@ -361,7 +493,8 @@ func (s *Store) ListCleanupRuns(limit int) ([]CleanupRun, error) {
 		var c CleanupRun
 		var dry, ok int64
 		if err := rows.Scan(&c.ID, &c.RanAt, &c.Trigger, &dry, &ok, &c.Error, &c.BatchDeleted, &c.TokensDeleted,
-			&c.ReportsDeleted, &c.AuditDeleted, &c.RevisionsDeleted, &c.BytesReclaimed, &c.DurationMs); err != nil {
+			&c.ReportsDeleted, &c.AuditDeleted, &c.RevisionsDeleted, &c.PredictionsDeleted,
+			&c.BytesReclaimed, &c.DurationMs); err != nil {
 			return nil, err
 		}
 		c.DryRun = dry != 0

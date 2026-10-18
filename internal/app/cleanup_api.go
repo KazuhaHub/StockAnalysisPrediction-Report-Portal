@@ -39,10 +39,13 @@ func (s *Server) apiCleanupConfigGet(w http.ResponseWriter, r *http.Request, use
 		"revisions_enabled":  c.RevisionsEnabled,
 		"revisions_days":     c.RevisionsDays,
 		"revisions_keep":     s.reportRevisionsKeep(),
+		"predictions_enabled": c.PredictionsEnabled,
+		"predictions_days":    c.PredictionsDays,
 		"batch_floor":        minBatchRetentionDays,
 		"reports_floor":      minReportsRetentionDays,
 		"audit_floor":        minAuditRetentionDays,
 		"revisions_floor":    minRevisionsRetentionDays,
+		"predictions_floor":  minPredictionsRetentionDays,
 		"revisions_keep_max": maxReportRevisionsKeep,
 		"last_run_period":    s.st.GetSetting("cleanup_last_run_period", ""),
 		"last_result":        last,
@@ -69,6 +72,10 @@ func (s *Server) apiCleanupConfigSave(w http.ResponseWriter, r *http.Request, us
 		RevisionsEnabled *bool `json:"revisions_enabled"`
 		RevisionsDays    *int  `json:"revisions_days"`
 		RevisionsKeep    *int  `json:"revisions_keep"`
+		// The forecast-verification ledger (ADR 0029 §8). Enabled and days only: unlike a revision,
+		// there is no per-report cap that makes sense here — the ledger's bound is its predicate.
+		PredictionsEnabled *bool `json:"predictions_enabled"`
+		PredictionsDays    *int  `json:"predictions_days"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -105,6 +112,11 @@ func (s *Server) apiCleanupConfigSave(w http.ResponseWriter, r *http.Request, us
 	if in.RevisionsDays != nil && *in.RevisionsDays < minRevisionsRetentionDays {
 		jsonErrorCode(w, http.StatusBadRequest, "retention_too_short",
 			"编辑历史保留天数不能少于 "+strconv.Itoa(minRevisionsRetentionDays)+" 天")
+		return
+	}
+	if in.PredictionsDays != nil && *in.PredictionsDays < minPredictionsRetentionDays {
+		jsonErrorCode(w, http.StatusBadRequest, "retention_too_short",
+			"预测验证账本保留天数不能少于 "+strconv.Itoa(minPredictionsRetentionDays)+" 天")
 		return
 	}
 	// Refused, not clamped. A cap an admin typed and did not get is a history they think is bounded
@@ -157,6 +169,12 @@ func (s *Server) apiCleanupConfigSave(w http.ResponseWriter, r *http.Request, us
 	if in.RevisionsEnabled != nil {
 		s.st.SetSetting("cleanup_revisions_enabled", strconv.Itoa(boolInt(*in.RevisionsEnabled)))
 	}
+	if in.PredictionsDays != nil {
+		s.st.SetSetting("cleanup_predictions_days", strconv.Itoa(*in.PredictionsDays))
+	}
+	if in.PredictionsEnabled != nil {
+		s.st.SetSetting("cleanup_predictions_enabled", strconv.Itoa(boolInt(*in.PredictionsEnabled)))
+	}
 	if in.RevisionsKeep != nil {
 		s.st.SetSetting(setReportRevisionsKeep, strconv.Itoa(*in.RevisionsKeep))
 	}
@@ -171,13 +189,14 @@ func (s *Server) apiCleanupConfigSave(w http.ResponseWriter, r *http.Request, us
 
 func (s *Server) apiCleanupUsage(w http.ResponseWriter, r *http.Request, user string) {
 	c := s.cleanupConfigLoad()
-	batchCut, tokenCut, reportsCut, auditCut, revisionsCut := c.cutoffs(time.Now())
+	batchCut, tokenCut, reportsCut, auditCut, revisionsCut, predictionsCut := c.cutoffs(time.Now())
 
 	batchEligible, _ := s.st.CountFinishedJobsBefore(batchCut)
 	tokEligible, _ := s.st.CountExpiredTokensBefore(tokenCut)
 	repEligible, _ := s.st.CountReportsIngestedBefore(reportsCut)
 	auditEligible, _ := s.st.CountAuditBefore(auditCut)
 	revEligible, _ := s.st.CountRevisionsBefore(revisionsCut)
+	predEligible, _ := s.st.CountPredictionsBefore(predictionsCut)
 
 	batchOld, batchNew := s.st.usageSpan("batch_jobs", "finished_at")
 	tokOld, tokNew := s.st.usageSpan("api_tokens", "created_at")
@@ -217,6 +236,14 @@ func (s *Server) apiCleanupUsage(w http.ResponseWriter, r *http.Request, user st
 				s.st.usageCount("chat_conversations"),
 				s.st.usageBytes("chat_conversations", "LENGTH(COALESCE(title,''))"),
 				0, "", ""), // read-only awareness: no retention target for the thin chat index
+			// The forecast ledger (ADR 0029 §8). The eligible count is this target's own predicate
+			// — orphaned, fully terminal, and older than the cutoff — so the number an admin sees
+			// here is exactly what a pass would remove, not an approximation of it.
+			cat("predictions",
+				s.st.usageCount("prediction_sets")+s.st.usageCount("prediction_claims")+s.st.usageCount("prediction_marks"),
+				s.st.usageBytes("prediction_sets", "LENGTH(COALESCE(payload,''))+LENGTH(COALESCE(errors,''))")+
+					s.st.usageBytes("prediction_claims", "LENGTH(COALESCE(claim_key,''))+LENGTH(COALESCE(kind,''))"),
+				predEligible, "", ""),
 		},
 	})
 }
@@ -257,7 +284,7 @@ func (s *Server) apiCleanupPreview(w http.ResponseWriter, r *http.Request, user 
 	sel := s.readTargets(r)
 	c := s.cleanupConfigLoad()
 	now := time.Now()
-	batchCut, tokenCut, reportsCut, auditCut, revisionsCut := c.cutoffs(now)
+	batchCut, tokenCut, reportsCut, auditCut, revisionsCut, predictionsCut := c.cutoffs(now)
 	res := cleanupResult{Trigger: "preview", DryRun: true, OK: true, At: now.UTC().Format(time.RFC3339)}
 	if sel.Batch {
 		n, err := s.st.CountFinishedJobsBefore(batchCut)
@@ -282,6 +309,11 @@ func (s *Server) apiCleanupPreview(w http.ResponseWriter, r *http.Request, user 
 	if sel.Revisions {
 		n, err := s.st.CountRevisionsBefore(revisionsCut)
 		res.Revisions = n
+		res.note(err)
+	}
+	if sel.Predictions {
+		n, err := s.st.CountPredictionsBefore(predictionsCut)
+		res.Predictions = n
 		res.note(err)
 	}
 	writeJSON(w, res)

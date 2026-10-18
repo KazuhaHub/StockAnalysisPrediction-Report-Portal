@@ -165,7 +165,146 @@ type migration struct {
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
 func (s *Store) migrations() []migration {
-	return []migration{migration0001(), migration0002(), migration0003()}
+	return []migration{migration0001(), migration0002(), migration0003(), migration0004()}
+}
+
+// The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).
+//
+// Three tables rather than columns on an existing one, and the reason is the one thing this feature
+// cannot work around. `tracking_items` is DELETEd and re-INSERTed on every ingest (SetTracking), so
+// any machine-computed outcome stored there is erased by the next run of the same report; `reports` is
+// upserted on identity, so it cannot hold more than one set per report. A set is a thing with claims
+// and marks hanging off it, not a property of either.
+//
+// The tables are new and empty, so an older dump restores cleanly: it simply has none of this, which
+// is what "not recorded yet" means. Every column is therefore nullable or defaulted.
+//
+// Prices are integer fen and probabilities integer basis points, never REAL. The store is dual-driver,
+// where REAL is an 8-byte double on SQLite and a 4-byte float4 on Postgres, so a boundary comparison
+// could resolve differently per driver in the one table whose whole purpose is being citable.
+func migration0004() migration {
+	return migration{
+		id: string(predictionMigrationID),
+		// The cleanup_runs column is declared so verifyMigrationProducts checks it on every start:
+		// "recorded" is not evidence, and a column dropped by hand would otherwise start up looking
+		// migrated.
+		columns: []colRef{{table: "cleanup_runs", name: "predictions_deleted"}},
+		tables: []string{
+			"prediction_sets", "prediction_claims", "prediction_marks",
+		},
+		indices: []string{
+			"idx_pred_sets_idem", "idx_pred_sets_group", "idx_pred_sets_symbol",
+			"idx_pred_claims_key", "idx_pred_marks_cp", "idx_pred_marks_due",
+		},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			pk := e.s.pkAuto()
+			// cleanup_runs is a BASELINE table, so the ledger's cleanup target cannot be given its own
+			// column by declaring it in baseSchemaStmts() — that shape is the acceptance contract, and
+			// adding to it would refuse every existing database. It is added here instead, guarded by
+			// the existence probe the framework requires so a retry after a crash is a no-op.
+			if !e.columnExists("cleanup_runs", "predictions_deleted") {
+				if _, err := e.exec(`ALTER TABLE cleanup_runs ADD COLUMN predictions_deleted INTEGER DEFAULT 0`); err != nil {
+					return err
+				}
+			}
+			for _, q := range []string{
+				// report_id is NULLed, never deleted, when its report is purged: the ledger outlives
+				// reports because the reports retention floor is 365 days while h12 resolves twelve
+				// months after a set is made, so a floor-scoped ledger would lose every set on the day
+				// its long-horizon mark became answerable.
+				`CREATE TABLE IF NOT EXISTS prediction_sets(
+					id ` + pk + `,
+					report_id BIGINT,
+					symbol TEXT NOT NULL DEFAULT '',
+					rtype TEXT NOT NULL DEFAULT '',
+					version TEXT NOT NULL DEFAULT '',
+					title TEXT NOT NULL DEFAULT '',
+					report_date TEXT NOT NULL DEFAULT '',
+					made_at TEXT NOT NULL,
+					made_on TEXT NOT NULL,
+					cohort TEXT NOT NULL,
+					zone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+					state TEXT NOT NULL,
+					errors TEXT NOT NULL DEFAULT '',
+					payload TEXT NOT NULL DEFAULT '',
+					payload_truncated INTEGER NOT NULL DEFAULT 0,
+					payload_sha256 TEXT NOT NULL DEFAULT '',
+					body_sha256 TEXT NOT NULL DEFAULT '',
+					emitter_app TEXT NOT NULL DEFAULT '',
+					emitter_version TEXT NOT NULL DEFAULT '',
+					calculator TEXT NOT NULL DEFAULT '',
+					schema_name TEXT NOT NULL DEFAULT '',
+					policy_version TEXT NOT NULL DEFAULT '',
+					probability_method TEXT NOT NULL DEFAULT '',
+					probability_transform TEXT NOT NULL DEFAULT '',
+					decision_status TEXT NOT NULL DEFAULT '',
+					decision_quality TEXT NOT NULL DEFAULT '',
+					information_cutoff TEXT NOT NULL DEFAULT '',
+					horizon_end TEXT NOT NULL DEFAULT '',
+					horizon_std INTEGER NOT NULL DEFAULT 0,
+					emitted_base_fen BIGINT,
+					emitted_base_as_of TEXT NOT NULL DEFAULT '',
+					emitted_base_source TEXT NOT NULL DEFAULT '',
+					s0_date TEXT NOT NULL DEFAULT '',
+					base_date TEXT NOT NULL DEFAULT '',
+					s0_fen BIGINT,
+					base_check TEXT NOT NULL DEFAULT 'pending',
+					bench_code TEXT NOT NULL DEFAULT '')`,
+				// The idempotency key for a retried ingest. NULLs are distinct in a unique index on
+				// both drivers, so any number of PURGED sets may share a payload hash — which they
+				// will, because two runs of one symbol produce identical payloads.
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_sets_idem ON prediction_sets(report_id, payload_sha256)`,
+				// Group queries filter on rtype equality plus a made_on range, so the index leads with
+				// rtype. cohort is kept for display and export, not as the read key.
+				`CREATE INDEX IF NOT EXISTS idx_pred_sets_group ON prediction_sets(rtype, made_on, state)`,
+				`CREATE INDEX IF NOT EXISTS idx_pred_sets_symbol ON prediction_sets(symbol, made_on)`,
+
+				`CREATE TABLE IF NOT EXISTS prediction_claims(
+					id ` + pk + `,
+					set_id BIGINT NOT NULL,
+					claim_key TEXT NOT NULL,
+					kind TEXT NOT NULL,
+					stance TEXT NOT NULL DEFAULT '',
+					label TEXT NOT NULL DEFAULT '',
+					price_fen BIGINT,
+					prob_bp INTEGER,
+					weight_bp INTEGER)`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_claims_key ON prediction_claims(set_id, claim_key)`,
+
+				// One row per accepted set x checkpoint, created pending with the set. resolved and
+				// refused_final are both terminal, which is what makes a mature cell's inputs fixed
+				// and therefore makes a mature cell immutable by construction rather than by caching.
+				`CREATE TABLE IF NOT EXISTS prediction_marks(
+					id ` + pk + `,
+					set_id BIGINT NOT NULL,
+					checkpoint TEXT NOT NULL,
+					status TEXT NOT NULL DEFAULT 'pending',
+					refusal TEXT NOT NULL DEFAULT '',
+					attempts INTEGER NOT NULL DEFAULT 0,
+					next_attempt_at TEXT NOT NULL DEFAULT '',
+					session_date TEXT NOT NULL DEFAULT '',
+					bar_date TEXT NOT NULL DEFAULT '',
+					halted INTEGER NOT NULL DEFAULT 0,
+					corp_action INTEGER NOT NULL DEFAULT 0,
+					close_fen BIGINT,
+					low_fen BIGINT,
+					high_fen BIGINT,
+					ret_bp INTEGER,
+					bench_ret_bp INTEGER,
+					bench_code TEXT NOT NULL DEFAULT '',
+					resolved_at TEXT NOT NULL DEFAULT '',
+					source TEXT NOT NULL DEFAULT '')`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_marks_cp ON prediction_marks(set_id, checkpoint)`,
+				`CREATE INDEX IF NOT EXISTS idx_pred_marks_due ON prediction_marks(status, next_attempt_at)`,
+			} {
+				if _, err := e.exec(q); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
 }
 
 // Independent sessions and personal login history. Older backups need no data upgrade:
