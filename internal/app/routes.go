@@ -305,6 +305,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// The verification page's aggregate. PermManage, not admin: the ledger's statistics are a
 	// management view, and a bridge query token must never reach them (ADR 0029 §7).
 	s.perm(mux, "GET /api/admin/forecast/groups", PermManage, s.apiForecastGroups)
+	s.perm(mux, "GET /api/admin/forecast/groups/members", PermManage, s.apiForecastGroupMembers)
 	// The audit log. requirePermJSON, not requireAdminJSON: see apiAdminAudit.
 	s.perm(mux, "GET /api/admin/audit", PermManage, s.apiAdminAudit)
 	s.admin(mux, "POST /api/admin/settings", s.apiSettingsSave)

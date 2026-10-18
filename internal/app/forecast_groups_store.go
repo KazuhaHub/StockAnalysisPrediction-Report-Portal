@@ -11,9 +11,11 @@ import "database/sql"
 // groupSet is one ledger row with the claims and marks the statistics read flattened out, so the
 // metric code never has to search a claim slice per member.
 type groupSet struct {
-	ID     int64
-	Symbol string
-	State  string
+	ID         int64
+	ReportID   *int64
+	Symbol     string
+	ReportDate string
+	State      string
 
 	MadeAt string
 	MadeOn string
@@ -42,8 +44,8 @@ type groupSet struct {
 // loadForecastGroupSets reads every set of one covered type in a made_on range, oldest first within
 // each symbol so "the earliest accepted set" is a slice scan rather than a sort.
 func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, error) {
-	rows, err := s.query(`SELECT ps.id, ps.symbol, ps.state, ps.made_at, ps.made_on,
-			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
+	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
+			ps.made_at, ps.made_on, ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
 		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?
@@ -58,13 +60,18 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, erro
 	for rows.Next() {
 		var (
 			gs         groupSet
+			reportID   sql.NullInt64
 			horizonStd int
 			s0         sql.NullInt64
 		)
-		if err := rows.Scan(&gs.ID, &gs.Symbol, &gs.State, &gs.MadeAt, &gs.MadeOn,
+		if err := rows.Scan(&gs.ID, &reportID, &gs.Symbol, &gs.ReportDate, &gs.State, &gs.MadeAt, &gs.MadeOn,
 			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0,
 			&gs.PolicyVersion, &gs.ProbabilityMethod, &gs.ProbabilityTransform); err != nil {
 			return nil, err
+		}
+		if reportID.Valid {
+			v := reportID.Int64
+			gs.ReportID = &v
 		}
 		gs.HorizonStd = horizonStd == 1
 		if s0.Valid {
@@ -140,4 +147,42 @@ func (s *Store) forecastEarliestMadeOn(rtype string) (string, error) {
 		return "", err
 	}
 	return v.String, nil
+}
+
+// reportKindName is the pair the member drawer needs to build a stock link. kind is the report's
+// TOP-LEVEL kind (e.g. 投资决策), not the subtype: apiStock matches it against repKind and silently
+// falls back to the first kind on a miss, so passing the rtype would open the wrong tab.
+type reportKindName struct {
+	Kind string
+	Name string
+}
+
+func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
+	uniq := make([]int64, 0, len(ids))
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			uniq = append(uniq, id)
+		}
+	}
+	out := make(map[int64]reportKindName, len(uniq))
+	if len(uniq) == 0 {
+		return out, nil
+	}
+	rows, err := s.query(`SELECT id, COALESCE(kind,''), COALESCE(name,'') FROM reports WHERE id IN (`+
+		placeholders(len(uniq))+`)`, int64Args(uniq)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var v reportKindName
+		if err := rows.Scan(&id, &v.Kind, &v.Name); err != nil {
+			return nil, err
+		}
+		out[id] = v
+	}
+	return out, rows.Err()
 }

@@ -481,3 +481,48 @@ func TestOnlyOfficialMatureCellsAreCached(t *testing.T) {
 	}
 	_ = first
 }
+
+func doMembers(t *testing.T, s *Server, target string) forecastMembersResponse {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.apiForecastGroupMembers(rec, httptest.NewRequest("GET", target, nil), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("members %s: %d %s", target, rec.Code, rec.Body.String())
+	}
+	var out forecastMembersResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out
+}
+
+func TestGroupMembersMirrorTheCell(t *testing.T) {
+	s := newV1Server(t)
+	sampleMembers(t, s, predMatureMinN+3, nil)
+	resp := doMembers(t, s, "/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5")
+	if resp.State != "mature" || len(resp.Members) != predMatureMinN+3 {
+		t.Fatalf("state=%q members=%d", resp.State, len(resp.Members))
+	}
+	m := resp.Members[0]
+	if m.Stance != "long" || m.ExcessBp == nil || m.Upside == nil || m.Agree == nil {
+		t.Fatalf("member = %+v", m)
+	}
+	// The fixtures insert no reports, so every set is orphaned and must not offer a link.
+	if m.ReportID != nil {
+		t.Fatalf("orphaned set has report id %v", *m.ReportID)
+	}
+
+	rec := httptest.NewRecorder()
+	s.apiForecastGroupMembers(rec, httptest.NewRequest("GET",
+		"/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d7", nil), "admin")
+	if rec.Code != http.StatusBadRequest || !hasCode(rec.Body.Bytes(), "bad_checkpoint") {
+		t.Fatalf("bad checkpoint: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	s.apiForecastGroupMembers(rec, httptest.NewRequest("GET",
+		"/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2024-01&checkpoint=d5", nil), "admin")
+	if rec.Code != http.StatusNotFound || !hasCode(rec.Body.Bytes(), "label_not_found") {
+		t.Fatalf("unknown label: %d %s", rec.Code, rec.Body.String())
+	}
+}
