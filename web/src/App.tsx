@@ -45,6 +45,7 @@ const WebhooksPage = lazyRetry(() => import('./pages/manage/WebhooksPage'))
 const StoragePage = lazyRetry(() => import('./pages/manage/StoragePage'))
 const AuditPage = lazyRetry(() => import('./pages/manage/AuditPage'))
 const QuoteSourcesPage = lazyRetry(() => import('./pages/manage/QuoteSourcesPage'))
+const ForecastPage = lazyRetry(() => import('./pages/manage/ForecastPage'))
 const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
@@ -190,6 +191,7 @@ function AppRoutes() {
           <Route path="links" element={<LinksPage />} />
           <Route path="types" element={<TypesPage />} />
           <Route path="versions" element={<VersionsPage />} />
+          <Route path="forecast" element={<ForecastPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="sso" element={<SSOPage />} />
           <Route path="security" element={<SecurityPage />} />
