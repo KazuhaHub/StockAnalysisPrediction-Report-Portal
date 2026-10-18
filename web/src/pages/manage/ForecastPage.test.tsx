@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router'
 import ForecastPage from './ForecastPage'
 
 // The page's two jobs, both of which are invisible in review: it must not present a default as a
@@ -39,26 +40,81 @@ const on = {
   unsettled_baseline: 0,
 }
 
-const show = () =>
+const emptyGroups = {
+  ok: true,
+  mode: 'month',
+  official: true,
+  range: { from: '', to: '' },
+  checkpoints: ['d5', 'd20', 'd60', 'd120', 'h12'],
+  unrecorded: 0,
+  groups: [],
+}
+
+const matureGroups = {
+  ok: true,
+  mode: 'custom',
+  official: false,
+  range: { from: '2026-09-01', to: '2026-09-30', group: 'month' },
+  checkpoints: ['d5', 'd20', 'd60', 'd120', 'h12'],
+  unrecorded: 0,
+  groups: [
+    {
+      label: '2026-09',
+      start: '2026-09-01',
+      end: '2026-09-30',
+      official: false,
+      coverage: {
+        reports: 40,
+        member: 35,
+        duplicate: 3,
+        absent: 1,
+        rejected: 1,
+        backtest: 0,
+        degraded: 0,
+        mismatch: 0,
+        refused: 0,
+        pending_baseline: 0,
+      },
+      cells: {
+        d5: { state: 'mature', n: 35, spread_bp: 120, spread_p: 0.02, spread_q: 0.04 },
+        d20: { state: 'open' },
+        d60: { state: 'open' },
+        d120: { state: 'open' },
+        h12: { state: 'open' },
+      },
+    },
+  ],
+}
+
+// Two endpoints now: the settings object and the matrix. Routing by URL keeps the settings tests
+// about settings.
+const byUrl = (settings: unknown) => (url: string) =>
+  Promise.resolve(url.includes('/forecast/groups') ? emptyGroups : settings)
+
+const show = (initial = '/') =>
   render(
-    <App>
-      <ForecastPage />
-    </App>,
+    <MemoryRouter initialEntries={[initial]}>
+      <App>
+        <ForecastPage />
+      </App>
+    </MemoryRouter>,
   )
 
 describe('ForecastPage', () => {
   beforeEach(() => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()
-    apiMock.get.mockResolvedValue(on)
+    apiMock.get.mockImplementation(byUrl(on))
   })
 
   it('shows neither the status nor the settings button until the server has answered', async () => {
     let resolveGet: ((v: unknown) => void) | undefined
-    apiMock.get.mockReturnValue(
-      new Promise((resolve) => {
-        resolveGet = resolve
-      }),
+    apiMock.get.mockImplementation((url: string) =>
+      url.includes('/forecast/groups')
+        ? Promise.resolve(emptyGroups)
+        : new Promise((resolve) => {
+            resolveGet = resolve
+          }),
     )
     show()
     await screen.findByText('common.loading')
@@ -70,7 +126,7 @@ describe('ForecastPage', () => {
   })
 
   it('reports a failed load instead of presenting zero counts as the state', async () => {
-    apiMock.get.mockRejectedValue(new Error('offline'))
+    apiMock.get.mockImplementation(() => Promise.reject(new Error('offline')))
     show()
     await waitFor(() => expect(screen.getByText('common.loadFailed')).toBeTruthy())
     // The four backlog numbers are exactly what must not be invented: "0 due" is a real and
@@ -79,7 +135,7 @@ describe('ForecastPage', () => {
   })
 
   it('says the evaluator is off, and shows the counts beside it', async () => {
-    apiMock.get.mockResolvedValue({ ...on, enabled: false, due_sets: 0, pending: 0 })
+    apiMock.get.mockImplementation(byUrl({ ...on, enabled: false, due_sets: 0, pending: 0 }))
     show()
     await waitFor(() => expect(screen.getByText('forecast.eval.off')).toBeTruthy())
     // Off is the shipped state and reads as a fault unless named as intentional.
@@ -88,7 +144,7 @@ describe('ForecastPage', () => {
   })
 
   it('marks a non-zero refusal count as a number to act on, not as another counter', async () => {
-    apiMock.get.mockResolvedValue({ ...on, refused: 7 })
+    apiMock.get.mockImplementation(byUrl({ ...on, refused: 7 }))
     show()
     await waitFor(() => expect(screen.getByText('forecast.eval.refused')).toBeTruthy())
     // The tag is how a stuck evaluator is told apart from an idle one at a glance.
@@ -112,8 +168,9 @@ describe('ForecastPage', () => {
       }),
     )
     // And the page reloads, so the counts shown are the ones the save left behind rather than the
-    // ones that were on screen before it.
-    await waitFor(() => expect(apiMock.get).toHaveBeenCalledTimes(2))
+    // ones that were on screen before it. Count only the settings request: the matrix has its own.
+    const settingsCalls = () => apiMock.get.mock.calls.filter(([u]) => u === '/api/admin/forecast').length
+    await waitFor(() => expect(settingsCalls()).toBe(2))
   })
 
   it('surfaces the server refusal of a bad benchmark instead of a generic failure', async () => {
@@ -127,5 +184,30 @@ describe('ForecastPage', () => {
     fireEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
     expect(screen.getByText('common.save')).toBeTruthy()
+  })
+
+  it('shows the exploratory banner, the p* convention and the linked range in the custom tab', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.includes('/forecast/groups') ? matureGroups : on),
+    )
+    show('/manage/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
+    await waitFor(() => expect(screen.getByText('forecast.custom.banner')).toBeTruthy())
+    // A p* is the promise that this number was not corrected for range selection.
+    expect(screen.getByText(/p\*=0\.02/)).toBeTruthy()
+    expect(screen.getByText('forecast.tag.exploratory')).toBeTruthy()
+    expect(
+      apiMock.get.mock.calls.some(
+        ([u]) => u === '/api/admin/forecast/groups?mode=custom&from=2026-09-01&to=2026-09-30&group=month',
+      ),
+    ).toBe(true)
+  })
+
+  it('surfaces a refused range instead of rendering an empty matrix as success', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      url.includes('/forecast/groups') ? Promise.reject(new Error('range_too_long')) : Promise.resolve(on),
+    )
+    show('/manage/forecast?mode=custom&from=2020-01-01&to=2026-09-30&group=month')
+    await waitFor(() => expect(screen.getByText('Request failed')).toBeTruthy())
+    expect(screen.queryByText('forecast.empty')).toBeNull()
   })
 })

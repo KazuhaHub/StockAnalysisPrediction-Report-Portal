@@ -1249,3 +1249,194 @@ export interface QuoteResp {
   /** Absolute market-zone wake time used after close. Mutually exclusive with refreshAfterSecs. */
   refreshAt?: string
 }
+
+// ── Forecast verification ────────────────────────────────────────────────────────────────────────
+//
+// The ledger's read shapes (ADR 0029 §5, plan §4.1) and the group statistics (plan §7.6). Prices are
+// integer 分 on the wire; only the display layer converts, for the same reason the quote contract
+// does. A field the server omits is genuinely unknown, so most metric fields are optional: a
+// non-mature cell carries NO metric keys, and `undefined` is how the UI tells that apart from a
+// measured zero.
+
+export type PredictionState = 'absent' | 'rejected' | 'backtest' | 'accepted'
+export type ForecastCheckpoint = 'd5' | 'd20' | 'd60' | 'd120' | 'h12'
+
+export interface PredictionClaim {
+  key: string
+  kind: 'stance' | 'terminal_value' | 'scenario' | 'entry_price' | 'stop_loss'
+  stance?: 'long' | 'no_position'
+  label?: 'bull' | 'base' | 'bear'
+  price_fen?: number
+  prob_bp?: number
+  weight_bp?: number
+}
+
+export interface PredictionMark {
+  checkpoint: ForecastCheckpoint
+  status: 'pending' | 'resolved' | 'refused' | 'refused_final'
+  refusal?: string
+  session_date?: string
+  bar_date?: string
+  halted?: boolean
+  corp_action?: boolean
+  close_fen?: number
+  low_fen?: number
+  high_fen?: number
+  ret_bp?: number
+  bench_ret_bp?: number
+  attempts?: number
+}
+
+export interface PredictionSetError {
+  reason: string
+  path: string
+  message: string
+}
+
+export interface PredictionSet {
+  id: number
+  report_id?: number
+  state: PredictionState
+  symbol: string
+  rtype: string
+  title: string
+  version: string
+  made_at: string
+  made_on: string
+  cohort: string
+  zone: string
+  bench_code: string
+  decision_status?: string
+  decision_quality?: string
+  probability_method?: string
+  policy_version?: string
+  horizon_end?: string
+  horizon_std: boolean
+  baseline_emitted_fen?: number
+  baseline_as_of?: string
+  baseline_source?: string
+  baseline_check: 'pending' | 'match' | 'mismatch' | 'refused'
+  s0_date?: string
+  s0_fen?: number
+  /** True when the report's body changed after this set was written. */
+  body_changed: boolean
+  errors?: PredictionSetError[]
+  claims: PredictionClaim[]
+  marks: PredictionMark[]
+  payload?: string
+  /** The cohort this set is the counted member of, or '' when it is not one. */
+  counted_in_group?: string
+}
+
+export interface ReportPredictions {
+  ok: boolean
+  sets: PredictionSet[]
+  counted_set_id?: number
+}
+
+export type ForecastMode = 'month' | 'custom'
+export type ForecastGrouping = 'week' | 'month' | 'quarter' | 'all'
+export type ForecastMetric = 'spread' | 'ic' | 'hit' | 'fill'
+
+export interface ForecastCoverage {
+  reports: number
+  member: number
+  duplicate: number
+  absent: number
+  rejected: number
+  backtest: number
+  degraded: number
+  mismatch: number
+  refused: number
+  pending_baseline: number
+}
+
+export interface ForecastCell {
+  state: 'open' | 'pending' | 'small' | 'mature'
+  n?: number
+  resolved?: number
+  total?: number
+  refused?: number
+  corp_action?: number
+
+  spread_bp?: number
+  spread_one_arm?: boolean
+  spread_p?: number
+  spread_q?: number
+
+  ic?: number
+  ic_n?: number
+  ic_p?: number
+  ic_q?: number
+
+  hit?: number
+  hit_n?: number
+  hit_null?: number
+  hit_p?: number
+  hit_q?: number
+
+  fill?: number
+  fill_ret_bp?: number
+  fill_derived?: boolean
+
+  band?: number
+  band_n?: number
+  calib?: number
+  calib_n?: number
+
+  slices?: ForecastSlice[]
+}
+
+export interface ForecastSlice extends ForecastCell {
+  policy_version: string
+}
+
+export interface ForecastGroup {
+  label: string
+  start: string
+  end: string
+  official: boolean
+  coverage: ForecastCoverage
+  cells: Record<ForecastCheckpoint, ForecastCell>
+}
+
+export interface ForecastGroupsResponse {
+  ok: boolean
+  mode: ForecastMode
+  official: boolean
+  range: { from: string; to: string; group?: ForecastGrouping }
+  checkpoints: ForecastCheckpoint[]
+  unrecorded: number
+  groups: ForecastGroup[]
+}
+
+export interface ForecastMember {
+  set_id: number
+  report_id?: number
+  symbol: string
+  name?: string
+  kind?: string
+  report_date: string
+  made_at: string
+  made_on: string
+  stance: 'long' | 'no_position'
+  status: string
+  close_fen?: number
+  ret_bp?: number
+  bench_ret_bp?: number
+  excess_bp?: number
+  s0_fen?: number
+  terminal_fen?: number
+  upside?: number
+  agree?: boolean
+}
+
+export interface ForecastMembersResponse {
+  ok: boolean
+  label: string
+  start: string
+  end: string
+  checkpoint: ForecastCheckpoint
+  state: string
+  members: ForecastMember[]
+}

@@ -1,10 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Card, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, qs, ApiError } from '../api/client'
-import type { QuoteResp, StockResp } from '../api/types'
+import type { PredictionSet, QuoteResp, ReportPredictions, StockResp } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
 import ReaderControls from '../components/ReaderControls'
@@ -25,6 +25,7 @@ import {
 } from '../lib/quoteRefresh'
 import { startVisibleDeadline } from '../lib/visiblePoll'
 import { FavoriteButton } from '../components/FavoriteButton'
+import PredictionPanel from '../components/PredictionPanel'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
@@ -93,6 +94,13 @@ export default function StockPage() {
   // re-request without navigating, and a nonce is the smallest way to say "run that effect again".
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
+  // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
+  const [predSets, setPredSets] = useState<PredictionSet[]>([])
+  const [predCounted, setPredCounted] = useState<number | undefined>(undefined)
+  const [otherSets, setOtherSets] = useState<PredictionSet[]>([])
+  // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
+  // the levels noise.
+  const [overlay, setOverlay] = useState(true)
 
   // The write is here rather than inside the setState updater on purpose: an updater must be pure,
   // and StrictMode calls it twice in development.
@@ -177,6 +185,48 @@ export default function StockPage() {
     return startVisibleDeadline(() => setQuoteNonce((n) => n + 1), delay)
   }, [symbol, quoteRange, quoteRefresh?.refreshAfterSecs, quoteRefresh?.refreshAt])
 
+  // The report's predictions, in one request per selected report. include=payload is asked for here
+  // rather than on every list: the payload is 2 KiB of contract and only this panel shows it.
+  const repId = data?.rep?.id
+  useEffect(() => {
+    if (!repId) {
+      setPredSets([])
+      setPredCounted(undefined)
+      return
+    }
+    let cancelled = false
+    api
+      .get<ReportPredictions>(`/api/report/${repId}/predictions?include=payload`)
+      .then((r) => {
+        if (cancelled) return
+        setPredSets(r.sets ?? [])
+        setPredCounted(r.counted_set_id)
+      })
+      .catch(() => {
+        if (!cancelled) setPredSets([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [repId])
+
+  // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
+  useEffect(() => {
+    if (!symbol) return
+    let cancelled = false
+    api
+      .get<{ ok: boolean; sets: PredictionSet[] }>(`/api/predictions?symbol=${encodeURIComponent(symbol)}&limit=50`)
+      .then((r) => {
+        if (!cancelled) setOtherSets(r.sets ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setOtherSets([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [symbol])
+
   // Warm the neighbours on the timeline. Stepping a day forward or back is the move a reader makes
   // most, and it is the one that costs a whole report — measured at ~96% report, ~4% navigation
   // (internal/app/stock_payload_test.go), which is why this can reuse the same endpoint rather than
@@ -222,6 +272,38 @@ export default function StockPage() {
   // The report id is numeric in the JSON contract but stays a string in the `?r=` query.
   const setId = (id: number) => setSp({ date: data.selDate, kind: data.selKind, r: String(id) })
   const rep = data.rep
+
+  // The accepted set the overlay describes: the counted one when there is one, else the latest.
+  const acceptedSets = predSets.filter((s) => s.state === 'accepted')
+  const acceptedSet = acceptedSets.find((s) => s.id === predCounted) ?? acceptedSets[acceptedSets.length - 1]
+  const claimOf = (s: PredictionSet, kind: string, label?: string) =>
+    s.claims.find((c) => c.kind === kind && (label === undefined || c.label === label))
+  const terminalFen = acceptedSet ? claimOf(acceptedSet, 'terminal_value')?.price_fen : undefined
+  const entryFen = acceptedSet ? claimOf(acceptedSet, 'entry_price')?.price_fen : undefined
+  type Level = { price: number; label: string; tone: 'neutral' | 'primary' | 'warning' }
+  const overlayLevels: Level[] =
+    acceptedSet && overlay
+      ? [
+          acceptedSet.s0_fen !== undefined
+            ? { price: acceptedSet.s0_fen, label: t('forecast.chart.s0'), tone: 'neutral' as Level['tone'] }
+            : null,
+          terminalFen !== undefined
+            ? { price: terminalFen, label: t('forecast.chart.terminal'), tone: 'primary' as Level['tone'] }
+            : null,
+          entryFen !== undefined
+            ? { price: entryFen, label: t('forecast.chart.entry'), tone: 'warning' as Level['tone'] }
+            : null,
+        ].filter((v): v is Level => v !== null)
+      : []
+  const overlayMarkers =
+    acceptedSet && overlay && rep
+      ? [
+          { date: rep.date, label: t('forecast.chart.report') },
+          ...acceptedSet.marks
+            .filter((m) => m.status === 'resolved' && (m.bar_date || m.session_date))
+            .map((m) => ({ date: (m.bar_date || m.session_date) as string, label: t(`forecast.cp.${m.checkpoint}`) })),
+        ]
+      : []
 
   // Back + stock name/code. This is the page's identity/nav header — it sits at the very
   // top of every layout (above the timeline), so "where am I / go back" is the first thing
@@ -282,6 +364,11 @@ export default function StockPage() {
           styles={{ body: { paddingTop: 12 } }}
           extra={
             <Space size={4} wrap>
+              {acceptedSet && chartOpen && (
+                <Checkbox checked={overlay} onChange={(e) => setOverlay(e.target.checked)}>
+                  {t('forecast.chart.overlay')}
+                </Checkbox>
+              )}
               {/* The range switcher belongs to the chart, so it appears with the chart. Chrome for
                   something that is not on screen is not free: each press re-fetches the quote, so a
                   collapsed panel would spend vendor requests on bars nobody is looking at. */}
@@ -326,6 +413,8 @@ export default function StockPage() {
                 // The chart's price axis prints a unit and the strip above it prints the currency;
                 // handing it the same field is what stops one price carrying two answers.
                 currency={quote?.currency}
+                levels={overlayLevels}
+                markers={overlayMarkers}
               />
             </div>
           )}
@@ -424,6 +513,16 @@ export default function StockPage() {
                 )}
                 {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
               </Card>
+              {rep && (
+                <PredictionPanel
+                  sets={predSets}
+                  countedSetID={predCounted}
+                  otherSets={otherSets}
+                  latestClose={quote?.snapshot.last}
+                  latestDate={quote?.snapshot.asOf?.slice(0, 10)}
+                  symbol={data.symbol}
+                />
+              )}
               {/* The button set this state from the day it shipped; nothing rendered the modal, so
                   pressing it did nothing at all. */}
               {compareFor !== null && (
