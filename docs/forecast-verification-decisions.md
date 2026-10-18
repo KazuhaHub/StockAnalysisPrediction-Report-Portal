@@ -30,7 +30,7 @@ Two open questions the implementation plan raises, which the ADR does not settle
 
 ## 2. The table shape
 
-The DDL is **ADR 0029 §7** — three tables, six indices, written out in full there so it can be
+The DDL is **ADR 0029 §7** — four tables, one added column, seven indices, written out in full there so it can be
 reviewed without opening the implementation plan. Please sign off on:
 
 - `prediction_sets` — one row per covered ingest, insert-only, `report_id` nullable.

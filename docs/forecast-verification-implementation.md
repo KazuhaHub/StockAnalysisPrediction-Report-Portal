@@ -258,7 +258,7 @@ deleted**, and why.
 ### 2.4 Storage console
 
 In `cleanup_api.go:172` `apiCleanupUsage`, add a category `predictions`: rows and bytes across the
-three tables; `eligible` is the target's own predicate count. The ledger is the sixth cleanup target
+the four ledger tables; `eligible` is the target's own predicate count. The ledger is the sixth cleanup target
 (ADR 0029 §8), off by default. Add i18n
 `storage.cat.predictions`. There is no change to `cleanupTargets`.
 
@@ -269,7 +269,7 @@ three tables; `eligible` is the target's own predicate count. The ledger is the 
   `TEST_POSTGRES_DSN` is set.
 - `TestMigration0002OlderDumpRestores`: a dump taken before the step restores, and the tables exist
   afterwards and are empty.
-- `TestBackupIncludesPredictionTables`: a backup round-trip carries rows in all three tables.
+- `TestBackupIncludesPredictionTables`: a backup round-trip carries rows in all four tables.
 - `TestDeleteReportNullsPredictionSets` and `TestCleanupChunkNullsPredictionSets`: claims and marks
   survive, `report_id` is NULL, and a new report row inherits nothing. On both drivers.
 - `TestPredSetIdemIndexAllowsManyNullReportIDs`: on both drivers.

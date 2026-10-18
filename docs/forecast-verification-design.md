@@ -223,7 +223,8 @@ The HTTP response is 200 in every case above and carries `predictions_status`.
 ## 6. Data model
 
 One migration step, **`migration0002`** in `migrate_steps.go`, with
-`restoreRule{olderDumpOK: true}`. It declares three tables and their indices, and is never edited
+`restoreRule{olderDumpOK: true}`. It declares four tables, one `cleanup_runs` column and their indices,
+and is never edited
 after release. Nothing is added to `baseSchemaStmts()`.
 
 Units: `_fen` = integer fen; `_bp` = integer basis points.

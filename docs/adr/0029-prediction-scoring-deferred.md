@@ -180,17 +180,22 @@ with `attempts` and `next_attempt_at`. A refusal that is still refused 10 sessio
 
 ### 7. The tables
 
-One migration step in `migrate_steps.go`, declaring three tables and their indices, never edited after
-release. Nothing is added to `baseSchemaStmts()`. **This is the shape the owner signs off on, and PR 1
-does not start until they have.**
+One migration step in `migrate_steps.go`, declaring four tables, one column and their indices, never
+edited after release. Nothing is added to `baseSchemaStmts()`. **This is the shape the owner signs off
+on, and PR 1 does not start until they have.**
 
 ```go
 func migration0004() migration {
     return migration{
-        id:      "0004",
-        tables:  []string{"prediction_sets", "prediction_claims", "prediction_marks"},
+        id: "0004",
+        // The cleanup_runs column is declared so verifyMigrationProducts checks it on every start:
+        // "recorded" is not evidence, and a column dropped by hand would otherwise start up looking
+        // migrated. cleanup_runs is a BASELINE table, so the column cannot go in baseSchemaStmts()
+        // (that list is the acceptance contract) — it is added by this step instead.
+        columns: []colRef{{table: "cleanup_runs", name: "predictions_deleted"}},
+        tables: []string{"prediction_sets", "prediction_claims", "prediction_marks", "prediction_purges"},
         indices: []string{"idx_pred_sets_idem", "idx_pred_sets_group", "idx_pred_sets_symbol",
-            "idx_pred_claims_key", "idx_pred_marks_cp", "idx_pred_marks_due"},
+            "idx_pred_claims_key", "idx_pred_marks_cp", "idx_pred_marks_due", "idx_pred_purges_month"},
         restore: restoreRule{olderDumpOK: true}, // new and empty: a pre-step dump restores cleanly
         up:      func(e migExec) error { /* the CREATE statements below, via e.exec */ },
     }
@@ -267,6 +272,17 @@ CREATE TABLE IF NOT EXISTS prediction_marks(
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_marks_cp  ON prediction_marks(set_id, checkpoint);
 CREATE INDEX        IF NOT EXISTS idx_pred_marks_due ON prediction_marks(status, next_attempt_at);
+
+-- One row per (rtype, cohort) month a retention pass removed (§8). Without it a purged month reads
+-- as a month in which nothing was ever predicted — a different and much better-looking claim.
+CREATE TABLE IF NOT EXISTS prediction_purges(
+  id {pkAuto},
+  rtype TEXT NOT NULL,
+  cohort TEXT NOT NULL,
+  purged_at TEXT NOT NULL DEFAULT '',
+  sets_removed INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pred_purges_month ON prediction_purges(rtype, cohort);
 ```
 
 `{pkAuto}` is the store's existing dialect helper (`store.go:160`: `BIGINT GENERATED ALWAYS AS
