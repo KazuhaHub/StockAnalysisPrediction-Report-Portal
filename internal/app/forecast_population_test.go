@@ -9,6 +9,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,10 +51,12 @@ func TestPopulationBoundIsTheFirstWeekdayCloseAfterTheEarliestSet(t *testing.T) 
 // audit row, and the coverage effect.
 func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 	s := newV1Server(t)
-	// A set on Sunday 2026-10-18 evening CST, the production shape. Its bound is 2026-10-19T07:00:00Z.
-	seedAcceptedSetAt(t, s, "600160", "2026-10-18")
+	// Use a set far enough in the past that every instant below is behind the wall clock: the
+	// too-late case must not depend on when the suite runs. Sunday 2020-01-05 21:00 CST has the bound
+	// Monday 2020-01-06 15:00 CST = 2020-01-06T07:00:00Z.
+	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
 	// A second set, well after, so the two are distinguishable.
-	seedAcceptedSetAt(t, s, "600161", "2026-10-25")
+	seedAcceptedSetAt(t, s, "600161", "2020-01-12")
 
 	post := func(pop string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -63,7 +66,7 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 	}
 
 	// The bound is the Monday close; anything after it is too late.
-	if rec := post("2026-10-19T07:00:01Z"); rec.Code != http.StatusConflict || !hasCode(rec.Body.Bytes(), "forecast_population_too_late") {
+	if rec := post("2020-01-06T07:00:01Z"); rec.Code != http.StatusConflict || !hasCode(rec.Body.Bytes(), "forecast_population_too_late") {
 		t.Fatalf("past the bound: %d %s", rec.Code, rec.Body.String())
 	}
 	// The future is the caller's error.
@@ -75,16 +78,16 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 		t.Fatalf("malformed: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// The decided value succeeds and excludes the 2026-10-18 set.
-	if rec := post("2026-10-18T16:00:00Z"); rec.Code != http.StatusOK {
+	// The decided value (here, before the bound) succeeds and excludes the 2020-01-05 set.
+	if rec := post("2020-01-06T00:00:00Z"); rec.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
 	}
 	got, ok := s.st.ForecastPopulationFrom()
-	if !ok || !got.Equal(time.Date(2026, time.October, 18, 16, 0, 0, 0, time.UTC)) {
+	if !ok || !got.Equal(time.Date(2020, time.January, 6, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("stored ledger start = %v (ok=%v)", got, ok)
 	}
 	// Write-once: a second save is refused.
-	if rec := post("2026-10-18T17:00:00Z"); rec.Code != http.StatusConflict || !hasCode(rec.Body.Bytes(), "forecast_population_set") {
+	if rec := post("2020-01-06T01:00:00Z"); rec.Code != http.StatusConflict || !hasCode(rec.Body.Bytes(), "forecast_population_set") {
 		t.Fatalf("second save: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -95,6 +98,7 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 	}
 	var detail struct {
 		From          string         `json:"from"`
+		Bound         string         `json:"bound"`
 		ExcludedIDs   []int64        `json:"excluded_set_ids"`
 		CountsByState map[string]int `json:"counts_by_state"`
 	}
@@ -106,6 +110,61 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 	}
 	if detail.CountsByState[predStateAccepted] != 1 {
 		t.Errorf("counts_by_state = %v, want one accepted", detail.CountsByState)
+	}
+	if detail.Bound == "" {
+		t.Errorf("audit detail has no bound: %s", rows[0].Detail)
+	}
+}
+
+// TestLedgerStartRefusedWhenTheFirstCohortIsMature: once the first cohort can publish a result, moving
+// the boundary would erase settled work, so the save is refused. The test settles a full cohort so the
+// cell is genuinely mature, which is what `firstCohortMature` reuses the statistics engine to decide.
+func TestLedgerStartRefusedWhenTheFirstCohortIsMature(t *testing.T) {
+	s := newV1Server(t)
+	// Thirty members in one month, all accepted with a matched baseline and a resolved d5, so d5 is
+	// mature. The earliest receipt is Sunday 2020-06-07. Six-digit codes: these go through the real
+	// ingest path, whose symbol normaliser drops anything that is not six digits.
+	for i := 0; i < predMatureMinN; i++ {
+		sym := fmt.Sprintf("600%03d", i)
+		setID := seedAcceptedSetAt(t, s, sym, "2020-06-07")
+		if _, err := s.st.exec(`UPDATE prediction_sets SET base_check='match', s0_fen=10000 WHERE id=?`, setID); err != nil {
+			t.Fatal(err)
+		}
+		// Resolve d5 for this set.
+		if _, err := s.st.exec(`UPDATE prediction_marks SET status=?, ret_bp=100, bench_ret_bp=50
+			WHERE set_id=? AND checkpoint='d5'`, markResolved, setID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The first cohort now has a mature d5 cell.
+	_, _, code, err := s.st.SaveForecastPopulationFrom(
+		time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "forecast_population_month_mature" {
+		t.Fatalf("code = %q, want forecast_population_month_mature", code)
+	}
+	if s.st.forecastPopulationIsSet() {
+		t.Error("a refused save wrote the key")
+	}
+}
+
+// TestRefusedPopulationWriteLeavesTheBenchUnchanged: a request that changes both fields must not
+// persist the benchmark when the ledger start is refused. "A refusal writes nothing" is about the
+// request, not the last field checked.
+func TestRefusedPopulationWriteLeavesTheBenchUnchanged(t *testing.T) {
+	s := newV1Server(t)
+	before := s.st.ForecastBench()
+	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
+	rec := httptest.NewRecorder()
+	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast",
+		strBody(`{"bench":"sh000905","population_from":"not-a-time"}`)), "admin")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if got := s.st.ForecastBench(); got != before {
+		t.Errorf("bench changed to %q after a refused population write, want %q", got, before)
 	}
 }
 
@@ -156,18 +215,25 @@ func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
 // deadlock into a failure rather than a hang.
 func TestLedgerStartSaveNeverCallsThePoolInsideTheTransaction(t *testing.T) {
 	s := newV1Server(t)
-	seedAcceptedSetAt(t, s, "600160", "2026-10-18")
+	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
 
-	done := make(chan struct{})
+	// The goroutine reports through a channel, never through t: on timeout the test returns while the
+	// goroutine may still be blocked, and calling t.Errorf from it afterwards would panic.
+	type result struct {
+		code string
+		err  error
+	}
+	done := make(chan result, 1)
 	go func() {
-		defer close(done)
-		if _, _, code, err := s.st.SaveForecastPopulationFrom(
-			time.Date(2026, time.October, 18, 16, 0, 0, 0, time.UTC), time.Now().UTC()); err != nil || code != "" {
-			t.Errorf("save: code=%q err=%v", code, err)
-		}
+		_, _, code, err := s.st.SaveForecastPopulationFrom(
+			time.Date(2020, time.January, 6, 0, 0, 0, 0, time.UTC), time.Now().UTC())
+		done <- result{code, err}
 	}()
 	select {
-	case <-done:
+	case r := <-done:
+		if r.err != nil || r.code != "" {
+			t.Fatalf("save: code=%q err=%v", r.code, r.err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("SaveForecastPopulationFrom did not return in 2s: a pooled call inside the transaction")
 	}
@@ -264,4 +330,22 @@ func dropMetaRow(t *testing.T, dump []byte, key string) []byte {
 		out = append(out, line)
 	}
 	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// TestCountedSetIDSkipsPreLive: the report page's counted_set_id must not point at a set the
+// statistics do not count, so a pre-live set is skipped and an empty result is 0.
+func TestCountedSetIDSkipsPreLive(t *testing.T) {
+	early := PredictionSet{ID: 1, State: predStateAccepted, MadeAt: "2020-06-07T13:00:00Z"}
+	late := PredictionSet{ID: 2, State: predStateAccepted, MadeAt: "2020-07-07T13:00:00Z"}
+	boundary := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
+
+	if got := countedSetIDFor([]PredictionSet{early, late}, boundary); got != 2 {
+		t.Errorf("counted_set_id = %d, want 2 (the pre-live set is skipped)", got)
+	}
+	if got := countedSetIDFor([]PredictionSet{early}, boundary); got != 0 {
+		t.Errorf("counted_set_id = %d, want 0 (the only set is pre-live)", got)
+	}
+	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}); got != 1 {
+		t.Errorf("counted_set_id = %d, want 1 with no boundary", got)
+	}
 }

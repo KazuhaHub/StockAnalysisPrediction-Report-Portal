@@ -539,6 +539,11 @@ export interface ForecastSettings {
 export interface ForecastPopulation {
   set: boolean
   from?: string
+  /** The key exists but its stored value is unreadable (a damaged database); `from` is absent. */
+  damaged?: boolean
+  /** Who set it and when, from the audit row, when the log still holds it. */
+  set_by?: string
+  set_at?: string
   /** The latest instant a ledger start may name, derived from the ledger's oldest set. Absent on an
    *  empty ledger, which has no bound to offer. */
   bound?: string

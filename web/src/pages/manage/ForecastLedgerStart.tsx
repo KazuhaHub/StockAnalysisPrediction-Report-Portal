@@ -28,11 +28,6 @@ function toShanghaiInput(iso: string): string {
   return dayjs(iso).tz(SHANGHAI).format('YYYY-MM-DDTHH:mm:ss')
 }
 
-function toUTC(iso: string): string {
-  // The admin types a Shanghai wall-clock instant; the wire value is its UTC instant.
-  return dayjs.tz(iso, SHANGHAI).utc().format('YYYY-MM-DDTHH:mm:ss[Z]')
-}
-
 export default function ForecastLedgerStart({
   open,
   value,
@@ -61,16 +56,11 @@ export default function ForecastLedgerStart({
     }
   }, [open, value.from])
 
-  const utc = (() => {
-    try {
-      return draft ? toUTC(draft) : ''
-    } catch {
-      return ''
-    }
-  })()
+  const valid = draft !== '' && dayjs.tz(draft, SHANGHAI).isValid()
+  const utc = valid ? dayjs.tz(draft, SHANGHAI).utc().format('YYYY-MM-DDTHH:mm:ss[Z]') : ''
 
   const save = async () => {
-    if (!utc) {
+    if (!valid) {
       setErr(t('forecast.population.bad_instant'))
       return
     }
@@ -117,16 +107,30 @@ export default function ForecastLedgerStart({
 
         {value.set ? (
           <>
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label={t('forecast.population.from')}>
-                {dayjs(value.from).tz(SHANGHAI).format('YYYY-MM-DD HH:mm:ss')}
-                <Typography.Text type="secondary" style={{ marginInlineStart: 8 }}>
-                  ({value.from})
-                </Typography.Text>
-              </Descriptions.Item>
-            </Descriptions>
+            {value.damaged ? (
+              <Alert type="error" showIcon title={t('forecast.population.damaged')} />
+            ) : (
+              <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label={t('forecast.population.from')}>
+                  {dayjs(value.from).tz(SHANGHAI).format('YYYY-MM-DD HH:mm:ss')}
+                  <Typography.Text type="secondary" style={{ marginInlineStart: 8 }}>
+                    ({value.from})
+                  </Typography.Text>
+                </Descriptions.Item>
+                {(value.set_by || value.set_at) && (
+                  <Descriptions.Item label={t('forecast.population.set_by')}>
+                    {value.set_by || '—'}
+                    {value.set_at && (
+                      <Typography.Text type="secondary" style={{ marginInlineStart: 8 }}>
+                        {dayjs(value.set_at).tz(SHANGHAI).format('YYYY-MM-DD HH:mm')}
+                      </Typography.Text>
+                    )}
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+            )}
             <Typography.Text type="secondary">
-              {t('forecast.population.set_by')}{' '}
+              {t('forecast.population.immutable')}{' '}
               <Link to="/manage/audit?action=forecast.population">{t('forecast.population.audit_link')}</Link>
             </Typography.Text>
           </>
@@ -166,7 +170,7 @@ export default function ForecastLedgerStart({
             {err && <Alert type="error" showIcon title={err} />}
 
             {!confirming ? (
-              <Button type="primary" danger disabled={!draft} onClick={() => setConfirming(true)}>
+              <Button type="primary" danger disabled={!valid} onClick={() => setConfirming(true)}>
                 {t('forecast.population.save')}
               </Button>
             ) : (

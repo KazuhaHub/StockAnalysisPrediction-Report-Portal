@@ -50,18 +50,34 @@ type populationCandidate struct {
 }
 
 // ForecastPopulationFrom returns the ledger start and whether one is set.
+//
+// "Set" is decided by the PRESENCE of the key, not by whether its value parses: a stored value that
+// cannot be parsed is a damaged database, and reporting it as unset would let a second save overwrite
+// it (the write-once guard would pass) and quietly move the boundary. A damaged value keeps the key
+// set, returns ok=false here so callers do not act on a wrong instant, and leaves the operator to
+// inspect it.
 func (s *Store) ForecastPopulationFrom() (time.Time, bool) {
-	raw := s.GetSetting(setForecastPopulationFrom, "")
+	raw := s.populationFromRow()
 	if raw == "" {
 		return time.Time{}, false
 	}
 	t, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
-		// A malformed stored value is treated as unset rather than as zero: a zero time would put the
-		// boundary at year 1 and mark every real set pre-live, which is the failure that hides data.
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+// forecastPopulationIsSet reports whether the key exists at all, whatever its value.
+func (s *Store) forecastPopulationIsSet() bool { return s.populationFromRow() != "" }
+
+// ForecastPopulationSetBy returns the actor and instant of the write that set the ledger start, from
+// the audit row, as far as the log still holds it. Empty strings when the log has been pruned or the
+// row predates this feature. It is display only: the authority is the meta key.
+func (s *Store) ForecastPopulationSetBy() (actor, at string) {
+	_ = s.queryRow(`SELECT actor, at FROM audit_log WHERE action=? ORDER BY id DESC LIMIT 1`,
+		AuditForecastPopulation).Scan(&actor, &at)
+	return actor, at
 }
 
 // forecastEarliestMadeAt is the receipt instant of the ledger's oldest set, and whether the ledger
@@ -112,8 +128,10 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	if from.IsZero() {
 		return nil, byState, "invalid_param", nil
 	}
-	// 1. Write-once.
-	if _, ok := s.ForecastPopulationFrom(); ok {
+	// 1. Write-once. The pool read is only a fast path; the authoritative check is the conflict-safe
+	// write below, because two admins (or a retried request) can pass this line together. Presence is
+	// what matters here, not parseability: a damaged value must not re-open the key.
+	if s.forecastPopulationIsSet() {
 		return nil, byState, "forecast_population_set", nil
 	}
 	// 2. Not in the future.
@@ -146,6 +164,19 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
+	// The write is the write-once gate: DO NOTHING means a row already present (including one whose
+	// value is unreadable, so a corrupt key cannot be silently overwritten and re-opened) leaves zero
+	// rows affected, and the save is refused. This is what makes write-once hold under a race and not
+	// merely under the fast-path read above.
+	res, err := tx.Exec(s.bind(`INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO NOTHING`),
+		setForecastPopulationFrom, from.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, byState, "", err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, byState, "forecast_population_set", nil
+	}
+
 	rows, err := tx.Query(s.bind(`SELECT id, state FROM prediction_sets WHERE made_at < ?`),
 		from.UTC().Format(time.RFC3339))
 	if err != nil {
@@ -168,11 +199,6 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	rows.Close()
 	sort.Slice(excluded, func(i, j int) bool { return excluded[i] < excluded[j] })
 
-	if _, err := tx.Exec(s.bind(`INSERT INTO meta(k,v) VALUES(?,?)
-		ON CONFLICT(k) DO UPDATE SET v=excluded.v`),
-		setForecastPopulationFrom, from.UTC().Format(time.RFC3339)); err != nil {
-		return nil, byState, "", err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, byState, "", err
 	}

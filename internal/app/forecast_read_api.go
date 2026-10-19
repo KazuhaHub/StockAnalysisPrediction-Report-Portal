@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // v1ReportPredictions serves every set ever written for one report, oldest first.
@@ -63,7 +64,8 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 	reverseSets(sets)
 	out := map[string]any{"ok": true, "sets": sets}
 	if len(sets) > 0 {
-		out["counted_set_id"] = countedSetIDFor(sets)
+		populationFrom, _ := s.st.ForecastPopulationFrom()
+		out["counted_set_id"] = countedSetIDFor(sets, populationFrom)
 	}
 	writeJSON(w, out)
 }
@@ -134,11 +136,17 @@ func (s *Server) canReadReport(id int64, sc *ownerScope) bool {
 // of made_on. A report can hold more than one set — a re-ingest with a changed number is a revision —
 // so the member is the earliest ACCEPTED one, and a report can also hold sets that are not members at
 // all (absent, rejected, backtest, or accepted but superseded by an earlier set for the same symbol).
-func countedSetIDFor(sets []PredictionSet) int64 {
+//
+// A set made before the ledger start (P5) is never a member, so it is skipped here too: otherwise the
+// reading page would point at a set the statistics do not count.
+func countedSetIDFor(sets []PredictionSet, populationFrom time.Time) int64 {
 	var best PredictionSet
 	found := false
 	for _, s := range sets {
 		if s.State != predStateAccepted {
+			continue
+		}
+		if !populationFrom.IsZero() && madeAtBefore(s.MadeAt, populationFrom) {
 			continue
 		}
 		if !found || s.MadeAt < best.MadeAt || (s.MadeAt == best.MadeAt && s.ID < best.ID) {

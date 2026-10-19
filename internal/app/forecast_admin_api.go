@@ -20,8 +20,17 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 	if from, ok := s.st.ForecastPopulationFrom(); ok {
 		population["set"] = true
 		population["from"] = from.UTC().Format(time.RFC3339)
+	} else if s.st.forecastPopulationIsSet() {
+		// The key exists but its value is unreadable: keep "set" true (write-once still holds) but do
+		// not hand the UI an instant nobody can trust.
+		population["set"] = true
+		population["damaged"] = true
 	} else {
 		population["set"] = false
+	}
+	if actor, at := s.st.ForecastPopulationSetBy(); actor != "" || at != "" {
+		population["set_by"] = actor
+		population["set_at"] = at
 	}
 	// The bound is derived from the ledger's oldest set; an empty ledger has no bound to offer, but
 	// the field is present so the UI does not have to special-case a missing key.
@@ -68,22 +77,38 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
+	// Validate EVERY field before writing any: a request that changes the benchmark and is then
+	// refused for its ledger start must not have persisted the benchmark. "A refusal writes nothing"
+	// is about the request, not about the one field that happened to be checked last.
+	var bench string
 	if in.Bench != nil {
-		bench := strings.TrimSpace(*in.Bench)
+		bench = strings.TrimSpace(*in.Bench)
 		if _, ok := benchSpecFor(bench); !ok {
 			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_bench",
 				"bench must be an index code the portal is allowed to fetch, for example sh000852")
 			return
 		}
-		s.st.SetSetting(setForecastBench, bench)
 	}
+	var populationFrom time.Time
 	if in.PopulationFrom != nil {
 		from, err := time.Parse(time.RFC3339, strings.TrimSpace(*in.PopulationFrom))
 		if err != nil {
 			jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "population_from must be an RFC3339 instant")
 			return
 		}
-		excluded, byState, code, err := s.st.SaveForecastPopulationFrom(from, time.Now().UTC())
+		populationFrom = from
+	}
+
+	// Apply the ledger start FIRST, because it is the field that can be refused on a rule the caller
+	// cannot see in the request (write-once, the bound, a mature cohort). Doing it after the other
+	// writes is what would leave a partially applied request behind.
+	if in.PopulationFrom != nil {
+		earliest, hasSets, _ := s.st.forecastEarliestMadeAt()
+		var bound string
+		if hasSets {
+			bound = populationBound(earliest).UTC().Format(time.RFC3339)
+		}
+		excluded, byState, code, err := s.st.SaveForecastPopulationFrom(populationFrom, time.Now().UTC())
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -94,9 +119,12 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 		s.recordChange(r, user, AuditForecastPopulation, "settings", setForecastPopulationFrom,
 			map[string]any{
-				"from": from.UTC().Format(time.RFC3339), "excluded_set_ids": excluded,
-				"counts_by_state": byState,
+				"from": populationFrom.UTC().Format(time.RFC3339), "bound": bound,
+				"excluded_set_ids": excluded, "counts_by_state": byState,
 			})
+	}
+	if in.Bench != nil {
+		s.st.SetSetting(setForecastBench, bench)
 	}
 	if in.Enabled != nil {
 		s.st.SetSetting(setForecastAuto, boolSetting(*in.Enabled))

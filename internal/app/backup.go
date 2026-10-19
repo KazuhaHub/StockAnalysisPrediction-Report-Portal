@@ -496,6 +496,13 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 			return fmt.Errorf("carry the ledger start through the restore: %w", err)
 		}
 	case dumpVal != prior.populationFrom:
+		// Compare INSTANTS, not text: the same instant can be written with a different but equivalent
+		// RFC3339 offset, and refusing that would make a harmless restore impossible.
+		dv, derr := time.Parse(time.RFC3339, dumpVal)
+		pv, perr := time.Parse(time.RFC3339, prior.populationFrom)
+		if derr == nil && perr == nil && dv.Equal(pv) {
+			return nil
+		}
 		return fmt.Errorf("forecast_population_conflict: dump has ledger start %q, live database has %q",
 			dumpVal, prior.populationFrom)
 	}
