@@ -88,6 +88,9 @@ type Store struct {
 	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
 	// never fall back to forecast_bench for a set whose frozen code is empty).
 	onSettingRead func(key string)
+	// onForecastApply is a test-only failure seam for the evaluator's per-set transaction. It is nil
+	// in production; a test makes the Nth write fail to prove the plan rolls back as one unit.
+	onForecastApply func(op int) error
 }
 
 // OpenStore opens the database using the given driver. driver: "sqlite" (default) or "postgres";

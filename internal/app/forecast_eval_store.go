@@ -9,6 +9,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"strconv"
 	"time"
@@ -199,27 +200,57 @@ func (s *Store) ApplyForecastPlan(p forecastPlan, now time.Time) error {
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
 
+	op := 0
+	check := func() error {
+		op++
+		if s.onForecastApply != nil {
+			return s.onForecastApply(op)
+		}
+		return nil
+	}
 	if p.baseline != nil {
-		if err := s.finishForecastBaselineTx(tx, p.setID, *p.baseline); err != nil {
+		if err := check(); err != nil {
 			return err
+		}
+		written, err := s.finishForecastBaselineTx(tx, p.setID, *p.baseline)
+		if err != nil {
+			return err
+		}
+		if !written {
+			// Another pass made the baseline terminal between selection and this write. Settling
+			// with the values this pass computed would contradict the stored baseline, so abort and
+			// let the next tick read the stored one.
+			return errForecastBaselineRaced
 		}
 	}
 	for _, d := range p.defers {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.DeferForecastMarks(tx, d.marks, d.code, d.session, now); err != nil {
 			return err
 		}
 	}
 	for _, st := range p.settles {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.SettleForecastMark(tx, st.markID, st.res, now); err != nil {
 			return err
 		}
 	}
 	for _, f := range p.finals {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.MarkRefusedFinal(tx, f.markID, f.code, now); err != nil {
 			return err
 		}
 	}
 	for id, wake := range p.wakes {
+		if err := check(); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(s.bind(`UPDATE prediction_marks SET next_attempt_at=?
 			WHERE id=? AND status IN (?,?)`),
 			wake.UTC().Format(time.RFC3339), id, markPending, markRefused); err != nil {
@@ -227,6 +258,9 @@ func (s *Store) ApplyForecastPlan(p forecastPlan, now time.Time) error {
 		}
 	}
 	if p.terminalBaseline {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.finishForecastBaselineTerminalTx(tx, p.setID, now); err != nil {
 			return err
 		}
@@ -287,17 +321,29 @@ func (s *Store) MarkRefusedFinal(tx *sql.Tx, markID int64, code string, now time
 	return err
 }
 
-// finishForecastBaselineTx fills the set's four evaluator-owned columns, once.
-func (s *Store) finishForecastBaselineTx(tx *sql.Tx, setID int64, b forecastBaseline) error {
+// errForecastBaselineRaced means another pass made the baseline terminal before this plan wrote it.
+// The plan is rolled back; the next tick reads the stored baseline instead of settling on its own.
+var errForecastBaselineRaced = errors.New("forecast: baseline was written by another pass")
+
+// finishForecastBaselineTx fills the set's four evaluator-owned columns, once. It reports whether
+// this call was the one that wrote them.
+func (s *Store) finishForecastBaselineTx(tx *sql.Tx, setID int64, b forecastBaseline) (bool, error) {
 	check := baseMismatch
 	if barOn(b.Index, b.S0) != nil {
 		check = baseMatch
 	}
-	_, err := tx.Exec(s.bind(`UPDATE prediction_sets
+	res, err := tx.Exec(s.bind(`UPDATE prediction_sets
 		SET s0_date = ?, base_date = ?, s0_fen = ?, base_check = ?
 		WHERE id = ? AND base_check IN (?, ?)`),
 		b.S0, b.BaseDate, b.S0Fen, check, setID, baseCheckPending, baseRefused)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // finishForecastBaselineTerminal gives up on a baseline that cannot be resolved: the set's start is

@@ -7,9 +7,7 @@ package app
 // every date is a lower bound because holidays only ever delay a session. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
-// P1 ships TODAY's rules unchanged — S0 is the first session strictly after the receipt date, and dN
-// records sessions[N-1] and is only due once N+1 sessions exist. P6 changes the definitions inside
-// predScheduleFor and the tests in this file move with it.
+// S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.
 
 import (
 	"time"
@@ -23,15 +21,56 @@ type predSchedule struct {
 	Known  bool
 }
 
-// predScheduleFor maps a checkpoint to its sessions. `sessions` are completed sessions strictly after
-// the receipt date, oldest first; `frozenS0` is the start session already stored on the set, if any.
+// predS0 is the first session whose close is after made_at. `sessions` are completed, ascending.
+//
+// Received before 15:00:00 on session T (pre-open and the lunch break included) → T. Received at or
+// after 15:00:00, or on a day that is not a session → the next session. A date is known NOT to be a
+// session only once a LATER session is on the calendar (vendors publish in order), so "today has no
+// bar yet" is never read as "today is a holiday".
+func predS0(madeAt time.Time, sessions []string) (string, bool) {
+	t := madeAt.In(chinaZone)
+	d := t.Format("2006-01-02")
+	close := time.Date(t.Year(), t.Month(), t.Day(), predSessionCloseMinute/60, predSessionCloseMinute%60, 0, 0, chinaZone)
+	beforeClose := t.Before(close)
+	for _, s := range sessions {
+		switch {
+		case s < d:
+			continue
+		case s == d:
+			if beforeClose {
+				return d, true
+			}
+			continue // received after the close: the next session
+		default:
+			return s, true // the first session after d
+		}
+	}
+	return "", false
+}
+
+// predScheduleFor maps a checkpoint to its sessions. `sessions` are COMPLETED sessions, ascending;
+// `frozenS0` is the start session already stored on the set, if any. S0 comes from the stored value
+// when present; otherwise it follows the 15:00 rule above.
 func predScheduleFor(cp string, madeAt time.Time, horizonStd bool, frozenS0 string, sessions []string) predSchedule {
 	madeOn := madeAt.In(chinaZone).Format("2006-01-02")
 	s0 := frozenS0
-	if s0 == "" && len(sessions) > 0 {
-		s0 = sessions[0]
-	}
 	if s0 == "" {
+		var ok bool
+		s0, ok = predS0(madeAt, sessions)
+		if !ok {
+			return predSchedule{}
+		}
+	}
+	i0 := indexOfDate(sessions, s0)
+	if i0 < 0 && frozenS0 != "" {
+		// The stored start session is not on this calendar (a vendor gap). Fall back to the
+		// receipt-based session for SCHEDULING only; the stored baseline still governs the score.
+		if alt, ok := predS0(madeAt, sessions); ok {
+			s0 = alt
+			i0 = indexOfDate(sessions, s0)
+		}
+	}
+	if i0 < 0 {
 		return predSchedule{}
 	}
 	sch := predSchedule{S0: s0}
@@ -40,7 +79,7 @@ func predScheduleFor(cp string, madeAt time.Time, horizonStd bool, frozenS0 stri
 			return predSchedule{}
 		}
 		target := addMonths(madeOn, 12)
-		for _, s := range sessions {
+		for _, s := range sessions[i0:] {
 			if s >= target {
 				sch.Record, sch.Due, sch.Known = s, s, true
 				return sch
@@ -52,17 +91,44 @@ func predScheduleFor(cp string, madeAt time.Time, horizonStd bool, frozenS0 stri
 	}
 	n, ok := predCheckpointSessions[cp]
 	if !ok {
-		return predSchedule{}
-	}
-	// Today's rule: the Nth session after the receipt date, due once N+1 sessions have completed.
-	// The extra one is the F04 off-by-one P6 fixes; P1 pins it rather than changing two things.
-	if len(sessions) <= n {
 		return predSchedule{S0: s0}
 	}
-	// Today's rule records the Nth session but may settle only once the NEXT one has completed:
-	// `Due` is the session after which the mark may settle, so `sessionsPastDue` starts at zero.
-	sch.Record, sch.Due, sch.Known = sessions[n-1], sessions[n], true
+	// dN is the Nth session AFTER S0 (the F04/F05 rule). Record and Due are the same session: the mark
+	// may settle once that session has completed, and nothing is deferred a further session.
+	idx := i0 + n
+	if idx >= len(sessions) {
+		return predSchedule{S0: s0}
+	}
+	sch.Record, sch.Due, sch.Known = sessions[idx], sessions[idx], true
 	return sch
+}
+
+// indexOfDate returns the position of a date in an ascending session list, or -1.
+func indexOfDate(dates []string, date string) int {
+	for i, d := range dates {
+		if d == date {
+			return i
+		}
+		if d > date {
+			return -1
+		}
+	}
+	return -1
+}
+
+// projectedS0 is the weekday lower bound of S0: the receipt date itself when received before 15:00,
+// otherwise the next weekday. Holidays only delay, so this is never later than the real session.
+func projectedS0(madeAt time.Time) string {
+	t := madeAt.In(chinaZone)
+	from := t.Format("2006-01-02")
+	close := time.Date(t.Year(), t.Month(), t.Day(), predSessionCloseMinute/60, predSessionCloseMinute%60, 0, 0, chinaZone)
+	if !t.Before(close) {
+		from = shiftDays(from, 1)
+	}
+	if p := predProjectSessions(from, 1); len(p) > 0 {
+		return p[0]
+	}
+	return ""
 }
 
 // predProjectSessions returns the weekday dates (Mon–Fri, no holidays) from `from` onward. A holiday
@@ -92,20 +158,30 @@ func predProjectSessions(from string, n int) []string {
 // While the set's baseline is unsettled it is the earlier of that and S0's projected 15:30, because
 // the baseline has to be resolved before any checkpoint can be.
 func predWakeAt(set forecastWorkSet, cp string) time.Time {
-	madeOn := set.MadeOn
+	madeAt, ok := setMadeAt(set)
+	if !ok {
+		return time.Time{}
+	}
+	s0 := set.S0Date
+	if s0 == "" {
+		s0 = projectedS0(madeAt)
+	}
+	if s0 == "" {
+		return time.Time{}
+	}
 	due := ""
 	if cp == "h12" {
 		if !set.HorizonStd {
 			return time.Time{}
 		}
-		target := addMonths(madeOn, 12)
+		target := addMonths(set.MadeOn, 12)
 		if p := predProjectSessions(target, 1); len(p) > 0 {
 			due = p[0]
 		}
 	} else if n, ok := predCheckpointSessions[cp]; ok {
-		// Match predScheduleFor's "N+1 completed" rule: the wake is the projected (N+1)th session.
-		if p := predProjectSessions(shiftDays(madeOn, 1), n+1); len(p) > n {
-			due = p[n]
+		// dN is the Nth session after S0: project N weekdays starting the day after S0.
+		if p := predProjectSessions(shiftDays(s0, 1), n); len(p) >= n {
+			due = p[n-1]
 		}
 	}
 	if due == "" {
@@ -113,19 +189,23 @@ func predWakeAt(set forecastWorkSet, cp string) time.Time {
 	}
 	wake := dateAtClose(due)
 	if set.BaseCheck == baseCheckPending || set.BaseCheck == baseRefused {
-		s0 := set.S0Date
-		if s0 == "" {
-			if p := predProjectSessions(shiftDays(madeOn, 1), 1); len(p) > 0 {
-				s0 = p[0]
-			}
-		}
-		if s0 != "" {
-			if w := dateAtClose(s0); w.Before(wake) {
-				wake = w
-			}
+		if w := dateAtClose(s0); w.Before(wake) {
+			wake = w
 		}
 	}
 	return wake
+}
+
+// setMadeAt parses the set's receipt instant, falling back to noon on its civil date. The fallback is
+// only for a malformed row; a real set always carries an RFC3339 made_at.
+func setMadeAt(set forecastWorkSet) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339, set.MadeAt); err == nil {
+		return t, true
+	}
+	if t, err := time.ParseInLocation("2006-01-02", set.MadeOn, chinaZone); err == nil {
+		return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, chinaZone), true
+	}
+	return time.Time{}, false
 }
 
 // dateAtClose is the session's close (15:30 Asia/Shanghai) on a civil date.

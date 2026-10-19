@@ -39,32 +39,195 @@ func evalStub(now *time.Time, index, stock []QuoteBar, indexErr, stockErr error)
 // seven digits, which the classifier (correctly) refuses.
 func ingestSymbol(i int) string { return fmt.Sprintf("61%04d", i) }
 
-func TestCheckpointArithmeticToday(t *testing.T) {
-	madeAt := shanghai(2026, time.October, 16, 21, 0) // Friday after the close
-	sessions := tradingDays("2026-10-19", 12)
+func TestS0FollowsReceiptTimeOfDay(t *testing.T) {
+	dates := tradingDays("2026-10-19", 20) // Mon 19 Oct onward
+	for _, tc := range []struct {
+		name   string
+		madeAt time.Time
+		want   string
+	}{
+		{"10:00 before the close", shanghai(2026, time.October, 19, 10, 0), dates[0]},
+		{"14:59:59 before the close", shanghai(2026, time.October, 19, 14, 59), dates[0]},
+		{"15:00:00 at the close", shanghai(2026, time.October, 19, 15, 0), dates[1]},
+		{"12:00 lunch break", shanghai(2026, time.October, 19, 12, 0), dates[0]},
+		{"08:00 pre-open", shanghai(2026, time.October, 19, 8, 0), dates[0]},
+		{"Sunday evening", shanghai(2026, time.October, 18, 21, 0), dates[0]},
+	} {
+		if got, ok := predS0(tc.madeAt, dates); !ok || got != tc.want {
+			t.Errorf("%s: predS0 = %q (ok=%v), want %q", tc.name, got, ok, tc.want)
+		}
+	}
 
-	sch := predScheduleFor("d5", madeAt, true, "", sessions[:6])
-	if !sch.Known || sch.S0 != sessions[0] || sch.Record != sessions[4] || sch.Due != sessions[5] {
-		t.Fatalf("d5 = %+v, want S0=%s record=%s due=%s", sch, sessions[0], sessions[4], sessions[5])
+	// A holiday Monday is known only once Tuesday's bar exists: the calendar skips it.
+	if got, ok := predS0(shanghai(2026, time.October, 19, 10, 0), dates[1:]); !ok || got != dates[1] {
+		t.Errorf("holiday Monday: predS0 = %q (ok=%v), want %q", got, ok, dates[1])
 	}
-	// Today's boundary: len == n is NOT due; len == n+1 is.
-	if got := predScheduleFor("d5", madeAt, true, "", sessions[:5]); got.Known {
-		t.Errorf("d5 with 5 sessions is known (%+v); today's rule requires N+1", got)
+	// Not decided while no later session is on the calendar.
+	if got, ok := predS0(shanghai(2026, time.October, 19, 10, 0), nil); ok {
+		t.Errorf("predS0 decided with an empty calendar: %q", got)
 	}
-	if got := predScheduleFor("d5", madeAt, true, "", sessions[:6]); !got.Known {
-		t.Errorf("d5 with 6 sessions is not due")
+}
+
+func TestS0WaitsWhileTodayIsUnknown(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-19")
+	// Pin the receipt to 10:00 CST, when today's session would be the start if its bar were known.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at='2026-10-19T02:00:00Z', made_on='2026-10-19', cohort='2026-10' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
 	}
-	// A frozen S0 wins over the first session in the window.
-	if got := predScheduleFor("d5", madeAt, true, sessions[1], sessions[:7]); got.S0 != sessions[1] {
-		t.Errorf("S0 = %q, want the frozen %q", got.S0, sessions[1])
+	// The calendar has only the session before the receipt: today's bar has not arrived yet.
+	index := barsFor(tradingDays("2026-10-16", 1), 4000)
+	stock := barsFor(tradingDays("2026-10-16", 1), 1000)
+	now := shanghai(2026, time.October, 19, 10, 0)
+	sets, err := s.st.ForecastSetsDue(now, 1)
+	if err != nil || len(sets) != 1 {
+		t.Fatalf("selection = %d (%v), want the seeded set", len(sets), err)
 	}
-	// h12 is calendar-based and only exists for a standard horizon.
-	if got := predScheduleFor("h12", madeAt, false, "", sessions); got.Known {
-		t.Errorf("h12 on a non-standard horizon is known: %+v", got)
+	e := evalStub(&now, index, stock, nil, nil)
+	if err := e.evaluateSet(context.Background(), s, sets[0], forecastSeries{Bars: index, Kind: quoteKindIndex}, nil); err != nil {
+		t.Fatal(err)
 	}
-	target := addMonths("2026-10-16", 12)
-	if got := predScheduleFor("h12", madeAt, true, "", sessions); got.Known || got.Due != target {
-		t.Errorf("h12 with only %d sessions = %+v, want not known with target %s", len(sessions), got, target)
+	var check, s0 string
+	s.st.queryRow("SELECT base_check, s0_date FROM prediction_sets WHERE id=?", setID).Scan(&check, &s0)
+	if check != baseCheckPending || s0 != "" {
+		t.Errorf("baseline = %q/%q, want pending and no S0: today's session is not known yet", check, s0)
+	}
+	var refused int
+	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE set_id=? AND status IN (?,?)",
+		setID, markRefused, markRefusedFinal).Scan(&refused)
+	if refused != 0 {
+		t.Errorf("%d marks refused while the start session is unknown", refused)
+	}
+}
+
+func TestDNIsTheNthSessionAfterS0(t *testing.T) {
+	// Set 6: received Sunday 2026-10-18 in the evening; d5 is 2026-10-26.
+	sessions := tradingDays("2026-10-19", 20)
+	sch := predScheduleFor("d5", shanghai(2026, time.October, 18, 21, 0), true, "", sessions)
+	if !sch.Known || sch.S0 != "2026-10-19" || sch.Record != "2026-10-26" || sch.Due != "2026-10-26" {
+		t.Errorf("set 6 d5 = %+v, want S0 2026-10-19 and record/due 2026-10-26", sch)
+	}
+
+	// The demo report: received 2026-09-17 after 15:00, the fixture has no 2026-09-25 bar.
+	demo := []string{"2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-28"}
+	got := predScheduleFor("d5", shanghai(2026, time.September, 17, 16, 0), true, "", demo)
+	if !got.Known || got.S0 != "2026-09-18" || got.Record != "2026-09-28" {
+		t.Errorf("demo d5 = %+v, want S0 2026-09-18 and record 2026-09-28", got)
+	}
+
+	// A frozen S0 wins, and the Nth session after it is the record.
+	frozen := predScheduleFor("d5", shanghai(2026, time.October, 18, 21, 0), true, sessions[1], sessions)
+	if frozen.S0 != sessions[1] || frozen.Record != sessions[6] {
+		t.Errorf("frozen S0: %+v, want S0=%s record=%s", frozen, sessions[1], sessions[6])
+	}
+	// Not due until the Nth session after S0 exists.
+	if early := predScheduleFor("d5", shanghai(2026, time.October, 18, 21, 0), true, "", sessions[:5]); early.Known {
+		t.Errorf("d5 was known with only five sessions: %+v", early)
+	}
+	// h12 stays calendar-based and only exists for a standard horizon.
+	if h := predScheduleFor("h12", shanghai(2026, time.October, 18, 21, 0), false, "", sessions); h.Known {
+		t.Errorf("h12 on a non-standard horizon is known: %+v", h)
+	}
+	long := tradingDays("2025-10-17", 400)
+	if h := predScheduleFor("h12", shanghai(2025, time.October, 17, 10, 0), true, "", long); !h.Known || h.Record < "2026-10-17" {
+		t.Errorf("h12 with a year of sessions = %+v, want known on or after 2026-10-17", h)
+	}
+}
+
+func TestMarksUseTheStoredBaseline(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16") // after the close: S0 is Monday
+	sessions := tradingDays("2026-10-19", 7)
+	index := barsFor(sessions, 4000)
+	stock := barsFor(sessions, 1000) // every close 1000
+
+	now := shanghai(2026, time.October, 27, 16, 0)
+	if err := func() error {
+		// First pass with only five sessions: the baseline is written but d5 is not due.
+		idx := index[:5]
+		stk := stock[:5]
+		e := evalStub(&now, idx, stk, nil, nil)
+		return e.tick(s)
+	}(); err != nil {
+		t.Fatal(err)
+	}
+	var s0 string
+	var s0Fen int64
+	s.st.queryRow("SELECT s0_date, s0_fen FROM prediction_sets WHERE id=?", setID).Scan(&s0, &s0Fen)
+	if s0 != sessions[0] || s0Fen != 1000 {
+		t.Fatalf("first baseline = %s/%d, want %s/1000", s0, s0Fen, sessions[0])
+	}
+
+	// A revised vendor body: S0 printed at 5000, d5 at 1100. The stored base must win, so d5's
+	// return is 1100/1000-1 = +10.00%, not 1100/5000-1.
+	revised := barsFor(sessions, 1000)
+	revised[0].Close = 5000
+	revised[5].Close = 1100
+	// The first pass could not see the d5 session, so it wakes ten minutes later; the next pass runs
+	// after that wake with the full calendar.
+	later := now.Add(11 * time.Minute)
+	e := evalStub(&later, index, revised, nil, nil)
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
+	}
+	var ret int32
+	s.st.queryRow("SELECT ret_bp FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&ret)
+	if ret != 1000 {
+		t.Errorf("d5 ret_bp = %d, want 1000 from the stored s0_fen", ret)
+	}
+}
+
+func TestPlanIsAtomicPerSetBaselineFirst(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
+	var ids []int64
+	rows, err := s.st.query("SELECT id FROM prediction_marks WHERE set_id=? ORDER BY id LIMIT 2", setID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if len(ids) != 2 {
+		t.Fatalf("marks = %d, want 2", len(ids))
+	}
+
+	s.st.onForecastApply = func(op int) error {
+		if op == 3 { // baseline (1), mark 1 (2), mark 2 (3)
+			return fmt.Errorf("injected failure")
+		}
+		return nil
+	}
+	defer func() { s.st.onForecastApply = nil }()
+
+	first := int64(1111)
+	err = s.st.ApplyForecastPlan(forecastPlan{
+		setID: setID,
+		baseline: &forecastBaseline{S0: "2026-10-19", BaseDate: "2026-10-19", S0Fen: 1000,
+			Index: []QuoteBar{{Date: "2026-10-19", Close: 4000}}},
+		settles: []forecastSettle{
+			{markID: ids[0], res: markResult{Status: markResolved, Session: "2026-10-26", CloseFen: &first}},
+			{markID: ids[1], res: markResult{Status: markResolved, Session: "2026-10-26", CloseFen: &first}},
+		},
+	}, time.Now())
+	if err == nil {
+		t.Fatal("the injected failure did not surface")
+	}
+
+	var check, s0 string
+	s.st.queryRow("SELECT base_check, s0_date FROM prediction_sets WHERE id=?", setID).Scan(&check, &s0)
+	if check != baseCheckPending || s0 != "" {
+		t.Errorf("baseline = %q/%q after a failed plan, want pending and no S0", check, s0)
+	}
+	var status string
+	s.st.queryRow("SELECT status FROM prediction_marks WHERE id=?", ids[0]).Scan(&status)
+	if status != markPending {
+		t.Errorf("mark 1 = %q, want pending: the plan must roll back as one unit", status)
 	}
 }
 

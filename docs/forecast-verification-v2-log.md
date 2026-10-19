@@ -141,3 +141,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   signature; a finalised mark records the failed attempt that finalised it; an unschedulable checkpoint
   terminalises with `no_schedule` instead of spinning; `baseline_check=refused_final` is rendered; the
   EXPLAIN tests now use the production selection text (and PG's `SET LOCAL` on the same connection).
+
+### P6 decisions (2026-10-19)
+- **S0 follows the 15:00 rule.** A receipt before 15:00 on a session starts that session; at or after
+  15:00, or on a non-session, starts the next. A date is known not to be a session only once a later
+  session is on the calendar, so a bar that has not arrived yet is never read as a holiday.
+- **dN is the Nth session after S0**, and `Record` and `Due` are the same session: the mark may settle
+  as soon as that session has completed. P1's extra-session rule and its `len > n` pin are replaced.
+- **A terminal baseline is used as stored.** A later pass never recomputes S0/base/price from a revised
+  vendor body.
+- **The plan's transaction already writes the baseline first** (P1); P6 adds a failure seam to
+  `ApplyForecastPlan` and pins that a failure on the second mark rolls the baseline and the first mark
+  back.
+- **Adversarial review follow-ups (P6).** Fixed before merge: a stored S0 missing from the calendar
+  falls back to the receipt-based session for scheduling only (never an endless wake); a terminal
+  baseline with a NULL `s0_fen` omits the return instead of recomputing the price from a revised body;
+  a guarded baseline write that affects 0 rows aborts the plan (`errForecastBaselineRaced`) so a racing
+  pass cannot settle on its own values; the unknown-today test now calls the evaluator path rather
+  than being short-circuited by the wake-only pre-pass; a known h12 and a future bar are pinned.
