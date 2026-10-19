@@ -360,7 +360,7 @@ func (s *Store) firstCohortMature(now time.Time) (bool, error) {
 	}
 	today := now.In(chinaZone).Format("2006-01-02")
 	// Pre-live does not apply to this check: it asks whether the cohort would publish if scored.
-	members, pending, _ := forecastMembership(sets, time.Time{})
+	members, pending, _ := forecastMembership(sets, time.Time{}, cohortBenchFromSets(sets))
 	for _, cp := range predCheckpoints {
 		if computeForecastCell(members, pending, predTestRtype, from, to, cp, today).State == "mature" {
 			return true, nil

@@ -27,6 +27,8 @@ type gsSeed struct {
 	Symbol      string
 	MadeOn      string
 	MadeAt      string
+	Cohort      string
+	Bench       string
 	State       string
 	Quality     string
 	BaseCheck   string
@@ -71,13 +73,17 @@ func seedGroupSet(t *testing.T, s *Server, g gsSeed) int64 {
 	if g.Stance == "" {
 		g.Stance = "long"
 	}
+	cohort := g.Cohort
+	if cohort == "" {
+		cohort = g.MadeOn[:7]
+	}
 	res, err := s.st.exec(s.st.bind(`INSERT INTO prediction_sets(
 		report_id, symbol, rtype, version, title, report_date, made_at, made_on, cohort, zone, state,
 		policy_version, probability_method, probability_transform, decision_quality, horizon_std,
-		s0_fen, base_check)
-		VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
-		g.Symbol, predTestRtype, "", "", g.MadeOn, g.MadeAt, g.MadeOn, g.MadeOn[:7], predZone,
-		g.State, g.Policy, g.Method, g.Transform, g.Quality, boolInt(g.HorizonStd), g.S0Fen, g.BaseCheck)
+		s0_fen, base_check, bench_code)
+		VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+		g.Symbol, predTestRtype, "", "", g.MadeOn, g.MadeAt, g.MadeOn, cohort, predZone,
+		g.State, g.Policy, g.Method, g.Transform, g.Quality, boolInt(g.HorizonStd), g.S0Fen, g.BaseCheck, g.Bench)
 	if err != nil {
 		t.Fatalf("insert set: %v", err)
 	}
@@ -237,7 +243,7 @@ func TestBHAdjustTextbook(t *testing.T) {
 func TestCellMaturityGates(t *testing.T) {
 	s := newV1Server(t)
 	sets := sampleMembers(t, s, 30, nil)
-	members, pending, cov := forecastMembership(sets, time.Time{})
+	members, pending, cov := forecastMembership(sets, time.Time{}, "")
 	if cov.Member != 30 || len(members) != 30 {
 		t.Fatalf("membership = %+v", cov)
 	}
@@ -251,7 +257,7 @@ func TestCellMaturityGates(t *testing.T) {
 
 	// n = 29 is small.
 	s2 := newV1Server(t)
-	m29, p29, _ := forecastMembership(sampleMembers(t, s2, predMatureMinN-1, nil), time.Time{})
+	m29, p29, _ := forecastMembership(sampleMembers(t, s2, predMatureMinN-1, nil), time.Time{}, "")
 	if c := computeForecastCell(m29, p29, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18"); c.State != "small" || c.N == nil || *c.N != 29 {
 		t.Fatalf("29 members: %+v", c)
 	}
@@ -267,7 +273,7 @@ func TestCellMaturityGates(t *testing.T) {
 		if i == 0 {
 			g.Marks["d5"] = gsMark{Status: markPending}
 		}
-	}), time.Time{})
+	}), time.Time{}, "")
 	if c := computeForecastCell(m3, p3, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18"); c.State != "pending" || c.Resolved == nil || *c.Resolved != 29 {
 		t.Fatalf("pending mark: %+v", c)
 	}
@@ -278,7 +284,7 @@ func TestCellMaturityGates(t *testing.T) {
 		if i < 2 {
 			g.Marks["d5"] = gsMark{Status: markRefusedFinal}
 		}
-	}), time.Time{})
+	}), time.Time{}, "")
 	if c := computeForecastCell(m4, p4, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18"); c.State != "mature" {
 		t.Fatalf("5%% refusals: %+v", c)
 	}
@@ -287,7 +293,7 @@ func TestCellMaturityGates(t *testing.T) {
 		if i < 3 {
 			g.Marks["d5"] = gsMark{Status: markRefusedFinal}
 		}
-	}), time.Time{})
+	}), time.Time{}, "")
 	if c := computeForecastCell(m5, p5, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18"); c.State != "pending" {
 		t.Fatalf("6%% refusals: %+v", c)
 	}
@@ -295,7 +301,7 @@ func TestCellMaturityGates(t *testing.T) {
 
 func TestNonMatureCellsOmitMetricKeys(t *testing.T) {
 	s := newV1Server(t)
-	m, p, _ := forecastMembership(sampleMembers(t, s, predMatureMinN-1, nil), time.Time{})
+	m, p, _ := forecastMembership(sampleMembers(t, s, predMatureMinN-1, nil), time.Time{}, "")
 	cell := computeForecastCell(m, p, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18")
 	b, _ := json.Marshal(cell)
 	var m2 map[string]any
@@ -327,11 +333,11 @@ func TestMembershipCountsDuplicatesAndBaseline(t *testing.T) {
 	seedGroupSet(t, s, pendingBase)
 
 	sets, _ := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30")
-	members, pb, cov := forecastMembership(sets, time.Time{})
+	members, pb, cov := forecastMembership(sets, time.Time{}, "")
 	if cov.Member != 1 || cov.Duplicate != 1 || cov.PendingBaseline != 1 || len(members) != 1 || len(pb) != 1 {
 		t.Fatalf("coverage = %+v, members=%d pending=%d", cov, len(members), len(pb))
 	}
-	m, p, _ := forecastMembership(sets, time.Time{})
+	m, p, _ := forecastMembership(sets, time.Time{}, "")
 	if c := computeForecastCell(m, p, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18"); c.State != "pending" {
 		t.Fatalf("a pending baseline must block: %+v", c)
 	}
@@ -360,7 +366,7 @@ func TestMonthlyAndWholeMonthCustomAgree(t *testing.T) {
 
 func TestMatureCellsDoNotChange(t *testing.T) {
 	s := newV1Server(t)
-	members, pending, _ := forecastMembership(sampleMembers(t, s, predMatureMinN+2, nil), time.Time{})
+	members, pending, _ := forecastMembership(sampleMembers(t, s, predMatureMinN+2, nil), time.Time{}, "")
 	a := computeForecastCell(members, pending, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2026-10-18")
 	b := computeForecastCell(members, pending, predTestRtype, "2025-06-01", "2025-06-30", "d5", "2027-01-01")
 	ja, _ := json.Marshal(a)
@@ -502,10 +508,10 @@ func TestOnlyOfficialMatureCellsAreCached(t *testing.T) {
 	if len(s.forecastGroupsCache) == 0 {
 		t.Fatal("a mature monthly cell was not cached")
 	}
-	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "d5")]; !ok || c.State != "mature" {
+	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "", "d5")]; !ok || c.State != "mature" {
 		t.Fatalf("d5 entry = %+v, present=%v", c, ok)
 	}
-	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "h12")]; ok {
+	if c, ok := s.forecastGroupsCache[forecastGroupCellKey(predTestRtype, "2025-06-01", "2025-06-30", "", "h12")]; ok {
 		t.Fatalf("a %s cell was cached: %+v", c.State, c)
 	}
 

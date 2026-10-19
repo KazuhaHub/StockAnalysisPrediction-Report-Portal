@@ -149,6 +149,11 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
             {t('forecast.cov.test', { n: c.test })}
           </div>
         )}
+        {c.off_benchmark > 0 && (
+          <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
+            {t('forecast.cov.off_benchmark', { n: c.off_benchmark })}
+          </div>
+        )}
       </div>
     )
   }
@@ -193,6 +198,11 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
                     <Tag style={{ marginInlineStart: 6 }} color="warning">
                       {t('forecast.tag.exploratory')}
                     </Tag>
+                  )}
+                  {g.bench && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>
+                      {t(`forecast.bench.${g.bench}`)}
+                    </Typography.Text>
                   )}
                 </td>
                 {resp.checkpoints.map((cp) => (

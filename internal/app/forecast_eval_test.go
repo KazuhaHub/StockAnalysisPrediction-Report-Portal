@@ -478,17 +478,28 @@ func TestForecastSettingsRoundTrip(t *testing.T) {
 		t.Errorf("enabled = %v, want false: the evaluator ships off", got["enabled"])
 	}
 
-	body := `{"enabled":true,"bench":"sh000905"}`
+	expectedFrom := nextCohort(shanghaiCohort(time.Now()))
+	body := `{"enabled":true,"bench_schedule":"sh000905"}`
 	rec = httptest.NewRecorder()
 	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast", strBody(body)), "admin")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST status %d: %s", rec.Code, rec.Body.String())
 	}
+	var saved map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &saved)
+	if saved["effective_cohort"] != expectedFrom {
+		t.Errorf("effective_cohort = %v, want %q", saved["effective_cohort"], expectedFrom)
+	}
 	if s.st.GetSetting(setForecastAuto, "0") != "1" {
 		t.Error("the switch was not persisted")
 	}
-	if s.st.ForecastBench() != "sh000905" {
-		t.Errorf("bench = %q, want sh000905", s.st.ForecastBench())
+	// Effective-dated: the active value does not move on save; the next cohort gets the new code.
+	if s.st.ForecastBench() != defaultForecastBench {
+		t.Errorf("active bench = %q, want %q: a change must not re-score this cohort",
+			s.st.ForecastBench(), defaultForecastBench)
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "sh000905" || from != expectedFrom {
+		t.Errorf("scheduled = %q from %q, want sh000905 from %q", next, from, expectedFrom)
 	}
 
 	// Flipping the switch is audited. The settings endpoint is the only writer of forecast_auto, and
@@ -502,6 +513,9 @@ func TestForecastSettingsRoundTrip(t *testing.T) {
 	}
 	if rows[0].Actor != "admin" || rows[0].TargetType != "settings" || rows[0].TargetID != setForecastAuto {
 		t.Errorf("audit row = %+v, want actor=admin on settings/%s", rows[0], setForecastAuto)
+	}
+	if benchRows := auditRows(t, s, AuditForecastBench); len(benchRows) != 1 {
+		t.Fatalf("audit entries for %s = %d, want 1", AuditForecastBench, len(benchRows))
 	}
 
 	// A request that only changes the benchmark does not touch the switch, so it must not file an
@@ -525,8 +539,26 @@ func TestForecastSettingsRoundTrip(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status for a bad benchmark = %d, want 400", rec.Code)
 	}
-	if s.st.ForecastBench() != "sh000300" {
-		t.Error("a refused benchmark was stored anyway")
+	if next, _ := s.st.forecastScheduledBench(); next != "sh000300" {
+		t.Errorf("a refused benchmark changed the schedule to %q", next)
+	}
+
+	// Rescheduling the active value when nothing is pending writes nothing at all.
+	clean := newV1Server(t)
+	if _, err := clean.st.exec(`DELETE FROM audit_log WHERE action IN (?,?)`, AuditForecastAuto, AuditForecastBench); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	clean.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast",
+		strBody(`{"bench_schedule":"`+defaultForecastBench+`"}`)), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("no-op POST status %d: %s", rec.Code, rec.Body.String())
+	}
+	if rows := auditRows(t, clean, AuditForecastBench); len(rows) != 0 {
+		t.Errorf("a no-op resave filed %d audit rows, want 0", len(rows))
+	}
+	if next, from := clean.st.forecastScheduledBench(); next != "" || from != "" {
+		t.Errorf("a no-op resave scheduled %q from %q", next, from)
 	}
 }
 

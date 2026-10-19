@@ -504,7 +504,7 @@ func buildGoldenCells(spec goldenFixtureSpec, sets []*groupSet) goldenCellsDoc {
 					in = append(in, gs)
 				}
 			}
-			members, pending, cov := forecastMembership(in, time.Time{})
+			members, pending, cov := forecastMembership(in, time.Time{}, "")
 			cells := make(map[string]*forecastCell, len(predCheckpoints))
 			for _, cp := range predCheckpoints {
 				cells[cp] = computeForecastCell(members, pending, spec.Rtype, p.Start, p.End, cp, goldenToday)

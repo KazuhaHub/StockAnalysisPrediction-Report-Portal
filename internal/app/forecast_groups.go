@@ -31,10 +31,13 @@ type forecastRange struct {
 }
 
 type forecastGroup struct {
-	Label    string                   `json:"label"`
-	Start    string                   `json:"start"`
-	End      string                   `json:"end"`
-	Official bool                     `json:"official"`
+	Label    string `json:"label"`
+	Start    string `json:"start"`
+	End      string `json:"end"`
+	Official bool   `json:"official"`
+	// Bench is the index every member of this group was frozen with (P4). A range that spans cohorts
+	// with different indexes is split into one group per index, so a cell never pools two baselines.
+	Bench    string                   `json:"bench"`
 	Coverage forecastCoverage         `json:"coverage"`
 	Cells    map[string]*forecastCell `json:"cells"`
 }
@@ -58,6 +61,9 @@ type forecastCoverage struct {
 	// Test counts sets a producer declared as test runs (P36). Like pre-live, they are accounted for
 	// and never reach the record.
 	Test int `json:"test"`
+	// OffBenchmark counts accepted sets frozen with an index other than their cohort's benchmark
+	// (P4). They are counted and kept out of the cell, so a cohort never pools two indexes.
+	OffBenchmark int `json:"off_benchmark"`
 }
 
 // madeAtBefore reports whether a set's stored made_at instant is strictly before the boundary. A
@@ -133,8 +139,24 @@ type forecastPeriod struct {
 // `populationFrom` is the ledger start (P5, decisions V3). A zero time means "no boundary set": every
 // set is live. A set made strictly before the boundary is pre-live and never enters bySymbol, so it
 // can neither be a member nor make a later real set a duplicate (plan B4).
-func forecastMembership(sets []*groupSet, populationFrom time.Time) (members, pendingBaseline []*groupSet, cov forecastCoverage) {
+func forecastMembership(sets []*groupSet, populationFrom time.Time, bench string) (members, pendingBaseline []*groupSet, cov forecastCoverage) {
 	cov.Reports = len(sets)
+	// The symbol's earliest accepted set decides. If it is off-benchmark the symbol is out for the
+	// group, exactly like a degraded first set, and a later on-benchmark set must not revive it.
+	firstBench := map[string]string{}
+	if bench != "" {
+		for _, gs := range sets {
+			if !populationFrom.IsZero() && madeAtBefore(gs.MadeAt, populationFrom) {
+				continue
+			}
+			if gs.State != predStateAccepted {
+				continue
+			}
+			if _, ok := firstBench[gs.Symbol]; !ok {
+				firstBench[gs.Symbol] = gs.BenchCode
+			}
+		}
+	}
 	bySymbol := map[string][]*groupSet{}
 	for _, gs := range sets {
 		if !populationFrom.IsZero() && madeAtBefore(gs.MadeAt, populationFrom) {
@@ -151,6 +173,10 @@ func forecastMembership(sets []*groupSet, populationFrom time.Time) (members, pe
 		case predStateTest:
 			cov.Test++
 		case predStateAccepted:
+			if bench != "" && (gs.BenchCode != bench || firstBench[gs.Symbol] != bench) {
+				cov.OffBenchmark++
+				continue
+			}
 			bySymbol[gs.Symbol] = append(bySymbol[gs.Symbol], gs)
 		}
 	}
@@ -178,6 +204,25 @@ func forecastMembership(sets []*groupSet, populationFrom time.Time) (members, pe
 		}
 	}
 	return members, pendingBaseline, cov
+}
+
+// cohortBenchFromSets derives a cohort's benchmark from a loaded population: the frozen code of the
+// earliest accepted set. The admin matrix uses the ledger-wide query instead, so a partial range
+// cannot pick a different earliest set; the paths that already hold the whole cohort use this.
+func cohortBenchFromSets(sets []*groupSet) string {
+	var best *groupSet
+	for _, gs := range sets {
+		if gs.State != predStateAccepted {
+			continue
+		}
+		if best == nil || gs.MadeAt < best.MadeAt || (gs.MadeAt == best.MadeAt && gs.ID < best.ID) {
+			best = gs
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.BenchCode
 }
 
 const predQualityNormal = "normal"

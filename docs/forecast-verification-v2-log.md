@@ -82,3 +82,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   (the ingest path uses the real clock); the "no state UPDATE" guard now scans every non-test `.go`
   file with a whitespace/case-insensitive regex, not just `forecast_*.go`; a backtest + `run_mode=test`
   case is pinned; `forecastCoverage.pre_live`/`test` added to the web type and the matrix bar/legend.
+
+### P4 decisions (2026-10-19)
+- **Golden delta.** §4.7 said "golden snapshots unchanged", but the same section adds
+  `forecastCoverage.OffBenchmark`, which `golden_cells.json` serialises. Every coverage block gains
+  `off_benchmark: 0`; all values are otherwise byte-identical. Regenerated in P4's own commit and the
+  doc line corrected.
+- **`mode` is 0/1 only in P4.** `enabled` is the alias; `mode:"dry"` is refused rather than stored,
+  because dry-run readiness is P9's. The evaluator's existing `!= "1"` test keeps any future value off.
+- **Reconciliation is boot-only for now.** P9's housekeeping will call `promoteForecastBench` daily;
+  until then the effective-dated reader (`ForecastBenchFor`) already returns the right code for the new
+  cohort, so the active meta value merely lags by a boot.
+- **Off-benchmark is per set, not per symbol, except for the earliest.** Every accepted set whose
+  frozen code differs from its cohort's benchmark is counted and excluded; if the symbol's earliest
+  accepted set is off-benchmark the whole symbol is out (later sets are counted off-benchmark too), as
+  §4.7 requires. In the default population the earliest set defines the benchmark, so that branch is
+  defensive.
+- **`counted_set_id` respects off-benchmark.** The report page's pointer now skips a set whose
+  `bench_code` differs from its cohort's benchmark, so it cannot show a green "counted" badge on a set
+  the statistics exclude. The cohort benchmark is the ledger-wide query, not the loaded slice.
+- **A legacy `bench` plus `bench_cancel` is refused** as ambiguous, the same as `bench_schedule` plus
+  `bench_cancel`; the cancel intent alone still works.

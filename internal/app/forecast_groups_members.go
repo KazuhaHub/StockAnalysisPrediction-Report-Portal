@@ -8,6 +8,7 @@ package app
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,7 @@ type forecastMembersResponse struct {
 	Label      string           `json:"label"`
 	Start      string           `json:"start"`
 	End        string           `json:"end"`
+	Bench      string           `json:"bench"`
 	Checkpoint string           `json:"checkpoint"`
 	State      string           `json:"state"`
 	Members    []forecastMember `json:"members"`
@@ -60,6 +62,16 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	label := q.Get("label")
+	bench := strings.TrimSpace(q.Get("bench"))
+	// A custom group that spanned two benchmarks was split into labels like "2026-10 · sh000906".
+	// Accept either the suffixed label or the base label plus bench=, so the drawer follows the
+	// matrix row it was opened from.
+	if i := strings.LastIndex(label, " · "); i > 0 {
+		if bench == "" {
+			bench = label[i+len(" · "):]
+		}
+		label = label[:i]
+	}
 	cp := q.Get("checkpoint")
 	if !containsStr(predCheckpoints, cp) {
 		jsonErrorCode(w, http.StatusBadRequest, "bad_checkpoint", "checkpoint is not one of d5, d20, d60, d120, h12")
@@ -118,7 +130,25 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	populationFrom, _ := s.st.ForecastPopulationFrom()
-	members, pending, _ := forecastMembership(sets, populationFrom)
+	if bench == "" {
+		bench = cohortBenchFromSets(sets)
+	}
+	if bench != "" {
+		benchOf := map[string]string{}
+		filtered := make([]*groupSet, 0, len(sets))
+		for _, gs := range sets {
+			b, ok := benchOf[gs.Cohort]
+			if !ok {
+				b, _ = s.st.earliestCohortBench(rtype, gs.Cohort)
+				benchOf[gs.Cohort] = b
+			}
+			if b == bench {
+				filtered = append(filtered, gs)
+			}
+		}
+		sets = filtered
+	}
+	members, pending, _ := forecastMembership(sets, populationFrom, bench)
 	today := now.In(chinaZone).Format("2006-01-02")
 	cell := computeForecastCell(members, pending, rtype, period.Start, period.End, cp, today)
 	if cp == "h12" {
@@ -130,6 +160,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		Label:      period.Label,
 		Start:      period.Start,
 		End:        period.End,
+		Bench:      bench,
 		Checkpoint: cp,
 		State:      cell.State,
 		Members:    []forecastMember{},

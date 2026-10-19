@@ -130,7 +130,10 @@ const (
 	// Setting the ledger start (P5). Write-once, so the one row that carries it has to say who set
 	// which instant and which sets left the record.
 	AuditForecastPopulation = "forecast.population"
-	AuditReportDelete       = "report.delete"
+	// Scheduling or promoting a benchmark (P4). Effective-dated and audited, so a reader can tell
+	// which cohort a number was scored against and who changed the index.
+	AuditForecastBench = "forecast.bench"
+	AuditReportDelete  = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -412,6 +415,7 @@ var auditVocabulary = []string{
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
+	AuditForecastBench,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

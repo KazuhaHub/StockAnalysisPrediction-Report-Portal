@@ -495,9 +495,39 @@ check("G", "A non-manager is refused the group statistics", sc == 403, f"{sc}")
 
 sc, settings = admin.req("GET", "/api/admin/forecast")
 check("G", "The evaluator reads its settings", sc == 200 and settings.get("enabled") is False, f"{sc} {settings}")
-sc, _ = admin.req("POST", "/api/admin/forecast", {"enabled": False, "bench": settings.get("bench")})
-check("G", "The settings save round-trips", sc == 200, f"{sc}")
-check("G", "Automatic settling stays off", sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "0")
+bench_before = settings.get("bench")
+bench_audit = lambda: sql("SELECT COUNT(*) FROM audit_log WHERE action='forecast.bench'")[0][0]
+bench_rows = bench_audit()
+
+# A benchmark change is effective-dated: it schedules for the next cohort and leaves the active
+# value alone, so nothing already on the ledger is re-scored.
+sc, scheduled = admin.req("POST", "/api/admin/forecast", {"bench_schedule": "sh000300"})
+check("G", "A benchmark change is scheduled for the next cohort",
+      sc == 200 and bool(scheduled.get("effective_cohort")), f"{sc} {scheduled}")
+sc, sched = admin.req("GET", "/api/admin/forecast")
+check("G", "The schedule reads back with the active value unchanged",
+      sched.get("bench") == bench_before and sched.get("bench_next") == "sh000300", f"{sched}")
+check("G", "The schedule is audited", bench_audit() == bench_rows + 1, f"{bench_rows} -> {bench_audit()}")
+
+# A mode-only save touches the switch and nothing else.
+sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": 1})
+check("G", "A mode-only save turns settling on",
+      sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "1", f"{sc}")
+sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": 0})
+check("G", "A mode-only save turns settling off again",
+      sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "0", f"{sc}")
+
+# Cancelling clears the schedule; rescheduling the active value is then a no-op with no audit row.
+sc, _ = admin.req("POST", "/api/admin/forecast", {"bench_cancel": True})
+cancel_ok = sc == 200
+sc, after_cancel = admin.req("GET", "/api/admin/forecast")
+rows_after_cancel = bench_audit()
+check("G", "Cancel clears the schedule",
+      cancel_ok and sc == 200 and not after_cancel.get("bench_next"), f"{after_cancel}")
+sc, _ = admin.req("POST", "/api/admin/forecast", {"bench_schedule": bench_before})
+sc, noop = admin.req("GET", "/api/admin/forecast")
+check("G", "Rescheduling the active benchmark is a no-op",
+      sc == 200 and bench_audit() == rows_after_cancel and not noop.get("bench_next"), f"{sc} {noop}")
 
 # The ledger start (P5): a bounded, write-once instant. The e2e portal is a throwaway database, so
 # setting it here is safe. Preview first (the GET carries the bound and the candidates), then save,

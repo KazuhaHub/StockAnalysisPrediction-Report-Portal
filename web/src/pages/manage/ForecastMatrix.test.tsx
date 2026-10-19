@@ -30,6 +30,7 @@ function resp(cells: Record<string, ForecastCell>): ForecastGroupsResponse {
         start: '2026-09-01',
         end: '2026-09-30',
         official: true,
+        bench: 'sh000852',
         coverage: {
           reports: 50,
           member: 42,
@@ -43,6 +44,7 @@ function resp(cells: Record<string, ForecastCell>): ForecastGroupsResponse {
           pending_baseline: 0,
           pre_live: 0,
           test: 0,
+          off_benchmark: 0,
         },
         cells,
       },

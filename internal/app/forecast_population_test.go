@@ -271,7 +271,7 @@ func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, cov := forecastMembership(sets, boundary)
+	_, _, cov := forecastMembership(sets, boundary, "")
 	if cov.PreLive != 1 {
 		t.Errorf("pre_live = %d, want 1", cov.PreLive)
 	}
@@ -287,7 +287,7 @@ func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
 
 	// Without a boundary the early set IS the symbol's decision (D4), so the later real set becomes a
 	// duplicate — exactly the B4 failure the boundary exists to prevent.
-	_, _, covNo := forecastMembership(sets, time.Time{})
+	_, _, covNo := forecastMembership(sets, time.Time{}, "")
 	if covNo.PreLive != 0 || covNo.Duplicate != 1 {
 		t.Errorf("no boundary: pre_live=%d duplicate=%d, want 0/1", covNo.PreLive, covNo.Duplicate)
 	}
@@ -433,13 +433,13 @@ func TestCountedSetIDSkipsPreLive(t *testing.T) {
 	late := PredictionSet{ID: 2, State: predStateAccepted, MadeAt: "2020-07-07T13:00:00Z"}
 	boundary := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
 
-	if got := countedSetIDFor([]PredictionSet{early, late}, boundary); got != 2 {
+	if got := countedSetIDFor([]PredictionSet{early, late}, boundary, ""); got != 2 {
 		t.Errorf("counted_set_id = %d, want 2 (the pre-live set is skipped)", got)
 	}
-	if got := countedSetIDFor([]PredictionSet{early}, boundary); got != 0 {
+	if got := countedSetIDFor([]PredictionSet{early}, boundary, ""); got != 0 {
 		t.Errorf("counted_set_id = %d, want 0 (the only set is pre-live)", got)
 	}
-	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}); got != 1 {
+	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}, ""); got != 1 {
 		t.Errorf("counted_set_id = %d, want 1 with no boundary", got)
 	}
 }
@@ -478,7 +478,7 @@ func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	members, pending, cov := forecastMembership(sets, time.Time{})
+	members, pending, cov := forecastMembership(sets, time.Time{}, "")
 	if cov.Test != 2 {
 		t.Errorf("test = %d, want 2", cov.Test)
 	}
@@ -489,7 +489,7 @@ func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
 		t.Errorf("test sets produced members=%d pending=%d, want 0/0", len(members), len(pending))
 	}
 	sum := cov.Absent + cov.Rejected + cov.Backtest + cov.Test + cov.PreLive +
-		cov.Member + cov.Duplicate + cov.Degraded + cov.Mismatch + cov.PendingBaseline
+		cov.Member + cov.Duplicate + cov.Degraded + cov.Mismatch + cov.PendingBaseline + cov.OffBenchmark
 	if sum != cov.Reports {
 		t.Errorf("coverage sums to %d but loaded %d reports", sum, cov.Reports)
 	}

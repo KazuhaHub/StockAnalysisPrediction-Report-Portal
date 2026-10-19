@@ -259,13 +259,16 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	//
 	// The symbol it sees is the NORMALISED one, so a producer that sent " 600160 " is classified on
 	// the value that will actually be stored and scored.
+	// One instant decides both the frozen benchmark and the cohort: reading the clock twice could
+	// cross a cohort boundary (or a scheduled change) between them.
+	madeAt := time.Now().UTC()
 	predSet, predClaims, predErrs := classifyPredictions(predInput{
 		Raw:       in.Predictions,
 		Rtype:     rtype,
 		Symbol:    in.Symbol,
-		MadeAt:    time.Now().UTC(),
+		MadeAt:    madeAt,
 		BodySHA:   sha256Hex([]byte(in.BodyMD + "\x00" + in.BodyHTML)),
-		BenchCode: s.st.ForecastBench(),
+		BenchCode: s.st.ForecastBenchFor(shanghaiCohort(madeAt)),
 	})
 	kind := in.Kind
 	if kind == "" {
