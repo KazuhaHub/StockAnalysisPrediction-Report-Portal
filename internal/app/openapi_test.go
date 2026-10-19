@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -77,6 +78,75 @@ func TestOpenAPIIngestRequestMatchesRuntimeValidation(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("IngestRequest.anyOf missing %s branch: %v", want, anyOf)
 		}
+	}
+}
+
+// TestOpenAPIIngestRequestDocumentsEveryWireField keeps the two descriptions of the ingest body in
+// step: the decoded Go struct (v1IngestRequest) and the documented IngestRequest schema. They are read
+// by different audiences — a producer reads the spec to decide what to send — and nothing else compares
+// them, so a field the handler accepts but the spec omits is a wire field a machine consumer cannot
+// discover. owner_token was exactly that: accepted and verified at runtime, absent from the schema.
+//
+// Failure direction: FC (fail-closed on contract drift). A field present on one side and not the other
+// fails the test in either direction, so it cannot be satisfied by deleting the documentation.
+func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
+	var spec map[string]any
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
+	}
+	schema := spec["components"].(map[string]any)["schemas"].(map[string]any)["IngestRequest"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+
+	// Reflect the struct's top-level json tags. Every field's tag must be a documented property.
+	typ := reflect.TypeOf(v1IngestRequest{})
+	wire := make(map[string]bool, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" || name == "-" {
+			t.Fatalf("v1IngestRequest field %s has no usable json tag (%q)", typ.Field(i).Name, tag)
+		}
+		wire[name] = true
+		if _, ok := properties[name]; !ok {
+			t.Errorf("v1IngestRequest.%s (json:%q) is accepted at runtime but missing from IngestRequest.properties",
+				typ.Field(i).Name, name)
+		}
+	}
+	// And the reverse: a documented property the handler does not decode is a promise the portal breaks.
+	for name := range properties {
+		if !wire[name] {
+			t.Errorf("IngestRequest.properties.%s is documented but v1IngestRequest does not decode it", name)
+		}
+	}
+}
+
+// TestOpenAPIIngestRequestDocumentsOwnerToken pins the specific field this PR exists for: the signed
+// OU-attribution token is documented, in all three languages, with the sentence that says what its
+// absence means (unattributed, never the client's to set).
+func TestOpenAPIIngestRequestDocumentsOwnerToken(t *testing.T) {
+	var spec map[string]any
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
+	}
+	schema := spec["components"].(map[string]any)["schemas"].(map[string]any)["IngestRequest"].(map[string]any)
+
+	desc := schema["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
+	for _, want := range []string{"归属", "受限 OU", "第一次有效的令牌"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("IngestRequest.owner_token (zh-CN) description = %q, missing %q", desc, want)
+		}
+	}
+	i18n := schema["x-i18n"].(map[string]any)
+	en := i18n["en-US"].(map[string]any)["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
+	for _, want := range []string{"OU-attribution token", "_rp_owner_token", "attributed to any OU", "restricted OU", "first valid token"} {
+		if !strings.Contains(en, want) {
+			t.Errorf("IngestRequest.owner_token (en-US) description = %q, missing %q", en, want)
+		}
+	}
+	// zh-TW is machine-generated from zh-CN via OpenCC s2twp; it must exist and be non-empty.
+	tw := i18n["zh-TW"].(map[string]any)["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
+	if strings.TrimSpace(tw) == "" {
+		t.Error("IngestRequest.owner_token (zh-TW) description is empty")
 	}
 }
 
