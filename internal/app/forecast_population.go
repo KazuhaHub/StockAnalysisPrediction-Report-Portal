@@ -1,0 +1,210 @@
+package app
+
+// The forecast ledger start (ADR 0029, decisions V3).
+//
+// Sets 1–6 in production are integration runs made before the ledger was declared live. They are NOT
+// deleted — a ledger that rewrites its own history is worth nothing — and instead a single write-once,
+// bounded, audited instant is recorded: every set made before it is `pre_live`. A pre-live set is
+// still selected, settled, counted and purged like any other; it simply never enters the record, and
+// in particular it can never make a later real set a duplicate (plan B4).
+//
+// The value lives in `meta` under forecast_population_from as an RFC3339 UTC instant. The key is
+// WRITE-ONCE by construction: once present, a second save is refused, and a restore may carry it from
+// the live database but may never silently move it.
+
+import (
+	"database/sql"
+	"fmt"
+	"sort"
+	"time"
+)
+
+const setForecastPopulationFrom = "forecast_population_from"
+
+// populationBound is the latest instant a ledger start may name: the first 15:00 Asia/Shanghai on a
+// weekday strictly after the earliest made_at in the ledger. It needs no exchange calendar; a holiday
+// only moves the true first S0 close later, so the bound is conservative. A start later than this
+// would leave a set that has already had sessions to settle inside the record.
+func populationBound(earliestMadeAt time.Time) time.Time {
+	t := earliestMadeAt.In(chinaZone)
+	// Start from the receipt's own date when the receipt was before the close, so a report received
+	// on a weekday before 15:00 can be cut at that day's close; otherwise from the next day.
+	day := time.Date(t.Year(), t.Month(), t.Day(), 15, 0, 0, 0, chinaZone)
+	if !t.Before(day) {
+		day = day.AddDate(0, 0, 1)
+	}
+	for day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+		day = day.AddDate(0, 0, 1)
+	}
+	return day
+}
+
+// populationCandidate is one set a ledger start might exclude. It never carries the payload.
+type populationCandidate struct {
+	ID     int64  `json:"id"`
+	Symbol string `json:"symbol"`
+	Rtype  string `json:"rtype"`
+	MadeAt string `json:"made_at"`
+	State  string `json:"state"`
+	Orphan bool   `json:"orphan"` // report_id is NULL: its report was purged
+}
+
+// ForecastPopulationFrom returns the ledger start and whether one is set.
+func (s *Store) ForecastPopulationFrom() (time.Time, bool) {
+	raw := s.GetSetting(setForecastPopulationFrom, "")
+	if raw == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		// A malformed stored value is treated as unset rather than as zero: a zero time would put the
+		// boundary at year 1 and mark every real set pre-live, which is the failure that hides data.
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// forecastEarliestMadeAt is the receipt instant of the ledger's oldest set, and whether the ledger
+// has any set at all.
+func (s *Store) forecastEarliestMadeAt() (time.Time, bool, error) {
+	var raw sql.NullString
+	if err := s.queryRow(`SELECT MIN(made_at) FROM prediction_sets`).Scan(&raw); err != nil {
+		return time.Time{}, false, err
+	}
+	if !raw.Valid || raw.String == "" {
+		return time.Time{}, false, nil
+	}
+	t, err := time.Parse(time.RFC3339, raw.String)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("earliest made_at %q is not RFC3339: %w", raw.String, err)
+	}
+	return t, true, nil
+}
+
+// forecastPopulationCandidates lists every set a ledger start at or before `bound` could exclude,
+// oldest first, so an admin can see exactly what would move out of the record. It never selects the
+// payload.
+func (s *Store) forecastPopulationCandidates(bound time.Time) ([]populationCandidate, error) {
+	rows, err := s.query(`SELECT id, symbol, rtype, made_at, state, report_id
+		FROM prediction_sets WHERE made_at <= ? ORDER BY made_at, id`, bound.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []populationCandidate
+	for rows.Next() {
+		var c populationCandidate
+		var reportID sql.NullInt64
+		if err := rows.Scan(&c.ID, &c.Symbol, &c.Rtype, &c.MadeAt, &c.State, &reportID); err != nil {
+			return nil, err
+		}
+		c.Orphan = !reportID.Valid
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SaveForecastPopulationFrom validates and writes the ledger start in one transaction, on the tx
+// handle only (§0.1's single-connection rule). It returns the excluded set ids and their counts by
+// state for the audit row, or a stable code on refusal with nothing written.
+func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int64, byState map[string]int, code string, err error) {
+	byState = map[string]int{}
+	if from.IsZero() {
+		return nil, byState, "invalid_param", nil
+	}
+	// 1. Write-once.
+	if _, ok := s.ForecastPopulationFrom(); ok {
+		return nil, byState, "forecast_population_set", nil
+	}
+	// 2. Not in the future.
+	if from.After(now) {
+		return nil, byState, "forecast_population_future", nil
+	}
+	// 3. Not past the bound, which is derived from the ledger's own oldest set. An empty ledger has no
+	// bound and the save is allowed: there is nothing to exclude yet.
+	earliest, hasSets, err := s.forecastEarliestMadeAt()
+	if err != nil {
+		return nil, byState, "", err
+	}
+	if hasSets && from.After(populationBound(earliest)) {
+		return nil, byState, "forecast_population_too_late", nil
+	}
+	// 4. Not once the first cohort can already publish a result: moving the boundary then would erase
+	// settled work from the record.
+	mature, err := s.firstCohortMature(now)
+	if err != nil {
+		return nil, byState, "", err
+	}
+	if mature {
+		return nil, byState, "forecast_population_month_mature", nil
+	}
+
+	// The write, plus the excluded-set accounting, on one connection.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, byState, "", err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	rows, err := tx.Query(s.bind(`SELECT id, state FROM prediction_sets WHERE made_at < ?`),
+		from.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, byState, "", err
+	}
+	for rows.Next() {
+		var id int64
+		var state string
+		if err := rows.Scan(&id, &state); err != nil {
+			rows.Close()
+			return nil, byState, "", err
+		}
+		excluded = append(excluded, id)
+		byState[state]++
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, byState, "", err
+	}
+	rows.Close()
+	sort.Slice(excluded, func(i, j int) bool { return excluded[i] < excluded[j] })
+
+	if _, err := tx.Exec(s.bind(`INSERT INTO meta(k,v) VALUES(?,?)
+		ON CONFLICT(k) DO UPDATE SET v=excluded.v`),
+		setForecastPopulationFrom, from.UTC().Format(time.RFC3339)); err != nil {
+		return nil, byState, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, byState, "", err
+	}
+	return excluded, byState, "", nil
+}
+
+// firstCohortMature reports whether any official cell of the ledger's first covered cohort is already
+// mature. It reuses the real statistics engine over the first month, so "mature" means exactly what it
+// means on the record.
+func (s *Store) firstCohortMature(now time.Time) (bool, error) {
+	earliest, err := s.forecastEarliestMadeOn(predTestRtype)
+	if err != nil || earliest == "" {
+		return false, err
+	}
+	first, err := time.ParseInLocation("2006-01-02", earliest, chinaZone)
+	if err != nil {
+		return false, nil
+	}
+	start := time.Date(first.Year(), first.Month(), 1, 0, 0, 0, 0, chinaZone)
+	end := start.AddDate(0, 1, -1)
+	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
+	sets, err := s.loadForecastGroupSets(predTestRtype, from, to)
+	if err != nil {
+		return false, err
+	}
+	today := now.In(chinaZone).Format("2006-01-02")
+	// Pre-live does not apply to this check: it asks whether the cohort would publish if scored.
+	members, pending, _ := forecastMembership(sets, time.Time{})
+	for _, cp := range predCheckpoints {
+		if computeForecastCell(members, pending, predTestRtype, from, to, cp, today).State == "mature" {
+			return true, nil
+		}
+	}
+	return false, nil
+}

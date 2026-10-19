@@ -94,7 +94,8 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		}
 	}
 
-	resp.Groups = s.buildForecastGroups(periods, sets, rtype, today, resp.Official)
+	populationFrom, _ := s.st.ForecastPopulationFrom()
+	resp.Groups = s.buildForecastGroups(periods, sets, rtype, today, resp.Official, populationFrom)
 	writeJSON(w, resp)
 }
 
@@ -102,7 +103,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // result depends only on its own members and its own seed — so they run on a worker pool. At the
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
-func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool) []forecastGroup {
+func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time) []forecastGroup {
 	type job struct {
 		gi      int
 		cp      string
@@ -120,7 +121,7 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 				in = append(in, gs)
 			}
 		}
-		members, pending, cov := forecastMembership(in)
+		members, pending, cov := forecastMembership(in, populationFrom)
 		groups[i] = forecastGroup{
 			Label:    p.Label,
 			Start:    p.Start,

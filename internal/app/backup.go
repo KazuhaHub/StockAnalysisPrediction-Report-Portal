@@ -349,6 +349,11 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The values a restore must reconcile rather than simply replace. Read HERE, through the pool,
+	// because the restore's own transaction is about to delete the `meta` rows that hold them
+	// (§3.3). `forecast_population_from` is write-once and must never move silently, so a dump that
+	// disagrees with the live value is refused; a dump that lacks it inherits the live one.
+	prior := restorePrior{populationFrom: s.populationFromRow()}
 
 	rep := &RestoreReport{
 		Rows:     map[string]int64{},
@@ -410,7 +415,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// restore that ended with the data and the ledger disagreeing would be a database nobody could
 	// reason about, and leaving a step unrecorded is how the next start re-runs an upgrade over data
 	// that has already been upgraded.
-	if err := s.finishRestore(tx, steps); err != nil {
+	if err := s.finishRestore(tx, steps, prior); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -420,11 +425,32 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	return rep, nil
 }
 
+// restorePrior holds the live values a restore must reconcile against the dump rather than replace
+// outright. It is captured before the restore's transaction clears the tables.
+type restorePrior struct {
+	populationFrom string // the live forecast_population_from, "" when unset
+}
+
+// populationFromRow reads the raw stored ledger start without going through GetSetting's parse, so a
+// malformed value is still visible to the restore conflict check.
+func (s *Store) populationFromRow() string {
+	var v sql.NullString
+	if err := s.queryRow(`SELECT v FROM meta WHERE k=?`, setForecastPopulationFrom).Scan(&v); err != nil {
+		return ""
+	}
+	return v.String
+}
+
 // finishRestore settles the database after its rows have been replaced: the unknown-step check, the
 // product check, and the ledger. All of it runs on the restore's own transaction, so a failure here
 // takes the data back with it rather than leaving a half-loaded database behind.
-func (s *Store) finishRestore(tx *sql.Tx, steps []migration) error {
+func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	// The write-once keys. `meta` was just replaced by the dump's, so a key the dump lacked is now
+	// absent and one it carried is now the dump's value. Both rules run on the tx handle only.
+	if err := applyRestorePrior(e, prior); err != nil {
+		return err
+	}
 	known := map[string]bool{}
 	for _, m := range steps {
 		known[m.id] = true
@@ -447,6 +473,31 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration) error {
 		if err := e.setSetting(migrationLedgerKey(m.id), time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// applyRestorePrior enforces the restore rules for the write-once keys (doc §3.3). The dump's `meta`
+// has already replaced the live one, so:
+//
+//   - the ledger start is carried from the live database when the dump lacks it (an older build wrote
+//     that dump, or the key was set after the backup was taken);
+//   - a dump and a live database that both set it MUST agree — the key is write-once and a restore
+//     must never move it, so a disagreement is refused rather than resolved in either direction.
+func applyRestorePrior(e migExec, prior restorePrior) error {
+	dumpVal := e.setting(setForecastPopulationFrom)
+	switch {
+	case prior.populationFrom == "" && dumpVal == "":
+		// Neither side set it: nothing to do.
+	case prior.populationFrom == "":
+		// The live database had none; the dump's value stands as restored.
+	case dumpVal == "":
+		if err := e.setSetting(setForecastPopulationFrom, prior.populationFrom); err != nil {
+			return fmt.Errorf("carry the ledger start through the restore: %w", err)
+		}
+	case dumpVal != prior.populationFrom:
+		return fmt.Errorf("forecast_population_conflict: dump has ledger start %q, live database has %q",
+			dumpVal, prior.populationFrom)
 	}
 	return nil
 }

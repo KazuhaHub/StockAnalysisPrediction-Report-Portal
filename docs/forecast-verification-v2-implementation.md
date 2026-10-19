@@ -734,7 +734,10 @@ i18n: `forecast.population.title`, `.help`, `.bound`, `.candidates`, `.confirm_t
 - `TestLedgerStartSurvivesAnOlderRestore` (first rows of `TestRestoreRulesForForecastKeys`): carried from live when
   the dump lacks it; refused with `forecast_population_conflict` when both differ. FC
 - `TestLedgerStartSaveNeverCallsThePoolInsideTheTransaction`: SQLite, 2-second deadline. FC
-- Golden snapshots unchanged.
+- Golden snapshots: `golden_cells.json` gains a `pre_live` line in every coverage block (the new
+  counter the doc's own `forecastCoverage` definition adds); the values are otherwise byte-identical,
+  and `golden_members.json` / `golden_fixture.json` are unchanged. The regeneration is in P5's own
+  commit.
 - vitest `ForecastLedgerStart.test.tsx`: unset → confirmation requires the typed value; set → read-only; a 409 shows
   the mapped message; loading and error states.
 - e2e section G: preview, save, second save 409.

@@ -52,6 +52,20 @@ type forecastCoverage struct {
 	Mismatch        int `json:"mismatch"`
 	Refused         int `json:"refused"`
 	PendingBaseline int `json:"pending_baseline"`
+	// PreLive counts sets made before the ledger start (P5). They are accounted for here so Reports
+	// still equals the number of rows loaded; they simply never reach the record.
+	PreLive int `json:"pre_live"`
+}
+
+// madeAtBefore reports whether a set's stored made_at instant is strictly before the boundary. A
+// stored value that cannot be parsed is treated as NOT before the boundary: an unreadable timestamp
+// must not silently pull a live set into pre-live, which is the direction that would hide data.
+func madeAtBefore(madeAt string, boundary time.Time) bool {
+	t, err := time.Parse(time.RFC3339, madeAt)
+	if err != nil {
+		return false
+	}
+	return t.Before(boundary)
 }
 
 // forecastCell is one group × checkpoint. Every metric is a pointer so a non-mature cell can OMIT
@@ -112,10 +126,18 @@ type forecastPeriod struct {
 // The earliest accepted set is the decision, and nothing promotes a later one: if that set is
 // degraded, mismatched, or has no settled baseline, the symbol is out for the whole group. Later
 // accepted sets are duplicates — visible, counted, never scored.
-func forecastMembership(sets []*groupSet) (members, pendingBaseline []*groupSet, cov forecastCoverage) {
+//
+// `populationFrom` is the ledger start (P5, decisions V3). A zero time means "no boundary set": every
+// set is live. A set made strictly before the boundary is pre-live and never enters bySymbol, so it
+// can neither be a member nor make a later real set a duplicate (plan B4).
+func forecastMembership(sets []*groupSet, populationFrom time.Time) (members, pendingBaseline []*groupSet, cov forecastCoverage) {
 	cov.Reports = len(sets)
 	bySymbol := map[string][]*groupSet{}
 	for _, gs := range sets {
+		if !populationFrom.IsZero() && madeAtBefore(gs.MadeAt, populationFrom) {
+			cov.PreLive++
+			continue
+		}
 		switch gs.State {
 		case predStateAbsent:
 			cov.Absent++

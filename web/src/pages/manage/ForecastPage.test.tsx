@@ -34,6 +34,8 @@ vi.mock('react-i18next', () => ({
 const on = {
   enabled: true,
   bench: 'sh000852',
+  bench_codes: ['sh000300', 'sh000905', 'sh000852', 'sh000906'],
+  population: { set: false, candidates: [] },
   due_sets: 3,
   pending: 12,
   refused: 0,
