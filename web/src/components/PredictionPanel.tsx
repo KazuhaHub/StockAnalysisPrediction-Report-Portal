@@ -46,9 +46,14 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   const { t } = useTranslation()
   const [open, setOpen] = useState(readOpen)
 
+  // A test run is listed here too (P36), so a producer's console run is visibly a test rather than
+  // vanishing. It has no marks and no checkpoint table; only production sets are scored. An accepted
+  // set always wins the panel when there is one — a test set must never shadow the record.
   const accepted = sets.filter((s) => s.state === 'accepted')
-  const set = accepted.find((s) => s.id === countedSetID) ?? accepted[accepted.length - 1]
+  const tests = sets.filter((s) => s.state === 'test')
+  const set = accepted.find((s) => s.id === countedSetID) ?? accepted[accepted.length - 1] ?? tests[tests.length - 1]
   if (!set) return null
+  const isTest = set.state === 'test'
 
   const toggle = () => {
     const next = !open
@@ -70,11 +75,13 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
 
   const badges = (
     <Space size={[4, 4]} wrap>
-      {set.counted_in_group ? (
-        <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
-      ) : (
-        <Tag>{t('forecast.panel.not_counted')}</Tag>
-      )}
+      {isTest && <Tag color="purple">{t('forecast.panel.test_run')}</Tag>}
+      {!isTest &&
+        (set.counted_in_group ? (
+          <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
+        ) : (
+          <Tag>{t('forecast.panel.not_counted')}</Tag>
+        ))}
       <Tag color={set.baseline_check === 'match' ? 'green' : set.baseline_check === 'mismatch' ? 'red' : 'default'}>
         {t(`forecast.panel.baseline.${set.baseline_check}`)}
       </Tag>
@@ -165,30 +172,32 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
             </Descriptions.Item>
           </Descriptions>
 
-          <div>
-            <Typography.Text strong>{t('forecast.panel.checkpoints')}</Typography.Text>
-            <Table
-              size="small"
-              rowKey="key"
-              pagination={false}
-              style={{ marginTop: 8 }}
-              dataSource={marks.map(markRow)}
-              columns={[
-                { title: t('forecast.panel.mark'), dataIndex: 'checkpoint', key: 'checkpoint' },
-                { title: t('forecast.panel.mark_status'), dataIndex: 'status', key: 'status' },
-                { title: t('forecast.panel.mark_date'), dataIndex: 'date', key: 'date' },
-                { title: t('forecast.panel.close'), dataIndex: 'close', key: 'close' },
-                { title: t('forecast.panel.ret'), dataIndex: 'ret', key: 'ret' },
-                { title: t('forecast.panel.bench_ret'), dataIndex: 'bench', key: 'bench' },
-                { title: t('forecast.panel.excess'), dataIndex: 'excess', key: 'excess' },
-                { title: t('forecast.panel.touched'), dataIndex: 'touched', key: 'touched' },
-                { title: t('forecast.panel.agreement'), dataIndex: 'agree', key: 'agree' },
-              ]}
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {t('forecast.panel.settle_note')}
-            </Typography.Text>
-          </div>
+          {!isTest && (
+            <div>
+              <Typography.Text strong>{t('forecast.panel.checkpoints')}</Typography.Text>
+              <Table
+                size="small"
+                rowKey="key"
+                pagination={false}
+                style={{ marginTop: 8 }}
+                dataSource={marks.map(markRow)}
+                columns={[
+                  { title: t('forecast.panel.mark'), dataIndex: 'checkpoint', key: 'checkpoint' },
+                  { title: t('forecast.panel.mark_status'), dataIndex: 'status', key: 'status' },
+                  { title: t('forecast.panel.mark_date'), dataIndex: 'date', key: 'date' },
+                  { title: t('forecast.panel.close'), dataIndex: 'close', key: 'close' },
+                  { title: t('forecast.panel.ret'), dataIndex: 'ret', key: 'ret' },
+                  { title: t('forecast.panel.bench_ret'), dataIndex: 'bench', key: 'bench' },
+                  { title: t('forecast.panel.excess'), dataIndex: 'excess', key: 'excess' },
+                  { title: t('forecast.panel.touched'), dataIndex: 'touched', key: 'touched' },
+                  { title: t('forecast.panel.agreement'), dataIndex: 'agree', key: 'agree' },
+                ]}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('forecast.panel.settle_note')}
+              </Typography.Text>
+            </div>
+          )}
 
           {latestClose !== undefined && (
             <Typography.Text type="secondary">

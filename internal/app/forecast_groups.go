@@ -55,6 +55,9 @@ type forecastCoverage struct {
 	// PreLive counts sets made before the ledger start (P5). They are accounted for here so Reports
 	// still equals the number of rows loaded; they simply never reach the record.
 	PreLive int `json:"pre_live"`
+	// Test counts sets a producer declared as test runs (P36). Like pre-live, they are accounted for
+	// and never reach the record.
+	Test int `json:"test"`
 }
 
 // madeAtBefore reports whether a set's stored made_at instant is strictly before the boundary. A
@@ -145,6 +148,8 @@ func forecastMembership(sets []*groupSet, populationFrom time.Time) (members, pe
 			cov.Rejected++
 		case predStateBacktest:
 			cov.Backtest++
+		case predStateTest:
+			cov.Test++
 		case predStateAccepted:
 			bySymbol[gs.Symbol] = append(bySymbol[gs.Symbol], gs)
 		}

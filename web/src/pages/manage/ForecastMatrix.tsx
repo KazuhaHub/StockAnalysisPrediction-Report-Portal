@@ -124,7 +124,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
           {seg(c.member, token.colorPrimary)}
           {seg(c.duplicate, token.colorInfo)}
           {seg(c.absent + c.rejected, token.colorWarning)}
-          {seg(c.backtest + c.degraded + c.mismatch, token.colorFillSecondary)}
+          {seg(c.backtest + c.degraded + c.mismatch + c.pre_live + c.test, token.colorFillSecondary)}
         </div>
         <div style={{ fontSize: 12, color: token.colorTextSecondary, marginTop: 3 }}>
           {t('forecast.cov.summary', { member: c.member, reports: c.reports })}
@@ -142,6 +142,11 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
         {c.pending_baseline > 0 && (
           <div style={{ fontSize: 12, color: token.colorWarning }}>
             {t('forecast.cov.pending_baseline', { n: c.pending_baseline })}
+          </div>
+        )}
+        {c.test > 0 && (
+          <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
+            {t('forecast.cov.test', { n: c.test })}
           </div>
         )}
       </div>

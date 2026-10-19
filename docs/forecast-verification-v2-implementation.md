@@ -845,7 +845,9 @@ in code (state is frozen at insert).
   `run_mode`; no code path updates `state` after insert (source scan for `UPDATE prediction_sets SET state`). FC
 - `TestTestSetsHaveTheirOwnBucket`: coverage adds up exactly with test sets present. BI
 - `TestOpenAPIPredictionEnumsMatchTheGoVocabulary` gains `run_mode`.
-- Golden snapshots unchanged.
+- Golden snapshots: `golden_cells.json` gains a `test` line in every coverage block (the new counter
+  the doc's own `forecastCoverage` definition adds); values are otherwise byte-identical, and
+  `golden_members.json` / `golden_fixture.json` are unchanged. Regenerated in P36's own commit.
 - vitest: a test set renders the label `forecast.panel.test_run` and no checkpoint table.
 
 **Rollback.** Revert; an older binary drops `test` sets from every bucket (a display gap; release note says so).

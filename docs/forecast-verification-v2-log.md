@@ -67,3 +67,18 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Legacy audit timestamps.** The floor query compares `audit_log.at >= from` lexically. Pre-v0.4.15
   audit rows use a different local format and sort earlier, which is harmless for a recent boundary
   and only latent if a boundary were ever set before that release. Noted, not changed.
+
+### P36 decisions (2026-10-19)
+- **Golden snapshot delta.** §4.6's test list said "golden snapshots unchanged", but §4.6 also adds
+  `forecastCoverage.Test`; `golden_cells.json` serialises the whole struct, so every coverage block
+  gains a `test` line. Regenerated in P36's own commit; values are otherwise byte-identical and
+  `golden_members.json` / `golden_fixture.json` are unchanged. The doc line was corrected.
+- **The test label lives in the existing panel.** A test set now renders the panel (it previously
+  returned null when the only set was not accepted) with `forecast.panel.test_run` and without the
+  checkpoint table. `counted_set_id` still skips test sets, so it never marks one as counted.
+- **Adversarial review follow-ups (P36).** Fixed before merge: `forecast.state.test` added to all three
+  locales (the other-sets list renders `forecast.state.*`); the panel prefers an accepted set over a
+  newer test set and never shows the counted badge for a test; the test seed pins `made_at`/`made_on`
+  (the ingest path uses the real clock); the "no state UPDATE" guard now scans every non-test `.go`
+  file with a whitespace/case-insensitive regex, not just `forecast_*.go`; a backtest + `run_mode=test`
+  case is pinned; `forecastCoverage.pre_live`/`test` added to the web type and the matrix bar/legend.

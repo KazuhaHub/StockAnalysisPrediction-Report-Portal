@@ -443,3 +443,54 @@ func TestCountedSetIDSkipsPreLive(t *testing.T) {
 		t.Errorf("counted_set_id = %d, want 1 with no boundary", got)
 	}
 }
+
+// seedTestSet ingests a valid payload the producer declared as a test run (P36).
+func seedTestSet(t *testing.T, s *Server, symbol, date string) int64 {
+	t.Helper()
+	body := ingestBody(string(predWire(func(m map[string]any) { m["run_mode"] = "test" })))
+	body = replaceOnce(body, `"symbol":"600160"`, `"symbol":"`+symbol+`"`)
+	body = replaceOnce(body, `"date":"2026-10-17"`, `"date":"`+date+`"`)
+	code, m := ingestPost(t, s, body)
+	if code != http.StatusOK {
+		t.Fatalf("seed test set: %d %v", code, m)
+	}
+	var setID int64
+	if err := s.st.queryRow("SELECT id FROM prediction_sets ORDER BY id DESC LIMIT 1").Scan(&setID); err != nil {
+		t.Fatalf("read seeded test set: %v", err)
+	}
+	// Pin the receipt to the requested day, like seedAcceptedSetAt: the ingest path uses the real
+	// clock, and the group query is scoped to a fixed month.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_on=?, made_at=?, cohort=? WHERE id=?`,
+		date, date+"T13:00:00Z", date[:7], setID); err != nil {
+		t.Fatalf("pin seeded test set: %v", err)
+	}
+	return setID
+}
+
+// TestTestSetsHaveTheirOwnBucket: coverage adds up exactly with test sets present, and a test set
+// never becomes a symbol's member or a duplicate (plan §4.6).
+func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
+	s := newV1Server(t)
+	seedTestSet(t, s, "600160", "2026-10-17")
+	seedTestSet(t, s, "600160", "2026-10-18") // same symbol: if it counted, it would be a duplicate
+
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	members, pending, cov := forecastMembership(sets, time.Time{})
+	if cov.Test != 2 {
+		t.Errorf("test = %d, want 2", cov.Test)
+	}
+	if cov.Member != 0 || cov.Duplicate != 0 {
+		t.Errorf("member/duplicate = %d/%d, want 0/0: test sets never enter bySymbol", cov.Member, cov.Duplicate)
+	}
+	if len(members) != 0 || len(pending) != 0 {
+		t.Errorf("test sets produced members=%d pending=%d, want 0/0", len(members), len(pending))
+	}
+	sum := cov.Absent + cov.Rejected + cov.Backtest + cov.Test + cov.PreLive +
+		cov.Member + cov.Duplicate + cov.Degraded + cov.Mismatch + cov.PendingBaseline
+	if sum != cov.Reports {
+		t.Errorf("coverage sums to %d but loaded %d reports", sum, cov.Reports)
+	}
+}

@@ -474,6 +474,19 @@
             "type": "string",
             "description": "预测期限，YYYY-MM-DD，必须晚于门户收到报告的日期（按上海时区）。"
           },
+          "run_mode": {
+            "type": "string",
+            "enum": ["production", "test"],
+            "description": "运行模式。缺省视为 production；test 表示测试运行，预测集单独存放、不结算、不参与统计。用于控制台或调试运行，避免测试数据进入记录。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Run mode. Absent means production; test marks a test run whose set is stored apart, never settled and never scored, so console or debug runs stay out of the record."
+              },
+              "zh-TW": {
+                "description": "執行模式。缺省視為 production；test 表示測試執行，預測集單獨存放、不結算、不參與統計，讓主控台或除錯執行不進入記錄。"
+              }
+            }
+          },
           "claims": {
             "type": "array",
             "items": {

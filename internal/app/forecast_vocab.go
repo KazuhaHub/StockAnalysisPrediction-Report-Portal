@@ -95,7 +95,13 @@ const (
 	predStateRejected = "rejected" // predictions arrived but failed a rule
 	predStateBacktest = "backtest" // the information cutoff shows this was a run over history
 	predStateAccepted = "accepted" // scored, subject to the maturity gates
+	// predStateTest is a run the producer declared as a test (V24): stored and listed apart, no marks,
+	// never scored. Absent run_mode means production.
+	predStateTest = "test"
 )
+
+// predRunModes is the closed vocabulary of the run_mode wire field (V24). Absent means production.
+var predRunModes = []string{"production", "test"}
 
 // Baseline check (ADR 0029 §9.4). The emitted baseline is the LLM agent's quote, which code only
 // selects, so it is checked against what the market actually printed.

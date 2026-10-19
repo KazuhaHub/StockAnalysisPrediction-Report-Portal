@@ -83,6 +83,8 @@ describe('forecastCsv', () => {
           mismatch: 0,
           refused: 0,
           pending_baseline: 0,
+          pre_live: 0,
+          test: 0,
         },
         cells: { d5: mature, d20: { state: 'open' }, d60: { state: 'open' }, d120: { state: 'open' }, h12: { state: 'open' } },
       },
