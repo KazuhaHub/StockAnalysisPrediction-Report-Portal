@@ -156,7 +156,7 @@ func TestCorporateActionFromTheDividendElement(t *testing.T) {
 // that bar would freeze a live price into the record.
 func TestCompletedSessionsExcludesAnUnfinishedBar(t *testing.T) {
 	dates := tradingDays("2026-10-19", 6)
-	cal := forecastSeries{Bars: barsFor(dates, 4000)}
+	cal := forecastSeries{Bars: append(barsFor(dates, 4000), bar("2026-11-02", 4000, 4000, 4010, 3990))}
 	today := dates[5]
 
 	// At 10:00 on today's session, today is not complete.
@@ -266,7 +266,7 @@ func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
 // first session the stock actually traded on.
 func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
 	dates := tradingDays("2026-10-19", 10)
-	stock := barsFor(dates[2:], 1000) // the stock's series starts two sessions late
+	stock := barsFor(dates[2:], 1000)                 // the stock's series starts two sessions late
 	madeAt := shanghai(2026, time.October, 19, 10, 0) // before the close on the first session
 
 	s0, base, fen, err := resolveStartBar(stock, forecastWorkSet{}, madeAt, dates)
@@ -381,10 +381,11 @@ func TestBaselineIsWrittenOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second pass with a different start point.
+	// The second write is refused rather than silently ignored: the set already has its start.
 	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, baseline: &forecastBaseline{
 		S0: dates[3], BaseDate: dates[3], S0Fen: 9999, Index: index,
-	}}, time.Now()); err != nil {
-		t.Fatal(err)
+	}}, time.Now()); err != errForecastBaselineRaced {
+		t.Fatalf("second baseline write = %v, want errForecastBaselineRaced", err)
 	}
 	var s0 string
 	var fen int64

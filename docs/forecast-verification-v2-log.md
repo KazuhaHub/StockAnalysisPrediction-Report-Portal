@@ -153,3 +153,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **The plan's transaction already writes the baseline first** (P1); P6 adds a failure seam to
   `ApplyForecastPlan` and pins that a failure on the second mark rolls the baseline and the first mark
   back.
+- **Adversarial review follow-ups (P6).** Fixed before merge: a stored S0 missing from the calendar
+  falls back to the receipt-based session for scheduling only (never an endless wake); a terminal
+  baseline with a NULL `s0_fen` omits the return instead of recomputing the price from a revised body;
+  a guarded baseline write that affects 0 rows aborts the plan (`errForecastBaselineRaced`) so a racing
+  pass cannot settle on its own values; the unknown-today test now calls the evaluator path rather
+  than being short-circuited by the wake-only pre-pass; a known h12 and a future bar are pinned.

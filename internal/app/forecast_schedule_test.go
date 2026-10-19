@@ -71,12 +71,20 @@ func TestS0FollowsReceiptTimeOfDay(t *testing.T) {
 func TestS0WaitsWhileTodayIsUnknown(t *testing.T) {
 	s := newV1Server(t)
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-19")
+	// Pin the receipt to 10:00 CST, when today's session would be the start if its bar were known.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at='2026-10-19T02:00:00Z', made_on='2026-10-19', cohort='2026-10' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
+	}
 	// The calendar has only the session before the receipt: today's bar has not arrived yet.
 	index := barsFor(tradingDays("2026-10-16", 1), 4000)
 	stock := barsFor(tradingDays("2026-10-16", 1), 1000)
-	now := shanghai(2026, time.October, 19, 15, 20)
+	now := shanghai(2026, time.October, 19, 10, 0)
+	sets, err := s.st.ForecastSetsDue(now, 1)
+	if err != nil || len(sets) != 1 {
+		t.Fatalf("selection = %d (%v), want the seeded set", len(sets), err)
+	}
 	e := evalStub(&now, index, stock, nil, nil)
-	if err := e.tick(s); err != nil {
+	if err := e.evaluateSet(context.Background(), s, sets[0], forecastSeries{Bars: index, Kind: quoteKindIndex}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var check, s0 string
@@ -119,6 +127,10 @@ func TestDNIsTheNthSessionAfterS0(t *testing.T) {
 	// h12 stays calendar-based and only exists for a standard horizon.
 	if h := predScheduleFor("h12", shanghai(2026, time.October, 18, 21, 0), false, "", sessions); h.Known {
 		t.Errorf("h12 on a non-standard horizon is known: %+v", h)
+	}
+	long := tradingDays("2025-10-17", 400)
+	if h := predScheduleFor("h12", shanghai(2025, time.October, 17, 10, 0), true, "", long); !h.Known || h.Record < "2026-10-17" {
+		t.Errorf("h12 with a year of sessions = %+v, want known on or after 2026-10-17", h)
 	}
 }
 

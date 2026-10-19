@@ -7,9 +7,7 @@ package app
 // every date is a lower bound because holidays only ever delay a session. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
-// P1 ships TODAY's rules unchanged — S0 is the first session strictly after the receipt date, and dN
-// records sessions[N-1] and is only due once N+1 sessions exist. P6 changes the definitions inside
-// predScheduleFor and the tests in this file move with it.
+// S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.
 
 import (
 	"time"
@@ -64,6 +62,14 @@ func predScheduleFor(cp string, madeAt time.Time, horizonStd bool, frozenS0 stri
 		}
 	}
 	i0 := indexOfDate(sessions, s0)
+	if i0 < 0 && frozenS0 != "" {
+		// The stored start session is not on this calendar (a vendor gap). Fall back to the
+		// receipt-based session for SCHEDULING only; the stored baseline still governs the score.
+		if alt, ok := predS0(madeAt, sessions); ok {
+			s0 = alt
+			i0 = indexOfDate(sessions, s0)
+		}
+	}
 	if i0 < 0 {
 		return predSchedule{}
 	}

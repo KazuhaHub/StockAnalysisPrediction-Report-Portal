@@ -9,6 +9,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"strconv"
 	"time"
@@ -211,8 +212,15 @@ func (s *Store) ApplyForecastPlan(p forecastPlan, now time.Time) error {
 		if err := check(); err != nil {
 			return err
 		}
-		if err := s.finishForecastBaselineTx(tx, p.setID, *p.baseline); err != nil {
+		written, err := s.finishForecastBaselineTx(tx, p.setID, *p.baseline)
+		if err != nil {
 			return err
+		}
+		if !written {
+			// Another pass made the baseline terminal between selection and this write. Settling
+			// with the values this pass computed would contradict the stored baseline, so abort and
+			// let the next tick read the stored one.
+			return errForecastBaselineRaced
 		}
 	}
 	for _, d := range p.defers {
@@ -313,17 +321,29 @@ func (s *Store) MarkRefusedFinal(tx *sql.Tx, markID int64, code string, now time
 	return err
 }
 
-// finishForecastBaselineTx fills the set's four evaluator-owned columns, once.
-func (s *Store) finishForecastBaselineTx(tx *sql.Tx, setID int64, b forecastBaseline) error {
+// errForecastBaselineRaced means another pass made the baseline terminal before this plan wrote it.
+// The plan is rolled back; the next tick reads the stored baseline instead of settling on its own.
+var errForecastBaselineRaced = errors.New("forecast: baseline was written by another pass")
+
+// finishForecastBaselineTx fills the set's four evaluator-owned columns, once. It reports whether
+// this call was the one that wrote them.
+func (s *Store) finishForecastBaselineTx(tx *sql.Tx, setID int64, b forecastBaseline) (bool, error) {
 	check := baseMismatch
 	if barOn(b.Index, b.S0) != nil {
 		check = baseMatch
 	}
-	_, err := tx.Exec(s.bind(`UPDATE prediction_sets
+	res, err := tx.Exec(s.bind(`UPDATE prediction_sets
 		SET s0_date = ?, base_date = ?, s0_fen = ?, base_check = ?
 		WHERE id = ? AND base_check IN (?, ?)`),
 		b.S0, b.BaseDate, b.S0Fen, check, setID, baseCheckPending, baseRefused)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // finishForecastBaselineTerminal gives up on a baseline that cannot be resolved: the set's start is

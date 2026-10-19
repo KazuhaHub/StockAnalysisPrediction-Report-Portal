@@ -320,8 +320,8 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		return s.st.ApplyForecastPlan(plan, now)
 	}
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
-	// Sessions strictly after the receipt date, using the BENCHMARK's calendar so a halted stock
-	// cannot slide its own checkpoints. The cutoff is what keeps today's unfinished bar out.
+	// The BENCHMARK's completed sessions, so a halted stock cannot slide its own checkpoints. The
+	// completion guard is what keeps today's unfinished bar out.
 	sessions := completedSessions(indexSeries, now)
 
 	madeAt, ok := setMadeAt(set)
@@ -330,12 +330,16 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	}
 
 	// A terminal baseline is used as STORED. Recomputing it on a later pass would let a revised
-	// vendor body move the starting point of the set's whole return series.
+	// vendor body move the starting point of the set's whole return series. A NULL s0_fen on a
+	// terminal row means the return cannot be computed; it is never a reason to recompute the price.
 	settled := set.BaseCheck == baseMatch || set.BaseCheck == baseMismatch || set.BaseCheck == baseRefusedFinal
 	var s0, baseDate string
 	var s0Fen int64
-	if settled && set.S0Fen != nil {
-		s0, baseDate, s0Fen = set.S0Date, set.BaseDate, *set.S0Fen
+	if settled {
+		s0, baseDate = set.S0Date, set.BaseDate
+		if set.S0Fen != nil {
+			s0Fen = *set.S0Fen
+		}
 	} else {
 		s0, baseDate, s0Fen, err = resolveStartBar(stockBars, set, madeAt, sessions)
 	}
