@@ -127,7 +127,10 @@ const (
 	// Turning the evaluator on or off. A background loop that reaches a third party is exactly the
 	// kind of change an operator wants attributed.
 	AuditForecastAuto = "forecast.auto"
-	AuditReportDelete = "report.delete"
+	// Setting the ledger start (P5). Write-once, so the one row that carries it has to say who set
+	// which instant and which sets left the record.
+	AuditForecastPopulation = "forecast.population"
+	AuditReportDelete       = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -408,7 +411,7 @@ var auditVocabulary = []string{
 	AuditAppInstall, AuditAppDelete,
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
-	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto,
+	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

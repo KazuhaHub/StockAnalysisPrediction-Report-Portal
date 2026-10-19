@@ -117,7 +117,8 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
-	members, pending, _ := forecastMembership(sets)
+	populationFrom, _ := s.st.ForecastPopulationFrom()
+	members, pending, _ := forecastMembership(sets, populationFrom)
 	today := now.In(chinaZone).Format("2006-01-02")
 	cell := computeForecastCell(members, pending, rtype, period.Start, period.End, cp, today)
 	if cp == "h12" {

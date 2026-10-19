@@ -21,6 +21,7 @@ import { readPrefetched } from '../../lib/prefetch'
 import ForecastCellDrawer from './ForecastCellDrawer'
 import ForecastMatrix from './ForecastMatrix'
 import ForecastSettingsModal from './ForecastSettingsModal'
+import ForecastLedgerStart from './ForecastLedgerStart'
 
 // 预测验证 (forecast verification): the admin page for the prediction ledger (ADR 0029).
 //
@@ -50,6 +51,7 @@ export default function ForecastPage() {
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [ledgerOpen, setLedgerOpen] = useState(false)
 
   const [groups, setGroups] = useState<ForecastGroupsResponse | null>(null)
   const [groupsLoading, setGroupsLoading] = useState(false)
@@ -170,6 +172,7 @@ export default function ForecastPage() {
             <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
               {t('forecast.settings.button')}
             </Button>
+            <Button onClick={() => setLedgerOpen(true)}>{t('forecast.population.button')}</Button>
           </Space>
         </div>
 
@@ -258,6 +261,15 @@ export default function ForecastPage() {
           open={settingsOpen}
           value={settings}
           onClose={() => setSettingsOpen(false)}
+          onSaved={load}
+        />
+      )}
+
+      {settings && (
+        <ForecastLedgerStart
+          open={ledgerOpen}
+          value={settings.population}
+          onClose={() => setLedgerOpen(false)}
           onSaved={load}
         />
       )}

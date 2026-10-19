@@ -499,6 +499,19 @@ sc, _ = admin.req("POST", "/api/admin/forecast", {"enabled": False, "bench": set
 check("G", "The settings save round-trips", sc == 200, f"{sc}")
 check("G", "Automatic settling stays off", sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "0")
 
+# The ledger start (P5): a bounded, write-once instant. The e2e portal is a throwaway database, so
+# setting it here is safe. Preview first (the GET carries the bound and the candidates), then save,
+# then a second save must be refused as a conflict.
+pop = settings.get("population") or {}
+check("G", "The ledger start is unset on a fresh portal", pop.get("set") is False, f"{pop}")
+sc, saved = admin.req("POST", "/api/admin/forecast", {"population_from": "2000-01-01T00:00:00Z"})
+check("G", "An early, bounded ledger start saves", sc == 200, f"{sc} {saved}")
+sc, again = admin.req("POST", "/api/admin/forecast", {"population_from": "2000-01-02T00:00:00Z"})
+check("G", "A second ledger-start save is refused (write-once)", sc == 409, f"{sc} {again}")
+sc, settings2 = admin.req("GET", "/api/admin/forecast")
+check("G", "The ledger start reads back as set",
+      (settings2.get("population") or {}).get("set") is True, f"{settings2.get('population')}")
+
 # ---------------------------------------------------------------- restart
 print("\nE. State survives a restart")
 restart()

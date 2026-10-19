@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"database/sql"
 	"testing"
+	"time"
 )
 
 // The forecast ledger on Postgres.
@@ -124,4 +126,62 @@ func seedPgReport(t *testing.T, st *Store, symbol, date string) int64 {
 		t.Fatalf("seed report: %v", err)
 	}
 	return id
+}
+
+// TestPostgresLedgerStartSaveAndRestoreRule covers P5's store paths on the driver production runs:
+// the transactional save (including the INSERT ... ON CONFLICT the SQLite path cannot prove) and the
+// restore rule that carries the write-once key from live when a dump lacks it.
+func TestPostgresLedgerStartSaveAndRestoreRule(t *testing.T) {
+	// Clean only the key this test writes: Postgres shares ONE database across the whole suite, and
+	// pgStore's `tables` argument DELETEs every row — clearing `meta` would drop the schema_version
+	// marker the next OpenStore needs.
+	st := pgStore(t, "prediction_sets")
+	clearForecastPopulation(t, st)
+
+	reportID := seedPgReport(t, st, "600160", "2026-10-18")
+	setID := seedPredictionSet(t, st, sql.NullInt64{Int64: reportID, Valid: true}, "ledger-start-pg")
+	// Pin the receipt before the boundary so the exclusion is deterministic.
+	if _, err := st.exec(`UPDATE prediction_sets SET made_at='2026-10-18T13:00:00Z', made_on='2026-10-18' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
+	}
+
+	from := time.Date(2026, time.October, 18, 16, 0, 0, 0, time.UTC)
+	excluded, byState, code, err := st.SaveForecastPopulationFrom(from, time.Now().UTC())
+	if err != nil || code != "" {
+		t.Fatalf("save: code=%q err=%v", code, err)
+	}
+	if len(excluded) != 1 || excluded[0] != setID {
+		t.Errorf("excluded = %v, want [%d]", excluded, setID)
+	}
+	if byState[predStateAccepted] != 1 {
+		t.Errorf("counts_by_state = %v, want one accepted", byState)
+	}
+	if got, ok := st.ForecastPopulationFrom(); !ok || !got.Equal(from) {
+		t.Fatalf("stored = %v (ok=%v)", got, ok)
+	}
+	// Write-once: a second save is refused.
+	if _, _, code, _ := st.SaveForecastPopulationFrom(from.Add(time.Hour), time.Now().UTC()); code != "forecast_population_set" {
+		t.Errorf("second save code = %q, want forecast_population_set", code)
+	}
+
+	// The restore rule: a dump without the key inherits the live value.
+	dump := dumpOf(t, st)
+	dst := pgStore(t, "prediction_sets")
+	clearForecastPopulation(t, dst)
+	seedLedgerStart(t, dst, "2026-10-18T16:00:00Z")
+	if _, err := dst.restoreFrom(bytes.NewReader(dropMetaRow(t, dump, setForecastPopulationFrom)), true); err != nil {
+		t.Fatalf("restore without the key: %v", err)
+	}
+	if got, ok := dst.ForecastPopulationFrom(); !ok || !got.Equal(from) {
+		t.Fatalf("carried value = %v (ok=%v)", got, ok)
+	}
+}
+
+// clearForecastPopulation removes only the ledger-start key, leaving the shared database's schema
+// marker and every other meta row intact.
+func clearForecastPopulation(t *testing.T, st *Store) {
+	t.Helper()
+	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, setForecastPopulationFrom); err != nil {
+		t.Fatalf("clean %s: %v", setForecastPopulationFrom, err)
+	}
 }

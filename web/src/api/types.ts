@@ -519,6 +519,12 @@ export interface ForecastSettings {
   /** The index NEW sets are benchmarked against. Sets already written keep theirs, so changing this
    *  never re-scores anything on the ledger. */
   bench: string
+  /** The closed list of benchmarks a new set may be frozen with (P3), so the picker cannot offer one
+   *  the server would refuse. */
+  bench_codes: string[]
+  /** The ledger start (P5): whether one is set, its value, the bound a new value must respect, and
+   *  the sets a value at or before the bound would exclude. */
+  population: ForecastPopulation
   /**
    * What the loop would find if it ran now. Cheap counts, not fetches, so an admin can tell "on and
    * caught up" (a small or zero backlog) from "on and stuck" (a count that is not moving).
@@ -527,6 +533,31 @@ export interface ForecastSettings {
   pending: number
   refused: number
   unsettled_baseline: number
+}
+
+/** The ledger start (P5). `set` is false before an admin has fixed the boundary. */
+export interface ForecastPopulation {
+  set: boolean
+  from?: string
+  /** The key exists but its stored value is unreadable (a damaged database); `from` is absent. */
+  damaged?: boolean
+  /** Who set it and when, from the audit row, when the log still holds it. */
+  set_by?: string
+  set_at?: string
+  /** The latest instant a ledger start may name, derived from the ledger's oldest set. Absent on an
+   *  empty ledger, which has no bound to offer. */
+  bound?: string
+  /** The sets a start at or before `bound` would exclude, oldest first. */
+  candidates: ForecastPopulationCandidate[]
+}
+
+export interface ForecastPopulationCandidate {
+  id: number
+  symbol: string
+  rtype: string
+  made_at: string
+  state: string
+  orphan: boolean
 }
 
 // The outcome of a cleanup pass (also the preview/run response shape).

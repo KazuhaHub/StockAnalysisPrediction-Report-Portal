@@ -17,6 +17,10 @@ config.yaml
 .DS_Store
 .env
 
+# Python bytecode from running the scripts/ tooling
+__pycache__/
+*.pyc
+
 # Default `go build` output (named after the directory)
 /StockAnalysisPrediction-Report-Portal
 

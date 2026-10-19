@@ -562,6 +562,19 @@ func seedAcceptedSet(t *testing.T, s *Server, symbol, date string) int64 {
 	return setID
 }
 
+// seedAcceptedSetAt is seedAcceptedSet with the receipt instant pinned, so a test can control where a
+// set falls relative to the ledger start. The receipt is the given day's 21:00 CST (13:00Z).
+func seedAcceptedSetAt(t *testing.T, s *Server, symbol, date string) int64 {
+	t.Helper()
+	setID := seedAcceptedSet(t, s, symbol, date)
+	madeAt := date + "T13:00:00Z" // 21:00 CST on `date`
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_on=?, made_at=?, cohort=? WHERE id=?`,
+		date, madeAt, date[:7], setID); err != nil {
+		t.Fatalf("pin seeded set: %v", err)
+	}
+	return setID
+}
+
 // TestBpFromRatioRoundsHalfAwayFromZeroOnBothSides pins the negative branch. `from/2` carries the
 // sign of `from`, so a version that used it directly is off by one basis point on every exact tie
 // below zero — a small number, in the one table whose whole point is that its numbers are exact.
