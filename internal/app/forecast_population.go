@@ -68,8 +68,16 @@ func (s *Store) ForecastPopulationFrom() (time.Time, bool) {
 	return t, true
 }
 
-// forecastPopulationIsSet reports whether the key exists at all, whatever its value.
-func (s *Store) forecastPopulationIsSet() bool { return s.populationFromRow() != "" }
+// forecastPopulationIsSet reports whether the key exists at all, whatever its value. It counts the
+// row rather than reading the value, so a row that is present but empty (” or NULL) is still "set":
+// write-once must hold, and the UI must not offer a form whose save would always be refused.
+func (s *Store) forecastPopulationIsSet() bool {
+	var n int
+	if err := s.queryRow(`SELECT COUNT(*) FROM meta WHERE k=?`, setForecastPopulationFrom).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
+}
 
 // ForecastPopulationSetBy returns the actor and instant of the write that set the ledger start, from
 // the audit row, as far as the log still holds it. Empty strings when the log has been pruned or the

@@ -70,7 +70,7 @@ func TestLedgerStartIsBoundedWriteOnceAndAudited(t *testing.T) {
 		t.Fatalf("past the bound: %d %s", rec.Code, rec.Body.String())
 	}
 	// The future is the caller's error.
-	if rec := post("2030-01-01T00:00:00Z"); rec.Code != http.StatusBadRequest || !hasCode(rec.Body.Bytes(), "forecast_population_future") {
+	if rec := post("9999-01-01T00:00:00Z"); rec.Code != http.StatusBadRequest || !hasCode(rec.Body.Bytes(), "forecast_population_future") {
 		t.Fatalf("future instant: %d %s", rec.Code, rec.Body.String())
 	}
 	// Malformed is the caller's error too.
@@ -152,19 +152,102 @@ func TestLedgerStartRefusedWhenTheFirstCohortIsMature(t *testing.T) {
 
 // TestRefusedPopulationWriteLeavesTheBenchUnchanged: a request that changes both fields must not
 // persist the benchmark when the ledger start is refused. "A refusal writes nothing" is about the
-// request, not the last field checked.
+// request, not the last field checked. This exercises the STORE refusal (409), not a parse error, so
+// the ordering fix is what it proves.
 func TestRefusedPopulationWriteLeavesTheBenchUnchanged(t *testing.T) {
 	s := newV1Server(t)
-	before := s.st.ForecastBench()
 	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
+	// Set the ledger start once, so a second save is refused by the write-once gate.
+	if _, _, code, err := s.st.SaveForecastPopulationFrom(
+		time.Date(2020, time.January, 6, 0, 0, 0, 0, time.UTC), time.Now().UTC()); err != nil || code != "" {
+		t.Fatalf("setup save: code=%q err=%v", code, err)
+	}
+	before := s.st.ForecastBench()
+
 	rec := httptest.NewRecorder()
 	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast",
-		strBody(`{"bench":"sh000905","population_from":"not-a-time"}`)), "admin")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+		strBody(`{"bench":"sh000905","population_from":"2020-01-06T01:00:00Z"}`)), "admin")
+	if rec.Code != http.StatusConflict || !hasCode(rec.Body.Bytes(), "forecast_population_set") {
+		t.Fatalf("status = %d body = %s, want 409 forecast_population_set", rec.Code, rec.Body.String())
 	}
 	if got := s.st.ForecastBench(); got != before {
 		t.Errorf("bench changed to %q after a refused population write, want %q", got, before)
+	}
+}
+
+// TestPopulationGETExposesSetterAndInstant: the settings GET reports who set the ledger start and
+// when (from the audit row), and flags a damaged key rather than handing back an untrusted instant.
+func TestPopulationGETExposesSetterAndInstant(t *testing.T) {
+	s := newV1Server(t)
+	seedAcceptedSetAt(t, s, "600160", "2020-01-05")
+	if rec := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast",
+			strBody(`{"population_from":"2020-01-06T00:00:00Z"}`)), "admin")
+		return rec
+	}(); rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := httptest.NewRecorder()
+	s.apiForecastSettings(rec, httptest.NewRequest("GET", "/api/admin/forecast", nil), "admin")
+	var got struct {
+		Population struct {
+			Set     bool   `json:"set"`
+			From    string `json:"from"`
+			SetBy   string `json:"set_by"`
+			SetAt   string `json:"set_at"`
+			Damaged bool   `json:"damaged"`
+		} `json:"population"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Population.Set || got.Population.From != "2020-01-06T00:00:00Z" {
+		t.Errorf("population = %+v", got.Population)
+	}
+	if got.Population.SetBy != "admin" || got.Population.SetAt == "" {
+		t.Errorf("set_by/set_at = %q/%q, want admin and an instant", got.Population.SetBy, got.Population.SetAt)
+	}
+	if got.Population.Damaged {
+		t.Error("a valid key was reported damaged")
+	}
+
+	// A key whose value is unreadable reads as set+damaged, never as an untrusted instant.
+	if _, err := s.st.exec(`UPDATE meta SET v='not-a-time' WHERE k=?`, setForecastPopulationFrom); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	s.apiForecastSettings(rec, httptest.NewRequest("GET", "/api/admin/forecast", nil), "admin")
+	got = struct {
+		Population struct {
+			Set     bool   `json:"set"`
+			From    string `json:"from"`
+			SetBy   string `json:"set_by"`
+			SetAt   string `json:"set_at"`
+			Damaged bool   `json:"damaged"`
+		} `json:"population"`
+	}{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Population.Set || !got.Population.Damaged || got.Population.From != "" {
+		t.Errorf("damaged key read as %+v, want set+damaged with no from", got.Population)
+	}
+}
+
+// TestEmptyStoredLedgerStartStillHoldsWriteOnce: a present-but-empty key is still set, so a save is
+// refused and the UI is not offered a form whose save would always fail.
+func TestEmptyStoredLedgerStartStillHoldsWriteOnce(t *testing.T) {
+	s := newV1Server(t)
+	if _, err := s.st.exec(`INSERT INTO meta(k,v) VALUES(?,'')`, setForecastPopulationFrom); err != nil {
+		t.Fatal(err)
+	}
+	if !s.st.forecastPopulationIsSet() {
+		t.Fatal("an empty stored value was treated as unset")
+	}
+	if _, _, code, _ := s.st.SaveForecastPopulationFrom(
+		time.Date(2020, time.January, 6, 0, 0, 0, 0, time.UTC), time.Now().UTC()); code != "forecast_population_set" {
+		t.Errorf("code = %q, want forecast_population_set", code)
 	}
 }
 
@@ -276,6 +359,17 @@ func TestRestoreRulesForForecastKeys(t *testing.T) {
 	seedLedgerStart(t, dstC, "2026-10-18T16:00:00Z")
 	if _, err := dstC.restoreFrom(bytes.NewReader(dumpC), true); err != nil {
 		t.Fatalf("a matching ledger start was refused: %v", err)
+	}
+
+	// Two different RFC3339 spellings of the SAME instant must restore, not conflict: the comparison
+	// is between instants, not text.
+	srcD := newTestStore(t)
+	seedLedgerStart(t, srcD, "2026-10-18T16:00:00+00:00")
+	dumpD := dumpOf(t, srcD)
+	dstD := newTestStore(t)
+	seedLedgerStart(t, dstD, "2026-10-18T16:00:00Z")
+	if _, err := dstD.restoreFrom(bytes.NewReader(dumpD), true); err != nil {
+		t.Fatalf("equivalent instants written differently were refused: %v", err)
 	}
 }
 

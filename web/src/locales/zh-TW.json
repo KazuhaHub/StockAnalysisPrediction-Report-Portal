@@ -774,7 +774,7 @@
   "forecast.population.tz_note": "按上海時間填寫，存為 UTC。",
   "forecast.population.bound": "最晚可設定到",
   "forecast.population.from": "已設定的起點",
-  "forecast.population.set_by": "設定後不可更改。",
+  "forecast.population.set_by": "設定者",
   "forecast.population.audit_link": "在審計日誌中檢視本次設定",
   "forecast.population.candidates": "將被排除的集合",
   "forecast.population.no_candidates": "沒有會被排除的集合。",

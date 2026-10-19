@@ -43,3 +43,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   documented in the function comment.
 - **`forecast.population.not_counted_pre_live`** is reserved for the reading page (P10/P16); it is in
   the three locale files now so the parity test holds and P10 has the exact key to use.
+- **An empty or NULL stored value.** Presence is now a row count, not a value read, so a present-but-
+  empty key is still `set` (the UI does not offer a form whose save would always be refused) and the
+  GET reports it `damaged` rather than as an untrusted instant. The restore prior's "unset" check is
+  unchanged for an empty value (it carries from live); that direction is safe either way.
