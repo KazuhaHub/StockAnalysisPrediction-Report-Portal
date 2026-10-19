@@ -362,8 +362,9 @@ func buildGoldenServer(t *testing.T, spec goldenFixtureSpec) (*Server, []*groupS
 				if g.Baseline.IndexHasS0 {
 					index = []QuoteBar{{Date: g.Baseline.S0Date, Close: 4000}}
 				}
-				if err := s.st.FinishForecastBaseline(forecastWorkSet{SetID: setID},
-					g.Baseline.S0Date, g.Baseline.BaseDate, g.Baseline.S0Fen, index); err != nil {
+				if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, baseline: &forecastBaseline{
+					S0: g.Baseline.S0Date, BaseDate: g.Baseline.BaseDate, S0Fen: g.Baseline.S0Fen, Index: index,
+				}}, time.Now()); err != nil {
 					t.Fatalf("FinishForecastBaseline %s: %v", g.Symbol, err)
 				}
 			}
@@ -447,13 +448,12 @@ func settleGoldenMarks(t *testing.T, s *Server, setID int64, g goldenSetSpec) {
 			res.Status = markRefused
 			res.Refusal = "no_bar"
 		}
-		if err := s.st.SettleForecastMark(markID, res); err != nil {
-			t.Fatalf("SettleForecastMark %s/%s: %v", g.Symbol, cp, err)
-		}
+		plan := forecastPlan{setID: setID, settles: []forecastSettle{{markID: markID, res: res}}}
 		if mk.Status == "refused_final" {
-			if err := s.st.MarkRefusedFinal(markID); err != nil {
-				t.Fatalf("MarkRefusedFinal %s/%s: %v", g.Symbol, cp, err)
-			}
+			plan.finals = []forecastFinal{{markID: markID, code: "no_bar"}}
+		}
+		if err := s.st.ApplyForecastPlan(plan, time.Now()); err != nil {
+			t.Fatalf("settle %s/%s: %v", g.Symbol, cp, err)
 		}
 	}
 }

@@ -111,3 +111,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Accepted, not a bug:** posting the *active* code as `bench_schedule` while a different change is
   pending replaces it (§4.7's table: a no-op only when nothing is scheduled). The modal posts only
   changed fields, and the legacy `bench` spelling is retired in P29.
+
+### P1 decisions (2026-10-19)
+- **Wake-only scheduling.** Before fetching a calendar, every non-terminal mark whose earliest
+  possible due (a weekday projection, so a lower bound) is still in the future is rescheduled from
+  the projection alone. A Friday batch therefore costs no vendor call until Monday's close, and the
+  batch limit is spent on work, not on marks that cannot be due.
+- **Today's arithmetic is preserved, including the extra session.** `predScheduleFor` keeps the
+  present `len > n` rule and `sessions[n-1]` record; P6 changes the definition inside it. The
+  characterization test pins the `len == n` / `len == n+1` boundary.
+- **The heal signature drops the plan's "not due" clause**, as §5.1 says: by the β2 deploy four d5
+  marks are due and the check would leave them with a phantom attempt. Returning them to pending only
+  causes a fresh, recorded attempt.
+- **Finality needs both halves.** A mark-specific failure becomes final only after 4 recorded
+  attempts and 10 completed sessions past its due session; a source failure never increments attempts
+  and never finalises. An unknown refusal code is treated as a source fault (retry forever is
+  recoverable; finalising on an unclassified fault is not).
+- **`predNotYetShown` during the session.** +10 minutes until 18:00, except a wake in the 09:00 hour
+  moves to 15:30 the same day (rather than re-waking every ten minutes through the session); after
+  18:00 it is 09:00 on the next weekday.
+- **The P9 readiness gate is not built here.** This PR makes item 1 of §1.4 true (the binary contains
+  P1); P9 adds the `forecast_not_ready` refusal and the per-item GET. The evaluator remains off.

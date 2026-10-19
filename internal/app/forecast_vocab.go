@@ -110,6 +110,9 @@ const (
 	baseMatch        = "match"
 	baseMismatch     = "mismatch"
 	baseRefused      = "refused"
+	// baseRefusedFinal is the terminal form: no start bar could ever be resolved, so the set can
+	// never be scored (P1). It is also what makes the cell stop looking pending.
+	baseRefusedFinal = "refused_final"
 )
 
 // ForecastBench is the index new sets are benchmarked against (D1), read at ingest and frozen onto

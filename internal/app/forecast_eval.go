@@ -116,7 +116,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	sets, err := s.st.ForecastSetsNeedingWork(e.clock(), predEvalBatch)
+	sets, err := s.st.ForecastSetsDue(e.clock(), predEvalBatch)
 	if err != nil {
 		return fmt.Errorf("select due work: %w", err)
 	}
@@ -128,12 +128,35 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		if err := ctx.Err(); err != nil {
 			return nil // out of time; the next tick continues from the rows
 		}
+		// Schedule first, and only fetch what the clock says could be due. A mark whose earliest
+		// possible due is still in the future needs no calendar at all, so a Friday's batch of sets
+		// costs nothing until Monday's close.
+		need := make([]forecastWorkSet, 0, len(group.sets))
+		for _, set := range group.sets {
+			plan, handled := e.wakeOnlyPlan(set, e.clock())
+			if handled {
+				if len(plan.wakes) > 0 {
+					if err := s.st.ApplyForecastPlan(plan, e.clock()); err != nil {
+						log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
+					}
+				}
+				continue
+			}
+			need = append(need, set)
+		}
+		if len(need) == 0 {
+			continue
+		}
 		spec, ok := benchSpecFor(group.code)
 		if !ok {
 			// An empty or unknown frozen code: the whole group waits. This is a SOURCE-class
 			// deferral — the run is not scored against the setting instead of its own index.
-			for _, set := range group.sets {
-				if err := s.st.DeferForecastSet(set, "no_bench", nil); err != nil {
+			for _, set := range need {
+				plan := forecastPlan{setID: set.SetID, wakes: map[int64]time.Time{}}
+				for _, m := range set.Marks {
+					plan.deferMark(m, "no_bench", "")
+				}
+				if err := s.st.ApplyForecastPlan(plan, e.clock()); err != nil {
 					log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 				}
 			}
@@ -143,8 +166,8 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		// fifty sets still costs one index body per benchmark in use. The fault, if any, names the
 		// refusal code each case must record (fetch_failed / not_index / calendar_bad), so an operator
 		// can tell a vendor outage from a wrong instrument from a broken calendar.
-		indexSeries, fault := e.benchCalendar(ctx, s, spec, group.sets)
-		for _, set := range group.sets {
+		indexSeries, fault := e.benchCalendar(ctx, s, spec, need)
+		for _, set := range need {
 			if err := ctx.Err(); err != nil {
 				return nil
 			}
@@ -154,6 +177,32 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		}
 	}
 	return nil
+}
+
+// wakeOnlyPlan schedules a set whose every non-terminal mark is safely in the future. It returns
+// handled=false when at least one mark could be due, or a backoff has expired, so the caller fetches
+// the calendar. With no non-terminal marks it is handled (nothing to do, nothing to fetch).
+func (e *forecastEvaluator) wakeOnlyPlan(set forecastWorkSet, now time.Time) (forecastPlan, bool) {
+	plan := forecastPlan{setID: set.SetID, wakes: map[int64]time.Time{}}
+	for _, m := range set.Marks {
+		if m.Status == markResolved || m.Status == markRefusedFinal {
+			continue
+		}
+		if m.Status == markRefused && m.NextAttemptAt != "" {
+			t, err := time.Parse(time.RFC3339, m.NextAttemptAt)
+			if err != nil || !now.Before(t) {
+				return forecastPlan{}, false // the backoff has expired: this set needs work
+			}
+			plan.wakes[m.ID] = t
+			continue
+		}
+		wake := predWakeAt(set, m.Checkpoint)
+		if wake.IsZero() || !now.Before(wake) {
+			return forecastPlan{}, false
+		}
+		plan.wakes[m.ID] = wake
+	}
+	return plan, true
 }
 
 // benchFault is a benchmark series that cannot settle a mark, with the refusal code its cause maps to.
@@ -233,50 +282,118 @@ func hasZeroVolumeBar(bars []QuoteBar) bool {
 }
 
 // evaluateSet resolves every due mark of one set, then fills the set's own baseline check.
+//
+// The shape is the P1 algorithm: schedule first (a mark that is not due is never a refusal), settle
+// only when the due session has completed, and classify a failure before deciding whether it is an
+// attempt at all. Every write lands in one transaction.
 func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set forecastWorkSet, indexSeries forecastSeries, fault *benchFault) error {
-	if fault != nil {
-		// The calendar is a shared dependency: without it no checkpoint date can be trusted, so the
-		// whole set waits rather than guessing. Retryable, and the retry is recorded on the marks
-		// under the fault's own code (fetch_failed / not_index / calendar_bad).
-		return s.st.DeferForecastSet(set, fault.code, fault.err)
-	}
 	now := e.clock()
+	plan := forecastPlan{setID: set.SetID, wakes: map[int64]time.Time{}}
+
+	if fault != nil {
+		// The calendar is a shared dependency: without it no checkpoint date can be trusted. This is
+		// a SOURCE failure — it leaves attempts unchanged and never counts toward finality.
+		for _, m := range set.Marks {
+			plan.deferMark(m, fault.code, "")
+		}
+		return s.st.ApplyForecastPlan(plan, now)
+	}
+
 	stockSeries, err := e.rangeBars(ctx, s, set.Market, set.Symbol, shiftDays(set.MadeOn, -predReferenceLagDays), now)
 	if err != nil {
-		return s.st.DeferForecastSet(set, "fetch_failed", err)
+		// The stock's own series failed to arrive. Also a source failure: the run was not scored
+		// against a wrong price, it simply has not been delivered yet.
+		for _, m := range set.Marks {
+			plan.deferMark(m, "fetch_failed", "")
+		}
+		return s.st.ApplyForecastPlan(plan, now)
 	}
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
 	// Sessions strictly after the receipt date, using the BENCHMARK's calendar so a halted stock
 	// cannot slide its own checkpoints. The cutoff is what keeps today's unfinished bar out.
 	sessions := completedSessionsAfter(indexBars, set.MadeOn, now)
 
+	madeAt, err := time.Parse(time.RFC3339, set.MadeAt)
+	if err != nil {
+		madeAt, _ = time.ParseInLocation("2006-01-02", set.MadeOn, chinaZone)
+	}
+
 	s0, baseDate, s0Fen, err := resolveStartBar(stockBars, indexBars, set, now)
 	if err != nil {
-		return s.st.DeferForecastSet(set, "no_bar", err)
+		// The baseline cannot be resolved yet. This is the set's own data, so it is a MARK-SPECIFIC
+		// failure and does count as an attempt; it only becomes terminal after the fixed clock has
+		// run out AND those attempts exist.
+		for _, m := range set.Marks {
+			plan.deferMark(m, "no_bar", "")
+		}
+		if s0 != "" && sessionsPastDue(sessions, s0, now) >= predRetryDeadlineTicks {
+			min, first := 0, true
+			for _, m := range set.Marks {
+				a := m.Attempts + 1
+				if first || a < min {
+					min, first = a, false
+				}
+			}
+			if !first && min >= predFinalMinAttempts {
+				plan.terminalBaseline = true
+			}
+		}
+		return s.st.ApplyForecastPlan(plan, now)
 	}
+	plan.baseline = &forecastBaseline{S0: s0, BaseDate: baseDate, S0Fen: s0Fen, Index: indexBars}
 
 	for _, mark := range set.Marks {
 		if mark.Status == markResolved || mark.Status == markRefusedFinal {
 			continue // terminal, and the guard would refuse the write anyway
 		}
-		session, due := checkpointSession(mark.Checkpoint, set, sessions)
-		if !due {
-			continue
-		}
-		// Finality: a refusal that has stood for long enough stops being retried, which is what
-		// makes every input of a mature cell terminal and therefore makes the cell immutable.
-		if mark.Status == markRefused && sessionsPastDue(sessions, session, now) >= predRetryDeadlineTicks {
-			if err := s.st.MarkRefusedFinal(mark.ID); err != nil {
-				return err
+		// A backoff that has not expired is not due, whatever the schedule says.
+		if mark.Status == markRefused && mark.NextAttemptAt != "" {
+			if t, err := time.Parse(time.RFC3339, mark.NextAttemptAt); err == nil && now.Before(t) {
+				plan.wakes[mark.ID] = t
+				continue
 			}
+		}
+		sch := predScheduleFor(mark.Checkpoint, madeAt, set.HorizonStd, set.S0Date, sessions)
+		if !sch.Known || !containsDate(sessions, sch.Due) {
+			// Not due. Record a wake; never a refusal. A calendar that has not shown the session yet
+			// is a delivery delay, not a bad prediction.
+			wake := predWakeAt(set, mark.Checkpoint)
+			if wake.IsZero() || !now.Before(wake) {
+				wake = predNotYetShown(now)
+			}
+			plan.wakes[mark.ID] = wake
 			continue
 		}
-		res := settleMark(set, mark, stockBars, indexBars, exDates, s0, baseDate, s0Fen, session)
-		if err := s.st.SettleForecastMark(mark.ID, res); err != nil {
-			return err
+		res := settleMark(set, mark, stockBars, indexBars, exDates, s0, baseDate, s0Fen, sch.Record)
+		if res.Status == markResolved {
+			plan.settles = append(plan.settles, forecastSettle{markID: mark.ID, res: res})
+			continue
+		}
+		// Finality only as the result of a failed attempt (V26): the mark must have failed enough
+		// times AND the fixed clock must have run out. A source failure never reaches this branch
+		// because it never increments attempts.
+		if refusalClassOf(res.Refusal) == refusalMarkSpecific &&
+			mark.Attempts+1 >= predFinalMinAttempts &&
+			sessionsPastDue(sessions, sch.Due, now) >= predRetryDeadlineTicks {
+			plan.finals = append(plan.finals, forecastFinal{markID: mark.ID, code: res.Refusal})
+			continue
+		}
+		plan.deferMark(mark, res.Refusal, sch.Due)
+	}
+	return s.st.ApplyForecastPlan(plan, now)
+}
+
+// containsDate reports whether a sorted session list contains a date.
+func containsDate(dates []string, date string) bool {
+	for _, d := range dates {
+		if d == date {
+			return true
+		}
+		if d > date {
+			return false
 		}
 	}
-	return s.st.FinishForecastBaseline(set, s0, baseDate, s0Fen, indexBars)
+	return false
 }
 
 // rangeBars fetches unadjusted daily bars, directly and without the shared cache.
@@ -541,7 +658,9 @@ func resolveStartBar(stock, index []QuoteBar, set forecastWorkSet, now time.Time
 	}
 	bar, ok := firstBarAtOrAfter(stock, s0)
 	if !ok {
-		return "", "", 0, fmt.Errorf("no traded bar on or after %s", s0)
+		// Return S0 even though the baseline cannot resolve: the caller needs it to decide whether
+		// the fixed clock has run out before giving up on the set.
+		return s0, "", 0, fmt.Errorf("no traded bar on or after %s", s0)
 	}
 	return s0, bar.Date, bar.Close, nil
 }

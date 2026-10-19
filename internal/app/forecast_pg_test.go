@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 )
@@ -228,5 +229,101 @@ func TestPostgresUnrecordedFloorAndRestore(t *testing.T) {
 	}
 	if n, _, ok, err := dst.countForecastUnrecorded(predTestRtype); err != nil || !ok || n != 1 {
 		t.Fatalf("count after restore = %d ok=%v err=%v, want 1", n, ok, err)
+	}
+}
+
+// TestPostgresDueSelectionHealAndPlan covers the P1 write path on the driver production runs. The
+// selection, the one-shot heal and the plan's transaction are all SQL this package writes, and the
+// SQLite tests would not catch a Postgres-only spelling or locking mistake.
+func TestPostgresDueSelectionHealAndPlan(t *testing.T) {
+	st := pgStore(t, "prediction_marks", "prediction_sets", "audit_log")
+	if _, err := st.exec("DELETE FROM meta WHERE k=?", setForecastRepairPremature); err != nil {
+		t.Fatal(err)
+	}
+
+	var setID int64
+	if err := st.queryRow(`INSERT INTO prediction_sets(
+		symbol, rtype, made_at, made_on, cohort, state, bench_code, base_check)
+		VALUES(?,?,?,?,?,?,?,?) RETURNING id`,
+		"600160", predTestRtype, "2026-10-16T13:00:00Z", "2026-10-16", "2026-10",
+		predStateAccepted, "sh000852", baseCheckPending).Scan(&setID); err != nil {
+		t.Fatalf("insert set: %v", err)
+	}
+	var markID int64
+	if err := st.queryRow(`INSERT INTO prediction_marks(set_id, checkpoint, status, bench_code)
+		VALUES(?,?,?,?) RETURNING id`, setID, "d5", markPending, "sh000852").Scan(&markID); err != nil {
+		t.Fatalf("insert mark: %v", err)
+	}
+
+	sets, err := st.ForecastSetsDue(time.Now(), 1000)
+	if err != nil {
+		t.Fatalf("selection: %v", err)
+	}
+	if len(sets) != 1 || sets[0].SetID != setID || len(sets[0].Marks) != 1 {
+		t.Fatalf("selection = %+v, want the seeded set with one mark", sets)
+	}
+
+	// The plan applies in one transaction on Postgres too.
+	if err := st.ApplyForecastPlan(forecastPlan{setID: setID, settles: []forecastSettle{
+		{markID: markID, res: markResult{Status: markResolved, Session: "2026-10-26"}},
+	}}, time.Now()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	var status string
+	if err := st.queryRow("SELECT status FROM prediction_marks WHERE id=?", markID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != markResolved {
+		t.Errorf("status = %q, want resolved", status)
+	}
+
+	// The one-shot heal on the pre-P1 signature, audited once by the server wrapper.
+	if _, err := st.exec(`UPDATE prediction_marks SET status=?, refusal='no_bar', session_date='',
+		resolved_at='', attempts=1 WHERE id=?`, markRefused, markID); err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{st: st}
+	srv.runForecastRepair()
+	if err := st.queryRow("SELECT status FROM prediction_marks WHERE id=?", markID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != markPending {
+		t.Errorf("after heal status = %q, want pending", status)
+	}
+	var audited int
+	if err := st.queryRow("SELECT COUNT(*) FROM audit_log WHERE action=?", AuditForecastRepair).Scan(&audited); err != nil {
+		t.Fatal(err)
+	}
+	if audited != 1 {
+		t.Errorf("repair audit rows = %d, want 1", audited)
+	}
+}
+
+func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
+	st := pgStore(t)
+	if _, err := st.exec("SET enable_seqscan = off"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.query(`EXPLAIN SELECT ps.id FROM prediction_sets ps
+		JOIN (SELECT DISTINCT set_id FROM prediction_marks
+		      WHERE status IN ('pending','refused')
+		        AND (next_attempt_at = '' OR next_attempt_at <= '2026-01-01T00:00:00Z')) due
+		  ON due.set_id = ps.id
+		WHERE ps.state = 'accepted'
+		ORDER BY ps.made_on, ps.id LIMIT 50`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	plan := ""
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan += line + "\n"
+	}
+	if !strings.Contains(plan, "idx_pred_marks_due") {
+		t.Errorf("selection does not use idx_pred_marks_due:\n%s", plan)
 	}
 }
