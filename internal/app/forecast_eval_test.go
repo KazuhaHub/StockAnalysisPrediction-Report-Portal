@@ -608,9 +608,11 @@ func TestEvaluatorTickSettlesDueMarks(t *testing.T) {
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		switch code {
 		case "000852":
-			return &QuoteResp{Bars: index, Snapshot: QuoteSnapshot{AsOf: "2026-11-20T15:00:01+08:00"}}, nil
+			// The index body must declare its kind: since P3 a benchmark series whose vendor kind is
+			// not "index" cannot settle a mark, so a stub that leaves Kind empty is (correctly) refused.
+			return &QuoteResp{Bars: index, Kind: quoteKindIndex, Snapshot: QuoteSnapshot{AsOf: "2026-11-20T15:00:01+08:00"}}, nil
 		case "600160":
-			return &QuoteResp{Bars: stock, Snapshot: QuoteSnapshot{AsOf: "2026-11-20T15:00:01+08:00"}}, nil
+			return &QuoteResp{Bars: stock, Kind: quoteKindStock, Snapshot: QuoteSnapshot{AsOf: "2026-11-20T15:00:01+08:00"}}, nil
 		}
 		return nil, fmt.Errorf("unexpected code %q", code)
 	}
