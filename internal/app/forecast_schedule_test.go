@@ -84,7 +84,10 @@ func TestS0WaitsWhileTodayIsUnknown(t *testing.T) {
 		t.Fatalf("selection = %d (%v), want the seeded set", len(sets), err)
 	}
 	e := evalStub(&now, index, stock, nil, nil)
-	if err := e.evaluateSet(context.Background(), s, sets[0], forecastSeries{Bars: index, Kind: quoteKindIndex}, nil); err != nil {
+	if err := e.evaluateSet(context.Background(), s, sets[0],
+		forecastSeries{Bars: index, Kind: quoteKindIndex},
+		nil, forecastSeries{Bars: stock, Kind: quoteKindStock, AsOf: "2026-10-16T15:00:01+08:00"},
+		nil, false); err != nil {
 		t.Fatal(err)
 	}
 	var check, s0 string
@@ -136,44 +139,52 @@ func TestDNIsTheNthSessionAfterS0(t *testing.T) {
 
 func TestMarksUseTheStoredBaseline(t *testing.T) {
 	s := newV1Server(t)
-	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16") // after the close: S0 is Monday
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16") // after the close: S0 would be Monday
 	sessions := tradingDays("2026-10-19", 7)
 	index := barsFor(sessions, 4000)
-	stock := barsFor(sessions, 1000) // every close 1000
+	stock := barsFor(sessions, 1000)
+	stock[1].Close = 1200 // a later session at a different price
+	stock[5].Close = 1100
 
-	now := shanghai(2026, time.October, 27, 16, 0)
-	if err := func() error {
-		// First pass with only five sessions: the baseline is written but d5 is not due.
-		idx := index[:5]
-		stk := stock[:5]
-		e := evalStub(&now, idx, stk, nil, nil)
-		return e.tick(s)
-	}(); err != nil {
+	// Store a baseline the receipt rule would NOT pick: S0 is the receipt Friday, not Monday. The
+	// score must come from this row, so d5 is 1100/1000-1 = +10.00%, not 1100/1200-1.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET base_check=?, s0_date=?, base_date=?, s0_fen=1000
+		WHERE id=?`, baseMatch, sessions[0], sessions[0], setID); err != nil {
 		t.Fatal(err)
 	}
-	var s0 string
-	var s0Fen int64
-	s.st.queryRow("SELECT s0_date, s0_fen FROM prediction_sets WHERE id=?", setID).Scan(&s0, &s0Fen)
-	if s0 != sessions[0] || s0Fen != 1000 {
-		t.Fatalf("first baseline = %s/%d, want %s/1000", s0, s0Fen, sessions[0])
-	}
 
-	// A revised vendor body: S0 printed at 5000, d5 at 1100. The stored base must win, so d5's
-	// return is 1100/1000-1 = +10.00%, not 1100/5000-1.
-	revised := barsFor(sessions, 1000)
-	revised[0].Close = 5000
-	revised[5].Close = 1100
-	// The first pass could not see the d5 session, so it wakes ten minutes later; the next pass runs
-	// after that wake with the full calendar.
-	later := now.Add(11 * time.Minute)
-	e := evalStub(&later, index, revised, nil, nil)
+	now := shanghai(2026, time.October, 27, 16, 0)
+	e := evalStub(&now, index, stock, nil, nil)
 	if err := e.tick(s); err != nil {
 		t.Fatal(err)
 	}
 	var ret int32
-	s.st.queryRow("SELECT ret_bp FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&ret)
+	if err := s.st.queryRow("SELECT ret_bp FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&ret); err != nil {
+		t.Fatal(err)
+	}
 	if ret != 1000 {
 		t.Errorf("d5 ret_bp = %d, want 1000 from the stored s0_fen", ret)
+	}
+
+	// The body's close on base_date no longer matches the stored anchor: the mark refuses instead of
+	// silently moving its start.
+	if _, err := s.st.exec(`DELETE FROM prediction_marks WHERE set_id=? AND checkpoint='d5'`, setID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status) VALUES(?, 'd5', 'pending')`, setID); err != nil {
+		t.Fatal(err)
+	}
+	moved := append([]QuoteBar(nil), stock...)
+	moved[0].Close = 5000
+	later := now.Add(2 * time.Hour)
+	e = evalStub(&later, index, moved, nil, nil)
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
+	}
+	var status, refusal string
+	s.st.queryRow("SELECT status, refusal FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&status, &refusal)
+	if status != markRefused || refusal != "anchor_mismatch" {
+		t.Errorf("moved anchor = %s/%s, want refused/anchor_mismatch", status, refusal)
 	}
 }
 
