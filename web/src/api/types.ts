@@ -519,6 +519,9 @@ export interface ForecastSettings {
   /** The index NEW sets are benchmarked against. Sets already written keep theirs, so changing this
    *  never re-scores anything on the ledger. */
   bench: string
+  /** A scheduled change, effective from the next cohort (P4). Empty when nothing is pending. */
+  bench_next?: string
+  bench_next_from?: string
   /** The closed list of benchmarks a new set may be frozen with (P3), so the picker cannot offer one
    *  the server would refuse. */
   bench_codes: string[]
@@ -1397,6 +1400,7 @@ export interface ForecastCoverage {
   pending_baseline: number
   pre_live: number
   test: number
+  off_benchmark: number
 }
 
 export interface ForecastCell {
@@ -1444,6 +1448,8 @@ export interface ForecastGroup {
   start: string
   end: string
   official: boolean
+  /** The index every member was frozen with (P4); a split custom range has one group per index. */
+  bench: string
   coverage: ForecastCoverage
   cells: Record<ForecastCheckpoint, ForecastCell>
 }

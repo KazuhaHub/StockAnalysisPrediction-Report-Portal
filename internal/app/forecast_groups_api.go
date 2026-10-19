@@ -7,8 +7,10 @@ package app
 // hand the whole ledger's aggregate to any bridge app. This is a management view.
 
 import (
+	"log"
 	"net/http"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 )
@@ -106,34 +108,87 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
 func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time) []forecastGroup {
-	type job struct {
-		gi      int
-		cp      string
-		start   string
-		end     string
-		members []*groupSet
-		pending []*groupSet
+	// The cohort's benchmark is the frozen code of its earliest in-population accepted set — a
+	// ledger-wide answer, not just what this range happened to load. A custom range that starts
+	// mid-cohort must not pick a later set and call the cohort something else.
+	benchOf := map[string]string{}
+	for _, gs := range sets {
+		if _, ok := benchOf[gs.Cohort]; ok {
+			continue
+		}
+		b, err := s.st.earliestCohortBench(rtype, gs.Cohort)
+		if err != nil {
+			log.Printf("forecast groups: cohort %s benchmark: %v", gs.Cohort, err)
+			b = ""
+		}
+		benchOf[gs.Cohort] = b
 	}
-	groups := make([]forecastGroup, len(periods))
-	jobs := make([]job, 0, len(periods)*len(predCheckpoints))
-	for i, p := range periods {
+
+	// A period that spans cohorts with different benchmarks is split, so no cell pools two indexes.
+	type plan struct {
+		period forecastPeriod
+		bench  string
+		in     []*groupSet
+	}
+	plans := make([]plan, 0, len(periods))
+	for _, p := range periods {
 		in := make([]*groupSet, 0, 64)
 		for _, gs := range sets {
 			if gs.MadeOn >= p.Start && gs.MadeOn <= p.End {
 				in = append(in, gs)
 			}
 		}
-		members, pending, cov := forecastMembership(in, populationFrom)
+		byBench := map[string][]*groupSet{}
+		for _, gs := range in {
+			byBench[benchOf[gs.Cohort]] = append(byBench[benchOf[gs.Cohort]], gs)
+		}
+		if len(byBench) <= 1 {
+			b := ""
+			for k := range byBench {
+				b = k
+			}
+			plans = append(plans, plan{p, b, in})
+			continue
+		}
+		codes := make([]string, 0, len(byBench))
+		for b := range byBench {
+			codes = append(codes, b)
+		}
+		sort.Strings(codes)
+		for _, b := range codes {
+			plans = append(plans, plan{
+				period: forecastPeriod{Start: p.Start, End: p.End, Label: p.Label + " · " + b},
+				bench:  b,
+				in:     byBench[b],
+			})
+		}
+	}
+
+	type job struct {
+		gi      int
+		cp      string
+		start   string
+		end     string
+		bench   string
+		members []*groupSet
+		pending []*groupSet
+	}
+	groups := make([]forecastGroup, len(plans))
+	jobs := make([]job, 0, len(plans)*len(predCheckpoints))
+	for i, pl := range plans {
+		members, pending, cov := forecastMembership(pl.in, populationFrom, pl.bench)
 		groups[i] = forecastGroup{
-			Label:    p.Label,
-			Start:    p.Start,
-			End:      p.End,
+			Label:    pl.period.Label,
+			Start:    pl.period.Start,
+			End:      pl.period.End,
 			Official: official,
+			Bench:    pl.bench,
 			Coverage: cov,
 			Cells:    make(map[string]*forecastCell, len(predCheckpoints)),
 		}
 		for _, cp := range predCheckpoints {
-			jobs = append(jobs, job{gi: i, cp: cp, start: p.Start, end: p.End, members: members, pending: pending})
+			jobs = append(jobs, job{gi: i, cp: cp, start: pl.period.Start, end: pl.period.End,
+				bench: pl.bench, members: members, pending: pending})
 		}
 	}
 	if len(jobs) == 0 {
@@ -157,14 +212,12 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				key := forecastGroupCellKey(rtype, j.start, j.end, j.cp)
+				key := forecastGroupCellKey(rtype, j.start, j.end, j.bench, j.cp)
 				if c := s.cachedForecastCell(key); c != nil {
 					out <- result{j.gi, j.cp, c}
 					continue
 				}
 				c := computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
-				// Only the official view writes: an exploratory range must not seed the record,
-				// and a custom group that equals a whole month already hits the monthly key.
 				if official && c.State == "mature" {
 					s.storeForecastCell(key, c)
 				}
@@ -188,8 +241,8 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 
 // forecastGroupCellKey is the memo's identity. It deliberately has no `mode`: a whole-month custom
 // group must hit the monthly entry, which is what makes the two answers identical by construction.
-func forecastGroupCellKey(rtype, start, end, cp string) string {
-	return rtype + "\x00" + start + "\x00" + end + "\x00" + cp
+func forecastGroupCellKey(rtype, start, end, bench, cp string) string {
+	return rtype + "\x00" + start + "\x00" + end + "\x00" + bench + "\x00" + cp
 }
 
 func (s *Server) cachedForecastCell(key string) *forecastCell {

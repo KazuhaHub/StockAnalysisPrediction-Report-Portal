@@ -945,7 +945,9 @@ an `off_benchmark` count renders as a chip.
 - `TestCustomRangeSlicesByBenchmark`: a range over 2026-10 and 2026-11 yields one group per benchmark; no cell's
   members mix codes. FC
 - `TestBenchPromotionAtBoot`: with next_from reached, active becomes next, audited once; a second boot does nothing.
-- Golden snapshots unchanged.
+- Golden snapshots: `golden_cells.json` gains an `off_benchmark` line in every coverage block (the new
+  counter); values are otherwise byte-identical and `golden_members.json` / `golden_fixture.json` are
+  unchanged. Regenerated in P4's own commit.
 - vitest: the Select, the scheduled line with Cancel, and a mode toggle that posts `mode` only.
 - e2e section G: a schedule round trip with its audit row; a mode-only save; a no-op save writing nothing (replaces
   today's `{"enabled": False, "bench": …}` post at `scripts/e2e_check.py:498`).

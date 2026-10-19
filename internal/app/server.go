@@ -237,6 +237,14 @@ func RunServer(cfgPath string) {
 		st.UpsertPlugin(difyPluginSlug, "Dify Workflow", "1.0.0", "{}", "bundled")
 	}
 
+	// Benchmark schedule (P4). Promotion first: a due change makes the active value true, and then
+	// reconciliation compares it with what the current cohort was frozen with. Both are idempotent and
+	// audit as `system`; in a normal boot reconciliation is a no-op.
+	s.promoteForecastBench(time.Now())
+	if err := s.reconcileForecastBench(time.Now()); err != nil {
+		log.Printf("forecast bench: reconcile: %v", err)
+	}
+
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
 	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)

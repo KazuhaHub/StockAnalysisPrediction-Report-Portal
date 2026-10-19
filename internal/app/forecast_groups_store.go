@@ -22,6 +22,10 @@ type groupSet struct {
 
 	MadeAt string
 	MadeOn string
+	Cohort string
+	// BenchCode is the index the set was FROZEN with at ingest. A set whose code differs from its
+	// cohort's benchmark is off-benchmark: it is counted and kept out of the cell.
+	BenchCode string
 
 	DecisionQuality      string
 	BaseCheck            string
@@ -48,7 +52,8 @@ type groupSet struct {
 // each symbol so "the earliest accepted set" is a slice scan rather than a sort.
 func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, error) {
 	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
-			ps.made_at, ps.made_on, ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
+			ps.made_at, ps.made_on, ps.cohort, ps.bench_code,
+			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
 		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?
@@ -68,6 +73,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, erro
 			s0         sql.NullInt64
 		)
 		if err := rows.Scan(&gs.ID, &reportID, &gs.Symbol, &gs.ReportDate, &gs.State, &gs.MadeAt, &gs.MadeOn,
+			&gs.Cohort, &gs.BenchCode,
 			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0,
 			&gs.PolicyVersion, &gs.ProbabilityMethod, &gs.ProbabilityTransform); err != nil {
 			return nil, err

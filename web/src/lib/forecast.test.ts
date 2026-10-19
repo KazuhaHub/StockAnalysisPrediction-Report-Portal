@@ -72,6 +72,7 @@ describe('forecastCsv', () => {
         start: '2026-01-05',
         end: '2026-01-11',
         official: false,
+        bench: 'sh000852',
         coverage: {
           reports: 10,
           member: 8,
@@ -85,6 +86,7 @@ describe('forecastCsv', () => {
           pending_baseline: 0,
           pre_live: 0,
           test: 0,
+          off_benchmark: 0,
         },
         cells: { d5: mature, d20: { state: 'open' }, d60: { state: 'open' }, d120: { state: 'open' }, h12: { state: 'open' } },
       },

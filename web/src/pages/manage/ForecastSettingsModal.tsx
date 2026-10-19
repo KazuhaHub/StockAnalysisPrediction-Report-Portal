@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Alert, Input, Modal, Space, Switch, Typography } from 'antd'
+import { App, Alert, Button, Modal, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
@@ -11,12 +11,10 @@ import type { ForecastSettings } from '../../api/types'
 //   - whether it runs at all. It is a background loop that reaches a Chinese market-data vendor on
 //     its own volition, on every install where it is on, which is why it ships OFF (ADR 0029 §6) and
 //     why flipping it is audited — the operator turned on something that egresses.
-//   - the benchmark NEW sets are written with. It is here rather than on the page because it is a
-//     write-once-per-set fact: changing it never re-scores anything already on the ledger, and the
-//     hint says so before an admin assumes otherwise.
-//
-// The counters the page shows (due, pending, refused, unsettled) are deliberately NOT editable and
-// not repeated here: they are what the evaluator has done, not what it is configured to do.
+//   - the benchmark NEW sets are written with. A change is effective from the NEXT cohort (P4): the
+//     sets already written keep the index they were frozen with, so nothing on the ledger is
+//     re-scored. The modal posts only the fields the admin actually changed, so a save that only
+//     flips the switch does not schedule a benchmark by accident.
 export default function ForecastSettingsModal({
   open,
   value,
@@ -31,7 +29,7 @@ export default function ForecastSettingsModal({
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [enabled, setEnabled] = useState(value.enabled)
-  const [bench, setBench] = useState(value.bench)
+  const [bench, setBench] = useState(value.bench_next || value.bench)
   const [busy, setBusy] = useState(false)
 
   // Seed the draft from the page's copy each time the modal opens. Without this, a modal closed
@@ -40,20 +38,47 @@ export default function ForecastSettingsModal({
   useEffect(() => {
     if (open) {
       setEnabled(value.enabled)
-      setBench(value.bench)
+      setBench(value.bench_next || value.bench)
     }
-  }, [open, value.enabled, value.bench])
+  }, [open, value.enabled, value.bench, value.bench_next])
+
+  const benchOptions = value.bench_codes.map((code) => ({
+    value: code,
+    label: t(`forecast.bench.${code}`),
+  }))
 
   const save = async () => {
+    const payload: Record<string, unknown> = {}
+    if (enabled !== value.enabled) payload.mode = enabled ? 1 : 0
+    const chosen = value.bench_next || value.bench
+    if (bench !== chosen) payload.bench_schedule = bench
+    if (Object.keys(payload).length === 0) {
+      onClose()
+      return
+    }
     setBusy(true)
     try {
-      await api.post('/api/admin/forecast', { enabled, bench })
+      await api.post('/api/admin/forecast', payload)
       message.success(t('common.saved'))
       onSaved()
       onClose()
     } catch (e) {
-      // The server owns the benchmark vocabulary (a six-digit index with a daily series), so its
-      // refusal is shown with its own code — err.forecast_bad_bench — rather than a generic failure.
+      // The server owns the benchmark vocabulary (an index with a daily series), so its refusal is
+      // shown with its own code — err.forecast_bad_bench — rather than a generic failure.
+      message.error(errText(e, t))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelSchedule = async () => {
+    setBusy(true)
+    try {
+      await api.post('/api/admin/forecast', { bench_cancel: true })
+      message.success(t('common.saved'))
+      onSaved()
+      onClose()
+    } catch (e) {
       message.error(errText(e, t))
     } finally {
       setBusy(false)
@@ -83,16 +108,27 @@ export default function ForecastSettingsModal({
         </Space>
         <div>
           <Typography.Text>{t('forecast.settings.bench')}</Typography.Text>
-          <Input
+          <Select
             value={bench}
-            onChange={(e) => setBench(e.target.value)}
-            placeholder="sh000852"
+            onChange={setBench}
+            options={benchOptions}
             aria-label={t('forecast.settings.bench')}
-            style={{ marginTop: 4 }}
+            style={{ width: '100%', marginTop: 4 }}
           />
           <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
-            {t('forecast.settings.benchHint')}
+            {t('forecast.settings.benchHint', { active: t(`forecast.bench.${value.bench}`) })}
           </Typography.Text>
+          {value.bench_next && value.bench_next_from && (
+            <Typography.Text style={{ display: 'block', marginTop: 4 }}>
+              {t('forecast.settings.scheduled', {
+                bench: t(`forecast.bench.${value.bench_next}`),
+                from: value.bench_next_from,
+              })}{' '}
+              <Button type="link" size="small" onClick={cancelSchedule} disabled={busy}>
+                {t('forecast.settings.scheduledCancel')}
+              </Button>
+            </Typography.Text>
+          )}
         </div>
       </Space>
     </Modal>

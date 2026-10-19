@@ -158,15 +158,15 @@ describe('ForecastPage', () => {
     await waitFor(() => expect(screen.getByText('forecast.settings.button')).toBeTruthy())
     fireEvent.click(screen.getByText('forecast.settings.button'))
 
-    const bench = await screen.findByLabelText('forecast.settings.bench')
-    fireEvent.change(bench, { target: { value: 'sh000300' } })
+    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    fireEvent.click(await screen.findByText('forecast.bench.sh000300'))
     apiMock.post.mockResolvedValue({ ok: true })
     fireEvent.click(screen.getByText('common.save'))
 
+    // Only the changed field is posted: the switch was already true, so no `mode` rides along.
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast', {
-        enabled: true,
-        bench: 'sh000300',
+        bench_schedule: 'sh000300',
       }),
     )
     // And the page reloads, so the counts shown are the ones the save left behind rather than the
@@ -182,6 +182,8 @@ describe('ForecastPage', () => {
 
     // The page's errText is stubbed to a fixed string here; what matters is that the save's failure
     // path keeps the modal open and does not report success.
+    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    fireEvent.click(await screen.findByText('forecast.bench.sh000300'))
     apiMock.post.mockRejectedValue(new Error('forecast_bad_bench'))
     fireEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))

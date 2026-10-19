@@ -1081,6 +1081,11 @@ func (s *Store) SetSetting(k, v string) error {
 	return err
 }
 
+func (s *Store) DeleteSetting(k string) error {
+	_, err := s.exec("DELETE FROM meta WHERE k=?", k)
+	return err
+}
+
 // ---------- Report type configuration (editable by admins) ----------
 
 type TypeConfig struct {

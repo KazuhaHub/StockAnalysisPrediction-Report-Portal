@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -359,5 +360,336 @@ func TestEmptyBenchCodeNeverReadsTheSetting(t *testing.T) {
 	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE status=? AND refusal='no_bench'", markRefused).Scan(&refused)
 	if refused == 0 {
 		t.Error("an empty frozen code produced no deferral")
+	}
+}
+
+// ---------- P4: effective-dated, audited benchmarks ----------
+
+func saveForecastSettings(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast", strBody(body)), "admin")
+	return rec
+}
+
+func TestBenchChangeIsEffectiveDatedAndReconciled(t *testing.T) {
+	s := newV1Server(t)
+	if err := s.st.applyForecastBenchState("sh000300", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	// October was actually frozen with CSI 1000, so the active value is describing the wrong index.
+	seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
+
+	now := time.Date(2026, time.October, 20, 4, 0, 0, 0, time.UTC) // 12:00 CST
+	if err := s.reconcileForecastBench(now); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.st.ForecastBench(); got != "sh000852" {
+		t.Errorf("active = %q, want sh000852 (what October was frozen with)", got)
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "sh000300" || from != "2026-11" {
+		t.Errorf("scheduled = %q from %q, want sh000300 from 2026-11", next, from)
+	}
+	rows := auditRows(t, s, AuditForecastBench)
+	if len(rows) != 2 {
+		t.Fatalf("bench audit rows = %d, want 2 (active + schedule)", len(rows))
+	}
+	for _, r := range rows {
+		if r.Actor != "system" {
+			t.Errorf("reconcile audit actor = %q, want system", r.Actor)
+		}
+	}
+	// This is the reader ingest uses: the October cohort keeps its code, November gets the new one.
+	if got := s.st.ForecastBenchFor("2026-10"); got != "sh000852" {
+		t.Errorf("For(2026-10) = %q, want sh000852", got)
+	}
+	if got := s.st.ForecastBenchFor("2026-11"); got != "sh000300" {
+		t.Errorf("For(2026-11) = %q, want sh000300", got)
+	}
+
+	// A second reconcile sees no disagreement and writes nothing.
+	if err := s.reconcileForecastBench(now); err != nil {
+		t.Fatal(err)
+	}
+	if rows := auditRows(t, s, AuditForecastBench); len(rows) != 2 {
+		t.Errorf("a no-op reconcile filed %d rows, want 2", len(rows))
+	}
+}
+
+func TestCSI800ScheduleFromNovember(t *testing.T) {
+	s := newV1Server(t)
+	from := nextCohort(shanghaiCohort(time.Now()))
+	rec := saveForecastSettings(t, s, `{"bench_schedule":"sh000906"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("schedule: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp["effective_cohort"] != from {
+		t.Errorf("effective_cohort = %v, want %q", resp["effective_cohort"], from)
+	}
+	if got := s.st.ForecastBench(); got != defaultForecastBench {
+		t.Errorf("active = %q: a scheduled change must not re-score the cohort in flight", got)
+	}
+
+	// The CST month boundary: 23:59:59 on 31 October is still October; 00:00:00 on 1 November is
+	// November. The producer's sandbox runs in UTC, so this is exactly where a mistake lands.
+	if got := shanghaiCohort(time.Date(2026, time.October, 31, 15, 59, 59, 0, time.UTC)); got != "2026-10" {
+		t.Errorf("cohort at 2026-10-31T15:59:59Z = %q, want 2026-10", got)
+	}
+	if got := shanghaiCohort(time.Date(2026, time.October, 31, 16, 0, 0, 0, time.UTC)); got != "2026-11" {
+		t.Errorf("cohort at 2026-10-31T16:00:00Z = %q, want 2026-11", got)
+	}
+
+	// Pin the reader on the fixed cohorts rather than on today's clock.
+	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", "2026-11"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.st.ForecastBenchFor("2026-10"); got != defaultForecastBench {
+		t.Errorf("For(2026-10) = %q, want %q", got, defaultForecastBench)
+	}
+	if got := s.st.ForecastBenchFor("2026-11"); got != "sh000906" {
+		t.Errorf("For(2026-11) = %q, want sh000906", got)
+	}
+}
+
+func TestBenchCancel(t *testing.T) {
+	s := newV1Server(t)
+	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", "2026-11"); err != nil {
+		t.Fatal(err)
+	}
+	rec := saveForecastSettings(t, s, `{"bench_cancel":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "" || from != "" {
+		t.Errorf("after cancel: %q from %q, want both empty", next, from)
+	}
+	rows := auditRows(t, s, AuditForecastBench)
+	if len(rows) != 1 {
+		t.Fatalf("cancel audit rows = %d, want 1", len(rows))
+	}
+	if !strings.Contains(rows[0].Detail, "sh000906") {
+		t.Errorf("cancel detail = %q, want the cancelled code", rows[0].Detail)
+	}
+	// A second cancel has nothing to clear, so it writes nothing.
+	if rec := saveForecastSettings(t, s, `{"bench_cancel":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("second cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	if rows := auditRows(t, s, AuditForecastBench); len(rows) != 1 {
+		t.Errorf("second cancel filed %d rows, want 1", len(rows))
+	}
+}
+
+func TestEnabledAliasesMode(t *testing.T) {
+	s := newV1Server(t)
+	// The switch is already off: posting off is a no-op, not an audit row.
+	if rec := saveForecastSettings(t, s, `{"enabled":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("enabled:false: %d %s", rec.Code, rec.Body.String())
+	}
+	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 0 {
+		t.Fatalf("an unchanged switch filed %d rows, want 0", len(rows))
+	}
+	if rec := saveForecastSettings(t, s, `{"mode":1}`); rec.Code != http.StatusOK {
+		t.Fatalf("mode:1: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting(setForecastAuto, "0"); got != "1" {
+		t.Errorf("mode 1 stored %q, want 1", got)
+	}
+	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 1 {
+		t.Fatalf("audit rows = %d, want 1", len(rows))
+	}
+	// The alias and the string spelling both reach the same value and change nothing.
+	for _, body := range []string{`{"enabled":true}`, `{"mode":"1"}`} {
+		if rec := saveForecastSettings(t, s, body); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 1 {
+		t.Errorf("unchanged saves filed %d rows, want 1", len(rows))
+	}
+	if rec := saveForecastSettings(t, s, `{"mode":"dry"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("mode dry status = %d, want 400 (P4 implements 0/1 only)", rec.Code)
+	}
+}
+
+func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
+	t.Run("a later set with another index is out and counted", func(t *testing.T) {
+		s := newV1Server(t)
+		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
+		seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-10-13", Bench: "sh000905"})
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		if err != nil {
+			t.Fatal(err)
+		}
+		members, _, cov := forecastMembership(sets, time.Time{}, "sh000852")
+		if cov.OffBenchmark != 1 {
+			t.Errorf("off_benchmark = %d, want 1", cov.OffBenchmark)
+		}
+		if len(members) != 1 || members[0].Symbol != "600160" {
+			t.Errorf("members = %v, want only 600160", symbolsOf(members))
+		}
+		if sum := cov.Absent + cov.Rejected + cov.Backtest + cov.Test + cov.PreLive +
+			cov.Member + cov.Duplicate + cov.Degraded + cov.Mismatch + cov.PendingBaseline +
+			cov.OffBenchmark; sum != cov.Reports {
+			t.Errorf("coverage sums to %d, want %d", sum, cov.Reports)
+		}
+	})
+
+	t.Run("an off-benchmark earliest set takes the symbol out", func(t *testing.T) {
+		s := newV1Server(t)
+		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-01", Bench: "sh000905"})
+		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-02", Bench: "sh000852"})
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		if err != nil {
+			t.Fatal(err)
+		}
+		members, _, cov := forecastMembership(sets, time.Time{}, "sh000852")
+		if cov.OffBenchmark != 2 || len(members) != 0 {
+			t.Errorf("off_benchmark=%d members=%v, want 2 and none (the symbol is out)", cov.OffBenchmark, symbolsOf(members))
+		}
+	})
+}
+
+func symbolsOf(sets []*groupSet) []string {
+	out := make([]string, 0, len(sets))
+	for _, gs := range sets {
+		out = append(out, gs.Symbol)
+	}
+	return out
+}
+
+func TestCustomRangeSlicesByBenchmark(t *testing.T) {
+	s := newV1Server(t)
+	seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
+	seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-11-12", Bench: "sh000906"})
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-11-30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	periods := []forecastPeriod{{Start: "2026-10-01", End: "2026-11-30", Label: "2026-10..11"}}
+	groups := s.buildForecastGroups(periods, sets, predTestRtype, "2026-12-01", false, time.Time{})
+	if len(groups) != 2 {
+		t.Fatalf("groups = %d, want 2 (one per benchmark)", len(groups))
+	}
+	seen := map[string]bool{}
+	for _, g := range groups {
+		seen[g.Bench] = true
+		if g.Coverage.Member != 1 {
+			t.Errorf("group %q member = %d, want 1", g.Label, g.Coverage.Member)
+		}
+		if !strings.Contains(g.Label, g.Bench) {
+			t.Errorf("label %q does not name the benchmark %q", g.Label, g.Bench)
+		}
+	}
+	if !seen["sh000852"] || !seen["sh000906"] {
+		t.Errorf("benchmarks = %v, want sh000852 and sh000906", seen)
+	}
+}
+
+func TestBenchPromotionAtBoot(t *testing.T) {
+	s := newV1Server(t)
+	if err := s.st.applyForecastBenchState("sh000852", "sh000906", "2026-10"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.October, 20, 4, 0, 0, 0, time.UTC)
+	s.promoteForecastBench(now)
+	if got := s.st.ForecastBench(); got != "sh000906" {
+		t.Errorf("active = %q, want sh000906 after promotion", got)
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "" || from != "" {
+		t.Errorf("after promotion: %q from %q, want both empty", next, from)
+	}
+	rows := auditRows(t, s, AuditForecastBench)
+	if len(rows) != 1 || rows[0].Actor != "system" || !strings.Contains(rows[0].Detail, "promote") {
+		t.Fatalf("promotion audit = %+v, want one system row with reason promote", rows)
+	}
+	// A second boot has nothing due.
+	s.promoteForecastBench(now)
+	if rows := auditRows(t, s, AuditForecastBench); len(rows) != 1 {
+		t.Errorf("a second boot filed %d rows, want 1", len(rows))
+	}
+}
+
+func TestIngestFreezesTheCohortsBenchmark(t *testing.T) {
+	s := newV1Server(t)
+	benches := func() string {
+		var b string
+		if err := s.st.queryRow("SELECT bench_code FROM prediction_sets ORDER BY id DESC LIMIT 1").Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	code, m := ingestPost(t, s, ingestBody(string(predWire(nil))))
+	if code != http.StatusOK {
+		t.Fatalf("ingest: %d %v", code, m)
+	}
+	if got := benches(); got != defaultForecastBench {
+		t.Errorf("frozen bench = %q, want %q", got, defaultForecastBench)
+	}
+
+	// A change that is due for the CURRENT cohort (not yet promoted) is already what ingest reads.
+	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", shanghaiCohort(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	body := replaceOnce(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600161"`)
+	code, m = ingestPost(t, s, body)
+	if code != http.StatusOK {
+		t.Fatalf("second ingest: %d %v", code, m)
+	}
+	if got := benches(); got != "sh000906" {
+		t.Errorf("frozen bench = %q, want sh000906 from the current cohort's schedule", got)
+	}
+}
+
+func TestCancelOfADueScheduleKeepsTheCurrentCohort(t *testing.T) {
+	s := newV1Server(t)
+	// The schedule is effective for the cohort in flight but a boot has not promoted it yet (the
+	// admin's save can be the first request after the boundary). Cancelling must not revert the
+	// cohort to the old code mid-month.
+	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", shanghaiCohort(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if rec := saveForecastSettings(t, s, `{"bench_cancel":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.ForecastBench(); got != "sh000906" {
+		t.Errorf("active = %q, want sh000906: the due schedule is already in force", got)
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "" || from != "" {
+		t.Errorf("after cancel: %q from %q, want both empty", next, from)
+	}
+}
+
+func TestMalformedScheduleIsIgnored(t *testing.T) {
+	s := newV1Server(t)
+	// A restore or an out-of-band edit could leave this behind. It must not apply early or never.
+	s.st.SetSetting(setForecastBenchNext, "sh000906")
+	s.st.SetSetting(setForecastBenchNextFrom, "not-a-month")
+	if got := s.st.ForecastBenchFor(shanghaiCohort(time.Now())); got != defaultForecastBench {
+		t.Errorf("For(current) = %q, want %q: a malformed cohort must not schedule anything", got, defaultForecastBench)
+	}
+	s.promoteForecastBench(time.Now())
+	if got := s.st.ForecastBench(); got != defaultForecastBench {
+		t.Errorf("active = %q after a malformed schedule's promotion, want %q", got, defaultForecastBench)
+	}
+}
+
+func TestCountedSetIDJudgesEachCohortOnItsOwn(t *testing.T) {
+	sets := []PredictionSet{
+		{ID: 1, State: predStateAccepted, MadeAt: "2026-10-18T13:00:00Z", Cohort: "2026-10", BenchCode: "sh000852"},
+		{ID: 2, State: predStateAccepted, MadeAt: "2026-10-19T13:00:00Z", Cohort: "2026-11", BenchCode: "sh000906"},
+	}
+	bench := map[string]string{"2026-10": "sh000852", "2026-11": "sh000906"}
+	forCohort := func(c string) string { return bench[c] }
+	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 1 {
+		t.Errorf("counted = %d, want 1 (the earliest on-benchmark set)", got)
+	}
+	// October's benchmark moved: its set is now off-benchmark, and the November revision is judged
+	// against November's code, not October's.
+	bench["2026-10"] = "sh000905"
+	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 2 {
+		t.Errorf("counted = %d, want 2 (the older set is off-benchmark in its own cohort)", got)
 	}
 }
