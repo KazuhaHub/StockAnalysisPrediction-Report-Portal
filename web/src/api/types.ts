@@ -1395,6 +1395,8 @@ export interface ForecastCoverage {
   mismatch: number
   refused: number
   pending_baseline: number
+  pre_live: number
+  test: number
 }
 
 export interface ForecastCell {

@@ -76,3 +76,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **The test label lives in the existing panel.** A test set now renders the panel (it previously
   returned null when the only set was not accepted) with `forecast.panel.test_run` and without the
   checkpoint table. `counted_set_id` still skips test sets, so it never marks one as counted.
+- **Adversarial review follow-ups (P36).** Fixed before merge: `forecast.state.test` added to all three
+  locales (the other-sets list renders `forecast.state.*`); the panel prefers an accepted set over a
+  newer test set and never shows the counted badge for a test; the test seed pins `made_at`/`made_on`
+  (the ingest path uses the real clock); the "no state UPDATE" guard now scans every non-test `.go`
+  file with a whitespace/case-insensitive regex, not just `forecast_*.go`; a backtest + `run_mode=test`
+  case is pinned; `forecastCoverage.pre_live`/`test` added to the web type and the matrix bar/legend.

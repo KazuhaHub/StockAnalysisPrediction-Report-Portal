@@ -59,9 +59,19 @@ describe('PredictionPanel', () => {
   })
 
   it('labels a test run and shows no checkpoint table', () => {
-    show([{ ...accepted, state: 'test', marks: [] }])
+    show([{ ...accepted, state: 'test', marks: [], counted_in_group: '' }])
     expect(screen.getByText('forecast.panel.test_run')).toBeTruthy()
     expect(screen.queryByText('forecast.panel.checkpoints')).toBeNull()
+    // A test run is never "counted", even if a stale payload says it was.
+    expect(screen.queryByText('forecast.panel.counted')).toBeNull()
+  })
+
+  it('shows the accepted set rather than a newer test set for the same report', () => {
+    show([accepted, { ...accepted, id: 8, state: 'test', marks: [], counted_in_group: '' }], {
+      countedSetID: accepted.id,
+    })
+    expect(screen.getByText('forecast.panel.checkpoints')).toBeTruthy()
+    expect(screen.queryByText('forecast.panel.test_run')).toBeNull()
   })
 
   it('warns when the report body changed after the set was written', () => {

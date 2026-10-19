@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -699,6 +700,18 @@ func TestTestRunIsFrozenAtIngest(t *testing.T) {
 			t.Errorf("run_mode %q: state = %q, want %q", tc.mode, set.State, tc.want)
 		}
 	}
+	// A test run over history is still a test: the declared mode overrides the backtest inference.
+	set, _, errs := classify(t, predWire(func(m map[string]any) {
+		m["run_mode"] = "test"
+		m["information_cutoff"] = "2026-06-01T00:00:00Z"
+	}), predTestRtype)
+	if len(errs) != 0 {
+		t.Fatalf("test run over history refused: %+v", errs)
+	}
+	if set.State != predStateTest {
+		t.Errorf("test run over history: state = %q, want %q", set.State, predStateTest)
+	}
+
 	for _, mode := range []string{"Test", "dry"} {
 		_, _, errs := classify(t, run(mode), predTestRtype)
 		if onlyReason(t, errs) != reasonBadEnum {
@@ -728,10 +741,12 @@ func TestTestRunIsFrozenAtIngest(t *testing.T) {
 // state being frozen at insert (design §7), so any later UPDATE of prediction_sets.state is a bug even
 // if no test has caught it yet.
 func TestNoCodePathUpdatesAPredictionState(t *testing.T) {
-	files, err := filepath.Glob("forecast_*.go")
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Whitespace- and case-insensitive: a guard that a reformat silently defeats is not a guard.
+	update := regexp.MustCompile(`(?i)update\s+prediction_sets\s+set\s+state`)
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -740,7 +755,7 @@ func TestNoCodePathUpdatesAPredictionState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(strings.ToUpper(string(b)), "UPDATE PREDICTION_SETS SET STATE") {
+		if update.Match(b) {
 			t.Errorf("%s updates prediction_sets.state after insert", f)
 		}
 	}

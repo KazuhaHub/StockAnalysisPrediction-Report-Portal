@@ -47,9 +47,11 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   const [open, setOpen] = useState(readOpen)
 
   // A test run is listed here too (P36), so a producer's console run is visibly a test rather than
-  // vanishing. It has no marks and no checkpoint table; only production sets are scored.
-  const shown = sets.filter((s) => s.state === 'accepted' || s.state === 'test')
-  const set = shown.find((s) => s.id === countedSetID) ?? shown[shown.length - 1]
+  // vanishing. It has no marks and no checkpoint table; only production sets are scored. An accepted
+  // set always wins the panel when there is one — a test set must never shadow the record.
+  const accepted = sets.filter((s) => s.state === 'accepted')
+  const tests = sets.filter((s) => s.state === 'test')
+  const set = accepted.find((s) => s.id === countedSetID) ?? accepted[accepted.length - 1] ?? tests[tests.length - 1]
   if (!set) return null
   const isTest = set.state === 'test'
 
@@ -74,11 +76,12 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   const badges = (
     <Space size={[4, 4]} wrap>
       {isTest && <Tag color="purple">{t('forecast.panel.test_run')}</Tag>}
-      {set.counted_in_group ? (
-        <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
-      ) : (
-        <Tag>{t('forecast.panel.not_counted')}</Tag>
-      )}
+      {!isTest &&
+        (set.counted_in_group ? (
+          <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
+        ) : (
+          <Tag>{t('forecast.panel.not_counted')}</Tag>
+        ))}
       <Tag color={set.baseline_check === 'match' ? 'green' : set.baseline_check === 'mismatch' ? 'red' : 'default'}>
         {t(`forecast.panel.baseline.${set.baseline_check}`)}
       </Tag>

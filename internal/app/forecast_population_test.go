@@ -458,6 +458,12 @@ func seedTestSet(t *testing.T, s *Server, symbol, date string) int64 {
 	if err := s.st.queryRow("SELECT id FROM prediction_sets ORDER BY id DESC LIMIT 1").Scan(&setID); err != nil {
 		t.Fatalf("read seeded test set: %v", err)
 	}
+	// Pin the receipt to the requested day, like seedAcceptedSetAt: the ingest path uses the real
+	// clock, and the group query is scoped to a fixed month.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_on=?, made_at=?, cohort=? WHERE id=?`,
+		date, date+"T13:00:00Z", date[:7], setID); err != nil {
+		t.Fatalf("pin seeded test set: %v", err)
+	}
 	return setID
 }
 
