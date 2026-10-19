@@ -140,29 +140,50 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			continue
 		}
 		// One calendar fetch per distinct code, shared by every set frozen with it, so a tick of
-		// fifty sets still costs one index body per benchmark in use.
-		indexSeries, indexErr := e.indexCalendar(ctx, s, spec, group.sets)
-		if indexErr == nil && indexSeries.Kind != quoteKindIndex {
-			// A body the vendor does not call an index cannot settle any mark: the caller would be
-			// comparing a stock's close for the benchmark leg. Source class; nothing is written.
-			indexErr = fmt.Errorf("benchmark %q is not an index (vendor kind %q)", spec.Code, indexSeries.Kind)
-		}
-		if indexErr == nil && hasZeroVolumeBar(indexSeries.Bars) {
-			// An index publishes a bar on every session the exchange is open, and never one with zero
-			// volume. A zero-volume bar means the series is broken for the whole group — an index-wide
-			// fault — so the group waits rather than scoring against it.
-			indexErr = fmt.Errorf("benchmark %q calendar has a zero-volume bar", spec.Code)
-		}
+		// fifty sets still costs one index body per benchmark in use. The fault, if any, names the
+		// refusal code each case must record (fetch_failed / not_index / calendar_bad), so an operator
+		// can tell a vendor outage from a wrong instrument from a broken calendar.
+		indexSeries, fault := e.benchCalendar(ctx, s, spec, group.sets)
 		for _, set := range group.sets {
 			if err := ctx.Err(); err != nil {
 				return nil
 			}
-			if err := e.evaluateSet(ctx, s, set, indexSeries, indexErr); err != nil {
+			if err := e.evaluateSet(ctx, s, set, indexSeries, fault); err != nil {
 				log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 			}
 		}
 	}
 	return nil
+}
+
+// benchFault is a benchmark series that cannot settle a mark, with the refusal code its cause maps to.
+type benchFault struct {
+	code string
+	err  error
+}
+
+// benchCalendar fetches the group's benchmark series and checks it is usable as a calendar. A fetch
+// failure is fetch_failed, a body the vendor does not call an index is not_index, and a zero-volume
+// bar is calendar_bad — three source-class faults with three distinct codes, never one `no_bar`.
+func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec benchSpec, sets []forecastWorkSet) (forecastSeries, *benchFault) {
+	series, err := e.indexCalendar(ctx, s, spec, sets)
+	if err != nil {
+		return series, &benchFault{code: "fetch_failed", err: err}
+	}
+	if series.Kind != quoteKindIndex {
+		// A body the vendor does not call an index cannot settle any mark: the caller would be
+		// comparing a stock's close for the benchmark leg.
+		return series, &benchFault{code: "not_index",
+			err: fmt.Errorf("benchmark %q is not an index (vendor kind %q)", spec.Code, series.Kind)}
+	}
+	if hasZeroVolumeBar(series.Bars) {
+		// An index publishes a bar on every session the exchange is open, and never one with zero
+		// volume. A zero-volume bar means the series is broken for the whole group — an index-wide
+		// fault — so the group waits rather than scoring against it.
+		return series, &benchFault{code: "calendar_bad",
+			err: fmt.Errorf("benchmark %q calendar has a zero-volume bar", spec.Code)}
+	}
+	return series, nil
 }
 
 // benchGroup is the due sets frozen with one benchmark code, in first-appearance order.
@@ -212,16 +233,17 @@ func hasZeroVolumeBar(bars []QuoteBar) bool {
 }
 
 // evaluateSet resolves every due mark of one set, then fills the set's own baseline check.
-func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set forecastWorkSet, indexSeries forecastSeries, indexErr error) error {
-	if indexErr != nil {
+func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set forecastWorkSet, indexSeries forecastSeries, fault *benchFault) error {
+	if fault != nil {
 		// The calendar is a shared dependency: without it no checkpoint date can be trusted, so the
-		// whole set waits rather than guessing. Retryable, and the retry is recorded on the marks.
-		return s.st.DeferForecastSet(set, "no_bar", indexErr)
+		// whole set waits rather than guessing. Retryable, and the retry is recorded on the marks
+		// under the fault's own code (fetch_failed / not_index / calendar_bad).
+		return s.st.DeferForecastSet(set, fault.code, fault.err)
 	}
 	now := e.clock()
 	stockSeries, err := e.rangeBars(ctx, s, set.Market, set.Symbol, shiftDays(set.MadeOn, -predReferenceLagDays), now)
 	if err != nil {
-		return s.st.DeferForecastSet(set, "no_bar", err)
+		return s.st.DeferForecastSet(set, "fetch_failed", err)
 	}
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
 	// Sessions strictly after the receipt date, using the BENCHMARK's calendar so a halted stock

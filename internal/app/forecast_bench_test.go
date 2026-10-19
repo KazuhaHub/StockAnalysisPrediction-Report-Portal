@@ -47,29 +47,30 @@ func TestBenchAllowlistMapsExplicitly(t *testing.T) {
 	}
 
 	// The misroutes marketPrefix would commit: a bare code, a Shenzhen spelling of a Shanghai index,
-	// an ordinary stock, and the empty string. Every one must be refused.
+	// an ordinary stock, its prefixed form, and the empty string. Every one must be refused by
+	// benchSpecFor AND by the settings save (400 forecast_bad_bench), storing nothing.
+	s := newV1Server(t)
 	for _, bad := range []string{"000852", "sz000852", "600519", "sh600519", ""} {
 		if spec, ok := benchSpecFor(bad); ok {
 			t.Errorf("benchSpecFor(%q) = %+v, want refused", bad, spec)
 		}
+		rec := httptest.NewRecorder()
+		s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast",
+			strBody(`{"bench":"`+bad+`"}`)), "admin")
+		if rec.Code != http.StatusBadRequest || !hasCode(rec.Body.Bytes(), "forecast_bad_bench") {
+			t.Errorf("settings bench=%q status = %d body = %s, want 400 forecast_bad_bench", bad, rec.Code, rec.Body.String())
+		}
+		if s.st.ForecastBench() != defaultForecastBench {
+			t.Errorf("a refused benchmark %q was stored: %q", bad, s.st.ForecastBench())
+		}
 	}
+
 	// And the four allowlisted codes resolve.
 	for _, good := range []string{"sh000300", "sh000905", "sh000852", "sh000906"} {
 		spec, ok := benchSpecFor(good)
 		if !ok || spec.Market == "" || spec.Sym == "" {
 			t.Errorf("benchSpecFor(%q) refused an allowlisted code", good)
 		}
-	}
-
-	// The settings save refuses a code outside the allowlist, and STORES nothing on a refusal.
-	s := newV1Server(t)
-	rec := httptest.NewRecorder()
-	s.apiForecastSettingsSave(rec, httptest.NewRequest("POST", "/api/admin/forecast", strBody(`{"bench":"sz000852"}`)), "admin")
-	if rec.Code != http.StatusBadRequest || !hasCode(rec.Body.Bytes(), "forecast_bad_bench") {
-		t.Fatalf("sz000852 status = %d body = %s, want 400 forecast_bad_bench", rec.Code, rec.Body.String())
-	}
-	if s.st.ForecastBench() != defaultForecastBench {
-		t.Errorf("a refused benchmark was stored: %q", s.st.ForecastBench())
 	}
 }
 
@@ -106,18 +107,19 @@ func TestBenchGetListsTheAllowlist(t *testing.T) {
 
 // TestEvaluatorFetchesEachFrozenBenchmark is the F02 pin: two sets frozen with two different codes in
 // one tick cause two calendar fetches, each with the right (market, code), and each mark's benchmark
-// return is measured from its OWN index fixture.
+// return is measured from its OWN index fixture — asserted against a value computed from that fixture,
+// not merely against "the two differ".
 func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 	s := newV1Server(t)
-	// A single index fixture, but two frozen codes: if the tick fetches by code, both stocks resolve
-	// against their own body. The returns differ between the two fixtures, so a shared body is caught.
 	sh000852 := indexFixtureBody(t, "sh000852")
 	sh000906 := indexFixtureBody(t, "sh000906")
 
-	// Two sets, one per code, both with d5 due.
+	const madeOn = "2026-03-02"
+	// Two sets, one per code, both with d5 due. The stock series starts on S0 and is flat, so the
+	// benchmark leg is exercised by the index alone and its expected value is computable by hand.
 	for _, tc := range []struct{ sym, code string }{{"600160", "sh000852"}, {"600161", "sh000906"}} {
-		setID := seedAcceptedSet(t, s, tc.sym, "2026-03-02")
-		if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-03-02', made_at='2026-03-02T13:00:00Z', bench_code=? WHERE id=?", tc.code, setID); err != nil {
+		setID := seedAcceptedSet(t, s, tc.sym, madeOn)
+		if _, err := s.st.exec("UPDATE prediction_sets SET made_on=?, made_at='2026-03-02T13:00:00Z', bench_code=? WHERE id=?", madeOn, tc.code, setID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,6 +129,11 @@ func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
+		// An index is published by Shanghai: any other market means the routing is wrong, and the test
+		// says so rather than serving a body that would mask it.
+		if market != "sh" {
+			return nil, fmt.Errorf("fetch for market %q: an index is only ever sh", market)
+		}
 		fetched = append(fetched, fetchKey{market, code})
 		switch code {
 		case "000852":
@@ -156,9 +163,13 @@ func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 		t.Fatalf("index fetches = %d, want 2 (one per distinct frozen code); all fetches: %v", indexFetches, fetched)
 	}
 
-	// Each set's d5 resolved with a benchmark return drawn from ITS index, and the two differ.
-	benchFor := func(symbol string) *int32 {
-		var v *int32
+	// The expected benchmark return for each code, computed from that code's own fixture: the index
+	// close on the d5 session over its close on S0. A mark routed to the wrong index cannot match.
+	want := func(resp *QuoteResp) int32 {
+		return expectedBenchRetBp(t, resp, madeOn)
+	}
+	benchFor := func(symbol string) int32 {
+		var v int32
 		if err := s.st.queryRow(`SELECT pm.bench_ret_bp FROM prediction_marks pm
 			JOIN prediction_sets ps ON ps.id = pm.set_id
 			WHERE ps.symbol=? AND pm.checkpoint='d5'`, symbol).Scan(&v); err != nil {
@@ -166,15 +177,35 @@ func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 		}
 		return v
 	}
-	a, b := benchFor("600160"), benchFor("600161")
-	if a == nil || b == nil {
-		t.Fatalf("a benchmark return is missing: 852=%v 906=%v", a, b)
+	if got, w := benchFor("600160"), want(sh000852); got != w {
+		t.Errorf("600160 (sh000852) bench_ret_bp = %d, want %d from its own index", got, w)
 	}
-	// The two indexes are at different levels, so the ratios over the same window differ. Under the
-	// F02 bug (one body shared from sets[0]) both marks would carry the SAME ratio.
-	if *a == *b {
-		t.Errorf("both marks carry bench_ret_bp=%d; the second set was scored against the first set's index", *a)
+	if got, w := benchFor("600161"), want(sh000906); got != w {
+		t.Errorf("600161 (sh000906) bench_ret_bp = %d, want %d from its own index", got, w)
 	}
+}
+
+// expectedBenchRetBp derives the d5 benchmark return for a fixture: the index close on the fifth
+// session after made_on over its close on S0 (the first session after made_on), in basis points.
+// It reads the fixture's own bars, so it is an independent check of the evaluator's routing.
+func expectedBenchRetBp(t *testing.T, resp *QuoteResp, madeOn string) int32 {
+	t.Helper()
+	var sessions []string
+	for _, b := range resp.Bars {
+		if b.Date > madeOn {
+			sessions = append(sessions, b.Date)
+		}
+	}
+	if len(sessions) < 5 {
+		t.Fatalf("fixture has %d sessions after %s, need at least 5 for d5", len(sessions), madeOn)
+	}
+	s0, d5 := sessions[0], sessions[4]
+	s0Close := barOn(resp.Bars, s0)
+	d5Close := barOn(resp.Bars, d5)
+	if s0Close == nil || d5Close == nil {
+		t.Fatalf("fixture is missing a bar on %s or %s", s0, d5)
+	}
+	return bpFromRatio(d5Close.Close, s0Close.Close)
 }
 
 // TestBenchmarkBodyMustBeAnIndex: a body the vendor does not call an index cannot settle a mark.
@@ -188,31 +219,27 @@ func TestBenchmarkBodyMustBeAnIndex(t *testing.T) {
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
-		if code == "000852" {
-			// A STOCK body for the index's code.
-			return &QuoteResp{Bars: stock, Kind: quoteKindStock, Snapshot: QuoteSnapshot{AsOf: "2026-03-20T15:00:01+08:00"}}, nil
+		if market != "sh" {
+			return nil, fmt.Errorf("fetch for market %q: an index is only ever sh", market)
 		}
+		// A STOCK body for the index's code.
 		return &QuoteResp{Bars: stock, Kind: quoteKindStock, Snapshot: QuoteSnapshot{AsOf: "2026-03-20T15:00:01+08:00"}}, nil
 	}
 	if err := e.tick(s); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
-	// Nothing resolved: the only write is the deferral of the pending marks.
+	// Nothing resolved, and the marks carry the not_index code — not the generic no_bar.
 	var resolved int
 	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE status=?", markResolved).Scan(&resolved)
 	if resolved != 0 {
 		t.Errorf("%d marks resolved against a stock body for the benchmark", resolved)
 	}
-	var refused int
-	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE status=? AND refusal='no_bar'", markRefused).Scan(&refused)
-	if refused == 0 {
-		t.Error("a not-index benchmark body produced no deferral; the marks were neither resolved nor refused")
-	}
+	assertAllMarksRefusedTo(t, s.st, "not_index")
 }
 
 // TestZeroVolumeIndexBarDefersTheGroup: an index body with a zero-volume bar is a broken calendar, so
-// the group waits rather than scoring against it. (The attempts/finality half of this property is
-// P1's; see TestSourceFailuresAreNotMarkSpecific.)
+// the group waits rather than scoring against it, and the marks carry the calendar_bad code. (The
+// attempts/finality half of this property is P1's; see TestSourceFailuresAreNotMarkSpecific.)
 func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-03-02")
@@ -224,6 +251,9 @@ func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
+		if market != "sh" {
+			return nil, fmt.Errorf("fetch for market %q: an index is only ever sh", market)
+		}
 		if code == "000852" {
 			return &QuoteResp{Bars: indexBars, Kind: quoteKindIndex, Snapshot: QuoteSnapshot{AsOf: "2026-03-20T15:00:01+08:00"}}, nil
 		}
@@ -236,6 +266,62 @@ func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
 	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE status=?", markResolved).Scan(&resolved)
 	if resolved != 0 {
 		t.Errorf("%d marks resolved against a zero-volume index body", resolved)
+	}
+	assertAllMarksRefusedTo(t, s.st, "calendar_bad")
+}
+
+// TestBenchFetchFailureIsFetchFailed: a benchmark fetch that errors carries the fetch_failed code,
+// distinct from not_index and calendar_bad.
+func TestBenchFetchFailureIsFetchFailed(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSet(t, s, "600160", "2026-03-02")
+	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-03-02', made_at='2026-03-02T13:00:00Z', bench_code='sh000852' WHERE id=?", setID); err != nil {
+		t.Fatal(err)
+	}
+	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
+	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
+		if code == "000852" {
+			return nil, fmt.Errorf("vendor unreachable")
+		}
+		return &QuoteResp{Bars: stock, Kind: quoteKindStock, Snapshot: QuoteSnapshot{AsOf: "2026-03-20T15:00:01+08:00"}}, nil
+	}
+	if err := e.tick(s); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	var resolved int
+	s.st.queryRow("SELECT COUNT(*) FROM prediction_marks WHERE status=?", markResolved).Scan(&resolved)
+	if resolved != 0 {
+		t.Errorf("%d marks resolved after a benchmark fetch failure", resolved)
+	}
+	assertAllMarksRefusedTo(t, s.st, "fetch_failed")
+}
+
+// assertAllMarksRefusedTo asserts that the set has at least one refused mark and that every refused
+// mark carries the expected refusal code (so a partial or mixed-code write cannot pass).
+func assertAllMarksRefusedTo(t *testing.T, st *Store, code string) {
+	t.Helper()
+	total, matching := 0, 0
+	rows, err := st.query(`SELECT refusal FROM prediction_marks WHERE status=?`, markRefused)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		total++
+		if r == code {
+			matching++
+		}
+	}
+	if total == 0 {
+		t.Fatalf("no refused marks; expected them refused to %q", code)
+	}
+	if matching != total {
+		t.Errorf("%d of %d refused marks carry %q, want all", matching, total, code)
 	}
 }
 
