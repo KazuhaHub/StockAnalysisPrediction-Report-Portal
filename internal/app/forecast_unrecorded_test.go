@@ -8,9 +8,12 @@ package app
 // (P5) and a floor captured with it bound the count to the ledger's own lifetime.
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,40 +47,52 @@ func TestUnrecordedIsHiddenUntilTheLedgerStartIsSet(t *testing.T) {
 	}
 }
 
-// TestUnrecordedFloorFromIngestAudit is the B1 pin: pre-ledger covered reports count 0, a covered
-// report created after the ledger start with no set counts 1, a manual version counts 0, and deleting
-// the audit rows afterwards does not move the floor.
+// TestUnrecordedFloorFromIngestAudit is the B1 pin: the floor comes from the created ingest audit
+// rows after the ledger start, and the count excludes pre-ledger reports, reports that have a set,
+// hand-written reports, and other report types.
 func TestUnrecordedFloorFromIngestAudit(t *testing.T) {
 	st := newTestStore(t)
-	// A batch of pre-ledger covered reports. (The production number was 1259; the shape is the same.)
-	const preLedger = 40
-	lastPre := int64(0)
-	for i := 0; i < preLedger; i++ {
-		lastPre = seedReportOnly(t, st, "600"+pad3(i), "2020-01-05", "")
+	from := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
+	// Pre-ledger covered reports, with audit rows before the boundary.
+	for i := 0; i < 40; i++ {
+		id := seedReportOnly(t, st, "600"+pad3(i), "2020-01-05", "")
+		seedIngestAudit(t, st, id, from.Add(-time.Hour))
 	}
-	// The ledger start is set now; there are no sets, so the bound and maturity checks are vacuous and
-	// the floor falls back to MAX(reports.id) = the last pre-ledger report.
-	now := time.Now().UTC()
-	if _, _, code, err := st.SaveForecastPopulationFrom(now, now); err != nil || code != "" {
+	// Two reports created after the boundary but WITH a set: they must not be counted, and their ids
+	// pin the floor's "min - 1" arithmetic.
+	for i := 0; i < 2; i++ {
+		sym := "602" + pad3(i)
+		id := seedReportOnly(t, st, sym, "2020-06-08", "")
+		seedIngestAudit(t, st, id, from.Add(time.Hour))
+		if _, _, err := st.InsertPredictionSet(id, &predSetRow{
+			Symbol: sym, Rtype: predTestRtype, MadeAt: "2020-06-08T13:00:00Z", MadeOn: "2020-06-08",
+			Cohort: "2020-06", Zone: predZone, State: predStateAccepted, PayloadSHA: "sha-" + sym,
+		}, nil); err != nil {
+			t.Fatalf("seed set: %v", err)
+		}
+	}
+	if _, _, code, err := st.SaveForecastPopulationFrom(from, time.Now().UTC()); err != nil || code != "" {
 		t.Fatalf("save: code=%q err=%v", code, err)
 	}
+	if floor, ok := st.forecastUnrecordedFloor(); !ok || floor != 40 {
+		t.Fatalf("floor = %d ok=%v, want 40 (min post-boundary id 41 minus one; the audit branch)", floor, ok)
+	}
 	if n, _, ok, err := st.countForecastUnrecorded(predTestRtype); err != nil || !ok || n != 0 {
-		t.Fatalf("pre-ledger count = %d ok=%v err=%v, want 0", n, ok, err)
+		t.Fatalf("count = %d ok=%v err=%v, want 0 (the two post-boundary reports have sets)", n, ok, err)
 	}
 
-	// A covered report created after the ledger start with no set counts 1.
-	postID := seedReportOnly(t, st, "600999", "2020-01-06", "")
-	if postID <= lastPre {
-		t.Fatalf("setup: post-ledger report id %d is not after the floor %d", postID, lastPre)
+	// A covered report after the boundary with no set counts 1.
+	seedReportOnly(t, st, "602999", "2020-06-09", "")
+	// A manual report counts 0.
+	seedReportOnly(t, st, "602998", "2020-06-09", manualVersionName)
+	// A report of another rtype counts 0 for this rtype.
+	otherID, _, err := st.UpsertReport(Rep{Symbol: "602997", Date: "2020-06-09", RType: "行业分析", MD: "b"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	_ = otherID
 	if n, since, ok, err := st.countForecastUnrecorded(predTestRtype); err != nil || !ok || n != 1 {
-		t.Fatalf("post-ledger count = %d since=%q ok=%v err=%v, want 1", n, since, ok, err)
-	}
-
-	// A hand-written (manual) report counts 0: it is not a workflow ingest and never was.
-	seedReportOnly(t, st, "600998", "2020-01-06", manualVersionName)
-	if n, _, _, _ := st.countForecastUnrecorded(predTestRtype); n != 1 {
-		t.Errorf("count = %d after a manual report, want 1 (manual is excluded)", n)
+		t.Fatalf("count = %d since=%q ok=%v err=%v, want 1", n, since, ok, err)
 	}
 
 	// Deleting every ingest audit row does not move the stored floor.
@@ -134,40 +149,98 @@ func TestUnrecordedFloorReDerivedOnRestore(t *testing.T) {
 	}
 }
 
-// TestStoreFailedEmitsWebhook: the second-failure branch fires predictions.store_failed with the
-// report identity, and the event is offered to subscribers.
+// TestStoreFailedEmitsWebhook: the second-failure branch fires predictions.store_failed exactly
+// once, with the report identity, and a successful ingest sends nothing.
 func TestStoreFailedEmitsWebhook(t *testing.T) {
 	if !containsStr(availableEvents(), EventPredictionsStoreFailed) {
 		t.Fatal("predictions.store_failed is not in availableEvents()")
 	}
 	s := newV1Server(t)
+	type delivery struct{ event, body string }
+	got := make(chan delivery, 4)
 	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- delivery{r.Header.Get("X-Report-Portal-Event"), string(b)}
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(io.Discard, r.Body)
 	}))
 	defer recv.Close()
-	whID, err := s.st.CreateWebhook(recv.URL, []string{EventPredictionsStoreFailed}, "")
-	if err != nil {
+	if _, err := s.st.CreateWebhook(recv.URL, []string{EventPredictionsStoreFailed}, ""); err != nil {
 		t.Fatal(err)
 	}
-	// Break the ledger write so the ingest takes the store-failed branch.
+
+	// A successful ingest must deliver nothing.
+	if code, m := ingestPost(t, s, ingestBody(string(predWire(nil)))); code != http.StatusOK || m["predictions_status"] != predStateAccepted {
+		t.Fatalf("setup ingest: %d %v", code, m)
+	}
+	select {
+	case d := <-got:
+		t.Fatalf("a successful ingest delivered %s: %s", d.event, d.body)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	// Break the ledger write so the next ingest takes the store-failed branch.
 	if _, err := s.st.exec(`DROP TABLE prediction_claims`); err != nil {
 		t.Fatal(err)
 	}
-	code, m := ingestPost(t, s, ingestBody(string(predWire(nil))))
+	// A DIFFERENT identity, so the ledger actually attempts the insert (an identical one is a
+	// duplicate and never touches the dropped table).
+	failing := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600161"`, 1)
+	code, m := ingestPost(t, s, failing)
 	if code != http.StatusOK || m["predictions_status"] != "store_failed" {
 		t.Fatalf("ingest: %d %v", code, m)
 	}
-	// The delivery is asynchronous; poll the subscriber's recorded status for a 2xx.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		var status int
-		if err := s.st.queryRow(`SELECT last_status FROM webhooks WHERE id=?`, whID).Scan(&status); err == nil && status == http.StatusOK {
-			return
+	select {
+	case d := <-got:
+		if d.event != EventPredictionsStoreFailed {
+			t.Fatalf("event = %q, want %q", d.event, EventPredictionsStoreFailed)
 		}
-		time.Sleep(50 * time.Millisecond)
+		for _, k := range []string{"report_id", "symbol", "rtype", "made_at", "error"} {
+			if !strings.Contains(d.body, `"`+k+`"`) {
+				t.Errorf("payload missing %q: %s", k, d.body)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no predictions.store_failed delivery")
 	}
-	t.Fatal("no successful predictions.store_failed delivery")
+	// Exactly one: a duplicate would page twice.
+	select {
+	case d := <-got:
+		t.Fatalf("a second delivery arrived: %s", d.event)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestEveryWebhookEventHasALabel keeps the event registry and the webhook UI in step: the UI labels
+// each event with `webhook.event.<code>`, so an event without a label renders as a raw identifier.
+func TestEveryWebhookEventHasALabel(t *testing.T) {
+	dir := filepath.Join("..", "..", "web", "src", "locales")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("locale bundles not present: %v", err)
+	}
+	checked := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		var labels map[string]string
+		if err := json.Unmarshal(raw, &labels); err != nil {
+			t.Fatalf("parse %s: %v", e.Name(), err)
+		}
+		checked++
+		for _, event := range availableEvents() {
+			if strings.TrimSpace(labels["webhook.event."+event]) == "" {
+				t.Errorf("%s has no webhook.event.%s, so the UI would show the raw event code", e.Name(), event)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no locale bundles were checked")
+	}
 }
 
 func pad3(i int) string {

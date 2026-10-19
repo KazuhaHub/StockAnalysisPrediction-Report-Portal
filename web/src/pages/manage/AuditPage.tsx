@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router'
 import { auditTime } from '../../lib/auditTime'
 import { formatRegion } from '../../lib/geo'
 import {
@@ -228,10 +229,13 @@ export default function AuditPage() {
   // tablet has about 600px of content for a table that wants 1040, and cards read better there
   // than a table scrolled sideways with the detail column off the edge.
   const mobile = !Grid.useBreakpoint().lg
+  const [params] = useSearchParams()
   const [data, setData] = useState<AuditResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
-  const [action, setAction] = useState<string>()
+  // Seed the action filter from `?action=`, so a link from an incident surface (the
+  // store-failure line, the ledger-start audit link) opens already filtered.
+  const [action, setAction] = useState<string | undefined>(() => params.get('action') ?? undefined)
   const [row, setRow] = useState<AuditEntry | null>(null) // the row opened in full
   const [actor, setActor] = useState('')
   const [ip, setIP] = useState('')

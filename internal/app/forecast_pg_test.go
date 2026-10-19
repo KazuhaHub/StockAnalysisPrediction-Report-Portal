@@ -185,3 +185,48 @@ func clearForecastPopulation(t *testing.T, st *Store) {
 		t.Fatalf("clean %s: %v", setForecastPopulationFrom, err)
 	}
 }
+
+// TestPostgresUnrecordedFloorAndRestore covers P2's floor on Postgres: captured at save, counted with
+// the same exclusions, and re-derived through a restore that lacks the keys.
+func TestPostgresUnrecordedFloorAndRestore(t *testing.T) {
+	st := pgStore(t, "prediction_sets", "reports", "audit_log")
+	for _, k := range []string{setForecastPopulationFrom, setForecastUnrecordedFloorID, setForecastUnrecordedFloorAt, setForecastUnrecordedFloorMethod} {
+		if _, err := st.exec(`DELETE FROM meta WHERE k=?`, k); err != nil {
+			t.Fatalf("clean %s: %v", k, err)
+		}
+	}
+	from := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
+	// Two pre-boundary covered reports, with audit rows before the boundary.
+	for i := 0; i < 2; i++ {
+		id := seedReportOnly(t, st, "603"+pad3(i), "2020-01-05", "")
+		seedIngestAudit(t, st, id, from.Add(-time.Hour))
+	}
+	if _, _, code, err := st.SaveForecastPopulationFrom(from, time.Now().UTC()); err != nil || code != "" {
+		t.Fatalf("save: code=%q err=%v", code, err)
+	}
+	if _, ok := st.forecastUnrecordedFloor(); !ok {
+		t.Fatal("the floor was not captured on Postgres")
+	}
+	// A post-boundary covered report with no set counts 1. It still has a created ingest audit row,
+	// as every ingest does (the audit is written before the ledger write).
+	postID := seedReportOnly(t, st, "603999", "2020-06-09", "")
+	seedIngestAudit(t, st, postID, from.Add(time.Hour))
+	if n, _, ok, err := st.countForecastUnrecorded(predTestRtype); err != nil || !ok || n != 1 {
+		t.Fatalf("count = %d ok=%v err=%v, want 1", n, ok, err)
+	}
+
+	// A dump without the floor keys, restored into a database with the boundary, re-derives them.
+	dump := dropMetaRow(t, dumpOf(t, st), setForecastUnrecordedFloorID)
+	dump = dropMetaRow(t, dump, setForecastUnrecordedFloorAt)
+	dump = dropMetaRow(t, dump, setForecastUnrecordedFloorMethod)
+	dst := pgStore(t, "prediction_sets", "reports", "audit_log")
+	if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if _, ok := dst.forecastUnrecordedFloor(); !ok {
+		t.Fatal("the restore did not re-derive the floor")
+	}
+	if n, _, ok, err := dst.countForecastUnrecorded(predTestRtype); err != nil || !ok || n != 1 {
+		t.Fatalf("count after restore = %d ok=%v err=%v, want 1", n, ok, err)
+	}
+}

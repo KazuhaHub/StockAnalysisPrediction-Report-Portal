@@ -212,19 +212,8 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	// The floor for "unrecorded" (P2): captured here, inside the same transaction as the boundary, so
 	// it is a single snapshot of "which reports existed when the ledger began". Later audit retention
 	// cannot move it.
-	floorID, floorMethod, err := captureUnrecordedFloor(migExec{s: s, ex: tx}, from)
-	if err != nil {
+	if err := storeUnrecordedFloor(migExec{s: s, ex: tx}, from); err != nil {
 		return nil, byState, "", err
-	}
-	txe := migExec{s: s, ex: tx}
-	for k, v := range map[string]string{
-		setForecastUnrecordedFloorID:     strconv.FormatInt(floorID, 10),
-		setForecastUnrecordedFloorAt:     from.UTC().Format(time.RFC3339),
-		setForecastUnrecordedFloorMethod: floorMethod,
-	} {
-		if err := txe.setSetting(k, v); err != nil {
-			return nil, byState, "", err
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -255,17 +244,20 @@ func captureUnrecordedFloor(e migExec, from time.Time) (int64, string, error) {
 	var minID int64
 	found := false
 	for rows.Next() {
-		var targetID, detail string
+		var targetID, detail sql.NullString
 		if err := rows.Scan(&targetID, &detail); err != nil {
 			return 0, "", err
+		}
+		if !targetID.Valid || !detail.Valid {
+			continue
 		}
 		var d struct {
 			Created bool `json:"created"`
 		}
-		if json.Unmarshal([]byte(detail), &d) != nil || !d.Created {
+		if json.Unmarshal([]byte(detail.String), &d) != nil || !d.Created {
 			continue
 		}
-		id, err := strconv.ParseInt(targetID, 10, 64)
+		id, err := strconv.ParseInt(targetID.String, 10, 64)
 		if err != nil {
 			continue
 		}
@@ -289,21 +281,62 @@ func captureUnrecordedFloor(e migExec, from time.Time) (int64, string, error) {
 	return maxID, "max_id", nil
 }
 
-// forecastUnrecordedFloor returns the stored floor, re-deriving it read-only from the ledger start
-// when the keys are absent (a database whose boundary predates P2, or a restore that could not read
-// them). ok=false when the ledger start is not set.
-func (s *Store) forecastUnrecordedFloor(from time.Time) (int64, bool, error) {
+// forecastUnrecordedFloor returns the floor captured when the ledger start was set. ok=false when it
+// is absent: the count then shows nothing rather than being re-derived on a read path, because
+// re-deriving after the audit retention window has moved would read MAX(reports.id) and perpetually
+// return 0. The floor is captured at save time and re-derived once by a restore (finishRestore) and at
+// boot for a database whose boundary predates this key.
+func (s *Store) forecastUnrecordedFloor() (int64, bool) {
 	raw := s.GetSetting(setForecastUnrecordedFloorID, "")
-	if raw != "" {
-		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			return id, true, nil
+	if raw == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// storeUnrecordedFloor derives the floor from the ledger start and writes the three keys on the given
+// executor. Used by the save (tx), by finishRestore (tx) and by the boot ensure (pool).
+func storeUnrecordedFloor(e migExec, from time.Time) error {
+	floorID, method, err := captureUnrecordedFloor(e, from)
+	if err != nil {
+		return err
+	}
+	for k, v := range map[string]string{
+		setForecastUnrecordedFloorID:     strconv.FormatInt(floorID, 10),
+		setForecastUnrecordedFloorAt:     from.UTC().Format(time.RFC3339),
+		setForecastUnrecordedFloorMethod: method,
+	} {
+		if err := e.setSetting(k, v); err != nil {
+			return err
 		}
 	}
-	id, _, err := captureUnrecordedFloor(s.poolExec(), from)
-	if err != nil {
-		return 0, false, err
+	return nil
+}
+
+// EnsureForecastUnrecordedFloor runs at boot: if a ledger start exists but the floor keys do not (a
+// database whose boundary was set before P2 shipped, or a restore that could not read them), derive
+// and persist them once through a short transaction. Idempotent.
+func (s *Store) EnsureForecastUnrecordedFloor() error {
+	from, ok := s.ForecastPopulationFrom()
+	if !ok {
+		return nil
 	}
-	return id, true, nil
+	if _, has := s.forecastUnrecordedFloor(); has {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	if err := storeUnrecordedFloor(migExec{s: s, ex: tx}, from); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // firstCohortMature reports whether any official cell of the ledger's first covered cohort is already

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { MemoryRouter } from 'react-router'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, Grid } from 'antd'
@@ -68,11 +69,13 @@ const reachable = (el: Element | null): boolean => {
 const detailText = (container: HTMLElement) =>
   [...container.querySelectorAll('.rp-audit-detail')].map((d) => d.textContent).join('\n')
 
-const mount = () =>
+const mount = (initial = '/manage/audit') =>
   render(
-    <App>
-      <AuditPage />
-    </App>,
+    <MemoryRouter initialEntries={[initial]}>
+      <App>
+        <AuditPage />
+      </App>
+    </MemoryRouter>,
   )
 
 // jsdom's matchMedia never matches, so antd would report every breakpoint as absent and the page
@@ -85,6 +88,15 @@ describe('AuditPage', () => {
     apiMock.get.mockReset()
     apiMock.get.mockResolvedValue(RESP)
     screenWidth(true)
+  })
+
+  it('seeds the action filter from the URL so incident links open filtered', async () => {
+    mount('/manage/audit?action=predictions.store_failed')
+    await waitFor(() =>
+      expect(
+        apiMock.get.mock.calls.some(([u]) => String(u).includes('action=predictions.store_failed')),
+      ).toBe(true),
+    )
   })
 
   it('names the OU the actor was in, rather than showing a bare id', async () => {

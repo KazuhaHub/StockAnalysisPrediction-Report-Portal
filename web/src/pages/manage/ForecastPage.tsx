@@ -212,8 +212,9 @@ export default function ForecastPage() {
                     showIcon
                     title={
                       <>
+                        <Typography.Text strong>{u.rtype}</Typography.Text>{' '}
                         {t('forecast.cov.unrecorded_since', {
-                          since: u.since.slice(0, 10),
+                          since: dayjs(u.since).utcOffset(8 * 60).format('YYYY-MM-DD'),
                           n: u.n,
                           m: u.store_failed_30d,
                         })}{' '}

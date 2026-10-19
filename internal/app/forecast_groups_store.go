@@ -140,11 +140,10 @@ func (s *Store) countForecastUnrecorded(rtype string) (n int, since string, ok b
 	if !has {
 		return 0, "", false, nil
 	}
-	floor, hasFloor, err := s.forecastUnrecordedFloor(from)
-	if err != nil {
-		return 0, "", false, err
-	}
+	floor, hasFloor := s.forecastUnrecordedFloor()
 	if !hasFloor {
+		// The floor was never captured (a boundary set before P2, or a restore that could not read
+		// it). Show nothing rather than re-deriving on a read path; boot/restore persists it.
 		return 0, "", false, nil
 	}
 	err = s.queryRow(`SELECT COUNT(*) FROM reports r

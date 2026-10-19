@@ -47,16 +47,17 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		population["candidates"] = []populationCandidate{}
 	}
 	// Unrecorded covered reports since the ledger start (P2), and recent ledger store failures. `ok`
-	// says whether the boundary is set; the count is 0 and meaningless until it is.
+	// says whether the boundary is set; the count is 0 and meaningless until it is. Store failures are
+	// ledger-wide (not per rtype), so they are computed once.
 	unrecorded := make([]map[string]any, 0, len(predictionRtypes))
 	thirtyDaysAgo := time.Now().UTC().AddDate(0, 0, -30)
+	failed, err := s.st.countPredictionsStoreFailed(thirtyDaysAgo)
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
 	for rtype := range predictionRtypes {
 		n, since, ok, err := s.st.countForecastUnrecorded(rtype)
-		if err != nil {
-			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-			return
-		}
-		failed, err := s.st.countPredictionsStoreFailed(thirtyDaysAgo)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
