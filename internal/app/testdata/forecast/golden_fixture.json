@@ -1,0 +1,3009 @@
+{
+  "rtype": "投资决策建议",
+  "bench_code": "sh000852",
+  "months": [
+    {
+      "label": "2025-04",
+      "sets": [
+        {
+          "symbol": "600201",
+          "report_title": "600201 2025-04 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600201",
+          "made_on": "2025-04-10",
+          "made_at": "2025-04-10T09:00:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "degraded",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11000,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-04-11",
+            "base_date": "2025-04-11",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d5": {
+              "status": "resolved",
+              "close_fen": 10200,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 200,
+              "bench_ret_bp": 20
+            }
+          }
+        },
+        {
+          "symbol": "600201",
+          "report_title": "600201 2025-04 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600201",
+          "made_on": "2025-04-10",
+          "made_at": "2025-04-10T11:00:00+08:00",
+          "share_report_with_previous": true,
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11500,
+            "p_profit_bp": 6500,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-04-11",
+            "base_date": "2025-04-11",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d5": {
+              "status": "resolved",
+              "close_fen": 10300,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 300,
+              "bench_ret_bp": 40
+            }
+          }
+        },
+        {
+          "symbol": "600202",
+          "report_title": "600202 2025-04 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600202",
+          "made_on": "2025-04-10",
+          "made_at": "2025-04-10T10:00:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 12000,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": false,
+            "s0_date": "2025-04-11",
+            "base_date": "2025-04-11",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d5": {
+              "status": "resolved",
+              "close_fen": 10400,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 400,
+              "bench_ret_bp": 60
+            }
+          }
+        },
+        {
+          "symbol": "600203",
+          "report_title": "600203 2025-04 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600203",
+          "made_on": "2025-04-10",
+          "made_at": "2025-04-10T10:00:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 12500,
+            "p_profit_bp": 7500,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": false,
+            "index_has_s0": false,
+            "s0_date": "2025-04-11",
+            "base_date": "2025-04-11",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d5": {
+              "status": "pending"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "2025-05",
+      "sets": [
+        {
+          "symbol": "600100",
+          "report_title": "600100 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600100",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:00:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10499,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10295,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 295,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10265,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 265,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10250,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10280,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 280,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600101",
+          "report_title": "600101 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600101",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:01:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10500,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10335,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 335,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10305,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 305,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10290,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10320,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 320,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10270,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 270,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600102",
+          "report_title": "600102 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600102",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:02:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 10501,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10375,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 375,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10345,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 345,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10300,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 300,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600103",
+          "report_title": "600103 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600103",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:03:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 8800,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10130,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 130,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10110,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 110,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10100,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 100,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10120,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 120,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600104",
+          "report_title": "600104 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600104",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:04:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11400,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10455,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 455
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10425,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 425
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10410,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 410
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10440,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 440
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600105",
+          "report_title": "600105 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600105",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:05:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 9400,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10495,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 495,
+              "bench_ret_bp": 130,
+              "corp_action": true
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10465,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 465,
+              "bench_ret_bp": 110,
+              "corp_action": true
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10450,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 450,
+              "bench_ret_bp": 100,
+              "corp_action": true
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10480,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 480,
+              "bench_ret_bp": 120,
+              "corp_action": true
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70,
+              "corp_action": true
+            }
+          }
+        },
+        {
+          "symbol": "600106",
+          "report_title": "600106 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600106",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:06:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10800,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10535,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 535,
+              "bench_ret_bp": 130,
+              "halted": true
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10505,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 505,
+              "bench_ret_bp": 110,
+              "halted": true
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10490,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 490,
+              "bench_ret_bp": 100,
+              "halted": true
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10520,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 520,
+              "bench_ret_bp": 120,
+              "halted": true
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10270,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 270,
+              "bench_ret_bp": 70,
+              "halted": true
+            }
+          }
+        },
+        {
+          "symbol": "600107",
+          "report_title": "600107 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600107",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:07:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9000,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10295,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 295,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10265,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 265,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10250,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10280,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 280,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10300,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 300,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600108",
+          "report_title": "600108 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600108",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:08:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 11200,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10335,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 335,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10305,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 305,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10290,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10320,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 320,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600109",
+          "report_title": "600109 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600109",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:09:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 8600,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10375,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 375,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10345,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 345,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600110",
+          "report_title": "600110 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600110",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:10:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10600,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10415,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 415,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10385,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 385,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10370,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 370,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10400,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 400,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600111",
+          "report_title": "600111 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600111",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:11:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 9200,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10455,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 455,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10425,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 425,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10410,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 410,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10440,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 440,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10270,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 270,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600112",
+          "report_title": "600112 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600112",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:12:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11000,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10495,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 495,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10465,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 465,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10450,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 450,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10480,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 480,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10300,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 300,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600113",
+          "report_title": "600113 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600113",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:13:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 8800,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10535,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 535,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10505,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 505,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10490,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 490,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10520,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 520,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600114",
+          "report_title": "600114 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600114",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:14:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 11400,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10295,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 295,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10265,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 265,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10250,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10280,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 280,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600115",
+          "report_title": "600115 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600115",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:15:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9400,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10335,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 335,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10305,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 305,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10290,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10320,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 320,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600116",
+          "report_title": "600116 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600116",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:16:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10800,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10375,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 375,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10345,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 345,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10330,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 330,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10360,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 360,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10270,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 270,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600117",
+          "report_title": "600117 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600117",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:17:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 9000,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10415,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 415,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10385,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 385,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10370,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 370,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10400,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 400,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10300,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 300,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600118",
+          "report_title": "600118 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600118",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:18:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11200,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9835,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -165,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9805,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -195,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9790,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -210,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9820,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -180,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10150,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 150,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600119",
+          "report_title": "600119 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600119",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:19:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 8600,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9795,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -205,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9765,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -235,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9750,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9780,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -220,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10120,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 120,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600120",
+          "report_title": "600120 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600120",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:20:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 10600,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9755,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -245,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9725,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -275,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9710,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9740,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -260,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600121",
+          "report_title": "600121 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600121",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:21:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9200,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9995,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -5,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9965,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -35,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9950,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -50,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9980,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -20,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10210,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 210,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600122",
+          "report_title": "600122 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600122",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:22:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11000,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9955,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -45,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9925,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -75,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9910,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -90,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9940,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -60,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10180,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 180,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600123",
+          "report_title": "600123 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600123",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:23:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 8800,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9915,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -85,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9885,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -115,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9870,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -130,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9900,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -100,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10150,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 150,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600124",
+          "report_title": "600124 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600124",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:24:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11400,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9875,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -125,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9845,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -155,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9830,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -170,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9860,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -140,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10120,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 120,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600125",
+          "report_title": "600125 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600125",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:25:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9400,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9835,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -165,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9805,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -195,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9790,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -210,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9820,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -180,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600126",
+          "report_title": "600126 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600126",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:26:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 10800,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9795,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -205,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9765,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -235,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9750,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9780,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -220,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10210,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 210,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600127",
+          "report_title": "600127 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600127",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:27:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9000,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9755,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -245,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9725,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -275,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9710,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9740,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -260,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10180,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 180,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600128",
+          "report_title": "600128 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600128",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:28:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11200,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9995,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -5,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9965,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -35,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9950,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -50,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9980,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -20,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10150,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 150,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600129",
+          "report_title": "600129 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600129",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:29:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 8600,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9955,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -45,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9925,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -75,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9910,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -90,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9940,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -60,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10120,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 120,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600130",
+          "report_title": "600130 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600130",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:30:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10600,
+            "p_profit_bp": 4000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9915,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -85,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9885,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -115,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9870,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -130,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9900,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -100,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10240,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 240,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600131",
+          "report_title": "600131 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600131",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:31:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 9200,
+            "p_profit_bp": 5000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9875,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -125,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9845,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -155,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9830,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -170,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9860,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -140,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10210,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 210,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600132",
+          "report_title": "600132 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600132",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:32:00+08:00",
+          "policy_version": "v3config-2",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 11000,
+            "p_profit_bp": 6000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9835,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -165,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9805,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -195,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9790,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -210,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9820,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -180,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10180,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 180,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600133",
+          "report_title": "600133 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600133",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:33:00+08:00",
+          "policy_version": "v3config-2",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 8800,
+            "p_profit_bp": 7000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9795,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -205,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9765,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -235,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9750,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -250,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9780,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -220,
+              "bench_ret_bp": 120
+            },
+            "h12": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 10150,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 150,
+              "bench_ret_bp": 70
+            }
+          }
+        },
+        {
+          "symbol": "600134",
+          "report_title": "600134 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600134",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:34:00+08:00",
+          "policy_version": "v3config-2",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": false,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 11400,
+            "p_profit_bp": 8000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9755,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -245,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9725,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -275,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9710,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -290,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9740,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -260,
+              "bench_ret_bp": 120
+            }
+          }
+        },
+        {
+          "symbol": "600135",
+          "report_title": "600135 2025-05 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600135",
+          "made_on": "2025-05-10",
+          "made_at": "2025-05-10T10:35:00+08:00",
+          "policy_version": "v3config-2",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": false,
+          "claims": {
+            "stance": "no_position",
+            "terminal_fen": 9400,
+            "p_profit_bp": 9000,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-05-12",
+            "base_date": "2025-05-12",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9995,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -5,
+              "bench_ret_bp": 130
+            },
+            "d20": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9965,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -35,
+              "bench_ret_bp": 110
+            },
+            "d5": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9950,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -50,
+              "bench_ret_bp": 100
+            },
+            "d60": {
+              "status": "resolved",
+              "session": "2025-05-16",
+              "close_fen": 9980,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": -20,
+              "bench_ret_bp": 120
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "2025-06",
+      "sets": [
+        {
+          "symbol": "600300",
+          "report_title": "600300 2025-06 report",
+          "report_kind": "投资决策",
+          "report_name": "公司 600300",
+          "made_on": "2025-06-10",
+          "made_at": "2025-06-10T10:00:00+08:00",
+          "policy_version": "v3config-1",
+          "probability_method": "subjective_committee",
+          "decision_quality": "normal",
+          "decision_status": "eligible",
+          "horizon_std": true,
+          "claims": {
+            "stance": "long",
+            "terminal_fen": 10800,
+            "p_profit_bp": 5500,
+            "entry_fen": 9850,
+            "bear_fen": 8000,
+            "base_fen": 10000,
+            "bull_fen": 14000,
+            "weight_bp": 1000
+          },
+          "baseline": {
+            "settled": true,
+            "index_has_s0": true,
+            "s0_date": "2025-06-11",
+            "base_date": "2025-06-11",
+            "s0_fen": 10000
+          },
+          "marks": {
+            "d120": {
+              "status": "resolved",
+              "close_fen": 10210,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 210,
+              "bench_ret_bp": 55
+            },
+            "d20": {
+              "status": "resolved",
+              "close_fen": 10190,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 190,
+              "bench_ret_bp": 45
+            },
+            "d5": {
+              "status": "resolved",
+              "close_fen": 10180,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 180,
+              "bench_ret_bp": 40
+            },
+            "d60": {
+              "status": "resolved",
+              "close_fen": 10200,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 200,
+              "bench_ret_bp": 50
+            },
+            "h12": {
+              "status": "resolved",
+              "close_fen": 10220,
+              "low_fen": 9800,
+              "high_fen": 10200,
+              "ret_bp": 220,
+              "bench_ret_bp": 60
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
