@@ -501,10 +501,19 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 		dv, derr := time.Parse(time.RFC3339, dumpVal)
 		pv, perr := time.Parse(time.RFC3339, prior.populationFrom)
 		if derr == nil && perr == nil && dv.Equal(pv) {
-			return nil
+			break
 		}
 		return fmt.Errorf("forecast_population_conflict: dump has ledger start %q, live database has %q",
 			dumpVal, prior.populationFrom)
+	}
+	// The unrecorded floor (P2): if the boundary is set but the dump lacks the floor keys, derive and
+	// persist them on this transaction. A dump that carries them keeps them.
+	if raw := e.setting(setForecastPopulationFrom); raw != "" && e.setting(setForecastUnrecordedFloorID) == "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			if err := storeUnrecordedFloor(e, t); err != nil {
+				return fmt.Errorf("derive the unrecorded floor through the restore: %w", err)
+			}
+		}
 	}
 	return nil
 }

@@ -46,6 +46,26 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 	} else {
 		population["candidates"] = []populationCandidate{}
 	}
+	// Unrecorded covered reports since the ledger start (P2), and recent ledger store failures. `ok`
+	// says whether the boundary is set; the count is 0 and meaningless until it is. Store failures are
+	// ledger-wide (not per rtype), so they are computed once.
+	unrecorded := make([]map[string]any, 0, len(predictionRtypes))
+	thirtyDaysAgo := time.Now().UTC().AddDate(0, 0, -30)
+	failed, err := s.st.countPredictionsStoreFailed(thirtyDaysAgo)
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	for rtype := range predictionRtypes {
+		n, since, ok, err := s.st.countForecastUnrecorded(rtype)
+		if err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		unrecorded = append(unrecorded, map[string]any{
+			"rtype": rtype, "n": n, "since": since, "ok": ok, "store_failed_30d": failed,
+		})
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
@@ -56,6 +76,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		// offer one the validator would refuse.
 		"bench_codes": forecastBenchCodes(),
 		"population":  population,
+		"unrecorded":  unrecorded,
 		// What the evaluator would find if it ran now. Read-only and cheap — a count, not a fetch —
 		// so an admin can tell "on and caught up" from "on and stuck" without opening the log.
 		"due_sets":           s.st.CountForecastSetsDue(),

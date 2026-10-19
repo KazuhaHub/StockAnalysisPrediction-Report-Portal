@@ -34,7 +34,9 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		Mode:        mode,
 		Checkpoints: append([]string{}, predCheckpoints...),
 	}
-	unrecorded, err := s.st.countForecastUnrecorded(rtype)
+	// The admin alias keeps its bounded unrecorded integer until P29; it is 0 while the ledger start
+	// is unset (the admin GET's `unrecorded` list is where the "set the ledger start" state is shown).
+	unrecorded, _, _, err := s.st.countForecastUnrecorded(rtype)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return

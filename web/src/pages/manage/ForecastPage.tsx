@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, DatePicker, Descriptions, Empty, Segmented, Space, Spin, Tabs, Tag, Typography } from 'antd'
 import { DownloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs, { type Dayjs } from 'dayjs'
 import { api, errText } from '../../api/client'
@@ -203,6 +203,28 @@ export default function ForecastPage() {
                 )}
               </Descriptions>
               <Typography.Text type="secondary">{t('forecast.eval.hint')}</Typography.Text>
+              {(settings.unrecorded ?? [])
+                .filter((u) => u.ok && (u.n > 0 || u.store_failed_30d > 0))
+                .map((u) => (
+                  <Alert
+                    key={u.rtype}
+                    type="warning"
+                    showIcon
+                    title={
+                      <>
+                        <Typography.Text strong>{u.rtype}</Typography.Text>{' '}
+                        {t('forecast.cov.unrecorded_since', {
+                          since: dayjs(u.since).utcOffset(8 * 60).format('YYYY-MM-DD'),
+                          n: u.n,
+                          m: u.store_failed_30d,
+                        })}{' '}
+                        <Link to="/manage/audit?action=predictions.store_failed">
+                          {t('forecast.cov.unrecorded_audit')}
+                        </Link>
+                      </>
+                    }
+                  />
+                ))}
             </div>
           )}
         </Card>

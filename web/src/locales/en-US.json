@@ -844,7 +844,6 @@
   "forecast.cov.summary": "Counted {{member}} / reports {{reports}}",
   "forecast.cov.rejected": "Rejected {{n}}",
   "forecast.cov.pending_baseline": "Unverified baseline {{n}}",
-  "forecast.cov.unrecorded": "{{n}} reports have no prediction row (the ingest failed)",
   "forecast.cp.d5": "5 sessions",
   "forecast.cp.d20": "20 sessions",
   "forecast.cp.d60": "60 sessions",
@@ -2079,5 +2078,8 @@
   "storage.loginHistoryHint": "Apply this limit to every account and immediately remove excess personal sign-in history. Choose 1–10000; the default is 100. Sessions and administrator audit records are unaffected. Increasing the limit cannot restore removed history.",
   "storage.loginHistoryConfirm": "Keep the latest {{count}} sign-ins per account for all accounts?",
   "forecast.population.immutable": "Once set, it cannot be changed.",
-  "forecast.population.damaged": "The ledger start value is unreadable (a damaged database). It remains write-once; ask the operator to inspect the meta table."
+  "forecast.population.damaged": "The ledger start value is unreadable (a damaged database). It remains write-once; ask the operator to inspect the meta table.",
+  "forecast.cov.unrecorded_since": "{{n}} covered reports since {{since}} have no prediction row · store failures (30 days): {{m}}",
+  "forecast.cov.unrecorded_audit": "see the audit log",
+  "webhook.event.predictions.store_failed": "Prediction ledger write failed"
 }

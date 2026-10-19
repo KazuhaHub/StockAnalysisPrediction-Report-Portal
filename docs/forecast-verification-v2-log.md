@@ -47,3 +47,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   empty key is still `set` (the UI does not offer a form whose save would always be refused) and the
   GET reports it `damaged` rather than as an untrusted instant. The restore prior's "unset" check is
   unchanged for an empty value (it carries from live); that direction is safe either way.
+
+### P2 review follow-ups (2026-10-19)
+- **The floor is captured once, not re-derived per read.** An earlier version re-derived it when the
+  keys were absent; after audit retention that would read `MAX(reports.id)` at request time and
+  perpetually count 0. Now it is stored at save time, re-derived once by `finishRestore` on the tx, and
+  ensured once at boot for a boundary that predates P2; the read path only reads the stored key and
+  shows nothing (`ok=false`) if it is absent.
+- **`store_failed_30d` is computed once per GET**, not per covered rtype (it is ledger-wide).
+- **The admin page's "since" date is rendered in Asia/Shanghai** (the boundary is a Shanghai instant),
+  not by truncating the UTC string.
+- **The audit deep link now actually filters:** `AuditPage` seeds its action filter from `?action=`.
+  This also fixes the pre-existing `predictions.reject` and `forecast.population` links.
+- **The store-failure line is per rtype and names it** (the rtype prefix), so a second covered type
+  would not produce ambiguous duplicate lines.
+- **Read-path/copy note (no permission change):** the old groups-page "N reports have no prediction
+  row" warning is removed and the CSV's `# unrecorded=` value now means "since the ledger start"
+  instead of "all history". This is the §4.5 copy change, not a scope change.
+- **Legacy audit timestamps.** The floor query compares `audit_log.at >= from` lexically. Pre-v0.4.15
+  audit rows use a different local format and sort earlier, which is harmless for a recent boundary
+  and only latent if a boundary were ever set before that release. Noted, not changed.

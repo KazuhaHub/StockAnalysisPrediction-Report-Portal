@@ -14,8 +14,10 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -207,10 +209,134 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	rows.Close()
 	sort.Slice(excluded, func(i, j int) bool { return excluded[i] < excluded[j] })
 
+	// The floor for "unrecorded" (P2): captured here, inside the same transaction as the boundary, so
+	// it is a single snapshot of "which reports existed when the ledger began". Later audit retention
+	// cannot move it.
+	if err := storeUnrecordedFloor(migExec{s: s, ex: tx}, from); err != nil {
+		return nil, byState, "", err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, byState, "", err
 	}
 	return excluded, byState, "", nil
+}
+
+// The unrecorded floor keys (P2).
+const (
+	setForecastUnrecordedFloorID     = "forecast_unrecorded_floor_id"
+	setForecastUnrecordedFloorAt     = "forecast_unrecorded_floor_at"
+	setForecastUnrecordedFloorMethod = "forecast_unrecorded_floor_method"
+)
+
+// captureUnrecordedFloor finds the highest report id that existed at the ledger start, so a count of
+// "covered reports with no set" can ignore the pre-ledger history. It prefers the ingest audit trail
+// (every created covered report leaves a row with detail.created) and falls back to the current max
+// id when the audit has been pruned. Runs on the given executor only (tx during the save, pool when
+// re-deriving on read).
+func captureUnrecordedFloor(e migExec, from time.Time) (int64, string, error) {
+	rows, err := e.query(`SELECT target_id, detail FROM audit_log WHERE action=? AND at >= ? ORDER BY id`,
+		AuditReportIngest, from.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, "", err
+	}
+	defer rows.Close()
+	var minID int64
+	found := false
+	for rows.Next() {
+		var targetID, detail sql.NullString
+		if err := rows.Scan(&targetID, &detail); err != nil {
+			return 0, "", err
+		}
+		if !targetID.Valid || !detail.Valid {
+			continue
+		}
+		var d struct {
+			Created bool `json:"created"`
+		}
+		if json.Unmarshal([]byte(detail.String), &d) != nil || !d.Created {
+			continue
+		}
+		id, err := strconv.ParseInt(targetID.String, 10, 64)
+		if err != nil {
+			continue
+		}
+		if !found || id < minID {
+			minID, found = id, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, "", err
+	}
+	if found {
+		if minID > 0 {
+			minID--
+		}
+		return minID, "audit", nil
+	}
+	var maxID int64
+	if err := e.queryRow(`SELECT COALESCE(MAX(id),0) FROM reports`).Scan(&maxID); err != nil {
+		return 0, "", err
+	}
+	return maxID, "max_id", nil
+}
+
+// forecastUnrecordedFloor returns the floor captured when the ledger start was set. ok=false when it
+// is absent: the count then shows nothing rather than being re-derived on a read path, because
+// re-deriving after the audit retention window has moved would read MAX(reports.id) and perpetually
+// return 0. The floor is captured at save time and re-derived once by a restore (finishRestore) and at
+// boot for a database whose boundary predates this key.
+func (s *Store) forecastUnrecordedFloor() (int64, bool) {
+	raw := s.GetSetting(setForecastUnrecordedFloorID, "")
+	if raw == "" {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+// storeUnrecordedFloor derives the floor from the ledger start and writes the three keys on the given
+// executor. Used by the save (tx), by finishRestore (tx) and by the boot ensure (pool).
+func storeUnrecordedFloor(e migExec, from time.Time) error {
+	floorID, method, err := captureUnrecordedFloor(e, from)
+	if err != nil {
+		return err
+	}
+	for k, v := range map[string]string{
+		setForecastUnrecordedFloorID:     strconv.FormatInt(floorID, 10),
+		setForecastUnrecordedFloorAt:     from.UTC().Format(time.RFC3339),
+		setForecastUnrecordedFloorMethod: method,
+	} {
+		if err := e.setSetting(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EnsureForecastUnrecordedFloor runs at boot: if a ledger start exists but the floor keys do not (a
+// database whose boundary was set before P2 shipped, or a restore that could not read them), derive
+// and persist them once through a short transaction. Idempotent.
+func (s *Store) EnsureForecastUnrecordedFloor() error {
+	from, ok := s.ForecastPopulationFrom()
+	if !ok {
+		return nil
+	}
+	if _, has := s.forecastUnrecordedFloor(); has {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	if err := storeUnrecordedFloor(migExec{s: s, ex: tx}, from); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // firstCohortMature reports whether any official cell of the ledger's first covered cohort is already

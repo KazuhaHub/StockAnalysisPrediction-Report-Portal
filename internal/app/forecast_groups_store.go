@@ -6,7 +6,10 @@ package app
 // which suits a computation over up to 36 months of sets. This loader is separate for that reason,
 // and it selects only the columns the statistics read: no payload, no body, no errors.
 
-import "database/sql"
+import (
+	"database/sql"
+	"time"
+)
 
 // groupSet is one ledger row with the claims and marks the statistics read flattened out, so the
 // metric code never has to search a claim slice per member.
@@ -125,17 +128,38 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, erro
 	return out, nil
 }
 
-// countForecastUnrecorded counts live reports of a covered type that have no set row at all. It is
-// the one number that catches store_failed: a covered ingest is supposed to leave a row in every
-// outcome, so a report with none means the ledger never heard about it.
+// countForecastUnrecorded counts covered reports created since the ledger start that have no set row.
+// It is the one number that catches store_failed: a covered ingest is supposed to leave a row in
+// every outcome, so a report with none means the ledger never heard about it.
 //
-// It cannot be per group: reports.sent_at is caller-supplied and not uniformly UTC, so it cannot
-// place a report in a civil month. The page shows it once.
-func (s *Store) countForecastUnrecorded(rtype string) (int, error) {
-	var n int
-	err := s.queryRow(`SELECT COUNT(*) FROM reports r
+// `since` is the ledger start (P2). ok=false while it is unset: the page then says "set the ledger
+// start" rather than showing a number, because without the floor the count would include every
+// pre-ledger report and read as a mass failure (the B1 defect).
+func (s *Store) countForecastUnrecorded(rtype string) (n int, since string, ok bool, err error) {
+	from, has := s.ForecastPopulationFrom()
+	if !has {
+		return 0, "", false, nil
+	}
+	floor, hasFloor := s.forecastUnrecordedFloor()
+	if !hasFloor {
+		// The floor was never captured (a boundary set before P2, or a restore that could not read
+		// it). Show nothing rather than re-deriving on a read path; boot/restore persists it.
+		return 0, "", false, nil
+	}
+	err = s.queryRow(`SELECT COUNT(*) FROM reports r
 		WHERE r.rtype = ?
-		  AND NOT EXISTS (SELECT 1 FROM prediction_sets ps WHERE ps.report_id = r.id)`, rtype).Scan(&n)
+		  AND r.id > ?
+		  AND r.version <> ?
+		  AND NOT EXISTS (SELECT 1 FROM prediction_sets ps WHERE ps.report_id = r.id)`,
+		rtype, floor, manualVersionName).Scan(&n)
+	return n, from.UTC().Format(time.RFC3339), true, err
+}
+
+// countPredictionsStoreFailed counts store-failed ingest audit rows at or after an instant.
+func (s *Store) countPredictionsStoreFailed(since time.Time) (int, error) {
+	var n int
+	err := s.queryRow(`SELECT COUNT(*) FROM audit_log WHERE action=? AND at >= ?`,
+		AuditPredictionsStoreFailed, since.UTC().Format(time.RFC3339)).Scan(&n)
 	return n, err
 }
 

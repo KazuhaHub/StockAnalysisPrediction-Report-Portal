@@ -844,7 +844,6 @@
   "forecast.cov.summary": "計入 {{member}} / 報告 {{reports}}",
   "forecast.cov.rejected": "被拒 {{n}}",
   "forecast.cov.pending_baseline": "基準未核對 {{n}}",
-  "forecast.cov.unrecorded": "{{n}} 份報告沒有預測記錄（入帳失敗）",
   "forecast.cp.d5": "5 個交易日",
   "forecast.cp.d20": "20 個交易日",
   "forecast.cp.d60": "60 個交易日",
@@ -2079,5 +2078,8 @@
   "storage.loginHistoryHint": "此上限統一套用於所有帳戶，儲存後立即清理超出數量的個人登入歷史。範圍為 1–10000，預設 100 筆。不會登出或刪除管理員稽核紀錄，提高上限不能恢復已清理的歷史。",
   "storage.loginHistoryConfirm": "將所有帳戶統一設定為保留最新 {{count}} 筆登入歷史？",
   "forecast.population.immutable": "設定後不可更改。",
-  "forecast.population.damaged": "賬本起點的值已損壞，無法讀取。寫入仍保持只讀，請聯絡維護者檢查 meta 表。"
+  "forecast.population.damaged": "賬本起點的值已損壞，無法讀取。寫入仍保持只讀，請聯絡維護者檢查 meta 表。",
+  "forecast.cov.unrecorded_since": "{{since}} 以來有 {{n}} 份覆蓋類型的報告沒有預測記錄 · 近 30 天寫入失敗：{{m}}",
+  "forecast.cov.unrecorded_audit": "查看審計日誌",
+  "webhook.event.predictions.store_failed": "預測帳本寫入失敗"
 }
