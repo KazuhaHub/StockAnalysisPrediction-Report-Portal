@@ -219,7 +219,13 @@ review line by line.
 `POST /api/admin/forecast {"mode":"1"}` returns 409 `forecast_not_ready` until every item holds, and the GET
 response lists each item with its state (P9):
 
-1. This binary contains R1a and R1b (true by construction once deployed; listed so the page says so).
+1. This binary contains R1a and R1b — **including P1**. True by construction once R1a-β2 is deployed;
+   listed so the page says so, and so the P3→P1 gap is explicit: P3 (R1a-β1) records the right refusal
+   codes for benchmark faults, but the source/mark-specific class — a source fault's code not counting
+   toward the attempt limit or finality (V26) — arrives with P1. Until P1 is deployed a benchmark fault
+   deferred by P3 would count as a mark-specific attempt and could become a final refusal, so **the
+   evaluator stays off until P1 ships**. R1a-β1 ships P3 with the evaluator off; this item is the gate
+   that keeps it off (`POST /api/admin/forecast {"mode":"1"}` refuses while R1a-β2 is not deployed).
 2. `forecast_population_from` is set (P5).
 3. The mode is currently `dry`, and the last dry pass finished without `errors` (heartbeat, P9).
 4. A dry-run check is recorded for **each benchmark code the evaluator can select** (`forecast_dry_gate`, P9): the
@@ -625,8 +631,9 @@ for code, group := range byCode (in order of first appearance):
     cal, err := rangeBars(spec.Market, spec.Sym, from, now)
     if err: defer group with "fetch_failed" (source)
     if cal.resp.Kind != "index": defer group with "not_index" (source); continue
-    if any bar in cal has volume <= 0: defer group with "calendar_bad" (source class: an index-wide fault,
-                                       attempts unchanged, never toward finality, V26); continue
+    if any bar in cal has volume <= 0: defer group with "calendar_bad" (source class: an index-wide fault;
+                                       P3 records the code through today's defer — the "attempts unchanged,
+                                       never toward finality" semantics are P1's, §5.1); continue
     for set in group: evaluateSet(set, cal)
 ```
 
@@ -642,8 +649,12 @@ for code, group := range byCode (in order of first appearance):
   fixture. FC
 - `TestBenchmarkBodyMustBeAnIndex`: a stub that answers a stock body for `(sh,000852)` gives `not_index` and writes
   nothing to `prediction_marks` except the deferral. FC
-- `TestZeroVolumeIndexBarIsASourceFault`: an index body with one zero-volume bar defers every due mark of the group
-  with `calendar_bad`, leaves `attempts` at 0, and 30 such ticks over 20 sessions never make a mark final. FC
+- `TestZeroVolumeIndexBarDefersTheGroup`: an index body with one zero-volume bar defers every due mark of
+  the group with `calendar_bad` and writes nothing else. The "attempts stay 0 and the mark never becomes
+  final" half of the property belongs to P1 (R1a-β2), which introduces the source/mark-specific refusal
+  class; it is asserted there by `TestSourceFailuresAreNotMarkSpecific` (§5.3). Between P3's deploy and
+  P1's, the evaluator stays off (the readiness list of §1.4 includes P1), so no mark is ever written with
+  today's default defer. FC
 - `TestEmptyBenchCodeNeverReadsTheSetting`: a set with `bench_code=''` defers with `no_bench` while
   `forecast_bench` is set to a valid code; the counting store sees no read of `forecast_bench`. FC
 - Existing `TestForecastSettingsRoundTrip` (`forecast_eval_test.go:467`) keeps passing for `sh000905`/`sh000300`
@@ -946,6 +957,14 @@ Defect → PR map: F01, F02 → P3 (β1); F06, F07 → P1; F04, F05, F12 → P6;
 F10 → P8; B5 (members route scoring and outcome leak) → P16a.
 
 ### 5.1 P1 `fix/forecast-due-only-scheduling` — schedule only due work; not due is never a refusal; finality per V26 (F06, F07)
+
+**P1 completes what P3 started.** P3 (R1a-β1) defers a benchmark fault with its own code (`fetch_failed`,
+`not_index`, `calendar_bad`, `no_bench`) but through today's defer, which counts every deferral as an
+attempt. P1 introduces the source/mark-specific refusal class so a source code leaves `attempts` unchanged
+and never counts toward finality (V26). **The evaluator must stay off between P3's deploy and P1's** —
+this PR's readiness item (§1.4 item 1) is what keeps it off — because a benchmark fault written by P3
+against the old semantics would otherwise become a final refusal. This PR's `TestSourceFailuresAreNotMarkSpecific`
+(runbook §5.3) is where the "attempts stay 0 / never final" half of P3's `calendar_bad` property is asserted.
 
 **Goal.** Today every first tick before S0 refuses every mark `no_bar` with a fixed one-hour backoff and no
 `session_date` (`forecast_eval.go:176-191`, `forecast_eval_store.go:120-137`); finality fires without an attempt

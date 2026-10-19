@@ -673,7 +673,7 @@
   "err.enrolment_policy_unavailable": "无法读取登录策略，本次请求已被拒绝，请稍后重试。",
   "err.enrolment_disabled": "本账号已被设为不允许登记新的登录因子。",
   "err.footer_too_long": "底部信息过长。",
-  "err.forecast_bad_bench": "基准必须是一个能取到日线的六位指数代码，例如 sh000852。",
+  "err.forecast_bad_bench": "基准必须是门户允许的指数之一：沪深300 sh000300、中证500 sh000905、中证1000 sh000852、中证800 sh000906。",
   "err.bad_date": "日期必须为 YYYY-MM-DD。",
   "err.bad_group": "分组必须是周、月、季度或全部。",
   "err.bad_mode": "模式必须是按月或自定义。",

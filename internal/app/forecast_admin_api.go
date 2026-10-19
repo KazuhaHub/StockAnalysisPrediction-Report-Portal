@@ -19,6 +19,9 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		// The benchmark new sets are written with. Existing sets keep theirs, and the UI says so:
 		// changing this does not re-score anything already on the ledger.
 		"bench": s.st.ForecastBench(),
+		// The closed list of benchmarks a new set may be frozen with, so the settings Select cannot
+		// offer one the validator would refuse.
+		"bench_codes": forecastBenchCodes(),
 		// What the evaluator would find if it ran now. Read-only and cheap — a count, not a fetch —
 		// so an admin can tell "on and caught up" from "on and stuck" without opening the log.
 		"due_sets":           s.st.CountForecastSetsDue(),
@@ -41,9 +44,9 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	}
 	if in.Bench != nil {
 		bench := strings.TrimSpace(*in.Bench)
-		if market, _ := benchMarketCode(bench); market == "" {
+		if _, ok := benchSpecFor(bench); !ok {
 			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_bench",
-				"基准必须是一个能取到日线的六位指数代码，例如 sh000852")
+				"bench must be an index code the portal is allowed to fetch, for example sh000852")
 			return
 		}
 		s.st.SetSetting(setForecastBench, bench)

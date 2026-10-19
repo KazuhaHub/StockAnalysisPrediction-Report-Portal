@@ -673,7 +673,7 @@
   "err.enrolment_policy_unavailable": "無法讀取登入策略，本次請求已被拒絕，請稍後重試。",
   "err.enrolment_disabled": "本帳號已被設為不允許登記新的登入因子。",
   "err.footer_too_long": "底部資訊過長。",
-  "err.forecast_bad_bench": "基準必須是一個能取到日線的六位指數代碼，例如 sh000852。",
+  "err.forecast_bad_bench": "基準必須是門戶允許的指數之一：滬深300 sh000300、中證500 sh000905、中證1000 sh000852、中證800 sh000906。",
   "err.bad_date": "日期必須為 YYYY-MM-DD。",
   "err.bad_group": "分組必須是週、月、季度或全部。",
   "err.bad_mode": "模式必須是按月或自訂。",

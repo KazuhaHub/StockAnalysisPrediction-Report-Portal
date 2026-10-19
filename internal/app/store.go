@@ -84,6 +84,10 @@ type Store struct {
 	db       *sql.DB
 	driver   string     // "sqlite" | "postgres"
 	ticketMu sync.Mutex // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
+	// onSettingRead is a test-only observer of GetSetting. It is nil in production; a test sets it to
+	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
+	// never fall back to forecast_bench for a set whose frozen code is empty).
+	onSettingRead func(key string)
 }
 
 // OpenStore opens the database using the given driver. driver: "sqlite" (default) or "postgres";
@@ -1058,6 +1062,9 @@ func (s *Store) CountAdmins() (n int) {
 // ---------- System settings (stored in the meta table, editable via the web UI) ----------
 
 func (s *Store) GetSetting(k, def string) string {
+	if s.onSettingRead != nil {
+		s.onSettingRead(k)
+	}
 	var v sql.NullString
 	if err := s.queryRow("SELECT v FROM meta WHERE k=?", k).Scan(&v); err == nil && v.Valid {
 		return v.String
