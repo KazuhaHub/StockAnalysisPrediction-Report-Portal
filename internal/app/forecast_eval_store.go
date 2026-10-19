@@ -60,7 +60,7 @@ const forecastSetsDueQuery = `SELECT ps.id, ps.symbol, ps.made_on, ps.made_at, p
 //
 // It drives from the marks' due index, not from prediction_sets: a set with no mark whose
 // next_attempt_at has passed costs nothing, and a set 300 rows later cannot be starved by a
-// correlated EXISTS that never uses the index. A new mark has next_attempt_at = '', which sorts
+// correlated EXISTS that never uses the index. A new mark has next_attempt_at = ”, which sorts
 // before every RFC3339 instant, so it is selected once and scheduled without a vendor call.
 func (s *Store) ForecastSetsDue(now time.Time, limit int) ([]forecastWorkSet, error) {
 	if limit <= 0 {

@@ -136,7 +136,7 @@ const (
 	// The one-shot repair of refusals written by the pre-P1 evaluator (P1). A data repair with no
 	// operator behind it still has to be attributable and counted.
 	AuditForecastRepair = "forecast.repair"
-	AuditReportDelete  = "report.delete"
+	AuditReportDelete   = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
