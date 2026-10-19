@@ -137,6 +137,42 @@ func symbolFor(i int) string {
 	return "6000" + string(rune('0'+i/100%10)) + string(rune('0'+i/10%10)) + string(rune('0'+i%10))
 }
 
+// TestStatisticsAreArchitectureDeterministic pins the last-bit result of the statistics' floating-point
+// multiply-adds to their base-amd64 value.
+//
+// Go's spec permits an implementation to contract `a*b + c` into a single fused multiply-add. The arm64
+// backend and the GOAMD64>=v3 amd64 backend do; the base (SSE2) amd64 backend does not. The two forms
+// round differently, so without an explicit float64() barrier a p-value would differ by one ulp between
+// the multi-arch release image's builds — and a "mature cell can never change" promise would be false
+// the moment two builds disagreed.
+//
+// Each case is a fixed input whose contracted form differs from its rounded form; the expected values
+// are the base-amd64 results. On an architecture that contracts, the test fails the moment a barrier is
+// removed, and on base amd64 it pins that the barrier changed nothing.
+func TestStatisticsAreArchitectureDeterministic(t *testing.T) {
+	// pearson (forecast_stats.go) — the IC path.
+	x := []float64{-467453.34799834504, 851814.5740686853, -354709.66366818256, 521846.8054312628,
+		-274953.3148886243, -124110.07143413178, -157333.47489722128, 1.8503700466309118e+06, -892838.6317734944}
+	y := []float64{1.758743180429219e+06, -259610.62353169444, 97133.37088882424, 686934.3356067712,
+		-41771.97866842364, -797130.1890835358, -196153.73329400615, 114533.50850602132, 404752.0167660134}
+	if got, want := pearson(x, y), -0.19012956571531586247; got != want {
+		t.Errorf("pearson = %.20g, want %.20g (the amd64 value; a difference is FMA contraction)", got, want)
+	}
+
+	// spreadStat (forecast_groups.go) — the spread permutation statistic.
+	spreadVals := []float64{-14297.669077771037, 15574.538981985952, 17506.99973298668, 11124.922162094244,
+		-4276.642431456285, -6118.545681733372, 12191.189609114055}
+	var s float64
+	for _, v := range spreadVals {
+		s += v
+	}
+	k := 1/8.0 + 1/5.0
+	invc := 12345.67 / 5.0
+	if got, want := spreadStat(s, k, invc), 7834.9238209465747786; got != want {
+		t.Errorf("spreadStat = %.20g, want %.20g (the amd64 value)", got, want)
+	}
+}
+
 func TestSpearmanAveragesTies(t *testing.T) {
 	x := []float64{1, 2, 2, 3}
 	y := []float64{4, 3, 2, 1}

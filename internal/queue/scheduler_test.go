@@ -13,6 +13,35 @@ func ids(items []Item) []int64 {
 	return out
 }
 
+// TestScoreIsArchitectureDeterministic pins the weighted-factor sum in Weights.Score's last bit to its
+// base-amd64 value.
+//
+// Go may contract `a*b + c` into one fused multiply-add: arm64 and GOAMD64>=v3 amd64 do, base SSE2
+// amd64 does not, and the two round differently. Score wraps each product in an explicit float64() to
+// forbid the contraction. The input below is one whose contracted form differs from its rounded form;
+// the expected value is the base-amd64 result, so removing a barrier fails this test where it contracts
+// and changes nothing on base amd64.
+//
+// This pins the sum only. The factors themselves are computed in internal/app, and the Fair factor is
+// math.Exp2(-usage), whose arm64 and amd64 implementations still differ on a small fraction of inputs —
+// so a whole priority is not arch-stable, and this test does not claim it is.
+func TestScoreIsArchitectureDeterministic(t *testing.T) {
+	// The inputs are built through non-inlinable constructors so the compiler cannot constant-fold
+	// them: with literal structs it folds the whole expression and the contraction under test never
+	// happens, which would make this test pass whether or not the barrier is present.
+	w := opaqueWeights(-1321.2951327019389, 2151.7985282456157, 711.0973788366834)
+	f := opaqueFactors(-0.7191924833395245, 0.5635444122066078, -1.9687407377145596)
+	if got, want := w.Score(f), 762.93318630173121164; got != want {
+		t.Errorf("Score = %.20g, want %.20g (the amd64 value)", got, want)
+	}
+}
+
+//go:noinline
+func opaqueWeights(a, b, c float64) Weights { return Weights{Base: a, Age: b, Fair: c} }
+
+//go:noinline
+func opaqueFactors(a, b, c float64) Factors { return Factors{Base: a, Age: b, Fair: c} }
+
 // Score combines the weighted factors; a higher factor sum scores higher, and a
 // bare 加急 run outranks the best-scoring non-urgent one.
 func TestScoreCombinesFactorsAndUrgentDominates(t *testing.T) {

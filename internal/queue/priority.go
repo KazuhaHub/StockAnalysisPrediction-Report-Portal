@@ -42,7 +42,12 @@ const (
 // Urgent and idle are mutually exclusive (a run's priority is one of "urgent"/"idle"/
 // a base number); urgent is checked first so it wins if both were ever set.
 func (w Weights) Score(f Factors) float64 {
-	s := w.Base*f.Base + w.Age*f.Age + w.Fair*f.Fair
+	// Each product is wrapped in an explicit float64() conversion so the compiler may not contract
+	// `a*b + c` into one fused multiply-add. Go permits that contraction on arm64 (and ppc64/s390x)
+	// but not on amd64, and the two round differently, so without the barrier a run's priority — and
+	// the order two near-equal runs are admitted in — could differ between the multi-arch release
+	// image built for amd64 and one built for arm64.
+	s := float64(w.Base*f.Base) + float64(w.Age*f.Age) + float64(w.Fair*f.Fair)
 	if f.Urgent {
 		s += urgentBoost
 	} else if f.Idle {

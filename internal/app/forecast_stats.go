@@ -75,9 +75,9 @@ func pearson(x, y []float64) float64 {
 	var sxy, sxx, syy float64
 	for i := 0; i < n; i++ {
 		dx, dy := x[i]-mx, y[i]-my
-		sxy += dx * dy
-		sxx += dx * dx
-		syy += dy * dy
+		sxy += float64(dx * dy)
+		sxx += float64(dx * dx)
+		syy += float64(dy * dy)
 	}
 	if sxx == 0 || syy == 0 {
 		return math.NaN()
