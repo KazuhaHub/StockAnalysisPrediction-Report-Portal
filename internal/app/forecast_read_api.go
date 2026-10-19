@@ -9,9 +9,9 @@ package app
 //   GET /api/report/{id}/predictions       browser session, per report
 //
 // The browser route exists because the machine surface is not where a browser call belongs: /api/v1
-// is classed authBearer, so it is outside sessionRoutes() and no whole-portal session policy covers
-// it, even though its read handlers do admit a cookie session through canQuery. The SPA uses this
-// route and never /api/v1.
+// is classed authBearer, so it is outside sessionRoutes(). Its read handlers do admit a cookie
+// session through canQuery, and the forced-enrolment wall is applied explicitly (v1CanRead) rather
+// than by the session policy — but the SPA still uses this route and never /api/v1.
 
 import (
 	"net/http"
@@ -21,8 +21,7 @@ import (
 
 // v1ReportPredictions serves every set ever written for one report, oldest first.
 func (s *Server) v1ReportPredictions(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	s.serveReportPredictions(w, r, s.queryScope(r))
@@ -71,16 +70,15 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 
 // v1QueryPredictions serves sets by symbol and date range, newest first.
 func (s *Server) v1QueryPredictions(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	s.serveQueryPredictions(w, r, s.queryScope(r))
 }
 
 // apiQueryPredictions is the browser twin, for the reading page's "other predictions of this
-// stock" list. The SPA never calls /api/v1: that surface is classed authBearer, and its cookie
-// admission (canQuery) is not a property the session policy covers.
+// stock" list. The SPA never calls /api/v1: that machine surface is classed authBearer, and the SPA
+// route is separately scope- and enrolment-gated with the session it already carries.
 func (s *Server) apiQueryPredictions(w http.ResponseWriter, r *http.Request, user string) {
 	s.serveQueryPredictions(w, r, s.viewerScope(user))
 }

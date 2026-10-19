@@ -353,6 +353,18 @@ func (s *Store) subtreeIDs(root int64) ([]int64, error) {
 // enrolmentReachable reports whether a pattern is on that list.
 func (s *Server) enrolmentReachable(pattern string) bool { return enrolmentPaths[pattern] }
 
+// enrolmentHolds is the wall's DECISION, with no writer: it reports whether this account must be
+// held at the wall for this request, and separately whether the policy could be read at all (an
+// unreadable policy is a refusal too, and the one a client can retry). Keeping the decision free of
+// an http.ResponseWriter is what lets the session surface answer in the SPA's envelope and the
+// machine surface answer in the v1 envelope while the rule itself lives in exactly one place.
+func (s *Server) enrolmentHolds(r *http.Request, username string) (holds bool, policyErr error) {
+	if username == "" || s.enrolmentReachable(r.Pattern) {
+		return false, nil
+	}
+	return s.mustEnroll(username)
+}
+
 // gateEnrolment is the wall itself, called by the session helpers after they have resolved who is
 // asking. It answers false once it has written the refusal.
 //
@@ -360,16 +372,13 @@ func (s *Server) enrolmentReachable(pattern string) bool { return enrolmentPaths
 // unreadable policy is a refusal with a code the client can retry on, never a pass. The one place it
 // fails open is a route on the list above, which is a decision rather than an accident.
 func (s *Server) gateEnrolment(w http.ResponseWriter, r *http.Request, username string) bool {
-	if username == "" || s.enrolmentReachable(r.Pattern) {
-		return true
-	}
-	must, err := s.mustEnroll(username)
+	holds, err := s.enrolmentHolds(r, username)
 	if err != nil {
 		jsonErrorCode(w, http.StatusServiceUnavailable, "enrolment_policy_unavailable",
 			"the sign-in policy could not be read, so this request was refused rather than allowed")
 		return false
 	}
-	if !must {
+	if !holds {
 		return true
 	}
 	jsonErrorCode(w, http.StatusForbidden, "enrolment_required",

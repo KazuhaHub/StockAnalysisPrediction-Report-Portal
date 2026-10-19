@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The mandate: an account that MUST have a second factor, and the wall it meets until it does.
@@ -172,6 +174,88 @@ func TestAnUnsatisfiableMandateStillHolds(t *testing.T) {
 }
 
 // ---------- the gate ----------
+
+// The /api/v1 read surface is classed authBearer, so it sits OUTSIDE sessionRoutes() and the wall the
+// session helpers put up does not reach it — yet its read handlers admit a browser cookie through
+// canQuery. A cookie holder under a mandate but without a factor could therefore read every report
+// over /api/v1 while the SPA refused it. This is the regression test for that hole: every v1 read
+// handler must hold the mandated cookie at the wall with the v1 error envelope, while a machine
+// Bearer(query) token is not a reader to be held there.
+func TestV1ReadsAreHeldAtTheEnrolmentWall(t *testing.T) {
+	env := mandateServer(t)
+	env.s.names = LoadNames(t.TempDir(), env.s.st)
+	env.s.names.fetch = func(string) string { return "" }
+	today := time.Now().Format("2006-01-02")
+	id, _, err := env.s.st.UpsertReport(Rep{Symbol: "600519", Date: today, RType: "投资决策", Title: "t", MD: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.s.st.CreateToken("tok-query", "test", "query", ""); err != nil {
+		t.Fatal(err)
+	}
+	idStr := strconv.FormatInt(id, 10)
+
+	cases := []struct {
+		name      string
+		pattern   string
+		path      string
+		pathValue map[string]string
+		h         http.HandlerFunc
+	}{
+		{"now", "GET /api/v1/now", "/api/v1/now", nil, env.s.v1Now},
+		{"query", "GET /api/v1/reports", "/api/v1/reports?symbol=600519", nil, env.s.v1QueryReports},
+		{"get", "GET /api/v1/reports/{id}", "/api/v1/reports/" + idStr, map[string]string{"id": idStr}, env.s.v1GetReport},
+		{"manifest", "GET /api/v1/reports/manifest", "/api/v1/reports/manifest?symbol=600519", nil, env.s.v1Manifest},
+		{"runs", "GET /api/v1/runs", "/api/v1/runs?symbol=600519", nil, env.s.v1Runs},
+		{"symbols", "GET /api/v1/symbols", "/api/v1/symbols?q=600519", nil, env.s.v1Symbols},
+		{"tracking", "GET /api/v1/tracking", "/api/v1/tracking?symbol=600519", nil, env.s.v1Tracking},
+		{"report-predictions", "GET /api/v1/reports/{id}/predictions", "/api/v1/reports/" + idStr + "/predictions", map[string]string{"id": idStr}, env.s.v1ReportPredictions},
+		{"predictions", "GET /api/v1/predictions", "/api/v1/predictions?symbol=600519", nil, env.s.v1QueryPredictions},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A mandated cookie with no factor is walled with the v1 envelope.
+			req := sessionForPath(t, env.s, env.must, tc.pattern, tc.path)
+			for k, v := range tc.pathValue {
+				req.SetPathValue(k, v)
+			}
+			rec := httptest.NewRecorder()
+			tc.h(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("mandated cookie → %d, want 403", rec.Code)
+			}
+			if body := rec.Body.String(); !strings.Contains(body, "enrolment_required") {
+				t.Errorf("refused with %q, want the v1 code the client branches on", body)
+			}
+
+			// A machine Bearer(query) token is not a session and stays ungated.
+			mreq := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			mreq.Header.Set("Authorization", "Bearer tok-query")
+			mreq.Pattern = tc.pattern
+			for k, v := range tc.pathValue {
+				mreq.SetPathValue(k, v)
+			}
+			mrec := httptest.NewRecorder()
+			tc.h(mrec, mreq)
+			if mrec.Code != http.StatusOK {
+				t.Errorf("machine token → %d, want 200 (%s)", mrec.Code, mrec.Body.String())
+			}
+
+			// An account that HAS a factor, or is not mandated, reads normally.
+			for _, ok := range []string{env.already, env.free} {
+				oreq := sessionForPath(t, env.s, ok, tc.pattern, tc.path)
+				for k, v := range tc.pathValue {
+					oreq.SetPathValue(k, v)
+				}
+				orec := httptest.NewRecorder()
+				tc.h(orec, oreq)
+				if orec.Code != http.StatusOK {
+					t.Errorf("%s (no wall) → %d, want 200 (%s)", ok, orec.Code, orec.Body.String())
+				}
+			}
+		})
+	}
+}
 
 // The wall: a mandated account with no factor reaches the enrolment routes and nothing else.
 func TestTheGateHoldsAMandatedAccountAtTheWall(t *testing.T) {
