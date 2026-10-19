@@ -156,43 +156,52 @@ func (s *Server) v1RepJSON(r Rep, withBody bool) map[string]any {
 	return m
 }
 
+// v1IngestRequest is the decoded body of POST /api/v1/reports. It is a named type so a test can
+// reflect its json tags against the documented IngestRequest schema: every field here that the spec
+// omits is a wire field a producer may send and a machine consumer cannot discover
+// (TestOpenAPIIngestRequestDocumentsEveryWireField).
+type v1IngestRequest struct {
+	RunID      string `json:"run_id"`
+	OwnerToken string `json:"owner_token"` // signed OU-attribution token echoed from the run inputs (ADR 0022 R1)
+	Symbol     string `json:"symbol"`
+	Name       string `json:"name"`
+	Date       string `json:"date"`
+	Kind       string `json:"kind"`
+	Subtype    string `json:"subtype"`
+	RType      string `json:"rtype"`
+	// Version (ADR 0024): which written form of this analysis the workflow just produced.
+	// Omitted means the default version — exactly what every existing producer means today —
+	// so a workflow that has never heard of versions keeps overwriting its own row in place.
+	Version  string `json:"version"`
+	Title    string `json:"title"`
+	Source   string `json:"source"`
+	Time     string `json:"time"`
+	BodyMD   string `json:"body_md"`
+	BodyHTML string `json:"body_html"`
+	// Predictions (ADR 0029): the structured claims this report makes, projected from the
+	// producer's code nodes. Kept raw rather than decoded, because the classifier has to see the
+	// bytes — an object and a string are both valid JSON, and the difference between them is the
+	// single most likely producer bug (Dify renders an object parameter from a template and
+	// passes a string when the rendered text is not valid JSON).
+	Predictions json.RawMessage      `json:"predictions"`
+	Tracking    []v1TrackingItemWire `json:"tracking"`
+}
+
+// v1TrackingItemWire is one assumption/tracking item on the ingest body.
+type v1TrackingItemWire struct {
+	IType       string `json:"itype"`
+	Content     string `json:"content"`
+	Status      string `json:"status"`
+	ReviewPoint string `json:"review_point"`
+}
+
 // POST /api/v1/reports — ingest (portal-derived identity, validated). scope ingest.
 func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	if !s.tokenOK(r, "ingest") {
 		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid ingest token")
 		return
 	}
-	var in struct {
-		RunID      string `json:"run_id"`
-		OwnerToken string `json:"owner_token"` // signed OU-attribution token echoed from the run inputs (ADR 0022 R1)
-		Symbol     string `json:"symbol"`
-		Name       string `json:"name"`
-		Date       string `json:"date"`
-		Kind       string `json:"kind"`
-		Subtype    string `json:"subtype"`
-		RType      string `json:"rtype"`
-		// Version (ADR 0024): which written form of this analysis the workflow just produced.
-		// Omitted means the default version — exactly what every existing producer means today —
-		// so a workflow that has never heard of versions keeps overwriting its own row in place.
-		Version  string `json:"version"`
-		Title    string `json:"title"`
-		Source   string `json:"source"`
-		Time     string `json:"time"`
-		BodyMD   string `json:"body_md"`
-		BodyHTML string `json:"body_html"`
-		// Predictions (ADR 0029): the structured claims this report makes, projected from the
-		// producer's code nodes. Kept raw rather than decoded, because the classifier has to see the
-		// bytes — an object and a string are both valid JSON, and the difference between them is the
-		// single most likely producer bug (Dify renders an object parameter from a template and
-		// passes a string when the rendered text is not valid JSON).
-		Predictions json.RawMessage `json:"predictions"`
-		Tracking    []struct {
-			IType       string `json:"itype"`
-			Content     string `json:"content"`
-			Status      string `json:"status"`
-			ReviewPoint string `json:"review_point"`
-		} `json:"tracking"`
-	}
+	var in v1IngestRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&in); err != nil {
 		v1err(w, http.StatusBadRequest, "bad_json", "request body is not valid JSON")
 		return
