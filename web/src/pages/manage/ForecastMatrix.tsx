@@ -124,7 +124,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
           {seg(c.member, token.colorPrimary)}
           {seg(c.duplicate, token.colorInfo)}
           {seg(c.absent + c.rejected, token.colorWarning)}
-          {seg(c.backtest + c.degraded + c.mismatch + c.pre_live + c.test, token.colorFillSecondary)}
+          {seg(c.backtest + c.degraded + c.mismatch + c.pre_live + c.test + c.off_benchmark, token.colorFillSecondary)}
         </div>
         <div style={{ fontSize: 12, color: token.colorTextSecondary, marginTop: 3 }}>
           {t('forecast.cov.summary', { member: c.member, reports: c.reports })}

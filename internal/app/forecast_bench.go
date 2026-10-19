@@ -67,12 +67,17 @@ const (
 // ForecastBenchFor is the benchmark a set made in this cohort is frozen with. It is the only reader
 // the ingest path uses: the frozen code and the cohort must come from the same instant.
 func (s *Store) ForecastBenchFor(cohort string) string {
-	if next := s.GetSetting(setForecastBenchNext, ""); next != "" {
-		if from := s.GetSetting(setForecastBenchNextFrom, ""); from != "" && cohort >= from {
-			return next
-		}
+	if next, from := s.forecastScheduledBench(); next != "" && cohort >= from {
+		return next
 	}
 	return s.ForecastBench()
+}
+
+// validForecastCohort accepts exactly "YYYY-MM". A malformed stored value (a restore, an out-of-band
+// edit) must not make the lexicographic comparison below apply a change early or never.
+func validForecastCohort(s string) bool {
+	t, err := time.Parse("2006-01", s)
+	return err == nil && t.Format("2006-01") == s
 }
 
 // shanghaiCohort is the cohort label of an instant: the Shanghai civil month. Ingest and the schedule
@@ -94,12 +99,24 @@ func nextCohort(cohort string) string {
 	return t.AddDate(0, 1, 0).Format("2006-01")
 }
 
-// forecastScheduledBench is the pending schedule, if any: the code and its effective cohort. A
-// schedule needs both halves; a half-written pair is treated as nothing to promote.
+// forecastScheduledBench is the pending schedule, if any: the code and its effective cohort. It reads
+// the pair in ONE statement, so a concurrent save cannot be observed as a mixed pair (the two keys are
+// committed together). A pair that is incomplete or whose cohort is malformed is treated as nothing.
 func (s *Store) forecastScheduledBench() (code, from string) {
-	code = s.GetSetting(setForecastBenchNext, "")
-	from = s.GetSetting(setForecastBenchNextFrom, "")
-	if code == "" || from == "" {
+	rows, err := s.query(`SELECT k, v FROM meta WHERE k IN (?,?)`, setForecastBenchNext, setForecastBenchNextFrom)
+	if err != nil {
+		return "", ""
+	}
+	defer rows.Close()
+	pair := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			pair[k] = strings.TrimSpace(v)
+		}
+	}
+	code, from = pair[setForecastBenchNext], pair[setForecastBenchNextFrom]
+	if code == "" || !validForecastCohort(from) {
 		return "", ""
 	}
 	return code, from

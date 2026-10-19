@@ -65,16 +65,22 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 	out := map[string]any{"ok": true, "sets": sets}
 	if len(sets) > 0 {
 		populationFrom, _ := s.st.ForecastPopulationFrom()
-		// The cohort's benchmark, so the "counted" pointer never lands on a set the statistics
-		// excluded as off-benchmark (P4).
-		bench := ""
-		for _, set := range sets {
-			if set.State == predStateAccepted {
-				bench, _ = s.st.earliestCohortBench(set.RType, set.Cohort)
-				break
+		// The cohort's benchmark, per set, so the "counted" pointer never lands on a set the statistics
+		// excluded as off-benchmark (P4). A report's revisions can span cohorts, so each candidate is
+		// judged against its own.
+		benchOf := map[string]string{}
+		benchFor := func(cohort string) string {
+			if b, ok := benchOf[cohort]; ok {
+				return b
 			}
+			b := ""
+			if len(sets) > 0 {
+				b, _ = s.st.earliestCohortBench(sets[0].RType, cohort)
+			}
+			benchOf[cohort] = b
+			return b
 		}
-		out["counted_set_id"] = countedSetIDFor(sets, populationFrom, bench)
+		out["counted_set_id"] = countedSetIDFor(sets, populationFrom, benchFor)
 	}
 	writeJSON(w, out)
 }
@@ -148,7 +154,7 @@ func (s *Server) canReadReport(id int64, sc *ownerScope) bool {
 //
 // A set made before the ledger start (P5) is never a member, so it is skipped here too: otherwise the
 // reading page would point at a set the statistics do not count.
-func countedSetIDFor(sets []PredictionSet, populationFrom time.Time, bench string) int64 {
+func countedSetIDFor(sets []PredictionSet, populationFrom time.Time, benchFor func(cohort string) string) int64 {
 	var best PredictionSet
 	found := false
 	for _, s := range sets {
@@ -158,8 +164,10 @@ func countedSetIDFor(sets []PredictionSet, populationFrom time.Time, bench strin
 		if !populationFrom.IsZero() && madeAtBefore(s.MadeAt, populationFrom) {
 			continue
 		}
-		if bench != "" && s.BenchCode != bench {
-			continue
+		if benchFor != nil {
+			if bench := benchFor(s.Cohort); bench != "" && s.BenchCode != bench {
+				continue
+			}
 		}
 		if !found || s.MadeAt < best.MadeAt || (s.MadeAt == best.MadeAt && s.ID < best.ID) {
 			best, found = s, true

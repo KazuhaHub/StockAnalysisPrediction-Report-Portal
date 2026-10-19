@@ -182,6 +182,11 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 			})
 	}
 
+	// A schedule that is already due but not yet promoted by a boot is effective for ingest NOW.
+	// Promote it before anchoring on the active value, or cancelling/rescheduling would silently
+	// revert the current cohort mid-month and make the next sets off-benchmark.
+	s.promoteForecastBench(time.Now())
+
 	effective := ""
 	switch {
 	case cancel:
@@ -199,6 +204,10 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		// Rescheduling the active value when nothing is pending changes nothing, so it writes nothing.
 		if !(bench == active && pending == "") {
 			from := nextCohort(shanghaiCohort(time.Now()))
+			if from == "" {
+				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "could not derive the next cohort")
+				return
+			}
 			if err := s.st.applyForecastBenchState(active, bench, from); err != nil {
 				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 				return

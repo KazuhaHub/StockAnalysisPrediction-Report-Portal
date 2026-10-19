@@ -103,3 +103,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   the statistics exclude. The cohort benchmark is the ledger-wide query, not the loaded slice.
 - **A legacy `bench` plus `bench_cancel` is refused** as ambiguous, the same as `bench_schedule` plus
   `bench_cancel`; the cancel intent alone still works.
+- **Adversarial review follow-ups (P4).** Fixed before merge: a save promotes a due-but-unpromoted
+  schedule first, so cancelling/rescheduling cannot revert the current cohort mid-month; the pending
+  pair is read in one statement and a malformed cohort is ignored; `counted_set_id` judges each
+  candidate against its own cohort; the member drawer derives the benchmark with the ledger-wide query
+  (and `populationFrom`), matching the matrix; the coverage bar accounts for `off_benchmark`.
+- **Accepted, not a bug:** posting the *active* code as `bench_schedule` while a different change is
+  pending replaces it (§4.7's table: a no-op only when nothing is scheduled). The modal posts only
+  changed fields, and the legacy `bench` spelling is retired in P29.

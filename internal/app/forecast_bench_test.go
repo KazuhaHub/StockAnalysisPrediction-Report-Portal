@@ -642,3 +642,54 @@ func TestIngestFreezesTheCohortsBenchmark(t *testing.T) {
 		t.Errorf("frozen bench = %q, want sh000906 from the current cohort's schedule", got)
 	}
 }
+
+func TestCancelOfADueScheduleKeepsTheCurrentCohort(t *testing.T) {
+	s := newV1Server(t)
+	// The schedule is effective for the cohort in flight but a boot has not promoted it yet (the
+	// admin's save can be the first request after the boundary). Cancelling must not revert the
+	// cohort to the old code mid-month.
+	if err := s.st.applyForecastBenchState(defaultForecastBench, "sh000906", shanghaiCohort(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if rec := saveForecastSettings(t, s, `{"bench_cancel":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.ForecastBench(); got != "sh000906" {
+		t.Errorf("active = %q, want sh000906: the due schedule is already in force", got)
+	}
+	if next, from := s.st.forecastScheduledBench(); next != "" || from != "" {
+		t.Errorf("after cancel: %q from %q, want both empty", next, from)
+	}
+}
+
+func TestMalformedScheduleIsIgnored(t *testing.T) {
+	s := newV1Server(t)
+	// A restore or an out-of-band edit could leave this behind. It must not apply early or never.
+	s.st.SetSetting(setForecastBenchNext, "sh000906")
+	s.st.SetSetting(setForecastBenchNextFrom, "not-a-month")
+	if got := s.st.ForecastBenchFor(shanghaiCohort(time.Now())); got != defaultForecastBench {
+		t.Errorf("For(current) = %q, want %q: a malformed cohort must not schedule anything", got, defaultForecastBench)
+	}
+	s.promoteForecastBench(time.Now())
+	if got := s.st.ForecastBench(); got != defaultForecastBench {
+		t.Errorf("active = %q after a malformed schedule's promotion, want %q", got, defaultForecastBench)
+	}
+}
+
+func TestCountedSetIDJudgesEachCohortOnItsOwn(t *testing.T) {
+	sets := []PredictionSet{
+		{ID: 1, State: predStateAccepted, MadeAt: "2026-10-18T13:00:00Z", Cohort: "2026-10", BenchCode: "sh000852"},
+		{ID: 2, State: predStateAccepted, MadeAt: "2026-10-19T13:00:00Z", Cohort: "2026-11", BenchCode: "sh000906"},
+	}
+	bench := map[string]string{"2026-10": "sh000852", "2026-11": "sh000906"}
+	forCohort := func(c string) string { return bench[c] }
+	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 1 {
+		t.Errorf("counted = %d, want 1 (the earliest on-benchmark set)", got)
+	}
+	// October's benchmark moved: its set is now off-benchmark, and the November revision is judged
+	// against November's code, not October's.
+	bench["2026-10"] = "sh000905"
+	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 2 {
+		t.Errorf("counted = %d, want 2 (the older set is off-benchmark in its own cohort)", got)
+	}
+}

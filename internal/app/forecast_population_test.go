@@ -433,13 +433,13 @@ func TestCountedSetIDSkipsPreLive(t *testing.T) {
 	late := PredictionSet{ID: 2, State: predStateAccepted, MadeAt: "2020-07-07T13:00:00Z"}
 	boundary := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
 
-	if got := countedSetIDFor([]PredictionSet{early, late}, boundary, ""); got != 2 {
+	if got := countedSetIDFor([]PredictionSet{early, late}, boundary, nil); got != 2 {
 		t.Errorf("counted_set_id = %d, want 2 (the pre-live set is skipped)", got)
 	}
-	if got := countedSetIDFor([]PredictionSet{early}, boundary, ""); got != 0 {
+	if got := countedSetIDFor([]PredictionSet{early}, boundary, nil); got != 0 {
 		t.Errorf("counted_set_id = %d, want 0 (the only set is pre-live)", got)
 	}
-	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}, ""); got != 1 {
+	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}, nil); got != 1 {
 		t.Errorf("counted_set_id = %d, want 1 with no boundary", got)
 	}
 }

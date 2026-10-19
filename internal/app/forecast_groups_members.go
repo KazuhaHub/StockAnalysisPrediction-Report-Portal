@@ -130,19 +130,35 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	populationFrom, _ := s.st.ForecastPopulationFrom()
+	// Use the matrix's ledger-wide answer, not the loaded slice: the slice can start after a pre-live
+	// set or omit part of the cohort, and then the drawer would show a different population.
+	benchOf := map[string]string{}
+	for _, gs := range sets {
+		if _, ok := benchOf[gs.Cohort]; ok {
+			continue
+		}
+		b, _ := s.st.earliestCohortBench(rtype, gs.Cohort)
+		benchOf[gs.Cohort] = b
+	}
 	if bench == "" {
-		bench = cohortBenchFromSets(sets)
+		distinct := map[string]bool{}
+		for _, gs := range sets {
+			if benchOf[gs.Cohort] != "" {
+				distinct[benchOf[gs.Cohort]] = true
+			}
+		}
+		if len(distinct) == 1 {
+			for b := range distinct {
+				bench = b
+			}
+		} else if len(sets) > 0 {
+			bench = benchOf[sets[0].Cohort]
+		}
 	}
 	if bench != "" {
-		benchOf := map[string]string{}
 		filtered := make([]*groupSet, 0, len(sets))
 		for _, gs := range sets {
-			b, ok := benchOf[gs.Cohort]
-			if !ok {
-				b, _ = s.st.earliestCohortBench(rtype, gs.Cohort)
-				benchOf[gs.Cohort] = b
-			}
-			if b == bench {
+			if benchOf[gs.Cohort] == bench {
 				filtered = append(filtered, gs)
 			}
 		}
