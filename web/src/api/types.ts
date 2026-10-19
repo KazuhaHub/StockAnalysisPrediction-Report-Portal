@@ -1304,7 +1304,7 @@ export interface QuoteResp {
 // non-mature cell carries NO metric keys, and `undefined` is how the UI tells that apart from a
 // measured zero.
 
-export type PredictionState = 'absent' | 'rejected' | 'backtest' | 'accepted'
+export type PredictionState = 'absent' | 'rejected' | 'backtest' | 'accepted' | 'test'
 export type ForecastCheckpoint = 'd5' | 'd20' | 'd60' | 'd120' | 'h12'
 
 export interface PredictionClaim {

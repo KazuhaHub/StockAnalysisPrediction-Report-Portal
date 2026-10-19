@@ -894,6 +894,7 @@
   "forecast.panel.excess": "超额",
   "forecast.panel.touched": "触及买入价",
   "forecast.panel.agreement": "判定",
+  "forecast.panel.test_run": "测试运行——单独存放，不参与结算。",
   "forecast.panel.settle_note": "收盘 15:30 后结算，结算后不再改变。",
   "forecast.panel.latest_close": "最新收盘 {{date}}：{{price}}（不计分）",
   "forecast.panel.others": "这只股票的其他预测",

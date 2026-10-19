@@ -46,9 +46,12 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   const { t } = useTranslation()
   const [open, setOpen] = useState(readOpen)
 
-  const accepted = sets.filter((s) => s.state === 'accepted')
-  const set = accepted.find((s) => s.id === countedSetID) ?? accepted[accepted.length - 1]
+  // A test run is listed here too (P36), so a producer's console run is visibly a test rather than
+  // vanishing. It has no marks and no checkpoint table; only production sets are scored.
+  const shown = sets.filter((s) => s.state === 'accepted' || s.state === 'test')
+  const set = shown.find((s) => s.id === countedSetID) ?? shown[shown.length - 1]
   if (!set) return null
+  const isTest = set.state === 'test'
 
   const toggle = () => {
     const next = !open
@@ -70,6 +73,7 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
 
   const badges = (
     <Space size={[4, 4]} wrap>
+      {isTest && <Tag color="purple">{t('forecast.panel.test_run')}</Tag>}
       {set.counted_in_group ? (
         <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
       ) : (
@@ -165,30 +169,32 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
             </Descriptions.Item>
           </Descriptions>
 
-          <div>
-            <Typography.Text strong>{t('forecast.panel.checkpoints')}</Typography.Text>
-            <Table
-              size="small"
-              rowKey="key"
-              pagination={false}
-              style={{ marginTop: 8 }}
-              dataSource={marks.map(markRow)}
-              columns={[
-                { title: t('forecast.panel.mark'), dataIndex: 'checkpoint', key: 'checkpoint' },
-                { title: t('forecast.panel.mark_status'), dataIndex: 'status', key: 'status' },
-                { title: t('forecast.panel.mark_date'), dataIndex: 'date', key: 'date' },
-                { title: t('forecast.panel.close'), dataIndex: 'close', key: 'close' },
-                { title: t('forecast.panel.ret'), dataIndex: 'ret', key: 'ret' },
-                { title: t('forecast.panel.bench_ret'), dataIndex: 'bench', key: 'bench' },
-                { title: t('forecast.panel.excess'), dataIndex: 'excess', key: 'excess' },
-                { title: t('forecast.panel.touched'), dataIndex: 'touched', key: 'touched' },
-                { title: t('forecast.panel.agreement'), dataIndex: 'agree', key: 'agree' },
-              ]}
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {t('forecast.panel.settle_note')}
-            </Typography.Text>
-          </div>
+          {!isTest && (
+            <div>
+              <Typography.Text strong>{t('forecast.panel.checkpoints')}</Typography.Text>
+              <Table
+                size="small"
+                rowKey="key"
+                pagination={false}
+                style={{ marginTop: 8 }}
+                dataSource={marks.map(markRow)}
+                columns={[
+                  { title: t('forecast.panel.mark'), dataIndex: 'checkpoint', key: 'checkpoint' },
+                  { title: t('forecast.panel.mark_status'), dataIndex: 'status', key: 'status' },
+                  { title: t('forecast.panel.mark_date'), dataIndex: 'date', key: 'date' },
+                  { title: t('forecast.panel.close'), dataIndex: 'close', key: 'close' },
+                  { title: t('forecast.panel.ret'), dataIndex: 'ret', key: 'ret' },
+                  { title: t('forecast.panel.bench_ret'), dataIndex: 'bench', key: 'bench' },
+                  { title: t('forecast.panel.excess'), dataIndex: 'excess', key: 'excess' },
+                  { title: t('forecast.panel.touched'), dataIndex: 'touched', key: 'touched' },
+                  { title: t('forecast.panel.agreement'), dataIndex: 'agree', key: 'agree' },
+                ]}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('forecast.panel.settle_note')}
+              </Typography.Text>
+            </div>
+          )}
 
           {latestClose !== undefined && (
             <Typography.Text type="secondary">

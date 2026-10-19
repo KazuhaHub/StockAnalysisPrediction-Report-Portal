@@ -198,6 +198,9 @@ type predPayloadWire struct {
 	Baseline           predBaselineWire `json:"baseline"`
 	HorizonEnd         string           `json:"horizon_end"`
 	Claims             []predClaimWire  `json:"claims"`
+	// RunMode is the producer declaring a test run (V24), so a console/debug run of a workflow never
+	// needs another portal cut to stay out of the record. Absent means production.
+	RunMode string `json:"run_mode"`
 }
 
 // ---------- the classifier ----------
@@ -267,6 +270,9 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	// typo. An empty string is the producer saying nothing, which is not the same as an unknown value.
 	if wire.ScenarioBasis != "" && !containsStr(predScenarioBases, wire.ScenarioBasis) {
 		add(reasonBadEnum, "scenario_basis", fmt.Sprintf("%q is not one of %s", wire.ScenarioBasis, strings.Join(predScenarioBases, ", ")))
+	}
+	if runMode := strings.TrimSpace(wire.RunMode); runMode != "" && !containsStr(predRunModes, runMode) {
+		add(reasonBadEnum, "run_mode", fmt.Sprintf("%q is not one of %s", wire.RunMode, strings.Join(predRunModes, ", ")))
 	}
 	// scenario_provenance is audit detail, so its internals are not validated field by field — the
 	// producer owns that shape. Only two things are checked: that it is an object (a string here is
@@ -364,6 +370,12 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 			set.State = predStateBacktest
 		} else {
 			set.State = predStateAccepted
+		}
+		// A declared test run is stored apart, with no marks and never scored. It overrides the
+		// accepted/backtest classification; a test payload that fails validation is still "rejected",
+		// so a broken test run stays visible as such.
+		if strings.TrimSpace(wire.RunMode) == predStateTest {
+			set.State = predStateTest
 		}
 		return &set, claims, nil
 	}

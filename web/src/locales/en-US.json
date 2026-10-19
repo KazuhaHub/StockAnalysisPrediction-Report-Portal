@@ -894,6 +894,7 @@
   "forecast.panel.excess": "Excess",
   "forecast.panel.touched": "Entry touched",
   "forecast.panel.agreement": "Agreement",
+  "forecast.panel.test_run": "Test run — stored apart, never scored.",
   "forecast.panel.settle_note": "Settles after the 15:30 close, and never changes after that.",
   "forecast.panel.latest_close": "Latest close {{date}}: {{price}} (not scored)",
   "forecast.panel.others": "This stock's other predictions",

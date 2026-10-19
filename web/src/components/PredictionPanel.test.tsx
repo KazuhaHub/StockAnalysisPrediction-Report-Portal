@@ -58,6 +58,12 @@ describe('PredictionPanel', () => {
     expect(screen.getByText('forecast.panel.counted')).toBeTruthy()
   })
 
+  it('labels a test run and shows no checkpoint table', () => {
+    show([{ ...accepted, state: 'test', marks: [] }])
+    expect(screen.getByText('forecast.panel.test_run')).toBeTruthy()
+    expect(screen.queryByText('forecast.panel.checkpoints')).toBeNull()
+  })
+
   it('warns when the report body changed after the set was written', () => {
     show([{ ...accepted, body_changed: true }])
     expect(screen.getByText('forecast.panel.body_changed')).toBeTruthy()

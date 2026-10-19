@@ -8,6 +8,9 @@ package app
 
 import (
 	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -669,5 +672,76 @@ func TestBaselineAsOfRefusesNonsense(t *testing.T) {
 				t.Errorf("reason = %q, want %q", got, reasonBadDate)
 			}
 		})
+	}
+}
+
+// TestTestRunIsFrozenAtIngest pins P36: a producer declares a test run on the wire, so a console or
+// debug run stays out of the record without another portal cut. Absent means production; a declared
+// test is stored with state=test and no marks, and is never reclassified afterwards.
+func TestTestRunIsFrozenAtIngest(t *testing.T) {
+	run := func(mode string) json.RawMessage {
+		return predWire(func(m map[string]any) {
+			if mode != "" {
+				m["run_mode"] = mode
+			}
+		})
+	}
+	for _, tc := range []struct{ mode, want string }{
+		{"", predStateAccepted},
+		{"production", predStateAccepted},
+		{"test", predStateTest},
+	} {
+		set, _, errs := classify(t, run(tc.mode), predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("run_mode %q refused: %+v", tc.mode, errs)
+		}
+		if set.State != tc.want {
+			t.Errorf("run_mode %q: state = %q, want %q", tc.mode, set.State, tc.want)
+		}
+	}
+	for _, mode := range []string{"Test", "dry"} {
+		_, _, errs := classify(t, run(mode), predTestRtype)
+		if onlyReason(t, errs) != reasonBadEnum {
+			t.Errorf("run_mode %q: reason = %q, want %q", mode, errs[0].Reason, reasonBadEnum)
+		}
+		if errs[0].Path != "run_mode" {
+			t.Errorf("run_mode %q: path = %q, want run_mode", mode, errs[0].Path)
+		}
+	}
+
+	// Through the write path: a test set lands as state=test and gets no marks. Marks are what the
+	// evaluator settles, so "no marks" is the read-side proof it can never be scored.
+	s := newV1Server(t)
+	code, m := ingestPost(t, s, ingestBody(string(run("test"))))
+	if code != http.StatusOK {
+		t.Fatalf("test-run ingest: %d %v", code, m)
+	}
+	if set := lastSet(t, s.st); set.State != predStateTest {
+		t.Errorf("stored state = %q, want %q", set.State, predStateTest)
+	}
+	if n := predRowCount(t, s.st, "prediction_marks"); n != 0 {
+		t.Errorf("marks for a test set = %d, want 0", n)
+	}
+}
+
+// TestNoCodePathUpdatesAPredictionState is a source guard, not a behavioural one: the design rests on
+// state being frozen at insert (design §7), so any later UPDATE of prediction_sets.state is a bug even
+// if no test has caught it yet.
+func TestNoCodePathUpdatesAPredictionState(t *testing.T) {
+	files, err := filepath.Glob("forecast_*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.ToUpper(string(b)), "UPDATE PREDICTION_SETS SET STATE") {
+			t.Errorf("%s updates prediction_sets.state after insert", f)
+		}
 	}
 }
