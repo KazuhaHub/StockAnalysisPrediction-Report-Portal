@@ -90,6 +90,13 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
+      # Arch determinism: the release image is multi-arch and production may run the arm64 build, so
+      # the forecast statistics' p-values and the queue priority score must be identical on every
+      # architecture. Go contracts `a*b + c` into an FMA on arm64 (and GOAMD64>=v3 amd64) but not on
+      # base amd64, and the two round differently. The barrier that forbids it is invisible to a test
+      # on amd64, so this cross-compiles for arm64 and reads the disassembly. See the script's header.
+      - name: FMA contraction (arm64)
+        run: ./scripts/check-fma-contraction.py
       # staticcheck: static analysis beyond go vet (real bugs, dead code, simplifications).
       # Pinned; the tree already passes it clean. See docs/adr/0016-app-package-architecture.md.
       # Nothing bumps a pin in a run: line, Dependabot included, so it is bumped by hand: a release

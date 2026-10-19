@@ -206,6 +206,18 @@ func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end
 	return cell
 }
 
+// spreadStat is the permutation statistic for the stance spread: the long arm's excess sum scaled
+// into an excess mean and centred on the sample mean. It is a named function so the arithmetic (and
+// the arch-determinism barrier below) has one home and one regression test.
+//
+// The explicit float64() around the product stops the compiler contracting `s*k - invc` into a fused
+// multiply-add. Go permits that contraction on arm64 (and ppc64/s390x) but not on amd64, and the two
+// round differently at the last bit, which would make a p-value differ between the multi-arch release
+// image's amd64 build and its arm64 build. The barrier keeps the amd64 result and rounds arm64 to it.
+func spreadStat(s, k, invc float64) float64 {
+	return float64(s*k) - invc
+}
+
 func filterHorizonStd(in []*groupSet) []*groupSet {
 	out := make([]*groupSet, 0, len(in))
 	for _, gs := range in {
@@ -290,7 +302,7 @@ func scoreForecastCell(cell *forecastCell, sets []*groupSet, cp string, seedPart
 						s += excess[i]
 					}
 				}
-				return s*k - invc
+				return spreadStat(s, k, invc)
 			}))
 	}
 
@@ -662,9 +674,9 @@ func correlationPermP(seed int64, rx, ry []float64) (float64, float64) {
 	var sxx, syy, sxy float64
 	for i := 0; i < n; i++ {
 		dx, dy := rx[i]-mx, ry[i]-my
-		sxx += dx * dx
-		syy += dy * dy
-		sxy += dx * dy
+		sxx += float64(dx * dx)
+		syy += float64(dy * dy)
+		sxy += float64(dx * dy)
 	}
 	if sxx == 0 || syy == 0 {
 		return math.NaN(), math.NaN()
@@ -691,7 +703,7 @@ func correlationPermP(seed int64, rx, ry []float64) (float64, float64) {
 		r.shuffle(perm)
 		var s float64
 		for i := 0; i < n; i++ {
-			s += cx[perm[i]] * dy[i]
+			s += float64(cx[perm[i]] * dy[i])
 		}
 		if math.Abs(s/sd) >= absRho {
 			extreme++
