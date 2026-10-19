@@ -43,6 +43,19 @@ type forecastMark struct {
 	SessionDate   string
 }
 
+// forecastSetsDueQuery is the one selection statement. The tests EXPLAIN this exact text, so the plan
+// they pin is the plan production runs — a copy in a test could drift and keep passing.
+const forecastSetsDueQuery = `SELECT ps.id, ps.symbol, ps.made_on, ps.made_at, ps.horizon_end, ps.horizon_std,
+		ps.bench_code, ps.base_check, ps.s0_date, ps.base_date, ps.s0_fen,
+		ps.emitted_base_fen
+	FROM prediction_sets ps
+	JOIN (SELECT DISTINCT set_id FROM prediction_marks
+	      WHERE status IN (?,?) AND (next_attempt_at = '' OR next_attempt_at <= ?)) due
+	  ON due.set_id = ps.id
+	WHERE ps.state = ?
+	ORDER BY ps.made_on, ps.id
+	LIMIT ?`
+
 // ForecastSetsDue returns the sets with work due, oldest first, bounded by limit.
 //
 // It drives from the marks' due index, not from prediction_sets: a set with no mark whose
@@ -54,16 +67,7 @@ func (s *Store) ForecastSetsDue(now time.Time, limit int) ([]forecastWorkSet, er
 		limit = predEvalBatch
 	}
 	nowStr := now.UTC().Format(time.RFC3339)
-	rows, err := s.query(`SELECT ps.id, ps.symbol, ps.made_on, ps.made_at, ps.horizon_end, ps.horizon_std,
-			ps.bench_code, ps.base_check, ps.s0_date, ps.base_date, ps.s0_fen,
-			ps.emitted_base_fen
-		FROM prediction_sets ps
-		JOIN (SELECT DISTINCT set_id FROM prediction_marks
-		      WHERE status IN (?,?) AND (next_attempt_at = '' OR next_attempt_at <= ?)) due
-		  ON due.set_id = ps.id
-		WHERE ps.state = ?
-		ORDER BY ps.made_on, ps.id
-		LIMIT ?`,
+	rows, err := s.query(forecastSetsDueQuery,
 		markPending, markRefused, nowStr, predStateAccepted, limit)
 	if err != nil {
 		return nil, err
@@ -274,8 +278,10 @@ func (s *Store) SettleForecastMark(tx *sql.Tx, markID int64, res markResult, now
 // MarkRefusedFinal ends retries on a mark. It accepts a pending mark too: finality is the result of a
 // failed attempt, and that attempt's deferral may have been written in this same plan.
 func (s *Store) MarkRefusedFinal(tx *sql.Tx, markID int64, code string, now time.Time) error {
+	// The final marker is the result of a failed attempt, so it records that attempt: a row that says
+	// refused_final with attempts=3 would misreport why it stopped.
 	_, err := tx.Exec(s.bind(`UPDATE prediction_marks
-		SET status = ?, refusal = ?, resolved_at = ?
+		SET status = ?, refusal = ?, attempts = attempts + 1, resolved_at = ?
 		WHERE id = ? AND status IN (?, ?)`),
 		markRefusedFinal, code, now.UTC().Format(time.RFC3339), markID, markPending, markRefused)
 	return err

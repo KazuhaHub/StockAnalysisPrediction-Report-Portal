@@ -292,8 +292,14 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 
 	if fault != nil {
 		// The calendar is a shared dependency: without it no checkpoint date can be trusted. This is
-		// a SOURCE failure — it leaves attempts unchanged and never counts toward finality.
+		// a SOURCE failure — it leaves attempts unchanged and never counts toward finality. A mark
+		// whose earliest possible due is still in the future is rescheduled rather than marked
+		// refused: a vendor outage is not a fact about a checkpoint that cannot be due yet.
 		for _, m := range set.Marks {
+			if wake := predWakeAt(set, m.Checkpoint); !wake.IsZero() && now.Before(wake) {
+				plan.wakes[m.ID] = wake
+				continue
+			}
 			plan.deferMark(m, fault.code, "")
 		}
 		return s.st.ApplyForecastPlan(plan, now)
@@ -302,8 +308,13 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	stockSeries, err := e.rangeBars(ctx, s, set.Market, set.Symbol, shiftDays(set.MadeOn, -predReferenceLagDays), now)
 	if err != nil {
 		// The stock's own series failed to arrive. Also a source failure: the run was not scored
-		// against a wrong price, it simply has not been delivered yet.
+		// against a wrong price, it simply has not been delivered yet. Only marks that could be due
+		// are refused; a far-off checkpoint keeps its scheduled wake.
 		for _, m := range set.Marks {
+			if wake := predWakeAt(set, m.Checkpoint); !wake.IsZero() && now.Before(wake) {
+				plan.wakes[m.ID] = wake
+				continue
+			}
 			plan.deferMark(m, "fetch_failed", "")
 		}
 		return s.st.ApplyForecastPlan(plan, now)
@@ -320,11 +331,28 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 
 	s0, baseDate, s0Fen, err := resolveStartBar(stockBars, indexBars, set, now)
 	if err != nil {
-		// The baseline cannot be resolved yet. This is the set's own data, so it is a MARK-SPECIFIC
-		// failure and does count as an attempt; it only becomes terminal after the fixed clock has
-		// run out AND those attempts exist.
+		if s0 == "" {
+			// The calendar has not shown a session after the receipt yet (holiday, vendor lag). That
+			// is not due and not a refusal: keep every mark waiting.
+			for _, m := range set.Marks {
+				wake := predWakeAt(set, m.Checkpoint)
+				if wake.IsZero() {
+					plan.finals = append(plan.finals, forecastFinal{markID: m.ID, code: "no_schedule"})
+					continue
+				}
+				if !now.Before(wake) {
+					wake = predNotYetShown(now)
+				}
+				plan.wakes[m.ID] = wake
+			}
+			return s.st.ApplyForecastPlan(plan, now)
+		}
+		// The start session exists but the stock has no bar on or after it. This is the set's own
+		// data, so it is a MARK-SPECIFIC failure and does count as an attempt; it only becomes
+		// terminal after the fixed clock has run out AND those attempts exist. The session is
+		// recorded, so the one-shot heal never mistakes this for a pre-P1 refusal.
 		for _, m := range set.Marks {
-			plan.deferMark(m, "no_bar", "")
+			plan.deferMark(m, "no_bar", s0)
 		}
 		if s0 != "" && sessionsPastDue(sessions, s0, now) >= predRetryDeadlineTicks {
 			min, first := 0, true
@@ -358,7 +386,13 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			// Not due. Record a wake; never a refusal. A calendar that has not shown the session yet
 			// is a delivery delay, not a bad prediction.
 			wake := predWakeAt(set, mark.Checkpoint)
-			if wake.IsZero() || !now.Before(wake) {
+			if wake.IsZero() {
+				// An unknown checkpoint (or h12 on a non-standard horizon) can never be scheduled.
+				// It cannot occur from this build's own marks, but a corrupt row must not spin.
+				plan.finals = append(plan.finals, forecastFinal{markID: mark.ID, code: "no_schedule"})
+				continue
+			}
+			if !now.Before(wake) {
 				wake = predNotYetShown(now)
 			}
 			plan.wakes[mark.ID] = wake

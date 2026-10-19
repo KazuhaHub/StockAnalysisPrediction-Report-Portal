@@ -916,6 +916,7 @@
   "forecast.panel.baseline.match": "基準價核對一致",
   "forecast.panel.baseline.mismatch": "基準價不符",
   "forecast.panel.baseline.pending": "基準價待核對",
+  "forecast.panel.baseline.refused_final": "基準無法確定",
   "forecast.panel.baseline.refused": "基準價取得失敗",
   "forecast.panel.quality": "決策品質：{{quality}}",
   "forecast.panel.default_probability": "情境機率為策略預設值，不參與機率校準",

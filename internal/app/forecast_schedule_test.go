@@ -44,8 +44,8 @@ func TestCheckpointArithmeticToday(t *testing.T) {
 	sessions := tradingDays("2026-10-19", 12)
 
 	sch := predScheduleFor("d5", madeAt, true, "", sessions[:6])
-	if !sch.Known || sch.S0 != sessions[0] || sch.Record != sessions[4] || sch.Due != sessions[4] {
-		t.Fatalf("d5 = %+v, want S0=%s record/due=%s", sch, sessions[0], sessions[4])
+	if !sch.Known || sch.S0 != sessions[0] || sch.Record != sessions[4] || sch.Due != sessions[5] {
+		t.Fatalf("d5 = %+v, want S0=%s record=%s due=%s", sch, sessions[0], sessions[4], sessions[5])
 	}
 	// Today's boundary: len == n is NOT due; len == n+1 is.
 	if got := predScheduleFor("d5", madeAt, true, "", sessions[:5]); got.Known {
@@ -168,14 +168,8 @@ func TestDueSelectionUsesTheDueIndex(t *testing.T) {
 	if s.st.driver != "sqlite" {
 		t.Skip("the query plan is SQLite-specific; the Postgres test covers the same shape")
 	}
-	rows, err := s.st.query(`EXPLAIN QUERY PLAN
-		SELECT ps.id FROM prediction_sets ps
-		JOIN (SELECT DISTINCT set_id FROM prediction_marks
-		      WHERE status IN ('pending','refused')
-		        AND (next_attempt_at = '' OR next_attempt_at <= '2026-01-01T00:00:00Z')) due
-		  ON due.set_id = ps.id
-		WHERE ps.state = 'accepted'
-		ORDER BY ps.made_on, ps.id LIMIT 50`)
+	rows, err := s.st.query("EXPLAIN QUERY PLAN "+forecastSetsDueQuery,
+		markPending, markRefused, "2026-01-01T00:00:00Z", predStateAccepted, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +281,13 @@ func TestCatchUpAfterDryPeriodNeverFinalisesOnFirstFailure(t *testing.T) {
 		}
 		if status != want {
 			t.Errorf("failure %d: d5 = %q, want %q", i, status, want)
+		}
+		if i == 4 {
+			var attempts int
+			s.st.queryRow("SELECT attempts FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&attempts)
+			if attempts != 4 {
+				t.Errorf("final attempts = %d, want 4", attempts)
+			}
 		}
 		if i < 4 {
 			if _, err := s.st.exec(`UPDATE prediction_marks SET next_attempt_at='' WHERE set_id=? AND checkpoint='d5'`, setID); err != nil {
@@ -468,5 +469,97 @@ func TestSourceFailuresAreNotMarkSpecific(t *testing.T) {
 		if got := refusalClassOf(code); got != refusalMarkSpecific {
 			t.Errorf("%s is %q, want mark-specific", code, got)
 		}
+	}
+}
+
+func TestFinalityNeedsSessionsAsWellAsAttempts(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
+	sessions := tradingDays("2026-10-19", 40)
+	index := barsFor(sessions, 4000)
+	stock := []QuoteBar{bar("2026-10-15", 1000, 1000, 1010, 990), bar(sessions[10], 1000, 1000, 1010, 990)}
+
+	early, _ := time.ParseInLocation("2006-01-02", sessions[11], chinaZone)
+	early = time.Date(early.Year(), early.Month(), early.Day(), 16, 0, 0, 0, chinaZone)
+	for i := 0; i < 4; i++ {
+		e := evalStub(&early, index, stock, nil, nil)
+		if err := e.tick(s); err != nil {
+			t.Fatal(err)
+		}
+		if i < 3 {
+			if _, err := s.st.exec(`UPDATE prediction_marks SET next_attempt_at='' WHERE set_id=? AND checkpoint='d5'`, setID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var status string
+	var attempts int
+	s.st.queryRow("SELECT status, attempts FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).
+		Scan(&status, &attempts)
+	if status == markRefusedFinal {
+		t.Fatalf("finalised after 4 attempts but only 6 sessions past due")
+	}
+	if status != markRefused || attempts != 4 {
+		t.Fatalf("early: %s/%d, want refused/4", status, attempts)
+	}
+
+	late, _ := time.ParseInLocation("2006-01-02", sessions[29], chinaZone)
+	late = time.Date(late.Year(), late.Month(), late.Day(), 16, 0, 0, 0, chinaZone)
+	if _, err := s.st.exec(`UPDATE prediction_marks SET next_attempt_at='' WHERE set_id=? AND checkpoint='d5'`, setID); err != nil {
+		t.Fatal(err)
+	}
+	e := evalStub(&late, index, stock, nil, nil)
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
+	}
+	s.st.queryRow("SELECT status, attempts FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).
+		Scan(&status, &attempts)
+	if status != markRefusedFinal || attempts != 5 {
+		t.Errorf("late: %s/%d, want refused_final/5 (the final attempt is recorded)", status, attempts)
+	}
+}
+
+func TestHealDoesNotMatchANewBaselineRefusal(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
+	index := barsFor(tradingDays("2026-10-19", 12), 4000)
+	now := shanghai(2026, time.November, 10, 16, 0)
+	e := evalStub(&now, index, nil, nil, nil) // no stock bar: a baseline no_bar
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
+	}
+	var sessions int
+	s.st.queryRow(`SELECT COUNT(*) FROM prediction_marks WHERE set_id=? AND session_date<>''`, setID).Scan(&sessions)
+	if sessions == 0 {
+		t.Fatal("a baseline no_bar did not record a session; the heal would mistake it for a pre-P1 refusal")
+	}
+
+	s.runForecastRepair()
+	var healed int
+	s.st.queryRow(`SELECT COUNT(*) FROM prediction_marks WHERE set_id=? AND status=?`, setID, markPending).Scan(&healed)
+	if healed != 0 {
+		t.Errorf("%d new-code baseline refusals were healed; they are real attempts", healed)
+	}
+}
+
+func TestUnknownCheckpointTerminalises(t *testing.T) {
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
+	if _, err := s.st.exec(`INSERT INTO prediction_marks(set_id, checkpoint, status, bench_code)
+		VALUES(?, 'weird', ?, 'sh000852')`, setID, markPending); err != nil {
+		t.Fatal(err)
+	}
+	index := barsFor(tradingDays("2026-10-19", 12), 4000)
+	stock := barsFor(tradingDays("2026-10-19", 12), 1000)
+	now := shanghai(2026, time.November, 10, 16, 0)
+	e := evalStub(&now, index, stock, nil, nil)
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
+	}
+	var status, refusal string
+	s.st.queryRow("SELECT status, refusal FROM prediction_marks WHERE set_id=? AND checkpoint='weird'", setID).
+		Scan(&status, &refusal)
+	if status != markRefusedFinal || refusal != "no_schedule" {
+		t.Errorf("weird checkpoint = %s/%s, want refused_final/no_schedule", status, refusal)
 	}
 }

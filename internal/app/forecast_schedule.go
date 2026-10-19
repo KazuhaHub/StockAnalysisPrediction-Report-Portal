@@ -59,7 +59,9 @@ func predScheduleFor(cp string, madeAt time.Time, horizonStd bool, frozenS0 stri
 	if len(sessions) <= n {
 		return predSchedule{S0: s0}
 	}
-	sch.Record, sch.Due, sch.Known = sessions[n-1], sessions[n-1], true
+	// Today's rule records the Nth session but may settle only once the NEXT one has completed:
+	// `Due` is the session after which the mark may settle, so `sessionsPastDue` starts at zero.
+	sch.Record, sch.Due, sch.Known = sessions[n-1], sessions[n], true
 	return sch
 }
 
@@ -101,9 +103,9 @@ func predWakeAt(set forecastWorkSet, cp string) time.Time {
 			due = p[0]
 		}
 	} else if n, ok := predCheckpointSessions[cp]; ok {
-		// Match predScheduleFor's "N+1 completed" rule: the projected Nth session after the receipt.
-		if p := predProjectSessions(shiftDays(madeOn, 1), n+1); len(p) >= n {
-			due = p[n-1]
+		// Match predScheduleFor's "N+1 completed" rule: the wake is the projected (N+1)th session.
+		if p := predProjectSessions(shiftDays(madeOn, 1), n+1); len(p) > n {
+			due = p[n]
 		}
 	}
 	if due == "" {
@@ -171,6 +173,7 @@ const (
 var predRefusalClass = map[string]string{
 	"no_bar":       refusalMarkSpecific,
 	"no_base":      refusalMarkSpecific,
+	"no_schedule":  refusalMarkSpecific,
 	"fetch_failed": refusalSource,
 	"not_index":    refusalSource,
 	"calendar_bad": refusalSource,

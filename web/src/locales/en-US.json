@@ -916,6 +916,7 @@
   "forecast.panel.baseline.match": "Baseline matches the market",
   "forecast.panel.baseline.mismatch": "Baseline does not match",
   "forecast.panel.baseline.pending": "Baseline not checked yet",
+  "forecast.panel.baseline.refused_final": "Baseline could not be resolved",
   "forecast.panel.baseline.refused": "Baseline fetch failed",
   "forecast.panel.quality": "Decision quality: {{quality}}",
   "forecast.panel.default_probability": "Scenario probabilities are policy defaults and do not feed the calibration",

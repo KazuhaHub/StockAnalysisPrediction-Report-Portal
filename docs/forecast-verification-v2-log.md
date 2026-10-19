@@ -132,3 +132,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   18:00 it is 09:00 on the next weekday.
 - **The P9 readiness gate is not built here.** This PR makes item 1 of §1.4 true (the binary contains
   P1); P9 adds the `forecast_not_ready` refusal and the per-item GET. The evaluator remains off.
+- **Adversarial review follow-ups (P1).** Fixed before merge: a calendar with no session after the
+  receipt reschedules instead of refusing (the baseline `no_bar` is reserved for "the start session
+  exists but the stock has no bar"); `Due` is now the session after which the mark may settle, so
+  `sessionsPastDue` starts at 0 and the 10-session conjunct is real (`predWakeAt` wakes on the same
+  session); a source fault only refuses marks that could be due, leaving far-off checkpoints on their
+  wake; a baseline deferral records S0 as its session, so the heal cannot mistake it for the pre-P1
+  signature; a finalised mark records the failed attempt that finalised it; an unschedulable checkpoint
+  terminalises with `no_schedule` instead of spinning; `baseline_check=refused_final` is rendered; the
+  EXPLAIN tests now use the production selection text (and PG's `SET LOCAL` on the same connection).

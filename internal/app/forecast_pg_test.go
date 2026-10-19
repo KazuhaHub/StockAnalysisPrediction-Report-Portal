@@ -301,16 +301,18 @@ func TestPostgresDueSelectionHealAndPlan(t *testing.T) {
 
 func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
 	st := pgStore(t)
-	if _, err := st.exec("SET enable_seqscan = off"); err != nil {
+	// SET LOCAL is scoped to the transaction (and its connection), so the plan is read on the same
+	// connection that disabled the sequential scan.
+	tx, err := st.db.Begin()
+	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := st.query(`EXPLAIN SELECT ps.id FROM prediction_sets ps
-		JOIN (SELECT DISTINCT set_id FROM prediction_marks
-		      WHERE status IN ('pending','refused')
-		        AND (next_attempt_at = '' OR next_attempt_at <= '2026-01-01T00:00:00Z')) due
-		  ON due.set_id = ps.id
-		WHERE ps.state = 'accepted'
-		ORDER BY ps.made_on, ps.id LIMIT 50`)
+	defer tx.Rollback() //nolint:errcheck // read-only
+	if _, err := tx.Exec("SET LOCAL enable_seqscan = off"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(st.bind("EXPLAIN "+forecastSetsDueQuery),
+		markPending, markRefused, "2026-01-01T00:00:00Z", predStateAccepted, 50)
 	if err != nil {
 		t.Fatal(err)
 	}

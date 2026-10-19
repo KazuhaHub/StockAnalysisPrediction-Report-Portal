@@ -916,6 +916,7 @@
   "forecast.panel.baseline.match": "基准价核对一致",
   "forecast.panel.baseline.mismatch": "基准价不符",
   "forecast.panel.baseline.pending": "基准价待核对",
+  "forecast.panel.baseline.refused_final": "基准无法确定",
   "forecast.panel.baseline.refused": "基准价取数失败",
   "forecast.panel.quality": "仲裁质量：{{quality}}",
   "forecast.panel.default_probability": "情景概率为策略默认值，不参与概率校准",
