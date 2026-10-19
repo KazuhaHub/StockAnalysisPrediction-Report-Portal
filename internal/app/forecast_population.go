@@ -14,8 +14,10 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -207,10 +209,101 @@ func (s *Store) SaveForecastPopulationFrom(from, now time.Time) (excluded []int6
 	rows.Close()
 	sort.Slice(excluded, func(i, j int) bool { return excluded[i] < excluded[j] })
 
+	// The floor for "unrecorded" (P2): captured here, inside the same transaction as the boundary, so
+	// it is a single snapshot of "which reports existed when the ledger began". Later audit retention
+	// cannot move it.
+	floorID, floorMethod, err := captureUnrecordedFloor(migExec{s: s, ex: tx}, from)
+	if err != nil {
+		return nil, byState, "", err
+	}
+	txe := migExec{s: s, ex: tx}
+	for k, v := range map[string]string{
+		setForecastUnrecordedFloorID:     strconv.FormatInt(floorID, 10),
+		setForecastUnrecordedFloorAt:     from.UTC().Format(time.RFC3339),
+		setForecastUnrecordedFloorMethod: floorMethod,
+	} {
+		if err := txe.setSetting(k, v); err != nil {
+			return nil, byState, "", err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, byState, "", err
 	}
 	return excluded, byState, "", nil
+}
+
+// The unrecorded floor keys (P2).
+const (
+	setForecastUnrecordedFloorID     = "forecast_unrecorded_floor_id"
+	setForecastUnrecordedFloorAt     = "forecast_unrecorded_floor_at"
+	setForecastUnrecordedFloorMethod = "forecast_unrecorded_floor_method"
+)
+
+// captureUnrecordedFloor finds the highest report id that existed at the ledger start, so a count of
+// "covered reports with no set" can ignore the pre-ledger history. It prefers the ingest audit trail
+// (every created covered report leaves a row with detail.created) and falls back to the current max
+// id when the audit has been pruned. Runs on the given executor only (tx during the save, pool when
+// re-deriving on read).
+func captureUnrecordedFloor(e migExec, from time.Time) (int64, string, error) {
+	rows, err := e.query(`SELECT target_id, detail FROM audit_log WHERE action=? AND at >= ? ORDER BY id`,
+		AuditReportIngest, from.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, "", err
+	}
+	defer rows.Close()
+	var minID int64
+	found := false
+	for rows.Next() {
+		var targetID, detail string
+		if err := rows.Scan(&targetID, &detail); err != nil {
+			return 0, "", err
+		}
+		var d struct {
+			Created bool `json:"created"`
+		}
+		if json.Unmarshal([]byte(detail), &d) != nil || !d.Created {
+			continue
+		}
+		id, err := strconv.ParseInt(targetID, 10, 64)
+		if err != nil {
+			continue
+		}
+		if !found || id < minID {
+			minID, found = id, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, "", err
+	}
+	if found {
+		if minID > 0 {
+			minID--
+		}
+		return minID, "audit", nil
+	}
+	var maxID int64
+	if err := e.queryRow(`SELECT COALESCE(MAX(id),0) FROM reports`).Scan(&maxID); err != nil {
+		return 0, "", err
+	}
+	return maxID, "max_id", nil
+}
+
+// forecastUnrecordedFloor returns the stored floor, re-deriving it read-only from the ledger start
+// when the keys are absent (a database whose boundary predates P2, or a restore that could not read
+// them). ok=false when the ledger start is not set.
+func (s *Store) forecastUnrecordedFloor(from time.Time) (int64, bool, error) {
+	raw := s.GetSetting(setForecastUnrecordedFloorID, "")
+	if raw != "" {
+		if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return id, true, nil
+		}
+	}
+	id, _, err := captureUnrecordedFloor(s.poolExec(), from)
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 // firstCohortMature reports whether any official cell of the ledger's first covered cohort is already

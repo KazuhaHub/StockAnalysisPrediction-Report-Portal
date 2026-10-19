@@ -533,6 +533,17 @@ export interface ForecastSettings {
   pending: number
   refused: number
   unsettled_baseline: number
+  /** Unrecorded covered reports since the ledger start (P2), and ledger store failures in 30 days.
+   *  `ok` is false while the ledger start is unset, when a count would be meaningless. */
+  unrecorded?: ForecastUnrecorded[]
+}
+
+export interface ForecastUnrecorded {
+  rtype: string
+  n: number
+  since: string
+  ok: boolean
+  store_failed_30d: number
 }
 
 /** The ledger start (P5). `set` is false before an admin has fixed the boundary. */

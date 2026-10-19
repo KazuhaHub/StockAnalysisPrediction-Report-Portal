@@ -166,11 +166,6 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
         {' · '}
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Typography.Text>
-      {resp.unrecorded > 0 && (
-        <div style={{ color: token.colorWarning, fontSize: 13 }}>
-          {t('forecast.cov.unrecorded', { n: resp.unrecorded })}
-        </div>
-      )}
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
         <table style={{ borderCollapse: 'separate', borderSpacing: 4, width: '100%' }}>
           <thead>

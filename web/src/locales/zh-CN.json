@@ -844,7 +844,6 @@
   "forecast.cov.summary": "计入 {{member}} / 报告 {{reports}}",
   "forecast.cov.rejected": "被拒 {{n}}",
   "forecast.cov.pending_baseline": "基准未核对 {{n}}",
-  "forecast.cov.unrecorded": "{{n}} 份报告没有预测记录（入库失败）",
   "forecast.cp.d5": "5 个交易日",
   "forecast.cp.d20": "20 个交易日",
   "forecast.cp.d60": "60 个交易日",
@@ -2079,5 +2078,8 @@
   "storage.loginHistoryHint": "此上限统一应用于所有账户，保存后立即清理超出数量的个人登录历史。范围为 1–10000，默认 100 条。不会退出登录或删除管理员审计记录，提高上限不能恢复已清理的历史。",
   "storage.loginHistoryConfirm": "将所有账户统一设置为保留最新 {{count}} 条登录历史？",
   "forecast.population.immutable": "设置后不可更改。",
-  "forecast.population.damaged": "账本起点的值已损坏，无法读取。写入仍保持只读，请联系维护者检查 meta 表。"
+  "forecast.population.damaged": "账本起点的值已损坏，无法读取。写入仍保持只读，请联系维护者检查 meta 表。",
+  "forecast.cov.unrecorded_since": "{{since}} 以来有 {{n}} 份覆盖类型的报告没有预测记录 · 近 30 天写入失败：{{m}}",
+  "forecast.cov.unrecorded_audit": "查看审计日志",
+  "webhook.event.predictions.store_failed": "预测账本写入失败"
 }

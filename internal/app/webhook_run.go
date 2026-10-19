@@ -21,6 +21,10 @@ const (
 	// than a flag on report.ingested, because it is the one outcome a subscriber should alert on and
 	// the report itself is stored and looks normal.
 	EventPredictionsRejected = "predictions.rejected"
+	// A covered ingest whose ledger write failed after a retry (P2, plan B1). The report exists and
+	// the set does not, and it cannot be re-created after the fact, so this is an incident: the one
+	// event a subscriber should page on.
+	EventPredictionsStoreFailed = "predictions.store_failed"
 )
 
 const (

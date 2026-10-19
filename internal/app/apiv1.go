@@ -357,6 +357,12 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 				logPredictionsStoreFailed(id, again)
 				s.recordChange(r, "", AuditPredictionsStoreFailed, "report", strconv.FormatInt(id, 10),
 					map[string]any{"error": again.Error()})
+				// The report exists and the set does not, and a started run is never re-run, so this
+				// is the one ingest outcome a subscriber should alert on (P2).
+				s.fireEvent(EventPredictionsStoreFailed, map[string]any{
+					"report_id": id, "symbol": in.Symbol, "rtype": rtype,
+					"made_at": predSet.MadeAt, "error": again.Error(),
+				})
 			}
 		}
 	}

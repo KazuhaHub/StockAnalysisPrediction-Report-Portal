@@ -212,4 +212,23 @@ describe('ForecastPage', () => {
     await waitFor(() => expect(screen.getByText('Request failed')).toBeTruthy())
     expect(screen.queryByText('forecast.empty')).toBeNull()
   })
+
+  it('hides the unrecorded line when the count and the failures are both zero', async () => {
+    apiMock.get.mockImplementation(
+      byUrl({ ...on, unrecorded: [{ rtype: '投资决策建议', n: 0, since: '2026-10-19T00:00:00Z', ok: true, store_failed_30d: 0 }] }),
+    )
+    show()
+    await waitFor(() => expect(screen.getByText('forecast.eval.title')).toBeTruthy())
+    expect(screen.queryByText(/forecast.cov.unrecorded_since/)).toBeNull()
+  })
+
+  it('shows the unrecorded line with a link to the store-failure audit filter', async () => {
+    apiMock.get.mockImplementation(
+      byUrl({ ...on, unrecorded: [{ rtype: '投资决策建议', n: 3, since: '2026-10-19T00:00:00Z', ok: true, store_failed_30d: 1 }] }),
+    )
+    show()
+    await waitFor(() => expect(screen.getByText(/forecast.cov.unrecorded_since/)).toBeTruthy())
+    const link = screen.getByText('forecast.cov.unrecorded_audit').closest('a') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toContain('action=predictions.store_failed')
+  })
 })
