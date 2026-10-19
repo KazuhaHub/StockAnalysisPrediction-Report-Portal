@@ -322,14 +322,23 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
 	// Sessions strictly after the receipt date, using the BENCHMARK's calendar so a halted stock
 	// cannot slide its own checkpoints. The cutoff is what keeps today's unfinished bar out.
-	sessions := completedSessionsAfter(indexBars, set.MadeOn, now)
+	sessions := completedSessions(indexSeries, now)
 
-	madeAt, err := time.Parse(time.RFC3339, set.MadeAt)
-	if err != nil {
-		madeAt, _ = time.ParseInLocation("2006-01-02", set.MadeOn, chinaZone)
+	madeAt, ok := setMadeAt(set)
+	if !ok {
+		return fmt.Errorf("set %d has no readable made_at (%q)", set.SetID, set.MadeAt)
 	}
 
-	s0, baseDate, s0Fen, err := resolveStartBar(stockBars, indexBars, set, now)
+	// A terminal baseline is used as STORED. Recomputing it on a later pass would let a revised
+	// vendor body move the starting point of the set's whole return series.
+	settled := set.BaseCheck == baseMatch || set.BaseCheck == baseMismatch || set.BaseCheck == baseRefusedFinal
+	var s0, baseDate string
+	var s0Fen int64
+	if settled && set.S0Fen != nil {
+		s0, baseDate, s0Fen = set.S0Date, set.BaseDate, *set.S0Fen
+	} else {
+		s0, baseDate, s0Fen, err = resolveStartBar(stockBars, set, madeAt, sessions)
+	}
 	if err != nil {
 		if s0 == "" {
 			// The calendar has not shown a session after the receipt yet (holiday, vendor lag). That
@@ -368,7 +377,13 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		return s.st.ApplyForecastPlan(plan, now)
 	}
-	plan.baseline = &forecastBaseline{S0: s0, BaseDate: baseDate, S0Fen: s0Fen, Index: indexBars}
+	if !settled {
+		plan.baseline = &forecastBaseline{S0: s0, BaseDate: baseDate, S0Fen: s0Fen, Index: indexBars}
+	}
+	// From here on the baseline IS resolved (either stored or written in this pass), so a not-due
+	// mark's wake is its real projected due, not S0's close plus ten minutes.
+	set.S0Date = s0
+	set.BaseCheck = baseMatch
 
 	for _, mark := range set.Marks {
 		if mark.Status == markResolved || mark.Status == markRefusedFinal {
@@ -481,25 +496,20 @@ type forecastSeries struct {
 
 // ---------- sessions ----------
 
-// completedSessionsAfter returns the dates of sessions strictly after madeOn that have completed by
-// now: the date itself is included once its close has passed, and today's bar is excluded until then.
-//
-// The bars come from the benchmark, which has one on every session the exchange is open — including
-// the days a stock is halted, which is the whole reason they are the calendar.
-func completedSessionsAfter(indexBars []QuoteBar, madeOn string, now time.Time) []string {
+// completedSessions returns the benchmark session dates that have completed by now, ascending. A bar
+// dated before today is complete; a bar dated today is complete only once the clock has passed the
+// session stamp (the vendor's own partial bar was already dropped by rangeBars); a bar dated later
+// never is. Sessions come from the benchmark, which has one on every exchange session including the
+// days a stock is halted.
+func completedSessions(cal forecastSeries, now time.Time) []string {
 	today := now.In(chinaZone).Format("2006-01-02")
 	stamp := predSessionStamp(now)
 	var out []string
-	for _, b := range indexBars {
-		if b.Date <= madeOn {
-			continue
-		}
-		// A bar dated today is usable only after the close. A bar dated earlier is complete by
-		// definition — the vendor would not have published it otherwise.
-		if b.Date == today && !stamp {
-			continue
-		}
+	for _, b := range cal.Bars {
 		if b.Date > today {
+			continue
+		}
+		if b.Date == today && !stamp {
 			continue
 		}
 		out = append(out, b.Date)
@@ -567,35 +577,6 @@ func inRegularSession(t time.Time) bool {
 		}
 	}
 	return false
-}
-
-// checkpointSession maps a checkpoint to the session it settles on, and whether that session has
-// completed yet.
-//
-// dN counts N sessions after S0's session. h12 is calendar-based and lands on the first session on or
-// after made_on + 12 months — and only standard-horizon sets have it at all, which is what keeps a
-// caller-supplied six-month horizon out of the twelve-month column.
-func checkpointSession(cp string, set forecastWorkSet, sessions []string) (string, bool) {
-	if cp == "h12" {
-		if !set.HorizonStd {
-			return "", false
-		}
-		target := addMonths(set.MadeOn, 12)
-		for _, s := range sessions {
-			if s >= target {
-				return s, true
-			}
-		}
-		return target, false
-	}
-	n, ok := predCheckpointSessions[cp]
-	if !ok {
-		return "", false
-	}
-	if len(sessions) <= n {
-		return "", false
-	}
-	return sessions[n-1], true
 }
 
 // sessionsPastDue counts how many completed sessions have passed since a mark's due session. Used for
@@ -672,23 +653,17 @@ func settleMark(set forecastWorkSet, mark forecastMark, stock, index []QuoteBar,
 
 // resolveStartBar picks S0 and the stock's base date.
 //
-// They are two dates on purpose. S0 is the session whose close the report could not have known, so it
-// is the first session strictly after the report was RECEIVED. base_date is the first session on or
-// after S0 on which the stock actually traded, which is where the returns start: a stock halted on S0
-// has no price that day, and using the benchmark's close for it would compare two different days.
-func resolveStartBar(stock, index []QuoteBar, set forecastWorkSet, now time.Time) (s0, baseDate string, s0Fen int64, err error) {
-	for _, b := range index {
-		if b.Date <= set.MadeOn {
-			continue
-		}
-		if b.Date > now.In(chinaZone).Format("2006-01-02") {
-			break
-		}
-		s0 = b.Date
-		break
-	}
+// S0 is the first session whose close is after the receipt (predS0). base_date is the first session
+// the stock actually traded on or after S0, which is where the returns start: a stock halted on S0 has
+// no price that day, and using the benchmark's close for it would compare two different days.
+func resolveStartBar(stock []QuoteBar, set forecastWorkSet, madeAt time.Time, sessions []string) (s0, baseDate string, s0Fen int64, err error) {
+	s0 = set.S0Date
 	if s0 == "" {
-		return "", "", 0, fmt.Errorf("no session after %s yet", set.MadeOn)
+		var ok bool
+		s0, ok = predS0(madeAt, sessions)
+		if !ok {
+			return "", "", 0, fmt.Errorf("no completed session decides the start yet")
+		}
 	}
 	bar, ok := firstBarAtOrAfter(stock, s0)
 	if !ok {

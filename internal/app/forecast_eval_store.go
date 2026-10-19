@@ -199,27 +199,50 @@ func (s *Store) ApplyForecastPlan(p forecastPlan, now time.Time) error {
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
 
+	op := 0
+	check := func() error {
+		op++
+		if s.onForecastApply != nil {
+			return s.onForecastApply(op)
+		}
+		return nil
+	}
 	if p.baseline != nil {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.finishForecastBaselineTx(tx, p.setID, *p.baseline); err != nil {
 			return err
 		}
 	}
 	for _, d := range p.defers {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.DeferForecastMarks(tx, d.marks, d.code, d.session, now); err != nil {
 			return err
 		}
 	}
 	for _, st := range p.settles {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.SettleForecastMark(tx, st.markID, st.res, now); err != nil {
 			return err
 		}
 	}
 	for _, f := range p.finals {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.MarkRefusedFinal(tx, f.markID, f.code, now); err != nil {
 			return err
 		}
 	}
 	for id, wake := range p.wakes {
+		if err := check(); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(s.bind(`UPDATE prediction_marks SET next_attempt_at=?
 			WHERE id=? AND status IN (?,?)`),
 			wake.UTC().Format(time.RFC3339), id, markPending, markRefused); err != nil {
@@ -227,6 +250,9 @@ func (s *Store) ApplyForecastPlan(p forecastPlan, now time.Time) error {
 		}
 	}
 	if p.terminalBaseline {
+		if err := check(); err != nil {
+			return err
+		}
 		if err := s.finishForecastBaselineTerminalTx(tx, p.setID, now); err != nil {
 			return err
 		}

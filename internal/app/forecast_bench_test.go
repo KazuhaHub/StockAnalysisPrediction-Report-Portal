@@ -187,8 +187,9 @@ func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 }
 
 // expectedBenchRetBp derives the d5 benchmark return for a fixture: the index close on the fifth
-// session after made_on over its close on S0 (the first session after made_on), in basis points.
-// It reads the fixture's own bars, so it is an independent check of the evaluator's routing.
+// session after S0 over its close on S0, in basis points. The test receives after the close, so S0 is
+// the first session after made_on. It reads the fixture's own bars, so it is an independent check of
+// the evaluator's routing.
 func expectedBenchRetBp(t *testing.T, resp *QuoteResp, madeOn string) int32 {
 	t.Helper()
 	var sessions []string
@@ -197,10 +198,10 @@ func expectedBenchRetBp(t *testing.T, resp *QuoteResp, madeOn string) int32 {
 			sessions = append(sessions, b.Date)
 		}
 	}
-	if len(sessions) < 5 {
-		t.Fatalf("fixture has %d sessions after %s, need at least 5 for d5", len(sessions), madeOn)
+	if len(sessions) < 6 {
+		t.Fatalf("fixture has %d sessions after %s, need at least 6 for d5 after S0", len(sessions), madeOn)
 	}
-	s0, d5 := sessions[0], sessions[4]
+	s0, d5 := sessions[0], sessions[5]
 	s0Close := barOn(resp.Bars, s0)
 	d5Close := barOn(resp.Bars, d5)
 	if s0Close == nil || d5Close == nil {

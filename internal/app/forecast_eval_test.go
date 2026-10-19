@@ -156,24 +156,23 @@ func TestCorporateActionFromTheDividendElement(t *testing.T) {
 // that bar would freeze a live price into the record.
 func TestCompletedSessionsExcludesAnUnfinishedBar(t *testing.T) {
 	dates := tradingDays("2026-10-19", 6)
-	index := barsFor(dates, 4000)
+	cal := forecastSeries{Bars: barsFor(dates, 4000)}
 	today := dates[5]
 
 	// At 10:00 on today's session, today is not complete.
-	got := completedSessionsAfter(index, dates[0], shanghai(2026, time.October, dayOf(today), 10, 0))
+	got := completedSessions(cal, shanghai(2026, time.October, dayOf(today), 10, 0))
 	if containsStr(got, today) {
 		t.Errorf("today's session was counted as complete at 10:00: %v", got)
 	}
 	// At 15:31 it is.
-	got = completedSessionsAfter(index, dates[0], shanghai(2026, time.October, dayOf(today), 15, 31))
+	got = completedSessions(cal, shanghai(2026, time.October, dayOf(today), 15, 31))
 	if !containsStr(got, today) {
 		t.Errorf("today's session was not counted as complete at 15:31: %v", got)
 	}
-	// Sessions at or before the receipt date are never in the window.
-	got = completedSessionsAfter(index, dates[3], shanghai(2026, time.October, dayOf(today), 16, 0))
+	// A bar dated after today is never counted.
 	for _, d := range got {
-		if d <= dates[3] {
-			t.Errorf("%s is at or before the receipt date but was counted", d)
+		if d > today {
+			t.Errorf("%s is after today but was counted", d)
 		}
 	}
 }
@@ -195,47 +194,6 @@ func TestBarIsCompleteDistrustsAPartialBody(t *testing.T) {
 	// And before the close, neither is believed, whatever the body says.
 	if barIsComplete(final, shanghai(2026, time.October, 21, 10, 0)) {
 		t.Error("a body was believed at 10:00, before the session closed")
-	}
-}
-
-// TestCheckpointSessionIsSessionBasedAndH12IsCalendar: dN counts sessions after S0; h12 is decided by
-// the calendar and exists only for standard horizons.
-func TestCheckpointSessionIsSessionBasedAndH12IsCalendar(t *testing.T) {
-	dates := tradingDays("2026-10-20", 140)
-	set := forecastWorkSet{MadeOn: "2026-10-17", HorizonStd: true}
-
-	for _, tc := range []struct {
-		cp   string
-		want string
-	}{
-		{"d5", dates[4]},
-		{"d20", dates[19]},
-		{"d60", dates[59]},
-		{"d120", dates[119]},
-	} {
-		got, due := checkpointSession(tc.cp, set, dates)
-		if !due || got != tc.want {
-			t.Errorf("%s = %q (due=%v), want %q", tc.cp, got, due, tc.want)
-		}
-	}
-
-	// A non-standard horizon has no h12 at all, which is what keeps a six-month call out of the
-	// twelve-month column.
-	if _, due := checkpointSession("h12", forecastWorkSet{MadeOn: "2026-10-17", HorizonStd: false}, dates); due {
-		t.Error("h12 was due for a non-standard horizon")
-	}
-	// A standard one lands on the first session on or after made_on + 12 months.
-	set2 := forecastWorkSet{MadeOn: "2025-10-17", HorizonStd: true}
-	got, due := checkpointSession("h12", set2, dates)
-	if !due {
-		t.Fatal("h12 was not due twelve months after a receipt inside the fixture's span")
-	}
-	if got < "2026-10-17" {
-		t.Errorf("h12 session = %s, want on or after 2026-10-17", got)
-	}
-	// Not due while the series has not reached it.
-	if _, due := checkpointSession("h12", forecastWorkSet{MadeOn: "2026-10-17", HorizonStd: true}, dates); due {
-		t.Error("h12 was due one year early")
 	}
 }
 
@@ -304,27 +262,30 @@ func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
 	}
 }
 
-// TestResolveStartBarIsTheFirstSessionAfterReceipt: S0 is the first close the report could not have
-// known. The base date is the first session the stock actually traded on, which is a different date
-// when the stock was halted exactly then.
-func TestResolveStartBarIsTheFirstSessionAfterReceipt(t *testing.T) {
+// TestResolveStartBarUsesTheReceiptTimeOfDay: S0 follows the 15:00 rule, and the base date is the
+// first session the stock actually traded on.
+func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
 	dates := tradingDays("2026-10-19", 10)
-	index := barsFor(dates, 4000)
 	stock := barsFor(dates[2:], 1000) // the stock's series starts two sessions late
-	now := shanghai(2026, time.October, 30, 16, 0)
+	madeAt := shanghai(2026, time.October, 19, 10, 0) // before the close on the first session
 
-	s0, base, fen, err := resolveStartBar(stock, index, forecastWorkSet{MadeOn: dates[0]}, now)
+	s0, base, fen, err := resolveStartBar(stock, forecastWorkSet{}, madeAt, dates)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s0 != dates[1] {
-		t.Errorf("s0 = %s, want the first session after receipt %s", s0, dates[1])
+	if s0 != dates[0] {
+		t.Errorf("s0 = %s, want the receipt session %s (received before 15:00)", s0, dates[0])
 	}
 	if base != dates[2] {
 		t.Errorf("base_date = %s, want the first session the stock traded %s", base, dates[2])
 	}
 	if fen != 1000 {
 		t.Errorf("s0_fen = %d, want 1000", fen)
+	}
+	// After the close the start moves to the next session.
+	after := shanghai(2026, time.October, 19, 16, 0)
+	if got, _, _, err := resolveStartBar(stock, forecastWorkSet{}, after, dates); err != nil || got != dates[1] {
+		t.Errorf("after-close S0 = %q (%v), want %s", got, err, dates[1])
 	}
 }
 
@@ -712,8 +673,8 @@ func TestEvaluatorTickSettlesDueMarks(t *testing.T) {
 		WHERE set_id=? AND checkpoint='d5'`, setID).Scan(&ret, &bench, &session); err != nil {
 		t.Fatal(err)
 	}
-	if session != dates[4] {
-		t.Errorf("d5 session = %s, want the fifth session %s", session, dates[4])
+	if session != dates[5] {
+		t.Errorf("d5 session = %s, want the fifth session after S0 %s", session, dates[5])
 	}
 	// The fixture is flat until session 10, so d5's return is genuinely zero. What matters is that the
 	// benchmark was measured over the same window and stored beside it.
