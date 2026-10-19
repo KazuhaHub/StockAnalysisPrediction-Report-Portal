@@ -133,7 +133,10 @@ const (
 	// Scheduling or promoting a benchmark (P4). Effective-dated and audited, so a reader can tell
 	// which cohort a number was scored against and who changed the index.
 	AuditForecastBench = "forecast.bench"
-	AuditReportDelete  = "report.delete"
+	// The one-shot repair of refusals written by the pre-P1 evaluator (P1). A data repair with no
+	// operator behind it still has to be attributable and counted.
+	AuditForecastRepair = "forecast.repair"
+	AuditReportDelete   = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -415,7 +418,7 @@ var auditVocabulary = []string{
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
-	AuditForecastBench,
+	AuditForecastBench, AuditForecastRepair,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

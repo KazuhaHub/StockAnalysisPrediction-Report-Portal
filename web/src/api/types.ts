@@ -1364,7 +1364,7 @@ export interface PredictionSet {
   baseline_emitted_fen?: number
   baseline_as_of?: string
   baseline_source?: string
-  baseline_check: 'pending' | 'match' | 'mismatch' | 'refused'
+  baseline_check: 'pending' | 'match' | 'mismatch' | 'refused' | 'refused_final'
   s0_date?: string
   s0_fen?: number
   /** True when the report's body changed after this set was written. */

@@ -244,6 +244,9 @@ func RunServer(cfgPath string) {
 	if err := s.reconcileForecastBench(time.Now()); err != nil {
 		log.Printf("forecast bench: reconcile: %v", err)
 	}
+	// The pre-P1 evaluator refused every mark on its first tick before S0. Those refusals carry an
+	// attempt that never happened; repair them once, before the loop can act on them.
+	s.runForecastRepair()
 
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)

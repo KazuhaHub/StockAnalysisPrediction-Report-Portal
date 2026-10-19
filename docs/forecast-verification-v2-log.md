@@ -111,3 +111,33 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Accepted, not a bug:** posting the *active* code as `bench_schedule` while a different change is
   pending replaces it (§4.7's table: a no-op only when nothing is scheduled). The modal posts only
   changed fields, and the legacy `bench` spelling is retired in P29.
+
+### P1 decisions (2026-10-19)
+- **Wake-only scheduling.** Before fetching a calendar, every non-terminal mark whose earliest
+  possible due (a weekday projection, so a lower bound) is still in the future is rescheduled from
+  the projection alone. A Friday batch therefore costs no vendor call until Monday's close, and the
+  batch limit is spent on work, not on marks that cannot be due.
+- **Today's arithmetic is preserved, including the extra session.** `predScheduleFor` keeps the
+  present `len > n` rule and `sessions[n-1]` record; P6 changes the definition inside it. The
+  characterization test pins the `len == n` / `len == n+1` boundary.
+- **The heal signature drops the plan's "not due" clause**, as §5.1 says: by the β2 deploy four d5
+  marks are due and the check would leave them with a phantom attempt. Returning them to pending only
+  causes a fresh, recorded attempt.
+- **Finality needs both halves.** A mark-specific failure becomes final only after 4 recorded
+  attempts and 10 completed sessions past its due session; a source failure never increments attempts
+  and never finalises. An unknown refusal code is treated as a source fault (retry forever is
+  recoverable; finalising on an unclassified fault is not).
+- **`predNotYetShown` during the session.** +10 minutes until 18:00, except a wake in the 09:00 hour
+  moves to 15:30 the same day (rather than re-waking every ten minutes through the session); after
+  18:00 it is 09:00 on the next weekday.
+- **The P9 readiness gate is not built here.** This PR makes item 1 of §1.4 true (the binary contains
+  P1); P9 adds the `forecast_not_ready` refusal and the per-item GET. The evaluator remains off.
+- **Adversarial review follow-ups (P1).** Fixed before merge: a calendar with no session after the
+  receipt reschedules instead of refusing (the baseline `no_bar` is reserved for "the start session
+  exists but the stock has no bar"); `Due` is now the session after which the mark may settle, so
+  `sessionsPastDue` starts at 0 and the 10-session conjunct is real (`predWakeAt` wakes on the same
+  session); a source fault only refuses marks that could be due, leaving far-off checkpoints on their
+  wake; a baseline deferral records S0 as its session, so the heal cannot mistake it for the pre-P1
+  signature; a finalised mark records the failed attempt that finalised it; an unschedulable checkpoint
+  terminalises with `no_schedule` instead of spinning; `baseline_check=refused_final` is rendered; the
+  EXPLAIN tests now use the production selection text (and PG's `SET LOCAL` on the same connection).

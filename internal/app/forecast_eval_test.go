@@ -377,15 +377,15 @@ func TestResolvedMarkIsTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := int64(1111)
-	if err := s.st.SettleForecastMark(markID, markResult{
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, settles: []forecastSettle{{markID: markID, res: markResult{
 		Status: markResolved, Session: "2026-10-24", BarDate: "2026-10-24", CloseFen: &first,
-	}); err != nil {
+	}}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	second := int64(2222)
-	if err := s.st.SettleForecastMark(markID, markResult{
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, settles: []forecastSettle{{markID: markID, res: markResult{
 		Status: markResolved, Session: "2026-10-24", BarDate: "2026-10-24", CloseFen: &second,
-	}); err != nil {
+	}}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var got int64
@@ -396,7 +396,7 @@ func TestResolvedMarkIsTerminal(t *testing.T) {
 		t.Errorf("close_fen = %d, want the first conclusion %d: a resolved mark must not move", got, first)
 	}
 	// refused_final is terminal in exactly the same way.
-	if err := s.st.MarkRefusedFinal(markID); err != nil {
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, finals: []forecastFinal{{markID: markID, code: "no_bar"}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var status string
@@ -414,11 +414,15 @@ func TestBaselineIsWrittenOnce(t *testing.T) {
 	dates := tradingDays("2026-10-19", 5)
 	index := barsFor(dates, 4000)
 
-	if err := s.st.FinishForecastBaseline(forecastWorkSet{SetID: setID}, dates[0], dates[0], 1000, index); err != nil {
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, baseline: &forecastBaseline{
+		S0: dates[0], BaseDate: dates[0], S0Fen: 1000, Index: index,
+	}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	// A second pass with a different start point.
-	if err := s.st.FinishForecastBaseline(forecastWorkSet{SetID: setID}, dates[3], dates[3], 9999, index); err != nil {
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, baseline: &forecastBaseline{
+		S0: dates[3], BaseDate: dates[3], S0Fen: 9999, Index: index,
+	}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var s0 string
@@ -431,28 +435,43 @@ func TestBaselineIsWrittenOnce(t *testing.T) {
 	}
 }
 
-// TestRefusalBecomesFinalAfterTheDeadline: a refusal that has stood long enough stops retrying, which
-// is what makes a mature cell's inputs terminal.
-func TestRefusalBecomesFinalAfterTheDeadline(t *testing.T) {
+// TestRefusalFinalityIsPerV26: a mark-specific failure is an attempt and can become final; a source
+// failure leaves attempts unchanged and never counts toward finality.
+func TestRefusalFinalityIsPerV26(t *testing.T) {
 	s := newV1Server(t)
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-17")
 	var markID int64
 	s.st.queryRow("SELECT id FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&markID)
 
-	if err := s.st.DeferForecastSet(forecastWorkSet{
-		Marks: []forecastMark{{ID: markID, Status: markPending}},
-	}, "no_bar", nil); err != nil {
+	mark := forecastMark{ID: markID, Status: markPending}
+	for i := 1; i <= 3; i++ {
+		if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, defers: []forecastDeferGroup{
+			{marks: []forecastMark{mark}, code: "no_bar"},
+		}}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var status string
+	var attempts int
+	s.st.queryRow("SELECT status, attempts FROM prediction_marks WHERE id=?", markID).Scan(&status, &attempts)
+	if status != markRefused || attempts != 3 {
+		t.Fatalf("after 3 no_bar defers: status=%q attempts=%d, want refused/3", status, attempts)
+	}
+
+	// A source failure is a delivery fault, not this mark's attempt.
+	mark.Refusal = "no_bar"
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, defers: []forecastDeferGroup{
+		{marks: []forecastMark{mark}, code: "fetch_failed"},
+	}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	var status, next string
-	s.st.queryRow("SELECT status, next_attempt_at FROM prediction_marks WHERE id=?", markID).Scan(&status, &next)
-	if status != markRefused {
-		t.Fatalf("status = %q, want refused", status)
+	s.st.queryRow("SELECT status, attempts FROM prediction_marks WHERE id=?", markID).Scan(&status, &attempts)
+	if status != markRefused || attempts != 3 {
+		t.Errorf("after a source failure: status=%q attempts=%d, want refused/3 (unchanged)", status, attempts)
 	}
-	if next == "" {
-		t.Error("no next_attempt_at: a refusal with no retry is a permanent hole")
-	}
-	if err := s.st.MarkRefusedFinal(markID); err != nil {
+
+	// Finality still ends the retries.
+	if err := s.st.ApplyForecastPlan(forecastPlan{setID: setID, finals: []forecastFinal{{markID: markID, code: "no_bar"}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	s.st.queryRow("SELECT status FROM prediction_marks WHERE id=?", markID).Scan(&status)

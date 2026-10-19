@@ -295,12 +295,14 @@ func forecastPopulationMessage(code string) string {
 // The counts above. Each is one cheap aggregate; none of them fetches anything.
 
 func (s *Store) CountForecastSetsDue() int64 {
+	now := time.Now().UTC().Format(time.RFC3339)
 	var n int64
-	s.queryRow(`SELECT COUNT(*) FROM prediction_sets ps WHERE ps.state = ?
-		AND (ps.base_check IN ('pending','refused')
-		  OR EXISTS (SELECT 1 FROM prediction_marks m WHERE m.set_id = ps.id
-		       AND m.status IN (?,?)))`,
-		predStateAccepted, markPending, markRefused).Scan(&n)
+	s.queryRow(`SELECT COUNT(*) FROM prediction_sets ps
+		JOIN (SELECT DISTINCT set_id FROM prediction_marks
+		      WHERE status IN (?,?) AND (next_attempt_at = '' OR next_attempt_at <= ?)) due
+		  ON due.set_id = ps.id
+		WHERE ps.state = ?`,
+		markPending, markRefused, now, predStateAccepted).Scan(&n)
 	return n
 }
 
