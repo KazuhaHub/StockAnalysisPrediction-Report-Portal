@@ -100,8 +100,7 @@ func (s *Server) panelLocation() *time.Location {
 // civil date/datetime in the panel timezone, so producers (e.g. Dify) anchor "today"
 // to the portal instead of their own (possibly UTC) sandbox clock. scope query.
 func (s *Server) v1Now(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	loc := s.panelLocation()
@@ -406,10 +405,42 @@ func (s *Server) queryScope(r *http.Request) *ownerScope {
 	return s.viewerScope(s.currentActiveUser(r))
 }
 
-// GET /api/v1/reports — search. scope query.
-func (s *Server) v1QueryReports(w http.ResponseWriter, r *http.Request) {
+// v1CanRead is canQuery PLUS the forced-enrolment wall, with the v1 error envelope. Every v1 READ
+// handler goes through it.
+//
+// canQuery admits a browser cookie, and /api/v1 is classed authBearer so it sits outside
+// sessionRoutes() — which means the session policy that holds a mandated account at the wall until it
+// binds a second factor did NOT cover these handlers. A cookie holder under a 2FA mandate but without a
+// factor could read every report over /api/v1 while the SPA itself refused it (the same hole
+// /api/symbols closes by gating explicitly). The gate is applied only when a COOKIE is what the caller
+// used, exactly as /api/symbols does: a machine Bearer(query) token is not a reader to be held at an
+// enrolment wall, and gating it would break Dify and the app bridge.
+func (s *Server) v1CanRead(w http.ResponseWriter, r *http.Request) bool {
 	if !s.canQuery(r) {
 		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+		return false
+	}
+	u := s.currentActiveUser(r)
+	if u == "" { // machine Bearer token: not a session, not gated
+		return true
+	}
+	holds, err := s.enrolmentHolds(r, u)
+	if err != nil {
+		v1err(w, http.StatusServiceUnavailable, "enrolment_policy_unavailable",
+			"the sign-in policy could not be read, so this request was refused rather than allowed")
+		return false
+	}
+	if holds {
+		v1err(w, http.StatusForbidden, "enrolment_required",
+			"this account must set up a second factor before it can be used")
+		return false
+	}
+	return true
+}
+
+// GET /api/v1/reports — search. scope query.
+func (s *Server) v1QueryReports(w http.ResponseWriter, r *http.Request) {
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	q := r.URL.Query()
@@ -476,8 +507,7 @@ func (s *Server) v1QueryReports(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/reports/{id} — single report with body. scope query.
 func (s *Server) v1GetReport(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	rep := s.v1ReportByPathID(r.PathValue("id"), s.queryScope(r))
@@ -521,8 +551,7 @@ func (s *Server) v1DeleteReport(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/reports/manifest?symbol= — probe. scope query.
 func (s *Server) v1Manifest(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
@@ -538,8 +567,7 @@ func (s *Server) v1Manifest(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/runs?symbol=&date= — report-group view. scope query.
 func (s *Server) v1Runs(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	symbol := strings.TrimSpace(r.URL.Query().Get("symbol"))
@@ -559,8 +587,7 @@ func (s *Server) v1Runs(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/symbols?q=&limit= — stocks with reports. scope query.
 func (s *Server) v1Symbols(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	q := r.URL.Query()
@@ -579,8 +606,7 @@ func (s *Server) v1Symbols(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/tracking?symbol=&status=&limit= — assumption/tracking items. scope query.
 func (s *Server) v1Tracking(w http.ResponseWriter, r *http.Request) {
-	if !s.canQuery(r) {
-		v1err(w, http.StatusUnauthorized, "unauthorized", "missing or invalid query credentials")
+	if !s.v1CanRead(w, r) {
 		return
 	}
 	q := r.URL.Query()

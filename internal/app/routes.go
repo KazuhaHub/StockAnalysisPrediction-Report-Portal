@@ -30,7 +30,10 @@ const (
 	// authAdmin / authPerm are a session plus a role check.
 	authAdmin
 	authPerm
-	// authBearer is the machine surface: a token opens it, a session does not.
+	// authBearer is the machine surface: a token is the documented credential, and its token-only
+	// registrations (ingest/delete/tracking writes) accept nothing else. Its READ handlers also admit a
+	// browser cookie via canQuery, but the class does not put them in sessionRoutes(), so they apply the
+	// forced-enrolment wall themselves (v1CanRead) instead of inheriting the session wrapper.
 	authBearer
 	// authSessionOrBearer is either one (canQuery) — a session IS accepted, so it is gated when a
 	// session is what the caller used.
@@ -194,8 +197,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.session(mux, "GET /api/home", s.apiHome)
 	s.session(mux, "GET /api/stock/{symbol}", s.apiStock)
 	// The ledger, for the SPA. The browser needs its own route rather than reusing the v1 one: /api/v1
-	// is classed authBearer, so it sits outside sessionRoutes() and no whole-portal session policy
-	// covers it. Same handler body, same scope rules.
+	// is classed authBearer, so it sits outside sessionRoutes() and the session policy's wrapper does
+	// not cover its handlers (the forced-enrolment wall is applied inside the v1 reads by v1CanRead
+	// instead). Same handler body, same scope rules.
 	s.session(mux, "GET /api/report/{id}/predictions", s.apiReportPredictions)
 	// The reading page asks for the symbol's other sets. Session-scoped, because the SPA must not
 	// use /api/v1 and the viewer scope is what a browser read is gated by.
