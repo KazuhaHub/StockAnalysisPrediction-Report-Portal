@@ -357,6 +357,43 @@ func (s *Store) SetUserRestricted(username string, restricted bool) error {
 	return err
 }
 
+// isRestrictedStrict is isRestricted with the failures surfaced (P31, D3): the account row and the
+// OU chain are read through the strict index, and any error — including a dangling or cyclic parent
+// — is returned rather than read as "not restricted". viewerScope turns that error into a scope of
+// nothing.
+func (s *Server) isRestrictedStrict(username string) (bool, error) {
+	if username == "" {
+		return false, nil
+	}
+	if s.isAdmin(username) {
+		return false, nil
+	}
+	restricted, found, err := s.st.userRestrictedRow(username)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		// No account row: not a session (a machine caller or a test identity), so there is no
+		// restriction to read. A real read failure is the branch above and denies.
+		return false, nil
+	}
+	if restricted {
+		return true, nil
+	}
+	ix, err := s.st.loadOUIndex()
+	if err != nil {
+		return false, err
+	}
+	gid := s.st.PrimaryGroupOf(username)
+	if gid == 0 {
+		gid = ix.defaultID
+	}
+	if gid == 0 {
+		return false, nil
+	}
+	return ix.restrictedEffective(gid)
+}
+
 // isRestricted reports whether a user's reads are scoped at all. The account flag and the OU flag OR
 // together, so an OU-restricted member cannot be un-restricted by leaving their own flag off.
 // Admins are never scoped: someone has to be able to diagnose a tenancy problem.

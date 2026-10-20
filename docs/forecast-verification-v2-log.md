@@ -220,8 +220,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
   `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P30 `fix/tenancy-restricted-ou-principals` (§6.8) is in this PR. After it: P31
-  (strict restricted-flag read), then P11 (ADR 0037).
+- **Next step.** P31 `fix/tenancy-strict-restricted-read` (§6.9) is in this PR. After it: P11
+  (ADR 0037), the last R1b PR before P39b's own Beta.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -418,3 +418,18 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   new one; closing it would need a different "all" encoding (an owner decision, not P30's). The
   comments that still described "every OU up the chain" and "both principals always recorded" were
   corrected, and the reader comment now says plainly that `isRestricted` is still lenient until P31.
+
+### P31 — an unreadable restriction scopes to nothing
+
+- `isRestrictedStrict` reads the account row through `userRestrictedRow`, which distinguishes "no such
+  row" from a read failure, then the OU chain through the strict index. A read failure, a dangling
+  parent or a cycle returns an error; `viewerScope` turns that into `ownerScope{denyAll: true}`, whose
+  `where` is `1=0`. A missing account row (a machine caller, a test identity) is not an error and
+  remains unscoped, because there is no restriction to read.
+- The lenient `isRestricted` stays for the callers that only ask "may this account configure things";
+  the reading path uses the strict form. `viewerScope` is also strict about its own index read and
+  chain walk, so an account-flagged restricted user cannot end up with a scope that silently lost a
+  restricted ancestor.
+- Tests: an unreadable account table and an unreadable OU table both deny on the report route (404)
+  and return no sets on the list route; a dangling chain denies; a readable restriction still reads
+  its own report; an ordinary internal account still gets no scope.
