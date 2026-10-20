@@ -42,7 +42,7 @@ func TestBaselineCheckFollowsDesignTable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ready := predBaseCheck(tc.madeAt, tc.emitted, stock, sessions)
+			got, ready := predBaseCheck(tc.madeAt, tc.emitted, stock, sessions, "")
 			if !ready {
 				t.Fatal("check not ready")
 			}
@@ -52,28 +52,38 @@ func TestBaselineCheckFollowsDesignTable(t *testing.T) {
 		})
 	}
 	// The check waits until the receipt session's bar is complete.
-	if _, ready := predBaseCheck(at(10, 0), ptr(1020), stock[:2], sessions[:2]); ready {
+	if _, ready := predBaseCheck(at(10, 0), ptr(1020), stock[:2], sessions[:2], ""); ready {
 		t.Error("the check decided before the receipt session completed")
 	}
 }
 
-// TestBackdatedAsOfCannotTurnMismatchIntoMatch: the reference session comes from made_at. A producer
-// that stamps a body with an older as_of cannot make an old price look current.
+// TestBackdatedAsOfCannotTurnMismatchIntoMatch: emitted_base_as_of is a diagnostic. The reference
+// session comes from made_at, so a body stamped with a date when the price did match cannot make a
+// current mismatch into a match.
 func TestBackdatedAsOfCannotTurnMismatchIntoMatch(t *testing.T) {
-	dates := tradingDays("2026-10-19", 6)
+	s := newV1Server(t)
+	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
+	dates := tradingDays("2026-10-13", 8)
+	index := barsFor(dates, 4000)
 	stock := barsFor(dates, 1000)
-	stock[0].Close = 1000
-	stock[1].Close = 1010
-	check, ready := predBaseCheck(shanghai(2026, time.October, 19, 16, 0), i64p(1000), stock, dates)
-	if !ready || check != baseMatch {
-		t.Fatalf("baseline = %q/%v, want match against the last close", check, ready)
+	stock[1].Close = 980  // 10-14, three sessions before the receipt
+	stock[2].Close = 1000 // 10-15
+	stock[3].Close = 1010 // 10-16, the reference session
+	// The emitted price matched 10-14, and the producer says so. The check must still use the
+	// receipt session (10-16), where it matches neither close.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET emitted_base_fen=980,
+		emitted_base_as_of='2026-10-14' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
 	}
-	// An older price (the one before) also matches; a price from no session at all does not.
-	if check, _ := predBaseCheck(shanghai(2026, time.October, 19, 16, 0), i64p(1000), stock, dates); check != baseMatch {
-		t.Errorf("the last close did not match: %q", check)
+	now := shanghai(2026, time.October, 27, 16, 0)
+	e := evalStub(&now, index, stock, nil, nil)
+	if err := e.tick(s); err != nil {
+		t.Fatal(err)
 	}
-	if check, _ := predBaseCheck(shanghai(2026, time.October, 19, 16, 0), i64p(900), stock, dates); check != baseMismatch {
-		t.Errorf("a stale price matched: %q", check)
+	var check string
+	s.st.queryRow("SELECT base_check FROM prediction_sets WHERE id=?", setID).Scan(&check)
+	if check != baseMismatch {
+		t.Errorf("base_check = %q, want mismatch: a backdated as_of must not rescue the price", check)
 	}
 }
 
@@ -112,6 +122,11 @@ func TestHaltResolvesOnEvidenceOrConfirmation(t *testing.T) {
 	res = settleMark(haltInput(all, 8, "", now))
 	if res.Status != markResolved || !res.Halted {
 		t.Errorf("confirmed halt = %s/%v, want resolved/halted", res.Status, res.Halted)
+	}
+	// A same-day 14:57 stamp is a body fetched before the close: it cannot confirm a halt.
+	res = settleMark(haltInput(early, 8, all[10]+"T14:57:00+08:00", earlyNow))
+	if res.Status != markRefused || res.Refusal != "stale_bar" {
+		t.Errorf("partial same-day body = %s/%s, want refused/stale_bar", res.Status, res.Refusal)
 	}
 	// The valve says the whole feed is behind: nothing is written, nothing counts.
 	in := haltInput(all, 8, "", now)
@@ -224,21 +239,27 @@ func TestLimitBackstopNeverFlagsATradingDay(t *testing.T) {
 // TestLimitBackstopLeavesListingsFirstBarsAlone is the "first five bars" rule: a series that begins
 // inside the fetch window is a listing's no-limit days and is never a corporate action.
 func TestLimitBackstopLeavesListingsFirstBarsAlone(t *testing.T) {
-	dates := tradingDays("2026-10-19", 10)
-	stock := barsFor(dates, 1000)
-	stock[0].Close = 4000 // the listing day, four times the reference close
-	if corporateActionBetween("600160", stock, nil, nil, dates[0], dates[5], dates[0]) {
+	dates := tradingDays("2026-10-19", 20)
+	floor := dates[0]
+	// The series begins a fortnight after the fetch floor: a listing. Its first bar is four times
+	// the next one, which no limit allows, and is exempt.
+	stock := barsFor(dates[10:], 1000)
+	stock[0].Close = 4000
+	if corporateActionBetween("600160", stock, nil, nil, dates[10], dates[15], floor) {
 		t.Error("a listing's first bar was flagged as a corporate action")
+	}
+	// The same move on a stock that was already trading at the floor IS a corporate action.
+	normal := barsFor(dates, 1000)
+	normal[10].Close = 4000
+	if !corporateActionBetween("600160", normal, nil, nil, dates[0], dates[15], floor) {
+		t.Error("an impossible move on an established series was not flagged")
 	}
 }
 
 func TestMissingBenchBarIsUnverifiableNotResolved(t *testing.T) {
 	dates := tradingDays("2026-10-19", 10)
 	stock := barsFor(dates, 1000)
-	index := barsFor(dates, 4000)
-	index = append(index[:5], index[6:]...) // no S0 bar (dates[0])? remove the due bar instead
-	index = barsFor(dates, 4000)
-	index = append(index[:9], index[10:]...)
+	index := append(barsFor(dates[:9], 4000), barsFor(dates[9:], 4000)[1:]...)
 	if barOn(index, dates[9]) != nil {
 		t.Fatal("setup: the due bar is still present")
 	}
@@ -354,8 +375,8 @@ func TestIndexWideCalendarFaultsNeverCountTowardFinality(t *testing.T) {
 			if status != markRefused || attempts != 0 {
 				t.Errorf("mark = %s/%d, want refused/0", status, attempts)
 			}
-			if refusal == "calendar_bad" && status == markRefusedFinal {
-				t.Error("a source-class calendar fault became final")
+			if refusal != "calendar_bad" {
+				t.Errorf("refusal = %q, want calendar_bad", refusal)
 			}
 		})
 	}
@@ -458,17 +479,17 @@ func TestValveIsSettledFromTheWholePass(t *testing.T) {
 		}
 		stocks = append(stocks, forecastSeries{Bars: bars})
 	}
-	if staleValve(forecastSeries{}, stocks, errs, dates) {
+	if staleValve(stocks, errs, dates) {
 		t.Error("one halted stock out of six tripped the valve")
 	}
 	// Two of six is still not "more than 20%"? It is 33%, so it trips.
 	stocks[1].Bars = stocks[1].Bars[:7]
-	if !staleValve(forecastSeries{}, stocks, errs, dates) {
+	if !staleValve(stocks, errs, dates) {
 		t.Error("two of six stale bodies did not trip the valve")
 	}
 	// A fetch error is not a stale body.
 	errs[0], errs[1] = fmt.Errorf("down"), fmt.Errorf("down")
-	if staleValve(forecastSeries{}, stocks, errs, dates) {
+	if staleValve(stocks, errs, dates) {
 		t.Error("failed fetches were counted as stale bodies")
 	}
 }

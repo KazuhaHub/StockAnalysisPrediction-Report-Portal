@@ -175,3 +175,6 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
     with a previous close: it may be a session whose bar has not completed, or a holiday.
   - The golden snapshots are unchanged: the fixture writes the baseline and marks directly, so P7's
     evaluator rules are not on that path. The comment in forecast_golden_test.go records this.
+  - Halt evidence is stricter than §5.3's pseudo-code: a same-day vendor stamp counts only when it
+    is at or after the close. A cached 14:57 body proves the stock had not traded by 14:57, not that
+    it did not trade that session; the plan's "stamp date >= S" would settle a halt on a partial body.

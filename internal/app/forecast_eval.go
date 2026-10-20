@@ -193,7 +193,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			stocks[i], stockErrs[i] = e.rangeBars(ctx, s, set.Market, set.Symbol,
 				shiftDays(set.MadeOn, -predReferenceLagDays), e.clock())
 		}
-		valve := staleValve(indexSeries, stocks, stockErrs, completedSessions(indexSeries, e.clock()))
+		valve := staleValve(stocks, stockErrs, completedSessions(indexSeries, e.clock()))
 		for i, set := range need {
 			if err := ctx.Err(); err != nil {
 				return nil
@@ -204,6 +204,16 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		}
 	}
 	return nil
+}
+
+// storedS0Reproduced reports whether the set's stored start is what predS0 derives from this
+// calendar. An empty stored start is not a contradiction.
+func storedS0Reproduced(stored string, madeAt time.Time, sessions []string) bool {
+	if stored == "" {
+		return true
+	}
+	want, ok := predS0(madeAt, sessions)
+	return !ok || want == stored
 }
 
 // quarantineBadWindows refuses the sets whose receipt date cannot build a vendor window, before any
@@ -234,7 +244,7 @@ func (e *forecastEvaluator) quarantineBadWindows(s *Server, sets []forecastWorkS
 // staleValve reports whether more than 20% of this pass's stock bodies end before the calendar's
 // newest completed session. That is a vendor-wide lag, not a halt: nothing may be written and no
 // attempts may move (V26).
-func staleValve(index forecastSeries, stocks []forecastSeries, errs []error, sessions []string) bool {
+func staleValve(stocks []forecastSeries, errs []error, sessions []string) bool {
 	if len(sessions) == 0 || len(stocks) == 0 {
 		return false
 	}
@@ -292,6 +302,12 @@ func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec b
 	series, err := e.indexCalendar(ctx, s, spec, sets)
 	if err != nil {
 		return series, &benchFault{code: "fetch_failed", err: err}
+	}
+	if len(series.Bars) == 0 {
+		// An index publishes a bar on every session. An empty body is a delivery fault for the whole
+		// group, never a fact about one stock's series.
+		return series, &benchFault{code: "no_bench",
+			err: fmt.Errorf("benchmark %q returned no bars", spec.Code)}
 	}
 	if series.Kind != quoteKindIndex {
 		// A body the vendor does not call an index cannot settle any mark: the caller would be
@@ -392,6 +408,18 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		return s.st.ApplyForecastPlan(plan, now)
 	}
+	if len(stockSeries.Bars) == 0 && stockSeries.UnverifiableDate == "" {
+		// A range endpoint answers history: an empty stock body is a delivery fault, not "this stock
+		// never traded". Charging it as no_base would let a source outage finalise the set.
+		for _, m := range set.Marks {
+			if wake := predWakeAt(set, m.Checkpoint); !wake.IsZero() && now.Before(wake) {
+				plan.wakes[m.ID] = wake
+				continue
+			}
+			plan.deferMark(m, "fetch_failed", "")
+		}
+		return s.st.ApplyForecastPlan(plan, now)
+	}
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
 	seriesFrom := shiftDays(set.MadeOn, -predReferenceLagDays)
 	// The BENCHMARK's completed sessions, so a halted stock cannot slide its own checkpoints. The
@@ -406,19 +434,17 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	// Self-consistency checks on the two bodies. The index-wide faults (zero volume, a stored
 	// s0_date this calendar does not reproduce) are SOURCE class: they concern every mark in the set
 	// and must never make one final.
-	if hasZeroVolumeBar(indexBars) {
+	if hasZeroVolumeBar(indexBars) || !storedS0Reproduced(set.S0Date, madeAt, sessions) {
 		for _, m := range set.Marks {
+			// A mark whose earliest possible due is still in the future is rescheduled, not
+			// refused: an index fault is not a fact about a checkpoint that cannot be due yet.
+			if wake := predWakeAt(set, m.Checkpoint); !wake.IsZero() && now.Before(wake) {
+				plan.wakes[m.ID] = wake
+				continue
+			}
 			plan.deferMark(m, "calendar_bad", "")
 		}
 		return s.st.ApplyForecastPlan(plan, now)
-	}
-	if set.S0Date != "" {
-		if want, ok := predS0(madeAt, sessions); ok && want != set.S0Date {
-			for _, m := range set.Marks {
-				plan.deferMark(m, "calendar_bad", "")
-			}
-			return s.st.ApplyForecastPlan(plan, now)
-		}
 	}
 
 	// A terminal baseline is used as STORED. Recomputing it on a later pass would let a revised
@@ -437,7 +463,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		// The baseline check is not a verdict on the set's honesty alone: it decides whether the
 		// emitted quote is a price the market printed. A mismatch still has a start session, but the
 		// set is excluded from the metrics (design §9.4).
-		check, ready := predBaseCheck(madeAt, set.EmitFen, stockBars, sessions)
+		check, ready := predBaseCheck(madeAt, set.EmitFen, stockBars, sessions, stockSeries.UnverifiableDate)
 		if !ready {
 			// The reference bar is not complete yet. Not due: keep every mark waiting.
 			for _, m := range set.Marks {
@@ -454,7 +480,19 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			// One bounded look-back: a stock halted for months still has a price before S0, and the
 			// reference window is only ten days wide.
 			wide, werr := e.rangeBars(ctx, s, set.Market, set.Symbol, shiftDays(set.MadeOn, -400), now)
-			if werr == nil {
+			if werr != nil {
+				// The look-back is a delivery fault, not this set's data: never charge the attempt.
+				for _, m := range set.Marks {
+					plan.deferMark(m, "fetch_failed", "")
+				}
+				return s.st.ApplyForecastPlan(plan, now)
+			}
+			if wideIdx, ierr := e.rangeBars(ctx, s, indexSeries.Market, indexSeries.Code,
+				shiftDays(set.MadeOn, -400), now); ierr == nil {
+				indexBars = wideIdx.Bars
+				indexSeries.Kind = wideIdx.Kind
+			}
+			{
 				wideSet := set
 				wideSet.S0Date = s0
 				// The look-back is bounded but must reach the bars it fetched: widen the floor too.
@@ -466,6 +504,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 					stockBars, exDates = wide.Bars, wide.ExDates
 					seriesFrom = shiftDays(set.MadeOn, -400)
 					stockSeries.AsOf, stockSeries.Source = wide.AsOf, wide.Source
+					stockSeries.UnverifiableDate = wide.UnverifiableDate
 				}
 			}
 		}
@@ -612,7 +651,7 @@ func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, co
 		return forecastSeries{}, fmt.Errorf("no response")
 	}
 	out := forecastSeries{ExDates: resp.ExDates, Kind: resp.Kind,
-		AsOf: resp.Snapshot.AsOf, Source: resp.BarsSource}
+		AsOf: resp.Snapshot.AsOf, Source: resp.BarsSource, Market: market, Code: code}
 	if out.Source == "" {
 		out.Source = resp.Source
 	}
@@ -647,6 +686,8 @@ type forecastSeries struct {
 	UnverifiableDate string
 	// Source names the vendor that answered, written onto every settled mark (F13).
 	Source string
+	// Market and Code are what produced this body, so a bounded look-back can widen the calendar too.
+	Market, Code string
 }
 
 // ---------- sessions ----------
@@ -811,17 +852,6 @@ func lastBarAtOrBefore(bars []QuoteBar, date string) (QuoteBar, bool) {
 	found := false
 	for _, b := range bars {
 		if b.Date <= date && (!found || b.Date > best.Date) {
-			best, found = b, true
-		}
-	}
-	return best, found
-}
-
-func firstBarAtOrAfter(bars []QuoteBar, date string) (QuoteBar, bool) {
-	var best QuoteBar
-	found := false
-	for _, b := range bars {
-		if b.Date >= date && (!found || b.Date < best.Date) {
 			best, found = b, true
 		}
 	}

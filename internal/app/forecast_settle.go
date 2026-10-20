@@ -91,7 +91,7 @@ func settleMark(in settleInput) markResult {
 		// session) resolves a halt at once. Without it, three completed sessions of silence are
 		// confirmation. Before that, the mark is retryable: a vendor lag is not a halt. A tripped
 		// valve says the whole feed is behind, so nothing may be written at all.
-		evidence := asOfDate(in.AsOf) >= in.Session
+		evidence := stampProvesCurrent(in.AsOf, in.Session)
 		confirmed := sessionsPastDue(in.Sessions, in.Session, in.Now) >= 3
 		switch {
 		case evidence:
@@ -132,7 +132,7 @@ func settleMark(in settleInput) markResult {
 // predBaseCheck compares the producer's emitted baseline with what the market printed (design §9.4).
 // The reference session comes from made_at, never from the payload; emitted_base_as_of is only a
 // diagnostic. ready is false while the reference bar is not complete yet.
-func predBaseCheck(madeAt time.Time, emittedFen *int64, stock []QuoteBar, sessions []string) (check string, ready bool) {
+func predBaseCheck(madeAt time.Time, emittedFen *int64, stock []QuoteBar, sessions []string, unverifiableDate string) (check string, ready bool) {
 	if emittedFen == nil {
 		return baseMismatch, true
 	}
@@ -147,6 +147,11 @@ func predBaseCheck(madeAt time.Time, emittedFen *int64, stock []QuoteBar, sessio
 	if intraday && !dateKnownNotSession(sessions, d) {
 		if !containsDate(sessions, d) {
 			// The receipt session has not completed, so its range is not known yet.
+			return "", false
+		}
+		if unverifiableDate == d {
+			// The session completed but the stock body could not vouch for its bar. Waiting is
+			// correct: falling back to the previous close would decide on a bar that was dropped.
 			return "", false
 		}
 		bar := barOn(stock, d)
@@ -180,6 +185,11 @@ func predBaseCheck(madeAt time.Time, emittedFen *int64, stock []QuoteBar, sessio
 		// The receipt predates every session in the fetched window: the body cannot answer the
 		// question, and waiting would never end. Treat it as unverifiable, which is a mismatch.
 		return baseMismatch, true
+	}
+	if unverifiableDate != "" && unverifiableDate == l {
+		// The reference bar was dropped because the body could not vouch for it. Falling back to an
+		// earlier close would decide on a bar the body itself said was not final.
+		return "", false
 	}
 	b, ok := lastBarAtOrBefore(stock, l)
 	if !ok {
@@ -228,6 +238,27 @@ func lastSessionAtOrBefore(sessions []string, date string) string {
 		}
 	}
 	return last
+}
+
+// stampProvesCurrent reports whether the vendor's own stamp says the session has been reached. A
+// same-day stamp BEFORE the close cannot: a cached 14:57 body is not evidence that a stock stopped
+// trading, it is a body fetched before the session ended.
+func stampProvesCurrent(asOf, session string) bool {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(asOf))
+	if err != nil {
+		return false
+	}
+	lt := t.In(chinaZone)
+	d := lt.Format("2006-01-02")
+	if d > session {
+		return true
+	}
+	if d < session {
+		return false
+	}
+	close := time.Date(lt.Year(), lt.Month(), lt.Day(),
+		predSessionCloseMinute/60, predSessionCloseMinute%60, 0, 0, chinaZone)
+	return !lt.Before(close)
 }
 
 // asOfDate returns the civil date of a vendor stamp, or "" when it is absent or unreadable.

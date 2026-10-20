@@ -517,8 +517,10 @@ func TestBaselineBecomesTerminal(t *testing.T) {
 	index := barsFor(sessions, 4000)
 	now := shanghai(2026, time.November, 10, 16, 0)
 
+	// A bar only outside both windows (500 days back): no usable start, but a delivered body.
+	oldOnly := []QuoteBar{bar(shiftDays("2026-10-16", -500), 1000, 1000, 1010, 990)}
 	for i := 0; i < 4; i++ {
-		e := evalStub(&now, index, nil, nil, nil) // the stock series is empty: no start bar
+		e := evalStub(&now, index, oldOnly, nil, nil)
 		if err := e.tick(s); err != nil {
 			t.Fatal(err)
 		}
@@ -698,7 +700,8 @@ func TestHealDoesNotMatchANewBaselineRefusal(t *testing.T) {
 	setID := seedAcceptedSetAt(t, s, "600160", "2026-10-16")
 	index := barsFor(tradingDays("2026-10-19", 12), 4000)
 	now := shanghai(2026, time.November, 10, 16, 0)
-	e := evalStub(&now, index, nil, nil, nil) // no stock bar: a baseline no_bar
+	oldOnly := []QuoteBar{bar(shiftDays("2026-10-16", -500), 1000, 1000, 1010, 990)}
+	e := evalStub(&now, index, oldOnly, nil, nil) // no usable start bar: a baseline no_base
 	if err := e.tick(s); err != nil {
 		t.Fatal(err)
 	}
