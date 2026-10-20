@@ -387,8 +387,9 @@ func (s *Store) ouSharesGroup(ou int64) bool {
 // costs no duplicate generation. Two people can each see "their" report and neither learns of the
 // other.
 //
-// Both principals are recorded — the person and, when there is one, their OU — so a version whose
-// visibility is later widened from owner to group needs no backfill.
+// The person is always recorded. The OU is recorded only when it is effectively restricted (P30):
+// an unrestricted container's principal is what D4 leaked through, and a version widened later to
+// group visibility does not need that row — a restricted OU writes one from then on.
 func (s *Store) AddReportViewer(reportID int64, rdate, username string, ou int64) error {
 	principals := []string{userPrincipal(username)}
 	// The OU principal is written ONLY for an effectively restricted OU (D4, P30). An unrestricted

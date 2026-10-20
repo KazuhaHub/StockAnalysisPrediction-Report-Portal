@@ -408,3 +408,13 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   does not see its unrestricted container's report; two members of the restricted tenant still
   share; ingest writes a group row only for a restricted OU; a dangling chain and an unreadable
   index write no group row; and an "all" audience still reaches a scoped reader.
+- **P30 review follow-ups.** The reader-side rule now has its own test: a legacy `g:<unrestricted
+  container>` row written directly (as every pre-P30 build did) must not match a member of that
+  container or of a tenant below it, and the scope must not carry the container principal. That test
+  fails with the old reader and passes with the new one. **Known limitation:** `g:<Default>` cannot
+  be made inert, because the same principal encodes the "all" audience and a legacy ingest row for a
+  Default-attributed run is byte-identical to it; those rows stay readable, and the log must not
+  claim otherwise. The Default is normally unrestricted, so the exposure is the pre-P30 one, not a
+  new one; closing it would need a different "all" encoding (an owner decision, not P30's). The
+  comments that still described "every OU up the chain" and "both principals always recorded" were
+  corrected, and the reader comment now says plainly that `isRestricted` is still lenient until P31.

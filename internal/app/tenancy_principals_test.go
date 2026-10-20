@@ -98,6 +98,32 @@ func TestOnlyRestrictedOUsShare(t *testing.T) {
 	if !f.canRead("dave", tenantReport) {
 		t.Error("two members of a restricted tenant do not share")
 	}
+
+	// A LEGACY row written for the unrestricted container (as every build before P30 did) must not
+	// match either: this is the part that protects existing data, and the part a writer-only fix
+	// leaves broken.
+	legacy := f.report(t, "600302", "alice", f.container)
+	if err := f.s.st.SetReportViewers(legacy, "2026-10-19",
+		[]string{userPrincipal("alice"), groupPrincipal(f.container)}); err != nil {
+		t.Fatal(err)
+	}
+	if f.canRead("bob", legacy) {
+		t.Error("an account-restricted user matched a legacy g-row for an unrestricted OU")
+	}
+	if f.canRead("carol", legacy) {
+		t.Error("a tenant matched a legacy g-row for its unrestricted container")
+	}
+	// And the scope itself carries the restricted tenant but not the unrestricted container.
+	var hasTenant bool
+	for _, p := range f.s.viewerScope("carol").principals {
+		if p == groupPrincipal(f.container) {
+			t.Errorf("the reader scope contains the unrestricted container: %v", p)
+		}
+		hasTenant = hasTenant || p == groupPrincipal(f.tenant)
+	}
+	if !hasTenant {
+		t.Error("the reader scope lost its restricted tenant")
+	}
 }
 
 func TestIngestWritesGroupPrincipalOnlyForRestrictedOUs(t *testing.T) {
