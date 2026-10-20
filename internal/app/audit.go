@@ -139,6 +139,11 @@ const (
 	// A manual evaluator pass (P9). It reaches a third party on the operator's behalf, so it is the
 	// same kind of act as flipping the switch.
 	AuditForecastEvalRun = "forecast.eval.run"
+	// Changing where the evaluator's alerts go (P41). Field NAMES only: one of the values is a
+	// webhook secret that must never enter the log.
+	AuditForecastAlert = "forecast.alert"
+	// Sending the test alert that readiness item 5 is about.
+	AuditForecastAlertTest = "forecast.alert.test"
 	// Recording a hand-checked dry run for one benchmark (P9). It is what lets mode 1 write for that
 	// code, so the note and the code belong in the log.
 	AuditForecastDryGate = "forecast.dry_gate"
@@ -425,6 +430,7 @@ var auditVocabulary = []string{
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
+	AuditForecastAlert, AuditForecastAlertTest,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

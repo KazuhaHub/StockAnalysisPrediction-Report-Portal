@@ -25,6 +25,7 @@ const base: ForecastSettings = {
   readiness: [],
   dry_gate: {},
   gate_codes: ['sh000852'],
+  alerts: { email_to: '', has_slack: false },
   bench: 'sh000852',
   bench_codes: ['sh000300', 'sh000852', 'sh000906'],
   population: { set: false, candidates: [] },

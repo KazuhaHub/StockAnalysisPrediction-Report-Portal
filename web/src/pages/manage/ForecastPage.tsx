@@ -22,6 +22,7 @@ import ForecastCellDrawer from './ForecastCellDrawer'
 import ForecastMatrix from './ForecastMatrix'
 import ForecastSettingsModal from './ForecastSettingsModal'
 import ForecastEvaluatorStatus from './ForecastEvaluatorStatus'
+import ForecastAlerts from './ForecastAlerts'
 import ForecastLedgerStart from './ForecastLedgerStart'
 
 // 预测验证 (forecast verification): the admin page for the prediction ledger (ADR 0029).
@@ -178,6 +179,7 @@ export default function ForecastPage() {
         </div>
 
         {settings && <ForecastEvaluatorStatus settings={settings} onChanged={load} />}
+        {settings && <ForecastAlerts settings={settings} onChanged={load} />}
 
         <Card title={t('forecast.eval.title')}>
           {settings && (

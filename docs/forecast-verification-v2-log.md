@@ -217,11 +217,10 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 ## Current progress (2026-10-20)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b started: P9 #127. `main` is at `d630ff55`.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127 and P41 in this PR.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P41 `feat/forecast-alert-channels` (§6.2): Email and Slack delivery for the
-  evaluator's alerts, `forecast_alert_test_ok_at`, and the readiness item that reads it. Until P41
-  ships, mode 1 is refused by item 5 on every install, which is intended.
+- **Next step.** P10 `fix/forecast-reading-hotfix` (§6.3, C1–C5/C7/C8): stop the reading page saying
+  false things before any mark resolves.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -261,3 +260,28 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   assertion (the watchdog shares no lock with cleanup), and the panic tests drive `step` and the
   watchdog's safe wrapper rather than an infinite ticker. `Healed` stays 0: the repair runs at boot,
   not per pass, and nothing in P9 changes that.
+
+### P41 — alert channels
+
+- **Two channels beside the webhook.** `forecastAlert` sends one message to the configured recipients
+  (through `sendEmail`, so a disabled or unconfigured SMTP is a recorded channel outcome, not a
+  silent drop) and to the Slack webhook. The webhook event itself is still fired by the producer —
+  the watchdog and the store-failure branch — so a reason produces exactly one webhook delivery and
+  one delivery per channel. A failing alert never fails the operation that produced it.
+- **The Slack URL is write-only and host-locked.** It is stored to be POSTed to, never returned, and
+  only `https://hooks.slack.com` is accepted (a test-only loopback allowance exists for httptest). A
+  transport error from `net/http` carries the URL, so the error is scrubbed before it is stored,
+  logged or shown.
+- **`forecast_alert_state` changed shape.** It now holds `{last: {reason: at}, channels: {email:
+  {at,ok,error}, slack: …}}`. `last` is the watchdog's de-duplication; `channels` is the page's last
+  delivery. An older flat map is ignored once, which re-fires each reason one time after the upgrade.
+- **The test alert is the readiness item.** `POST /api/admin/forecast/alert-test` writes
+  `forecast_alert_test_ok_at` only when BOTH channels succeed and answers 502 with the per-channel
+  errors otherwise. A real change to either channel deletes the stamp: the previous test no longer
+  proves the channel that is configured now.
+- **The ingest path is asynchronous.** The `predictions.store_failed` alert runs in its own goroutine
+  with its own recover, after the ledger write has returned, so the producer's response never waits
+  on SMTP or Slack and the alert never runs inside a transaction.
+- **Not in the e2e script.** A test alert needs a real mailbox and Slack webhook; section G's
+  readiness check therefore still sees item 5 fail on the throwaway portal. The channels are pinned
+  by unit tests with the mail seam and an httptest Slack stub.

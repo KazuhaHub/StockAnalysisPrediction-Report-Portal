@@ -360,7 +360,7 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 	now := time.Now()
 	s.forecastWatchdogOnce(now)
 	state := s.st.forecastAlertState()
-	if _, ok := state["stalled"]; !ok {
+	if _, ok := state.Last["stalled"]; !ok {
 		t.Fatalf("no stalled alert recorded: %+v", state)
 	}
 	select {
@@ -368,9 +368,9 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the stalled alert was recorded but no event was delivered")
 	}
-	first := state["stalled"]
+	first := state.Last["stalled"]
 	s.forecastWatchdogOnce(now.Add(time.Minute))
-	if got := s.st.forecastAlertState()["stalled"]; got != first {
+	if got := s.st.forecastAlertState().Last["stalled"]; got != first {
 		t.Errorf("a second alert %s fired inside the hour: %q -> %q", t.Name(), first, got)
 	}
 	select {

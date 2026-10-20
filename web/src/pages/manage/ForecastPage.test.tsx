@@ -43,6 +43,7 @@ const on = {
   ],
   dry_gate: {},
   gate_codes: ['sh000852'],
+  alerts: { email_to: 'ops@example.com', has_slack: true, last: {} },
   heartbeat: {
     mode: '1' as const,
     last_tick_at: new Date().toISOString(),

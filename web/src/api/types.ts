@@ -526,6 +526,8 @@ export interface ForecastSettings {
   dry_gate: Record<string, ForecastGate>
   /** The benchmark codes the readiness item is about, for the check form. */
   gate_codes: string[]
+  /** Email and Slack delivery for the evaluator's alerts (P41). */
+  alerts: ForecastAlerts
   /** The index NEW sets are benchmarked against. Sets already written keep theirs, so changing this
    *  never re-scores anything on the ledger. */
   bench: string
@@ -604,6 +606,23 @@ export interface ForecastReadinessItem {
   key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts'
   ok: boolean
   detail?: string
+}
+
+export interface ForecastChannelResult {
+  at?: string
+  ok: boolean
+  error?: string
+}
+
+export interface ForecastAlerts {
+  /** Comma-separated recipients; empty when none are configured. */
+  email_to: string
+  /** Whether a Slack webhook is stored. The URL itself is never returned. */
+  has_slack: boolean
+  /** The last delivery per channel, keyed "email" / "slack". */
+  last?: Record<string, ForecastChannelResult>
+  /** When a test alert last reached both channels. */
+  test_ok_at?: string
 }
 
 export interface ForecastGate {

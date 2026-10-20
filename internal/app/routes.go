@@ -314,6 +314,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
 	// One pass now, in the current mode (P9). Admin, like the switch it stands in for.
 	s.admin(mux, "POST /api/admin/forecast/evaluate", s.apiForecastEvaluate)
+	// The alert test (P41): the one action that proves a channel works.
+	s.admin(mux, "POST /api/admin/forecast/alert-test", s.apiForecastAlertTest)
 	// The verification page's aggregate. PermManage, not admin: the ledger's statistics are a
 	// management view, and a bridge query token must never reach them (ADR 0029 §7).
 	s.perm(mux, "GET /api/admin/forecast/groups", PermManage, s.apiForecastGroups)
