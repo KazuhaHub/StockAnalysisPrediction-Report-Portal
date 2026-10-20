@@ -822,10 +822,13 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
           })
         )}
 
-        {(levels?.length || markers?.length) && (
+        {((levels?.length ?? 0) > 0 || (markers?.length ?? 0) > 0) && (
           <g data-testid="price-overlay">
             {(markers ?? []).map((m) => {
-              const i = bars.findIndex((b) => dayOf(b.d) === m.date)
+              // Snap to the first bar on or after the marker's date. A checkpoint can fall on a
+              // weekend or a holiday, and dropping it silently lost the mark entirely; snapping
+              // keeps it visible on the next session the chart actually has.
+              const i = bars.findIndex((b) => dayOf(b.d) >= m.date)
               if (i < 0) return null
               const x = scale.cx(i)
               return (

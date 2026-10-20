@@ -44,7 +44,7 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 	sets, err := s.st.QueryPredictionSets(PredictionFilter{
 		ReportID:       id,
 		Limit:          200,
-		IncludePayload: r.URL.Query().Get("include") == "payload",
+		IncludePayload: includePayload(r, sc),
 	}, sc)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
@@ -59,6 +59,7 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	}
+	annotateReadPhases(sets, s.forecastEval.clock())
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
@@ -121,11 +122,13 @@ func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
+	f.IncludePayload = includePayload(r, sc)
 	sets, err := s.st.QueryPredictionSets(f, sc)
 	if err != nil {
 		v1err(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	annotateReadPhases(sets, s.forecastEval.clock())
 	writeJSON(w, map[string]any{"ok": true, "sets": sets})
 }
 
@@ -183,4 +186,11 @@ func reverseSets(sets []PredictionSet) {
 	for i, j := 0, len(sets)-1; i < j; i, j = i+1, j-1 {
 		sets[i], sets[j] = sets[j], sets[i]
 	}
+}
+
+// includePayload answers whether the verbatim predictions JSON may be returned. It is a diagnostic
+// for an unrestricted caller; a scoped reader gets every scored field without the producer's raw
+// contract, which is not theirs to read (C5).
+func includePayload(r *http.Request, sc *ownerScope) bool {
+	return r.URL.Query().Get("include") == "payload" && sc == nil
 }

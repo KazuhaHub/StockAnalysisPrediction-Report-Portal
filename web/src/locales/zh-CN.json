@@ -926,8 +926,6 @@
   "forecast.panel.disagree": "相反",
   "forecast.mark.pending": "待结算",
   "forecast.mark.resolved": "已结算",
-  "forecast.mark.refused": "取数失败（可重试）",
-  "forecast.mark.refused_final": "取数失败（终局）",
   "forecast.mark.halted": "停牌",
   "forecast.chart.s0": "起点",
   "forecast.chart.terminal": "终值",
@@ -2173,5 +2171,14 @@
   "forecast.alert.err.emailNone": "尚未配置邮件收件人。",
   "forecast.alert.err.slackNone": "尚未配置 Slack Webhook。",
   "forecast.alert.err.emailDisabled": "邮件功能已关闭，或 SMTP 未配置。",
-  "forecast.alert.err.slackStatus": "Slack 返回 HTTP {{code}}。"
+  "forecast.alert.err.slackStatus": "Slack 返回 HTTP {{code}}。",
+  "forecast.phase.waiting_s0": "等待首个交易日",
+  "forecast.phase.waiting": "等待中",
+  "forecast.phase.on_or_after": "预计 {{date}} 或之后",
+  "forecast.phase.retrying": "重试中",
+  "forecast.phase.resolved": "已结算",
+  "forecast.phase.final": "终局拒绝",
+  "forecast.quality.normal": "正常",
+  "forecast.quality.degraded": "降级",
+  "forecast.quality.repaired": "已修复"
 }

@@ -1,9 +1,9 @@
-import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, qs, ApiError } from '../api/client'
+import { api, qs, errText, ApiError } from '../api/client'
 import type { PredictionSet, QuoteResp, ReportPredictions, StockResp } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
@@ -97,6 +97,9 @@ export default function StockPage() {
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
   const [predSets, setPredSets] = useState<PredictionSet[]>([])
   const [predCounted, setPredCounted] = useState<number | undefined>(undefined)
+  const [predErr, setPredErr] = useState('')
+  const [predNonce, setPredNonce] = useState(0)
+  const predForRef = useRef<number | undefined>(undefined)
   const [otherSets, setOtherSets] = useState<PredictionSet[]>([])
   // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
   // the levels noise.
@@ -189,26 +192,34 @@ export default function StockPage() {
   // rather than on every list: the payload is 2 KiB of contract and only this panel shows it.
   const repId = data?.rep?.id
   useEffect(() => {
-    if (!repId) {
-      setPredSets([])
-      setPredCounted(undefined)
-      return
-    }
+    // A new report must not show the previous report's marks while the new request is in flight:
+    // the panel and the chart overlay were both reading the old set until it answered.
+    predForRef.current = repId
+    setPredSets([])
+    setPredCounted(undefined)
+    setPredErr('')
+    if (!repId) return
     let cancelled = false
+    const forId = repId
     api
-      .get<ReportPredictions>(`/api/report/${repId}/predictions?include=payload`)
+      .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
-        if (cancelled) return
+        if (cancelled || predForRef.current !== forId) return
         setPredSets(r.sets ?? [])
         setPredCounted(r.counted_set_id)
       })
-      .catch(() => {
-        if (!cancelled) setPredSets([])
+      .catch((e) => {
+        if (cancelled || predForRef.current !== forId) return
+        // A failed request is not "this report made no prediction". The body still renders; the
+        // panel area says what happened and offers one retry.
+        setPredSets([])
+        setPredErr(errText(e, t))
       })
     return () => {
       cancelled = true
     }
-  }, [repId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repId, predNonce])
 
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
@@ -513,6 +524,19 @@ export default function StockPage() {
                 )}
                 {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
               </Card>
+              {rep && predErr && (
+                <Alert
+                  type="error"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                  title={predErr}
+                  action={
+                    <Button size="small" onClick={() => setPredNonce((n) => n + 1)}>
+                      {t('common.retry')}
+                    </Button>
+                  }
+                />
+              )}
               {rep && (
                 <PredictionPanel
                   sets={predSets}

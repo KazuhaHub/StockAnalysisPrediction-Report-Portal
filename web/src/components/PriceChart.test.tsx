@@ -1008,17 +1008,28 @@ describe('forecast overlay', () => {
     expect(screen.getByTestId('price-level-edge').textContent).toContain('forecast.chart.outside')
   })
 
-  it('drops a marker whose date is outside the bars', () => {
+  it('snaps a marker with no bar to the next session, and drops one beyond the series', () => {
     renderChart(
       <PriceChart
         bars={BARS}
         markers={[
-          { date: '2026-09-02', label: 'd5' },
+          // A Sunday: the checkpoint fell on a non-session, and dropping it lost the mark entirely.
+          { date: '2026-08-30', label: 'd5' },
           { date: '2027-01-01', label: 'future' },
         ]}
       />,
     )
     expect(screen.getAllByTestId('price-marker')).toHaveLength(1)
     expect(screen.getByText('d5')).toBeTruthy()
+  })
+
+  it('renders no overlay and no stray zero for empty arrays', () => {
+    // A stray `0` used to be rendered where the overlay group would be, because the guard was a
+    // length (a number) rather than a boolean.
+    const withEmpty = renderChart(<PriceChart bars={BARS} levels={[]} markers={[]} />)
+    expect(withEmpty.container.querySelector('[data-testid="price-overlay"]')).toBeNull()
+    const outer = withEmpty.container.firstElementChild!
+    const stray = [...outer.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent === '0')
+    expect(stray).toHaveLength(0)
   })
 })

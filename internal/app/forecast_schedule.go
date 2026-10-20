@@ -277,3 +277,69 @@ func refusalClassOf(code string) string {
 	// fault nobody classified is not.
 	return refusalSource
 }
+
+// annotateReadPhases fills each mark's reading-page phase from a WEEKDAY projection, never a vendor
+// calendar. A holiday can make a projected date one or two sessions early, never late, so the page
+// can say "on or after <date>" truthfully without a fetch.
+//
+// The vocabulary is deliberately small, and `retrying` is only ever reached with evidence: a mark
+// that has never recorded a failed attempt is waiting, not failing.
+func annotateReadPhases(sets []PredictionSet, now time.Time) {
+	for i := range sets {
+		set := &sets[i]
+		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
+		if !ok {
+			continue
+		}
+		madeOn := madeAt.In(chinaZone).Format("2006-01-02")
+		sessions := predProjectSessions(shiftDays(madeOn, -1), 220)
+		s0 := set.S0Date
+		s0Projected := s0 == ""
+		if s0Projected {
+			s0 = projectedS0(madeAt)
+		}
+		s0Ready := s0 != "" && readSessionCompleted(s0, now)
+		today := now.In(chinaZone).Format("2006-01-02")
+		for j := range set.Marks {
+			m := &set.Marks[j]
+			switch m.Status {
+			case markResolved:
+				m.Phase = "resolved"
+				continue
+			case markRefusedFinal:
+				m.Phase = "final"
+				continue
+			}
+			if s0Projected && !s0Ready {
+				m.Phase, m.NotBefore = "waiting_s0", s0
+				continue
+			}
+			sch := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, s0, sessions)
+			if sch.Due == "" {
+				m.Phase = "waiting"
+				continue
+			}
+			if today < sch.Due {
+				m.Phase, m.NotBefore = "waiting", sch.Due
+				continue
+			}
+			if m.SessionDate != "" {
+				// A recorded due session means the evaluator tried and deferred. That is the only
+				// evidence that makes "retrying" true.
+				m.Phase, m.NotBefore = "retrying", ""
+				continue
+			}
+			m.Phase, m.NotBefore = "waiting", sch.Due
+		}
+	}
+}
+
+// readSessionCompleted reports whether a session's close has passed. It is the same 15:30 rule the
+// evaluator uses, so the panel and the loop agree about "today".
+func readSessionCompleted(date string, now time.Time) bool {
+	today := now.In(chinaZone).Format("2006-01-02")
+	if date < today {
+		return true
+	}
+	return date == today && predSessionStamp(now)
+}

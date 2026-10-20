@@ -1424,6 +1424,10 @@ export interface PredictionMark {
   ret_bp?: number
   bench_ret_bp?: number
   attempts?: number
+  /** Reading-page state (P10): waiting_s0 | waiting | retrying | resolved | final. */
+  phase?: 'waiting_s0' | 'waiting' | 'retrying' | 'resolved' | 'final'
+  /** The earliest date the mark can settle, from a weekday projection. */
+  not_before?: string
 }
 
 export interface PredictionSetError {

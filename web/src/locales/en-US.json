@@ -926,8 +926,6 @@
   "forecast.panel.disagree": "Opposite",
   "forecast.mark.pending": "Pending",
   "forecast.mark.resolved": "Settled",
-  "forecast.mark.refused": "Fetch failed (retryable)",
-  "forecast.mark.refused_final": "Fetch failed (final)",
   "forecast.mark.halted": "Halted",
   "forecast.chart.s0": "S0",
   "forecast.chart.terminal": "Terminal",
@@ -2173,5 +2171,14 @@
   "forecast.alert.err.emailNone": "No email recipients are configured.",
   "forecast.alert.err.slackNone": "No Slack webhook is configured.",
   "forecast.alert.err.emailDisabled": "Email is disabled or SMTP is not configured.",
-  "forecast.alert.err.slackStatus": "Slack answered HTTP {{code}}."
+  "forecast.alert.err.slackStatus": "Slack answered HTTP {{code}}.",
+  "forecast.phase.waiting_s0": "Waiting for the first session",
+  "forecast.phase.waiting": "Waiting",
+  "forecast.phase.on_or_after": "On or after {{date}}",
+  "forecast.phase.retrying": "Retrying",
+  "forecast.phase.resolved": "Settled",
+  "forecast.phase.final": "Final refusal",
+  "forecast.quality.normal": "Normal",
+  "forecast.quality.degraded": "Degraded",
+  "forecast.quality.repaired": "Repaired"
 }
