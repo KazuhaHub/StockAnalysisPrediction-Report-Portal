@@ -36,7 +36,11 @@ func satisfyForecastReadiness(t *testing.T, s *Server) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range s.st.ForecastGateCodes() {
+	codes, err := s.st.ForecastGateCodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range codes {
 		if err := s.st.RecordForecastDryGate(code, forecastGate{
 			At: time.Now().UTC().Format(time.RFC3339), By: "test", Note: "checked"}); err != nil {
 			t.Fatal(err)
@@ -57,12 +61,29 @@ func TestOffStepDoesExactlyOneRead(t *testing.T) {
 	var reads []string
 	s.st.onSettingRead = func(k string) { reads = append(reads, k) }
 	defer func() { s.st.onSettingRead = nil }()
-
+	applies := 0
+	s.st.onForecastApply = func(int) error { applies++; return nil }
+	defer func() { s.st.onForecastApply = nil }()
+	fetches := 0
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.fetch = func(context.Context, string, string, string, string) (*QuoteResp, error) {
+		fetches++
+		return nil, fmt.Errorf("off must not fetch")
+	}
+	e.adjust = func(context.Context, string, string, string, string) (map[string]int64, error) {
+		fetches++
+		return nil, fmt.Errorf("off must not fetch")
+	}
 	e.step(s, "tick")
 
 	if len(reads) != 1 || reads[0] != setForecastAuto {
 		t.Fatalf("off step read %v, want exactly [%s]", reads, setForecastAuto)
+	}
+	if applies != 0 {
+		t.Errorf("off step made %d ledger writes", applies)
+	}
+	if fetches != 0 {
+		t.Errorf("off step made %d vendor fetches", fetches)
 	}
 	if _, ok := s.st.ForecastHeartbeat(); ok {
 		t.Error("an off step wrote a heartbeat")
@@ -104,14 +125,17 @@ func opsFixture(t *testing.T, s *Server) (int64, *forecastEvaluator) {
 func forecastChecksum(t *testing.T, s *Server) string {
 	t.Helper()
 	var marks, sets string
-	if err := s.st.queryRow(`SELECT COUNT(*)||'/'||COALESCE(SUM(id),0)||'/'||
-		COALESCE(SUM(CASE WHEN status=? THEN 1 ELSE 0 END),0)||'/'||COALESCE(SUM(attempts),0)
-		FROM prediction_marks`, markResolved).Scan(&marks); err != nil {
+	if err := s.st.queryRow(`SELECT COALESCE(GROUP_CONCAT(line, ';'), '') FROM (
+		SELECT id||','||status||','||refusal||','||attempts||','||session_date||','||source||','||
+			next_attempt_at||','||COALESCE(close_fen,-1)||','||COALESCE(low_fen,-1)||','||
+			COALESCE(high_fen,-1)||','||COALESCE(ret_bp,0)||','||COALESCE(bench_ret_bp,0) AS line
+		FROM prediction_marks ORDER BY id)`).Scan(&marks); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.st.queryRow(`SELECT COUNT(*)||'/'||COALESCE(SUM(id),0)||'/'||
-		COALESCE(SUM(CASE WHEN base_check<>? THEN 1 ELSE 0 END),0)
-		FROM prediction_sets`, baseCheckPending).Scan(&sets); err != nil {
+	if err := s.st.queryRow(`SELECT COALESCE(GROUP_CONCAT(line, ';'), '') FROM (
+		SELECT id||','||state||','||base_check||','||s0_date||','||base_date||','||
+			COALESCE(s0_fen,-1) AS line
+		FROM prediction_sets ORDER BY id)`).Scan(&sets); err != nil {
 		t.Fatal(err)
 	}
 	return marks + "|" + sets
@@ -200,25 +224,66 @@ func TestReadinessHasNoLedgerChainItemBeforeP23(t *testing.T) {
 	}
 }
 
-// TestModeOneRequiresReadiness: one failing item at a time keeps the switch off, and the refusal
-// names the item.
+// TestModeOneRequiresReadiness: every item gates the switch, and each failure is named. The
+// dry_pass case with a mode-1 heartbeat is the one a naive "errors == 0" check misses.
 func TestModeOneRequiresReadiness(t *testing.T) {
-	s := newV1Server(t)
-	satisfyForecastReadiness(t, s)
-	if items := readinessFailure(s.forecastReadiness(time.Now())); len(items) != 0 {
-		t.Fatalf("seeded readiness still fails: %+v", items)
+	cases := []struct {
+		name    string
+		disable func(t *testing.T, s *Server)
+	}{
+		{"population", func(t *testing.T, s *Server) {
+			if err := s.st.DeleteSetting(setForecastPopulationFrom); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"dry_pass", func(t *testing.T, s *Server) {
+			if err := s.st.saveForecastHeartbeat(forecastHeartbeat{
+				Mode: forecastModeDry, LastTickAt: time.Now().UTC().Format(time.RFC3339),
+				Pass: passStats{Kind: "tick", StartedAt: time.Now().UTC().Format(time.RFC3339),
+					FinishedAt: time.Now().UTC().Format(time.RFC3339), Errors: 1},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"dry_pass from a mode-1 pass", func(t *testing.T, s *Server) {
+			if err := s.st.saveForecastHeartbeat(forecastHeartbeat{
+				Mode: forecastModeOn, LastTickAt: time.Now().UTC().Format(time.RFC3339),
+				Pass: passStats{Kind: "tick", StartedAt: time.Now().UTC().Format(time.RFC3339),
+					FinishedAt: time.Now().UTC().Format(time.RFC3339)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"dry_gate", func(t *testing.T, s *Server) {
+			if err := s.st.DeleteSetting(setForecastDryGate); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"alerts", func(t *testing.T, s *Server) {
+			if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
+				t.Fatal(err)
+			}
+		}},
 	}
-	// Break one item: the gate.
-	s.st.DeleteSetting(setForecastDryGate)
-	rec := saveForecastSettings(t, s, `{"mode":"1"}`)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "dry_gate") {
-		t.Errorf("refusal does not name the failing item: %s", rec.Body.String())
-	}
-	if got := s.st.GetSetting(setForecastAuto, "0"); got == forecastModeOn {
-		t.Error("a refused switch was persisted")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newV1Server(t)
+			satisfyForecastReadiness(t, s)
+			if items := readinessFailure(s.forecastReadiness(time.Now())); len(items) != 0 {
+				t.Fatalf("seeded readiness still fails: %+v", items)
+			}
+			tc.disable(t, s)
+			rec := saveForecastSettings(t, s, `{"mode":"1"}`)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "forecast_not_ready") {
+				t.Errorf("refusal has no code: %s", rec.Body.String())
+			}
+			if got := s.st.GetSetting(setForecastAuto, "0"); got == forecastModeOn {
+				t.Error("a refused switch was persisted")
+			}
+		})
 	}
 }
 
@@ -241,7 +306,17 @@ func TestModeOneWithoutGateWritesNothingForThatBenchmark(t *testing.T) {
 	if len(hb.AwaitingGate) == 0 || hb.AwaitingGate[0] != "sh000852" {
 		t.Errorf("awaiting_gate = %v, want [sh000852]", hb.AwaitingGate)
 	}
-	// With the check recorded, the same pass writes.
+	// A check for a DIFFERENT benchmark must not unlock this set: planWrites asks about the set's
+	// frozen code, not whether any gate exists.
+	if err := s.st.RecordForecastDryGate("sh000300", forecastGate{
+		At: time.Now().UTC().Format(time.RFC3339), By: "test", Note: "checked"}); err != nil {
+		t.Fatal(err)
+	}
+	e.step(s, "manual")
+	if after := forecastChecksum(t, s); after != before {
+		t.Error("a gate for a different benchmark unlocked this set")
+	}
+	// With the right check recorded, the same pass writes.
 	if err := s.st.RecordForecastDryGate("sh000852", forecastGate{
 		At: time.Now().UTC().Format(time.RFC3339), By: "test", Note: "checked"}); err != nil {
 		t.Fatal(err)
@@ -272,16 +347,36 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	delivered := make(chan struct{}, 2)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		delivered <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	if _, err := s.st.CreateWebhook(ts.URL, []string{EventForecastEvaluatorUnhealthy}, ""); err != nil {
+		t.Fatal(err)
+	}
+
 	now := time.Now()
 	s.forecastWatchdogOnce(now)
 	state := s.st.forecastAlertState()
 	if _, ok := state["stalled"]; !ok {
 		t.Fatalf("no stalled alert recorded: %+v", state)
 	}
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stalled alert was recorded but no event was delivered")
+	}
 	first := state["stalled"]
 	s.forecastWatchdogOnce(now.Add(time.Minute))
 	if got := s.st.forecastAlertState()["stalled"]; got != first {
 		t.Errorf("a second alert %s fired inside the hour: %q -> %q", t.Name(), first, got)
+	}
+	select {
+	case <-delivered:
+		t.Error("a de-duplicated alert was delivered again")
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -291,11 +386,19 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 // planned and never written.
 func TestReadinessGateCoversPreLiveBenchCodes(t *testing.T) {
 	s := newV1Server(t)
-	opsFixture(t, s) // accepted, non-terminal marks, frozen with the default sh000852
+	setID, e := opsFixture(t, s) // accepted, non-terminal marks, frozen with the default sh000852
+	// Move the ACTIVE benchmark away from the frozen one, so the union is actually exercised: with
+	// both at sh000852 this test would pass even if pre-live sets were filtered out.
+	if err := s.st.applyForecastBenchState("sh000300", "", ""); err != nil {
+		t.Fatal(err)
+	}
 
-	codes := s.st.ForecastGateCodes()
-	if len(codes) != 1 || codes[0] != "sh000852" {
-		t.Fatalf("gate codes = %v, want [sh000852]", codes)
+	codes, err := s.st.ForecastGateCodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codes) != 2 || codes[0] != "sh000300" || codes[1] != "sh000852" {
+		t.Fatalf("gate codes = %v, want [sh000300 sh000852]", codes)
 	}
 	items := s.forecastReadiness(time.Now())
 	var gate *readinessItem
@@ -316,15 +419,43 @@ func TestReadinessGateCoversPreLiveBenchCodes(t *testing.T) {
 	}
 	for _, it := range s.forecastReadiness(time.Now()) {
 		if it.Key == "dry_gate" && !it.OK {
-			t.Errorf("dry_gate still fails: %s", it.Detail)
+			// sh000300 is the active benchmark and has no check yet.
+			if !strings.Contains(it.Detail, "sh000300") {
+				t.Errorf("dry_gate detail = %q, want it to name sh000300", it.Detail)
+			}
 		}
+	}
+	if err := s.st.RecordForecastDryGate("sh000300", forecastGate{
+		At: time.Now().UTC().Format(time.RFC3339), By: "test", Note: "checked"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range s.forecastReadiness(time.Now()) {
+		if it.Key == "dry_gate" && !it.OK {
+			t.Errorf("dry_gate still fails with both codes checked: %s", it.Detail)
+		}
+	}
+
+	// The pre-live set is written through the same step once its own code is checked.
+	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
+		t.Fatal(err)
+	}
+	e.step(s, "manual")
+	var status string
+	if err := s.st.queryRow(`SELECT status FROM prediction_marks WHERE set_id=? AND checkpoint='d5'`, setID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != markResolved {
+		t.Errorf("pre-live set d5 = %q, want resolved", status)
 	}
 }
 
 // TestGateCodesAreNeverVacuous: with no accepted set at all, the active benchmark is still listed.
 func TestGateCodesAreNeverVacuous(t *testing.T) {
 	s := newV1Server(t)
-	codes := s.st.ForecastGateCodes()
+	codes, err := s.st.ForecastGateCodes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(codes) != 1 || codes[0] != s.st.ForecastBench() {
 		t.Fatalf("gate codes = %v, want the active %q", codes, s.st.ForecastBench())
 	}

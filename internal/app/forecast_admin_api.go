@@ -68,6 +68,11 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 			"rtype": rtype, "n": n, "since": since, "ok": ok, "store_failed_30d": failed,
 		})
 	}
+	gateCodes, err := s.st.ForecastGateCodes()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
@@ -79,7 +84,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		"dry_gate":  s.st.ForecastDryGate(),
 		// The codes the readiness item asks about, so the page can offer exactly those in the
 		// dry-run check form rather than every allowed index.
-		"gate_codes": s.st.ForecastGateCodes(),
+		"gate_codes": gateCodes,
 		// The benchmark new sets are written with. Existing sets keep theirs, and the UI says so:
 		// changing this does not re-score anything already on the ledger.
 		"bench": s.st.ForecastBench(),

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   App,
@@ -31,13 +31,18 @@ const STALLED_MS = 10 * 60_000
 
 type Status = 'off' | 'dry' | 'healthy' | 'stale' | 'lagging' | 'error'
 
-function statusOf(s: ForecastSettings): Status {
+function statusOf(s: ForecastSettings, nowMs: number): Status {
   if (s.mode === '0') return 'off'
   const hb = s.heartbeat
   if (!hb) return 'stale'
-  if (dayjs().diff(dayjs(hb.last_tick_at), 'millisecond') > STALLED_MS) return 'stale'
+  if (nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
   if (hb.pass.errors > 0 || hb.pass.panics > 0) return 'error'
-  if ((hb.awaiting_gate?.length ?? 0) > 0 || hb.pass.oldest_due_unsettled_minutes > 360) return 'lagging'
+  if (
+    (hb.awaiting_gate?.length ?? 0) > 0 ||
+    hb.pass.stale_valve_tripped ||
+    hb.pass.oldest_due_unsettled_minutes > 360
+  )
+    return 'lagging'
   return s.mode === 'dry' ? 'dry' : 'healthy'
 }
 
@@ -62,8 +67,15 @@ export default function ForecastEvaluatorStatus({
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState(settings.gate_codes[0] ?? settings.bench)
   const [note, setNote] = useState('')
+  // Re-render the age on its own clock: a page left open must go stale without a reload, and the
+  // heartbeat is the only evidence that the loop is alive.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
-  const status = statusOf(settings)
+  const status = statusOf(settings, nowMs)
   const hb = settings.heartbeat
   const failing = settings.readiness.filter((r) => !r.ok)
 
@@ -108,8 +120,9 @@ export default function ForecastEvaluatorStatus({
   const evaluateNow = async () => {
     setBusy(true)
     try {
+      // No success toast: the card reloads and shows what the pass actually did, including an
+      // error. "Saved" after a pass that failed would be the one message that hides it.
       await api.post('/api/admin/forecast/evaluate', {})
-      message.success(t('common.saved'))
       onChanged()
     } catch (e) {
       message.error(errText(e, t))
@@ -121,7 +134,7 @@ export default function ForecastEvaluatorStatus({
   const recordGate = async () => {
     if (!note.trim()) return
     try {
-      await post({ dry_gate: { code, note } }, t('forecast.eval.gate.recorded', { by: '', at: '' }))
+      await post({ dry_gate: { code, note } }, t('common.saved'))
       setNote('')
     } catch {
       // the message is already shown

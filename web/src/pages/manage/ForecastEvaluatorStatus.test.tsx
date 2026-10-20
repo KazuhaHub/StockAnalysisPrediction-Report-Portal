@@ -101,6 +101,14 @@ describe('ForecastEvaluatorStatus', () => {
     expect(screen.getByText('forecast.eval.status.stale')).toBeTruthy()
   })
 
+  it('goes lagging when the stale-data valve tripped', () => {
+    show({
+      mode: '1',
+      heartbeat: { ...base.heartbeat!, pass: { ...base.heartbeat!.pass, stale_valve_tripped: true } },
+    })
+    expect(screen.getByText('forecast.eval.status.lagging')).toBeTruthy()
+  })
+
   it('shows an error state when the last pass failed', () => {
     show({
       mode: '1',

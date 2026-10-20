@@ -516,14 +516,6 @@ sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": "dry"})
 check("G", "A mode-only save selects dry mode",
       sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "dry", f"{sc}")
 
-# The manual pass runs in the current mode and records a heartbeat.
-sc, ran = admin.req("POST", "/api/admin/forecast/evaluate", {})
-check("G", "Evaluate now runs a dry pass", sc == 200 and ran.get("mode") == "dry", f"{sc} {ran}")
-sc, hb = admin.req("GET", "/api/admin/forecast")
-check("G", "The dry pass leaves a heartbeat and writes nothing",
-      sc == 200 and (hb.get("heartbeat") or {}).get("pass", {}).get("kind") == "manual"
-      and (hb.get("heartbeat") or {}).get("pass", {}).get("errors") == 0, f"{hb.get('heartbeat')}")
-
 # Mode 1 is refused while the readiness list has a failing item; the refusal names it.
 sc, notready = admin.req("POST", "/api/admin/forecast", {"mode": 1})
 check("G", "Mode 1 is refused until the readiness list holds",

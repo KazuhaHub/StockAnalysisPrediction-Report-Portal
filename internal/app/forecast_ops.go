@@ -429,6 +429,8 @@ func (s *Store) ForecastDryGate() map[string]forecastGate {
 
 // RecordForecastDryGate stores one code's check. The caller has already validated the code and note.
 func (s *Store) RecordForecastDryGate(code string, gate forecastGate) error {
+	s.forecastGateMu.Lock()
+	defer s.forecastGateMu.Unlock()
 	all := s.ForecastDryGate()
 	all[code] = gate
 	body, err := json.Marshal(all)
@@ -442,7 +444,7 @@ func (s *Store) RecordForecastDryGate(code string, gate forecastGate) error {
 // frozen by an accepted set that still has a non-terminal mark (pre-live sets included, because the
 // evaluator settles them like any other). With no accepted set at all the active code is still
 // listed, so the item can never be vacuously satisfied.
-func (s *Store) ForecastGateCodes() []string {
+func (s *Store) ForecastGateCodes() ([]string, error) {
 	seen := map[string]bool{}
 	if code := s.ForecastBench(); code != "" {
 		seen[code] = true
@@ -451,21 +453,31 @@ func (s *Store) ForecastGateCodes() []string {
 		JOIN prediction_marks m ON m.set_id = ps.id
 		WHERE ps.state = ? AND m.status IN (?,?) AND ps.bench_code <> ''`,
 		predStateAccepted, markPending, markRefused)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var code string
-			if rows.Scan(&code) == nil && code != "" {
-				seen[code] = true
-			}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return nil, err
 		}
+		// A code the evaluator can never select (an old or hand-edited row) is not a gate it can
+		// record: the settings handler refuses such a code, so listing it would block readiness for
+		// ever with an unfixable item.
+		if _, ok := benchSpecFor(code); ok {
+			seen[code] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	out := make([]string, 0, len(seen))
 	for code := range seen {
 		out = append(out, code)
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // ---------- readiness ----------
@@ -490,12 +502,16 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	// 3. The mode is dry, and the last dry pass finished without errors.
 	mode := forecastMode(s.st.GetSetting(setForecastAuto, "0"))
 	hb, haveHB := s.st.ForecastHeartbeat()
-	dryOK := mode == forecastModeDry && haveHB && hb.Pass.FinishedAt != "" && hb.Pass.Errors == 0 && hb.Pass.Panics == 0
+	dryOK := mode == forecastModeDry && haveHB && hb.Mode == forecastModeDry &&
+		hb.Pass.FinishedAt != "" && hb.Pass.Errors == 0 && hb.Pass.Panics == 0
 	dryDetail := ""
 	switch {
 	case mode != forecastModeDry:
 		dryDetail = "the evaluator is not in dry mode"
-	case !haveHB || hb.Pass.FinishedAt == "":
+	case !haveHB || hb.Mode != forecastModeDry:
+		// Switching 1 -> dry and straight back must not pass: the heartbeat is from the mode-1 run.
+		dryDetail = "no pass has run since the mode was set to dry"
+	case hb.Pass.FinishedAt == "":
 		dryDetail = "no dry pass has finished yet"
 	case hb.Pass.Errors > 0 || hb.Pass.Panics > 0:
 		dryDetail = "the last dry pass reported " + strconv.Itoa(hb.Pass.Errors) + " errors"
@@ -505,16 +521,22 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	// 4. A dry-run check is recorded for every benchmark the evaluator can select.
 	gates := s.st.ForecastDryGate()
 	var missing []string
-	for _, code := range s.st.ForecastGateCodes() {
-		if _, ok := gates[code]; !ok {
-			missing = append(missing, code)
+	gateCodes, gateErr := s.st.ForecastGateCodes()
+	if gateErr != nil {
+		items = append(items, readinessItem{Key: "dry_gate", OK: false,
+			Detail: "could not read the benchmarks in use"})
+	} else {
+		for _, code := range gateCodes {
+			if _, ok := gates[code]; !ok {
+				missing = append(missing, code)
+			}
 		}
+		gateDetail := ""
+		if len(missing) > 0 {
+			gateDetail = "no dry-run check for " + strings.Join(missing, ", ")
+		}
+		items = append(items, readinessItem{Key: "dry_gate", OK: len(missing) == 0, Detail: gateDetail})
 	}
-	gateDetail := ""
-	if len(missing) > 0 {
-		gateDetail = "no dry-run check for " + strings.Join(missing, ", ")
-	}
-	items = append(items, readinessItem{Key: "dry_gate", OK: len(missing) == 0, Detail: gateDetail})
 
 	// 5. Alert channels were verified within thirty days. P41 writes the key.
 	alertsOK := false
@@ -640,7 +662,18 @@ func staleCalendar(hb forecastHeartbeat, now time.Time) bool {
 		return false
 	}
 	today := t.Format("2006-01-02")
+	started, err := time.Parse(time.RFC3339, hb.Pass.StartedAt)
+	if err != nil {
+		return false
+	}
 	for _, b := range hb.Bench {
+		// Only a code this pass actually fetched can say the vendor is behind now. A carried-over
+		// entry from an idle pass would otherwise alert every evening about a calendar nobody asked
+		// for.
+		fetched, ferr := time.Parse(time.RFC3339, b.FetchedAt)
+		if ferr != nil || fetched.Before(started) {
+			continue
+		}
 		if b.LastBar != "" && b.LastBar < today {
 			return true
 		}

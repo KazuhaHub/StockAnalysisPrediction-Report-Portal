@@ -248,8 +248,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Watchdog.** Its own goroutine, its own recover, one settings read while off. `stalled` after ten
   minutes (at most hourly), `lagging` on a due mark over six hours, a tripped valve, or a benchmark
   calendar still ending before today after 18:00 CST on a weekday (at most daily). `no_source` is not
-  emitted before P23, as the plan says: there is no ledger chain to check yet. The dry gate is reset
-  by a restore for free, because a restore deletes every `meta` row.
+  emitted before P23, as the plan says: there is no ledger chain to check yet.
+- **Restore (§3.3).** `forecast_eval_state`, `forecast_alert_state`, `forecast_dry_gate` and
+  `forecast_alert_test_ok_at` are deleted on this transaction; the mode is the lower of dump and
+  live (`0 < dry < 1`), audited only on a real change; and a result of `1` is capped at `dry` with
+  `{reason:"restore_gates_empty"}`, because the gates were just reset and mode 1 without them would
+  plan every set and write none. The audit row is written through the restore's own transaction.
 - **Health route.** `GET /healthz/forecast` is public and answers exactly `{"ok":…}`, 503 when the
   mode is not off and the heartbeat is missing or older than ten minutes. A switched-off evaluator is
   200.

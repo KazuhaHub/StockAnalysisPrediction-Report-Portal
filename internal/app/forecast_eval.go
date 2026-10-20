@@ -314,10 +314,12 @@ type benchFault struct {
 func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec benchSpec, sets []forecastWorkSet) (forecastSeries, *benchFault) {
 	series, err := e.indexCalendar(ctx, s, spec, sets)
 	e.noteFetch(spec.Market, spec.Sym, series.Source)
-	e.noteBench(spec.Code, series)
 	if err != nil {
+		// Do NOT overwrite the last known bar with an empty series: the stale-calendar check must
+		// keep seeing the age of the last body that arrived, not the moment a fetch failed.
 		return series, &benchFault{code: "fetch_failed", err: err}
 	}
+	e.noteBench(spec.Code, series)
 	if len(series.Bars) == 0 {
 		// An index publishes a bar on every session. An empty body is a delivery fault for the whole
 		// group, never a fact about one stock's series.

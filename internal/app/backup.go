@@ -353,7 +353,10 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// because the restore's own transaction is about to delete the `meta` rows that hold them
 	// (§3.3). `forecast_population_from` is write-once and must never move silently, so a dump that
 	// disagrees with the live value is refused; a dump that lacks it inherits the live one.
-	prior := restorePrior{populationFrom: s.populationFromRow()}
+	prior := restorePrior{
+		populationFrom: s.populationFromRow(),
+		autoMode:       s.GetSetting(setForecastAuto, ""),
+	}
 
 	rep := &RestoreReport{
 		Rows:     map[string]int64{},
@@ -429,6 +432,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 // outright. It is captured before the restore's transaction clears the tables.
 type restorePrior struct {
 	populationFrom string // the live forecast_population_from, "" when unset
+	autoMode       string // the live forecast_auto, "" when unset
 }
 
 // populationFromRow reads the raw stored ledger start without going through GetSetting's parse, so a
@@ -515,7 +519,79 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 			}
 		}
 	}
+	if err := applyRestoreEvaluator(e, prior.autoMode); err != nil {
+		return err
+	}
 	return nil
+}
+
+// applyRestoreEvaluator applies §3.3's rules for the evaluator's own keys.
+//
+// A restored mode must never be stronger than the weaker of the two databases, and it must never be
+// 1 without a gate: the gates are reset (they describe hand checks of a database that no longer
+// exists), and mode 1 with no gate plans every set and writes none of them. Both rules run on the
+// restore's transaction, and each real change leaves an audit row attributed to `system`.
+func applyRestoreEvaluator(e migExec, live string) error {
+	for _, k := range []string{setForecastEvalState, setForecastAlertState, setForecastDryGate, setForecastAlertTestOKAt} {
+		if _, err := e.exec(`DELETE FROM meta WHERE k=?`, k); err != nil {
+			return fmt.Errorf("reset %s on restore: %w", k, err)
+		}
+	}
+	dump := forecastMode(e.setting(setForecastAuto))
+	liveMode := forecastMode(live)
+	final := lowerForecastMode(dump, liveMode)
+	if final != dump {
+		if err := e.setSetting(setForecastAuto, final); err != nil {
+			return fmt.Errorf("cap the evaluator mode through the restore: %w", err)
+		}
+		if err := auditRestoreChange(e, map[string]any{"from": dump, "to": final}); err != nil {
+			return err
+		}
+	}
+	if final == forecastModeOn {
+		// The gates were just deleted, so mode 1 would plan everything and write nothing. Cap it and
+		// say why, which is the only way an operator learns the mode did not survive the restore.
+		if err := e.setSetting(setForecastAuto, forecastModeDry); err != nil {
+			return fmt.Errorf("cap the evaluator mode at dry: %w", err)
+		}
+		if err := auditRestoreChange(e, map[string]any{
+			"from": forecastModeOn, "to": forecastModeDry, "reason": "restore_gates_empty",
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lowerForecastMode orders off < dry < 1.
+func lowerForecastMode(a, b string) string {
+	rank := func(m string) int {
+		switch m {
+		case forecastModeOn:
+			return 2
+		case forecastModeDry:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(a) <= rank(b) {
+		return a
+	}
+	return b
+}
+
+// auditRestoreChange writes the restore's own audit row through the restore transaction, so a
+// rolled-back restore does not leave a claim about a change that did not happen.
+func auditRestoreChange(e migExec, detail map[string]any) error {
+	body, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+		VALUES(?,?,?,?,?,?,?,?)`, time.Now().UTC().Format(time.RFC3339), "system", 0,
+		AuditForecastAuto, "settings", setForecastAuto, string(body), "")
+	return err
 }
 
 // restoreStream reads the dump body. With tx == nil it validates and counts without writing, which
