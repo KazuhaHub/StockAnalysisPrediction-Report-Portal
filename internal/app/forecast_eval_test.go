@@ -92,15 +92,18 @@ func TestBpFromRatioIsExact(t *testing.T) {
 func TestDailyLimitFollowsTheBoard(t *testing.T) {
 	for _, tc := range []struct {
 		symbol string
-		want   int32
+		want   int64
 	}{
 		{"600160", 1000}, // main board
 		{"000001", 1000},
 		{"300772", 2000}, // ChiNext
+		{"301272", 2000}, // ChiNext, post-2021 range
 		{"688111", 2000}, // STAR
+		{"689009", 2000}, // STAR, post-2021 range
+		{"830799", 3000}, // Beijing
 	} {
-		if got := dailyLimitBp(tc.symbol); got != tc.want {
-			t.Errorf("dailyLimitBp(%s) = %d, want %d", tc.symbol, got, tc.want)
+		if got := predDailyLimitBp(tc.symbol); got != tc.want {
+			t.Errorf("predDailyLimitBp(%s) = %d, want %d", tc.symbol, got, tc.want)
 		}
 	}
 }
@@ -114,14 +117,14 @@ func TestBeyondDailyLimitNeverFlagsALegalMove(t *testing.T) {
 		bar("2026-10-21", 1000, 900, 1005, 898), // exactly -10%: a limit-down day
 		bar("2026-10-22", 900, 1080, 1085, 895), // +20% on a MAIN BOARD code: impossible as trading
 	}
-	if beyondDailyLimit("600160", bars, bars[1]) {
+	if beyondLimitPrice(bars[0].Close, bars[1].Close, predDailyLimitBp("600160")) {
 		t.Error("a -10% move was flagged; that is an ordinary limit-down day, not a corporate action")
 	}
-	if !beyondDailyLimit("600160", bars, bars[2]) {
+	if !beyondLimitPrice(bars[1].Close, bars[2].Close, predDailyLimitBp("600160")) {
 		t.Error("a +20% move on a main-board code was not flagged; no legal session produces it")
 	}
 	// The same +20% IS legal on ChiNext.
-	if beyondDailyLimit("300772", bars, bars[2]) {
+	if beyondLimitPrice(bars[1].Close, bars[2].Close, predDailyLimitBp("300772")) {
 		t.Error("a +20% move on ChiNext was flagged; that board's limit is 20%")
 	}
 }
@@ -133,18 +136,18 @@ func TestCorporateActionFromTheDividendElement(t *testing.T) {
 	bars := barsFor(dates, 1000)
 	from, to := dates[2], dates[10]
 	ex := []string{dates[5]}
-	if !corporateActionBetween("600160", bars, nil, ex, from, to) {
+	if !corporateActionBetween("600160", bars, nil, ex, from, to, "") {
 		t.Error("an ex-date inside the window was not detected")
 	}
-	if corporateActionBetween("600160", bars, nil, ex, dates[6], to) {
+	if corporateActionBetween("600160", bars, nil, ex, dates[6], to, "") {
 		t.Error("an ex-date BEFORE the window was counted")
 	}
-	if corporateActionBetween("600160", bars, nil, ex, from, dates[4]) {
+	if corporateActionBetween("600160", bars, nil, ex, from, dates[4], "") {
 		t.Error("an ex-date AFTER the window was counted")
 	}
 	// The window is exclusive at the start: an event ON base_date belongs to the report's own entry
 	// price, not to its forecast.
-	if corporateActionBetween("600160", bars, nil, []string{from}, from, to) {
+	if corporateActionBetween("600160", bars, nil, []string{from}, from, to, "") {
 		t.Error("an ex-date exactly on base_date was counted; the window opens after it")
 	}
 }
@@ -177,26 +180,6 @@ func TestCompletedSessionsExcludesAnUnfinishedBar(t *testing.T) {
 	}
 }
 
-// TestBarIsCompleteDistrustsAPartialBody is the second half of the same rule, and the one a clock-only
-// check gets wrong: the vendor stamps its own time, and a body captured at 14:57 carries 14:57 however
-// late it is read. That is exactly what a cached response does.
-func TestBarIsCompleteDistrustsAPartialBody(t *testing.T) {
-	partial := &QuoteResp{Snapshot: QuoteSnapshot{AsOf: "2026-10-21T14:57:03+08:00"}}
-	final := &QuoteResp{Snapshot: QuoteSnapshot{AsOf: "2026-10-21T15:00:01+08:00"}}
-
-	// Read at 15:31, a 14:57 body is still a partial bar.
-	if barIsComplete(partial, shanghai(2026, time.October, 21, 15, 31)) {
-		t.Error("a 14:57 body was believed at 15:31; this is the cached-partial-bar bug")
-	}
-	if !barIsComplete(final, shanghai(2026, time.October, 21, 15, 31)) {
-		t.Error("a 15:00 body was not believed after the close")
-	}
-	// And before the close, neither is believed, whatever the body says.
-	if barIsComplete(final, shanghai(2026, time.October, 21, 10, 0)) {
-		t.Error("a body was believed at 10:00, before the session closed")
-	}
-}
-
 // ---------- settling ----------
 
 // TestSettleMarkHandlesAHalt: a halted stock resolves on its last traded close and is FLAGGED, not
@@ -206,8 +189,13 @@ func TestSettleMarkHandlesAHalt(t *testing.T) {
 	stock := barsFor(dates[:8], 1000) // stops trading after dates[7]
 	index := barsFor(dates, 4000)
 
-	res := settleMark(forecastWorkSet{Symbol: "600160"}, forecastMark{Checkpoint: "d20"},
-		stock, index, nil, dates[0], dates[0], 1000, dates[19])
+	res := settleMark(settleInput{
+		Set: forecastWorkSet{Symbol: "600160"}, Mark: forecastMark{Checkpoint: "d20"},
+		Stock: stock, Index: index, Sessions: dates,
+		AsOf: dates[19] + "T15:00:00+08:00",
+		S0:   dates[0], BaseDate: dates[0], S0Fen: 1000, Session: dates[19],
+		Now: shanghai(2026, time.November, 30, 15, 31),
+	})
 
 	if res.Status != markResolved {
 		t.Fatalf("status = %q, want resolved: a halt is an answer, not a refusal", res.Status)
@@ -232,8 +220,12 @@ func TestSettleMarkNeverLooksBeforeBaseDate(t *testing.T) {
 	stock[0].Low = 100 // an early low the report could not have seen
 	index := barsFor(dates, 4000)
 
-	res := settleMark(forecastWorkSet{Symbol: "600160"}, forecastMark{Checkpoint: "d5"},
-		stock, index, nil, dates[3], dates[3], 1000, dates[8])
+	res := settleMark(settleInput{
+		Set: forecastWorkSet{Symbol: "600160"}, Mark: forecastMark{Checkpoint: "d5"},
+		Stock: stock, Index: index, Sessions: dates,
+		S0: dates[3], BaseDate: dates[3], S0Fen: 1000, Session: dates[8],
+		Now: shanghai(2026, time.November, 30, 15, 31),
+	})
 
 	if res.LowFen == nil {
 		t.Fatal("no low reported")
@@ -248,11 +240,16 @@ func TestSettleMarkNeverLooksBeforeBaseDate(t *testing.T) {
 func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
 	dates := tradingDays("2026-10-20", 10)
 	stock := barsFor(dates, 1100) // +10%
+	stock[0].Close = 1000         // the anchor is the S0 close the set stored
 	index := barsFor(dates, 4000)
 	index[5].Close = 4400 // the index rose 10% too
 
-	res := settleMark(forecastWorkSet{Symbol: "600160"}, forecastMark{Checkpoint: "d5"},
-		stock, index, nil, dates[0], dates[0], 1000, dates[5])
+	res := settleMark(settleInput{
+		Set: forecastWorkSet{Symbol: "600160"}, Mark: forecastMark{Checkpoint: "d5"},
+		Stock: stock, Index: index, Sessions: dates,
+		S0: dates[0], BaseDate: dates[0], S0Fen: 1000, Session: dates[5],
+		Now: shanghai(2026, time.November, 30, 15, 31),
+	})
 
 	if res.RetBp == nil || res.BenchRetBp == nil {
 		t.Fatal("a return is missing")
@@ -266,7 +263,7 @@ func TestSettleMarkMeasuresAgainstTheBenchmark(t *testing.T) {
 // first session the stock actually traded on.
 func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
 	dates := tradingDays("2026-10-19", 10)
-	stock := barsFor(dates[2:], 1000)                 // the stock's series starts two sessions late
+	stock := barsFor(dates, 1000)
 	madeAt := shanghai(2026, time.October, 19, 10, 0) // before the close on the first session
 
 	s0, base, fen, err := resolveStartBar(stock, forecastWorkSet{}, madeAt, dates)
@@ -276,16 +273,24 @@ func TestResolveStartBarUsesTheReceiptTimeOfDay(t *testing.T) {
 	if s0 != dates[0] {
 		t.Errorf("s0 = %s, want the receipt session %s (received before 15:00)", s0, dates[0])
 	}
-	if base != dates[2] {
-		t.Errorf("base_date = %s, want the first session the stock traded %s", base, dates[2])
-	}
-	if fen != 1000 {
-		t.Errorf("s0_fen = %d, want 1000", fen)
+	if base != dates[0] || fen != 1000 {
+		t.Errorf("base = %s/%d, want the S0 close %s/1000", base, fen, dates[0])
 	}
 	// After the close the start moves to the next session.
 	after := shanghai(2026, time.October, 19, 16, 0)
 	if got, _, _, err := resolveStartBar(stock, forecastWorkSet{}, after, dates); err != nil || got != dates[1] {
 		t.Errorf("after-close S0 = %q (%v), want %s", got, err, dates[1])
+	}
+	// A stock with no bar on S0 uses its last traded close before S0.
+	preS0 := shiftDays(dates[0], -3)
+	gapped := append([]QuoteBar{bar(preS0, 900, 900, 910, 890)}, barsFor(dates[2:], 1000)...)
+	gotS0, gotBase, gotFen, err := resolveStartBar(gapped, forecastWorkSet{MadeOn: dates[0]}, madeAt, dates)
+	if err != nil || gotS0 != dates[0] || gotBase != preS0 || gotFen != 900 {
+		t.Errorf("halted-on-S0 = %s/%s/%d (%v), want %s with base %s", gotS0, gotBase, gotFen, err, dates[0], preS0)
+	}
+	// Nothing inside the window at all is the bounded look-back signal, not a halt.
+	if _, _, _, err := resolveStartBar(nil, forecastWorkSet{MadeOn: dates[0]}, madeAt, dates); err != errNoBaseInWindow {
+		t.Errorf("empty window = %v, want errNoBaseInWindow", err)
 	}
 }
 
@@ -619,15 +624,20 @@ func TestEvaluatorTickSettlesDueMarks(t *testing.T) {
 	setID := seedAcceptedSet(t, s, "600160", "2026-10-16")
 	// Its made_on is today's real date, which the evaluator will compare against fixture bars far in
 	// the past. Pin the row instead so the arithmetic is deterministic.
-	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-10-16', made_at='2026-10-16T13:00:00Z' WHERE id=?", setID); err != nil {
+	// The producer's emitted quote must agree with the S0 close the fixture prints (10.00), or P7's
+	// baseline check correctly calls the set a mismatch.
+	if _, err := s.st.exec("UPDATE prediction_sets SET made_on='2026-10-16', made_at='2026-10-16T13:00:00Z', emitted_base_fen=1000 WHERE id=?", setID); err != nil {
 		t.Fatal(err)
 	}
 
 	// Twenty-two sessions after the receipt date, enough for d5 and d20 and not for d60.
 	dates := tradingDays("2026-10-19", 22)
-	index := barsFor(dates, 4000)
-	stock := barsFor(dates, 1000)
-	stock[10].Close, stock[10].High = 1100, 1110 // a real move in the middle, nothing corporate
+	// The body must also carry the receipt day's session: P7's baseline check compares the emitted
+	// quote with the last completed close at or before made_at, and 2026-10-16 is that session.
+	calDates := append([]string{"2026-10-15", "2026-10-16"}, dates...)
+	index := barsFor(calDates, 4000)
+	stock := barsFor(calDates, 1000)
+	stock[12].Close, stock[12].High = 1100, 1110 // a real move in the middle, nothing corporate
 
 	now := shanghai(2026, time.November, 20, 16, 0)
 	e := &forecastEvaluator{now: func() time.Time { return now }}

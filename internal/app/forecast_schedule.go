@@ -251,13 +251,22 @@ const (
 // vendor, the calendar, the frozen code) is not this mark's attempt: it leaves attempts unchanged and
 // never counts toward finality, so an outage cannot finalise a whole cohort on the first tick.
 var predRefusalClass = map[string]string{
-	"no_bar":       refusalMarkSpecific,
-	"no_base":      refusalMarkSpecific,
-	"no_schedule":  refusalMarkSpecific,
+	// A fault in this mark's own data.
+	"no_bar":            refusalMarkSpecific,
+	"stale_bar":         refusalMarkSpecific,
+	"unverifiable":      refusalMarkSpecific,
+	"anchor_mismatch":   refusalMarkSpecific,
+	"calendar_mismatch": refusalMarkSpecific, // ONE stock's dates are not on the index calendar
+	"bad_window":        refusalMarkSpecific,
+	"no_base":           refusalMarkSpecific,
+	"no_schedule":       refusalMarkSpecific,
+	// A fault in the delivery or the instrument, never this mark's attempt (V26).
 	"fetch_failed": refusalSource,
 	"not_index":    refusalSource,
-	"calendar_bad": refusalSource,
+	"calendar_bad": refusalSource, // index-wide: zero volume, or a stored s0_date the calendar drops
 	"no_bench":     refusalSource,
+	"no_source":    refusalSource,
+	"calendar_lag": refusalSource, // the stale valve tripped: vendor-wide lag, nothing counts
 }
 
 func refusalClassOf(code string) string {

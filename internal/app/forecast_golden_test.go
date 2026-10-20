@@ -12,12 +12,10 @@ package app
 //
 //	go test ./internal/app -run TestForecastGolden -update-forecast-golden
 //
-// EXPECTED REGENERATION IN P7. P7 changes the baseline-check semantics (design §9.4: the reference
-// session comes from made_at, the emitted baseline is compared against what the market printed) and
-// settles the marks a baseline mismatch currently leaves pending. Every set here sets
-// EmittedBaseFen = its S0Fen so that the fixture is one a regeneration under P7 can re-derive; P7
-// will refresh these three files wholesale, in its own commit, and that is the one whole-file
-// regeneration this suite anticipates.
+// P7 (settlement semantics) did NOT change these snapshots. The fixture writes the baseline and the
+// marks through their own writers rather than through the evaluator, so the new baseline check, the
+// halt evidence/confirmation rule and the consistency checks are not on this path. Every set still
+// sets EmittedBaseFen = its S0Fen, so a future regeneration starts from a faithful fixture.
 //
 // The fixture deliberately holds NO pre_live, test or off_benchmark set: those are introduced by
 // P5, P36 and P4, which bring their own tests and must leave these snapshots untouched.

@@ -148,6 +148,7 @@ type forecastBaseline struct {
 	S0       string
 	BaseDate string
 	S0Fen    int64
+	Check    string
 	Index    []QuoteBar
 }
 
@@ -304,9 +305,17 @@ func (s *Store) SettleForecastMark(tx *sql.Tx, markID int64, res markResult, now
 		res.Status, res.Refusal, res.Session, res.BarDate, boolInt(res.Halted), boolInt(res.CorpAction),
 		nullableFen(res.CloseFen), nullableFen(res.LowFen), nullableFen(res.HighFen),
 		nullableInt32(res.RetBp), nullableInt32(res.BenchRetBp),
-		now.UTC().Format(time.RFC3339), quoteSourceTencent,
+		now.UTC().Format(time.RFC3339), sourceOr(res.Source),
 		markID, markResolved, markRefusedFinal)
 	return err
+}
+
+// sourceOr names the answering vendor, falling back to the only one this build writes.
+func sourceOr(source string) string {
+	if source == "" {
+		return quoteSourceTencent
+	}
+	return source
 }
 
 // MarkRefusedFinal ends retries on a mark. It accepts a pending mark too: finality is the result of a
@@ -328,9 +337,12 @@ var errForecastBaselineRaced = errors.New("forecast: baseline was written by ano
 // finishForecastBaselineTx fills the set's four evaluator-owned columns, once. It reports whether
 // this call was the one that wrote them.
 func (s *Store) finishForecastBaselineTx(tx *sql.Tx, setID int64, b forecastBaseline) (bool, error) {
-	check := baseMismatch
-	if barOn(b.Index, b.S0) != nil {
-		check = baseMatch
+	check := b.Check
+	if check == "" {
+		check = baseMismatch
+		if barOn(b.Index, b.S0) != nil {
+			check = baseMatch
+		}
 	}
 	res, err := tx.Exec(s.bind(`UPDATE prediction_sets
 		SET s0_date = ?, base_date = ?, s0_fen = ?, base_check = ?

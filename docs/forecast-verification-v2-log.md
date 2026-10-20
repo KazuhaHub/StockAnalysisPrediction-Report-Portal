@@ -159,3 +159,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   a guarded baseline write that affects 0 rows aborts the plan (`errForecastBaselineRaced`) so a racing
   pass cannot settle on its own values; the unknown-today test now calls the evaluator path rather
   than being short-circuited by the wake-only pre-pass; a known h12 and a future bar are pinned.
+- **P7 decisions.**
+  - The V20 probe fixtures (a live suspended stock, a delisted one, limit days on 301/689/bj, a
+    sub-¥2 stock) were not captured: they are read-only vendor probes and a synthetic bar can pin
+    every rule they were meant to cover. The tests use synthetic series and the existing benchmark
+    fixtures; this is the one deviation from §5.3's file list.
+  - The stale valve is computed once per benchmark group from every stock body in that pass (more
+    than 20% ending before the calendar's newest completed session). A fetch error is not a stale
+    body, so a partial outage cannot trip it.
+  - The bounded look-back (400 days) reuses the body it fetched for the marks too; otherwise the
+    narrow window would refuse the very halt it just resolved.
+  - The listing exemption for the daily-limit backstop is "the series' first five bars when the
+    series begins at or after the window's base date".
+  - A receipt after the close on a date the calendar does not show yet waits rather than comparing
+    with a previous close: it may be a session whose bar has not completed, or a holiday.
+  - The golden snapshots are unchanged: the fixture writes the baseline and marks directly, so P7's
+    evaluator rules are not on that path. The comment in forecast_golden_test.go records this.
+  - Halt evidence is stricter than §5.3's pseudo-code: a same-day vendor stamp counts only when it
+    is at or after the close. A cached 14:57 body proves the stock had not traded by 14:57, not that
+    it did not trade that session; the plan's "stamp date >= S" would settle a halt on a partial body.
