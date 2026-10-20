@@ -220,9 +220,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
   `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P38 `feat/forecast-access-schema` (§6.4) is in this PR: step `0006`, the strict OU
-  index, frozen attribution at ingest, and the OU delete's re-attribution. After it: P39a
-  `fix/dify-reserved-inputs` (§6.5).
+- **Next step.** P39a `fix/dify-reserved-inputs` (§6.5) is in this PR: `_rp_*` inputs are hidden,
+  stripped from submissions, and their names recorded per target. After it: P11 (ADR 0037) and the
+  tenancy pair P30/P31.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -367,3 +367,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   back NULL, and Postgres has its own case. The boot normalisation is tested through a reopen, not
   the helper. The group cache gained a generation counter, so a cell computed across a purge (an
   in-flight request that missed the cache before the OU delete) is not stored afterwards.
+
+### P39a — reserved inputs
+
+- **`_rp_*` is the portal's namespace.** `isReservedInput` gates four places: the probe and the refresh
+  remove such inputs from the user-facing list and record the names in the target's config JSON
+  (`reserved_inputs` — an existing TEXT column, no schema change); stored configs are filtered on
+  read (editor, target list, run form, CSV); the run form's submit deletes every reserved key from
+  every row before it is stored or audited; and `runInputs` strips them from the caller's copy before
+  injecting the minted token, so a caller-supplied value is never forwarded, even for an internal
+  user.
+- **The recorded names are a fact, not a guess.** A refresh replaces `reserved_inputs` with what the
+  workflow declares now, so a workflow that stops declaring the key stops receiving it. An editor
+  save that omits the field keeps it; a client can only record genuine `_rp_*` names.
+- **Absent vs empty.** The refresh apply treats an absent `reserved_inputs` as "the client did not
+  know about this field" and keeps the stored value (an older SPA bundle); a present list, even
+  empty, is the workflow's answer now. The shipped UI always sends it, so a dropped declaration
+  clears it.
+- **P39a review follow-ups.** A workflow that gains or loses only the reserved key has an identical
+  user-facing list, so the refresh preview now counts the recorded list as a change: without that the
+  confirm never ran, and the names were neither written after the Dify publish nor cleared when a
+  workflow dropped the declaration. The preview's diff and the audit compare the *filtered* list, so
+  a pre-P39a config no longer shows a reserved input as a removal. Recurring-task templates strip
+  reserved rows on save (they were the one row-storing path that bypassed the submit strip). The
+  recorded names are validated and deduped on read as well as on write.

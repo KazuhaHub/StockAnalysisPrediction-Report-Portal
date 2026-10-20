@@ -123,6 +123,9 @@ type difyRefreshResult struct {
 	LocalMode  string       `json:"local_mode"`
 	RemoteMode string       `json:"remote_mode"`
 	Inputs     []dify.Input `json:"inputs"` // exactly what a confirm would write
+	// ReservedInputs is what the workflow now declares as the portal's own (_rp_*). A confirm writes
+	// it back; a later preview with no reserved inputs clears it.
+	ReservedInputs []string `json:"reserved_inputs,omitempty"`
 	difyInputDiff
 	SymbolInputLost string `json:"symbol_input_lost,omitempty"`
 	NameDiffers     bool   `json:"name_differs"`
@@ -196,9 +199,18 @@ func (s *Server) previewDifyRefresh(ctx context.Context, tgt BatchTarget) difyRe
 	if difyModeChat(info.Mode) {
 		inputs = ensureQueryInput(inputs)
 	}
+	res.ReservedInputs = reservedInputNames(inputs)
+	inputs = dropReservedInputs(inputs)
 	inputs = preserveInputPresentation(cfg.Inputs, inputs)
 	res.Inputs = inputs
-	res.difyInputDiff = diffInputs(cfg.Inputs, inputs)
+	// The diff is about the user-facing list. A reserved input stored by an older build is not a
+	// change an admin made, so it must not appear as a removal.
+	res.difyInputDiff = diffInputs(dropReservedInputs(cfg.Inputs), inputs)
+	if !sameStringList(difyTargetReserved(tgt.Config), res.ReservedInputs) {
+		// A workflow that gained or lost only the reserved key has an identical user-facing list; it
+		// is still a change, or the confirm would never write (or clear) the recorded names.
+		res.Changed = true
+	}
 	res.SymbolInputLost = symbolInputLost(cfg.SymbolInput, inputs)
 	if res.RemoteMode != "" && res.RemoteMode != res.LocalMode {
 		res.Changed = true // the app itself changed kind; that is worth applying on its own
@@ -216,6 +228,9 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 			ID     int64        `json:"id"`
 			Mode   string       `json:"mode"`
 			Inputs []dify.Input `json:"inputs"`
+			// Absent means "the client did not know about this field" (an older bundle): keep the
+			// stored value rather than wiping it. Present, even empty, is the workflow's answer now.
+			ReservedInputs *[]string `json:"reserved_inputs"`
 		} `json:"items"`
 	}
 	if err := readJSON(r, &in); err != nil {
@@ -249,8 +264,11 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 		if err := json.Unmarshal([]byte(tgt.Config), &cfg); err != nil {
 			continue
 		}
-		before := cfg.Inputs
-		cfg.Inputs = it.Inputs
+		before := dropReservedInputs(cfg.Inputs)
+		cfg.Inputs = dropReservedInputs(it.Inputs)
+		if it.ReservedInputs != nil {
+			cfg.ReservedInputs = cleanReservedInputNames(*it.ReservedInputs)
+		}
 		if it.Mode != "" {
 			cfg.Mode = it.Mode
 		}
@@ -272,4 +290,22 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 		applied++
 	}
 	writeJSON(w, map[string]any{"ok": true, "applied": applied})
+}
+
+// sameStringList compares two small name lists order-insensitively.
+func sameStringList(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ac := cleanReservedInputNames(a)
+	bc := cleanReservedInputNames(b)
+	if len(ac) != len(bc) {
+		return false
+	}
+	for i := range ac {
+		if ac[i] != bc[i] {
+			return false
+		}
+	}
+	return true
 }

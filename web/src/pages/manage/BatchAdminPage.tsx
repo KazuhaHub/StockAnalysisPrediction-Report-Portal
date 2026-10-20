@@ -99,7 +99,11 @@ export default function BatchAdminPage() {
   const [probing, setProbing] = useState(false)
   const [probed, setProbed] = useState<{ name: string; inputsError?: string } | null>(null)
   const [inputs, setInputs] = useState<DifyInput[]>([])
-  const [mode, setMode] = useState('') // Dify app mode: "" / "workflow" / "chat"
+  // Dify app mode: "" / "workflow" / "chat".
+  const [mode, setMode] = useState('')
+  // Reserved inputs (_rp_*) are the portal's; the form never shows them, but it must carry the list
+  // back on save so a refresh's recording is not wiped by an ordinary edit (P39a).
+  const [reservedInputs, setReservedInputs] = useState<string[]>([])
   const [newVar, setNewVar] = useState('')
   // Pull-from-Dify preview (see DifyRefreshModal): results are read-only until confirmed.
   const [refreshOpen, setRefreshOpen] = useState(false)
@@ -162,6 +166,7 @@ export default function BatchAdminPage() {
     setProbed(null)
     setInputs([])
     setMode('')
+    setReservedInputs([])
     setNewVar('')
   }
 
@@ -186,6 +191,7 @@ export default function BatchAdminPage() {
         collapse_optional_inputs: !!d.collapse_optional_inputs,
       })
       setInputs(d.inputs || [])
+      setReservedInputs(d.reserved_inputs || [])
       setMode(d.mode || '')
       setEditingId(tg.id)
       setTargetOpen(true)
@@ -204,7 +210,13 @@ export default function BatchAdminPage() {
     }
     setProbing(true)
     try {
-      const r = await api.post<{ name: string; mode?: string; inputs: DifyInput[]; inputs_error?: string }>(
+      const r = await api.post<{
+        name: string
+        mode?: string
+        inputs: DifyInput[]
+        reserved_inputs?: string[]
+        inputs_error?: string
+      }>(
         '/api/admin/batch/dify/probe',
         // When editing, pass the target id so a blank key reuses the stored one.
         { base_url: v.base_url, api_key: v.api_key || '', target_id: editing ? editingId : undefined },
@@ -212,7 +224,10 @@ export default function BatchAdminPage() {
       setProbed({ name: r.name, inputsError: r.inputs_error })
       // Only when Dify actually answered. An empty list from a failed /parameters is "we could not
       // ask", not "this workflow has no inputs", and writing it over a hand-built list loses work.
-      if (!r.inputs_error) setInputs(r.inputs || [])
+      if (!r.inputs_error) {
+        setInputs(r.inputs || [])
+        setReservedInputs(r.reserved_inputs || [])
+      }
       setMode(r.mode || '')
       if (!form.getFieldValue('name') && r.name) form.setFieldValue('name', r.name)
       if (r.inputs_error) message.warning(t('batch.dify.inputsManual'))
@@ -244,7 +259,13 @@ export default function BatchAdminPage() {
   const applyRefresh = async (picked: DifyRefreshResult[]) => {
     try {
       await api.post('/api/admin/batch/dify/refresh/apply', {
-        items: picked.map((r) => ({ id: r.id, mode: r.remote_mode || '', inputs: r.inputs || [] })),
+        items: picked.map((r) => ({
+          id: r.id,
+          mode: r.remote_mode || '',
+          inputs: r.inputs || [],
+          // Present even when empty: a workflow that no longer declares the key must stop receiving it.
+          reserved_inputs: r.reserved_inputs ?? [],
+        })),
       })
       message.success(t('batch.refresh.applied', { n: picked.length }))
       setRefreshOpen(false)
@@ -288,6 +309,7 @@ export default function BatchAdminPage() {
         output_subtype: v.output_subtype || '',
         symbol_input: v.symbol_input || '',
         collapse_optional_inputs: !!v.collapse_optional_inputs,
+        reserved_inputs: reservedInputs,
       }
       if (editing) {
         await api.put(`/api/admin/batch/dify/targets/${editingId}`, body)

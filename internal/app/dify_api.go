@@ -68,8 +68,13 @@ func (s *Server) apiBatchDifyProbe(w http.ResponseWriter, r *http.Request, user 
 	if difyModeChat(info.Mode) {
 		inputs = ensureQueryInput(inputs)
 	}
+	// Record the reserved names BEFORE they are removed: the stored fact is what a later release
+	// reads to decide where to inject (P39b). They are never part of the user-facing list.
+	reserved := reservedInputNames(inputs)
+	inputs = dropReservedInputs(inputs)
 	inputs = preserveInputPresentation(localInputs, inputs)
-	out := map[string]any{"name": info.Name, "mode": info.Mode, "inputs": inputs}
+	out := map[string]any{"name": info.Name, "mode": info.Mode, "inputs": inputs,
+		"reserved_inputs": reserved}
 	if perr != nil {
 		out["inputs_error"] = perr.Error()
 	}
@@ -85,6 +90,7 @@ func (s *Server) apiBatchDifyTargetAdd(w http.ResponseWriter, r *http.Request, u
 		Mode                   string       `json:"mode"`
 		Inputs                 []dify.Input `json:"inputs"`
 		CollapseOptionalInputs bool         `json:"collapse_optional_inputs"`
+		ReservedInputs         []string     `json:"reserved_inputs"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -95,8 +101,9 @@ func (s *Server) apiBatchDifyTargetAdd(w http.ResponseWriter, r *http.Request, u
 		jsonError(w, http.StatusBadRequest, "name, base_url and api_key are required")
 		return
 	}
-	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: base, APIKey: key, Mode: in.Mode, Inputs: in.Inputs,
-		CollapseOptionalInputs: in.CollapseOptionalInputs})
+	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: base, APIKey: key, Mode: in.Mode,
+		Inputs: dropReservedInputs(in.Inputs), CollapseOptionalInputs: in.CollapseOptionalInputs,
+		ReservedInputs: cleanReservedInputNames(in.ReservedInputs)})
 	id, err := s.st.CreateTarget(difyPluginSlug, name, string(cfg))
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -121,15 +128,21 @@ func (s *Server) apiBatchDifyTargetGet(w http.ResponseWriter, r *http.Request, u
 	}
 	var cfg difyTargetConfig
 	json.Unmarshal([]byte(tgt.Config), &cfg)
-	inputs := cfg.Inputs
+	// Filtered on read: a config stored before P39a, or a hand-edited one, must not show a reserved
+	// input in the editor either.
+	inputs := dropReservedInputs(cfg.Inputs)
 	if inputs == nil {
 		inputs = []dify.Input{}
+	}
+	reserved := difyTargetReserved(tgt.Config)
+	if reserved == nil {
+		reserved = []string{}
 	}
 	writeJSON(w, map[string]any{
 		"id": tgt.ID, "name": tgt.Name, "base_url": cfg.BaseURL, "mode": cfg.Mode,
 		"inputs": inputs, "has_key": cfg.APIKey != "",
 		"output_subtype": cfg.OutputSubtype, "symbol_input": cfg.SymbolInput,
-		"collapse_optional_inputs": cfg.CollapseOptionalInputs,
+		"collapse_optional_inputs": cfg.CollapseOptionalInputs, "reserved_inputs": reserved,
 	})
 }
 
@@ -151,8 +164,9 @@ func (s *Server) apiBatchDifyTargetUpdate(w http.ResponseWriter, r *http.Request
 		CollapseOptionalInputs *bool        `json:"collapse_optional_inputs"`
 		// Pointers so an omitted field keeps the stored value (an ordinary rename must never wipe
 		// them and silently disable same-day reuse), while an explicit "" clears it.
-		OutputSubtype *string `json:"output_subtype"`
-		SymbolInput   *string `json:"symbol_input"`
+		OutputSubtype  *string   `json:"output_subtype"`
+		SymbolInput    *string   `json:"symbol_input"`
+		ReservedInputs *[]string `json:"reserved_inputs"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -167,6 +181,10 @@ func (s *Server) apiBatchDifyTargetUpdate(w http.ResponseWriter, r *http.Request
 	json.Unmarshal([]byte(tgt.Config), &cur)
 	subtype, symbolInput := cur.OutputSubtype, cur.SymbolInput
 	collapseOptionalInputs := cur.CollapseOptionalInputs
+	reservedInputs := cur.ReservedInputs
+	if in.ReservedInputs != nil {
+		reservedInputs = *in.ReservedInputs
+	}
 	if in.OutputSubtype != nil {
 		subtype = strings.TrimSpace(*in.OutputSubtype)
 	}
@@ -187,8 +205,10 @@ func (s *Server) apiBatchDifyTargetUpdate(w http.ResponseWriter, r *http.Request
 	if mode == "" {
 		mode = cur.Mode // blank → keep the stored mode
 	}
-	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: base, APIKey: key, Mode: mode, Inputs: in.Inputs,
-		OutputSubtype: subtype, SymbolInput: symbolInput, CollapseOptionalInputs: collapseOptionalInputs})
+	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: base, APIKey: key, Mode: mode,
+		Inputs:        dropReservedInputs(in.Inputs),
+		OutputSubtype: subtype, SymbolInput: symbolInput, CollapseOptionalInputs: collapseOptionalInputs,
+		ReservedInputs: cleanReservedInputNames(reservedInputs)})
 	if err := s.st.UpdateTarget(tgt.ID, name, string(cfg)); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
