@@ -217,7 +217,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 ## Current progress (2026-10-20)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127 and P41 in this PR.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129. `main` is at `077b7406`.
 - **In flight.** No branch is open. Nothing is unmerged.
 - **Next step.** P10 `fix/forecast-reading-hotfix` (§6.3, C1–C5/C7/C8): stop the reading page saying
   false things before any mark resolves.
