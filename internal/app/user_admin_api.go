@@ -421,10 +421,13 @@ func (s *Server) apiGroupDelete(w http.ResponseWriter, r *http.Request, user str
 	// Read before the delete: afterwards there is no name to record, and an id alone means
 	// nothing to whoever reads the row later.
 	name := ""
+	movedChildren := []int64{}
 	for _, g := range s.st.ListUserGroups() {
 		if g.ID == id {
 			name = g.Name
-			break
+		}
+		if g.ParentID == id {
+			movedChildren = append(movedChildren, g.ID)
 		}
 	}
 	// Also read before the delete: DeleteUserGroup sweeps the grants this is derived from.
@@ -435,10 +438,18 @@ func (s *Server) apiGroupDelete(w http.ResponseWriter, r *http.Request, user str
 			"有公告只发给这个分组，删除后将无人可见，请先选择如何处理")
 		return
 	}
-	if err := s.st.DeleteUserGroup(id); err != nil {
+	reattributed, targetOU, err := s.st.DeleteUserGroup(id)
+	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if reattributed == 0 {
+		// The plan's contract: both audit keys are present and both are 0 when nothing moved.
+		targetOU = 0
+	}
+	// A root OU's sets join the Default OU's population without changing the Default's subtree ids,
+	// so the population key does not move and the cache has to be dropped explicitly.
+	s.purgeForecastGroups()
 	disabled := 0
 	if choice == "disable" {
 		for _, aid := range impact.orphaned {
@@ -451,6 +462,10 @@ func (s *Server) apiGroupDelete(w http.ResponseWriter, r *http.Request, user str
 	s.recordChange(r, user, AuditGroupDelete, "group", itoa64(id), map[string]any{
 		"name": name, "announcements_affected": len(impact.affected),
 		"announcements_orphaned": len(impact.orphaned), "announcements_disabled": disabled,
+		// P38: the sets keep their frozen attribution except for this sanctioned re-attribution, and
+		// the children now inherit along the deleted OU's line.
+		"forecast_sets_reattributed": reattributed, "forecast_sets_to_ou": targetOU,
+		"children_moved": movedChildren,
 	})
 	writeJSON(w, okJSON)
 }

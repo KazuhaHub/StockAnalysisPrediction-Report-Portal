@@ -329,3 +329,91 @@ func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
 		t.Errorf("selection does not use idx_pred_marks_due:\n%s", plan)
 	}
 }
+
+// TestPostgresAccessSchemaAndReattribution is the Postgres twin of step 0006 and the OU delete's
+// re-attribution: the step's DDL, the index, and the one UPDATE that moves a deleted OU's sets.
+func TestPostgresAccessSchemaAndReattribution(t *testing.T) {
+	st := pgStore(t, "prediction_sets", "user_groups")
+	if err := st.EnsureDefaultForecastScope(); err != nil {
+		t.Fatal(err)
+	}
+	def := st.EnsureDefaultGroup()
+	for _, c := range []colRef{{"user_groups", "forecast_scope"}, {"prediction_sets", "attributed_ou"}} {
+		if !st.columnExists(c.table, c.name) {
+			t.Errorf("%s.%s missing on Postgres", c.table, c.name)
+		}
+	}
+	if !st.indexExists("idx_pred_sets_ou") {
+		t.Error("idx_pred_sets_ou missing on Postgres")
+	}
+
+	parent := seedOU(t, st, 0, scopeAll)
+	child := seedOU(t, st, parent, scopeAll)
+	setID := seedPredictionSet(t, st, sql.NullInt64{}, "p38-pg")
+	if _, err := st.exec(`UPDATE prediction_sets SET attributed_ou=? WHERE id=?`, child, setID); err != nil {
+		t.Fatal(err)
+	}
+	moved, target, err := st.DeleteUserGroup(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved != 1 || target != parent {
+		t.Errorf("moved/target = %d/%d, want 1/%d", moved, target, parent)
+	}
+	var got sql.NullInt64
+	if err := st.queryRow(`SELECT attributed_ou FROM prediction_sets WHERE id=?`, setID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Int64 != parent {
+		t.Errorf("attributed_ou = %v, want %d", got, parent)
+	}
+	if _, _, err := st.DeleteUserGroup(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.queryRow(`SELECT attributed_ou FROM prediction_sets WHERE id=?`, setID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Int64 != def {
+		t.Errorf("a root's set = %v, want Default %d", got, def)
+	}
+}
+
+// TestPostgresMigration0006OlderDumpRestores: a dump written before step 0006 loads into a build that
+// has it, both columns come back NULL, and the Default OU then reads none.
+func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
+	st := pgStore(t, "prediction_sets", "user_groups")
+	st.EnsureDefaultGroup() // pgStore emptied user_groups; the dump needs a Default to normalise
+	seedPredictionSet(t, st, sql.NullInt64{}, "p38-pg-older")
+	for _, q := range []string{
+		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
+		`ALTER TABLE prediction_sets DROP COLUMN IF EXISTS attributed_ou`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("winding back 0006: %v", err)
+		}
+	}
+	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
+		t.Fatal(err)
+	}
+	dump := dumpOf(t, st)
+	st.Close()
+
+	fresh, err := OpenStore("postgres", pgDSN(t))
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer fresh.Close()
+	if _, err := fresh.restoreFrom(bytes.NewReader(dump), true); err != nil {
+		t.Fatalf("an older dump must restore: %v", err)
+	}
+	if !fresh.columnExists("prediction_sets", "attributed_ou") || !fresh.columnExists("user_groups", "forecast_scope") {
+		t.Error("the step's columns are missing after the restore")
+	}
+	if got := scalar[string](t, fresh, `SELECT forecast_scope FROM user_groups WHERE is_default=1`); got != scopeNone {
+		t.Errorf("Default scope = %q, want none", got)
+	}
+	if n := scalar[int](t, fresh, `SELECT COUNT(*) FROM prediction_sets WHERE attributed_ou IS NOT NULL`); n != 0 {
+		t.Errorf("%d restored sets have an attribution", n)
+	}
+}

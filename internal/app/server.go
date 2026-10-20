@@ -82,6 +82,10 @@ type Server struct {
 	// rather than just fast. Only monthly mode writes here (plan §7.5).
 	forecastGroupsMu    sync.Mutex
 	forecastGroupsCache map[string]*forecastCell
+	// forecastGroupsGen is bumped by every purge. A cell computed across a purge (a request that
+	// missed the cache before an OU delete and stores after it) is dropped rather than kept for the
+	// life of the process.
+	forecastGroupsGen uint64
 }
 
 // statusRecorder records the response status code for use in request logging.

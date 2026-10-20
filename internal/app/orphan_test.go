@@ -182,7 +182,7 @@ func TestDeletingAnOUTakesItsGrantsAndViewers(t *testing.T) {
 		Title: "T", Version: "对外版", MD: "x"})
 	st.AddReportViewer(id, "2026-07-28", "someone", ou)
 
-	if err := st.DeleteUserGroup(ou); err != nil {
+	if _, _, err := st.DeleteUserGroup(ou); err != nil {
 		t.Fatal(err)
 	}
 	if got := viewerRows(t, st, "principal=?", groupPrincipal(ou)); got != 0 {

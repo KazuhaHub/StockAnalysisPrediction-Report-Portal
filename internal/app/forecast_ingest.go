@@ -94,6 +94,10 @@ type predSetRow struct {
 	DecisionQuality      string
 	InformationCutoff    string
 
+	// AttributedOU is the OU the producing run was attributed to, frozen at insert (P38). Nil means
+	// unattributed: no token, an invalid one, or a set written before step 0006.
+	AttributedOU *int64
+
 	HorizonEnd string
 	HorizonStd int
 

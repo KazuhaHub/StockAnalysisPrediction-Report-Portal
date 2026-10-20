@@ -36,8 +36,21 @@ func windBackToBeforeTheForecastStep(t *testing.T, st *Store) {
 	if _, err := st.exec(`ALTER TABLE cleanup_runs DROP COLUMN IF EXISTS predictions_deleted`); err != nil {
 		t.Fatalf("winding back cleanup_runs: %v", err)
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(predictionMigrationID)); err != nil {
-		t.Fatal(err)
+	// Step 0006 (P38) builds on this one, so a database "before the forecast step" cannot carry its
+	// columns or its ledger row either: otherwise the database claims 0006 while the tables it ran
+	// against are gone, and the next open refuses.
+	for _, q := range []string{
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
+	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("winding back step 0006: %v", err)
+		}
+	}
+	for _, key := range []string{predictionMigrationID, "0006"} {
+		if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(key)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

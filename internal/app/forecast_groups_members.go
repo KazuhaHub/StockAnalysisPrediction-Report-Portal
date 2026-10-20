@@ -185,7 +185,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	// An official month's matured cell is frozen in the matrix memo; the drawer must show that same
 	// state, even if a backdated set has since been loaded into the month.
 	if mode == "month" {
-		if c := s.cachedForecastCell(forecastGroupCellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
+		if c, _ := s.cachedForecastCell(forecastGroupCellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
 			state = c.State
 		}
 	}

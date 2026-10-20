@@ -56,7 +56,7 @@ func TestUserGroupsCRUDAndMembership(t *testing.T) {
 	if def == 0 {
 		t.Fatal("Default group was not bootstrapped")
 	}
-	if err := st.DeleteUserGroup(def); err == nil {
+	if _, _, err := st.DeleteUserGroup(def); err == nil {
 		t.Fatal("the Default group must not be deletable")
 	}
 
@@ -126,7 +126,7 @@ func TestUserGroupsCRUDAndMembership(t *testing.T) {
 	}
 
 	// Deleting a group drops its primary pointers (members fall back to Default).
-	st.DeleteUserGroup(gid2)
+	_, _, _ = st.DeleteUserGroup(gid2)
 	if got := st.PrimaryGroupOf("bob"); got != 0 {
 		t.Fatalf("bob still points at a deleted group: %d", got)
 	}
@@ -203,7 +203,7 @@ func TestGroupModelResolution(t *testing.T) {
 	// Deleting a group also clears its primary members; a stray duplicate default (if one
 	// ever existed) is likewise protected — the guard checks the row's own is_default flag.
 	st.SetPrimaryGroup("u", g)
-	if err := st.DeleteUserGroup(g); err != nil {
+	if _, _, err := st.DeleteUserGroup(g); err != nil {
 		t.Fatalf("DeleteUserGroup(VIP): %v", err)
 	}
 	if got := st.PrimaryGroupOf("u"); got != 0 {

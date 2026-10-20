@@ -290,6 +290,9 @@ func (s *Store) init() error {
 		return err
 	}
 	s.EnsureDefaultGroup() // group model B: guarantee the fallback group exists
+	if err := s.EnsureDefaultForecastScope(); err != nil {
+		return err
+	}
 	// A ledger start set before P2 shipped has no unrecorded floor; derive and persist it once.
 	if err := s.EnsureForecastUnrecordedFloor(); err != nil {
 		return err
