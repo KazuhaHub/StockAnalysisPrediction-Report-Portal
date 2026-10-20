@@ -141,10 +141,9 @@ func TestHaltResolvesOnEvidenceOrConfirmation(t *testing.T) {
 // traded close BEFORE S0, and the benchmark leg still runs from S0.
 func TestHaltedOnS0UsesLastPreS0Close(t *testing.T) {
 	dates := tradingDays("2026-10-19", 20)
-	stock := barsFor(dates, 1000)
 	// The stock trades before S0 at 900, then is halted from S0 onward.
 	pre := bar(shiftDays(dates[0], -3), 900, 900, 910, 890)
-	stock = []QuoteBar{pre}
+	stock := []QuoteBar{pre}
 	index := append([]QuoteBar{bar(pre.Date, 4000, 4000, 4010, 3990)}, barsFor(dates, 4000)...)
 	if b := barOn(index, dates[5]); b != nil {
 		b.Close = 4400 // the index moved after S0
