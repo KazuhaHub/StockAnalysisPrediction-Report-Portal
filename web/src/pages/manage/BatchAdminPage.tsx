@@ -99,10 +99,11 @@ export default function BatchAdminPage() {
   const [probing, setProbing] = useState(false)
   const [probed, setProbed] = useState<{ name: string; inputsError?: string } | null>(null)
   const [inputs, setInputs] = useState<DifyInput[]>([])
+  // Dify app mode: "" / "workflow" / "chat".
   const [mode, setMode] = useState('')
   // Reserved inputs (_rp_*) are the portal's; the form never shows them, but it must carry the list
   // back on save so a refresh's recording is not wiped by an ordinary edit (P39a).
-  const [reservedInputs, setReservedInputs] = useState<string[]>([]) // Dify app mode: "" / "workflow" / "chat"
+  const [reservedInputs, setReservedInputs] = useState<string[]>([])
   const [newVar, setNewVar] = useState('')
   // Pull-from-Dify preview (see DifyRefreshModal): results are read-only until confirmed.
   const [refreshOpen, setRefreshOpen] = useState(false)

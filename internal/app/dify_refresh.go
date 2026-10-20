@@ -203,7 +203,14 @@ func (s *Server) previewDifyRefresh(ctx context.Context, tgt BatchTarget) difyRe
 	inputs = dropReservedInputs(inputs)
 	inputs = preserveInputPresentation(cfg.Inputs, inputs)
 	res.Inputs = inputs
-	res.difyInputDiff = diffInputs(cfg.Inputs, inputs)
+	// The diff is about the user-facing list. A reserved input stored by an older build is not a
+	// change an admin made, so it must not appear as a removal.
+	res.difyInputDiff = diffInputs(dropReservedInputs(cfg.Inputs), inputs)
+	if !sameStringList(difyTargetReserved(tgt.Config), res.ReservedInputs) {
+		// A workflow that gained or lost only the reserved key has an identical user-facing list; it
+		// is still a change, or the confirm would never write (or clear) the recorded names.
+		res.Changed = true
+	}
 	res.SymbolInputLost = symbolInputLost(cfg.SymbolInput, inputs)
 	if res.RemoteMode != "" && res.RemoteMode != res.LocalMode {
 		res.Changed = true // the app itself changed kind; that is worth applying on its own
@@ -257,7 +264,7 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 		if err := json.Unmarshal([]byte(tgt.Config), &cfg); err != nil {
 			continue
 		}
-		before := cfg.Inputs
+		before := dropReservedInputs(cfg.Inputs)
 		cfg.Inputs = dropReservedInputs(it.Inputs)
 		if it.ReservedInputs != nil {
 			cfg.ReservedInputs = cleanReservedInputNames(*it.ReservedInputs)
@@ -283,4 +290,22 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 		applied++
 	}
 	writeJSON(w, map[string]any{"ok": true, "applied": applied})
+}
+
+// sameStringList compares two small name lists order-insensitively.
+func sameStringList(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ac := cleanReservedInputNames(a)
+	bc := cleanReservedInputNames(b)
+	if len(ac) != len(bc) {
+		return false
+	}
+	for i := range ac {
+		if ac[i] != bc[i] {
+			return false
+		}
+	}
+	return true
 }

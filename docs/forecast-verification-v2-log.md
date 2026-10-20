@@ -384,3 +384,10 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   know about this field" and keeps the stored value (an older SPA bundle); a present list, even
   empty, is the workflow's answer now. The shipped UI always sends it, so a dropped declaration
   clears it.
+- **P39a review follow-ups.** A workflow that gains or loses only the reserved key has an identical
+  user-facing list, so the refresh preview now counts the recorded list as a change: without that the
+  confirm never ran, and the names were neither written after the Dify publish nor cleared when a
+  workflow dropped the declaration. The preview's diff and the audit compare the *filtered* list, so
+  a pre-P39a config no longer shows a reserved input as a removal. Recurring-task templates strip
+  reserved rows on save (they were the one row-storing path that bypassed the submit strip). The
+  recorded names are validated and deduped on read as well as on write.

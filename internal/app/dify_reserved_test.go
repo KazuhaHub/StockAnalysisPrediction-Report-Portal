@@ -228,3 +228,77 @@ func p39aJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
+
+// TestReservedOnlyRefreshIsApplicable: a workflow that gains or loses only the reserved key has an
+// identical user-facing list, and the preview must still say it changed — otherwise the confirm never
+// runs and the recorded names are neither written nor cleared.
+func TestReservedOnlyRefreshIsApplicable(t *testing.T) {
+	s := batchServer(t)
+	params := `{"user_input_form":[{"text-input":{"variable":"symbol","required":true}}]}`
+	srv := reservedDifyStub(t, &params)
+	cfg, _ := json.Marshal(difyTargetConfig{BaseURL: srv.URL, APIKey: "k", Mode: "workflow",
+		Inputs: []dify.Input{{Variable: "symbol", Required: true}}})
+	id, err := s.st.CreateTarget(difyPluginSlug, "T", string(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := func() difyRefreshResult {
+		rec := httptest.NewRecorder()
+		s.apiBatchDifyRefresh(rec, httptest.NewRequest("POST", "/x", strings.NewReader(fmt.Sprintf(`{"ids":[%d]}`, id))), "admin")
+		var out struct {
+			Results []difyRefreshResult `json:"results"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		if len(out.Results) != 1 {
+			t.Fatalf("preview results = %+v", out.Results)
+		}
+		return out.Results[0]
+	}
+
+	if got := preview(); got.Changed {
+		t.Errorf("an unchanged workflow reports changed: %+v", got)
+	}
+	params = paramsWithReserved
+	got := preview()
+	if !got.Changed {
+		t.Fatal("a workflow that started declaring a reserved input is not applicable")
+	}
+	if len(got.Removed) != 0 || len(got.Added) != 0 {
+		t.Errorf("a reserved-only change leaked into the user-facing diff: +%v -%v", got.Added, got.Removed)
+	}
+	// A stored reserved input from before P39a is not a removal the admin made.
+	if _, err := s.st.exec(`UPDATE batch_targets SET config=? WHERE id=?`,
+		`{"base_url":"`+srv.URL+`","api_key":"k","inputs":[{"variable":"symbol"},{"variable":"_rp_owner_token"}]}`, id); err != nil {
+		t.Fatal(err)
+	}
+	if got := preview(); len(got.Removed) != 0 {
+		t.Errorf("a stored reserved input was reported as removed: %v", got.Removed)
+	}
+}
+
+func TestRecurringTemplateStripsReservedInputs(t *testing.T) {
+	s := batchServer(t)
+	seedDifyTarget(t, s, "t")
+	var targetID int64
+	if err := s.st.queryRow(`SELECT id FROM batch_targets ORDER BY id DESC LIMIT 1`).Scan(&targetID); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	body := fmt.Sprintf(`{"name":"nightly","target_id":%d,"rows":[{"code":"a","_rp_owner_token":"forged"}],
+		"freq":"daily","at_time":"09:00","enabled":true}`, targetID)
+	s.apiRecurringCreate(rec, httptest.NewRequest("POST", "/x", strings.NewReader(body)), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var id int64
+	if err := s.st.queryRow(`SELECT id FROM recurring_tasks ORDER BY id DESC LIMIT 1`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	task, ok := s.st.GetRecurringTask(id)
+	if !ok {
+		t.Fatal("task missing")
+	}
+	if strings.Contains(task.Rows, "_rp_") {
+		t.Errorf("a recurring template stored a reserved input: %s", task.Rows)
+	}
+}

@@ -80,6 +80,15 @@ func (s *Server) validateRecurring(in recurringIn, admin bool) (RecurringTask, s
 	if maxRetries < 0 {
 		maxRetries = 0
 	}
+	// A recurring template stores what a fired job will submit; a reserved key must not be persisted
+	// (P39a), exactly as the one-shot submit does not store one.
+	for _, row := range in.Rows {
+		for k := range row {
+			if isReservedInput(k) {
+				delete(row, k)
+			}
+		}
+	}
 	rowsJSON, _ := json.Marshal(in.Rows)
 	return RecurringTask{
 		Name: name, TargetID: in.TargetID, Rows: string(rowsJSON),

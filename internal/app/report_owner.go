@@ -105,9 +105,11 @@ func dropReservedInputs(in []dify.Input) []dify.Input {
 // cleanReservedInputNames keeps only genuine `_rp_*` names, sorted: a client cannot record an
 // ordinary input as "reserved" and change what a later release injects.
 func cleanReservedInputNames(in []string) []string {
-	var out []string
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
 	for _, name := range in {
-		if isReservedInput(name) {
+		if isReservedInput(name) && !seen[name] {
+			seen[name] = true
 			out = append(out, name)
 		}
 	}
@@ -118,14 +120,13 @@ func cleanReservedInputNames(in []string) []string {
 // reservedInputNames returns the sorted names of the reserved inputs a workflow declares. The probe
 // and the refresh record them so P39b can inject only where the workflow has the key.
 func reservedInputNames(in []dify.Input) []string {
-	var out []string
+	var names []string
 	for _, i := range in {
 		if isReservedInput(i.Variable) {
-			out = append(out, i.Variable)
+			names = append(names, i.Variable)
 		}
 	}
-	sort.Strings(out)
-	return out
+	return cleanReservedInputNames(names)
 }
 
 // ownerScope restricts which reports a scoped (external) viewer may READ (ADR 0024, superseding the

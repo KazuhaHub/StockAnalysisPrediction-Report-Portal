@@ -466,7 +466,9 @@ func difyTargetReserved(configJSON string) []string {
 	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
 		return nil
 	}
-	return cfg.ReservedInputs
+	// Read-side validation: a hand-edited or stale config cannot hand a non-`_rp_*` or duplicated
+	// name to the editor or to a later release.
+	return cleanReservedInputNames(cfg.ReservedInputs)
 }
 
 // difyTargetMode returns a Dify target's app mode ("" / "workflow" / "chat").
