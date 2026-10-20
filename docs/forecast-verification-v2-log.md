@@ -317,3 +317,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Deviation.** The production 20-mark tuple is represented by a synthetic set pinned to the same
   receipt (2026-10-18 21:00 CST, S0 2026-10-19, d5 2026-10-26); the repository has no fixture of
   those rows. W1 and W3 use a real `MemoryRouter`, not the router mock the older page tests use.
+- **P10 review follow-ups.** A marker older than the chart's first bar is dropped again rather than
+  pinned to the left edge (the snap only applies inside the series). The predictions state is one
+  value keyed by the report id, so the render that already shows report B's header can never paint
+  report A's marks — the effect alone left one frame of the old panel. The C5 test now covers the
+  list route as well as the per-report route, and the phase test uses a stored S0 that differs from
+  the projection (2026-10-20), a recorded session before its due date, and an assertion through the
+  handler, so neither the stored-S0 rule nor the wiring can regress silently. The W1 test also
+  covers a late answer for the report that was left. Note: `viewerScope` still fails open if the
+  account/OU read fails; that is P31's, and C5 inherits it.

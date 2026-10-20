@@ -60,7 +60,8 @@ const setFor = (reportId: number, terminal: number) => ({
 
 let predCalls: string[]
 let rejectPred: boolean
-let pendingB: Promise<unknown>
+let aDeferred: { resolve: (v: unknown) => void } | null
+let pendingB: boolean
 
 vi.mock('../api/client', () => ({
   api: {
@@ -69,8 +70,16 @@ vi.mock('../api/client', () => ({
       if (url.startsWith('/api/predictions?')) return Promise.resolve({ ok: true, sets: [] })
       if (url.includes('/predictions')) {
         predCalls.push(url)
-        if (url.includes('/api/report/2/')) return pendingB
+        if (url.includes('/api/report/2/')) {
+          if (pendingB) return new Promise(() => {}) // the in-flight case
+          return Promise.resolve({ ok: true, sets: [setFor(2, 222200)], counted_set_id: 2 })
+        }
         if (rejectPred) return Promise.reject(new Error('boom'))
+        if (aDeferred) {
+          return new Promise((resolve) => {
+            aDeferred!.resolve = resolve
+          })
+        }
         return Promise.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1 })
       }
       if (url.includes('date=2026-07-08')) return Promise.resolve(report(2, '2026-07-08'))
@@ -99,7 +108,8 @@ function show() {
 beforeEach(() => {
   predCalls = []
   rejectPred = false
-  pendingB = new Promise(() => {}) // never resolves: the in-flight case
+  aDeferred = null
+  pendingB = true
   try {
     window.localStorage.clear()
   } catch {
@@ -112,9 +122,24 @@ describe('StockPage predictions', () => {
     show()
     expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
     await userEvent.click(screen.getByText('next-report'))
-    // The new report's request is still in flight; A's panel must already be gone.
+    // The new report's predictions request is still in flight; A's panel must already be gone. The
+    // chart overlay reads the same derived state, so it is cleared by the same expression.
     await waitFor(() => expect(screen.queryByText(/1,111\.00/)).toBeNull())
     expect(predCalls.some((u) => u.includes('/api/report/2/'))).toBe(true)
+  })
+
+  it('ignores a late answer for the report that was left', async () => {
+    pendingB = false
+    aDeferred = { resolve: () => {} }
+    show()
+    await waitFor(() => expect(predCalls.some((u) => u.includes('/api/report/1/'))).toBe(true))
+    await userEvent.click(screen.getByText('next-report'))
+    expect(await screen.findByText(/2,222\.00/)).toBeTruthy()
+    // The abandoned request now answers. It must not replace the current report's marks.
+    aDeferred.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1 })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByText(/2,222\.00/)).toBeTruthy()
+    expect(screen.queryByText(/1,111\.00/)).toBeNull()
   })
 
   it('renders the body and an inline retry when the predictions request fails', async () => {

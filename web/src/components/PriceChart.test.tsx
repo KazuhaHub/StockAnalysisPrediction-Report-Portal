@@ -1015,12 +1015,15 @@ describe('forecast overlay', () => {
         markers={[
           // A Sunday: the checkpoint fell on a non-session, and dropping it lost the mark entirely.
           { date: '2026-08-30', label: 'd5' },
+          // Before the first bar: dropped, not pinned to the left edge.
+          { date: '2026-08-01', label: 'old-report' },
           { date: '2027-01-01', label: 'future' },
         ]}
       />,
     )
     expect(screen.getAllByTestId('price-marker')).toHaveLength(1)
     expect(screen.getByText('d5')).toBeTruthy()
+    expect(screen.queryByText('old-report')).toBeNull()
   })
 
   it('renders no overlay and no stray zero for empty arrays', () => {

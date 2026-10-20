@@ -64,8 +64,8 @@ type PredictionSet struct {
 	Errors []predError       `json:"errors,omitempty"`
 	Claims []PredictionClaim `json:"claims"`
 	Marks  []PredictionMark  `json:"marks"`
-	// Payload is the verbatim predictions JSON. Only returned on the per-report route with
-	// include=payload: it is 2 KiB of contract on every row of a list otherwise.
+	// Payload is the verbatim predictions JSON. Returned with include=payload only when the caller
+	// is unrestricted: it is a diagnostic, not a reader's field (P10).
 	Payload string `json:"payload,omitempty"`
 	// CountedInGroup is the cohort whose member this set is, or "" when it is not one. Filled by the
 	// group statistics, not by this query — the field exists here so one shape serves both callers.

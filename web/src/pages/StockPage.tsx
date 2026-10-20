@@ -95,9 +95,14 @@ export default function StockPage() {
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
-  const [predSets, setPredSets] = useState<PredictionSet[]>([])
-  const [predCounted, setPredCounted] = useState<number | undefined>(undefined)
-  const [predErr, setPredErr] = useState('')
+  // The sets, the counted pointer and the error are ONE value keyed by the report they describe.
+  // That key is what makes a stale response harmless and, more importantly, what stops the render
+  // that already shows report B's header from painting report A's marks: the derived values below
+  // are empty until the state's key matches the report on screen.
+  const [pred, setPred] = useState<{ forId?: number; sets: PredictionSet[]; counted?: number; err: string }>({
+    sets: [],
+    err: '',
+  })
   const [predNonce, setPredNonce] = useState(0)
   const predForRef = useRef<number | undefined>(undefined)
   const [otherSets, setOtherSets] = useState<PredictionSet[]>([])
@@ -192,12 +197,8 @@ export default function StockPage() {
   // rather than on every list: the payload is 2 KiB of contract and only this panel shows it.
   const repId = data?.rep?.id
   useEffect(() => {
-    // A new report must not show the previous report's marks while the new request is in flight:
-    // the panel and the chart overlay were both reading the old set until it answered.
     predForRef.current = repId
-    setPredSets([])
-    setPredCounted(undefined)
-    setPredErr('')
+    setPred({ forId: repId, sets: [], err: '' })
     if (!repId) return
     let cancelled = false
     const forId = repId
@@ -205,21 +206,25 @@ export default function StockPage() {
       .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
         if (cancelled || predForRef.current !== forId) return
-        setPredSets(r.sets ?? [])
-        setPredCounted(r.counted_set_id)
+        setPred({ forId, sets: r.sets ?? [], counted: r.counted_set_id, err: '' })
       })
       .catch((e) => {
         if (cancelled || predForRef.current !== forId) return
         // A failed request is not "this report made no prediction". The body still renders; the
         // panel area says what happened and offers one retry.
-        setPredSets([])
-        setPredErr(errText(e, t))
+        setPred({ forId, sets: [], err: errText(e, t) })
       })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repId, predNonce])
+
+  // What may be shown NOW. A state that belongs to another report is not shown at all, even for the
+  // one render between the new report arriving and the effect above running.
+  const predSets = pred.forId === repId ? pred.sets : []
+  const predCounted = pred.forId === repId ? pred.counted : undefined
+  const predErr = pred.forId === repId ? pred.err : ''
 
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
