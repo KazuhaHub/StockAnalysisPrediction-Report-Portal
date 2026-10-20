@@ -203,3 +203,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
     byte-identical; the file's diff was reviewed field by field before committing.
   - The members route sends the gate's counts (`resolved`, `total`, `refused`, `corp_action`, `n`) so
     the drawer's headline does not need the scorer. A non-mature cell sends identity and status only.
+- **P16a review follow-ups.** A member with no benchmark excess is `untested`, not `flat` (F08): the
+  cell's hit denominator now excludes it, which is why `golden_cells.json` moved from 34 to 33 in
+  every resolved column. The members route reads the official month's cached cell state so a
+  backdated set cannot make the drawer disagree with the matrix, and `TestMembersRouteScoresNothing`
+  clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
+  The two snapshot files are regenerated in their own commit with the byte-level explanation above.

@@ -345,14 +345,14 @@ func scoreForecastCell(cell *forecastCell, sets []*groupSet, cp string, seedPart
 		if gs.S0Fen != nil && *gs.S0Fen > 0 && gs.TerminalFen != nil {
 			upside[i] = float64(*gs.TerminalFen)/float64(*gs.S0Fen) - 1
 			// The hit subset and both signs come from the ONE predicate the drawer also uses, so a
-			// row's verdict and the cell's hit rate cannot disagree at the 5% boundary.
-			var exBp int32
+			// row's verdict and the cell's hit rate cannot disagree at the 5% boundary. A member with
+			// no benchmark excess is NOT tested: there is nothing to agree or disagree with.
 			if m.RetBp != nil && m.BenchRetBp != nil {
-				exBp = *m.RetBp - *m.BenchRetBp
+				exBp := *m.RetBp - *m.BenchRetBp
+				big[i] = predHitClass(*gs.TerminalFen, *gs.S0Fen, exBp) != dirUntested
+				signUp[i] = signOfInt64(*gs.TerminalFen - *gs.S0Fen)
+				signEx[i] = signOfInt32(exBp)
 			}
-			big[i] = predHitClass(*gs.TerminalFen, *gs.S0Fen, exBp) != dirUntested
-			signUp[i] = signOfInt64(*gs.TerminalFen - *gs.S0Fen)
-			signEx[i] = signOfInt32(exBp)
 			icUp = append(icUp, upside[i])
 			icEx = append(icEx, excess[i])
 		}
@@ -529,14 +529,7 @@ func subscores(sets []*groupSet, cp string, seedParts []string) *forecastCell {
 
 // hitStats returns the hit rate, its base-rate null and the subset size. When perm is non-nil each
 // member's upside is read from another member while its own excess stays fixed.
-// forecastPerHook is a test seam counting permutation passes. It is nil in production, and the
-// members route must never make it non-zero: the gate, not the scorer, decides a cell's state.
-var forecastPerHook func()
-
 func hitStats(big []bool, signUp, signEx []int8, perm []int) (hit, null float64, n int, ok bool) {
-	if forecastPerHook != nil {
-		forecastPerHook()
-	}
 	agree, pos, neg := 0, 0, 0
 	for i := range big {
 		j := i

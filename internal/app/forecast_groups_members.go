@@ -181,7 +181,14 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	}
 	// The STATE comes from the gate, never the scorer: opening a drawer must not cost 10 000
 	// permutations to learn what the matrix already showed.
-	state, n, refused, corp, resolved, total := forecastCellGate(members, pending, cp, period.End, today)
+	state, _, _, _, _, _ := forecastCellGate(members, pending, cp, period.End, today)
+	// An official month's matured cell is frozen in the matrix memo; the drawer must show that same
+	// state, even if a backdated set has since been loaded into the month.
+	if mode == "month" {
+		if c := s.cachedForecastCell(forecastGroupCellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
+			state = c.State
+		}
+	}
 	mature := state == "mature"
 
 	out := forecastMembersResponse{
@@ -192,11 +199,6 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		Bench:      bench,
 		Checkpoint: cp,
 		State:      state,
-		Resolved:   resolved,
-		Total:      total,
-		Refused:    refused,
-		CorpAction: corp,
-		N:          n,
 		Members:    []forecastMember{},
 	}
 	var ids []int64
@@ -229,11 +231,13 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			if gs.S0Fen != nil && *gs.S0Fen > 0 && gs.TerminalFen != nil {
 				u := float64(*gs.TerminalFen)/float64(*gs.S0Fen) - 1
 				fm.Upside = &u
-				var ex int32
+				// No benchmark excess means the verdict is unknowable, not `flat`: flat is a tested
+				// row that ended level with its index.
 				if fm.ExcessBp != nil {
-					ex = *fm.ExcessBp
+					fm.Direction = predHitClass(*gs.TerminalFen, *gs.S0Fen, *fm.ExcessBp)
+				} else {
+					fm.Direction = dirUntested
 				}
-				fm.Direction = predHitClass(*gs.TerminalFen, *gs.S0Fen, ex)
 			}
 		}
 		if gs.ReportID != nil {

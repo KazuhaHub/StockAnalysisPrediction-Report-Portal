@@ -38,11 +38,6 @@ function show(direction?: string) {
     end: '2026-09-30',
     checkpoint: 'd5',
     state: 'mature',
-    resolved: 4,
-    total: 4,
-    refused: 0,
-    corp_action: 0,
-    n: 4,
     members: [member(1, direction)],
   }
   return render(
@@ -73,9 +68,11 @@ describe('ForecastCellDrawer direction', () => {
     await waitFor(() => expect(screen.getByText(key)).toBeTruthy())
   })
 
-  it('renders a dash when the non-mature payload carries no direction', async () => {
+  it('renders no verdict when the payload carries no direction', async () => {
     show(undefined)
     await waitFor(() => expect(screen.getByText('600001')).toBeTruthy())
-    expect(screen.queryByText('forecast.direction.agree')).toBeNull()
+    for (const key of ['agree', 'disagree', 'flat', 'untested']) {
+      expect(screen.queryByText(`forecast.direction.${key}`)).toBeNull()
+    }
   })
 })

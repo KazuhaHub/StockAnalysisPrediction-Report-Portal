@@ -1492,10 +1492,5 @@ export interface ForecastMembersResponse {
   end: string
   checkpoint: ForecastCheckpoint
   state: string
-  resolved: number
-  total: number
-  refused: number
-  corp_action: number
-  n: number
   members: ForecastMember[]
 }

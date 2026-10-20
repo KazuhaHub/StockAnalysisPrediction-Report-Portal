@@ -117,9 +117,16 @@ func predSeed(parts ...string) int64 {
 //
 // Shuffling the index vector rather than the values is what keeps the realised excess returns fixed
 // in place while the predictions move across members (design §8.3).
+// forecastPerHook is a test seam counting permutation passes. It is nil in production, and the
+// members route must never make it non-zero: the gate, not the scorer, decides a cell's state.
+var forecastPerHook func()
+
 func permP(seed int64, observed float64, n int, stat func(perm []int) float64) float64 {
 	if n < 2 || math.IsNaN(observed) {
 		return math.NaN()
+	}
+	if forecastPerHook != nil {
+		forecastPerHook()
 	}
 	r := newPredRand(seed)
 	perm := make([]int, n)
