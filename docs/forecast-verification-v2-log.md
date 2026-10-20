@@ -217,10 +217,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 ## Current progress (2026-10-20)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129. `main` is at `077b7406`.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
+  `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P10 `fix/forecast-reading-hotfix` (§6.3, C1–C5/C7/C8) is in this PR. After it:
-  P38 `feat/forecast-access-schema` (§6.4), the one schema change in R1b.
+- **Next step.** P38 `feat/forecast-access-schema` (§6.4): step `0006`, the OU index, and freezing
+  each set's attribution at ingest. This is the one schema change in R1b and it must follow the
+  owner-approved §3.2 shape exactly; any deviation needs the owner before writing DDL.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
