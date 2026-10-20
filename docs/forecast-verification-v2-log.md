@@ -197,15 +197,33 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
     untested and 5.00% is tested, exactly as the plan's `|d|*10000 < predHitUpsideBp*s0Fen`.
   - A zero excess is `flat` and is counted in the hit-rate denominator (agree+disagree+flat), because
     the plan defines the hit rate over the tested subset; a flat row is a tested row that did not
-    agree. The cell's hit rate is therefore agree/(tested) and reconciles with the drawer.
-  - `golden_members.json` is regenerated in this PR: the only change is `agree` (bool) →
-    `direction` (four states). The cell states, n, and every member's identity and outcome fields are
-    byte-identical; the file's diff was reviewed field by field before committing.
-  - The members route sends the gate's counts (`resolved`, `total`, `refused`, `corp_action`, `n`) so
-    the drawer's headline does not need the scorer. A non-mature cell sends identity and status only.
+    agree. A member with NO benchmark excess is `untested` and is not in the denominator at all:
+    there is nothing to agree or disagree with (F08).
+  - `golden_members.json` is regenerated in its own commit: `agree` (bool) → `direction` (four
+    states). Cell states, n, and every member's identity and outcome fields are unchanged.
+  - `golden_cells.json` is regenerated in the same commit: `hit_n` falls by one in every resolved
+    column because one fixture member has no benchmark excess and is now untested rather than flat.
+    The hit/null/p values move with the denominator; no other metric changes.
+  - The members route returns the gate's `state` and no counts: the drawer's headline already comes
+    from the clicked cell, so repeating the counts was dead surface. A non-mature cell sends
+    identity and status only.
 - **P16a review follow-ups.** A member with no benchmark excess is `untested`, not `flat` (F08): the
   cell's hit denominator now excludes it, which is why `golden_cells.json` moved from 34 to 33 in
   every resolved column. The members route reads the official month's cached cell state so a
   backdated set cannot make the drawer disagree with the matrix, and `TestMembersRouteScoresNothing`
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
+
+## Current progress (2026-10-20)
+
+- **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
+  P6 #121, P7 #122, P8 #123, P16a #124. `main` is at `183061a3`.
+- **In flight.** No branch is open. Nothing is unmerged.
+- **Next step.** R1a-β2 is done; the next release is R1b, beginning with P9
+  `feat/forecast-evaluator-operations` (§6.1): dry mode, heartbeat, watchdog, health route,
+  evaluate-now, and the §1.4 readiness list. Start it on a fresh branch from `origin/main`.
+- **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
+  fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
+  synthetic coverage that replaces them.
+- **Evaluator state.** `forecast_auto` must remain OFF until R1b ships and the readiness list is
+  green.
