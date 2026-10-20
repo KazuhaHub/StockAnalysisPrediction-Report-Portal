@@ -214,8 +214,27 @@ func (s *Server) viewerScope(user string) *ownerScope {
 	}
 	sc := &ownerScope{self: userPrincipal(user)}
 	sc.principals = append(sc.principals, sc.self)
-	for _, g := range s.st.groupChain(user) {
-		sc.principals = append(sc.principals, groupPrincipal(g))
+	// Group principals are the Default (the "all" audience is stored as its principal) and, on the
+	// user's chain, only the effectively restricted OUs (D4, P30). An unrestricted OU — a container,
+	// or the Default beyond its "all" meaning — is what a reader would otherwise share through, and a
+	// g-row already written for one of them simply never matches again. An index or chain failure
+	// yields no group principals: less sharing, never more (P31 tightens this to a scope of nothing).
+	if ix, err := s.st.loadOUIndex(); err == nil {
+		if ix.defaultID != 0 {
+			sc.principals = append(sc.principals, groupPrincipal(ix.defaultID))
+		}
+		if gid := s.st.PrimaryGroupOf(user); gid != 0 {
+			if chain, cerr := ix.chain(gid); cerr == nil {
+				for _, g := range chain {
+					if g == ix.defaultID {
+						continue
+					}
+					if restricted, rerr := ix.restrictedEffective(g); rerr == nil && restricted {
+						sc.principals = append(sc.principals, groupPrincipal(g))
+					}
+				}
+			}
+		}
 	}
 	for _, name := range s.st.GrantedVersions(user) {
 		v, ok := s.st.Version(name)

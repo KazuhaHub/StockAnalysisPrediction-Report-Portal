@@ -39,8 +39,10 @@ func TestDeletingAReportTakesItsViewers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := viewerRows(t, st, "1=1"); got != 4 { // two principals per report
-		t.Fatalf("seeded %d viewer rows, want 4", got)
+	// One principal per report: OU 7 is unrestricted, and P30 writes a g-row only for an
+	// effectively restricted OU. The test is about the cleanup, not the count.
+	if got := viewerRows(t, st, "1=1"); got != 2 {
+		t.Fatalf("seeded %d viewer rows, want 2", got)
 	}
 
 	if _, err := st.DeleteReport(single); err != nil {

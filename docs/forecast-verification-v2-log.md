@@ -220,9 +220,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
   `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P39a `fix/dify-reserved-inputs` (§6.5) is in this PR: `_rp_*` inputs are hidden,
-  stripped from submissions, and their names recorded per target. After it: P11 (ADR 0037) and the
-  tenancy pair P30/P31.
+- **Next step.** P30 `fix/tenancy-restricted-ou-principals` (§6.8) is in this PR. After it: P31
+  (strict restricted-flag read), then P11 (ADR 0037).
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -391,3 +390,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   a pre-P39a config no longer shows a reserved input as a removal. Recurring-task templates strip
   reserved rows on save (they were the one row-storing path that bypassed the submit strip). The
   recorded names are validated and deduped on read as well as on write.
+
+### P30 — OU principals only for restricted OUs
+
+- **Writer.** `AddReportViewer` writes `g:<OU>` only when `ouIndex.restrictedEffective(ou)` is true
+  with no error. An index read failure or a dangling/cyclic chain writes the `u:` row only: less
+  sharing, never more. The rule lives in the writer, so every caller inherits it.
+- **Reader.** `viewerScope` adds `g:` for the chain's effectively restricted OUs only, plus the
+  Default — the "all" audience is stored as the Default principal, and dropping it would have
+  silently broken "everyone". An unrestricted container is therefore not a principal, so a report
+  attributed to it no longer reaches the tenants below it. Existing `g:<unrestricted OU>` rows are
+  left in place and match nothing.
+- **Q5 is an owner-side check.** This branch has no production database; the runbook's
+  `report_viewers` count by principal should be attached before deploy. The reader-side rule makes
+  those rows inert even if they remain.
+- **Tests.** Two account-restricted users in one unrestricted OU do not share; a restricted tenant
+  does not see its unrestricted container's report; two members of the restricted tenant still
+  share; ingest writes a group row only for a restricted OU; a dangling chain and an unreadable
+  index write no group row; and an "all" audience still reaches a scoped reader.
