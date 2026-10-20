@@ -105,7 +105,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -813,7 +813,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -1521,7 +1521,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -2229,7 +2229,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -3607,7 +3607,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -4315,7 +4315,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -5023,7 +5023,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
@@ -5731,7 +5731,7 @@
           "s0_fen": 10000,
           "terminal_fen": 11400,
           "upside": 0.1399999999999999,
-          "direction": "flat"
+          "direction": "untested"
         },
         {
           "set_id": 11,
