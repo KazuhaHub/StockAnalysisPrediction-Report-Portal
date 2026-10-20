@@ -257,6 +257,9 @@ func RunServer(cfgPath string) {
 	// a goroutine that does nothing at all until an admin turns it on — which is the same shape
 	// geo_update.go uses, and the reason the switch can be a setting rather than a build flag.
 	go s.forecastEval.loop(s)
+	// The watchdog is its own goroutine on purpose: the failure it exists to report is the evaluator
+	// having stopped, which it could not do from inside that loop.
+	go s.forecastWatchdog()
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

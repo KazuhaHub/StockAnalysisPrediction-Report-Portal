@@ -136,7 +136,13 @@ const (
 	// The one-shot repair of refusals written by the pre-P1 evaluator (P1). A data repair with no
 	// operator behind it still has to be attributable and counted.
 	AuditForecastRepair = "forecast.repair"
-	AuditReportDelete   = "report.delete"
+	// A manual evaluator pass (P9). It reaches a third party on the operator's behalf, so it is the
+	// same kind of act as flipping the switch.
+	AuditForecastEvalRun = "forecast.eval.run"
+	// Recording a hand-checked dry run for one benchmark (P9). It is what lets mode 1 write for that
+	// code, so the note and the code belong in the log.
+	AuditForecastDryGate = "forecast.dry_gate"
+	AuditReportDelete    = "report.delete"
 	// Writing a report by hand is its own pair of actions, separate from report.ingest: "a person
 	// wrote this" and "a workflow produced this" are the two things a reader of the log most needs
 	// told apart, and one shared action would make that unanswerable.
@@ -418,7 +424,7 @@ var auditVocabulary = []string{
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
-	AuditForecastBench, AuditForecastRepair,
+	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

@@ -13,7 +13,8 @@ import (
 // write-only: it is never returned to the browser (only has_secret).
 
 func availableEvents() []string {
-	return []string{EventReportIngested, EventBatchFinished, EventPredictionsRejected, EventPredictionsStoreFailed}
+	return []string{EventReportIngested, EventBatchFinished, EventPredictionsRejected, EventPredictionsStoreFailed,
+		EventForecastEvaluatorUnhealthy}
 }
 
 func webhookJSON(w Webhook) map[string]any {

@@ -25,6 +25,10 @@ const (
 	// the set does not, and it cannot be re-created after the fact, so this is an incident: the one
 	// event a subscriber should page on.
 	EventPredictionsStoreFailed = "predictions.store_failed"
+	// The evaluator has stopped or fallen behind (P9, plan §6.1). One event per reason per window,
+	// de-duplicated through forecast_alert_state, so a subscriber sees "it stopped" once rather than
+	// once a minute.
+	EventForecastEvaluatorUnhealthy = "forecast.evaluator.unhealthy"
 )
 
 const (

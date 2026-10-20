@@ -464,6 +464,7 @@ func TestRefusalFinalityIsPerV26(t *testing.T) {
 // TestForecastSettingsRoundTrip: a switch with no writer is a constant with a misleading name.
 func TestForecastSettingsRoundTrip(t *testing.T) {
 	s := newV1Server(t)
+	satisfyForecastReadiness(t, s)
 
 	rec := httptest.NewRecorder()
 	s.apiForecastSettings(rec, httptest.NewRequest("GET", "/api/admin/forecast", nil), "admin")

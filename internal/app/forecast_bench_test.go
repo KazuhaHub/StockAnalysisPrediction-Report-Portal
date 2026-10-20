@@ -489,9 +489,11 @@ func TestBenchCancel(t *testing.T) {
 
 func TestEnabledAliasesMode(t *testing.T) {
 	s := newV1Server(t)
-	// The switch is already off: posting off is a no-op, not an audit row.
-	if rec := saveForecastSettings(t, s, `{"enabled":false}`); rec.Code != http.StatusOK {
-		t.Fatalf("enabled:false: %d %s", rec.Code, rec.Body.String())
+	satisfyForecastReadiness(t, s)
+	// The switch is already in dry mode (the readiness seed): posting it again is a no-op, not an
+	// audit row.
+	if rec := saveForecastSettings(t, s, `{"mode":"dry"}`); rec.Code != http.StatusOK {
+		t.Fatalf("mode dry (unchanged): %d %s", rec.Code, rec.Body.String())
 	}
 	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 0 {
 		t.Fatalf("an unchanged switch filed %d rows, want 0", len(rows))
@@ -514,8 +516,11 @@ func TestEnabledAliasesMode(t *testing.T) {
 	if rows := auditRows(t, s, AuditForecastAuto); len(rows) != 1 {
 		t.Errorf("unchanged saves filed %d rows, want 1", len(rows))
 	}
-	if rec := saveForecastSettings(t, s, `{"mode":"dry"}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("mode dry status = %d, want 400 (P4 implements 0/1 only)", rec.Code)
+	if rec := saveForecastSettings(t, s, `{"mode":"dry"}`); rec.Code != http.StatusOK {
+		t.Errorf("mode dry status = %d, want 200: P9 adds the dry mode", rec.Code)
+	}
+	if got := s.st.GetSetting(setForecastAuto, "0"); got != "dry" {
+		t.Errorf("mode dry stored %q, want dry", got)
 	}
 }
 

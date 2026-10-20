@@ -71,6 +71,15 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
+		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
+		// bundle keeps working.
+		"mode":      forecastMode(s.st.GetSetting(setForecastAuto, "0")),
+		"heartbeat": heartbeatOrNil(s.st.ForecastHeartbeat()),
+		"readiness": s.forecastReadiness(time.Now()),
+		"dry_gate":  s.st.ForecastDryGate(),
+		// The codes the readiness item asks about, so the page can offer exactly those in the
+		// dry-run check form rather than every allowed index.
+		"gate_codes": s.st.ForecastGateCodes(),
 		// The benchmark new sets are written with. Existing sets keep theirs, and the UI says so:
 		// changing this does not re-score anything already on the ledger.
 		"bench": s.st.ForecastBench(),
@@ -106,6 +115,10 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		BenchSchedule  *string          `json:"bench_schedule"`
 		BenchCancel    *bool            `json:"bench_cancel"`
 		PopulationFrom *string          `json:"population_from"`
+		DryGate        *struct {
+			Code string `json:"code"`
+			Note string `json:"note"`
+		} `json:"dry_gate"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -140,12 +153,45 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	if in.Mode != nil {
 		m, ok := parseForecastMode(*in.Mode)
 		if !ok {
-			jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "mode must be 0 or 1")
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_mode", "mode must be 0, dry or 1")
 			return
 		}
 		mode, modeSet = m, true
 	} else if in.Enabled != nil {
 		mode, modeSet = boolSetting(*in.Enabled), true
+	}
+
+	// Validate the dry-run check before any write, like every other field: a request that records a
+	// gate and is then refused for its mode must not have stored the gate.
+	var gateCode, gateNote string
+	if in.DryGate != nil {
+		gateCode = strings.TrimSpace(in.DryGate.Code)
+		gateNote = strings.TrimSpace(in.DryGate.Note)
+		if _, ok := benchSpecFor(gateCode); !ok {
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_gate",
+				"dry_gate.code must be an index code the portal is allowed to fetch")
+			return
+		}
+		if gateNote == "" {
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_gate",
+				"dry_gate.note must say what was checked")
+			return
+		}
+	}
+
+	// Switching the evaluator ON is gated by the §1.4 readiness list. The check happens before any
+	// write for the same reason: a request that is refused must leave nothing behind.
+	var readiness []readinessItem
+	if modeSet && mode == forecastModeOn && s.st.GetSetting(setForecastAuto, "0") != forecastModeOn {
+		readiness = s.forecastReadiness(time.Now())
+		if failed := readinessFailure(readiness); len(failed) > 0 {
+			writeJSONStatus(w, http.StatusConflict, map[string]any{
+				"error": "the evaluator is not ready to be switched on",
+				"code":  "forecast_not_ready",
+				"items": failed,
+			})
+			return
+		}
 	}
 	var populationFrom time.Time
 	if in.PopulationFrom != nil {
@@ -218,6 +264,17 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	if in.DryGate != nil {
+		if err := s.st.RecordForecastDryGate(gateCode, forecastGate{
+			At: time.Now().UTC().Format(time.RFC3339), By: user, Note: gateNote,
+		}); err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		s.recordChange(r, user, AuditForecastDryGate, "forecast", gateCode,
+			map[string]any{"code": gateCode, "note": gateNote})
+	}
+
 	// The evaluator switch. Only a real change is audited: a form that posts the values it read must
 	// not fill the log with no-ops, or the one row that turned it on is buried.
 	if modeSet {
@@ -227,8 +284,13 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 				return
 			}
-			s.recordChange(r, user, AuditForecastAuto, "settings", setForecastAuto,
-				map[string]any{"from": old, "to": mode})
+			// Turning it ON also records the readiness list it was allowed by, so the log can answer
+			// "what did the gate look like when this was flipped?" a year later.
+			extra := map[string]any{"from": old, "to": mode}
+			if mode == forecastModeOn {
+				extra["readiness"] = readiness
+			}
+			s.recordChange(r, user, AuditForecastAuto, "settings", setForecastAuto, extra)
 		}
 	}
 
@@ -239,16 +301,17 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, resp)
 }
 
-// parseForecastMode accepts the numeric and string spellings the settings forms use. P4 implements
-// 0 and 1 only; `dry` and readiness belong to P9.
+// parseForecastMode accepts the numeric and string spellings the settings forms use, including the
+// `dry` mode P9 adds. Anything else is refused rather than coerced: a typo that silently turned the
+// evaluator off would look like the loop had died.
 func parseForecastMode(raw json.RawMessage) (string, bool) {
 	var n json.Number
 	if err := json.Unmarshal(raw, &n); err == nil {
 		switch n.String() {
 		case "0":
-			return "0", true
+			return forecastModeOff, true
 		case "1":
-			return "1", true
+			return forecastModeOn, true
 		}
 		return "", false
 	}
@@ -256,12 +319,23 @@ func parseForecastMode(raw json.RawMessage) (string, bool) {
 	if err := json.Unmarshal(raw, &str); err == nil {
 		switch strings.TrimSpace(str) {
 		case "0":
-			return "0", true
+			return forecastModeOff, true
 		case "1":
-			return "1", true
+			return forecastModeOn, true
+		case "dry":
+			return forecastModeDry, true
 		}
 	}
 	return "", false
+}
+
+// heartbeatOrNil sends null rather than a zero-valued heartbeat before the first pass, so the page
+// can say "never run" instead of "ran at 0001-01-01".
+func heartbeatOrNil(hb forecastHeartbeat, ok bool) any {
+	if !ok {
+		return nil
+	}
+	return hb
 }
 
 // populationRefusalStatus maps a store refusal code to its HTTP status: the two "already decided"
@@ -317,4 +391,15 @@ func (s *Store) CountForecastBaselinePending() int64 {
 	s.queryRow(`SELECT COUNT(*) FROM prediction_sets WHERE state = ? AND base_check IN ('pending','refused')`,
 		predStateAccepted).Scan(&n)
 	return n
+}
+
+// apiForecastEvaluate runs one pass now in the current mode. It is the operator's "try it" button:
+// in dry mode it produces a sample and changes nothing; in mode 1 it settles what is due.
+func (s *Server) apiForecastEvaluate(w http.ResponseWriter, r *http.Request, user string) {
+	status, code, body := s.runForecastNow(r, user)
+	if code != "" {
+		jsonErrorCode(w, status, code, code)
+		return
+	}
+	writeJSONStatus(w, status, body)
 }

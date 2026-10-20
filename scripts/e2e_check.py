@@ -509,13 +509,38 @@ check("G", "The schedule reads back with the active value unchanged",
       sched.get("bench") == bench_before and sched.get("bench_next") == "sh000300", f"{sched}")
 check("G", "The schedule is audited", bench_audit() == bench_rows + 1, f"{bench_rows} -> {bench_audit()}")
 
-# A mode-only save touches the switch and nothing else.
-sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": 1})
-check("G", "A mode-only save turns settling on",
-      sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "1", f"{sc}")
+# A mode-only save touches the switch and nothing else. P9 adds `dry`: it plans and writes nothing,
+# and it is the only mode a fresh ledger can reach before the readiness list (which includes P41's
+# alert verification) is satisfied.
+sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": "dry"})
+check("G", "A mode-only save selects dry mode",
+      sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "dry", f"{sc}")
+
+# The manual pass runs in the current mode and records a heartbeat.
+sc, ran = admin.req("POST", "/api/admin/forecast/evaluate", {})
+check("G", "Evaluate now runs a dry pass", sc == 200 and ran.get("mode") == "dry", f"{sc} {ran}")
+sc, hb = admin.req("GET", "/api/admin/forecast")
+check("G", "The dry pass leaves a heartbeat and writes nothing",
+      sc == 200 and (hb.get("heartbeat") or {}).get("pass", {}).get("kind") == "manual"
+      and (hb.get("heartbeat") or {}).get("pass", {}).get("errors") == 0, f"{hb.get('heartbeat')}")
+
+# Mode 1 is refused while the readiness list has a failing item; the refusal names it.
+sc, notready = admin.req("POST", "/api/admin/forecast", {"mode": 1})
+check("G", "Mode 1 is refused until the readiness list holds",
+      sc == 409 and notready.get("code") == "forecast_not_ready"
+      and bool(notready.get("items")), f"{sc} {notready}")
+
 sc, _ = admin.req("POST", "/api/admin/forecast", {"mode": 0})
 check("G", "A mode-only save turns settling off again",
       sc == 200 and sql("SELECT v FROM meta WHERE k='forecast_auto'")[0][0] == "0", f"{sc}")
+sc, off = admin.req("POST", "/api/admin/forecast/evaluate", {})
+check("G", "Evaluate now is refused while the evaluator is off",
+      sc == 409 and off.get("code") == "forecast_eval_off", f"{sc} {off}")
+
+# The public status probe answers one key and never the heartbeat.
+sc, probe = Session().req("GET", "/healthz/forecast")
+check("G", "The evaluator probe is status-only",
+      sc == 200 and probe == {"ok": True}, f"{sc} {probe}")
 
 # Cancelling clears the schedule; rescheduling the active value is then a no-op with no audit row.
 sc, _ = admin.req("POST", "/api/admin/forecast", {"bench_cancel": True})

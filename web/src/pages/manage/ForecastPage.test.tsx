@@ -33,6 +33,27 @@ vi.mock('react-i18next', () => ({
 
 const on = {
   enabled: true,
+  mode: '1' as const,
+  readiness: [
+    { key: 'binary' as const, ok: true },
+    { key: 'population' as const, ok: true },
+    { key: 'dry_pass' as const, ok: true },
+    { key: 'dry_gate' as const, ok: true },
+    { key: 'alerts' as const, ok: true },
+  ],
+  dry_gate: {},
+  gate_codes: ['sh000852'],
+  heartbeat: {
+    mode: '1' as const,
+    last_tick_at: new Date().toISOString(),
+    bench: {},
+    pass: {
+      kind: 'tick' as const, started_at: '', finished_at: '', sets: 0, fetches: {},
+      resolved: 0, halted: 0, refused: {}, refused_by_class: {}, finalised: 0, healed: 0,
+      baselines: {}, awaiting_session: 0, due_unsettled: 0, oldest_due_unsettled_minutes: 0,
+      stale_valve_tripped: false, errors: 0, panics: 0,
+    },
+  },
   bench: 'sh000852',
   bench_codes: ['sh000300', 'sh000905', 'sh000852', 'sh000906'],
   population: { set: false, candidates: [] },
@@ -158,7 +179,7 @@ describe('ForecastPage', () => {
     await waitFor(() => expect(screen.getByText('forecast.settings.button')).toBeTruthy())
     fireEvent.click(screen.getByText('forecast.settings.button'))
 
-    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'forecast.settings.bench' }))
     fireEvent.click(await screen.findByText('forecast.bench.sh000300'))
     apiMock.post.mockResolvedValue({ ok: true })
     fireEvent.click(screen.getByText('common.save'))
@@ -182,7 +203,7 @@ describe('ForecastPage', () => {
 
     // The page's errText is stubbed to a fixed string here; what matters is that the save's failure
     // path keeps the modal open and does not report success.
-    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: 'forecast.settings.bench' }))
     fireEvent.click(await screen.findByText('forecast.bench.sh000300'))
     apiMock.post.mockRejectedValue(new Error('forecast_bad_bench'))
     fireEvent.click(screen.getByText('common.save'))

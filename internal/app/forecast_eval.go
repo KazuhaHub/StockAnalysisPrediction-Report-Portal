@@ -61,27 +61,29 @@ type forecastEvaluator struct {
 	// adjust is the front-adjusted fetch seam. It is the ONE qfq call (ADR 0029 §10) and exists only
 	// to detect a bonus or rights issue the unadjusted body does not name.
 	adjust func(ctx context.Context, market, code, from, to string) (map[string]int64, error)
+
+	// tickFn is a test seam for step's panic recovery. Nil means e.tick.
+	tickFn func(*Server) error
+
+	// Per-pass state, valid only while this evaluator holds the single-flight guard (loop, watchdog
+	// and the manual route all go through tryStart). Dry mode lives here: planWrites is the one
+	// question every write asks.
+	passMode     string
+	stats        *passStats
+	gate         map[string]bool
+	bench        map[string]benchStat
+	drySample    []drySample
+	awaitingGate map[string]bool
 }
 
 // loop is the ticker. Every minute it asks whether it should run at all, then whether anything is
 // due; both answers come from the database, so a restart resumes without special handling.
 func (e *forecastEvaluator) loop(s *Server) {
 	for range time.Tick(time.Minute) {
-		// Read the switch FIRST, so a disabled evaluator does no work whatsoever — no query, no
+		// step reads the switch first: a disabled evaluator does no work whatsoever — no query, no
 		// fetch, no write. A loop that checked a setting after touching the store would make "off"
 		// mean "quiet" rather than "off".
-		if s.st.GetSetting(setForecastAuto, "0") != "1" {
-			continue
-		}
-		if !e.tryStart() {
-			continue
-		}
-		func() {
-			defer e.finish()
-			if err := e.tick(s); err != nil {
-				log.Printf("forecast evaluator: %v", err)
-			}
-		}()
+		e.step(s, "tick")
 	}
 }
 
@@ -122,6 +124,9 @@ func (e *forecastEvaluator) tick(s *Server) error {
 	if err != nil {
 		return fmt.Errorf("select due work: %w", err)
 	}
+	if e.stats != nil {
+		e.stats.Sets = len(sets)
+	}
 	if len(sets) == 0 {
 		return nil
 	}
@@ -142,7 +147,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			plan, handled := e.wakeOnlyPlan(set, e.clock())
 			if handled {
 				if len(plan.wakes) > 0 {
-					if err := s.st.ApplyForecastPlan(plan, e.clock()); err != nil {
+					if err := e.applyPlan(s, set, forecastSeries{}, plan, e.clock()); err != nil {
 						log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 					}
 				}
@@ -162,7 +167,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 				for _, m := range set.Marks {
 					plan.deferMark(m, "no_bench", "")
 				}
-				if err := s.st.ApplyForecastPlan(plan, e.clock()); err != nil {
+				if err := e.applyPlan(s, set, forecastSeries{}, plan, e.clock()); err != nil {
 					log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 				}
 			}
@@ -174,6 +179,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		// can tell a vendor outage from a wrong instrument from a broken calendar.
 		indexSeries, fault := e.benchCalendar(ctx, s, spec, need)
 		if fault != nil {
+			log.Printf("forecast evaluator: benchmark %s: %v", spec.Code, fault.err)
 			for _, set := range need {
 				if err := ctx.Err(); err != nil {
 					return nil
@@ -195,8 +201,12 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 			stocks[i], stockErrs[i] = e.rangeBars(ctx, s, set.Market, set.Symbol,
 				shiftDays(set.MadeOn, -predReferenceLagDays), e.clock())
+			e.noteFetch(set.Market, set.Symbol, stocks[i].Source)
 		}
 		valve := staleValve(stocks, stockErrs, completedSessions(indexSeries, e.clock()))
+		if e.stats != nil {
+			e.stats.StaleValveTripped = valve
+		}
 		for i, set := range need {
 			if err := ctx.Err(); err != nil {
 				return nil
@@ -233,7 +243,7 @@ func (e *forecastEvaluator) quarantineBadWindows(s *Server, sets []forecastWorkS
 		for _, m := range set.Marks {
 			plan.deferMark(m, "bad_window", "")
 		}
-		if err := s.st.ApplyForecastPlan(plan, e.clock()); err != nil {
+		if err := e.applyPlan(s, set, forecastSeries{}, plan, e.clock()); err != nil {
 			log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 		}
 	}
@@ -303,6 +313,8 @@ type benchFault struct {
 // bar is calendar_bad — three source-class faults with three distinct codes, never one `no_bar`.
 func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec benchSpec, sets []forecastWorkSet) (forecastSeries, *benchFault) {
 	series, err := e.indexCalendar(ctx, s, spec, sets)
+	e.noteFetch(spec.Market, spec.Sym, series.Source)
+	e.noteBench(spec.Code, series)
 	if err != nil {
 		return series, &benchFault{code: "fetch_failed", err: err}
 	}
@@ -395,7 +407,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			}
 			plan.deferMark(m, fault.code, "")
 		}
-		return s.st.ApplyForecastPlan(plan, now)
+		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
 
 	if stockErr != nil {
@@ -409,7 +421,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			}
 			plan.deferMark(m, "fetch_failed", "")
 		}
-		return s.st.ApplyForecastPlan(plan, now)
+		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
 	if len(stockSeries.Bars) == 0 && stockSeries.UnverifiableDate == "" {
 		// A range endpoint answers history: an empty stock body is a delivery fault, not "this stock
@@ -421,7 +433,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			}
 			plan.deferMark(m, "fetch_failed", "")
 		}
-		return s.st.ApplyForecastPlan(plan, now)
+		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
 	indexBars, stockBars, exDates := indexSeries.Bars, stockSeries.Bars, stockSeries.ExDates
 	seriesFrom := shiftDays(set.MadeOn, -predReferenceLagDays)
@@ -447,7 +459,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			}
 			plan.deferMark(m, "calendar_bad", "")
 		}
-		return s.st.ApplyForecastPlan(plan, now)
+		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
 
 	// A terminal baseline is used as STORED. Recomputing it on a later pass would let a revised
@@ -476,7 +488,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				}
 				plan.wakes[m.ID] = wake
 			}
-			return s.st.ApplyForecastPlan(plan, now)
+			return e.applyPlan(s, set, stockSeries, plan, now)
 		}
 		s0, baseDate, s0Fen, err = resolveStartBar(stockBars, set, madeAt, sessions)
 		if err == errNoBaseInWindow {
@@ -488,7 +500,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				for _, m := range set.Marks {
 					plan.deferMark(m, "fetch_failed", "")
 				}
-				return s.st.ApplyForecastPlan(plan, now)
+				return e.applyPlan(s, set, stockSeries, plan, now)
 			}
 			if wideIdx, ierr := e.rangeBars(ctx, s, indexSeries.Market, indexSeries.Code,
 				shiftDays(set.MadeOn, -400), now); ierr == nil {
@@ -530,7 +542,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				}
 				plan.wakes[m.ID] = wake
 			}
-			return s.st.ApplyForecastPlan(plan, now)
+			return e.applyPlan(s, set, stockSeries, plan, now)
 		}
 		// The start session exists but nothing traded in the reference window (nor in the bounded
 		// look-back). This is the set's own data, so it is a MARK-SPECIFIC failure and does count as
@@ -556,7 +568,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				plan.terminalBaseline = true
 			}
 		}
-		return s.st.ApplyForecastPlan(plan, now)
+		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
 	// From here on the baseline IS resolved (either stored or written in this pass), so a not-due
 	// mark's wake is its real projected due, not S0's close plus ten minutes.
@@ -613,9 +625,10 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			// The adjustment check is part of the answer: the mark waits, it is never resolved
 			// without it (F10). A source failure, so no attempt is charged.
 			for _, d := range due {
+				e.noteDueUnsettled(d.due, now)
 				plan.deferMark(d.mark, "fetch_failed", d.due)
 			}
-			return s.st.ApplyForecastPlan(plan, now)
+			return e.applyPlan(s, set, stockSeries, plan, now)
 		}
 		adjChecked = true
 	}
@@ -659,6 +672,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			plan.settles = append(plan.settles, forecastSettle{markID: mark.ID, res: res})
 			continue
 		}
+		e.noteDueUnsettled(sch.Due, now)
 		// Finality only as the result of a failed attempt (V26): the mark must have failed enough
 		// times AND the fixed clock must have run out. A source failure never reaches this branch
 		// because it never increments attempts.
@@ -670,7 +684,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		plan.deferMark(mark, res.Refusal, sch.Due)
 	}
-	return s.st.ApplyForecastPlan(plan, now)
+	return e.applyPlan(s, set, stockSeries, plan, now)
 }
 
 // containsDate reports whether a sorted session list contains a date.
