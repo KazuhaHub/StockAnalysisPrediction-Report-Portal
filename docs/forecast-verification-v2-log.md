@@ -220,9 +220,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
   `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P38 `feat/forecast-access-schema` (§6.4): step `0006`, the OU index, and freezing
-  each set's attribution at ingest. This is the one schema change in R1b and it must follow the
-  owner-approved §3.2 shape exactly; any deviation needs the owner before writing DDL.
+- **Next step.** P38 `feat/forecast-access-schema` (§6.4) is in this PR: step `0006`, the strict OU
+  index, frozen attribution at ingest, and the OU delete's re-attribution. After it: P39a
+  `fix/dify-reserved-inputs` (§6.5).
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -328,3 +328,33 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   handler, so neither the stored-S0 rule nor the wiring can regress silently. The W1 test also
   covers a late answer for the report that was left. Note: `viewerScope` still fails open if the
   account/OU read fails; that is P31's, and C5 inherits it.
+
+### P38 — the access schema
+
+- **Step `0006`, exactly as approved (§3.2):** `user_groups.forecast_scope TEXT` (NULL = inherit),
+  `prediction_sets.attributed_ou BIGINT` (NULL = unattributed), and `idx_pred_sets_ou`. No CHECK
+  constraint; the closed set is enforced in Go and an unknown value resolves as `none`. No back-fill:
+  the Default OU is normalised to `none` at boot and at the end of every restore, on the restore's
+  own transaction, so an older dump still loads.
+- **A strict OU index (`ou_index.go`).** The whole table in one read; `chain`, `restrictedEffective`
+  and `subtree`, plus `effectiveScope` (nearest non-NULL up the line, with a NULL Default read as
+  none — the helper P26 will use). A dangling parent is `errDanglingOU`; a cycle or a chain over 64
+  is `errCyclicOU`; a truncated chain is never returned, because that would drop a restricted
+  ancestor and fail open.
+- **Frozen attribution.** `v1Ingest` decodes the owner token once (it already did, before the
+  insert), hoists the OU out of the branch, and sets `AttributedOU` before `InsertPredictionSet`,
+  which is the only INSERT that names the column. A missing or invalid token leaves it NULL.
+- **Deleting an OU is one transaction.** Its sets are re-attributed to its parent (or the Default for
+  a root or a dangling parent) before the row goes; its children move to that parent (or become
+  roots), instead of the old behaviour of silently making them roots and re-inheriting from the
+  Default; its principal rows go as before. The handler audits `forecast_sets_reattributed`,
+  `forecast_sets_to_ou` and `children_moved`, and drops the forecast group cache, because a root's
+  sets join the Default's population without changing its population key.
+- **Deviations.** The Postgres twin covers the step, the index and the delete's re-attribution; the
+  trigger-based atomicity test and the cache/audit tests are SQLite-only (no equivalent injectable
+  failure without a rule). The reused-id test simulates the id coming back by inserting an explicit
+  id after the delete, which is what the restore's identity reset produces. The pre-P38 wind-back
+  helper now also removes `0006`'s products and ledger row: a database "before the forecast step"
+  must not claim a later step whose tables it no longer has.
+- **Rollback is restore-only.** An older binary refuses a database that records `0006`
+  (`refuseUnknownLedgerRows`), so R1b needs the ADR 0027 backup before deploy.

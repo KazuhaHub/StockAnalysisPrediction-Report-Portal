@@ -325,7 +325,10 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	// both decided by the signed token, never by a client-supplied field. The viewer row is what
 	// makes the report readable by the person who paid for it under per-person visibility; stamping
 	// the OU alone would leave them unable to open their own result.
-	if ou, who, ok := s.ownerFromToken(in.OwnerToken); ok {
+	// Decoded ONCE, before both users: the report's owner stamp and the set's frozen attribution
+	// come from the same signed token (P38).
+	ou, who, ownerOK := s.ownerFromToken(in.OwnerToken)
+	if ownerOK {
 		if _, err := s.st.StampReportOwner(id, ou); err != nil {
 			log.Printf("v1 ingest stamp owner id=%d ou=%d: %v", id, ou, err)
 		}
@@ -347,6 +350,13 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	predStatus := ""
 	if predSet != nil {
 		predSet.Version, predSet.Title, predSet.ReportDate = version, in.Title, in.Date
+		// Frozen attribution: the OU whose run produced the set, from the signed token only, written
+		// once at insert and never updated afterwards (ADR 0039). No token, or a zero OU, leaves it
+		// NULL — the set belongs to no OU's 'own' population.
+		if ownerOK && ou != 0 {
+			v := ou
+			predSet.AttributedOU = &v
+		}
 		// Retried once, and then reported rather than raised. On SQLite a transient "database is
 		// locked" is the common cause and a second attempt is cheap next to a lost set; if it still
 		// fails, the response says store_failed and the ingest stays a success. Raising here would

@@ -522,6 +522,11 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 	if err := applyRestoreEvaluator(e, prior.autoMode); err != nil {
 		return err
 	}
+	// A restored older dump brings every forecast_scope back NULL; the Default OU is normalised to
+	// none here, on the same transaction, exactly as at boot (P38).
+	if err := ensureDefaultForecastScope(e); err != nil {
+		return fmt.Errorf("normalise the Default OU scope on restore: %w", err)
+	}
 	return nil
 }
 

@@ -163,25 +163,124 @@ func (s *Store) UpdateGroup(id int64, name, description string, weight *int, urg
 }
 
 // DeleteUserGroup removes a group and reassigns its former primary members to the Default
-// group (users.group_id back to NULL). Its priority rides on the group row, so it goes with
-// it. Any group flagged is_default is never deletable — the resolution depends on it. We check
-// the row's own flag (not just DefaultGroupID) so even a stray duplicate default can't be removed.
-func (s *Store) DeleteUserGroup(id int64) error {
-	var isDefault sql.NullInt64
-	s.queryRow("SELECT is_default FROM user_groups WHERE id=?", id).Scan(&isDefault)
-	if isDefault.Int64 != 0 {
-		return fmt.Errorf("the Default group cannot be deleted")
+// group (users.group_id back to NULL), moves its child OUs to the deleted OU's parent, and
+// re-attributes its prediction sets (P38, ADR 0039).
+//
+// It is ONE transaction on the tx handle only: a failure between the set re-attribution and the row
+// delete must not leave the sets pointing at an OU that still exists under a different meaning, or at
+// one that is gone. The transaction also removes the id-reuse risk: an id the database may reassign
+// later is never referenced by a set.
+//
+// Returns how many sets moved and the OU they moved to (the parent, or the Default OU for a root or a
+// dangling parent), for the handler's audit row.
+func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, err
 	}
-	s.exec("UPDATE users SET group_id=NULL WHERE group_id=?", id)
-	// Everything keyed to this OU goes with it. Group ids are assigned by the database and a
-	// deleted one can come back around, so a lingering grant or viewer row would be inherited by
-	// whichever OU is created next (ADR 0022 / 0024).
-	s.exec("DELETE FROM report_viewers WHERE principal=?", groupPrincipal(id))
-	s.exec("DELETE FROM version_grants WHERE principal=?", groupPrincipal(id))
-	s.exec("DELETE FROM announcement_grants WHERE principal=?", groupPrincipal(id))
-	s.exec("DELETE FROM group_targets WHERE group_id=?", id)
-	s.exec("UPDATE user_groups SET parent_id=NULL WHERE parent_id=?", id)
-	_, err := s.exec("DELETE FROM user_groups WHERE id=?", id)
+	defer tx.Rollback() //nolint:errcheck // a no-op once committed
+
+	var parent sql.NullInt64
+	var isDefault int
+	if err := tx.QueryRow(s.bind(`SELECT parent_id, COALESCE(is_default,0) FROM user_groups WHERE id=?`), id).
+		Scan(&parent, &isDefault); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, fmt.Errorf("no such group")
+		}
+		return 0, 0, err
+	}
+	// Any group flagged is_default is never deletable — the resolution depends on it. We check the
+	// row's own flag (not just DefaultGroupID) so even a stray duplicate default cannot be removed.
+	if isDefault != 0 {
+		return 0, 0, fmt.Errorf("the Default group cannot be deleted")
+	}
+	var defaultID int64
+	if err := tx.QueryRow(s.bind(`SELECT id FROM user_groups WHERE is_default=1 ORDER BY id LIMIT 1`)).
+		Scan(&defaultID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	target = parent.Int64
+	parentExists := false
+	if target != 0 {
+		var one int
+		if err := tx.QueryRow(s.bind(`SELECT 1 FROM user_groups WHERE id=?`), target).Scan(&one); err == nil {
+			parentExists = true
+		} else {
+			// A parent row that is gone: fail closed to the Default OU rather than leave a set (or a
+			// child) pointing at a missing id.
+			target = defaultID
+		}
+	} else {
+		target = defaultID
+	}
+	if target != 0 {
+		res, err := tx.Exec(s.bind(`UPDATE prediction_sets SET attributed_ou=? WHERE attributed_ou=?`), target, id)
+		if err != nil {
+			return 0, 0, err
+		}
+		if n, e := res.RowsAffected(); e == nil {
+			reattributed = n
+		}
+	} else if defaultID == 0 {
+		// No Default OU to move them to (a corrupt database): unattributed is the fail-closed answer.
+		res, err := tx.Exec(s.bind(`UPDATE prediction_sets SET attributed_ou=NULL WHERE attributed_ou=?`), id)
+		if err != nil {
+			return 0, 0, err
+		}
+		if n, e := res.RowsAffected(); e == nil {
+			reattributed = n
+		}
+	}
+
+	if _, err := tx.Exec(s.bind(`UPDATE users SET group_id=NULL WHERE group_id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	for _, q := range []string{
+		`DELETE FROM report_viewers WHERE principal=?`,
+		`DELETE FROM version_grants WHERE principal=?`,
+		`DELETE FROM announcement_grants WHERE principal=?`,
+	} {
+		if _, err := tx.Exec(s.bind(q), groupPrincipal(id)); err != nil {
+			return 0, 0, err
+		}
+	}
+	if _, err := tx.Exec(s.bind(`DELETE FROM group_targets WHERE group_id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	// Children keep inheriting along the line they were in: to the deleted OU's parent, or as roots
+	// when the deleted OU was a root (§16 item 9). A parent row that is gone would leave them
+	// dangling, so they inherit from the Default instead — the same fail-closed direction as the sets.
+	var childParent any
+	switch {
+	case parent.Valid && parentExists:
+		childParent = parent.Int64
+	case parent.Valid && defaultID != 0:
+		childParent = defaultID
+	}
+	if _, err := tx.Exec(s.bind(`UPDATE user_groups SET parent_id=? WHERE parent_id=?`), childParent, id); err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec(s.bind(`DELETE FROM user_groups WHERE id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return reattributed, target, nil
+}
+
+// EnsureDefaultForecastScope normalises the Default OU's forecast scope to none (P38, ADR 0039).
+//
+// The step cannot do this itself: a migration that writes data cannot accept a dump written before
+// it (olderDumpOK), and a restored older dump must come back with every scope NULL. Running the
+// UPDATE here at boot and at the end of every restore keeps the rule without changing the step.
+// Idempotent, and the resolver reads a NULL Default as none even between the step and this call.
+func (s *Store) EnsureDefaultForecastScope() error {
+	return ensureDefaultForecastScope(s.poolExec())
+}
+
+func ensureDefaultForecastScope(e migExec) error {
+	_, err := e.exec(`UPDATE user_groups SET forecast_scope='none' WHERE is_default=1 AND forecast_scope IS NULL`)
 	return err
 }
 

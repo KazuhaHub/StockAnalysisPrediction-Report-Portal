@@ -49,8 +49,8 @@ func (s *Store) InsertPredictionSet(reportID int64, set *predSetRow, claims []pr
 			policy_version, probability_method, probability_transform, scenario_basis,
 			decision_status, decision_quality, information_cutoff,
 			horizon_end, horizon_std,
-			emitted_base_fen, emitted_base_as_of, emitted_base_source, bench_code)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+			emitted_base_fen, emitted_base_as_of, emitted_base_source, bench_code, attributed_ou)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		setPtr, set.Symbol, set.Rtype, set.Version, set.Title, set.ReportDate,
 		set.MadeAt, set.MadeOn, set.Cohort, set.Zone, set.State, set.Errors,
 		set.Payload, set.Truncated, set.PayloadSHA, set.BodySHA,
@@ -58,7 +58,8 @@ func (s *Store) InsertPredictionSet(reportID int64, set *predSetRow, claims []pr
 		set.PolicyVersion, set.ProbabilityMethod, set.ProbabilityTransform, set.ScenarioBasis,
 		set.DecisionStatus, set.DecisionQuality, set.InformationCutoff,
 		set.HorizonEnd, set.HorizonStd,
-		nullableFen(set.EmittedBaseFen), set.EmittedBaseAsOf, set.EmittedBaseSrc, set.BenchCode)
+		nullableFen(set.EmittedBaseFen), set.EmittedBaseAsOf, set.EmittedBaseSrc, set.BenchCode,
+		nullableFen(set.AttributedOU))
 	if err != nil {
 		return 0, false, err
 	}

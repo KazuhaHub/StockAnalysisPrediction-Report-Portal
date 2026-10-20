@@ -165,7 +165,8 @@ type migration struct {
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
 func (s *Store) migrations() []migration {
-	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005()}
+	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
+		migration0006()}
 }
 
 // The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).
@@ -446,6 +447,48 @@ func migration0005() migration {
 				}
 			}
 			return nil
+		},
+	}
+}
+
+// migration0006 adds the forecast verification access model (ADR 0039).
+//
+// user_groups.forecast_scope is who may see the forecast record from this OU: 'all', 'own' or 'none',
+// with NULL meaning "inherit from the parent OU" (the nearest set value wins), the same tri-state the
+// enrolment columns of 0001 use. The column is nullable with no default, so applying the step changes
+// nobody's access: every OU inherits, and the Default OU is normalised to 'none' at boot rather than
+// here, because a step that writes data cannot let an older dump in (restoreRule.olderDumpOK).
+//
+// prediction_sets.attributed_ou is the OU the run that produced a set was attributed to, read from the
+// signed owner token at insert and never written again. NULL means unattributed (no token, an invalid
+// token, or a set written before this step) — such a set belongs to no OU's 'own' population and is
+// counted only under 'all'. It is never serialised to any client.
+func migration0006() migration {
+	cols := []colRef{
+		{table: "user_groups", name: "forecast_scope"},
+		{table: "prediction_sets", name: "attributed_ou"},
+	}
+	return migration{
+		id:      "0006",
+		columns: cols,
+		indices: []string{"idx_pred_sets_ou"},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			if !e.columnExists("user_groups", "forecast_scope") {
+				if _, err := e.exec(`ALTER TABLE user_groups ADD COLUMN forecast_scope TEXT`); err != nil {
+					return fmt.Errorf("add user_groups.forecast_scope: %w", err)
+				}
+			}
+			if !e.columnExists("prediction_sets", "attributed_ou") {
+				if _, err := e.exec(`ALTER TABLE prediction_sets ADD COLUMN attributed_ou BIGINT`); err != nil {
+					return fmt.Errorf("add prediction_sets.attributed_ou: %w", err)
+				}
+			}
+			// The 'own' population filters on attributed_ou within one rtype and a made_on range, the
+			// same shape idx_pred_sets_group serves for 'all'.
+			_, err := e.exec(`CREATE INDEX IF NOT EXISTS idx_pred_sets_ou
+				ON prediction_sets(attributed_ou, rtype, made_on)`)
+			return err
 		},
 	}
 }

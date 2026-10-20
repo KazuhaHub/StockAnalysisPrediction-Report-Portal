@@ -329,3 +329,51 @@ func TestPostgresDueSelectionUsesTheDueIndex(t *testing.T) {
 		t.Errorf("selection does not use idx_pred_marks_due:\n%s", plan)
 	}
 }
+
+// TestPostgresAccessSchemaAndReattribution is the Postgres twin of step 0006 and the OU delete's
+// re-attribution: the step's DDL, the index, and the one UPDATE that moves a deleted OU's sets.
+func TestPostgresAccessSchemaAndReattribution(t *testing.T) {
+	st := pgStore(t, "prediction_sets", "user_groups")
+	if err := st.EnsureDefaultForecastScope(); err != nil {
+		t.Fatal(err)
+	}
+	def := st.EnsureDefaultGroup()
+	for _, c := range []colRef{{"user_groups", "forecast_scope"}, {"prediction_sets", "attributed_ou"}} {
+		if !st.columnExists(c.table, c.name) {
+			t.Errorf("%s.%s missing on Postgres", c.table, c.name)
+		}
+	}
+	if !st.indexExists("idx_pred_sets_ou") {
+		t.Error("idx_pred_sets_ou missing on Postgres")
+	}
+
+	parent := seedOU(t, st, 0, scopeAll)
+	child := seedOU(t, st, parent, scopeAll)
+	setID := seedPredictionSet(t, st, sql.NullInt64{}, "p38-pg")
+	if _, err := st.exec(`UPDATE prediction_sets SET attributed_ou=? WHERE id=?`, child, setID); err != nil {
+		t.Fatal(err)
+	}
+	moved, target, err := st.DeleteUserGroup(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved != 1 || target != parent {
+		t.Errorf("moved/target = %d/%d, want 1/%d", moved, target, parent)
+	}
+	var got sql.NullInt64
+	if err := st.queryRow(`SELECT attributed_ou FROM prediction_sets WHERE id=?`, setID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Int64 != parent {
+		t.Errorf("attributed_ou = %v, want %d", got, parent)
+	}
+	if _, _, err := st.DeleteUserGroup(parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.queryRow(`SELECT attributed_ou FROM prediction_sets WHERE id=?`, setID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Valid || got.Int64 != def {
+		t.Errorf("a root's set = %v, want Default %d", got, def)
+	}
+}

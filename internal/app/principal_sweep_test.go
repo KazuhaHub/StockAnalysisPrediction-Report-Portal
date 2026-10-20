@@ -117,7 +117,7 @@ func TestEveryPrincipalTableIsSweptOnDelete(t *testing.T) {
 		for _, table := range tables {
 			seedPrincipalRow(t, st, table, principal)
 		}
-		if err := st.DeleteUserGroup(id); err != nil {
+		if _, _, err := st.DeleteUserGroup(id); err != nil {
 			t.Fatalf("DeleteUserGroup: %v", err)
 		}
 		for _, table := range tables {
