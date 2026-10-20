@@ -546,7 +546,8 @@ func TestGroupMembersMirrorTheCell(t *testing.T) {
 		t.Fatalf("state=%q members=%d", resp.State, len(resp.Members))
 	}
 	m := resp.Members[0]
-	if m.Stance != "long" || m.ExcessBp == nil || m.Upside == nil || m.Agree == nil {
+	if m.Stance != "long" || m.ExcessBp == nil || m.Upside == nil ||
+		(m.Direction != dirAgree && m.Direction != dirDisagree && m.Direction != dirFlat) {
 		t.Fatalf("member = %+v", m)
 	}
 	// The fixtures insert no reports, so every set is orphaned and must not offer a link.

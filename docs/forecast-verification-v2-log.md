@@ -192,3 +192,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   actually resolve (bar present and both index dates printed), not merely when a mark is scheduled;
   and `TestAdjustFetchOnlyForDueMarks` now asserts d5 resolves, so the adjusted map is proven used
   rather than merely fetched.
+- **P16a decisions.**
+  - `predHitClass` thresholds on the raw fen upside, `abs(terminal-s0)*10000 < 500*s0`, so 4.99% is
+    untested and 5.00% is tested, exactly as the plan's `|d|*10000 < predHitUpsideBp*s0Fen`.
+  - A zero excess is `flat` and is counted in the hit-rate denominator (agree+disagree+flat), because
+    the plan defines the hit rate over the tested subset; a flat row is a tested row that did not
+    agree. The cell's hit rate is therefore agree/(tested) and reconciles with the drawer.
+  - `golden_members.json` is regenerated in this PR: the only change is `agree` (bool) →
+    `direction` (four states). The cell states, n, and every member's identity and outcome fields are
+    byte-identical; the file's diff was reviewed field by field before committing.
+  - The members route sends the gate's counts (`resolved`, `total`, `refused`, `corp_action`, `n`) so
+    the drawer's headline does not need the scorer. A non-mature cell sends identity and status only.

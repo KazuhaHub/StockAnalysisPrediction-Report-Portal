@@ -229,16 +229,43 @@ const predQualityNormal = "normal"
 
 // computeForecastCell applies the maturity gates and, only if all pass, the metrics.
 func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end, cp, today string) *forecastCell {
-	seedParts := []string{rtype, start, end}
 	if cp == "h12" {
 		members = filterHorizonStd(members)
 		pendingBaseline = filterHorizonStd(pendingBaseline)
 	}
-	if end >= today {
-		return &forecastCell{State: "open"}
+	state, n, refused, corp, resolved, total := forecastCellGate(members, pendingBaseline, cp, end, today)
+	if state == "pending" {
+		r, t := resolved, total
+		return &forecastCell{State: state, Resolved: &r, Total: &t}
 	}
-	total := len(members)
-	resolved, refused, corp := 0, 0, 0
+	if state != "mature" {
+		if state == "small" {
+			return &forecastCell{State: state, N: &n}
+		}
+		return &forecastCell{State: state}
+	}
+	seedParts := []string{rtype, start, end}
+	cell := &forecastCell{State: "mature", N: &n, Refused: &refused, CorpAction: &corp}
+	scored := make([]*groupSet, 0, n)
+	for _, gs := range members {
+		m := gs.Marks[cp]
+		if m.Status == markResolved && !m.CorpAction {
+			scored = append(scored, gs)
+		}
+	}
+	scoreForecastCell(cell, scored, cp, seedParts)
+	applyForecastBH(cell, cell.Slices)
+	return cell
+}
+
+// forecastCellGate is the maturity gate without the scoring. computeForecastCell uses it before
+// scoring; the members route uses it instead of the scorer, so opening a drawer never runs 10 000
+// permutations to learn a state the matrix already computed.
+func forecastCellGate(members, pendingBaseline []*groupSet, cp, end, today string) (state string, n, refused, corp, resolved, total int) {
+	if end >= today {
+		return "open", 0, 0, 0, 0, 0
+	}
+	total = len(members)
 	blocked := false
 	for _, gs := range members {
 		m, ok := gs.Marks[cp]
@@ -257,25 +284,13 @@ func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end
 		}
 	}
 	if blocked || len(pendingBaseline) > 0 || (total > 0 && float64(refused)*100 > predRefusedMaxPct*float64(total)) {
-		r, t := resolved, total
-		return &forecastCell{State: "pending", Resolved: &r, Total: &t}
+		return "pending", 0, refused, corp, resolved, total
 	}
-	n := resolved - corp
+	n = resolved - corp
 	if n < predMatureMinN {
-		return &forecastCell{State: "small", N: &n}
+		return "small", n, refused, corp, resolved, total
 	}
-
-	cell := &forecastCell{State: "mature", N: &n, Refused: &refused, CorpAction: &corp}
-	scored := make([]*groupSet, 0, n)
-	for _, gs := range members {
-		m := gs.Marks[cp]
-		if m.Status == markResolved && !m.CorpAction {
-			scored = append(scored, gs)
-		}
-	}
-	scoreForecastCell(cell, scored, cp, seedParts)
-	applyForecastBH(cell, cell.Slices)
-	return cell
+	return "mature", n, refused, corp, resolved, total
 }
 
 // spreadStat is the permutation statistic for the stance spread: the long arm's excess sum scaled
@@ -329,13 +344,15 @@ func scoreForecastCell(cell *forecastCell, sets []*groupSet, cp string, seedPart
 		}
 		if gs.S0Fen != nil && *gs.S0Fen > 0 && gs.TerminalFen != nil {
 			upside[i] = float64(*gs.TerminalFen)/float64(*gs.S0Fen) - 1
-			big[i] = math.Abs(upside[i]) >= float64(predHitUpsideBp)/10000
-			switch {
-			case upside[i] > 0:
-				signUp[i] = 1
-			case upside[i] < 0:
-				signUp[i] = -1
+			// The hit subset and both signs come from the ONE predicate the drawer also uses, so a
+			// row's verdict and the cell's hit rate cannot disagree at the 5% boundary.
+			var exBp int32
+			if m.RetBp != nil && m.BenchRetBp != nil {
+				exBp = *m.RetBp - *m.BenchRetBp
 			}
+			big[i] = predHitClass(*gs.TerminalFen, *gs.S0Fen, exBp) != dirUntested
+			signUp[i] = signOfInt64(*gs.TerminalFen - *gs.S0Fen)
+			signEx[i] = signOfInt32(exBp)
 			icUp = append(icUp, upside[i])
 			icEx = append(icEx, excess[i])
 		}
@@ -512,7 +529,14 @@ func subscores(sets []*groupSet, cp string, seedParts []string) *forecastCell {
 
 // hitStats returns the hit rate, its base-rate null and the subset size. When perm is non-nil each
 // member's upside is read from another member while its own excess stays fixed.
+// forecastPerHook is a test seam counting permutation passes. It is nil in production, and the
+// members route must never make it non-zero: the gate, not the scorer, decides a cell's state.
+var forecastPerHook func()
+
 func hitStats(big []bool, signUp, signEx []int8, perm []int) (hit, null float64, n int, ok bool) {
+	if forecastPerHook != nil {
+		forecastPerHook()
+	}
 	agree, pos, neg := 0, 0, 0
 	for i := range big {
 		j := i

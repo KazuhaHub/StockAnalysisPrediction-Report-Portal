@@ -1482,7 +1482,7 @@ export interface ForecastMember {
   s0_fen?: number
   terminal_fen?: number
   upside?: number
-  agree?: boolean
+  direction?: 'agree' | 'disagree' | 'flat' | 'untested'
 }
 
 export interface ForecastMembersResponse {
@@ -1492,5 +1492,10 @@ export interface ForecastMembersResponse {
   end: string
   checkpoint: ForecastCheckpoint
   state: string
+  resolved: number
+  total: number
+  refused: number
+  corp_action: number
+  n: number
   members: ForecastMember[]
 }
