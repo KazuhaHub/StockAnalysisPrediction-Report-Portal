@@ -584,9 +584,19 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			due = append(due, dueMark{mark: mark, due: sch.Due})
 		}
 	}
+	// The adjustment check is made only for a mark whose stock leg can actually resolve: a set whose
+	// whole batch is waiting on a missing bar must not spend a vendor call on it (plan §5.4).
+	needAdj := false
+	for _, d := range due {
+		bar, ok := lastBarAtOrBefore(stockBars, d.due)
+		if ok && bar.Date >= baseDate && barOn(indexBars, baseDate) != nil && barOn(indexBars, d.due) != nil {
+			needAdj = true
+			break
+		}
+	}
 	adj := map[string]int64(nil)
 	adjChecked := false
-	if len(due) > 0 {
+	if needAdj {
 		last := due[0].due
 		for _, d := range due {
 			if d.due > last {

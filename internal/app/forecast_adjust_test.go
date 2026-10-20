@@ -100,7 +100,7 @@ func TestAdjustFetchOnlyForDueMarks(t *testing.T) {
 	e2.adjust = func(context.Context, string, string, string, string) (map[string]int64, error) {
 		calls++
 		out := map[string]int64{}
-		for _, b := range stock[:5] {
+		for _, b := range stock[:6] {
 			out[b.Date] = b.Close
 		}
 		return out, nil
@@ -111,7 +111,12 @@ func TestAdjustFetchOnlyForDueMarks(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("qfq calls = %d for one due set, want 1", calls)
 	}
-	_ = setID
+	// The call was actually used: d5 resolved rather than waiting for a missing adjusted close.
+	var status string
+	s.st.queryRow("SELECT status FROM prediction_marks WHERE set_id=? AND checkpoint='d5'", setID).Scan(&status)
+	if status != markResolved {
+		t.Errorf("d5 status = %q, want resolved (the adjusted map covers both dates)", status)
+	}
 }
 
 // TestQfqFetchFailureIsASourceFailure: a failed adjustment fetch leaves the mark waiting with its

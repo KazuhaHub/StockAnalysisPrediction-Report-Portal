@@ -188,3 +188,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
     mark is actually due. A failed call defers every due mark `fetch_failed` (source class).
   - A missing adjusted close for either the base or the due date is also `fetch_failed`: the check
     is part of the answer, never skipped.
+- **P8 review follow-ups.** The qfq call is made only when at least one due mark's stock leg can
+  actually resolve (bar present and both index dates printed), not merely when a mark is scheduled;
+  and `TestAdjustFetchOnlyForDueMarks` now asserts d5 resolves, so the adjusted map is proven used
+  rather than merely fetched.
