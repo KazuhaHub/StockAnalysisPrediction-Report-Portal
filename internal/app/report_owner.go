@@ -142,6 +142,9 @@ func reservedInputNames(in []dify.Input) []string {
 // report_viewers is the ONLY table consulted for ownership. owner_group survives on the report row
 // for attribution and audit, but the security-critical filter must not have two spellings.
 type ownerScope struct {
+	// denyAll is set when the restriction itself could not be read (P31): the scope must match
+	// nothing. It is a scope rather than nil because nil means "unrestricted".
+	denyAll bool
 	// principals identify this reader for the ownership test: always "u:<name>", plus the Default OU
 	// (which encodes the "all" audience), plus "g:<id>" for each EFFECTIVELY RESTRICTED OU on their
 	// chain. An unrestricted OU is not a principal (P30).
@@ -158,6 +161,10 @@ type ownerScope struct {
 func (sc *ownerScope) where(prefix string) (string, []any) {
 	if sc == nil {
 		return "", nil
+	}
+	if sc.denyAll {
+		// Unreadable restriction: nothing, spelled so it cannot be mistaken for "no filter".
+		return "1=0", nil
 	}
 	var ors []string
 	var args []any
@@ -210,7 +217,13 @@ func (sc *ownerScope) where(prefix string) (string, []any) {
 // restriction — for anonymous callers, admins, and any user who is not scoped, so internal behaviour
 // is unchanged. A scoped user carries their granted versions, bucketed by visibility.
 func (s *Server) viewerScope(user string) *ownerScope {
-	if !s.isRestricted(user) {
+	restricted, err := s.isRestrictedStrict(user)
+	if err != nil {
+		// The restriction could not be read (or the chain is broken): deny everything for this
+		// request. Reading it as "not restricted" is how D3 failed open.
+		return &ownerScope{denyAll: true}
+	}
+	if !restricted {
 		return nil
 	}
 	sc := &ownerScope{self: userPrincipal(user)}
@@ -220,22 +233,34 @@ func (s *Server) viewerScope(user string) *ownerScope {
 	// therefore not a principal, so a legacy g-row written for one never matches again. The Default
 	// is the exception the encoding forces: its principal is also the "all" audience, and a legacy
 	// ingest row for a Default-attributed run is byte-identical to it, so those rows remain readable
-	// (recorded as a known limitation in the log). This function's group principals are only as good
-	// as `isRestricted` above; P31 replaces that lenient check with a strict one.
-	if ix, err := s.st.loadOUIndex(); err == nil {
-		if ix.defaultID != 0 {
-			sc.principals = append(sc.principals, groupPrincipal(ix.defaultID))
+	// (recorded as a known limitation in the log).
+	ix, err := s.st.loadOUIndex()
+	if err != nil {
+		return &ownerScope{denyAll: true}
+	}
+	if ix.defaultID != 0 {
+		sc.principals = append(sc.principals, groupPrincipal(ix.defaultID))
+	}
+	gid := s.st.PrimaryGroupOf(user)
+	if gid == 0 {
+		gid = ix.defaultID
+	}
+	if gid != 0 {
+		chain, cerr := ix.chain(gid)
+		if cerr != nil {
+			// A dangling or cyclic chain would drop a restricted ancestor: deny rather than share.
+			return &ownerScope{denyAll: true}
 		}
-		if gid := s.st.PrimaryGroupOf(user); gid != 0 {
-			if chain, cerr := ix.chain(gid); cerr == nil {
-				for _, g := range chain {
-					if g == ix.defaultID {
-						continue
-					}
-					if restricted, rerr := ix.restrictedEffective(g); rerr == nil && restricted {
-						sc.principals = append(sc.principals, groupPrincipal(g))
-					}
-				}
+		for _, g := range chain {
+			if g == ix.defaultID {
+				continue
+			}
+			restricted, rerr := ix.restrictedEffective(g)
+			if rerr != nil {
+				return &ownerScope{denyAll: true}
+			}
+			if restricted {
+				sc.principals = append(sc.principals, groupPrincipal(g))
 			}
 		}
 	}
