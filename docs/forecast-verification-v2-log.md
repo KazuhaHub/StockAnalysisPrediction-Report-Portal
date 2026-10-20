@@ -217,11 +217,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 ## Current progress (2026-10-20)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. `main` is at `183061a3`.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b started: P9 #127. `main` is at `d630ff55`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P9 is implemented on `feat/forecast-evaluator-operations` and awaiting review; the
-  next PR is P41 (`feat/forecast-alert-channels`, §6.2), which writes `forecast_alert_test_ok_at` and
-  so makes readiness item 5 passable.
+- **Next step.** P41 `feat/forecast-alert-channels` (§6.2): Email and Slack delivery for the
+  evaluator's alerts, `forecast_alert_test_ok_at`, and the readiness item that reads it. Until P41
+  ships, mode 1 is refused by item 5 on every install, which is intended.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
