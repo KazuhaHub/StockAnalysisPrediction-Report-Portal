@@ -129,6 +129,7 @@ func TestEvaluatorFetchesEachFrozenBenchmark(t *testing.T) {
 	var fetched []fetchKey
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		// An index is published by Shanghai: any other market means the routing is wrong, and the test
 		// says so rather than serving a body that would mask it.
@@ -220,6 +221,7 @@ func TestBenchmarkBodyMustBeAnIndex(t *testing.T) {
 	}
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		if market != "sh" {
 			return nil, fmt.Errorf("fetch for market %q: an index is only ever sh", market)
@@ -252,6 +254,7 @@ func TestZeroVolumeIndexBarDefersTheGroup(t *testing.T) {
 	indexBars[3].Volume = 0 // the zero-volume bar
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		if market != "sh" {
 			return nil, fmt.Errorf("fetch for market %q: an index is only ever sh", market)
@@ -282,6 +285,7 @@ func TestBenchFetchFailureIsFetchFailed(t *testing.T) {
 	}
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		if code == "000852" {
 			return nil, fmt.Errorf("vendor unreachable")
@@ -346,6 +350,7 @@ func TestEmptyBenchCodeNeverReadsTheSetting(t *testing.T) {
 
 	stock := barsFor(tradingDays("2026-03-03", 10), 1000)
 	e := &forecastEvaluator{now: func() time.Time { return shanghai(2026, time.March, 20, 16, 0) }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		return &QuoteResp{Bars: stock, Kind: quoteKindStock, Snapshot: QuoteSnapshot{AsOf: "2026-03-20T15:00:01+08:00"}}, nil
 	}

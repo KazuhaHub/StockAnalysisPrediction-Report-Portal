@@ -58,6 +58,9 @@ type forecastEvaluator struct {
 	fetch func(ctx context.Context, market, code, from, to string) (*QuoteResp, error)
 	// now is the clock seam, for the same reason.
 	now func() time.Time
+	// adjust is the front-adjusted fetch seam. It is the ONE qfq call (ADR 0029 §10) and exists only
+	// to detect a bonus or rights issue the unadjusted body does not name.
+	adjust func(ctx context.Context, market, code, from, to string) (map[string]int64, error)
 }
 
 // loop is the ticker. Every minute it asks whether it should run at all, then whether anything is
@@ -560,6 +563,53 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	set.S0Date = s0
 	set.BaseCheck = baseMatch
 
+	// Collect the due marks first: the adjustment check is one vendor call per set per tick, made
+	// only when at least one mark's stock leg is actually resolvable now.
+	type dueMark struct {
+		mark forecastMark
+		due  string
+	}
+	var due []dueMark
+	for _, mark := range set.Marks {
+		if mark.Status == markResolved || mark.Status == markRefusedFinal {
+			continue
+		}
+		if mark.Status == markRefused && mark.NextAttemptAt != "" {
+			if t, err := time.Parse(time.RFC3339, mark.NextAttemptAt); err == nil && now.Before(t) {
+				continue
+			}
+		}
+		sch := predScheduleFor(mark.Checkpoint, madeAt, set.HorizonStd, set.S0Date, sessions)
+		if sch.Known && containsDate(sessions, sch.Due) {
+			due = append(due, dueMark{mark: mark, due: sch.Due})
+		}
+	}
+	adj := map[string]int64(nil)
+	adjChecked := false
+	if len(due) > 0 {
+		last := due[0].due
+		for _, d := range due {
+			if d.due > last {
+				last = d.due
+			}
+		}
+		fetch := e.adjust
+		if fetch == nil {
+			fetch = fetchTencentAdjustRatio
+		}
+		var aerr error
+		adj, aerr = fetch(ctx, set.Market, set.Symbol, baseDate, last)
+		if aerr != nil {
+			// The adjustment check is part of the answer: the mark waits, it is never resolved
+			// without it (F10). A source failure, so no attempt is charged.
+			for _, d := range due {
+				plan.deferMark(d.mark, "fetch_failed", d.due)
+			}
+			return s.st.ApplyForecastPlan(plan, now)
+		}
+		adjChecked = true
+	}
+
 	for _, mark := range set.Marks {
 		if mark.Status == markResolved || mark.Status == markRefusedFinal {
 			continue // terminal, and the guard would refuse the write anyway
@@ -593,7 +643,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			AsOf: stockSeries.AsOf, UnverifiableDate: stockSeries.UnverifiableDate,
 			Source: stockSeries.Source, Sessions: sessions,
 			S0: s0, BaseDate: baseDate, S0Fen: s0Fen, Session: sch.Record, SeriesFrom: seriesFrom,
-			Now: now, Valve: valve,
+			Adj: adj, AdjChecked: adjChecked, Now: now, Valve: valve,
 		})
 		if res.Status == markResolved {
 			plan.settles = append(plan.settles, forecastSettle{markID: mark.ID, res: res})

@@ -1004,7 +1004,11 @@ const (
 	// response when a window is wide, and it is the same quoteMaxBars ceiling every other call here
 	// carries. The dates say WHICH sessions; the count says how many may come back.
 	quoteTencentRangeURL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,%s,%s,%d,bfq"
-	quoteTencentReferer  = "https://gu.qq.com/"
+	// The SAME endpoint with qfq instead of bfq. This is the ONLY front-adjusted call in the build,
+	// and it exists for one purpose: detecting a bonus or rights issue the unadjusted body does not
+	// name. Its output is never stored, scored or displayed (ADR 0029 §10).
+	quoteTencentQfqRangeURL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,%s,%s,%d,qfq"
+	quoteTencentReferer     = "https://gu.qq.com/"
 
 	// A daily candle is under 100 bytes on either vendor, so quoteMaxBars of them plus a snapshot
 	// stays far below this; a body at this ceiling is an interstitial, not a quote.
@@ -1601,6 +1605,34 @@ func fetchTencentRange(ctx context.Context, market, code, from, to string) (*Quo
 	// bars=0: the window decides how many rows there are, so trimming to a count here would drop the
 	// OLDEST end of a range the reader explicitly asked for.
 	return parseTencentQuote(market, code, body, 0)
+}
+
+// fetchTencentAdjustRatio returns the front-adjusted closes for a window, keyed by date. It is the
+// only qfq call in the codebase (ADR 0029 §10), used only to detect an adjustment the unadjusted body
+// cannot name. The parser is the ordinary one: qfq rows have the same shape as bfq rows.
+func fetchTencentAdjustRatio(ctx context.Context, market, code, from, to string) (map[string]int64, error) {
+	sym, err := quoteSymbol(market, code)
+	if err != nil {
+		return nil, err
+	}
+	rawURL := fmt.Sprintf(quoteTencentQfqRangeURL, sym, from, to, quoteMaxBars)
+	ctx, cancel := context.WithTimeout(ctx, quoteFetchTimeout)
+	defer cancel()
+	body, err := vendorGet(ctx, rawURL, quoteTencentReferer, quoteBodyLimit)
+	if err != nil {
+		vendorLogf(rawURL, "quote qfq range fetch failed for %s: %v", sym, err)
+		return nil, err
+	}
+	resp, err := parseTencentQuote(market, code, body, 0)
+	if err != nil {
+		vendorLogf(rawURL, "quote qfq range parse failed for %s: %v", sym, err)
+		return nil, err
+	}
+	out := make(map[string]int64, len(resp.Bars))
+	for _, b := range resp.Bars {
+		out[b.Date] = b.Close
+	}
+	return out, nil
 }
 
 // fetchTencentIntraday fetches one session of minute points plus the snapshot that came with them.

@@ -37,6 +37,10 @@ type settleInput struct {
 	// SeriesFrom is the fetch window's floor: a series that begins there is a listing's first bars,
 	// whose moves have no price limit.
 	SeriesFrom string
+	// Adj holds the front-adjusted closes for the same window, keyed by date. AdjChecked says the
+	// caller was obliged to provide it: a missing date is then a source failure, never a skip.
+	Adj        map[string]int64
+	AdjChecked bool
 	Now        time.Time
 	// Valve is the pass-wide stale-feed signal: when tripped, a missing bar means the vendor is
 	// behind, not that this stock halted. Evidence still wins, so a current body resolves.
@@ -121,8 +125,23 @@ func settleMark(in settleInput) markResult {
 	}
 	bench := bpFromRatio(sessBar.Close, s0Bar.Close)
 	res.BenchRetBp = &bench
-	res.CorpAction = corporateActionBetween(in.Set.Symbol, in.Stock, in.Index, in.ExDates,
-		in.BaseDate, in.Session, in.SeriesFrom)
+	if in.AdjChecked {
+		qBase, okBase := in.Adj[in.BaseDate]
+		qS, okS := in.Adj[bar.Date]
+		if !okBase || !okS {
+			// The adjustment check is part of the answer: never resolve without it.
+			res.Status, res.Refusal = markRefused, "fetch_failed"
+			return res
+		}
+		if pBase := barOn(in.Stock, in.BaseDate); pBase != nil &&
+			adjustRatioChanged(qBase, pBase.Close, qS, bar.Close) {
+			res.CorpAction = true
+		}
+	}
+	if !res.CorpAction {
+		res.CorpAction = corporateActionBetween(in.Set.Symbol, in.Stock, in.Index, in.ExDates,
+			in.BaseDate, in.Session, in.SeriesFrom)
+	}
 
 	// A resumed or delisted stock keeps the halt flag; it never stays refused, because a refusal that
 	// can never resolve is exactly what hollows out a cohort without showing it.
@@ -313,6 +332,25 @@ func stockDatesNotIndexed(stock, index []QuoteBar, from, to string) bool {
 		}
 	}
 	return false
+}
+
+// adjustRatioChanged reports whether the qfq/raw ratio moved between two dates by more than the
+// rounding of four fen-rounded prices can explain. Exact integers: compare q1*p2 with q2*p1, and
+// bound the difference by the half-fen rounding of each of the four prices.
+func adjustRatioChanged(q1, p1, q2, p2 int64) bool {
+	if p1 <= 0 || p2 <= 0 || q1 <= 0 || q2 <= 0 {
+		return false
+	}
+	diff := abs64(q1*p2 - q2*p1)
+	bound := (q1+p1+q2+p2)/2 + 1
+	return diff > bound
+}
+
+func abs64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // ---------- daily-limit backstop (F14) ----------

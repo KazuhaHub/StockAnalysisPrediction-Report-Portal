@@ -183,6 +183,7 @@ func TestHaltLongerThanTheWindowFetchesBack(t *testing.T) {
 
 	now := shanghai(2026, time.October, 27, 16, 0)
 	e := &forecastEvaluator{now: func() time.Time { return now }}
+	e.adjust = adjustStub(stock)
 	var wides int
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		asOf := now.Format("2006-01-02") + "T15:00:01+08:00"

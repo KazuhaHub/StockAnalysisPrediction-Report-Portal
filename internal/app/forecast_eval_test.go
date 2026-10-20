@@ -25,6 +25,18 @@ func bar(date string, o, c, h, l int64) QuoteBar {
 	return QuoteBar{Date: date, Open: o, Close: c, High: h, Low: l, Volume: 100}
 }
 
+// adjustStub is the qfq seam for tests: the unadjusted closes unchanged, so detection sees no
+// adjustment unless a test supplies its own answer.
+func adjustStub(bars []QuoteBar) func(context.Context, string, string, string, string) (map[string]int64, error) {
+	return func(context.Context, string, string, string, string) (map[string]int64, error) {
+		out := make(map[string]int64, len(bars))
+		for _, b := range bars {
+			out[b.Date] = b.Close
+		}
+		return out, nil
+	}
+}
+
 // shanghai builds an instant in the exchange's zone, which is what every rule here reasons in.
 func shanghai(y int, mo time.Month, d, h, mi int) time.Time {
 	return time.Date(y, mo, d, h, mi, 0, 0, chinaZone)
@@ -641,6 +653,7 @@ func TestEvaluatorTickSettlesDueMarks(t *testing.T) {
 
 	now := shanghai(2026, time.November, 20, 16, 0)
 	e := &forecastEvaluator{now: func() time.Time { return now }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		switch code {
 		case "000852":
