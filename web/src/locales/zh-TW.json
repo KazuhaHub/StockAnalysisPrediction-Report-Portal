@@ -2095,5 +2095,9 @@
   "forecast.population.damaged": "賬本起點的值已損壞，無法讀取。寫入仍保持只讀，請聯絡維護者檢查 meta 表。",
   "forecast.cov.unrecorded_since": "{{since}} 以來有 {{n}} 份覆蓋類型的報告沒有預測記錄 · 近 30 天寫入失敗：{{m}}",
   "forecast.cov.unrecorded_audit": "查看審計日誌",
-  "webhook.event.predictions.store_failed": "預測帳本寫入失敗"
+  "webhook.event.predictions.store_failed": "預測帳本寫入失敗",
+  "forecast.direction.agree": "一致",
+  "forecast.direction.disagree": "相反",
+  "forecast.direction.flat": "持平",
+  "forecast.direction.untested": "不判定"
 }

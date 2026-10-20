@@ -13,13 +13,19 @@ import (
 )
 
 type forecastMembersResponse struct {
-	OK         bool             `json:"ok"`
-	Label      string           `json:"label"`
-	Start      string           `json:"start"`
-	End        string           `json:"end"`
-	Bench      string           `json:"bench"`
-	Checkpoint string           `json:"checkpoint"`
-	State      string           `json:"state"`
+	OK         bool   `json:"ok"`
+	Label      string `json:"label"`
+	Start      string `json:"start"`
+	End        string `json:"end"`
+	Bench      string `json:"bench"`
+	Checkpoint string `json:"checkpoint"`
+	State      string `json:"state"`
+	// The gate's own counts, so the drawer's headline matches the matrix without rescoring.
+	Resolved   int              `json:"resolved"`
+	Total      int              `json:"total"`
+	Refused    int              `json:"refused"`
+	CorpAction int              `json:"corp_action"`
+	N          int              `json:"n"`
 	Members    []forecastMember `json:"members"`
 }
 
@@ -44,7 +50,9 @@ type forecastMember struct {
 	S0Fen       *int64   `json:"s0_fen,omitempty"`
 	TerminalFen *int64   `json:"terminal_fen,omitempty"`
 	Upside      *float64 `json:"upside,omitempty"`
-	Agree       *bool    `json:"agree,omitempty"`
+	// Direction is the ONE hit verdict (agree|disagree|flat|untested), from predHitClass. It is sent
+	// only for a mature cell; a non-mature cell carries identity and status only.
+	Direction string `json:"direction,omitempty"`
 }
 
 func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string) {
@@ -166,10 +174,22 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	}
 	members, pending, _ := forecastMembership(sets, populationFrom, bench)
 	today := now.In(chinaZone).Format("2006-01-02")
-	cell := computeForecastCell(members, pending, rtype, period.Start, period.End, cp, today)
+	// The gate sees the same population the matrix scores: h12 is a standard-horizon column.
 	if cp == "h12" {
 		members = filterHorizonStd(members)
+		pending = filterHorizonStd(pending)
 	}
+	// The STATE comes from the gate, never the scorer: opening a drawer must not cost 10 000
+	// permutations to learn what the matrix already showed.
+	state, _, _, _, _, _ := forecastCellGate(members, pending, cp, period.End, today)
+	// An official month's matured cell is frozen in the matrix memo; the drawer must show that same
+	// state, even if a backdated set has since been loaded into the month.
+	if mode == "month" {
+		if c := s.cachedForecastCell(forecastGroupCellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
+			state = c.State
+		}
+	}
+	mature := state == "mature"
 
 	out := forecastMembersResponse{
 		OK:         true,
@@ -178,7 +198,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		End:        period.End,
 		Bench:      bench,
 		Checkpoint: cp,
-		State:      cell.State,
+		State:      state,
 		Members:    []forecastMember{},
 	}
 	var ids []int64
@@ -197,19 +217,27 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			SetID: gs.ID, ReportID: reportIDPtr(gs), Symbol: gs.Symbol,
 			ReportDate: reportDate, MadeAt: gs.MadeAt, MadeOn: gs.MadeOn,
 			Stance: gs.Stance, Status: m.Status,
-			CloseFen: m.CloseFen, RetBp: m.RetBp, BenchRetBp: m.BenchRetBp,
-			S0Fen: gs.S0Fen, TerminalFen: gs.TerminalFen,
 		}
-		if m.RetBp != nil && m.BenchRetBp != nil {
-			v := *m.RetBp - *m.BenchRetBp
-			fm.ExcessBp = &v
-		}
-		if gs.S0Fen != nil && *gs.S0Fen > 0 && gs.TerminalFen != nil {
-			u := float64(*gs.TerminalFen)/float64(*gs.S0Fen) - 1
-			fm.Upside = &u
-			if fm.ExcessBp != nil && u != 0 {
-				agree := (*fm.ExcessBp > 0 && u > 0) || (*fm.ExcessBp < 0 && u < 0)
-				fm.Agree = &agree
+		if mature {
+			// A non-mature cell has no outcomes to show: even a resolved mark is not a scored member
+			// until the whole cell passes its gates, and sending the numbers invites a reader to
+			// average a cell the matrix refuses to.
+			fm.CloseFen, fm.RetBp, fm.BenchRetBp = m.CloseFen, m.RetBp, m.BenchRetBp
+			fm.S0Fen, fm.TerminalFen = gs.S0Fen, gs.TerminalFen
+			if m.RetBp != nil && m.BenchRetBp != nil {
+				v := *m.RetBp - *m.BenchRetBp
+				fm.ExcessBp = &v
+			}
+			if gs.S0Fen != nil && *gs.S0Fen > 0 && gs.TerminalFen != nil {
+				u := float64(*gs.TerminalFen)/float64(*gs.S0Fen) - 1
+				fm.Upside = &u
+				// No benchmark excess means the verdict is unknowable, not `flat`: flat is a tested
+				// row that ended level with its index.
+				if fm.ExcessBp != nil {
+					fm.Direction = predHitClass(*gs.TerminalFen, *gs.S0Fen, *fm.ExcessBp)
+				} else {
+					fm.Direction = dirUntested
+				}
 			}
 		}
 		if gs.ReportID != nil {

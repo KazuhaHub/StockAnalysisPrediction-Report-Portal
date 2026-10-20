@@ -2095,5 +2095,9 @@
   "forecast.population.damaged": "The ledger start value is unreadable (a damaged database). It remains write-once; ask the operator to inspect the meta table.",
   "forecast.cov.unrecorded_since": "{{n}} covered reports since {{since}} have no prediction row · store failures (30 days): {{m}}",
   "forecast.cov.unrecorded_audit": "see the audit log",
-  "webhook.event.predictions.store_failed": "Prediction ledger write failed"
+  "webhook.event.predictions.store_failed": "Prediction ledger write failed",
+  "forecast.direction.agree": "Agreed",
+  "forecast.direction.disagree": "Disagreed",
+  "forecast.direction.flat": "Flat",
+  "forecast.direction.untested": "Untested"
 }

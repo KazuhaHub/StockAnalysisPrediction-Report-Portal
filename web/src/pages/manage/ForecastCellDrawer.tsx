@@ -141,7 +141,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     { title: t('forecast.drawer.stance'), dataIndex: 'stance', key: 'stance' },
     { title: t('forecast.drawer.upside'), dataIndex: 'upside', key: 'upside' },
     { title: t('forecast.drawer.excess'), dataIndex: 'excess_bp', key: 'excess_bp' },
-    { title: t('forecast.drawer.agreement'), dataIndex: 'agree', key: 'agree' },
+    { title: t('forecast.drawer.agreement'), dataIndex: 'direction', key: 'direction' },
   ]
 
   return (
@@ -220,14 +220,15 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
               },
               {
                 ...columns[5],
-                render: (_, m) =>
-                  m.agree === undefined ? (
-                    '—'
-                  ) : m.agree ? (
-                    <Tag color="green">✓</Tag>
-                  ) : (
-                    <Tag color="red">✗</Tag>
-                  ),
+                render: (_, m) => {
+                  // Text, not colour alone: the four states have to be readable in print and to a
+                  // reader who cannot tell the tags apart.
+                  const d = m.direction
+                  if (d === undefined) return '—'
+                  const label = t(`forecast.direction.${d}`)
+                  const color = d === 'agree' ? 'green' : d === 'disagree' ? 'red' : d === 'flat' ? 'default' : 'default'
+                  return <Tag color={color}>{label}</Tag>
+                },
               },
             ]}
           />

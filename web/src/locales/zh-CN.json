@@ -2095,5 +2095,9 @@
   "forecast.population.damaged": "账本起点的值已损坏，无法读取。写入仍保持只读，请联系维护者检查 meta 表。",
   "forecast.cov.unrecorded_since": "{{since}} 以来有 {{n}} 份覆盖类型的报告没有预测记录 · 近 30 天写入失败：{{m}}",
   "forecast.cov.unrecorded_audit": "查看审计日志",
-  "webhook.event.predictions.store_failed": "预测账本写入失败"
+  "webhook.event.predictions.store_failed": "预测账本写入失败",
+  "forecast.direction.agree": "一致",
+  "forecast.direction.disagree": "相反",
+  "forecast.direction.flat": "持平",
+  "forecast.direction.untested": "不判定"
 }
