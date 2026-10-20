@@ -45,6 +45,14 @@ func newP31Fixture(t *testing.T) p31Fixture {
 	if err := st.AddReportViewer(id, "2026-10-19", "ext", f.tenant); err != nil {
 		t.Fatal(err)
 	}
+	// The list route reads the prediction ledger, so it needs a set to hide; without one every
+	// scope, including the buggy unscoped one, would return an empty list.
+	ps := &predSetRow{Symbol: f.symbol, Rtype: "投资决策建议", Version: "v", ReportDate: "2026-10-19",
+		MadeAt: "2026-10-19T13:00:00Z", MadeOn: "2026-10-19", Cohort: "2026-10", Zone: "Asia/Shanghai",
+		State: predStateAccepted, PayloadSHA: "p31-1", BodySHA: "p31-1"}
+	if _, _, err := st.InsertPredictionSet(id, ps, nil); err != nil {
+		t.Fatalf("seed prediction set: %v", err)
+	}
 	return f
 }
 
@@ -71,10 +79,13 @@ func (f p31Fixture) readList(user string) []any {
 }
 
 func TestScopeOnUnreadableRestrictedFlag(t *testing.T) {
-	// Control: a readable restriction lets the tenant read its own report.
+	// Control: a readable restriction lets the tenant read its own report AND its list row.
 	f := newP31Fixture(t)
 	if code := f.readReport("ext"); code != http.StatusOK {
 		t.Fatalf("control: restricted read = %d", code)
+	}
+	if sets := f.readList("ext"); len(sets) != 1 {
+		t.Fatalf("control: list returned %d sets, want 1", len(sets))
 	}
 
 	// The account row cannot be read.

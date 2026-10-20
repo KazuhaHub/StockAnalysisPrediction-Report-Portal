@@ -373,8 +373,9 @@ func (s *Server) isRestrictedStrict(username string) (bool, error) {
 		return false, err
 	}
 	if !found {
-		// No account row: not a session (a machine caller or a test identity), so there is no
-		// restriction to read. A real read failure is the branch above and denies.
+		// No account row: a session route has already validated the account before reaching here, so
+		// this is a request that raced a deletion (or a direct caller that supplied a name). Treat it
+		// as unscoped, matching the pre-P31 contract; a read FAILURE is the branch above and denies.
 		return false, nil
 	}
 	if restricted {

@@ -154,7 +154,9 @@ func targetSymbolInput(config string) string {
 // viewer list — which is why strict per-person isolation costs no duplicate generation.
 func (s *Server) reuseSameDayReport(user string, targetID int64, rows []map[string]string) (int64, string, bool) {
 	sc := s.viewerScope(user)
-	if sc == nil || len(rows) != 1 {
+	// A deny-all scope cannot be proven entitled to anything: reuse would hand back another OU's
+	// report and write a viewer row for a caller whose restriction could not even be read (P31).
+	if sc == nil || sc.denyAll || len(rows) != 1 {
 		return 0, "", false
 	}
 	t, ok := s.st.GetTarget(targetID)

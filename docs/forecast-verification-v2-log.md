@@ -433,3 +433,10 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Tests: an unreadable account table and an unreadable OU table both deny on the report route (404)
   and return no sets on the list route; a dangling chain denies; a readable restriction still reads
   its own report; an ordinary internal account still gets no scope.
+- **P31 review follow-ups.** Same-day reuse now refuses a deny-all scope: it would otherwise hand
+  back another OU's report and write a `u:` viewer row for a caller whose restriction could not be
+  read, turning a failure into a silent, unreadable success. The list-route test now seeds a
+  prediction set, so its assertion has something the unscoped bug would have returned. A missing
+  account row stays unscoped (a session route has already validated the account; the window is a
+  request racing a deletion), while a read failure still denies — the comment now says exactly that
+  instead of calling it a machine caller.
