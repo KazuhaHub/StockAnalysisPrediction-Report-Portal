@@ -494,3 +494,72 @@ func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
 		t.Errorf("coverage sums to %d but loaded %d reports", sum, cov.Reports)
 	}
 }
+
+// TestRestoreCapsModeWhenGatesAreEmpty pins P9's restore rows (§3.3): the ephemeral keys are reset,
+// the mode is never stronger than the weaker database, and it never comes back as 1 with no gate.
+func TestRestoreCapsModeWhenGatesAreEmpty(t *testing.T) {
+	restoreInto := func(t *testing.T, dumpMode, liveMode string) (*Store, []AuditEntry) {
+		t.Helper()
+		src := newTestStore(t)
+		if err := src.SetSetting(setForecastAuto, dumpMode); err != nil {
+			t.Fatal(err)
+		}
+		if err := src.SetSetting(setForecastDryGate, `{"sh000852":{"at":"2026-10-20T00:00:00Z","by":"a","note":"b"}}`); err != nil {
+			t.Fatal(err)
+		}
+		dump := dumpOf(t, src)
+
+		dst := newTestStore(t)
+		for k, v := range map[string]string{
+			setForecastAuto:          liveMode,
+			setForecastDryGate:       `{"sh000906":{"at":"2026-10-20T00:00:00Z","by":"c","note":"d"}}`,
+			setForecastEvalState:     `{"mode":"1"}`,
+			setForecastAlertState:    `{"stalled":"2026-10-20T00:00:00Z"}`,
+			setForecastAlertTestOKAt: "2026-10-20T00:00:00Z",
+		} {
+			if err := dst.SetSetting(k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		rows, _ := dst.ListAudit(AuditFilter{Action: AuditForecastAuto})
+		return dst, rows
+	}
+
+	// Both at 1: the gates are gone, so the mode is capped at dry and the reason is recorded.
+	dst, rows := restoreInto(t, forecastModeOn, forecastModeOn)
+	if got := dst.GetSetting(setForecastAuto, "0"); got != forecastModeDry {
+		t.Errorf("mode after restore = %q, want dry", got)
+	}
+	if len(rows) != 1 || !strings.Contains(rows[0].Detail, "restore_gates_empty") {
+		t.Fatalf("audit rows = %+v, want one carrying restore_gates_empty", rows)
+	}
+	if rows[0].Actor != "system" {
+		t.Errorf("actor = %q, want system", rows[0].Actor)
+	}
+	for _, k := range []string{setForecastEvalState, setForecastAlertState, setForecastDryGate, setForecastAlertTestOKAt} {
+		if got := dst.GetSetting(k, "absent"); got != "absent" {
+			t.Errorf("%s survived the restore: %q", k, got)
+		}
+	}
+
+	// The dump is off, the live database on: off wins, and there is no second row.
+	dst, rows = restoreInto(t, forecastModeOff, forecastModeOn)
+	if got := dst.GetSetting(setForecastAuto, "0"); got != forecastModeOff {
+		t.Errorf("mode after restore = %q, want off", got)
+	}
+	if len(rows) != 0 {
+		t.Errorf("audit rows = %+v, want none (the dump already said off)", rows)
+	}
+
+	// Dry stays dry.
+	dst, rows = restoreInto(t, forecastModeDry, forecastModeOn)
+	if got := dst.GetSetting(setForecastAuto, "0"); got != forecastModeDry {
+		t.Errorf("mode after restore = %q, want dry", got)
+	}
+	if len(rows) != 0 {
+		t.Errorf("audit rows = %+v, want none", rows)
+	}
+}

@@ -91,6 +91,9 @@ type Store struct {
 	// onForecastApply is a test-only failure seam for the evaluator's per-set transaction. It is nil
 	// in production; a test makes the Nth write fail to prove the plan rolls back as one unit.
 	onForecastApply func(op int) error
+	// forecastGateMu serializes the dry-gate read-modify-write: two admins recording different
+	// benchmarks at the same moment must not drop one another's check.
+	forecastGateMu sync.Mutex
 }
 
 // OpenStore opens the database using the given driver. driver: "sqlite" (default) or "postgres";

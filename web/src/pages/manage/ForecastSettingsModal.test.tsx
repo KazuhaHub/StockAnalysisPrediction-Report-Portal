@@ -21,6 +21,10 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }
 
 const base: ForecastSettings = {
   enabled: false,
+  mode: '0',
+  readiness: [],
+  dry_gate: {},
+  gate_codes: ['sh000852'],
   bench: 'sh000852',
   bench_codes: ['sh000300', 'sh000852', 'sh000906'],
   population: { set: false, candidates: [] },
@@ -50,14 +54,6 @@ describe('ForecastSettingsModal', () => {
   beforeEach(() => {
     apiMock.post.mockReset()
     apiMock.post.mockResolvedValue({ ok: true })
-  })
-
-  it('posts mode only when the switch changed', async () => {
-    show()
-    fireEvent.click(screen.getByRole('switch', { name: 'forecast.settings.enabled' }))
-    save()
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
-    expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast', { mode: 1 })
   })
 
   it('posts bench_schedule only when the index changed', async () => {

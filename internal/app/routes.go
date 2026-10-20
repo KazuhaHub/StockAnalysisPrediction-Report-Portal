@@ -113,6 +113,9 @@ func (s *Server) sessionRoutes() []routeRow {
 // reliably, and the question a whole-portal policy is built on.
 func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "GET /healthz", s.handleHealthz)
+	// The evaluator's own status-only probe (P9). Public because an external monitor is not a portal
+	// account; the body is one boolean, never the heartbeat.
+	s.public(mux, "GET /healthz/forecast", s.handleHealthzForecast)
 	// Session-gated, not public: build identity (version/commit) is only shown in the signed-in
 	// app footer, so an anonymous scanner can't fingerprint the build against known CVEs.
 	s.session(mux, "GET /api/version", s.handleVersion)
@@ -309,6 +312,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/settings", s.apiAdminSettings)
 	s.admin(mux, "GET /api/admin/forecast", s.apiForecastSettings)
 	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
+	// One pass now, in the current mode (P9). Admin, like the switch it stands in for.
+	s.admin(mux, "POST /api/admin/forecast/evaluate", s.apiForecastEvaluate)
 	// The verification page's aggregate. PermManage, not admin: the ledger's statistics are a
 	// management view, and a bridge query token must never reach them (ADR 0029 §7).
 	s.perm(mux, "GET /api/admin/forecast/groups", PermManage, s.apiForecastGroups)

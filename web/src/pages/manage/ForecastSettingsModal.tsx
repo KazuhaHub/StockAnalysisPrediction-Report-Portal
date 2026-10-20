@@ -1,20 +1,16 @@
 import { useEffect, useState } from 'react'
-import { App, Alert, Button, Modal, Select, Space, Switch, Typography } from 'antd'
+import { App, Button, Modal, Select, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
 
 // The evaluator's settings, as a modal opened from the verification page's header.
 //
-// Two settings and no more, because that is the whole of what the evaluator reads:
-//
-//   - whether it runs at all. It is a background loop that reaches a Chinese market-data vendor on
-//     its own volition, on every install where it is on, which is why it ships OFF (ADR 0029 §6) and
-//     why flipping it is audited — the operator turned on something that egresses.
-//   - the benchmark NEW sets are written with. A change is effective from the NEXT cohort (P4): the
-//     sets already written keep the index they were frozen with, so nothing on the ledger is
-//     re-scored. The modal posts only the fields the admin actually changed, so a save that only
-//     flips the switch does not schedule a benchmark by accident.
+// The benchmark setting. Since P9 the evaluator's ON/OFF/DRY switch lives on the operating card
+// beside the readiness list that gates it, so this modal has one job: the index NEW sets are written
+// with. A change is effective from the NEXT cohort (P4): the sets already written keep the index they
+// were frozen with, so nothing on the ledger is re-scored. The modal posts only the fields the admin
+// actually changed.
 export default function ForecastSettingsModal({
   open,
   value,
@@ -28,7 +24,6 @@ export default function ForecastSettingsModal({
 }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
-  const [enabled, setEnabled] = useState(value.enabled)
   const [bench, setBench] = useState(value.bench_next || value.bench)
   const [busy, setBusy] = useState(false)
 
@@ -37,10 +32,9 @@ export default function ForecastSettingsModal({
   // server still has.
   useEffect(() => {
     if (open) {
-      setEnabled(value.enabled)
       setBench(value.bench_next || value.bench)
     }
-  }, [open, value.enabled, value.bench, value.bench_next])
+  }, [open, value.bench, value.bench_next])
 
   const benchOptions = value.bench_codes.map((code) => ({
     value: code,
@@ -49,7 +43,6 @@ export default function ForecastSettingsModal({
 
   const save = async () => {
     const payload: Record<string, unknown> = {}
-    if (enabled !== value.enabled) payload.mode = enabled ? 1 : 0
     const chosen = value.bench_next || value.bench
     if (bench !== chosen) payload.bench_schedule = bench
     if (Object.keys(payload).length === 0) {
@@ -96,16 +89,6 @@ export default function ForecastSettingsModal({
       cancelText={t('common.cancel')}
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-        {/* The disclosure, stated before the switch rather than after it: with this on, the loop
-            calls a third-party vendor on its own schedule for every due set. An operator cannot
-            weigh what they have not been told, and a one-line hint under a control is not a
-            substitute for saying it plainly. */}
-        <Alert type="warning" showIcon title={t('forecast.settings.enabledWarn')} />
-        <Space wrap>
-          <Switch checked={enabled} onChange={setEnabled} aria-label={t('forecast.settings.enabled')} />
-          <Typography.Text>{t('forecast.settings.enabled')}</Typography.Text>
-          <Typography.Text type="secondary">{t('forecast.settings.enabledHint')}</Typography.Text>
-        </Space>
         <div>
           <Typography.Text>{t('forecast.settings.bench')}</Typography.Text>
           <Select

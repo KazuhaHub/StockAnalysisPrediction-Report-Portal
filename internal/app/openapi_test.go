@@ -287,6 +287,13 @@ func TestHealthzSpecMatchesTheHandler(t *testing.T) {
 			t.Errorf("/healthz does not document a %s response, and the handler can return one", code)
 		}
 	}
+	// The evaluator's probe (P9) has the same two outcomes and the same one-key body.
+	got = spec.Paths["/healthz/forecast"].Get.Responses
+	for _, code := range []string{"200", "503"} {
+		if _, ok := got[code]; !ok {
+			t.Errorf("/healthz/forecast does not document a %s response", code)
+		}
+	}
 
 	// And the handler really does answer with both, so the assertion above is about something.
 	st := newTestStore(t)

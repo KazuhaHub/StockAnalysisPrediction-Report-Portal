@@ -514,8 +514,18 @@ export interface CleanupConfig {
 // count. It is one shape for both verbs because the GET answers with exactly what the page and the
 // modal between them need, so a save's reload and a fresh open are the same request.
 export interface ForecastSettings {
-  /** Whether the evaluator's background loop runs. Off by default. */
+  /** Whether the evaluator's background loop runs. Off by default. Kept for one release. */
   enabled: boolean
+  /** The three-way mode (P9): off, dry (plan, write nothing), or on. */
+  mode: '0' | 'dry' | '1'
+  /** The last pass, or null before the first. */
+  heartbeat?: ForecastHeartbeat | null
+  /** The §1.4 readiness list, in order. Item 6 arrives with P23. */
+  readiness: ForecastReadinessItem[]
+  /** Hand-checked dry runs, keyed by benchmark code. */
+  dry_gate: Record<string, ForecastGate>
+  /** The benchmark codes the readiness item is about, for the check form. */
+  gate_codes: string[]
   /** The index NEW sets are benchmarked against. Sets already written keep theirs, so changing this
    *  never re-scores anything on the ledger. */
   bench: string
@@ -539,6 +549,67 @@ export interface ForecastSettings {
   /** Unrecorded covered reports since the ledger start (P2), and ledger store failures in 30 days.
    *  `ok` is false while the ledger start is unset, when a count would be meaningless. */
   unrecorded?: ForecastUnrecorded[]
+}
+
+export interface ForecastPassStats {
+  kind: 'tick' | 'manual'
+  started_at: string
+  finished_at: string
+  sets: number
+  fetches: Record<string, number>
+  resolved: number
+  halted: number
+  refused: Record<string, number>
+  refused_by_class: Record<string, number>
+  finalised: number
+  healed: number
+  baselines: Record<string, number>
+  awaiting_session: number
+  due_unsettled: number
+  oldest_due_unsettled_minutes: number
+  stale_valve_tripped: boolean
+  errors: number
+  last_error?: string
+  panics: number
+}
+
+export interface ForecastDrySample {
+  set_id: number
+  mark?: string
+  kind: 'settle' | 'baseline' | 'final'
+  market: string
+  code: string
+  source?: string
+  due?: string
+}
+
+export interface ForecastBenchStat {
+  last_bar: string
+  fetched_at: string
+  source: string
+  market: string
+  code: string
+}
+
+export interface ForecastHeartbeat {
+  mode: '0' | 'dry' | '1'
+  last_tick_at: string
+  pass: ForecastPassStats
+  bench: Record<string, ForecastBenchStat>
+  dry_sample?: ForecastDrySample[]
+  awaiting_gate?: string[]
+}
+
+export interface ForecastReadinessItem {
+  key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts'
+  ok: boolean
+  detail?: string
+}
+
+export interface ForecastGate {
+  at: string
+  by: string
+  note: string
 }
 
 export interface ForecastUnrecorded {

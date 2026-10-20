@@ -219,11 +219,45 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
   P6 #121, P7 #122, P8 #123, P16a #124. `main` is at `183061a3`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** R1a-β2 is done; the next release is R1b, beginning with P9
-  `feat/forecast-evaluator-operations` (§6.1): dry mode, heartbeat, watchdog, health route,
-  evaluate-now, and the §1.4 readiness list. Start it on a fresh branch from `origin/main`.
+- **Next step.** P9 is implemented on `feat/forecast-evaluator-operations` and awaiting review; the
+  next PR is P41 (`feat/forecast-alert-channels`, §6.2), which writes `forecast_alert_test_ok_at` and
+  so makes readiness item 5 passable.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
 - **Evaluator state.** `forecast_auto` must remain OFF until R1b ships and the readiness list is
   green.
+
+### P9 — operating the evaluator
+
+- **Mode.** `forecast_auto` now carries `0` / `dry` / `1`. `step` reads it first and, when it is
+  off, performs exactly that one read: the off path has no heartbeat, no write and no fetch. The old
+  binary reading `dry` as off is deliberate and is the rollback story.
+- **Dry writes are prevented at one door.** Every ledger write in a pass goes through
+  `applyPlan`; it drops the plan in dry mode, and in mode 1 drops it for a benchmark with no recorded
+  hand check (`forecast_dry_gate`), recording the code in the heartbeat's `awaiting_gate`. A separate
+  "what would happen" path would have drifted from the real one, which is why the same planner runs.
+- **Readiness is the §1.4 list, items 1–5.** Item 6 (ledger chain) is absent until P23 and a test
+  pins the count at five. Item 5 reads `forecast_alert_test_ok_at`, which P41 writes; until then
+  mode 1 is reachable only by failing that item, so the evaluator stays off after this PR even if
+  every other item holds. That is the release order, not an oversight.
+- **The gate codes are the union of the active benchmark and every code frozen by an accepted set
+  with a non-terminal mark.** Pre-live sets are included on purpose: the evaluator settles them, and
+  counting only in-population sets would leave the list empty at the switch. With no accepted set at
+  all the active code is listed, so the item is never vacuously true.
+- **Watchdog.** Its own goroutine, its own recover, one settings read while off. `stalled` after ten
+  minutes (at most hourly), `lagging` on a due mark over six hours, a tripped valve, or a benchmark
+  calendar still ending before today after 18:00 CST on a weekday (at most daily). `no_source` is not
+  emitted before P23, as the plan says: there is no ledger chain to check yet.
+- **Restore (§3.3).** `forecast_eval_state`, `forecast_alert_state`, `forecast_dry_gate` and
+  `forecast_alert_test_ok_at` are deleted on this transaction; the mode is the lower of dump and
+  live (`0 < dry < 1`), audited only on a real change; and a result of `1` is capped at `dry` with
+  `{reason:"restore_gates_empty"}`, because the gates were just reset and mode 1 without them would
+  plan every set and write none. The audit row is written through the restore's own transaction.
+- **Health route.** `GET /healthz/forecast` is public and answers exactly `{"ok":…}`, 503 when the
+  mode is not off and the heartbeat is missing or older than ten minutes. A switched-off evaluator is
+  200.
+- **Deviations from the plan's test list.** `TestWatchdogRunsWhileCleanupIsSlow` is a timing
+  assertion (the watchdog shares no lock with cleanup), and the panic tests drive `step` and the
+  watchdog's safe wrapper rather than an infinite ticker. `Healed` stays 0: the repair runs at boot,
+  not per pass, and nothing in P9 changes that.
