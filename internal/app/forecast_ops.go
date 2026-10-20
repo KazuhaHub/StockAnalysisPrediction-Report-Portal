@@ -541,8 +541,10 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	// 5. Alert channels were verified within thirty days. P41 writes the key.
 	alertsOK := false
 	if raw := s.st.GetSetting(setForecastAlertTestOKAt, ""); raw != "" {
-		if at, err := time.Parse(time.RFC3339, raw); err == nil && now.Sub(at) <= 30*24*time.Hour {
-			alertsOK = true
+		if at, err := time.Parse(time.RFC3339, raw); err == nil {
+			age := now.Sub(at)
+			// A stamp in the future (a clock change, a hand-edited row) proves nothing.
+			alertsOK = age >= -5*time.Minute && age <= 30*24*time.Hour
 		}
 	}
 	alertDetail := ""
@@ -627,26 +629,24 @@ func (s *Server) forecastWatchdogOnce(now time.Time) {
 	s.promoteForecastBench(now)
 
 	hb, have := s.st.ForecastHeartbeat()
-	alerts := s.st.forecastAlertState()
-
 	if !have {
-		s.emitForecastAlert(alerts, "stalled", "no heartbeat has been written yet", now, forecastStallAlertEvery)
+		s.emitForecastAlert("stalled", "no heartbeat has been written yet", now, forecastStallAlertEvery)
 		return
 	}
 	if at, err := time.Parse(time.RFC3339, hb.LastTickAt); err != nil || now.Sub(at) > forecastStalledAfter {
-		s.emitForecastAlert(alerts, "stalled",
+		s.emitForecastAlert("stalled",
 			"the heartbeat is older than 10 minutes", now, forecastStallAlertEvery)
 	}
 	if hb.Pass.OldestDueUnsettledMinutes*int(time.Minute) > int(forecastLaggingAfter) {
-		s.emitForecastAlert(alerts, "lagging",
+		s.emitForecastAlert("lagging",
 			"a due mark has been unsettled for over 6 hours", now, forecastLaggingAlertEvery)
 	}
 	if hb.Pass.StaleValveTripped {
-		s.emitForecastAlert(alerts, "lagging",
+		s.emitForecastAlert("lagging",
 			"the stale-data valve tripped: the vendor's feed is behind the calendar", now, forecastLaggingAlertEvery)
 	}
 	if staleCalendar(hb, now) {
-		s.emitForecastAlert(alerts, "lagging",
+		s.emitForecastAlert("lagging",
 			"a benchmark calendar is behind the exchange after the close", now, forecastLaggingAlertEvery)
 	}
 }
@@ -681,40 +681,89 @@ func staleCalendar(hb forecastHeartbeat, now time.Time) bool {
 	return false
 }
 
-func (s *Store) forecastAlertState() map[string]string {
-	out := map[string]string{}
+// forecastChannelResult is one channel's last delivery, for the page.
+type forecastChannelResult struct {
+	At    string `json:"at"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// forecastAlertRecord is `forecast_alert_state`. `Last` de-duplicates the watchdog's events by
+// reason; `Channels` is what the page shows as the last delivery.
+type forecastAlertRecord struct {
+	Last     map[string]string                `json:"last,omitempty"`
+	Channels map[string]forecastChannelResult `json:"channels,omitempty"`
+}
+
+func (s *Store) forecastAlertState() forecastAlertRecord {
+	var out forecastAlertRecord
 	raw := s.GetSetting(setForecastAlertState, "")
 	if raw == "" {
 		return out
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return map[string]string{}
+		return forecastAlertRecord{}
 	}
 	return out
 }
 
-// emitForecastAlert fires one event unless the reason has fired inside its window, and records the
-// emission time either way.
-func (s *Server) emitForecastAlert(state map[string]string, reason, detail string, now time.Time, every time.Duration) {
-	if raw, ok := state[reason]; ok {
-		if at, err := time.Parse(time.RFC3339, raw); err == nil && now.Sub(at) < every {
-			return
-		}
+// updateForecastAlertState is the read-modify-write for the one meta key two paths write (the
+// watchdog's de-duplication and every channel delivery). Serialized so one cannot drop the other.
+func (s *Store) updateForecastAlertState(fn func(*forecastAlertRecord)) {
+	s.forecastAlertMu.Lock()
+	defer s.forecastAlertMu.Unlock()
+	rec := s.forecastAlertState()
+	if rec.Last == nil {
+		rec.Last = map[string]string{}
 	}
-	state[reason] = now.UTC().Format(time.RFC3339)
-	if body, err := json.Marshal(state); err == nil {
-		if err := s.st.SetSetting(setForecastAlertState, string(body)); err != nil {
-			log.Printf("forecast watchdog: alert state: %v", err)
+	if rec.Channels == nil {
+		rec.Channels = map[string]forecastChannelResult{}
+	}
+	fn(&rec)
+	body, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	if err := s.SetSetting(setForecastAlertState, string(body)); err != nil {
+		log.Printf("forecast alert state: %v", err)
+	}
+}
+
+// emitForecastAlert fires one event unless the reason has fired inside its window, and records the
+// emission time either way. The webhook and the two channels are fired here and nowhere else, so a
+// reason produces one delivery per channel.
+func (s *Server) emitForecastAlert(reason, detail string, now time.Time, every time.Duration) {
+	fire := false
+	s.st.updateForecastAlertState(func(rec *forecastAlertRecord) {
+		if raw, ok := rec.Last[reason]; ok {
+			if at, err := time.Parse(time.RFC3339, raw); err == nil && now.Sub(at) < every {
+				return
+			}
 		}
+		rec.Last[reason] = now.UTC().Format(time.RFC3339)
+		fire = true
+	})
+	if !fire {
+		return
 	}
 	hb, _ := s.st.ForecastHeartbeat()
-	s.fireEvent(EventForecastEvaluatorUnhealthy, map[string]any{
+	payload := map[string]any{
 		"reason":       reason,
 		"detail":       detail,
 		"mode":         hb.Mode,
 		"last_tick_at": hb.LastTickAt,
 		"at":           now.UTC().Format(time.RFC3339),
-	})
+	}
+	s.fireEvent(EventForecastEvaluatorUnhealthy, payload)
+	// The channels do network I/O with their own timeouts; they must not hold the watchdog.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("forecast alert: panic: %v", r)
+			}
+		}()
+		s.forecastAlert(EventForecastEvaluatorUnhealthy, reason, payload)
+	}()
 }
 
 // ---------- manual pass ----------

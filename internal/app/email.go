@@ -128,6 +128,15 @@ func (s *Server) apiEmailSave(w http.ResponseWriter, r *http.Request, user strin
 	if in.Security != nil {
 		s.st.SetSetting("smtp_security", strings.TrimSpace(*in.Security))
 	}
+	// Any change to the transport invalidates the forecast alert verification: readiness item 5 is
+	// about a real delivery through the configuration that exists now. The email form posts every
+	// field, so a save that changes nothing also clears it; the test button is one click.
+	if in.Enabled != nil || in.Host != nil || in.Port != nil || in.User != nil ||
+		in.Pass != nil || in.From != nil || in.Security != nil {
+		if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
+			log.Printf("email save: clear the forecast alert stamp: %v", err)
+		}
+	}
 	writeJSON(w, okJSON)
 }
 

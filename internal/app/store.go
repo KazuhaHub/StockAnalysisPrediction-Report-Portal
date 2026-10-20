@@ -94,6 +94,9 @@ type Store struct {
 	// forecastGateMu serializes the dry-gate read-modify-write: two admins recording different
 	// benchmarks at the same moment must not drop one another's check.
 	forecastGateMu sync.Mutex
+	// forecastAlertMu serializes `forecast_alert_state`, which the watchdog's de-duplication and
+	// every channel delivery both read-modify-write.
+	forecastAlertMu sync.Mutex
 }
 
 // OpenStore opens the database using the given driver. driver: "sqlite" (default) or "postgres";

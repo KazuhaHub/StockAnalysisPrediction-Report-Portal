@@ -67,6 +67,7 @@ type Server struct {
 	mermaidCharts      mermaidChartCache                                                          // user-scoped, bounded rendered SVG cache for PDF export (ADR 0020)
 	quotes             quoteCache                                                                 // vendor quotes: its OWN bounded LRU + single-flight + upstream ceiling; lazily initialised (quote_cache.go)
 	ssoInsecureForTest bool                                                                       // test-only: permit a plain-http loopback IdP (ADR 0023)
+	slackHostForTest   string                                                                     // test-only: permit a plain-http loopback Slack host
 	dekOnce            dekCache                                                                   // lazily unwrapped data key for stored auth secrets (ADR 0023)
 	captchaSvc         *captcha.Service                                                           // public-form captcha (login / forgot password / registration)
 	health             healthCache                                                                // memoized /healthz database verdict, so a public probe cannot be a query amplifier

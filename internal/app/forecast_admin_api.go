@@ -8,6 +8,7 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -85,6 +86,9 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		// The codes the readiness item asks about, so the page can offer exactly those in the
 		// dry-run check form rather than every allowed index.
 		"gate_codes": gateCodes,
+		// The alert channels (P41): configuration and the last delivery per channel. The Slack URL
+		// itself is write-only, so only whether one is stored is returned.
+		"alerts": s.forecastAlertsView(),
 		// The benchmark new sets are written with. Existing sets keep theirs, and the UI says so:
 		// changing this does not re-score anything already on the ledger.
 		"bench": s.st.ForecastBench(),
@@ -124,6 +128,8 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 			Code string `json:"code"`
 			Note string `json:"note"`
 		} `json:"dry_gate"`
+		AlertEmailTo  *string `json:"alert_email_to"`
+		AlertSlackURL *string `json:"alert_slack_url"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
@@ -182,6 +188,28 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 				"dry_gate.note must say what was checked")
 			return
 		}
+	}
+
+	// The alert channels (P41). Each is validated before any write, like every other field.
+	var alertFields []string
+	if in.AlertEmailTo != nil {
+		if !validAlertEmailList(*in.AlertEmailTo) {
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_alert_email",
+				"alert_email_to must be a comma-separated list of bare addresses")
+			return
+		}
+		alertFields = append(alertFields, "AlertEmailTo")
+	}
+	if in.AlertSlackURL != nil {
+		raw := strings.TrimSpace(*in.AlertSlackURL)
+		if raw != "" {
+			if _, err := s.slackURLAllowed(raw); err != nil {
+				jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_slack_url",
+					"alert_slack_url must be an https URL on hooks.slack.com")
+				return
+			}
+		}
+		alertFields = append(alertFields, "AlertSlackURL")
 	}
 
 	// Switching the evaluator ON is gated by the §1.4 readiness list. The check happens before any
@@ -266,6 +294,41 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 			s.recordChange(r, user, AuditForecastBench, "settings", setForecastBenchNext,
 				map[string]any{"from": active, "to": bench, "effective_cohort": from})
 			effective = from
+		}
+	}
+
+	// The alert channels. A real change also invalidates the verification stamp: the last test no
+	// longer proves the channel that is configured now.
+	if len(alertFields) > 0 {
+		changed := false
+		if in.AlertEmailTo != nil {
+			next := strings.TrimSpace(*in.AlertEmailTo)
+			if next != s.st.GetSetting(setForecastAlertEmailTo, "") {
+				if err := s.st.SetSetting(setForecastAlertEmailTo, next); err != nil {
+					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+					return
+				}
+				changed = true
+			}
+		}
+		if in.AlertSlackURL != nil {
+			next := strings.TrimSpace(*in.AlertSlackURL)
+			if next != strings.TrimSpace(s.st.GetSetting(setForecastAlertSlackURL, "")) {
+				if err := s.st.SetSetting(setForecastAlertSlackURL, next); err != nil {
+					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+					return
+				}
+				changed = true
+			}
+		}
+		if changed {
+			if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
+				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+				return
+			}
+			sort.Strings(alertFields)
+			s.recordChange(r, user, AuditForecastAlert, "settings", "forecast_alerts",
+				map[string]any{"fields": alertFields})
 		}
 	}
 
@@ -407,4 +470,35 @@ func (s *Server) apiForecastEvaluate(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 	writeJSONStatus(w, status, body)
+}
+
+// apiForecastAlertTest sends a test alert to both channels. The verification stamp is written only
+// when BOTH succeed: a stamp that covered one channel would let readiness item 5 pass on a channel
+// that has never delivered anything.
+func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, user string) {
+	results := s.forecastAlert("forecast.alert.test", "test", map[string]any{"by": user})
+	view := make(map[string]map[string]any, len(results))
+	okAll := true
+	for channel, err := range results {
+		entry := map[string]any{"ok": err == nil}
+		if err != nil {
+			entry["error"] = err.Error()
+			okAll = false
+		}
+		view[channel] = entry
+	}
+	s.recordChange(r, user, AuditForecastAlertTest, "settings", "forecast_alerts",
+		map[string]any{"ok": okAll, "channels": view})
+	if !okAll {
+		writeJSONStatus(w, http.StatusBadGateway, map[string]any{
+			"error": "the test alert did not reach every channel", "code": "forecast_alert_failed",
+			"results": view,
+		})
+		return
+	}
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "results": view})
 }

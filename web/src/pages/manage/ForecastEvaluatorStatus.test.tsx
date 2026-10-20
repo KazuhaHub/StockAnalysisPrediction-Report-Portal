@@ -43,6 +43,7 @@ const base: ForecastSettings = {
     { key: 'alerts', ok: true },
   ],
   dry_gate: {},
+  alerts: { email_to: '', has_slack: false },
   heartbeat: {
     mode: 'dry',
     last_tick_at: now,
