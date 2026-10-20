@@ -178,3 +178,17 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   - Halt evidence is stricter than §5.3's pseudo-code: a same-day vendor stamp counts only when it
     is at or after the close. A cached 14:57 body proves the stock had not traded by 14:57, not that
     it did not trade that session; the plan's "stamp date >= S" would settle a halt on a partial body.
+- **P8 decisions.**
+  - The qfq fixture pairs from §5.4 were not captured; every rule is pinned with synthetic raw and
+    adjusted closes, including a property test that fen rounding alone never flags. This is the
+    second deviation from a P-list's fixture column, for the same reason as P7's V20 probes.
+  - `adjustRatioChanged` uses the plan's exact integer comparison with the +1 fen bound. A
+    degenerate (zero or negative) price never flags.
+  - One qfq call per set per tick covers [base_date, latest due session], and only when at least one
+    mark is actually due. A failed call defers every due mark `fetch_failed` (source class).
+  - A missing adjusted close for either the base or the due date is also `fetch_failed`: the check
+    is part of the answer, never skipped.
+- **P8 review follow-ups.** The qfq call is made only when at least one due mark's stock leg can
+  actually resolve (bar present and both index dates printed), not merely when a mark is scheduled;
+  and `TestAdjustFetchOnlyForDueMarks` now asserts d5 resolves, so the adjusted map is proven used
+  rather than merely fetched.

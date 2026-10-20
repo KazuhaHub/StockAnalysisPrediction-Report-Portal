@@ -18,6 +18,7 @@ import (
 // vendor's symbol ("000852"); every other code is the stock.
 func evalStub(now *time.Time, index, stock []QuoteBar, indexErr, stockErr error) *forecastEvaluator {
 	e := &forecastEvaluator{now: func() time.Time { return *now }}
+	e.adjust = adjustStub(stock)
 	e.fetch = func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 		if code == "000852" {
 			if indexErr != nil {
