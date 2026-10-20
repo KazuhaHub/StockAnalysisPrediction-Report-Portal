@@ -28,27 +28,37 @@ export default function ForecastAlerts({
   const [testing, setTesting] = useState(false)
   const [results, setResults] = useState<Record<string, ForecastChannelResult> | null>(null)
 
-  const configured = alerts.email_to.trim() !== '' || alerts.has_slack
+  // Readiness item 5 needs BOTH channels, so a single configured channel is still a warning.
+  const bothConfigured = alerts.email_to.trim() !== '' && alerts.has_slack
+  const verifiedOK = (() => {
+    if (!alerts.test_ok_at) return false
+    const age = Date.now() - Date.parse(alerts.test_ok_at)
+    return age >= -5 * 60_000 && age <= 30 * 24 * 60 * 60_000
+  })()
 
-  const post = async (body: Record<string, unknown>, success: string) => {
+  const post = async (body: Record<string, unknown>, success: string): Promise<boolean> => {
     setBusy(true)
     try {
       await api.post('/api/admin/forecast', body)
       message.success(success)
       onChanged()
+      return true
     } catch (e) {
       message.error(errText(e, t))
+      return false
     } finally {
       setBusy(false)
     }
   }
 
-  const save = () => {
+  const save = async () => {
     const body: Record<string, unknown> = {}
     if (email.trim() !== alerts.email_to) body.alert_email_to = email.trim()
     if (slack.trim() !== '') body.alert_slack_url = slack.trim()
     if (Object.keys(body).length === 0) return
-    void post(body, t('common.saved')).then(() => setSlack(''))
+    // Only drop the typed webhook when the save worked: a refusal must not make the admin paste a
+    // secret again.
+    if (await post(body, t('common.saved'))) setSlack('')
   }
 
   const clearSlack = () => {
@@ -77,6 +87,18 @@ export default function ForecastAlerts({
     }
   }
 
+  // Known server failures are translated; an SMTP driver message is shown as it came, because
+  // inventing a generic line over it would hide the one detail an operator needs.
+  const channelError = (msg?: string) => {
+    if (!msg) return ''
+    if (msg.includes('no email recipients configured')) return t('forecast.alert.err.emailNone')
+    if (msg.includes('no Slack webhook configured')) return t('forecast.alert.err.slackNone')
+    if (msg.includes('email is not enabled')) return t('forecast.alert.err.emailDisabled')
+    const status = /^slack returned HTTP (\d+)$/.exec(msg)
+    if (status) return t('forecast.alert.err.slackStatus', { code: status[1] })
+    return msg
+  }
+
   const lastRow = (channel: 'email' | 'slack') => {
     const last = results?.[channel] ?? alerts.last?.[channel]
     if (!last) return <Typography.Text type="secondary">{t('forecast.alert.never')}</Typography.Text>
@@ -86,7 +108,7 @@ export default function ForecastAlerts({
           {last.ok ? '✓' : '✗'}
         </Typography.Text>
         {last.at && <Typography.Text type="secondary">{dayjs(last.at).format('YYYY-MM-DD HH:mm')}</Typography.Text>}
-        {last.error && <Typography.Text type="danger">{last.error}</Typography.Text>}
+        {last.error && <Typography.Text type="danger">{channelError(last.error)}</Typography.Text>}
       </Space>
     )
   }
@@ -95,7 +117,7 @@ export default function ForecastAlerts({
     <Card title={t('forecast.alert.title')}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">{t('forecast.alert.hint')}</Typography.Text>
-        {!configured && <Alert type="warning" showIcon title={t('forecast.alert.none')} />}
+        {!bothConfigured && <Alert type="warning" showIcon title={t('forecast.alert.none')} />}
 
         <div>
           <Typography.Text>{t('forecast.alert.email')}</Typography.Text>
@@ -131,7 +153,7 @@ export default function ForecastAlerts({
           <Button onClick={sendTest} loading={testing} disabled={busy || testing}>
             {t('forecast.alert.test')}
           </Button>
-          {alerts.test_ok_at ? (
+          {verifiedOK ? (
             <Typography.Text type="secondary">
               {t('forecast.alert.verifiedAt', { at: dayjs(alerts.test_ok_at).format('YYYY-MM-DD HH:mm') })}
             </Typography.Text>

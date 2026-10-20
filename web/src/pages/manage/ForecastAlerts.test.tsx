@@ -65,6 +65,28 @@ describe('ForecastAlerts', () => {
     expect(screen.getByText('forecast.alert.none')).toBeTruthy()
   })
 
+  it('warns when only one of the two channels is configured', () => {
+    show({ alerts: { email_to: 'ops@example.com', has_slack: false } })
+    expect(screen.getByText('forecast.alert.none')).toBeTruthy()
+  })
+
+  it('keeps the typed Slack URL when the save is refused', async () => {
+    show()
+    apiMock.post.mockRejectedValue(new ApiError(400, 'bad', 'forecast_bad_slack_url'))
+    const input = screen.getByLabelText('forecast.alert.slack') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'https://hooks.slack.com/services/T/B/S' } })
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.alert.save' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(input.value).toBe('https://hooks.slack.com/services/T/B/S')
+  })
+
+  it('does not call an expired stamp verified', () => {
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60_000).toISOString()
+    show({ alerts: { email_to: 'ops@example.com', has_slack: true, test_ok_at: old } })
+    expect(screen.queryByText(/forecast\.alert\.verifiedAt/)).toBeNull()
+    expect(screen.getByText('forecast.alert.notVerified')).toBeTruthy()
+  })
+
   it('posts the recipients when they changed', async () => {
     show()
     fireEvent.change(screen.getByLabelText('forecast.alert.email'), {

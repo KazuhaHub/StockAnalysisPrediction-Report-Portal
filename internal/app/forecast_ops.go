@@ -541,8 +541,10 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	// 5. Alert channels were verified within thirty days. P41 writes the key.
 	alertsOK := false
 	if raw := s.st.GetSetting(setForecastAlertTestOKAt, ""); raw != "" {
-		if at, err := time.Parse(time.RFC3339, raw); err == nil && now.Sub(at) <= 30*24*time.Hour {
-			alertsOK = true
+		if at, err := time.Parse(time.RFC3339, raw); err == nil {
+			age := now.Sub(at)
+			// A stamp in the future (a clock change, a hand-edited row) proves nothing.
+			alertsOK = age >= -5*time.Minute && age <= 30*24*time.Hour
 		}
 	}
 	alertDetail := ""

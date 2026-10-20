@@ -2162,12 +2162,16 @@
   "forecast.alert.slackClear": "清除",
   "forecast.alert.save": "保存告警设置",
   "forecast.alert.test": "发送测试告警",
-  "forecast.alert.none": "尚未配置任何渠道，就绪项 5 无法通过。",
+  "forecast.alert.none": "就绪项 5 要求两个渠道都可用；请补齐缺少的渠道。",
   "forecast.alert.last": "最近送达",
   "forecast.alert.channel.email": "邮件",
   "forecast.alert.channel.slack": "Slack",
   "forecast.alert.never": "尚无送达记录",
   "forecast.alert.testOK": "测试告警已送达两个渠道。",
   "forecast.alert.verifiedAt": "验证于 {{at}}",
-  "forecast.alert.notVerified": "最近 30 天没有成功的测试"
+  "forecast.alert.notVerified": "最近 30 天没有成功的测试",
+  "forecast.alert.err.emailNone": "尚未配置邮件收件人。",
+  "forecast.alert.err.slackNone": "尚未配置 Slack Webhook。",
+  "forecast.alert.err.emailDisabled": "邮件功能已关闭，或 SMTP 未配置。",
+  "forecast.alert.err.slackStatus": "Slack 返回 HTTP {{code}}。"
 }

@@ -285,3 +285,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Not in the e2e script.** A test alert needs a real mailbox and Slack webhook; section G's
   readiness check therefore still sees item 5 fail on the throwaway portal. The channels are pinned
   by unit tests with the mail seam and an httptest Slack stub.
+- **P41 review follow-ups.** The scrub now removes every spelling of the URL (`raw`, `u.String()`,
+  `u.RequestURI()`), because `url.Parse` normalises an uppercase scheme and the raw string alone
+  would have missed. Redirects are refused (`CheckRedirect` → `ErrUseLastResponse`): a 302 would
+  leave the host list and turn the POST into a GET whose 2xx looks like a delivery. A change to the
+  SMTP configuration now clears `forecast_alert_test_ok_at` too, and a stamp in the future is not
+  accepted. The card requires BOTH channels for readiness (not "any"), treats a stamp older than
+  thirty days as unverified, keeps a typed webhook when the save is refused, and translates the three
+  known channel errors.

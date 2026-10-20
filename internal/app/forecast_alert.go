@@ -79,7 +79,12 @@ func (s *Server) slackPost(ctx context.Context, raw, text string) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: slackTimeout}
+	client := &http.Client{
+		Timeout: slackTimeout,
+		// A redirect would leave the host list and, on 301/302/303, turn the POST into a GET whose
+		// 2xx would be mistaken for a delivered message. Treat any 3xx as final and let it fail.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	var last error
 	for attempt := 0; attempt < slackAttempts; attempt++ {
 		if attempt > 0 {
@@ -96,9 +101,20 @@ func (s *Server) slackPost(ctx context.Context, raw, text string) error {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			// url.Error carries the full URL, which is the secret. The stored/displayed error must
-			// never contain it.
-			last = errors.New(strings.ReplaceAll(err.Error(), raw, "<slack-webhook>"))
+			// url.Error carries the full URL, which is the secret. Take the underlying cause when
+			// there is one, then scrub every spelling of the URL (the raw setting is not necessarily
+			// byte-identical to u.String(), e.g. an uppercase scheme).
+			msg := err.Error()
+			var ue *url.Error
+			if errors.As(err, &ue) && ue.Err != nil {
+				msg = ue.Err.Error()
+			}
+			for _, spelling := range []string{raw, u.String(), u.RequestURI()} {
+				if spelling != "" {
+					msg = strings.ReplaceAll(msg, spelling, "<slack-webhook>")
+				}
+			}
+			last = errors.New(msg)
 			continue
 		}
 		_, _ = io.Copy(io.Discard, resp.Body)

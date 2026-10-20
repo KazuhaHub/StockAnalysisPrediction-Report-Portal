@@ -4,6 +4,7 @@ package app
 // httptest server registered through the test-only host allowance, so the wire format is exercised.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -100,6 +101,15 @@ func TestAlertGoesToBothChannels(t *testing.T) {
 	}
 	if !strings.Contains(mail.body, "stalled") {
 		t.Errorf("email body does not name the reason: %q", mail.body)
+	}
+	// One deduplicated reason means one delivery per channel.
+	select {
+	case p := <-posts:
+		t.Errorf("a second Slack POST arrived: %s", p.body)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if mail.n != 1 {
+		t.Errorf("emails = %d, want 1", mail.n)
 	}
 }
 
@@ -221,6 +231,8 @@ func TestStoreFailedAlertsBothChannelsWithoutDelayingTheIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseNow := func() { releaseOnce.Do(func() { close(release) }) }
 	var slackHits int32
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&slackHits, 1)
@@ -228,6 +240,7 @@ func TestStoreFailedAlertsBothChannelsWithoutDelayingTheIngest(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer stub.Close()
+	defer releaseNow() // LIFO: unblock the handler before Close waits on it
 	s.slackHostForTest = "127.0.0.1"
 	if err := s.st.SetSetting(setForecastAlertSlackURL, stub.URL); err != nil {
 		t.Fatal(err)
@@ -299,7 +312,7 @@ func TestStoreFailedAlertsBothChannelsWithoutDelayingTheIngest(t *testing.T) {
 	if got := atomic.LoadInt32(&slackHits); got != 1 {
 		t.Errorf("Slack POSTs = %d, want 1", got)
 	}
-	close(release)
+	releaseNow()
 	// And the delivery is recorded for the page.
 	deadline = time.Now().Add(3 * time.Second)
 	for {
@@ -339,7 +352,9 @@ func TestSlackTransportErrorDoesNotLeakTheURL(t *testing.T) {
 	s := newV1Server(t)
 	s.slackHostForTest = "127.0.0.1"
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	raw := stub.URL + "/services/secret-path"
+	// An uppercase scheme is accepted and normalised by url.Parse, so the raw stored spelling is not
+	// byte-identical to the URL in the error. The scrub must still remove it.
+	raw := strings.Replace(stub.URL, "http://", "HTTP://", 1) + "/services/secret-path"
 	stub.Close() // the port is now closed, so the POST fails at the transport layer
 	if err := s.st.SetSetting(setForecastAlertSlackURL, raw); err != nil {
 		t.Fatal(err)
@@ -354,5 +369,142 @@ func TestSlackTransportErrorDoesNotLeakTheURL(t *testing.T) {
 	rec := s.st.forecastAlertState()
 	if strings.Contains(rec.Channels["slack"].Error, "secret-path") {
 		t.Errorf("the recorded error leaks the webhook: %s", rec.Channels["slack"].Error)
+	}
+}
+
+// TestAlertTestFailsWhenSlackFails is the other half of the contract: email succeeding alone must
+// not write the stamp.
+func TestAlertTestFailsWhenSlackFails(t *testing.T) {
+	s := newV1Server(t)
+	s.mailFn = func([]string, string, string) error { return nil }
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer stub.Close()
+	s.slackHostForTest = "127.0.0.1"
+	if err := s.st.SetSetting(setForecastAlertSlackURL, stub.URL); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.apiForecastAlertTest(rec, httptest.NewRequest("POST", "/api/admin/forecast/alert-test", nil), "admin")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting(setForecastAlertTestOKAt, ""); got != "" {
+		t.Errorf("test_ok_at written while Slack failed: %q", got)
+	}
+}
+
+// TestAlertChangeInvalidatesTheVerification: a stamp only covers the configuration it was made
+// with, and only for thirty days.
+func TestAlertChangeInvalidatesTheVerification(t *testing.T) {
+	s := newV1Server(t)
+	now := time.Now().UTC()
+	item := func() readinessItem {
+		for _, it := range s.forecastReadiness(now) {
+			if it.Key == "alerts" {
+				return it
+			}
+		}
+		t.Fatal("no alerts item")
+		return readinessItem{}
+	}
+
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, now.Add(-24*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if !item().OK {
+		t.Fatal("a stamp from yesterday does not pass")
+	}
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, now.Add(-31*24*time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if item().OK {
+		t.Error("a 31-day-old stamp still passes")
+	}
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, now.Add(time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if item().OK {
+		t.Error("a future stamp passes")
+	}
+
+	// Changing a channel deletes the stamp.
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, now.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	rec := saveForecastSettings(t, s, `{"alert_email_to":"new@example.com"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting(setForecastAlertTestOKAt, ""); got != "" {
+		t.Errorf("stamp survived a channel change: %q", got)
+	}
+}
+
+// TestStoreFailedAlertRunsOutsideTheInsertTransaction: the channel sender can use the connection
+// pool (and meet a deadline) because it runs after the ledger transaction has returned.
+func TestStoreFailedAlertRunsOutsideTheInsertTransaction(t *testing.T) {
+	s := newV1Server(t)
+	done := make(chan error, 1)
+	s.mailFn = func([]string, string, string) error {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			var one int
+			err := s.st.queryRow("SELECT 1").Scan(&one)
+			if err == nil {
+				done <- nil
+				return nil
+			}
+			if time.Now().After(deadline) {
+				done <- err
+				return nil
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`DROP TABLE prediction_claims`); err != nil {
+		t.Fatal(err)
+	}
+	failing := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600164"`, 1)
+	if code, m := ingestPost(t, s, failing); code != http.StatusOK || m["predictions_status"] != "store_failed" {
+		t.Fatalf("ingest: %d %v", code, m)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("a pool call from the alert path could not run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the alert never ran")
+	}
+}
+
+// TestSlackRedirectIsNotFollowed: following a redirect would leave the host list, and a 302 would
+// turn the POST into a GET whose 2xx would look like a delivered message.
+func TestSlackRedirectIsNotFollowed(t *testing.T) {
+	s := newV1Server(t)
+	var targetHits int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&targetHits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	src := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer src.Close()
+	s.slackHostForTest = "127.0.0.1"
+	if err := s.slackPost(context.Background(), src.URL, "text"); err == nil {
+		t.Fatal("a redirect was treated as a successful delivery")
+	}
+	if n := atomic.LoadInt32(&targetHits); n != 0 {
+		t.Errorf("the redirect was followed %d time(s)", n)
 	}
 }

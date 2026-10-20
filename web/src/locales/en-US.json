@@ -2162,12 +2162,16 @@
   "forecast.alert.slackClear": "Clear",
   "forecast.alert.save": "Save alerts",
   "forecast.alert.test": "Send test alert",
-  "forecast.alert.none": "No channel is configured, so readiness item 5 cannot pass.",
+  "forecast.alert.none": "Both channels are required for readiness item 5; configure the one that is missing.",
   "forecast.alert.last": "Last delivery",
   "forecast.alert.channel.email": "Email",
   "forecast.alert.channel.slack": "Slack",
   "forecast.alert.never": "No delivery recorded yet",
   "forecast.alert.testOK": "Both channels delivered the test alert.",
   "forecast.alert.verifiedAt": "Verified at {{at}}",
-  "forecast.alert.notVerified": "No successful test in the last 30 days"
+  "forecast.alert.notVerified": "No successful test in the last 30 days",
+  "forecast.alert.err.emailNone": "No email recipients are configured.",
+  "forecast.alert.err.slackNone": "No Slack webhook is configured.",
+  "forecast.alert.err.emailDisabled": "Email is disabled or SMTP is not configured.",
+  "forecast.alert.err.slackStatus": "Slack answered HTTP {{code}}."
 }

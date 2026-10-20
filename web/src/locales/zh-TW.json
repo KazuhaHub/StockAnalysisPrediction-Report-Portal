@@ -2169,5 +2169,9 @@
   "forecast.alert.never": "尚無送達記錄",
   "forecast.alert.testOK": "測試告警已送達兩個渠道。",
   "forecast.alert.verifiedAt": "驗證於 {{at}}",
-  "forecast.alert.notVerified": "最近 30 天沒有成功的測試"
+  "forecast.alert.notVerified": "最近 30 天沒有成功的測試",
+  "forecast.alert.err.emailNone": "尚未配置郵件收件人。",
+  "forecast.alert.err.slackNone": "尚未配置 Slack Webhook。",
+  "forecast.alert.err.emailDisabled": "郵件功能已關閉，或 SMTP 未配置。",
+  "forecast.alert.err.slackStatus": "Slack 返回 HTTP {{code}}。"
 }
