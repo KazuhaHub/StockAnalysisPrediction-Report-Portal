@@ -1,7 +1,10 @@
 package app
 
 import (
+	"sort"
 	"strings"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/dify"
 )
 
 // Report ownership (ADR 0022 R1). A report is stamped with the OU that generated it so a restricted
@@ -65,18 +68,63 @@ const ownerTokenInput = "_rp_owner_token"
 // stamped to that OU at ingest (ADR 0022 R1). For every internal run it returns the caller's inputs
 // unchanged — the money-path stays byte-for-byte identical — and it never mutates the caller's map.
 func (s *Server) runInputs(job BatchJob, inputs map[string]string) map[string]string {
+	// Reserved inputs are the portal's, never the caller's: a value submitted under _rp_* does not
+	// survive into the run, whoever submits it (P39a).
+	out := make(map[string]string, len(inputs)+1)
+	for k, v := range inputs {
+		if !isReservedInput(k) {
+			out[k] = v
+		}
+	}
 	if !s.isRestricted(job.CreatedBy) {
-		return inputs
+		return out
 	}
 	tok := s.mintOwnerToken(s.st.OwnerGroupOf(job.CreatedBy), job.CreatedBy)
 	if tok == "" {
-		return inputs
-	}
-	out := make(map[string]string, len(inputs)+1)
-	for k, v := range inputs {
-		out[k] = v
+		return out
 	}
 	out[ownerTokenInput] = tok
+	return out
+}
+
+// isReservedInput reports whether a Dify input name belongs to the portal. Reserved inputs are
+// filled by the portal at run time (runInputs) and are never part of a target's user-facing list.
+func isReservedInput(name string) bool { return strings.HasPrefix(name, "_rp_") }
+
+// dropReservedInputs removes every reserved input from a workflow's declared list, keeping order.
+func dropReservedInputs(in []dify.Input) []dify.Input {
+	out := make([]dify.Input, 0, len(in))
+	for _, i := range in {
+		if !isReservedInput(i.Variable) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// cleanReservedInputNames keeps only genuine `_rp_*` names, sorted: a client cannot record an
+// ordinary input as "reserved" and change what a later release injects.
+func cleanReservedInputNames(in []string) []string {
+	var out []string
+	for _, name := range in {
+		if isReservedInput(name) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// reservedInputNames returns the sorted names of the reserved inputs a workflow declares. The probe
+// and the refresh record them so P39b can inject only where the workflow has the key.
+func reservedInputNames(in []dify.Input) []string {
+	var out []string
+	for _, i := range in {
+		if isReservedInput(i.Variable) {
+			out = append(out, i.Variable)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

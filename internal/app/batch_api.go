@@ -624,6 +624,16 @@ func (s *Server) apiBatchJobCreate(w http.ResponseWriter, r *http.Request, user 
 		jsonError(w, http.StatusBadRequest, "no rows to run")
 		return
 	}
+	// Reserved inputs belong to the portal. A client-supplied _rp_* value is dropped here, before it
+	// is stored, reused or audited — runInputs would ignore it anyway, but it must not be persisted as
+	// if it were part of the run (P39a).
+	for _, row := range in.Rows {
+		for k := range row {
+			if isReservedInput(k) {
+				delete(row, k)
+			}
+		}
+	}
 	// Resolve the optional schedule up front so a bad time never leaves an orphan job. A preset
 	// window (preset_id) resolves to run_at + a run_preset snapshot in the panel timezone (ADR
 	// 0014); an explicit run_at is the plain 定时 path. They're mutually exclusive (preset wins).

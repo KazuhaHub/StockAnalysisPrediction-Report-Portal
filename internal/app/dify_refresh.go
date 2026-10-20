@@ -123,6 +123,9 @@ type difyRefreshResult struct {
 	LocalMode  string       `json:"local_mode"`
 	RemoteMode string       `json:"remote_mode"`
 	Inputs     []dify.Input `json:"inputs"` // exactly what a confirm would write
+	// ReservedInputs is what the workflow now declares as the portal's own (_rp_*). A confirm writes
+	// it back; a later preview with no reserved inputs clears it.
+	ReservedInputs []string `json:"reserved_inputs,omitempty"`
 	difyInputDiff
 	SymbolInputLost string `json:"symbol_input_lost,omitempty"`
 	NameDiffers     bool   `json:"name_differs"`
@@ -196,6 +199,8 @@ func (s *Server) previewDifyRefresh(ctx context.Context, tgt BatchTarget) difyRe
 	if difyModeChat(info.Mode) {
 		inputs = ensureQueryInput(inputs)
 	}
+	res.ReservedInputs = reservedInputNames(inputs)
+	inputs = dropReservedInputs(inputs)
 	inputs = preserveInputPresentation(cfg.Inputs, inputs)
 	res.Inputs = inputs
 	res.difyInputDiff = diffInputs(cfg.Inputs, inputs)
@@ -216,6 +221,9 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 			ID     int64        `json:"id"`
 			Mode   string       `json:"mode"`
 			Inputs []dify.Input `json:"inputs"`
+			// Absent means "the client did not know about this field" (an older bundle): keep the
+			// stored value rather than wiping it. Present, even empty, is the workflow's answer now.
+			ReservedInputs *[]string `json:"reserved_inputs"`
 		} `json:"items"`
 	}
 	if err := readJSON(r, &in); err != nil {
@@ -250,7 +258,10 @@ func (s *Server) apiBatchDifyRefreshApply(w http.ResponseWriter, r *http.Request
 			continue
 		}
 		before := cfg.Inputs
-		cfg.Inputs = it.Inputs
+		cfg.Inputs = dropReservedInputs(it.Inputs)
+		if it.ReservedInputs != nil {
+			cfg.ReservedInputs = cleanReservedInputNames(*it.ReservedInputs)
+		}
 		if it.Mode != "" {
 			cfg.Mode = it.Mode
 		}

@@ -47,6 +47,10 @@ type difyTargetConfig struct {
 	// stored with the rest of the target definition so it round-trips without changing the DB
 	// shape; it never changes what is sent to Dify.
 	CollapseOptionalInputs bool `json:"collapse_optional_inputs,omitempty"`
+	// ReservedInputs names the inputs Dify declares as the portal's own (_rp_*). They are never part
+	// of the user-facing list; recording them lets a later release inject only where the workflow has
+	// the key (P39a/P39b). Stored inside the config JSON: no schema change.
+	ReservedInputs []string `json:"reserved_inputs,omitempty"`
 }
 
 // difyModeChat reports whether a probed app mode is a chat/agent app (anything that
@@ -451,7 +455,18 @@ func difyFileValue(declared, cell string) (any, bool) {
 func difyTargetInputs(configJSON string) []dify.Input {
 	var cfg difyTargetConfig
 	json.Unmarshal([]byte(configJSON), &cfg)
-	return cfg.Inputs
+	// A config stored before P39a may carry a reserved input in its list; it is filtered on read so
+	// the run form never shows one even then.
+	return dropReservedInputs(cfg.Inputs)
+}
+
+// difyTargetReserved returns the reserved input names recorded on a target (P39a).
+func difyTargetReserved(configJSON string) []string {
+	var cfg difyTargetConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return nil
+	}
+	return cfg.ReservedInputs
 }
 
 // difyTargetMode returns a Dify target's app mode ("" / "workflow" / "chat").

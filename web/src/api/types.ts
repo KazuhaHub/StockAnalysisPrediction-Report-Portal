@@ -104,6 +104,8 @@ export interface DifyRefreshResult {
   local_mode?: string
   remote_mode?: string
   inputs?: DifyInput[]
+  /** What the workflow declares as the portal's own; written back on confirm. */
+  reserved_inputs?: string[]
   added?: string[]
   removed?: string[]
   required_changed?: string[]
@@ -130,6 +132,8 @@ export interface DifyTargetEdit {
   output_subtype?: string
   symbol_input?: string
   collapse_optional_inputs?: boolean
+  /** Dify inputs reserved for the portal (_rp_*); never part of the user-facing list. */
+  reserved_inputs?: string[]
 }
 
 // Queue summary for the home banner + drawer (docs/adr/0007-run-analysis-and-scheduling.md).
