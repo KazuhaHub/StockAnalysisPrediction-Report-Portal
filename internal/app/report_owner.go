@@ -142,8 +142,9 @@ func reservedInputNames(in []dify.Input) []string {
 // report_viewers is the ONLY table consulted for ownership. owner_group survives on the report row
 // for attribution and audit, but the security-critical filter must not have two spellings.
 type ownerScope struct {
-	// principals identify this reader for the ownership test: always "u:<name>", plus "g:<id>" for
-	// each OU up their chain when a version shares within the OU.
+	// principals identify this reader for the ownership test: always "u:<name>", plus the Default OU
+	// (which encodes the "all" audience), plus "g:<id>" for each EFFECTIVELY RESTRICTED OU on their
+	// chain. An unrestricted OU is not a principal (P30).
 	self       string
 	principals []string
 	// The granted versions, split by what their visibility demands, so the predicate is a plain OR
@@ -214,8 +215,29 @@ func (s *Server) viewerScope(user string) *ownerScope {
 	}
 	sc := &ownerScope{self: userPrincipal(user)}
 	sc.principals = append(sc.principals, sc.self)
-	for _, g := range s.st.groupChain(user) {
-		sc.principals = append(sc.principals, groupPrincipal(g))
+	// Group principals are the Default (the "all" audience is stored as its principal) and, on the
+	// user's chain, only the effectively restricted OUs (D4, P30). An unrestricted container is
+	// therefore not a principal, so a legacy g-row written for one never matches again. The Default
+	// is the exception the encoding forces: its principal is also the "all" audience, and a legacy
+	// ingest row for a Default-attributed run is byte-identical to it, so those rows remain readable
+	// (recorded as a known limitation in the log). This function's group principals are only as good
+	// as `isRestricted` above; P31 replaces that lenient check with a strict one.
+	if ix, err := s.st.loadOUIndex(); err == nil {
+		if ix.defaultID != 0 {
+			sc.principals = append(sc.principals, groupPrincipal(ix.defaultID))
+		}
+		if gid := s.st.PrimaryGroupOf(user); gid != 0 {
+			if chain, cerr := ix.chain(gid); cerr == nil {
+				for _, g := range chain {
+					if g == ix.defaultID {
+						continue
+					}
+					if restricted, rerr := ix.restrictedEffective(g); rerr == nil && restricted {
+						sc.principals = append(sc.principals, groupPrincipal(g))
+					}
+				}
+			}
+		}
 	}
 	for _, name := range s.st.GrantedVersions(user) {
 		v, ok := s.st.Version(name)

@@ -29,18 +29,26 @@ func TestDeletingAReportTakesItsViewers(t *testing.T) {
 	st := s.st
 	old := time.Now().Add(-90 * 24 * time.Hour).Format("2006-01-02 15:04:05")
 
+	// An ordinary (unrestricted) OU, created here so the writer's "u: only" branch is what the row
+	// count below exercises.
+	ou, err := st.CreateUserGroup("plain", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	single, _, _ := st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-28", RType: "投资决策",
 		Title: "单删", Version: "对外版", MD: "x"})
 	bulk, _, _ := st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-01", RType: "投资决策",
 		Title: "批删", Version: "对外版", MD: "y", Time: old})
 	st.exec("UPDATE reports SET sent_at=? WHERE id=?", old, bulk)
 	for _, id := range []int64{single, bulk} {
-		if err := st.AddReportViewer(id, "2026-07-28", "alice", 7); err != nil {
+		if err := st.AddReportViewer(id, "2026-07-28", "alice", ou); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := viewerRows(t, st, "1=1"); got != 4 { // two principals per report
-		t.Fatalf("seeded %d viewer rows, want 4", got)
+	// One principal per report: the OU is unrestricted, and P30 writes a g-row only for an
+	// effectively restricted OU. The test is about the cleanup, not the count.
+	if got := viewerRows(t, st, "1=1"); got != 2 {
+		t.Fatalf("seeded %d viewer rows, want 2", got)
 	}
 
 	if _, err := st.DeleteReport(single); err != nil {

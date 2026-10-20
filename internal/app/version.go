@@ -370,17 +370,33 @@ func (s *Server) isRestricted(username string) bool {
 	return s.st.EffectiveGroupSettings(username).Restricted
 }
 
+// ouSharesGroup reports whether an OU may appear as a group principal. Only an effectively
+// restricted OU qualifies, and only when its chain can be read and trusted.
+func (s *Store) ouSharesGroup(ou int64) bool {
+	ix, err := s.loadOUIndex()
+	if err != nil {
+		return false
+	}
+	restricted, err := ix.restrictedEffective(ou)
+	return err == nil && restricted
+}
+
 // AddReportViewer records that someone asked for a report. It is what "only my own reports" is made
 // of, and it is additive by design: when a same-day request is served from an existing report the
 // requester JOINS its viewer list instead of triggering a second run, so strict per-person isolation
 // costs no duplicate generation. Two people can each see "their" report and neither learns of the
 // other.
 //
-// Both principals are recorded — the person and, when there is one, their OU — so a version whose
-// visibility is later widened from owner to group needs no backfill.
+// The person is always recorded. The OU is recorded only when it is effectively restricted (P30):
+// an unrestricted container's principal is what D4 leaked through, and a version widened later to
+// group visibility does not need that row — a restricted OU writes one from then on.
 func (s *Store) AddReportViewer(reportID int64, rdate, username string, ou int64) error {
 	principals := []string{userPrincipal(username)}
-	if ou != 0 {
+	// The OU principal is written ONLY for an effectively restricted OU (D4, P30). An unrestricted
+	// OU's g-row would let a restricted reader's chain share a report that was never meant to leave
+	// its requester. The rule lives here so every caller gets it, and any failure to prove the OU is
+	// restricted writes the `u:` row only — less sharing, never more.
+	if ou != 0 && s.ouSharesGroup(ou) {
 		principals = append(principals, groupPrincipal(ou))
 	}
 	for _, p := range principals {
