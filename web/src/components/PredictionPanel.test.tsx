@@ -55,7 +55,30 @@ describe('PredictionPanel', () => {
     expect(screen.getByText('forecast.panel.terminal')).toBeTruthy()
     expect(screen.getByText(/1,497\.75/)).toBeTruthy()
     expect(screen.getByText(/forecast\.panel\.entry_derived/)).toBeTruthy()
-    expect(screen.getByText('forecast.panel.counted')).toBeTruthy()
+    // The counted/not-counted badge is gone until real membership exists: every set used to claim
+    // "not counted", which was not a fact about that set.
+    expect(screen.queryByText('forecast.panel.counted')).toBeNull()
+    expect(screen.queryByText('forecast.panel.not_counted')).toBeNull()
+  })
+
+  it('translates the decision quality', () => {
+    show([{ ...accepted, decision_quality: 'degraded' }])
+    expect(screen.getByText('forecast.quality.degraded')).toBeTruthy()
+    expect(screen.queryByText(/forecast\.panel\.quality/)).toBeNull()
+  })
+
+  it('says a pending mark is waiting, never that fetching failed', () => {
+    show([
+      {
+        ...accepted,
+        marks: [
+          { checkpoint: 'd5', status: 'pending', phase: 'waiting', not_before: '2026-10-26' },
+          { checkpoint: 'd20', status: 'refused', phase: 'waiting', not_before: '2026-11-16' },
+        ],
+      },
+    ])
+    expect(screen.getAllByText(/forecast\.phase\.on_or_after/).length).toBe(2)
+    expect(screen.queryByText(/forecast\.mark\.refused/)).toBeNull()
   })
 
   it('labels a test run and shows no checkpoint table', () => {

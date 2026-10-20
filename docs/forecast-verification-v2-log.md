@@ -219,8 +219,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129. `main` is at `077b7406`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P10 `fix/forecast-reading-hotfix` (§6.3, C1–C5/C7/C8): stop the reading page saying
-  false things before any mark resolves.
+- **Next step.** P10 `fix/forecast-reading-hotfix` (§6.3, C1–C5/C7/C8) is in this PR. After it:
+  P38 `feat/forecast-access-schema` (§6.4), the one schema change in R1b.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -293,3 +293,36 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   accepted. The card requires BOTH channels for readiness (not "any"), treats a stamp older than
   thirty days as unverified, keeps a typed webhook when the save is refused, and translates the three
   known channel errors.
+
+### P10 — reading-page hotfix
+
+- **C1.** The predictions effect clears `predSets`/`predCounted` and the error as soon as the report
+  id changes, before the request, and drops a response whose id is no longer current. The panel and
+  the chart overlay read the same state, so both stop describing the previous report immediately.
+- **C2.** A failed request sets an error with an inline retry; it never renders as "this report made
+  no prediction". The report body is independent of the request and always renders.
+- **C3.** `PredictionMark` gains `phase` and `not_before`. The read routes fill them from
+  `predScheduleFor` over a weekday projection (no vendor call), with the vocabulary
+  `waiting_s0` / `waiting` / `retrying` / `resolved` / `final`. `retrying` requires a recorded
+  `session_date`: a mark that has never attempted is waiting, which is the whole defect. The
+  `forecast.mark.refused*` strings are removed.
+- **C4.** The counted / not-counted badge is gone until real membership ships. Every set used to say
+  "not counted", which was not a fact about that set.
+- **C5.** `include=payload` is honoured only for a nil (unrestricted) scope. Both read routes share
+  the same helper, so the session and v1 credentials cannot diverge.
+- **C7.** The quality enum is translated (`forecast.quality.*`).
+- **C8.** A marker with no bar snaps to the first bar on or after its date; one past the series is
+  still dropped. The overlay group's guard is a boolean, so an empty pair of arrays no longer renders
+  a stray `0`.
+- **Deviation.** The production 20-mark tuple is represented by a synthetic set pinned to the same
+  receipt (2026-10-18 21:00 CST, S0 2026-10-19, d5 2026-10-26); the repository has no fixture of
+  those rows. W1 and W3 use a real `MemoryRouter`, not the router mock the older page tests use.
+- **P10 review follow-ups.** A marker older than the chart's first bar is dropped again rather than
+  pinned to the left edge (the snap only applies inside the series). The predictions state is one
+  value keyed by the report id, so the render that already shows report B's header can never paint
+  report A's marks — the effect alone left one frame of the old panel. The C5 test now covers the
+  list route as well as the per-report route, and the phase test uses a stored S0 that differs from
+  the projection (2026-10-20), a recorded session before its due date, and an assertion through the
+  handler, so neither the stored-S0 rule nor the wiring can regress silently. The W1 test also
+  covers a late answer for the report that was left. Note: `viewerScope` still fails open if the
+  account/OU read fails; that is P31's, and C5 inherits it.

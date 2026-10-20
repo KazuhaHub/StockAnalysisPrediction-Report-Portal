@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -349,4 +350,199 @@ func TestSymbolPredictionsSessionRouteReturnsSets(t *testing.T) {
 	if len(out.Sets) != 2 {
 		t.Fatalf("sets = %d, want 2", len(out.Sets))
 	}
+}
+
+// TestPayloadWithheldFromScopedReader: the raw producer JSON is a diagnostic for an unrestricted
+// caller. Both read routes go through serveReportPredictions/serveQueryPredictions, so pinning the
+// shared implementation covers the session and v1 credential alike.
+func TestPayloadWithheldFromScopedReader(t *testing.T) {
+	s := newV1Server(t)
+	reportID, _ := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
+
+	read := func(sc *ownerScope) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/report/x/predictions?include=payload", nil)
+		req.SetPathValue("id", strconv.FormatInt(reportID, 10))
+		rec := httptest.NewRecorder()
+		s.serveReportPredictions(rec, req, sc)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Sets []map[string]any `json:"sets"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Sets) != 1 {
+			t.Fatalf("sets = %d, want 1", len(out.Sets))
+		}
+		return out.Sets[0]
+	}
+
+	// Unrestricted: include=payload is honoured.
+	if _, ok := read(nil)["payload"]; !ok {
+		t.Error("an unrestricted caller did not get the payload")
+	}
+	// Scoped, but able to read this report (the default version is open to everyone granted it).
+	sc := &ownerScope{self: userPrincipal("scoped"), versAll: []string{"default"}}
+	if _, ok := read(sc)["payload"]; ok {
+		t.Error("a scoped caller got the raw payload")
+	}
+
+	// The list route honours the same rule; the two must not diverge.
+	readList := func(scope *ownerScope) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/predictions?symbol=600160&include=payload", nil)
+		rec := httptest.NewRecorder()
+		s.serveQueryPredictions(rec, req, scope)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status %d: %s", rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Sets []map[string]any `json:"sets"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Sets) == 0 {
+			t.Fatal("list returned no sets")
+		}
+		return out.Sets[0]
+	}
+	if _, ok := readList(nil)["payload"]; !ok {
+		t.Error("an unrestricted caller did not get the payload from the list route")
+	}
+	if _, ok := readList(sc)["payload"]; ok {
+		t.Error("a scoped caller got the raw payload from the list route")
+	}
+}
+
+// TestReadPhaseNeverClaimsRetryingWithoutEvidence: a pending or deferred mark is "waiting on or
+// after <date>", never "fetch failed". Retrying needs a recorded due session, which is the evidence
+// that an attempt actually happened.
+func TestReadPhaseNeverClaimsRetryingWithoutEvidence(t *testing.T) {
+	s := newV1Server(t)
+	_, setID := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
+	// One set made at 21:00 CST on 2026-10-18: S0 is Monday 2026-10-19, so d5 falls on 2026-10-26.
+	// A stored S0 that differs from the projection (a holiday-shifted start): the phase must use the
+	// stored session, not recompute one.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at='2026-10-18T13:00:00Z',
+		made_on='2026-10-18', s0_date='2026-10-20', base_check='match' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`UPDATE prediction_marks SET status='refused', refusal='no_bar',
+		session_date='', next_attempt_at='' WHERE set_id=? AND checkpoint IN ('d20','d60')`, setID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`UPDATE prediction_marks SET status='refused', refusal='no_bar',
+		session_date='2026-11-17' WHERE set_id=? AND checkpoint='d20'`, setID); err != nil {
+		t.Fatal(err)
+	}
+	// A recorded session on a mark whose due date is still ahead: that is not a retry either.
+	if _, err := s.st.exec(`UPDATE prediction_marks SET status='refused', refusal='no_bar',
+		session_date='2026-10-19' WHERE set_id=? AND checkpoint='d60'`, setID); err != nil {
+		t.Fatal(err)
+	}
+
+	phases := func(now time.Time) map[string]PredictionMark {
+		t.Helper()
+		rows, err := s.st.QueryPredictionSets(PredictionFilter{Symbol: "600160", Limit: 10}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found *PredictionSet
+		for i := range rows {
+			if rows[i].ID == setID {
+				found = &rows[i]
+			}
+		}
+		if found == nil {
+			t.Fatal("set not found")
+		}
+		annotateReadPhases(rows, now)
+		out := map[string]PredictionMark{}
+		for _, m := range found.Marks {
+			out[m.Checkpoint] = m
+		}
+		return out
+	}
+
+	at := phases(shanghai(2026, time.October, 21, 16, 0))
+	if m := at["d5"]; m.Phase != "waiting" || m.NotBefore != "2026-10-27" {
+		t.Errorf("d5 = %s/%s, want waiting/2026-10-27 (stored S0 2026-10-20)", m.Phase, m.NotBefore)
+	}
+	if m := at["d20"]; m.Phase != "waiting" || m.NotBefore == "" {
+		t.Errorf("d20 = %s/%s, want waiting with a date", m.Phase, m.NotBefore)
+	}
+	if m := at["d60"]; m.Phase != "waiting" {
+		t.Errorf("d60 = %q, want waiting (a recorded session before its due date is not a retry)", m.Phase)
+	}
+
+	// After the due date, a deferred mark with no recorded session is still waiting; one with a
+	// recorded session is retrying.
+	late := phases(shanghai(2026, time.December, 1, 16, 0))
+	if m := late["d5"]; m.Phase != "waiting" {
+		t.Errorf("d5 after its due date = %q, want waiting (no recorded attempt)", m.Phase)
+	}
+	if m := late["d20"]; m.Phase != "retrying" {
+		t.Errorf("d20 = %q, want retrying (a due session was recorded)", m.Phase)
+	}
+
+	// Before S0 has completed, the panel says so rather than inventing a checkpoint date.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at=?,
+		made_on=?, s0_date='' WHERE id=?`, "2026-12-01T01:00:00Z", "2026-12-01", setID); err != nil {
+		t.Fatal(err)
+	}
+	early := phases(shanghai(2026, time.December, 1, 10, 0))
+	if m := early["d5"]; m.Phase != "waiting_s0" || m.NotBefore != "2026-12-01" {
+		t.Errorf("before S0: d5 = %s/%s, want waiting_s0/2026-12-01", m.Phase, m.NotBefore)
+	}
+
+	// And the route really annotates: a handler that forgot to call it would ship no phase at all.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at='2026-10-18T13:00:00Z',
+		made_on='2026-10-18', s0_date='2026-10-20' WHERE id=?`, setID); err != nil {
+		t.Fatal(err)
+	}
+	s.forecastEval.now = func() time.Time { return shanghai(2026, time.October, 21, 16, 0) }
+	req := httptest.NewRequest("GET", "/api/report/x/predictions", nil)
+	req.SetPathValue("id", strconv.FormatInt(reportIDForSet(t, s, setID), 10))
+	rec := httptest.NewRecorder()
+	s.serveReportPredictions(rec, req, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("route status %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Sets []struct {
+			Marks []PredictionMark `json:"marks"`
+		} `json:"sets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sets) == 0 {
+		t.Fatal("route returned no sets")
+	}
+	found := false
+	for _, m := range out.Sets[0].Marks {
+		if m.Checkpoint == "d5" {
+			found = true
+			if m.Phase != "waiting" || m.NotBefore != "2026-10-27" {
+				t.Errorf("route d5 = %s/%s, want waiting/2026-10-27", m.Phase, m.NotBefore)
+			}
+		}
+	}
+	if !found {
+		t.Error("route did not return the d5 mark")
+	}
+}
+
+// reportIDForSet reads a set's report id, for the route assertion above.
+func reportIDForSet(t *testing.T, s *Server, setID int64) int64 {
+	t.Helper()
+	var id int64
+	if err := s.st.queryRow("SELECT report_id FROM prediction_sets WHERE id=?", setID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

@@ -1,9 +1,9 @@
-import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, qs, ApiError } from '../api/client'
+import { api, qs, errText, ApiError } from '../api/client'
 import type { PredictionSet, QuoteResp, ReportPredictions, StockResp } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
@@ -95,8 +95,16 @@ export default function StockPage() {
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
-  const [predSets, setPredSets] = useState<PredictionSet[]>([])
-  const [predCounted, setPredCounted] = useState<number | undefined>(undefined)
+  // The sets, the counted pointer and the error are ONE value keyed by the report they describe.
+  // That key is what makes a stale response harmless and, more importantly, what stops the render
+  // that already shows report B's header from painting report A's marks: the derived values below
+  // are empty until the state's key matches the report on screen.
+  const [pred, setPred] = useState<{ forId?: number; sets: PredictionSet[]; counted?: number; err: string }>({
+    sets: [],
+    err: '',
+  })
+  const [predNonce, setPredNonce] = useState(0)
+  const predForRef = useRef<number | undefined>(undefined)
   const [otherSets, setOtherSets] = useState<PredictionSet[]>([])
   // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
   // the levels noise.
@@ -189,26 +197,34 @@ export default function StockPage() {
   // rather than on every list: the payload is 2 KiB of contract and only this panel shows it.
   const repId = data?.rep?.id
   useEffect(() => {
-    if (!repId) {
-      setPredSets([])
-      setPredCounted(undefined)
-      return
-    }
+    predForRef.current = repId
+    setPred({ forId: repId, sets: [], err: '' })
+    if (!repId) return
     let cancelled = false
+    const forId = repId
     api
-      .get<ReportPredictions>(`/api/report/${repId}/predictions?include=payload`)
+      .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
-        if (cancelled) return
-        setPredSets(r.sets ?? [])
-        setPredCounted(r.counted_set_id)
+        if (cancelled || predForRef.current !== forId) return
+        setPred({ forId, sets: r.sets ?? [], counted: r.counted_set_id, err: '' })
       })
-      .catch(() => {
-        if (!cancelled) setPredSets([])
+      .catch((e) => {
+        if (cancelled || predForRef.current !== forId) return
+        // A failed request is not "this report made no prediction". The body still renders; the
+        // panel area says what happened and offers one retry.
+        setPred({ forId, sets: [], err: errText(e, t) })
       })
     return () => {
       cancelled = true
     }
-  }, [repId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repId, predNonce])
+
+  // What may be shown NOW. A state that belongs to another report is not shown at all, even for the
+  // one render between the new report arriving and the effect above running.
+  const predSets = pred.forId === repId ? pred.sets : []
+  const predCounted = pred.forId === repId ? pred.counted : undefined
+  const predErr = pred.forId === repId ? pred.err : ''
 
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
@@ -513,6 +529,19 @@ export default function StockPage() {
                 )}
                 {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
               </Card>
+              {rep && predErr && (
+                <Alert
+                  type="error"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                  title={predErr}
+                  action={
+                    <Button size="small" onClick={() => setPredNonce((n) => n + 1)}>
+                      {t('common.retry')}
+                    </Button>
+                  }
+                />
+              )}
               {rep && (
                 <PredictionPanel
                   sets={predSets}

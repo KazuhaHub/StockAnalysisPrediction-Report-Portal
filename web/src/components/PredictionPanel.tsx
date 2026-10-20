@@ -76,21 +76,38 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   const badges = (
     <Space size={[4, 4]} wrap>
       {isTest && <Tag color="purple">{t('forecast.panel.test_run')}</Tag>}
-      {!isTest &&
-        (set.counted_in_group ? (
-          <Tag color="green">{t('forecast.panel.counted', { group: set.counted_in_group })}</Tag>
-        ) : (
-          <Tag>{t('forecast.panel.not_counted')}</Tag>
-        ))}
       <Tag color={set.baseline_check === 'match' ? 'green' : set.baseline_check === 'mismatch' ? 'red' : 'default'}>
         {t(`forecast.panel.baseline.${set.baseline_check}`)}
       </Tag>
-      <Tag>{t('forecast.panel.quality', { quality: set.decision_quality ?? '—' })}</Tag>
+      {/* The counted/not-counted badge is deliberately absent until real membership ships: the
+          reading page had no membership data, so every set said "not counted" — a false claim. */}
+      {set.decision_quality && <Tag>{t(`forecast.quality.${set.decision_quality}`)}</Tag>}
       {set.probability_method === 'approved_policy_default' && (
         <Tag color="orange">{t('forecast.panel.default_probability')}</Tag>
       )}
     </Space>
   )
+
+  // A pending mark is not a failure. The server sends the phase and the earliest date it can settle
+  // (a weekday projection); the panel only chooses the words.
+  const phaseText = (m: PredictionMark) => {
+    const onOrAfter = (date?: string) =>
+      date ? t('forecast.phase.on_or_after', { date }) : t('forecast.phase.waiting')
+    switch (m.phase) {
+      case 'waiting_s0':
+        return `${t('forecast.phase.waiting_s0')}${m.not_before ? ` · ${onOrAfter(m.not_before)}` : ''}`
+      case 'waiting':
+        return onOrAfter(m.not_before)
+      case 'retrying':
+        return t('forecast.phase.retrying')
+      case 'resolved':
+        return t('forecast.phase.resolved')
+      case 'final':
+        return t('forecast.phase.final')
+      default:
+        return m.status === 'resolved' ? t('forecast.phase.resolved') : t('forecast.phase.waiting')
+    }
+  }
 
   const markRow = (m: PredictionMark) => {
     const resolved = m.status === 'resolved'
@@ -104,7 +121,7 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
     return {
       key: m.checkpoint,
       checkpoint: t(`forecast.cp.${m.checkpoint}`),
-      status: m.halted ? `${t(`forecast.mark.${m.status}`)} · ${t('forecast.mark.halted')}` : t(`forecast.mark.${m.status}`),
+      status: m.halted ? `${phaseText(m)} · ${t('forecast.mark.halted')}` : phaseText(m),
       date: m.bar_date || m.session_date || '—',
       close: m.close_fen === undefined ? '—' : fenToYuan(m.close_fen),
       ret: m.ret_bp === undefined ? '—' : `${(m.ret_bp / 100).toFixed(2)}%`,

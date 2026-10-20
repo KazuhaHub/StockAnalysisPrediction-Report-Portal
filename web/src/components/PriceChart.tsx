@@ -822,10 +822,15 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
           })
         )}
 
-        {(levels?.length || markers?.length) && (
+        {((levels?.length ?? 0) > 0 || (markers?.length ?? 0) > 0) && (
           <g data-testid="price-overlay">
             {(markers ?? []).map((m) => {
-              const i = bars.findIndex((b) => dayOf(b.d) === m.date)
+              // Snap WITHIN the series only. A checkpoint can fall on a weekend or a holiday, and
+              // dropping it silently lost the mark; but a marker older than the window's first bar
+              // must still be dropped rather than pinned to the left edge (the contract above), or
+              // every old report would draw its date on today's first candle.
+              if (bars.length === 0 || m.date < dayOf(bars[0].d)) return null
+              const i = bars.findIndex((b) => dayOf(b.d) >= m.date)
               if (i < 0) return null
               const x = scale.cx(i)
               return (

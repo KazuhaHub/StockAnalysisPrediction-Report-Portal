@@ -64,8 +64,8 @@ type PredictionSet struct {
 	Errors []predError       `json:"errors,omitempty"`
 	Claims []PredictionClaim `json:"claims"`
 	Marks  []PredictionMark  `json:"marks"`
-	// Payload is the verbatim predictions JSON. Only returned on the per-report route with
-	// include=payload: it is 2 KiB of contract on every row of a list otherwise.
+	// Payload is the verbatim predictions JSON. Returned with include=payload only when the caller
+	// is unrestricted: it is a diagnostic, not a reader's field (P10).
 	Payload string `json:"payload,omitempty"`
 	// CountedInGroup is the cohort whose member this set is, or "" when it is not one. Filled by the
 	// group statistics, not by this query — the field exists here so one shape serves both callers.
@@ -98,6 +98,11 @@ type PredictionMark struct {
 	RetBp       *int32 `json:"ret_bp,omitempty"`
 	BenchRetBp  *int32 `json:"bench_ret_bp,omitempty"`
 	Attempts    int    `json:"attempts"`
+	// Phase and NotBefore are the READING page's words for a mark (P10): a pending mark is not a
+	// failure, and the page must not call it one. Filled from a weekday projection by the read
+	// route, never stored.
+	Phase     string `json:"phase,omitempty"`
+	NotBefore string `json:"not_before,omitempty"`
 }
 
 // QueryPredictionSets returns sets matching the filters, newest first, with their claims and marks.
