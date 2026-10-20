@@ -251,12 +251,12 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	// when the deleted OU was a root (§16 item 9). A parent row that is gone would leave them
 	// dangling, so they inherit from the Default instead — the same fail-closed direction as the sets.
 	var childParent any
-	switch {
-	case parent.Valid && parentExists:
+	if parent.Valid && parentExists {
 		childParent = parent.Int64
-	case parent.Valid && defaultID != 0:
-		childParent = defaultID
 	}
+	// A dangling grandparent makes the children roots, not children of the Default: a root is not in
+	// the Default's subtree, so its sets cannot join the Default's 'own' population. That is the
+	// fail-closed direction. (A valid parent keeps them on the line they were on.)
 	if _, err := tx.Exec(s.bind(`UPDATE user_groups SET parent_id=? WHERE parent_id=?`), childParent, id); err != nil {
 		return 0, 0, err
 	}
@@ -267,6 +267,13 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	return reattributed, target, nil
+}
+
+// userGroupExists reports whether an OU row is present.
+func (s *Store) userGroupExists(id int64) bool {
+	var n int
+	s.queryRow(`SELECT COUNT(*) FROM user_groups WHERE id=?`, id).Scan(&n)
+	return n > 0
 }
 
 // EnsureDefaultForecastScope normalises the Default OU's forecast scope to none (P38, ADR 0039).

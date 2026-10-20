@@ -358,3 +358,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   must not claim a later step whose tables it no longer has.
 - **Rollback is restore-only.** An older binary refuses a database that records `0006`
   (`refuseUnknownLedgerRows`), so R1b needs the ADR 0027 backup before deploy.
+- **P38 review follow-ups.** A dangling grandparent makes the deleted OU's children **roots**, not
+  children of the Default: a root is outside the Default's subtree, so its sets cannot join the
+  Default's `own` population — the fail-closed direction. An ingest carrying a token for an OU that
+  has since been deleted leaves the set unattributed (the token lives seven days). The audit's
+  `forecast_sets_to_ou` is 0 when nothing moved, and `children_moved` is `[]` rather than null. The
+  older-dump tests now actually run: the index is dropped before the column, a set exists to come
+  back NULL, and Postgres has its own case. The boot normalisation is tested through a reopen, not
+  the helper. The group cache gained a generation counter, so a cell computed across a purge (an
+  in-flight request that missed the cache before the OU delete) is not stored afterwards.

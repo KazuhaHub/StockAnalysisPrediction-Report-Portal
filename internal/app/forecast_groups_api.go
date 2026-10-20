@@ -213,13 +213,14 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 			defer wg.Done()
 			for j := range ch {
 				key := forecastGroupCellKey(rtype, j.start, j.end, j.bench, j.cp)
-				if c := s.cachedForecastCell(key); c != nil {
+				c, gen := s.cachedForecastCell(key)
+				if c != nil {
 					out <- result{j.gi, j.cp, c}
 					continue
 				}
-				c := computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
+				c = computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
 				if official && c.State == "mature" {
-					s.storeForecastCell(key, c)
+					s.storeForecastCell(key, c, gen)
 				}
 				out <- result{j.gi, j.cp, c}
 			}
@@ -245,17 +246,32 @@ func forecastGroupCellKey(rtype, start, end, bench, cp string) string {
 	return rtype + "\x00" + start + "\x00" + end + "\x00" + bench + "\x00" + cp
 }
 
-func (s *Server) cachedForecastCell(key string) *forecastCell {
+// cachedForecastCell returns the cell and the generation it was read at. A miss still returns the
+// generation, so a caller can compute and then store only if no purge intervened.
+func (s *Server) cachedForecastCell(key string) (*forecastCell, uint64) {
 	s.forecastGroupsMu.Lock()
 	defer s.forecastGroupsMu.Unlock()
-	return s.forecastGroupsCache[key]
+	return s.forecastGroupsCache[key], s.forecastGroupsGen
 }
 
-func (s *Server) storeForecastCell(key string, c *forecastCell) {
+// storeForecastCell drops a result computed across a purge: a pre-delete cell must not repopulate
+// the cache after the delete has invalidated it.
+func (s *Server) storeForecastCell(key string, c *forecastCell, gen uint64) {
 	s.forecastGroupsMu.Lock()
 	defer s.forecastGroupsMu.Unlock()
+	if gen != s.forecastGroupsGen {
+		return
+	}
 	if s.forecastGroupsCache == nil {
 		s.forecastGroupsCache = map[string]*forecastCell{}
 	}
 	s.forecastGroupsCache[key] = c
+}
+
+// purgeForecastGroups drops every memoized cell and invalidates any computation already in flight.
+func (s *Server) purgeForecastGroups() {
+	s.forecastGroupsMu.Lock()
+	defer s.forecastGroupsMu.Unlock()
+	s.forecastGroupsGen++
+	s.forecastGroupsCache = nil
 }

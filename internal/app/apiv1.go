@@ -353,7 +353,9 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 		// Frozen attribution: the OU whose run produced the set, from the signed token only, written
 		// once at insert and never updated afterwards (ADR 0039). No token, or a zero OU, leaves it
 		// NULL — the set belongs to no OU's 'own' population.
-		if ownerOK && ou != 0 {
+		if ownerOK && ou != 0 && s.st.userGroupExists(ou) {
+			// The token lives seven days; an OU deleted after the run was minted must not come back
+			// as a dangling attribution (or, after an id reuse, as a new OU's).
 			v := ou
 			predSet.AttributedOU = &v
 		}

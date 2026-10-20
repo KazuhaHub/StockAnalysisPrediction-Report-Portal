@@ -122,14 +122,17 @@ func TestMigration0006(t *testing.T) {
 
 func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 	src := newTestStore(t)
-	// Wind back to a database the release before P38 could have written: no columns, no ledger row.
+	// One set exists before the step, so the dump has a row to come back NULL.
+	seedPredictionSet(t, src, sql.NullInt64{}, "p38-older")
+	// Wind back to a database the release before P38 could have written: the index goes before the
+	// column (SQLite refuses to drop a column an index still names), then the columns, then the row.
 	for _, q := range []string{
-		`ALTER TABLE user_groups DROP COLUMN forecast_scope`,
-		`ALTER TABLE prediction_sets DROP COLUMN attributed_ou`,
 		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
+		`ALTER TABLE prediction_sets DROP COLUMN attributed_ou`,
+		`ALTER TABLE user_groups DROP COLUMN forecast_scope`,
 	} {
 		if _, err := src.exec(q); err != nil {
-			t.Skipf("cannot wind back: %v", err)
+			t.Fatalf("cannot wind back: %v", err)
 		}
 	}
 	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
@@ -146,6 +149,35 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 	}
 	if got := scalar[string](t, dst, `SELECT forecast_scope FROM user_groups WHERE is_default=1`); got != scopeNone {
 		t.Errorf("Default scope = %q, want none", got)
+	}
+	if n := scalar[int](t, dst, `SELECT COUNT(*) FROM prediction_sets WHERE attributed_ou IS NOT NULL`); n != 0 {
+		t.Errorf("%d restored sets have an attribution; an older dump has none", n)
+	}
+	if n := scalar[int](t, dst, `SELECT COUNT(*) FROM prediction_sets`); n == 0 {
+		t.Error("the seeded set did not survive the restore")
+	}
+}
+
+// TestDefaultScopeNormalisedAtBoot: the hook is in OpenStore, not only in the helper.
+func TestDefaultScopeNormalisedAtBoot(t *testing.T) {
+	path := fileStore(t, "p38-boot.db")
+	st, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := st.EnsureDefaultGroup()
+	if _, err := st.exec(`UPDATE user_groups SET forecast_scope=NULL WHERE id=?`, def); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	st2, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st2.Close()
+	if got := scalar[string](t, st2, `SELECT forecast_scope FROM user_groups WHERE id=?`, def); got != scopeNone {
+		t.Errorf("boot left the Default scope %q, want none", got)
 	}
 }
 
@@ -222,6 +254,19 @@ func TestInvalidOrMissingTokenLeavesSetsUnattributed(t *testing.T) {
 		if got := attributedOU(t, s.st, setID); got.Valid {
 			t.Errorf("token %d: attributed_ou = %d, want NULL", i, got.Int64)
 		}
+	}
+}
+
+func TestTokenForADeletedOULeavesTheSetUnattributed(t *testing.T) {
+	s := tokenServer(t)
+	ou := seedOU(t, s.st, 0, scopeAll)
+	tok := s.mintOwnerToken(ou, "x") // minted while the OU existed
+	if _, _, err := s.st.DeleteUserGroup(ou); err != nil {
+		t.Fatal(err)
+	}
+	_, setID := ingestWithToken(t, s, "600180", tok)
+	if got := attributedOU(t, s.st, setID); got.Valid {
+		t.Errorf("set attributed to a deleted OU: %d", got.Int64)
 	}
 }
 
@@ -393,6 +438,27 @@ func TestDeletingOUMovesChildrenToItsParent(t *testing.T) {
 	}
 }
 
+func TestDeletingOUWithADanglingParentKeepsChildrenAsRoots(t *testing.T) {
+	st := newTestStore(t)
+	ghost := seedOU(t, st, 0, nil)
+	parent := seedOU(t, st, ghost, nil)
+	child := seedOU(t, st, parent, nil)
+	// Make the parent's parent vanish out from under it (a corrupted/restored tree).
+	if _, err := st.exec(`DELETE FROM user_groups WHERE id=?`, ghost); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.DeleteUserGroup(parent); err != nil {
+		t.Fatal(err)
+	}
+	var parentCol sql.NullInt64
+	if err := st.queryRow(`SELECT parent_id FROM user_groups WHERE id=?`, child).Scan(&parentCol); err != nil {
+		t.Fatal(err)
+	}
+	if parentCol.Valid {
+		t.Errorf("child parent = %d, want NULL (a root, not the Default's child)", parentCol.Int64)
+	}
+}
+
 func TestDeletingRootOUKeepsChildrenAsRoots(t *testing.T) {
 	st := newTestStore(t)
 	root := seedOU(t, st, 0, nil)
@@ -484,9 +550,14 @@ func TestDeletingOUWritesAuditCounts(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("audit rows = %d", len(rows))
 	}
-	if !strings.Contains(rows[0].Detail, `"forecast_sets_reattributed":0`) &&
-		!strings.Contains(rows[1].Detail, `"forecast_sets_reattributed":0`) {
-		t.Errorf("the zero case is missing its keys: %s / %s", rows[0].Detail, rows[1].Detail)
+	var zero string
+	for _, r := range rows {
+		if strings.Contains(r.Detail, `"forecast_sets_reattributed":0`) {
+			zero = r.Detail
+		}
+	}
+	if zero == "" || !strings.Contains(zero, `"forecast_sets_to_ou":0`) {
+		t.Errorf("the zero case must report 0 for both keys; rows = %s / %s", rows[0].Detail, rows[1].Detail)
 	}
 }
 
@@ -509,6 +580,22 @@ func TestDeleteOUReattributionIsAtomic(t *testing.T) {
 	}
 	if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != ou {
 		t.Errorf("attribution was not rolled back: %v", got)
+	}
+}
+
+func TestAComputationAcrossAPurgeIsNotCached(t *testing.T) {
+	s := newV1Server(t)
+	_, gen := s.cachedForecastCell("k")
+	cell := &forecastCell{State: "mature"}
+	s.storeForecastCell("k", cell, gen)
+	if c, _ := s.cachedForecastCell("k"); c == nil {
+		t.Fatal("a fresh generation was not stored")
+	}
+	s.purgeForecastGroups()
+	// A computation that began before the purge must not repopulate the cache with a pre-delete cell.
+	s.storeForecastCell("k", cell, gen)
+	if c, _ := s.cachedForecastCell("k"); c != nil {
+		t.Error("a cell computed across a purge was cached")
 	}
 }
 

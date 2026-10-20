@@ -377,3 +377,43 @@ func TestPostgresAccessSchemaAndReattribution(t *testing.T) {
 		t.Errorf("a root's set = %v, want Default %d", got, def)
 	}
 }
+
+// TestPostgresMigration0006OlderDumpRestores: a dump written before step 0006 loads into a build that
+// has it, both columns come back NULL, and the Default OU then reads none.
+func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
+	st := pgStore(t, "prediction_sets", "user_groups")
+	st.EnsureDefaultGroup() // pgStore emptied user_groups; the dump needs a Default to normalise
+	seedPredictionSet(t, st, sql.NullInt64{}, "p38-pg-older")
+	for _, q := range []string{
+		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
+		`ALTER TABLE prediction_sets DROP COLUMN IF EXISTS attributed_ou`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("winding back 0006: %v", err)
+		}
+	}
+	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
+		t.Fatal(err)
+	}
+	dump := dumpOf(t, st)
+	st.Close()
+
+	fresh, err := OpenStore("postgres", pgDSN(t))
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer fresh.Close()
+	if _, err := fresh.restoreFrom(bytes.NewReader(dump), true); err != nil {
+		t.Fatalf("an older dump must restore: %v", err)
+	}
+	if !fresh.columnExists("prediction_sets", "attributed_ou") || !fresh.columnExists("user_groups", "forecast_scope") {
+		t.Error("the step's columns are missing after the restore")
+	}
+	if got := scalar[string](t, fresh, `SELECT forecast_scope FROM user_groups WHERE is_default=1`); got != scopeNone {
+		t.Errorf("Default scope = %q, want none", got)
+	}
+	if n := scalar[int](t, fresh, `SELECT COUNT(*) FROM prediction_sets WHERE attributed_ou IS NOT NULL`); n != 0 {
+		t.Errorf("%d restored sets have an attribution", n)
+	}
+}
