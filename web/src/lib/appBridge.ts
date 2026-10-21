@@ -43,13 +43,7 @@ export function validateApiRequest(msg: unknown, scopes: string[]): Validated {
   const m = msg as Record<string, unknown>
   if (m.type !== API_MESSAGE) return { ok: false, error: 'unknown message type' }
   const method = String(m.method || 'GET').toUpperCase()
-  if (method === 'GET') {
-    if (!scopes.includes('query')) return { ok: false, error: 'app lacks the query scope' }
-  } else if (WRITE_METHODS.has(method)) {
-    if (!scopes.includes('ingest')) return { ok: false, error: 'app lacks the ingest scope' }
-  } else {
-    return { ok: false, error: `method ${method} not permitted` }
-  }
+  if (method !== 'GET' && !WRITE_METHODS.has(method)) return { ok: false, error: `method ${method} not permitted` }
   if (typeof m.path !== 'string') return { ok: false, error: 'path must be a string' }
   const rawPath = m.path
   // Must be a same-origin API path, not an absolute/protocol-relative URL, and
@@ -79,6 +73,11 @@ export function validateApiRequest(msg: unknown, scopes: string[]): Validated {
   if (url.origin !== 'https://app-bridge.invalid' || !url.pathname.startsWith('/api/v1/') || url.hash) {
     return { ok: false, error: 'path must be under /api/v1/' }
   }
+  if (url.pathname === '/api/v1/notifications') {
+    if (method !== 'POST' || !scopes.includes('notify')) return { ok: false, error: 'app lacks notification publication permission' }
+  } else if (method === 'GET') {
+    if (!scopes.includes('query')) return { ok: false, error: 'app lacks the query scope' }
+  } else if (!scopes.includes('ingest')) return { ok: false, error: 'app lacks the ingest scope' }
   return { ok: true, method, path: url.pathname + url.search, body: m.body }
 }
 

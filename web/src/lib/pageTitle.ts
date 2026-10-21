@@ -25,6 +25,7 @@ const MANAGE: Record<string, string> = {
   assistant: 'nav.chat',
   apps: 'nav.appsAdmin',
   webhooks: 'nav.webhooks',
+  notifications: 'nav.notifications',
   apidoc: 'settings.apidoc',
   storage: 'nav.storage',
   audit: 'nav.audit',
@@ -48,6 +49,7 @@ const EXACT: Record<string, string> = {
   '/apps/recurring': 'nav.recurring',
   '/apps/quotes': 'nav.quotes',
   '/queue': 'nav.queue',
+  '/notifications': 'inbox.title',
   '/chat': 'nav.chat',
   '/report/new': 'reportEditor.titleNew',
 }

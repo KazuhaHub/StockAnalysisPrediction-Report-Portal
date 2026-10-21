@@ -175,6 +175,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// it is a ceiling an abusive caller uses the hole in. It is off until an admin sets one.
 	v1 := func(pattern string, h http.HandlerFunc) { s.bearer(mux, pattern, h) }
 	v1("POST /api/v1/reports", s.v1Ingest)
+	v1("POST /api/v1/notifications", s.v1PublishNotification)
 	v1("GET /api/v1/reports", s.v1QueryReports)
 	v1("GET /api/v1/reports/manifest", s.v1Manifest) // more specific than {id}, matched first
 	v1("GET /api/v1/reports/{id}", s.v1GetReport)
@@ -450,6 +451,28 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/webhooks", s.apiWebhookAdd)
 	s.admin(mux, "DELETE /api/admin/webhooks/{id}", s.apiWebhookDelete)
 	s.admin(mux, "POST /api/admin/webhooks/{id}/test", s.apiWebhookTest)
+	s.admin(mux, "GET /api/admin/notifications", s.apiNotifications)
+	s.admin(mux, "PUT /api/admin/notifications/retention", s.apiNotificationRetention)
+	s.session(mux, "GET /api/notifications", s.apiNotificationInbox)
+	s.session(mux, "GET /api/notifications/unread", s.apiNotificationUnread)
+	s.session(mux, "POST /api/notifications/{id}", s.apiNotificationInboxUpdate)
+	s.session(mux, "POST /api/notifications/read-snapshot", s.apiNotificationReadSnapshot)
+	s.session(mux, "POST /api/notifications/read-all", s.apiNotificationReadAll)
+	s.session(mux, "GET /api/notifications/preferences", s.apiNotificationPreferences)
+	s.session(mux, "PUT /api/notifications/preferences", s.apiNotificationPreferencesSave)
+	s.admin(mux, "POST /api/admin/notifications/channels", s.apiNotificationChannelSave)
+	s.admin(mux, "PUT /api/admin/notifications/channels/{id}", s.apiNotificationChannelSave)
+	s.admin(mux, "POST /api/admin/notifications/routes", s.apiNotificationRouteSave)
+	s.admin(mux, "PUT /api/admin/notifications/routes/{id}", s.apiNotificationRouteSave)
+	s.admin(mux, "GET /api/admin/notifications/deliveries", s.apiNotificationHistory)
+	s.admin(mux, "GET /api/admin/notifications/deliveries/{id}", s.apiNotificationDelivery)
+	s.admin(mux, "POST /api/admin/notifications/deliveries/{id}/replay", s.apiNotificationReplay)
+	s.admin(mux, "POST /api/admin/notifications/deliveries/{id}/review", s.apiNotificationReview)
+	s.admin(mux, "POST /api/admin/notifications/dispatch", s.apiNotificationDispatch)
+	s.admin(mux, "POST /api/admin/notifications/preview", s.apiNotificationPreview)
+	s.admin(mux, "POST /api/admin/notifications/channels/{id}/test", s.apiNotificationChannelTest)
+	s.admin(mux, "DELETE /api/admin/notifications/channels/{id}", s.apiNotificationChannelDelete)
+	s.admin(mux, "DELETE /api/admin/notifications/routes/{id}", s.apiNotificationRouteDelete)
 
 	// ---- Downloads: MD / PDF (cookie session) ----
 	s.sessionHTML(mux, "GET /report/{id}/md", s.reportMD)

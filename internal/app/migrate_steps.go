@@ -166,7 +166,7 @@ type migration struct {
 // migrations is the ordered list this build knows. Append only; never edit a released step.
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006()}
+		migration0006(), migration0007()}
 }
 
 // The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).

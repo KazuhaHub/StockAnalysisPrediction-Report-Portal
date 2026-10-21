@@ -130,6 +130,7 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 	// caller's own privilege: only an admin gets `ingest`; everyone else is downgraded to read-only.
 	if !s.isAdmin(user) {
 		scopes = dropScope(scopes, "ingest")
+		scopes = dropScope(scopes, "notify")
 	}
 	// A restricted (external) user must not obtain an app-bridge query token: that Bearer token is not
 	// OU-bound, so replaying it against /api/v1 (no cookie → no viewerScope) would read cross-OU and
@@ -138,7 +139,7 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 	if s.viewerScope(user) != nil {
 		scopes = dropScope(scopes, "query")
 	}
-	token := s.appTok.mint(scopes, time.Now())
+	token := s.appTok.mintForApp(scopes, time.Now(), app.ID, s.st.GetUser(user))
 	writeJSON(w, map[string]any{
 		"app": appJSON(app), "token": token, "scopes": scopes, "expires_in": int(appTokenTTL / time.Second),
 	})

@@ -66,6 +66,7 @@ func TestAlertGoesToBothChannels(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	startNotificationRuntimeForTest(t, s)
 	s.forecastWatchdogOnce(time.Now())
 
 	select {
@@ -262,6 +263,7 @@ func TestStoreFailedAlertsBothChannelsWithoutDelayingTheIngest(t *testing.T) {
 	}
 	failing := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600162"`, 1)
 	start := time.Now()
+	startNotificationRuntimeForTest(t, s)
 	code, m := ingestPost(t, s, failing)
 	elapsed := time.Since(start)
 	if code != http.StatusOK || m["predictions_status"] != "store_failed" {
@@ -338,6 +340,7 @@ func TestStoreFailedAlertPanicDoesNotReachTheRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	failing := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600163"`, 1)
+	startNotificationRuntimeForTest(t, s)
 	code, m := ingestPost(t, s, failing)
 	if code != http.StatusOK || m["predictions_status"] != "store_failed" {
 		t.Fatalf("ingest: %d %v", code, m)
@@ -473,6 +476,7 @@ func TestStoreFailedAlertRunsOutsideTheInsertTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	failing := strings.Replace(ingestBody(string(predWire(nil))), `"symbol":"600160"`, `"symbol":"600164"`, 1)
+	startNotificationRuntimeForTest(t, s)
 	if code, m := ingestPost(t, s, failing); code != http.StatusOK || m["predictions_status"] != "store_failed" {
 		t.Fatalf("ingest: %d %v", code, m)
 	}
@@ -501,7 +505,7 @@ func TestSlackRedirectIsNotFollowed(t *testing.T) {
 	}))
 	defer src.Close()
 	s.slackHostForTest = "127.0.0.1"
-	if err := s.slackPost(context.Background(), src.URL, "text"); err == nil {
+	if accepted, _, _, _, _ := s.attemptNotification(context.Background(), NotificationChannel{Adapter: "slack"}, notificationChannelConfig{URL: src.URL}, NotificationEvent{Type: "forecast.alert.test", Payload: `{"reason":"test"}`}); accepted {
 		t.Fatal("a redirect was treated as a successful delivery")
 	}
 	if n := atomic.LoadInt32(&targetHits); n != 0 {

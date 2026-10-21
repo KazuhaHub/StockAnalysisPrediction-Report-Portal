@@ -21,6 +21,7 @@ import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
+import NotificationBell from './NotificationBell'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -77,6 +78,7 @@ function AppShell() {
     if (p === '/apps/batch') return [home, apps, { label: t('nav.batch') }]
     if (p.startsWith('/apps/x/')) return [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
+    if (p === '/notifications') return [home, { label: t('inbox.title') }]
     if (p === '/chat') return [home, { label: t('nav.chat') }]
     if (p.startsWith('/stock/') || p.startsWith('/run/')) return [home, { label: decodeURIComponent(p.split('/')[2] || '') }]
     return []
@@ -295,6 +297,7 @@ function AppShell() {
         {/* Vertical gap (14) clears the queue badge's overhang so a 2-digit count (10+)
             doesn't collide with the button on the wrapped row above it. */}
         <Space size={compact ? [8, 14] : 10} wrap style={{ flexShrink: 0, marginLeft: 'auto' }}>
+          {user && <NotificationBell key={user} user={user} />}
           {canRun && !chatFocus && (
             // Keep the primary run action direct. Related run surfaces share a compact menu,
             // so single-run execution remains one click away.

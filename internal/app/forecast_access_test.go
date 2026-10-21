@@ -138,6 +138,10 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
 		t.Fatal(err)
 	}
+	// A pre-0006 dump cannot claim the later notification migration either.
+	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0007")); err != nil {
+		t.Fatal(err)
+	}
 	dump := dumpOf(t, src)
 
 	dst := newTestStore(t)

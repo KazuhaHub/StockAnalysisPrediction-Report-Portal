@@ -1023,6 +1023,13 @@ func (s *Store) DeleteUser(name string) error {
 		return err
 	}
 	defer tx.Rollback() // a no-op once Commit has run; the safety net if any step below returns
+	// Exclude a route writer that validated this username before deletion but
+	// would otherwise insert its grant after the cleanup sweep.
+	if s.driver == "postgres" {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(780716)`); err != nil {
+			return err
+		}
+	}
 
 	run := func(q string, args ...any) error {
 		_, err := tx.Exec(s.bind(q), args...)
@@ -1039,6 +1046,15 @@ func (s *Store) DeleteUser(name string) error {
 		arg any
 	}{
 		{"DELETE FROM users WHERE username=?", name},
+		{"INSERT INTO notification_source_cycles(source_key,generation,occurrence_id) VALUES(?,1,'') ON CONFLICT(source_key) DO UPDATE SET generation=notification_source_cycles.generation+1", notificationAccountKey(name)},
+		{"DELETE FROM notification_recipients WHERE username=?", name},
+		{"DELETE FROM notification_preferences WHERE username=?", name},
+		{"DELETE FROM job_notification_intents WHERE username=?", name},
+		{"UPDATE notification_attempts SET outcome='uncertain',error_code='account_deleted',finished_at=" + strconv.FormatInt(time.Now().UTC().UnixMilli(), 10) + " WHERE finished_at=0 AND delivery_id IN (SELECT id FROM notification_deliveries WHERE username=?)", name},
+		{"UPDATE notification_deliveries SET state=CASE WHEN state='leased' AND sending=1 THEN 'uncertain' ELSE 'canceled' END,last_error='account_deleted',lease_token='',lease_until=0,sending=0 WHERE username=? AND state IN ('pending','retry_wait','leased')", name},
+		// Closed evidence remains readable to administrators, but cannot be replayed
+		// to a different person who later registers the same username.
+		{"UPDATE notification_deliveries SET last_error='account_deleted' WHERE username=?", name},
 		// batch_jobs stays — it is the run history an operator audits — but it must stop being LIVE
 		// state. A job left queued is still dispatched to Dify, and billed, for an account that no
 		// longer exists; and the run counters read this table, so an unfinished job would also
@@ -1071,6 +1087,7 @@ func (s *Store) DeleteUser(name string) error {
 		// TestEveryPrincipalTableIsSweptOnDelete walks the schema for principal tables and fails if
 		// a future one is missing from here or from DeleteUserGroup.
 		{"DELETE FROM announcement_grants WHERE principal=?", principal},
+		{"DELETE FROM notification_route_grants WHERE principal=?", principal},
 	}
 	for _, st := range steps {
 		if err := run(st.q, st.arg); err != nil {

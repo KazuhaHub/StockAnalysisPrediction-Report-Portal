@@ -453,10 +453,6 @@ func (s *Server) scheduleTick() {
 	}
 	s.schedMu.Unlock()
 	for _, j := range done {
-		s.fireEvent(EventBatchFinished, map[string]any{
-			"job_id": j.ID, "status": j.Status, "total": j.Total,
-			"succeeded": j.Succeeded, "partial": j.Partial, "failed": j.Failed,
-		})
 		s.notifyJobDone(j)
 	}
 }
@@ -720,10 +716,6 @@ func (s *Server) finalizeJob(jobID int64) {
 	done := s.finalizeLocked(jobID)
 	s.schedMu.Unlock()
 	if done != nil {
-		s.fireEvent(EventBatchFinished, map[string]any{
-			"job_id": done.ID, "status": done.Status, "total": done.Total,
-			"succeeded": done.Succeeded, "partial": done.Partial, "failed": done.Failed,
-		})
 		s.notifyJobDone(*done)
 	}
 }

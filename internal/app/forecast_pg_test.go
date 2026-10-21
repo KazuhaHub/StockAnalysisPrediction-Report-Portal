@@ -393,7 +393,7 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 			t.Fatalf("winding back 0006: %v", err)
 		}
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
+	if _, err := st.exec(`DELETE FROM meta WHERE k IN (?,?)`, migrationLedgerKey("0006"), migrationLedgerKey("0007")); err != nil {
 		t.Fatal(err)
 	}
 	dump := dumpOf(t, st)

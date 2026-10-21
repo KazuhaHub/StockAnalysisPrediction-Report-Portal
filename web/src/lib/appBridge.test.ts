@@ -5,6 +5,14 @@ const q = ['query']
 const qi = ['query', 'ingest']
 
 describe('validateApiRequest', () => {
+  it('requires the dedicated publication scope only at the notification endpoint', () => {
+    const request = { type: API_MESSAGE, method: 'POST', path: '/api/v1/notifications', body: { occurrence_id: 'one' } }
+    expect(validateApiRequest(request, ['notify']).ok).toBe(true)
+    expect(validateApiRequest(request, ['ingest']).ok).toBe(false)
+    expect(validateApiRequest({ ...request, method: 'DELETE' }, ['notify']).ok).toBe(false)
+    expect(validateApiRequest({ ...request, path: '/api/v1/reports' }, ['notify']).ok).toBe(false)
+    expect(validateApiRequest({ ...request, path: '/api/admin/notifications' }, ['notify']).ok).toBe(false)
+  })
   it('accepts a GET under /api/v1/ with the query scope', () => {
     const r = validateApiRequest({ type: API_MESSAGE, reqId: 1, path: '/api/v1/symbols?q=abc' }, q)
     expect(r).toEqual({ ok: true, method: 'GET', path: '/api/v1/symbols?q=abc', body: undefined })

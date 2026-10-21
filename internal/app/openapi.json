@@ -2287,6 +2287,102 @@
         },
         "description": "评估器关闭时返回 200；开启且心跳在十分钟内也返回 200；开启但心跳缺失或过旧时返回 503。响应只有一个布尔值，绝不带心跳内容——那里有匿名调用者不该看到的计数。"
       }
+    },
+    "/api/v1/notifications": {
+      "post": {
+        "operationId": "publishNotification",
+        "summary": "Publish a source-owned notification",
+        "description": "Requires a dedicated notify:<publisher> machine token or a bound administrator-issued app token with notify scope. all, query, ingest and cookie sessions do not authorize publication. The server derives the event namespace, recipients and destination rules. Reusing occurrence_id is idempotent for identical content; changed content conflicts. At most 120 new source events per rolling hour.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "occurrence_id",
+                  "title",
+                  "message",
+                  "severity"
+                ],
+                "properties": {
+                  "occurrence_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "info",
+                      "warning",
+                      "error",
+                      "resolved"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Captured event or identical earlier occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "id",
+                    "created"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or destination-bearing input"
+          },
+          "401": {
+            "description": "Dedicated publication credential required"
+          },
+          "409": {
+            "description": "Occurrence reused with different content"
+          },
+          "429": {
+            "description": "Source publication or delivery capacity limit"
+          },
+          "500": {
+            "description": "Capture failed; retry with the same occurrence id"
+          }
+        }
+      }
     }
   }
 }
