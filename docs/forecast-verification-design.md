@@ -343,6 +343,11 @@ backup and restore pick them up.
     route cannot be limited to managers.
   - The monthly page is therefore a **core SPA page** (settles D6).
 
+> **Amended 2026-10-20.** Reader access is extended in R2a by ADR 0039 (per-OU `all`/`own`/`none`, a
+> top-level `/forecast` page, compute governance); that record supersedes this section's manager-only
+> framing. Until it ships, P30/P31 apply: only an effectively restricted OU is a group principal,
+> and an unreadable restriction scopes to nothing.
+
 ## 8. What is quantified
 
 ### 8.1 Groups and membership
@@ -465,10 +470,15 @@ Corporate actions cannot be ignored: a 10-for-10 bonus issue reads as −50 %. T
 by a change in the vendor's adjusted/unadjusted ratio between `S0` and `session_date`, using a qfq
 fetch for **detection only**.
 
+- The dividend element the unadjusted feed carries on an ex-date names a **cash** dividend; it does
+  not mention 送, 转增 or 配股. The ratio is therefore the primary signal for a bonus or rights
+  issue, not a fallback for the element's gaps.
 - That is a narrow exception to the ADR 0028 "never qfq" rule, which is about displaying prices. The
-  ADR records it.
+  ADR records it, and the comparison is exact in integers with a one-fen bound.
 - A flagged mark is resolved and stored, but excluded from metrics and counted (§8.2).
-- The gap heuristic of draft 2 is dropped, because it fires on limit-down days.
+- The gap heuristic of draft 2 is dropped. The remaining backstop is a move beyond the board's
+  daily limit, computed from fen-rounded limit prices (10 % main board, 20 % ChiNext/STAR, 30 %
+  Beijing); an ordinary limit day is not a corporate action.
 
 ### 9.3 Sessions, halts, delisting
 
@@ -477,6 +487,11 @@ or before `session_date` is used, and `halted = 1` is set when it is earlier.
 
 This covers suspensions and delistings alike. Neither stays refused, so neither can quietly hollow
 out a cell.
+
+**Halted on S0 (V6b).** If the stock did not trade on S0, its starting price is the last close it
+printed strictly before S0, found in the reference window and then in one bounded 400-day
+look-back. Returns still run from S0; the benchmark leg is unchanged. A stock with no bar anywhere
+in that window is a mark-specific failure, not a source failure.
 
 ### 9.4 Baseline check
 
@@ -492,6 +507,11 @@ the market actually printed.
 they start at `S0`.
 
 ## 10. UI
+
+> **Amended by P10/P20.** The reading panel's mark column uses the server's phase vocabulary
+> (`waiting_s0` / `waiting` "on or after <date>" / `retrying` only with a recorded due session /
+> `resolved` / `final`), never "fetch failed" for a mark that is merely not due. The full reading-page
+> integration (card, chip, timeline dots, run-page card) is P20 in R2b.
 
 - **Report section: a 「预测验证」 card on `StockPage`** (`/stock/:symbol`; there is no separate report page and no tabs), below the selected report's body. The price levels are drawn on the existing quote chart at the top of the page, through a new optional `PriceChart` prop. The card shows:
   - the set's own payload, not the current body;
@@ -544,9 +564,11 @@ Each states its direction.
     null is reproducible with a fixed seed.
 19. **Access.**
     - The cohort route is refused to non-`PermManage` users, including holders of app-bridge
-      tokens.
+      tokens; R2a replaces this with the per-OU scope of ADR 0039.
     - The per-report route is refused for an unreadable report.
     - `owner_group` is never consulted (a test sets it to a readable group on an unreadable report).
+    - A `g:` viewer row is written only for an effectively restricted OU, and an unreadable
+      restriction or a broken OU chain scopes to nothing (P30/P31).
 20. **Rounding.** A Dify-node unit test feeds `8.655`, `8.650000000000001` and probabilities
     `[0.33333, 0.33333, 0.33334]` and checks half-even decimal output summing to `1.0000`.
 21. **Store failure.** When the set insert fails twice, the response is 200 with `store_failed`,
@@ -589,6 +611,8 @@ There is no backfill.
   the usage list.
 - **D6. Monthly page.** Settled by §7: a core page, manager only. The page has a monthly tab and a
   custom-range tab (§8.5), and is named 预测验证 (§1.1). Both are settled by the owner on 2026-10-17.
+  **Superseded in R2a** by ADR 0039: the record moves to a top-level `/forecast` page for members
+  of OUs with a scope, and `/manage/forecast` becomes the operations page.
 - **D7. 3-5 重组决策.** Out of v1, or ask its owner for a deterministic value table first?
 - **D8. Corporate actions.** Proposed: detect from the dividend element that Tencent's unadjusted
   day rows carry on ex-dates (`quote.go:1121`); fall back to the qfq ratio only for the kinds that

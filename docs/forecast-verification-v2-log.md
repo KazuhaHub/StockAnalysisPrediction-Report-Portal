@@ -220,8 +220,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
   `e27c7ea8`.
 - **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P31 `fix/tenancy-strict-restricted-read` (§6.9) is in this PR. After it: P11
-  (ADR 0037), the last R1b PR before P39b's own Beta.
+- **Next step.** P11 (ADR 0037 and the Release 1 amendments) is in this PR and closes R1b's code and
+  docs. What remains before the evaluator can be switched on is not R1b: P39b's own Beta (owner
+  token for every run, after the Dify publish), then R2a/P39b as scheduled. R2a starts with P15.
 - **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
   fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
   synthetic coverage that replaces them.
@@ -440,3 +441,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   account row stays unscoped (a session route has already validated the account; the window is a
   request racing a deletion), while a read failure still denies — the comment now says exactly that
   instead of calling it a machine caller.
+
+### P11 — ADR 0037 and the Release 1 amendments
+
+- **ADR 0037** records the definition repair (S0/dN, terminal baseline, not-due, finality, settlement
+  checks, the adjusted-ratio detection), governance (ledger start, test runs, benchmark schedule,
+  unrecorded), operations (modes, readiness, dry gate, heartbeat, watchdog, health, alert channels,
+  the single-connection rule), the restore rules, and the five escapes (F01, F03, F06, F10, F14)
+  with their causes.
+- **ADR 0029** gains a dated amendment block and in-place notes at §5, §6, §7, §9, §10 and §12; the
+  new settled decisions (V3, V6b, V8, V9, V18, V24, V26, the access model, the owner token) are in
+  §12's table.
+- **ADR 0017** notes that `pre_live`/`test` sets are purged by the ledger's own retention target and
+  that `attributed_ou` is not a retention key. **ADR 0022** records the restricted-only `g:` principal
+  and the reserved `_rp_*` inputs. **ADR 0024** records the P30 amendment to the "both principals"
+  paragraph.
+- **The design document** points from §7 and D6 to ADR 0039 (R2a), corrects §9.2 (the dividend element
+  is a cash signal; the ratio is primary; the exact fen limit backstop), adds the S0-halt rule to
+  §9.3, notes the phase vocabulary in §10, and extends acceptance condition 19 with the forecast
+  scope.
+- **`docs/forecast-verification-operations.md` is created** with the signals that exist today
+  (stalled, lagging, awaiting_gate, store_failed, test/off_benchmark counts, the switch-on sequence,
+  scheduling, the ledger start, deploy/restore). Later surfaces add their own rows.

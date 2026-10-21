@@ -119,6 +119,14 @@ and the reconcile-not-retry `untracked` outcome (ADR 0015).
    Bytes reclaimed rides on the result and on a sixth `cleanup_runs` column. It is not a target: it is
    the consequence of the others, and there is nothing to enable or configure.
 
+## Forecast-verification note (2026-10-20)
+
+The prediction ledger has its own retention target (ADR 0029 §8): it deletes a whole month at a
+time, and only when every set in it is orphaned, fully terminal and past the cutoff. `pre_live` and
+`test` sets are purged by that target like any other — they are not special-cased, and the ledger's
+own retention is what keeps them bounded. `prediction_sets.attributed_ou` is attribution, not a
+retention key; it never affects which sets are deleted.
+
 ## Consequences
 
 - `batch_jobs`/`batch_items` and expired tokens can now be bounded; reports have a manual, guarded purge
