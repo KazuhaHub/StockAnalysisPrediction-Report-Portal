@@ -78,7 +78,7 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
-	out := map[string]any{"ok": true, "sets": sets}
+	out := map[string]any{"ok": true, "sets": sets, "settlement_paused": s.forecastSettlementPaused()}
 	if identityErr == nil && selectionErr == nil {
 		out["display_set_id"] = display
 	}
@@ -134,7 +134,11 @@ func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, s
 	if sc == nil {
 		_ = s.st.annotateForecastReadMembership(sets)
 	}
-	writeJSON(w, map[string]any{"ok": true, "sets": sets})
+	writeJSON(w, map[string]any{"ok": true, "sets": sets, "settlement_paused": s.forecastSettlementPaused()})
+}
+
+func (s *Server) forecastSettlementPaused() bool {
+	return forecastMode(s.st.GetSetting(setForecastAuto, forecastModeOff)) != forecastModeOn
 }
 
 // canReadReport reports whether the caller may read this report at all. Used only to choose between

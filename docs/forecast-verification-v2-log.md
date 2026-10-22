@@ -757,3 +757,32 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   (40.334 s). Golden fixtures are unchanged.
 - This does not complete P16: source/direction fields, paused notices, drawer population semantics,
   OpenAPI and protected-access reconciliation remain. No schema or production action is included.
+
+### P16 — outcome fields, pause notice and read contract checkpoint (2026-10-22, in progress)
+
+- Read marks now expose their stored source and use the shared hit predicate for resolved
+  direction. Missing inputs and corporate-action exclusions are untested; unresolved/final-refusal
+  marks do not carry a direction. Dual-driver tests pin agreement, disagreement, flat results,
+  missing data, exclusions and both sides of the absolute five-percent threshold.
+- Both reading responses expose a separate `settlement_paused` notice for off/dry/unknown modes.
+  The stock page keys it to the displayed report with the existing stale-response guard. The
+  panel renders the pause notice separately from settling/overdue phases in all three UI locales.
+  Tests verify pending navigation and a late abandoned response cannot retain another report's
+  notice; older responses without the optional flag remain supported.
+- Removed never-filled `counted_in_group`, `baseline_bar` and `baseline_fen` read fields and their
+  obsolete client fixture values. Added complete read set/claim/mark/response OpenAPI schemas,
+  linked both machine-route responses, documented display/counting identity and corrected the
+  old report-local counting description. Tests lock phase/direction/membership to Go constants,
+  cover every exported read field and verify response bindings in all three localized specs.
+- Tests first failed for absent fields and pause rendering. Independent review found that an
+  empty symbol query still serialized `sets: null`, contradicting the new array contract. A new
+  route regression reproduced it; the store now returns an empty non-nil slice, and follow-up
+  review confirmed closure with no further actionable issue. Existing golden files are unchanged.
+- Final validation: full Go/SQLite/Postgres regression passed (48.744 s app package), as did vet,
+  staticcheck, three repeated outcome/empty-result/privacy/golden/OpenAPI race passes (21.608 s),
+  web typecheck and all 120 Vitest files / 1007 tests. Production SPA build and the serialized Go
+  embed rebuild also passed.
+- P16 remains unmerged: drawer membership population/link semantics, removal of the unused
+  coverage refusal bucket, final contract audit and P26 protected-access reconciliation remain.
+  Apps integration PRs #141/#142 remain open at their previous heads; P26 #145 remains held.
+  No schema, production deployment or workflow publication was performed.

@@ -357,6 +357,98 @@
           }
         }
       },
+      "PredictionReadMark": {
+        "type": "object",
+        "required": ["checkpoint", "status", "halted", "corp_action", "attempts"],
+        "properties": {
+          "checkpoint": {"type": "string", "enum": ["d5", "d20", "d60", "d120", "h12"]},
+          "status": {"type": "string", "enum": ["pending", "resolved", "refused", "refused_final"]},
+          "phase": {"type": "string", "enum": ["waiting_s0", "waiting", "settling", "retrying", "overdue", "resolved", "final"], "description": "Derived reader state, not a stored status. Retrying requires an evidenced due session. Overdue starts 48 hours after an exact due close, or 21 days after a projected lower-bound close."},
+          "not_before": {"type": "string", "format": "date", "description": "Earliest settlement date. Without a covering evaluator-published calendar or a recorded due session this is only a weekday lower bound, not a promised trading date."},
+          "source": {"type": "string", "description": "Stored source that produced this checkpoint; never inferred from the current live quote."},
+          "direction": {"type": "string", "enum": ["agree", "disagree", "flat", "untested"], "description": "Shared hit verdict, only on resolved marks. Untested includes missing inputs, corporate actions and implied upside below the absolute 5 percent threshold. Flat means a tested zero benchmark excess."},
+          "refusal": {"type": "string"},
+          "session_date": {"type": "string", "format": "date"},
+          "bar_date": {"type": "string", "format": "date"},
+          "halted": {"type": "boolean"},
+          "corp_action": {"type": "boolean"},
+          "close_fen": {"type": "integer", "format": "int64"},
+          "low_fen": {"type": "integer", "format": "int64"},
+          "high_fen": {"type": "integer", "format": "int64"},
+          "ret_bp": {"type": "integer", "format": "int32"},
+          "bench_ret_bp": {"type": "integer", "format": "int32"},
+          "attempts": {"type": "integer", "minimum": 0}
+        }
+      },
+      "PredictionReadClaim": {
+        "type": "object",
+        "required": ["key", "kind"],
+        "properties": {
+          "key": {"type": "string"},
+          "kind": {"type": "string", "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"]},
+          "stance": {"type": "string", "enum": ["long", "no_position"]},
+          "label": {"type": "string", "enum": ["bull", "base", "bear"]},
+          "price_fen": {"type": "integer", "format": "int64"},
+          "prob_bp": {"type": "integer", "minimum": 0, "maximum": 10000},
+          "weight_bp": {"type": "integer", "minimum": 0, "maximum": 10000}
+        }
+      },
+      "PredictionReadSet": {
+        "type": "object",
+        "required": ["id", "report_id", "state", "symbol", "rtype", "title", "version", "report_date", "made_at", "made_on", "cohort", "zone", "bench_code", "horizon_std", "baseline_check", "body_changed", "claims", "marks"],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "report_id": {"type": ["integer", "null"], "format": "int64", "description": "Null after report retention; the prediction ledger can outlive its report."},
+          "state": {"type": "string", "enum": ["accepted", "test", "backtest", "absent", "rejected"]},
+          "symbol": {"type": "string"},
+          "rtype": {"type": "string"},
+          "title": {"type": "string"},
+          "version": {"type": "string"},
+          "report_date": {"type": "string", "format": "date"},
+          "made_at": {"type": "string", "format": "date-time"},
+          "made_on": {"type": "string", "format": "date"},
+          "cohort": {"type": "string"},
+          "zone": {"type": "string"},
+          "bench_code": {"type": "string"},
+          "membership": {"type": "string", "enum": ["member", "duplicate", "degraded", "mismatch", "pending_baseline", "pre_live", "off_benchmark", "test", "backtest", "absent", "rejected", "unknown"], "description": "Monthly membership in the complete all-report population, never inferred from this response's pagination or this report's revisions. Omitted for protected readers and on classification errors."},
+          "upside_bp": {"type": "integer", "format": "int64", "description": "(terminal minus S0) / S0 in basis points, truncated toward zero. Absent without usable inputs or on integer overflow."},
+          "horizon_std": {"type": "boolean"},
+          "horizon_end": {"type": "string", "format": "date"},
+          "baseline_check": {"type": "string", "enum": ["pending", "match", "mismatch", "refused", "refused_final"]},
+          "baseline_emitted_fen": {"type": "integer", "format": "int64"},
+          "baseline_as_of": {"type": "string"},
+          "baseline_source": {"type": "string"},
+          "s0_date": {"type": "string", "format": "date"},
+          "s0_fen": {"type": "integer", "format": "int64"},
+          "body_changed": {"type": "boolean"},
+          "decision_status": {"type": "string"},
+          "decision_quality": {"type": "string"},
+          "probability_method": {"type": "string"},
+          "policy_version": {"type": "string"},
+          "errors": {"type": "array", "items": {"type": "object"}},
+          "payload": {"type": "string", "description": "Original JSON as text, only when explicitly requested and permitted."},
+          "claims": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadClaim"}},
+          "marks": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadMark"}}
+        }
+      },
+      "PredictionReadResponse": {
+        "type": "object",
+        "required": ["ok", "sets", "settlement_paused"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "sets": {"type": "array", "maxItems": 200, "items": {"$ref": "#/components/schemas/PredictionReadSet"}},
+          "settlement_paused": {"type": "boolean", "description": "True when the evaluator is off, in dry mode, or has an unknown mode. This notice is separate from the historical phase and never changes stored outcomes."}
+        }
+      },
+      "ReportPredictionReadResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/PredictionReadResponse"},
+          {"type": "object", "properties": {
+            "display_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Latest accepted set matching the current report body; otherwise latest accepted set. Zero means none. Omitted if identity selection fails. A nonzero selected set is retained within the 200-set detail cap."},
+            "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."}
+          }}
+        ]
+      },
       "PredictionPayload": {
         "type": "object",
         "required": ["schema"],
@@ -2003,7 +2095,7 @@
         "operationId": "reportPredictions",
         "summary": "一份报告的结构化预测及其结算结果",
         "x-scope": "query",
-        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。",
+        "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice.",
         "parameters": [
           {
             "name": "id",
@@ -2028,12 +2120,13 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do."
+            "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice."
           }
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReportPredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"
@@ -2104,7 +2197,8 @@
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"

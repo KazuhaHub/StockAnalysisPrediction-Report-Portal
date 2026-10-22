@@ -72,7 +72,7 @@ vi.mock('../api/client', () => ({
         predCalls.push(url)
         if (url.includes('/api/report/2/')) {
           if (pendingB) return new Promise(() => {}) // the in-flight case
-          return Promise.resolve({ ok: true, sets: [setFor(2, 222200)], counted_set_id: 2 })
+          return Promise.resolve({ ok: true, sets: [setFor(2, 222200)], counted_set_id: 2, settlement_paused: false })
         }
         if (rejectPred) return Promise.reject(new Error('boom'))
         if (aDeferred) {
@@ -80,7 +80,7 @@ vi.mock('../api/client', () => ({
             aDeferred!.resolve = resolve
           })
         }
-        return Promise.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1 })
+        return Promise.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1, settlement_paused: true })
       }
       if (url.includes('date=2026-07-08')) return Promise.resolve(report(2, '2026-07-08'))
       return Promise.resolve(report(1, '2026-07-07'))
@@ -121,10 +121,12 @@ describe('StockPage predictions', () => {
   it('clears the previous report marks as soon as the report changes', async () => {
     show()
     expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
+    expect(screen.getByText('forecast.phase.settlement_paused')).toBeTruthy()
     await userEvent.click(screen.getByText('next-report'))
     // The new report's predictions request is still in flight; A's panel must already be gone. The
     // chart overlay reads the same derived state, so it is cleared by the same expression.
     await waitFor(() => expect(screen.queryByText(/1,111\.00/)).toBeNull())
+    expect(screen.queryByText('forecast.phase.settlement_paused')).toBeNull()
     expect(predCalls.some((u) => u.includes('/api/report/2/'))).toBe(true)
   })
 
@@ -136,10 +138,11 @@ describe('StockPage predictions', () => {
     await userEvent.click(screen.getByText('next-report'))
     expect(await screen.findByText(/2,222\.00/)).toBeTruthy()
     // The abandoned request now answers. It must not replace the current report's marks.
-    aDeferred.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1 })
+    aDeferred.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1, settlement_paused: true })
     await new Promise((r) => setTimeout(r, 50))
     expect(screen.getByText(/2,222\.00/)).toBeTruthy()
     expect(screen.queryByText(/1,111\.00/)).toBeNull()
+    expect(screen.queryByText('forecast.phase.settlement_paused')).toBeNull()
   })
 
   it('renders the body and an inline retry when the predictions request fails', async () => {

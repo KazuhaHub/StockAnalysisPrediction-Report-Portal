@@ -10,6 +10,56 @@ import (
 	"testing"
 )
 
+func TestOpenAPIReadSchemasCoverWireFields(t *testing.T) {
+	for _, lang := range []string{"zh-CN", "zh-TW", "en-US"} {
+		t.Run(lang, func(t *testing.T) {
+			data, err := localizedOpenAPIJSON(lang)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var spec map[string]any
+			if err := json.Unmarshal(data, &spec); err != nil {
+				t.Fatal(err)
+			}
+			schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+			for _, tc := range []struct {
+				name string
+				wire reflect.Type
+			}{
+				{"PredictionReadSet", reflect.TypeOf(PredictionSet{})},
+				{"PredictionReadMark", reflect.TypeOf(PredictionMark{})},
+				{"PredictionReadClaim", reflect.TypeOf(PredictionClaim{})},
+			} {
+				props := schemas[tc.name].(map[string]any)["properties"].(map[string]any)
+				for i := 0; i < tc.wire.NumField(); i++ {
+					field := tc.wire.Field(i)
+					if !field.IsExported() {
+						continue
+					}
+					key := strings.Split(field.Tag.Get("json"), ",")[0]
+					if key != "" && key != "-" && props[key] == nil {
+						t.Errorf("%s misses wire field %s", tc.name, key)
+					}
+				}
+			}
+			setProps := schemas["PredictionReadSet"].(map[string]any)["properties"].(map[string]any)
+			for _, obsolete := range []string{"counted_in_group", "baseline_bar", "baseline_fen"} {
+				if setProps[obsolete] != nil {
+					t.Errorf("obsolete field %s remains", obsolete)
+				}
+			}
+			paths := spec["paths"].(map[string]any)
+			for route, want := range map[string]string{"/api/v1/reports/{id}/predictions": "ReportPredictionReadResponse", "/api/v1/predictions": "PredictionReadResponse"} {
+				response := paths[route].(map[string]any)["get"].(map[string]any)["responses"].(map[string]any)["200"].(map[string]any)
+				ref := response["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"]
+				if ref != "#/components/schemas/"+want {
+					t.Errorf("%s response schema = %v", route, ref)
+				}
+			}
+		})
+	}
+}
+
 // The embedded OpenAPI spec must be valid 3.1 JSON and cover every v1 endpoint
 // (plus the public ones) so the served spec / rendered docs never drift.
 func TestOpenAPISpecValid(t *testing.T) {
@@ -349,6 +399,9 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 		{"run_mode", enumOf("PredictionPayload", "properties", "run_mode"), predRunModes, "PredictionPayload.run_mode"},
 		{"stance", enumOf("PredictionClaim", "properties", "stance"), predStances, "PredictionClaim.stance"},
 		{"label", enumOf("PredictionClaim", "properties", "label"), predLabels, "PredictionClaim.label"},
+		{"reader phase", enumOf("PredictionReadMark", "properties", "phase"), []string{predPhaseWaitingS0, predPhaseWaiting, predPhaseSettling, predPhaseRetrying, predPhaseOverdue, predPhaseResolved, predPhaseFinal}, "PredictionReadMark.phase"},
+		{"reader direction", enumOf("PredictionReadMark", "properties", "direction"), []string{dirAgree, dirDisagree, dirFlat, dirUntested}, "PredictionReadMark.direction"},
+		{"reader membership", enumOf("PredictionReadSet", "properties", "membership"), []string{membershipMember, membershipDuplicate, membershipDegraded, membershipMismatch, membershipPendingBaseline, membershipPreLive, membershipOffBenchmark, predStateTest, predStateBacktest, predStateAbsent, predStateRejected, membershipUnknown}, "PredictionReadSet.membership"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := append([]string(nil), tc.got...)

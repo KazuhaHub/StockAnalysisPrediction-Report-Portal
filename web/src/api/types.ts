@@ -1428,6 +1428,8 @@ export interface PredictionMark {
   ret_bp?: number
   bench_ret_bp?: number
   attempts?: number
+  source?: string
+  direction?: 'agree' | 'disagree' | 'flat' | 'untested'
   /** Derived reading-page state; retrying requires a recorded due session. */
   phase?: 'waiting_s0' | 'waiting' | 'settling' | 'retrying' | 'overdue' | 'resolved' | 'final'
   /** The earliest date the mark can settle; a projection is only a lower bound. */
@@ -1481,8 +1483,6 @@ export interface PredictionSet {
   claims: PredictionClaim[]
   marks: PredictionMark[]
   payload?: string
-  /** The cohort this set is the counted member of, or '' when it is not one. */
-  counted_in_group?: string
 }
 
 export interface ReportPredictions {
@@ -1490,6 +1490,7 @@ export interface ReportPredictions {
   sets: PredictionSet[]
   counted_set_id?: number
   display_set_id?: number
+  settlement_paused?: boolean
 }
 
 export type ForecastMode = 'month' | 'custom'

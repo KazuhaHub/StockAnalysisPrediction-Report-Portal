@@ -52,8 +52,6 @@ type PredictionSet struct {
 	BaselineAsOf       string `json:"baseline_as_of,omitempty"`
 	BaselineSource     string `json:"baseline_source,omitempty"`
 	BaselineCheck      string `json:"baseline_check"`
-	BaselineBar        string `json:"baseline_bar,omitempty"`
-	BaselineFen        *int64 `json:"baseline_fen,omitempty"`
 
 	S0Date string `json:"s0_date,omitempty"`
 	S0Fen  *int64 `json:"s0_fen,omitempty"`
@@ -71,9 +69,6 @@ type PredictionSet struct {
 	// Payload is the verbatim predictions JSON. Returned with include=payload only when the caller
 	// is unrestricted: it is a diagnostic, not a reader's field (P10).
 	Payload string `json:"payload,omitempty"`
-	// CountedInGroup is the cohort whose member this set is, or "" when it is not one. Filled by the
-	// group statistics, not by this query — the field exists here so one shape serves both callers.
-	CountedInGroup string `json:"counted_in_group,omitempty"`
 }
 
 // PredictionClaim is one claim of a set.
@@ -102,6 +97,8 @@ type PredictionMark struct {
 	RetBp       *int32 `json:"ret_bp,omitempty"`
 	BenchRetBp  *int32 `json:"bench_ret_bp,omitempty"`
 	Attempts    int    `json:"attempts"`
+	Source      string `json:"source,omitempty"`
+	Direction   string `json:"direction,omitempty"`
 	// Phase and NotBefore are the READING page's words for a mark (P10): a pending mark is not a
 	// failure, and the page must not call it one. Derived from published completed sessions or a
 	// conservative weekday projection by the read route, never stored.
@@ -188,7 +185,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 	}
 	defer rows.Close()
 
-	var out []PredictionSet
+	out := make([]PredictionSet, 0)
 	var ids []int64
 	for rows.Next() {
 		var (
@@ -266,6 +263,22 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 		if m, ok := marks[out[i].ID]; ok {
 			out[i].Marks = m
 		}
+		var terminal *int64
+		for _, claim := range out[i].Claims {
+			if claim.Kind == kindTerminal {
+				terminal = claim.PriceFen
+			}
+		}
+		for j := range out[i].Marks {
+			mark := &out[i].Marks[j]
+			if mark.Status != markResolved {
+				continue
+			}
+			mark.Direction = dirUntested
+			if !mark.CorpAction && terminal != nil && out[i].S0Fen != nil && mark.RetBp != nil && mark.BenchRetBp != nil {
+				mark.Direction = predHitClass(*terminal, *out[i].S0Fen, *mark.RetBp-*mark.BenchRetBp)
+			}
+		}
 	}
 	return out, nil
 }
@@ -322,7 +335,7 @@ func (s *Store) predictionClaimsFor(setIDs []int64) (map[int64][]PredictionClaim
 func (s *Store) predictionMarksFor(setIDs []int64) (map[int64][]PredictionMark, error) {
 	ph := placeholders(len(setIDs))
 	rows, err := s.query(`SELECT set_id, checkpoint, status, refusal, session_date, bar_date,
-			halted, corp_action, close_fen, low_fen, high_fen, ret_bp, bench_ret_bp, attempts
+			halted, corp_action, close_fen, low_fen, high_fen, ret_bp, bench_ret_bp, attempts, source
 		FROM prediction_marks WHERE set_id IN (`+ph+`)
 		ORDER BY set_id, `+predCheckpointOrderSQL(),
 		int64Args(setIDs)...)
@@ -337,7 +350,7 @@ func (s *Store) predictionMarksFor(setIDs []int64) (map[int64][]PredictionMark, 
 		var halted, corp int
 		var closeF, lowF, highF, ret, bench sql.NullInt64
 		if err := rows.Scan(&setID, &m.Checkpoint, &m.Status, &m.Refusal, &m.SessionDate, &m.BarDate,
-			&halted, &corp, &closeF, &lowF, &highF, &ret, &bench, &m.Attempts); err != nil {
+			&halted, &corp, &closeF, &lowF, &highF, &ret, &bench, &m.Attempts, &m.Source); err != nil {
 			return nil, err
 		}
 		m.Halted, m.CorpAction = halted == 1, corp == 1
