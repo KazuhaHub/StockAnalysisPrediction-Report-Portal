@@ -512,7 +512,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   and an undeclared fake owner input. Run `57abe025-2ee3-4ee8-a282-ab788578a58e` succeeded on all
   three nodes; the normalized workflow inputs omitted the undeclared key. The Console draft
   runtime therefore ignores it. No LLM, HTTP, report ingest or email node exists in that graph.
-  The production service API path still needs equivalent evidence before treating §11.1 as met.
+- Repeated the same authorized test through the published Service API using the test app's existing
+  key (no key created or exposed). `POST /v1/workflows/run` returned HTTP 200; run
+  `f6a85b7b-73ce-4116-8294-9b0986e84a2c` succeeded on all three steps with `waited_minutes=0`.
+  The undeclared input does not reject a run through the same API path Portal uses. This closes
+  the undeclared-input runtime question in §11.1; deployment and target refresh remain separate gates.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
