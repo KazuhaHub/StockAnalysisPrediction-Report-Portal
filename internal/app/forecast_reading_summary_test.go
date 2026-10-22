@@ -265,11 +265,17 @@ func TestReadingSummaryRechecksReportVisibility(t *testing.T) {
 
 func TestReadingSummaryNonstandardHorizonHasNoNextH12(t *testing.T) {
 	for _, driver := range []string{"sqlite", "postgres"} {
-		t.Run(driver, func(t *testing.T) { assertReadingSummaryNonstandardHorizon(t, driver) })
+		t.Run(driver, func(t *testing.T) { assertReadingSummaryH12(t, driver, false) })
 	}
 }
 
-func assertReadingSummaryNonstandardHorizon(t *testing.T, driver string) {
+func TestReadingSummaryStandardHorizonKeepsPendingH12(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) { assertReadingSummaryH12(t, driver, true) })
+	}
+}
+
+func assertReadingSummaryH12(t *testing.T, driver string, standard bool) {
 	t.Helper()
 	for _, storedH12 := range []bool{false, true} {
 		t.Run(fmt.Sprint("stored-h12-", storedH12), func(t *testing.T) {
@@ -285,10 +291,15 @@ func assertReadingSummaryNonstandardHorizon(t *testing.T, driver string) {
 			if storedH12 {
 				marks["h12"] = gsMark{Status: markPending}
 			}
-			report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-09-17", HorizonStd: false, Marks: marks}, "Nonstandard horizon")
+			report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-09-17", HorizonStd: standard, Marks: marks}, "Horizon applicability")
 			for _, route := range []string{"stock", "run"} {
 				summary := readingSummaryResponse(t, s, "summary-own", route, report, false)["prediction"].(map[string]any)
-				if _, exists := summary["next_checkpoint"]; exists {
+				next, exists := summary["next_checkpoint"]
+				if standard {
+					if !exists || next.(map[string]any)["checkpoint"] != "h12" {
+						t.Fatalf("%s lost a standard-horizon obligation: %v", route, summary)
+					}
+				} else if exists {
 					t.Fatalf("%s invented an inapplicable checkpoint: %v", route, summary)
 				}
 			}
