@@ -90,7 +90,11 @@ func madeAtBefore(madeAt string, boundary time.Time) bool {
 type forecastCell struct {
 	State string `json:"state"`
 	// External all readers receive the maturity assurance without the ledger's member count.
-	MinNMet bool `json:"min_n_met,omitempty"`
+	MinNMet           bool           `json:"min_n_met,omitempty"`
+	PendingReasons    map[string]int `json:"pending_reasons,omitempty"`
+	FailedCapExceeded *bool          `json:"failed_cap_exceeded,omitempty"`
+	NotBefore         string         `json:"not_before,omitempty"`
+	Expected          bool           `json:"expected,omitempty"`
 
 	N          *int `json:"n,omitempty"`
 	Resolved   *int `json:"resolved,omitempty"`

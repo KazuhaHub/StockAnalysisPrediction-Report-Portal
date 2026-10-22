@@ -35,6 +35,7 @@ type groupSet struct {
 
 	HorizonStd bool
 	S0Fen      *int64
+	S0Date     string
 
 	Marks map[string]PredictionMark
 
@@ -58,7 +59,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 	}
 	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
 			ps.made_at, ps.made_on, ps.cohort, ps.bench_code,
-			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
+			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen, ps.s0_date,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
 		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?`+where+`
@@ -79,7 +80,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 		)
 		if err := rows.Scan(&gs.ID, &reportID, &gs.Symbol, &gs.ReportDate, &gs.State, &gs.MadeAt, &gs.MadeOn,
 			&gs.Cohort, &gs.BenchCode,
-			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0,
+			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0, &gs.S0Date,
 			&gs.PolicyVersion, &gs.ProbabilityMethod, &gs.ProbabilityTransform); err != nil {
 			return nil, err
 		}

@@ -225,13 +225,15 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26 merge
-  checkpoint is `962e7e15`; P37 integration is under verification in the same isolated P16 worktree.
+  is pending; neither Apps branch nor the user's checkout was changed. The locally validated
+  P16/P26/P37 integration checkpoint is `10190278`. P17 cell explanations are in progress on
+  `feat/forecast-groups-explain`, stacked locally on that checkpoint, without an open PR.
   Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
   Independent P37 #151 is held by the unchanged production dependency audit; existing DOMPurify
   update #138 needs permission to reconcile and merge. No red CI has been merged.
-- **Next step.** Complete local P16/P37 verification, obtain the purge-evidence schema and dependency
-  PR decisions, and resolve P26's integration sequence before P27/P28.
+- **Next step.** Complete P17's response summary/capabilities/limits metadata and integration gates,
+  obtain the purge-evidence schema and dependency PR decisions, and resolve P26's integration
+  sequence before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -1201,3 +1203,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   evidence schema still awaits approval, as does reconciliation/merge of the existing DOMPurify
   dependency PR #138 that blocks P37 CI. No production, Apps branch, schema or evaluator mode
   was changed, and no separately owned PR was modified.
+
+### P17 — pending-cell explanations checkpoint (2026-10-22, in progress)
+
+- Added request-time phase counts, the final-refusal-cap flag and the earliest outstanding
+  not-before date/expected qualifier to non-mature cells. The classified member and pending-baseline
+  populations feed the explanation, with the same standard-horizon filter for h12. Invalid timing
+  has an explicit unknown bucket rather than silently disappearing. Counts include resolved and
+  final phases so they reconcile with the full selected population, not only failed attempts.
+- Read the already-existing frozen `s0_date` alongside group metadata on both drivers; no schema
+  change is involved. SQLite and Postgres tests prove explanations retain that frozen start.
+- The scoring builder has a read-time wrapper. Explanations are copied onto response cells after
+  computation and never enter mature-cell memos. Pure computation and archived golden fixtures
+  remain unchanged. A fixed 500-fixture independent gate oracle exercises open, pending, small
+  and mature outcomes; metadata must not alter any state.
+- External-all shaping removes every explanation field, including from a deliberately decorated
+  mature cell and recursively from slices. The positive leak fixture failed before adding those
+  removals; own readers retain their explanations, and shaping never mutates its source response.
+  Independent review found no actionable issue in this checkpoint.
+- Validation: full Go regression with Postgres passed (app package 53.364 s), vet/staticcheck,
+  three-repeat targeted race checks (33.185 s), web typecheck and all 120 Vitest files / 1020 tests
+  passed. The production SPA build and serialized Go embed rebuild passed.
+- This is not P17 completion. The response-level summary, covered types, limits, timestamps,
+  ledger start, evaluator mode and capabilities (with route-gate parity and external-all omission
+  tests) remain to implement. No PR, production action, Apps-branch change or database DDL was made.

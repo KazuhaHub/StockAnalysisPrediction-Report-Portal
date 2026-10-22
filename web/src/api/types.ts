@@ -1519,6 +1519,10 @@ export interface ForecastCoverage {
 
 export interface ForecastCell {
   state: 'open' | 'pending' | 'small' | 'mature' | 'purged'
+  pending_reasons?: Partial<Record<NonNullable<PredictionMark['phase']> | 'unknown', number>>
+  failed_cap_exceeded?: boolean
+  not_before?: string
+  expected?: boolean
   n?: number
   resolved?: number
   total?: number

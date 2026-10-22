@@ -84,6 +84,8 @@ func forecastCellWithoutVolume(cell *forecastCell) *forecastCell {
 	}
 	out := *cell
 	out.MinNMet = true
+	out.PendingReasons, out.FailedCapExceeded = nil, nil
+	out.NotBefore, out.Expected = "", false
 	out.N, out.Resolved, out.Total, out.Refused, out.CorpAction = nil, nil, nil, nil, nil
 	out.ICN, out.HitN, out.BandN, out.CalibN = nil, nil, nil, nil
 	if cell.Slices != nil {
