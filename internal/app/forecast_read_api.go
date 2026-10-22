@@ -21,8 +21,10 @@ import (
 )
 
 type forecastPredictionView struct {
-	scope     *ownerScope
-	protected bool
+	scope        *ownerScope
+	protected    bool
+	reader       bool
+	noMembership bool
 }
 
 func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string) (forecastPredictionView, bool) {
@@ -41,7 +43,7 @@ func forecastPredictionViewFor(d forecastDecision, sc *ownerScope) forecastPredi
 	if d.External && sc == nil {
 		sc = &ownerScope{denyAll: true}
 	}
-	return forecastPredictionView{scope: sc, protected: d.External || sc != nil}
+	return forecastPredictionView{scope: sc, protected: d.External || sc != nil, reader: d.Reason != "admin", noMembership: d.Scope == scopeOwn}
 }
 
 func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request) (forecastPredictionView, bool) {
@@ -56,16 +58,22 @@ func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request
 	return forecastPredictionView{}, true
 }
 
-func protectedPredictionSets(sets []PredictionSet, protected bool) []PredictionSet {
-	if !protected {
+func protectedPredictionSets(sets []PredictionSet, view forecastPredictionView) []PredictionSet {
+	if !view.protected && !view.reader {
 		return sets
 	}
 	out := make([]PredictionSet, 0, len(sets))
 	for _, set := range sets {
-		if set.State != predStateAccepted || set.ReportID == nil {
+		if set.State != predStateAccepted || view.protected && set.ReportID == nil {
 			continue
 		}
-		set.Payload, set.CountedInGroup, set.Errors = "", "", nil
+		set.Errors = nil
+		if view.protected {
+			set.Payload = ""
+		}
+		if view.protected || view.noMembership {
+			set.CountedInGroup = ""
+		}
 		out = append(out, set)
 	}
 	return out
@@ -104,7 +112,7 @@ func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Reque
 		ReportID:       id,
 		Limit:          200,
 		IncludePayload: !view.protected && includePayload(r, sc),
-		AcceptedOnly:   view.protected,
+		AcceptedOnly:   view.protected || view.reader,
 		RequireReport:  view.protected,
 	}, sc)
 	if err != nil {
@@ -121,12 +129,12 @@ func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	annotateReadPhases(sets, s.forecastEval.clock())
-	sets = protectedPredictionSets(sets, view.protected)
+	sets = protectedPredictionSets(sets, view)
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
 	out := map[string]any{"ok": true, "sets": sets}
-	if len(sets) > 0 && !view.protected {
+	if len(sets) > 0 && !view.protected && !view.noMembership {
 		populationFrom, _ := s.st.ForecastPopulationFrom()
 		// The cohort's benchmark, per set, so the "counted" pointer never lands on a set the statistics
 		// excluded as off-benchmark (P4). A report's revisions can span cohorts, so each candidate is
@@ -178,7 +186,7 @@ func (s *Server) serveQueryPredictionsView(w http.ResponseWriter, r *http.Reques
 		RType:         strings.TrimSpace(firstNonEmpty(q.Get("rtype"), q.Get("subtype"))),
 		From:          strings.TrimSpace(q.Get("from")),
 		To:            strings.TrimSpace(q.Get("to")),
-		AcceptedOnly:  view.protected,
+		AcceptedOnly:  view.protected || view.reader,
 		RequireReport: view.protected,
 	}
 	if f.Symbol == "" {
@@ -201,7 +209,7 @@ func (s *Server) serveQueryPredictionsView(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	annotateReadPhases(sets, s.forecastEval.clock())
-	sets = protectedPredictionSets(sets, view.protected)
+	sets = protectedPredictionSets(sets, view)
 	writeJSON(w, map[string]any{"ok": true, "sets": sets})
 }
 

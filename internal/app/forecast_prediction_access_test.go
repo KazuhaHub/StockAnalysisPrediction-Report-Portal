@@ -5,11 +5,96 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
+
+func TestInternalPredictionReaderDiagnosticsAndMembership(t *testing.T) {
+	s := newV1Server(t)
+	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
+	for _, scope := range []string{scopeAll, scopeOwn} {
+		seedForecastReader(t, s, scope, scope, false)
+	}
+	mustAddUser(t, s, "admin", true)
+	report, accepted := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
+	_, rejected := seedLedgerFor(t, s, "600160", "2026-10-18", "# rejected")
+	if _, err := s.st.exec(`UPDATE prediction_sets SET errors='[{"reason":"test"}]' WHERE id=?`, accepted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec("UPDATE prediction_sets SET state=? WHERE id=?", predStateRejected, rejected); err != nil {
+		t.Fatal(err)
+	}
+	orphan, _ := seedLedgerFor(t, s, "600160", "2026-10-19", "# orphan")
+	if _, err := s.st.DeleteReport(orphan); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []string{scopeAll, scopeOwn, "admin"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/api/report/x/predictions?include=payload", nil)
+		r.SetPathValue("id", itoa64(report))
+		s.apiReportPredictions(w, r, user)
+		var out map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		set := out["sets"].([]any)[0].(map[string]any)
+		if _, ok := set["payload"]; !ok {
+			t.Fatal("internal diagnostic payload missing")
+		}
+		_, hasErrors := set["errors"]
+		if hasErrors != (user == "admin") {
+			t.Errorf("%s error diagnostics mismatch", user)
+		}
+		_, hasMember := out["counted_set_id"]
+		if hasMember != (user != scopeOwn) {
+			t.Errorf("%s membership mismatch", user)
+		}
+		w = httptest.NewRecorder()
+		s.apiQueryPredictions(w, httptest.NewRequest("GET", "/api/predictions?symbol=600160", nil), user)
+		var list struct {
+			Sets []PredictionSet `json:"sets"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+			t.Fatal(err)
+		}
+		want := 2
+		if user == "admin" {
+			want = 3
+		}
+		if len(list.Sets) != want {
+			t.Errorf("%s nonaccepted rows: %d want %d", user, len(list.Sets), want)
+		}
+		// The same policy must apply to a cookie on the otherwise machine-classed surface.
+		vw := httptest.NewRecorder()
+		vr := sessionForPath(t, s, user, "GET /api/v1/reports/{id}/predictions", "/api/v1/reports/"+itoa64(report)+"/predictions?include=payload")
+		vr.SetPathValue("id", itoa64(report))
+		s.v1ReportPredictions(vw, vr)
+		var vout map[string]any
+		if err := json.Unmarshal(vw.Body.Bytes(), &vout); err != nil {
+			t.Fatal(err)
+		}
+		if vw.Code != 200 || !reflect.DeepEqual(out, vout) {
+			t.Fatalf("%s v1 cookie shape diverged: %d %s", user, vw.Code, vw.Body.String())
+		}
+		vw = httptest.NewRecorder()
+		s.v1QueryPredictions(vw, sessionForPath(t, s, user, "GET /api/v1/predictions", "/api/v1/predictions?symbol=600160"))
+		var vl struct {
+			Sets []PredictionSet `json:"sets"`
+		}
+		if err := json.Unmarshal(vw.Body.Bytes(), &vl); err != nil {
+			t.Fatal(err)
+		}
+		if vw.Code != 200 || !reflect.DeepEqual(list, vl) {
+			t.Fatalf("%s v1 cookie list diverged: %d %s", user, vw.Code, vw.Body.String())
+		}
+	}
+}
 
 func TestExternalPredictionScopeChangeFailsClosed(t *testing.T) {
 	for _, change := range []string{"delete", "unrestrict"} {

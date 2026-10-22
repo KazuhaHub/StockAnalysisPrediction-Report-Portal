@@ -720,3 +720,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boundary tests. The live minute ticker itself is not advanced through a wall-clock boundary.
   Hourly persistence necessarily permits losing the latest unflushed observations on abrupt
   termination; the adoption indicator is not an exact analytics ledger.
+- Access-table reconciliation: internal non-admin prediction readers now receive accepted sets
+  without error diagnostics, while retaining payload and orphaned history. Internal `own` readers
+  also omit membership pointers because those refer to the all-population record. Admin and
+  persistent-machine diagnostic contracts remain unchanged. Both SQL filters precede LIMIT.
+- Regression tests first exposed rejected rows, errors and own membership, then passed after the
+  view-policy correction. Positive controls retain internal payload/orphans and compare both SPA
+  reads against their real cookie-authenticated v1 counterparts. Independent review found no
+  actionable issue. Full Go regression with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed; the final orphan/v1 extensions passed in the race run separately.
