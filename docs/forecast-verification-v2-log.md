@@ -493,5 +493,26 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   preservation regression and updated source scan passed after the full run. Axe checks pass for
   shared guidance under both themes; jsdom cannot validate layout or contrast, so contrast is
   measured separately and seeded visual review remains pending P14. No golden fixture changed.
-- Rollback: revert this PR; no data or schema changes. P15 stays draft pending the required CI
-  gate and independent adversarial review. The current main toolchain still has GO-2026-6809.
+- Independent adversarial review found no actionable issues. Browser checks of the real shared
+  components in a temporary local harness covered 375/768/1280 px in both themes, with keyboard
+  focus and no page-level horizontal overflow. The owner spotted uneven checkpoint heights;
+  boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
+  fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
+  This component preview does not replace P14's seeded full-page acceptance.
+- Rollback: revert this PR; no data or schema changes. P15 stays draft pending required CI.
+  The current main toolchain still has GO-2026-6809.
+
+### P39b precondition audit (2026-10-22)
+
+- Read the live Dify Console API: all 16 published workflows declare the optional owner input;
+  all 18 ingest-node and 11 child-tool bindings are correct. All 12 workflow-tool providers carry
+  the input and report `synced=true`. Publication occurred on 2026-10-19, so the earlier handoff's
+  pending-publication note is stale. No workflow was modified or published during this audit.
+- With owner authorization for tests, ran the existing wait-only test workflow once with `n=0`
+  and an undeclared fake owner input. Run `57abe025-2ee3-4ee8-a282-ab788578a58e` succeeded on all
+  three nodes; the normalized workflow inputs omitted the undeclared key. The Console draft
+  runtime therefore ignores it. No LLM, HTTP, report ingest or email node exists in that graph.
+  The production service API path still needs equivalent evidence before treating §11.1 as met.
+- Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
+  2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
+  and the subsequent Portal target refresh. No deployment or production-data write was performed.

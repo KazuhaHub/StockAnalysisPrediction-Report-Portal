@@ -37,6 +37,8 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     borderRadius: 6,
     padding: '8px 10px',
     minHeight: 64,
+    height: '100%',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'center',
@@ -171,7 +173,8 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     fontWeight: 500,
     whiteSpace: 'nowrap',
   }
-  const td: CSSProperties = { padding: 6, verticalAlign: 'top' }
+  // A definite cell height lets every inner box stretch to the tallest checkpoint in its row.
+  const td: CSSProperties = { padding: 6, verticalAlign: 'top', height: 1 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
