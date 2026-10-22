@@ -664,3 +664,26 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
+# P23 capability-boundary checkpoint (2026-10-22, in progress)
+
+- Started `feat/quote-ledger-capability` from main `74e8c564`, independently of the held access
+  integration. P17/P18 implementation, validation and review remain preserved on
+  `feat/forecast-reader-server` at `8734b287`; this branch does not contain that stack.
+- Read-only inspection of Apps PRs 141/142 found no overlap with `quote.go`, `quote_cache.go` or
+  the new capability tests. No Apps branch, original checkout or production state was changed.
+- Added internal-only `settled` and `settled_shadow` capability identifiers. They remain outside
+  the public display interval inventory and range map. An absent declaration still grants the
+  existing display wildcard but cannot grant ledger access. Explicit grants preserve market and
+  code boundaries, distinguish writer from shadow, and reject unresolved markets.
+- Display cache entry and source-dispatch paths refuse ledger intervals before any cache lookup,
+  flight creation or upstream call. Red tests demonstrated both undeclared authorization and a
+  warm-cache hit before the repair; the initial focused controls passed after it. Added controls
+  for all three display fetcher shapes and unchanged cache occupancy on refusal.
+- This is a P23 foundation, not P23 completion. Source flags/grants, operator-order ledger walk,
+  isolated health/breaker/single-slot handling, refusal precedence, evaluator wiring, readiness
+  item 6, order auditing/confirmation and panel fields remain outstanding. ADR 0038/0040 belong
+  to Apps and 0039 to reader access; the source-policy ADR must use the next free number after
+  rechecking reservations. Full regression and independent review are pending at this checkpoint.
+- No source is newly admitted to settlement, no schema is changed and no production action is
+  authorized by these tests. The own purge-evidence schema proposal and prior integration holds
+  remain undecided.

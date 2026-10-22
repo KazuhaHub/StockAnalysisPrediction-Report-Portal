@@ -462,13 +462,20 @@ const (
 	// today — and what came back would be the wrong window under the reader's own dates, which is the
 	// same failure the 分时/5日 split exists to prevent.
 	quoteIntervalDailyRange quoteInterval = "dailyRange"
+	// Ledger capabilities are internal-only and never part of the display range inventory.
+	quoteIntervalSettled       quoteInterval = "settled"
+	quoteIntervalSettledShadow quoteInterval = "settled_shadow"
 )
 
-// quoteAllIntervals is every interval a request can be for, written once so that a declaration, a
-// capability check and the admin panel's market list cannot disagree about how many there are.
+// quoteAllIntervals lists display intervals only. Ledger capabilities must never become public
+// ranges or enter the display cache through this inventory.
 var quoteAllIntervals = []quoteInterval{
 	quoteIntervalSnapshot, quoteIntervalDaily, quoteIntervalIntraday, quoteIntervalIntraday5D,
 	quoteIntervalDailyRange,
+}
+
+func (iv quoteInterval) ledger() bool {
+	return iv == quoteIntervalSettled || iv == quoteIntervalSettledShadow
 }
 
 // intraday reports whether this interval's bars are MINUTES rather than days. Two things turn on it

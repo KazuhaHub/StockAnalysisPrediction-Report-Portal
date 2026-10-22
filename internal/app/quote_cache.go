@@ -146,6 +146,8 @@ const (
 // escaping as a success.
 var errQuoteNoSources = errors.New("quote: no vendor sources configured")
 
+var errQuoteLedgerInterval = errors.New("quote: ledger capability is unavailable on the display path")
+
 // quoteFetchFunc is the shape both vendor fetchers in quote.go already have.
 type quoteFetchFunc func(ctx context.Context, market, code string, bars int) (*QuoteResp, error)
 
@@ -270,6 +272,9 @@ type quoteSource struct {
 // (market, interval) pair, and then the code. It is what the RESOLVER asks, because the resolver has
 // a target in hand; the panel has only a market and asks covers below.
 func (src quoteSource) serves(t quoteTarget, iv quoteInterval) bool {
+	if iv.ledger() {
+		return src.servesExplicit(t, iv)
+	}
 	if !src.covers(t.Market, iv) {
 		return false
 	}
@@ -278,12 +283,29 @@ func (src quoteSource) serves(t quoteTarget, iv quoteInterval) bool {
 	return src.knows == nil || src.knows(t)
 }
 
+// servesExplicit never treats an absent declaration as permission. Ledger callers must also
+// resolve a known market before a market predicate may authorize their request.
+func (src quoteSource) servesExplicit(t quoteTarget, iv quoteInterval) bool {
+	if t.Market == nil {
+		return false
+	}
+	for _, grant := range src.caps {
+		if grant.covers(t.Market, iv) {
+			return src.knows == nil || src.knows(t)
+		}
+	}
+	return false
+}
+
 // covers is "may this source be asked about this MARKET at this interval", which is the declaration
-// alone, with the empty case spelled out: an undeclared source is asked for everything. It is the
-// panel's question (marketIDsFor) and half of the resolver's.
+// alone. An undeclared source keeps the display wildcard, but never receives a ledger grant.
+// It is the panel's question (marketIDsFor) and half of the resolver's.
 func (src quoteSource) covers(m *quoteMarket, iv quoteInterval) bool {
+	if iv.ledger() && m == nil {
+		return false
+	}
 	if len(src.caps) == 0 {
-		return true
+		return !iv.ledger()
 	}
 	for _, g := range src.caps {
 		if g.covers(m, iv) {
@@ -301,6 +323,9 @@ func (src quoteSource) covers(m *quoteMarket, iv quoteInterval) bool {
 // declaration that lets a test wire a bare stub means "no restriction recorded", and this is what
 // keeps that convenience from reaching the failover loop as a panic in a handler goroutine.
 func (src quoteSource) call(ctx context.Context, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, error) {
+	if iv.ledger() {
+		return nil, errQuoteLedgerInterval
+	}
 	// The bounded window first, and it never falls through to the other two. A source reached here
 	// for this interval declared it, so a nil fetcher is a wiring mistake and says so; answering it
 	// from fetch or fetchAt would return the last `bars` sessions labelled with the reader's dates.
@@ -1098,6 +1123,10 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 // The returned *QuoteResp is SHARED with every other caller holding the same cache entry. Nothing
 // downstream may mutate it; the handler copies the struct before stamping Cached on it.
 func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, bool, time.Duration, error) {
+	// Refuse before lookup, flight creation or upstream work, even if a matching entry exists.
+	if iv.ledger() {
+		return nil, false, 0, errQuoteLedgerInterval
+	}
 	c.init()
 	cfg = cfg.orDefaults()
 	key := quoteCacheKey(market, code, bars, iv, win)
