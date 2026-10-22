@@ -156,3 +156,16 @@ all 1,008 tests and the production build passed before the final directory/audit
 addition; affected checks are repeated for that addition. No production database,
 backend or market configuration has been changed. Runtime deployment and the
 independent Status packages remain outstanding.
+
+## Notification publication preflight
+
+`GET /api/v1/notifications/publisher` accepts the same dedicated publication
+credential as the POST endpoint and returns its actual publisher namespace and
+exact event selector, without creating an event. Generic all/query/ingest tokens
+are refused. Status verifies `service.status-<component-id>` before publishing;
+a mismatched token becomes review-required without sending a notice. This generic
+read capability adds no schema and does not grant a recipient or route override.
+
+The backend proxy preserves safe 400/403/404/409/422/429 statuses while replacing
+upstream bodies with a fixed error envelope. Transport capacity returns 429.
+Private upstream diagnostics and credentials never become browser error text.
