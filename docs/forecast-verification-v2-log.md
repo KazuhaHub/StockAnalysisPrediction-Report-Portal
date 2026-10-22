@@ -218,20 +218,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
-  `origin/main` is at `b235be93`.
-- **In flight.** P11 #137 is reviewed, corrected and rebased onto the toolchain fix, with fresh
-  CI pending. P15 is prepared on
-  `feat/forecast-web-foundations`, in an isolated worktree based on main, while that dependency
-  clears CI. Neither PR may merge with a failing required check.
-- **Next step.** Merge P11 after green CI; then finish P15 and
+  P30 #135, P31 #136, P11 #137. The standalone Go 1.26.10 security fix #144 is merged;
+  `origin/main` is at `83a64d89`.
+- **In flight.** P15 #143 is reviewed and rebased onto P11, in an isolated worktree on
+  `feat/forecast-web-foundations`. Full local checks passed again under Go 1.26.10; final CI
+  must pass before merge. The parallel Apps branches remain untouched.
+- **Next step.** Finish P15 and
   continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
-  review before P19/P20. P39b requires the deployments, Dify publication, target refresh and
-  undeclared-input answer in implementation §11.1; no production action has been performed here.
+  review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
+  the R1b deployment and subsequent Portal target refresh remain outstanding. No production
+  action has been performed here.
 - **Known limitations.** P7/P8 still lack the real vendor fixtures documented below. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
   responsive preview screenshots depend on P14. Re-check ADR numbers before P22/P23: the parallel
   notifications PR #141 already proposes ADR 0038.
+  P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
 
 ### P9 — operating the evaluator
@@ -500,8 +501,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
   fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
   This component preview does not replace P14's seeded full-page acceptance.
-- Rollback: revert this PR; no data or schema changes. P15 stays draft pending required CI
-  and the preceding P11 merge. The main toolchain blocker is resolved by #144.
+- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
+  required CI on its final rebased head; independent review and full local checks passed.
 
 ### P39b precondition audit (2026-10-22)
 
