@@ -1506,7 +1506,6 @@ export interface ForecastCoverage {
   backtest: number
   degraded: number
   mismatch: number
-  refused: number
   pending_baseline: number
   pre_live: number
   test: number

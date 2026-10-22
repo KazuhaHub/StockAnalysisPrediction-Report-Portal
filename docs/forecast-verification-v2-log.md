@@ -811,3 +811,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   error-message-only locale addition.
 - This checkpoint does not remove the P26 integration hold or make P16 merge-ready. No schema,
   Apps-branch, deployment or workflow-publication change is included.
+
+### P16 — retired coverage field and frozen characterization (2026-10-22, in progress)
+
+- Removed the never-populated `coverage.refused` field from the live Go/TypeScript contracts and
+  client fixtures. Checkpoint refusal counts remain: the raw-response regression proves one
+  final refusal still appears on a mature checkpoint while all 35 decisions remain members in
+  coverage. Its initial failure confirmed that the retired live field was still present.
+- Preserved the archived golden files byte for byte through an explicit test-only coverage DTO.
+  It copies every live counter and adds only the historical zero refusal placeholder in the
+  original key order. It describes frozen characterization serialization, not today's API.
+  A reflection guard gives every live counter a distinct nonzero value and checks matching
+  names, JSON tags and exact values; it also rejects unexpected archive-only fields. New live
+  coverage fields therefore cannot silently disappear from characterization assertions.
+- Independent review of both the approach and implementation found no actionable issue. The
+  raw API, adapter guard and golden tests pass without regenerating any fixture. This resolves
+  the plan's live-field removal while retaining its unchanged-statistics characterization gate.
+- Validation: full Go/SQLite/Postgres regression, vet/staticcheck, three repeated raw-contract /
+  adapter/golden/member/link race passes (12.904 s), web typecheck and all 120 Vitest files /
+  1007 tests passed. Production SPA build and the serialized embed rebuild passed. No archived
+  fixture was regenerated.
+- P16 still needs final protected-access reconciliation with P26 and an integrated requirement
+  audit before a merge-ready PR. No schema, Apps-branch or production change is included.

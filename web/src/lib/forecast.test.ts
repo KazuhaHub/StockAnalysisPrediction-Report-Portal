@@ -82,7 +82,6 @@ describe('forecastCsv', () => {
           backtest: 0,
           degraded: 0,
           mismatch: 0,
-          refused: 0,
           pending_baseline: 0,
           pre_live: 0,
           test: 0,

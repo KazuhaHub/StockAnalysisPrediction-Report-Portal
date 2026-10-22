@@ -60,7 +60,6 @@ type forecastCoverage struct {
 	Backtest        int `json:"backtest"`
 	Degraded        int `json:"degraded"`
 	Mismatch        int `json:"mismatch"`
-	Refused         int `json:"refused"`
 	PendingBaseline int `json:"pending_baseline"`
 	// PreLive counts sets made before the ledger start (P5). They are accounted for here so Reports
 	// still equals the number of rows loaded; they simply never reach the record.
