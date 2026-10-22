@@ -219,26 +219,26 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144, upload-test timer fix #147 and captured qfq-response fix #148
-  (`fa250ced`) are merged. P26 now integrates main at `fa250ced`.
-- **In flight.** P26 #145 on `feat/forecast-record-access`, in the isolated worktree. The strict
-  resolver, reader routes/populations/redaction, compute governance, per-user settings/limits,
-  cookie and bound-bridge prediction gates, OU settings/audit/preview, weekly count-only adoption
-  and cross-surface SQLite/Postgres matrix are implemented. Independent final review and local
-  validation passed, including older-server hint compatibility; CI was green on `27a5a6af`.
-  Combined-head validation and the Apps integration sequence remain before merge. The parallel
-  Apps branches remain untouched;
-  shared identity fields and `mintForApp` match their proposed interface. A read-only merge
-  preview still reports overlapping token edits; keep this PR a draft until those are resolved.
+  1.26.10 security fix #144, upload-test timer fix #147, captured qfq-response fix #148,
+  halt evidence #149 and P14 seeded preview #150 (`74e8c564`) are merged.
+- **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
+  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
+  previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
+  is pending; neither Apps branch nor the user's checkout was changed. The next normal merge
+  integrates main at `74e8c564`, retaining P26's scoped readers and P14's read-only demo clock;
+  that combined head requires fresh independent review and validation.
 - **Next step.** Validate P26's combined head, resolve its Apps integration sequence, then continue P27 and P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
   action has been performed here.
-- **Known limitations.** P7 still lacks live-suspension, delisted and Beijing trading-day evidence;
-  the follow-up captures real 301/689/low-price controls and a P8 bonus/unchanged-ratio pair. The P15
+- **Known limitations.** Beijing 30%/listing-day and rights-issue captures remain missing. The
+  follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
+  controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
+  responsive preview acceptance still requires the later reader/layout work and owner review.
+  Re-check ADR numbers before P23: Apps reserves
   0038/0040 and P22 uses 0039.
   P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
@@ -871,3 +871,91 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests, production build and serialized
   embed rebuild passed. Three-repeat bridge/snapshot/captured-fixture race validation and
   exact-head CI remain to be confirmed; the Apps sequencing hold remains independent of them.
+
+### P7 follow-up — live suspension and delisted-response evidence (2026-10-22)
+
+- Starts from main `fa250ced`, independently of P26 and both Apps branches. P26's normal main
+  integration at `840e9a9c` passed full exact-head CI/CodeQL and local combined validation, but
+  remains a draft for shared-token integration ordering; no coordination message is authorized.
+- Six full read-only Tencent captures and independent issuer/exchange references are recorded
+  in `internal/app/testdata/quote/forecast-halt-evidence.md`, with parameters and SHA-256.
+  Existing forecast golden outputs and schema are unchanged.
+- A short live halt has fewer than three later sessions: current-stamp evidence resolves it even
+  with the lag valve set; removing evidence refuses stale/lag instead. A longer halt uses the
+  real classifier, transactional ledger writer, evaluator and qfq fetch replay to settle d5
+  during a halt that began on S0. Stock return is 0; benchmark return is -365 bp from S0, not
+  -363 bp from the earlier traded base_date. Source and flags are asserted on the stored row.
+- A delisted instrument returns empty recent history plus a current-looking snapshot, and real
+  2019 candles in a separate historical window. The pure baseline resolver rejects both arrays
+  for a 2026 receipt. A real evaluator replay of the empty recent response does not promote its
+  snapshot to a baseline: s0_fen remains NULL, no mark resolves, delivery failure spends no
+  attempts, and no qfq call occurs. This is source-availability evidence,
+  not a claim that unavailable delisted history can settle or that the parser detects delisting.
+- Tests first failed for absent capture files. Three temporary production mutations proved
+  guard effectiveness: wrong benchmark anchor, ignored stamp and snapshot-to-candle fabrication
+  each failed its captured test. All mutations were reverted. Corrected stale developer comments
+  about non-cash event text and synthetic ratio examples; no runtime semantics are changed.
+- Independent review found one documentation overclaim (pure historical-array checks versus
+  recent-response evaluator replay); the log and provenance now distinguish those layers, and
+  follow-up review confirmed closure with no further findings. Full Go/Postgres regression,
+  vet/staticcheck, three repeated captured/long-look-back race runs, web typecheck, all 120
+  Vitest files / 1006 tests, production web build and serialized embed rebuild passed. Final
+  captured/arithmetic checks passed after the comment/error-text corrections. Six bodies match
+  their original response bytes plus terminal LF and documented SHA-256. Fresh exact-head CI
+  remains required before merge; no runtime, schema or production change is included.
+### P14 — isolated seeded preview and read clock (2026-10-22)
+
+- Added a test-only writer that reserves a new SQLite database and sibling infrastructure-only
+  config, listens on loopback port 8791, generates private random preview credentials, and refuses
+  existing DB/config/WAL/SHM paths, including existing and dangling symlinks. Config writes use the
+  reserved descriptor; failure cleanup checks file identity before removing its own reservations.
+- Historical receipts enter through a private per-server test seam and the real v1 ingest. The
+  real evaluator settles deterministic synthetic market bars through its existing fetch seams.
+  No schema or golden fixture changed. The stored evaluator remains off; no ingest token remains
+  in the generated database. Normal server bootstrap can create its own default API token.
+- Seeded open/pending/small/mature states, corrected positive/negative signals, neutral and one-arm
+  output, two mature policy slices, fills, frozen benchmark changes, coverage exclusions, halted
+  and corporate-action marks, final refusal, body-change and edition-isolation cases. Included
+  small own/sub-OU populations and restricted external-all accounts for the later access UI.
+- `RP_FORECAST_DEMO_NOW` affects only statistics and read phases in dev builds. Empty/invalid
+  values fail startup; any set value fails a non-dev build before config generation or DB writes.
+  Receipt, evaluator, authentication, retention and token clocks remain independent.
+- Initial failures exposed a duplicate entry claim and the exact backtest-slack boundary; the
+  writer now asserts every ingest classification. Independent review found missing policy
+  slices, which were added and asserted. Browser inspection found a pending-baseline fault
+  blocking the positive cohort; a failing cohort-specific test pins its isolation in June.
+  Report timestamps now agree with ledger receipts through body re-ingest. Final review found
+  no further actionable issue.
+- Validation: two independent seeds produce byte-identical groups JSON; matrix/drawer states,
+  scenario inventory, edition isolation, attribution and private permissions pass. The linked
+  release executable refuses demo clocks before creating any output. Full Go/SQLite/Postgres
+  regression, build, vet, staticcheck, three targeted race passes, web typecheck, 120 test files /
+  1006 tests, and production SPA build passed. Local server smoke checks returned 200 for
+  health/login/groups/SPA and a mature January cell with q < 0.001. The real browser rendered the
+  seeded matrix. This is not the later responsive parity sign-off or production baseline review.
+- Added the preview runbook and corrected the plan command to print the generated credentials
+  with `go test -v`. The runbook explicitly separates synthetic evaluator data from captured
+  vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
+- Rollback: revert this PR and stop the local preview. No production deployment, workflow
+  publication, evaluator enablement, Apps-branch edit or database migration was performed.
+
+### P26 — integrate seeded preview and captured halt evidence (2026-10-22)
+
+- Normal merge of main `74e8c564` brings independently validated #149 and P14 #150 into the
+  held P26 draft. Both histories' append-only evidence is retained in this log.
+- Resolved overlapping reader functions by retaining P26's authorization and protected-set
+  projection while selecting P14's `forecastNow` for periods and read phases. Custom/member
+  ceilings and adoption observations keep their separate operational clock.
+- New real-seed integration tests exercise the own/sub-OU population below 30, external-all
+  metrics without coverage or sample size, none denial and exact operational-week adoption.
+  Moving the demo clock cannot replenish either request ceiling. Temporary wrong-clock
+  mutations failed the period assertion, adoption persistence and both limiter subtests;
+  every mutation was restored before validation.
+- Independent review found no actionable issue in the conflict resolutions or new tests and
+  confirmed incoming seed/clock/evidence files match main. Full Go regression with Postgres,
+  build/vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests and three-repeat
+  access-matrix/demo-clock race checks passed (174.475 s). Supplemental three-repeat
+  bridge/snapshot/captured-fixture race checks also passed (221.801 s). The serialized
+  SPA/embed rebuild passed; exact-head CI remains required for the new combined commit.
+- P26 stays a draft for the existing Apps integration sequencing hold. No Apps branch,
+  original user checkout, production database, workflow publication or evaluator mode changed.

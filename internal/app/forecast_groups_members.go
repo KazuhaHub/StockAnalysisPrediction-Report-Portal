@@ -129,7 +129,7 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	now := s.forecastEval.clock()
+	now := s.forecastNow()
 	var periods []forecastPeriod
 	switch mode {
 	case "month":

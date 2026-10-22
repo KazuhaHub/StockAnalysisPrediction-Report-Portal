@@ -71,7 +71,7 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 		return
 	}
 
-	now := s.forecastEval.clock()
+	now := s.forecastNow()
 	resp := forecastGroupsResponse{
 		OK:          true,
 		Mode:        mode,

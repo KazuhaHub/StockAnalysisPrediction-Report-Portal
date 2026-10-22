@@ -131,7 +131,7 @@ func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	annotateReadPhases(sets, s.forecastEval.clock())
+	annotateReadPhases(sets, s.forecastNow())
 	sets = protectedPredictionSets(sets, view)
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
@@ -211,7 +211,7 @@ func (s *Server) serveQueryPredictionsView(w http.ResponseWriter, r *http.Reques
 		v1err(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
-	annotateReadPhases(sets, s.forecastEval.clock())
+	annotateReadPhases(sets, s.forecastNow())
 	sets = protectedPredictionSets(sets, view)
 	writeJSON(w, map[string]any{"ok": true, "sets": sets})
 }
