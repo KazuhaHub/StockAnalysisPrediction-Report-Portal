@@ -546,3 +546,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Go regression with Postgres enabled, vet, staticcheck, web typecheck, all 120 Vitest files /
   1006 tests, production web build and a serialized embed rebuild passed. CI on the exact pushed
   head remains required before merge.
+- CI integration: the first P22 run passed all assertions but failed on the upload timer's
+  unhandled teardown callback. Standalone fix #147 passed its exact-head CI and merged as
+  `40a18767`; this branch now integrates that main commit. Both append-only log sections are
+  retained. The P22 diff against main is still docs-only and its combined head needs fresh CI.
+
+### CI unblock — upload test timer lifetime (2026-10-22)
+
+- P22's docs-only CI passed all 120 files / 1006 assertions but failed on an unhandled callback
+  from `RunAnalysisModal.test.tsx`: `window is not defined` in `useDelayState`. Installed Ant
+  Design UploadList schedules its progress update after 300ms without unmount cancellation;
+  the existing shared teardown only drains the Form's short debounce through a 20ms wait.
+- Kept the fix out of the ADR PR. The upload integration test now owns its fake clock, advances
+  user interactions, explicitly unmounts and executes pending timers inside act while jsdom still
+  exists, asserts zero pending timers, and restores real time in finally. Production code and
+  global test behavior are unchanged; callback exceptions and runaway chains still fail.
+- The regression first found two timers after unmount without the drain; adding the drain passed
+  all 12 modal tests, ten repeated upload checks, the full 120-file / 1006-test suite, typecheck,
+  and full Go/Postgres regression plus vet/staticcheck. Independent review found no actionable
+  issue. Exact-head CI remains mandatory; this is a targeted repair, not a blind retry of P22.
