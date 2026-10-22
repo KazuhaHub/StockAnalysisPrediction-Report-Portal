@@ -14,23 +14,44 @@ func (r *ledgerRefusal) Error() string { return "ledger: " + r.Code }
 
 // One instance belongs to one evaluator pass. Lifetime, not wall-clock time, resets the breaker.
 type ledgerTick struct {
-	mu       sync.Mutex
-	failures map[string]int
+	mu        sync.Mutex
+	failures  map[string]int
+	lastError map[string]error
+	gate      chan struct{}
 }
 
-func (tick *ledgerTick) blocked(source string) bool {
+// Serialize walks within a pass without sharing their responses. A context-aware gate keeps a
+// cancelled caller from waiting behind another walk and makes the three-failure ceiling exact.
+func (tick *ledgerTick) acquire(ctx context.Context) (func(), error) {
+	tick.mu.Lock()
+	if tick.gate == nil {
+		tick.gate = make(chan struct{}, 1)
+	}
+	gate := tick.gate
+	tick.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (tick *ledgerTick) blocked(source string) (error, bool) {
 	tick.mu.Lock()
 	defer tick.mu.Unlock()
-	return tick.failures[source] >= 3
+	return tick.lastError[source], tick.failures[source] >= 3
 }
 
-func (tick *ledgerTick) fail(source string) {
+func (tick *ledgerTick) fail(source string, err error) {
 	tick.mu.Lock()
 	defer tick.mu.Unlock()
 	if tick.failures == nil {
 		tick.failures = map[string]int{}
+		tick.lastError = map[string]error{}
 	}
 	tick.failures[source]++
+	tick.lastError[source] = err
 }
 
 // walkLedger never uses display cache or single-flight. Tier 1 admits only sources that provide
@@ -50,6 +71,11 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 	if tick == nil {
 		return nil, fmt.Errorf("ledger: missing pass state")
 	}
+	endWalk, err := tick.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer endWalk()
 	c.init()
 	chain := c.ledgerChain(cfg, target)
 	if _, ok := ledgerPrimary(chain); !ok {
@@ -62,7 +88,13 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 	defer release()
 	var firstErr error
 	for _, src := range chain {
-		if !src.cashDividends || !src.reportsKind || tick.blocked(src.name) {
+		if !src.cashDividends || !src.reportsKind {
+			continue
+		}
+		if failure, blocked := tick.blocked(src.name); blocked {
+			if firstErr == nil {
+				firstErr = failure
+			}
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -89,7 +121,7 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 		}
 		var refusal *ledgerRefusal
 		if !errors.As(err, &refusal) {
-			tick.fail(src.name)
+			tick.fail(src.name, err)
 			c.noteLedgerResult(src.name, err)
 		}
 	}

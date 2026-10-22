@@ -746,3 +746,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   independent review are pending. No evaluator call site, admin API, actual vendor grant, source
   order, schema, Apps file or production state changed. This remains incomplete P23, not a new
   settlement admission or authorization to enable the evaluator.
+- The initial full Go/Postgres run passed (app package 34.861 s), as did three-repeat targeted
+  race checks (1.625 s), vet, staticcheck and build. Independent review then found that an exhausted
+  breaker incorrectly returned `no_source` for an otherwise configured primary. A new exact-error
+  control failed on the fourth walk before preserving that source's real failure in pass state.
+- Added a context-aware pass gate so concurrent walks cannot overrun the three-failure ceiling;
+  each still performs its own uncached fetch rather than joining a shared result. Twenty callers
+  sharing one pass now observe the same actual transport failure with exactly three vendor calls.
+  Added saturated-upstream cancellation and wrapped typed-refusal controls. Focused walk tests
+  passed (1.210 s); post-repair full checks and review follow-up remain pending.

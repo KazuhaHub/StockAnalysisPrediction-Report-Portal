@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -37,14 +40,15 @@ func TestLedgerWalkRefusesBeforeCallingSources(t *testing.T) {
 
 func TestLedgerWalkBreakerAndHealthAreSeparate(t *testing.T) {
 	calls := 0
+	failure := errors.New("transport failure")
 	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
 		calls++
-		return nil, errors.New("transport failure")
+		return nil, failure
 	})}}
 	cfg, tick := quoteConfig{Order: []string{"primary"}}, &ledgerTick{}
 	for i := 0; i < 5; i++ {
-		if _, err := c.walkLedger(context.Background(), cfg, "sh", "601899", "2026-10-01", "2026-10-22", tick); err == nil {
-			t.Fatal("failed source answered successfully")
+		if _, err := c.walkLedger(context.Background(), cfg, "sh", "601899", "2026-10-01", "2026-10-22", tick); !errors.Is(err, failure) {
+			t.Fatalf("failed or blocked source lost its actual failure: %v", err)
 		}
 	}
 	if calls != 3 || len(c.snapshotHealth()) != 0 {
@@ -60,7 +64,7 @@ func TestLedgerWalkBreakerAndHealthAreSeparate(t *testing.T) {
 }
 
 func TestLedgerWalkTypedRefusalsAndCancellationDoNotBlameVendor(t *testing.T) {
-	for _, outcome := range []error{&ledgerRefusal{Code: "not_index"}, context.Canceled} {
+	for _, outcome := range []error{&ledgerRefusal{Code: "not_index"}, fmt.Errorf("wrapped: %w", &ledgerRefusal{Code: "not_index"}), context.Canceled} {
 		calls := 0
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -84,6 +88,53 @@ func TestLedgerWalkTypedRefusalsAndCancellationDoNotBlameVendor(t *testing.T) {
 		if !errors.Is(outcome, context.Canceled) && calls != 4 {
 			t.Fatal("typed refusals incorrectly opened the circuit breaker")
 		}
+	}
+}
+
+func TestLedgerWalkCancellationWhileWaitingForSlot(t *testing.T) {
+	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
+		t.Fatal("cancelled slot waiter called the vendor")
+		return nil, nil
+	})}}
+	c.init()
+	for i := 0; i < quoteUpstreamConcurrency; i++ {
+		c.sem <- struct{}{}
+	}
+	defer func() {
+		for i := 0; i < quoteUpstreamConcurrency; i++ {
+			<-c.sem
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := c.walkLedger(ctx, quoteConfig{Order: []string{"primary"}}, "sh", "601899", "2026-10-01", "2026-10-22", &ledgerTick{})
+	if !errors.Is(err, context.DeadlineExceeded) || len(c.snapshotLedgerHealth()) != 0 || len(c.sem) != quoteUpstreamConcurrency {
+		t.Fatalf("slot cancellation changed health or occupancy: %v", err)
+	}
+}
+
+func TestLedgerWalkConcurrentPassHasOnlyThreeFailures(t *testing.T) {
+	var calls atomic.Int32
+	failure := errors.New("transport failure")
+	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
+		calls.Add(1)
+		return nil, failure
+	})}}
+	tick := &ledgerTick{}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.walkLedger(context.Background(), quoteConfig{Order: []string{"primary"}}, "sh", "601899", "2026-10-01", "2026-10-22", tick)
+			if !errors.Is(err, failure) {
+				t.Errorf("concurrent walk lost failure: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if calls.Load() != 3 {
+		t.Fatalf("calls=%d, want exactly three", calls.Load())
 	}
 }
 
