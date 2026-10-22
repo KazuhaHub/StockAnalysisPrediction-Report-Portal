@@ -722,3 +722,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   read-only review found no actionable issues in operator ordering, partition stability, explicit
   grants, primary requirements or display compatibility. The review used SQLite only and did not
   cover the still-absent vendor admission, source walk, evaluator, readiness or panel behavior.
+
+### P23 uncached source-walk checkpoint (2026-10-22, in progress)
+
+- Added a ledger-only bounded range walk. It validates the window through `quoteParseWindow`,
+  rejects unbounded dates, resolves the instrument, requires a primary and holds one shared
+  upstream slot across the whole chain. It never enters display cache or single-flight. A
+  missing range fetcher or nil success response is an error, never an accepted price series.
+- Tier 1 calls only explicitly granted sources with both evidence flags. A source without
+  corporate-action or instrument-kind evidence cannot become a writer just because a primary
+  failed. Actual shipped grants remain disabled pending the full wiring/readiness change.
+- Each evaluator pass will own a fresh `ledgerTick`: three transport/parser failures stop further
+  calls to that source in that pass. Typed ledger refusals do not trip the breaker or change vendor
+  health. Caller cancellation stops the walk without recording vendor failure. Separate ledger
+  health snapshots preserve the display counters, and the first called source's refusal wins
+  when every called source fails. A new pass reopens its own breaker.
+- Tests first failed against an empty walk, then passed for invalid windows, absent primary,
+  primary failure plus evidence-free fallback, nil responses, refusal priority, repeated uncached
+  success, health isolation, typed-refusal neutrality and cancellation. A saturated-slot fixture
+  leaves exactly one upstream slot available and exercises two sources under a two-second context
+  deadline, asserting the slot remains held during both calls and is released afterward.
+- Initial focused tests passed (0.556 s); full Go/Postgres, repeated race/static checks and
+  independent review are pending. No evaluator call site, admin API, actual vendor grant, source
+  order, schema, Apps file or production state changed. This remains incomplete P23, not a new
+  settlement admission or authorization to enable the evaluator.

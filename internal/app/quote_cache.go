@@ -787,11 +787,12 @@ type quoteFlight struct {
 type quoteCache struct {
 	once sync.Once
 
-	mu      sync.Mutex // guards entries, lru, bytes and health
-	entries map[string]*list.Element
-	lru     list.List
-	bytes   int
-	health  map[string]*QuoteSourceHealth
+	mu           sync.Mutex // guards entries, lru, bytes and health
+	entries      map[string]*list.Element
+	lru          list.List
+	bytes        int
+	health       map[string]*QuoteSourceHealth
+	ledgerHealth map[string]*QuoteSourceHealth
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight
