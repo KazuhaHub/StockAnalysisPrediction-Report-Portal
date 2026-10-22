@@ -39,11 +39,12 @@ the capture clock or as evidence about historical suspensions.
   from 1.25 to 1.38 is +10.40% but is inside the fen-rounded limit. No ST-specific limit is assumed.
 - **Board routing controls.** 301308 moves 88.87 to 106.64 on 2024-10-08; 689009 moves 48.20 to
   56.80 on the same date. Both exceed the old incorrect 10% backstop but are inside 20%.
-- **Known P7 gaps remain.** These bodies do not prove a live suspension, a delisted-stock answer,
-  a Beijing 30% day or listing-day behavior. Probes for old/new Beijing codes 830799, 920799 and
+- **Limits of these original captures.** These bodies do not prove a live suspension, a delisted-stock
+  answer, a Beijing 30% day or listing-day behavior. Live-halt and delisted-response follow-up is
+  documented in [the suspension evidence](forecast-halt-evidence.md). Probes for old/new Beijing codes 830799, 920799 and
   920185 over the 2024 window returned empty `day` arrays, so they were not substituted with
   fabricated data or presented as trading-day evidence. Existing synthetic guards remain useful
-  but do not close these real-vendor gaps. Rights-issue evidence is also not claimed here.
+  but do not close the remaining Beijing/listing-day gaps. Rights-issue evidence is also not claimed here.
 
 ## Stored-file SHA-256
 
