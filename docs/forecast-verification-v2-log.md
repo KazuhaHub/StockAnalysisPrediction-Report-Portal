@@ -602,3 +602,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   production build passed. Final full Go tests with Postgres enabled passed again after the
   limits-audit refinement. Independent review confirmed the generation and audit fixes; the
   remaining P26 requirements above still block merge.
+- Matrix alignment correction: replaced unreliable percentage heights inside native table cells
+  with shared grid tracks and stretched flex cells. Mixed mature, pending, small and open states
+  now share the same top/bottom edges within each row, including wrapped text and exclusions.
+  Group labels and metadata wrap within the first track instead of overlapping a checkpoint.
+  Browser checks at 1100, 740 and 360 pixel container widths confirmed equal card rectangles
+  in all six fixture rows and no label overflow. Added a regression test; all 26 forecast
+  component/page tests, typecheck and production build passed. Independent review closed the
+  long-label overflow finding. Apps code and production state were not changed.
