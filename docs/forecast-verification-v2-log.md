@@ -629,3 +629,38 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   captured/arithmetic checks passed after the comment/error-text corrections. Six bodies match
   their original response bytes plus terminal LF and documented SHA-256. Fresh exact-head CI
   remains required before merge; no runtime, schema or production change is included.
+### P14 — isolated seeded preview and read clock (2026-10-22)
+
+- Added a test-only writer that reserves a new SQLite database and sibling infrastructure-only
+  config, listens on loopback port 8791, generates private random preview credentials, and refuses
+  existing DB/config/WAL/SHM paths, including existing and dangling symlinks. Config writes use the
+  reserved descriptor; failure cleanup checks file identity before removing its own reservations.
+- Historical receipts enter through a private per-server test seam and the real v1 ingest. The
+  real evaluator settles deterministic synthetic market bars through its existing fetch seams.
+  No schema or golden fixture changed. The stored evaluator remains off; no ingest token remains
+  in the generated database. Normal server bootstrap can create its own default API token.
+- Seeded open/pending/small/mature states, corrected positive/negative signals, neutral and one-arm
+  output, two mature policy slices, fills, frozen benchmark changes, coverage exclusions, halted
+  and corporate-action marks, final refusal, body-change and edition-isolation cases. Included
+  small own/sub-OU populations and restricted external-all accounts for the later access UI.
+- `RP_FORECAST_DEMO_NOW` affects only statistics and read phases in dev builds. Empty/invalid
+  values fail startup; any set value fails a non-dev build before config generation or DB writes.
+  Receipt, evaluator, authentication, retention and token clocks remain independent.
+- Initial failures exposed a duplicate entry claim and the exact backtest-slack boundary; the
+  writer now asserts every ingest classification. Independent review found missing policy
+  slices, which were added and asserted. Browser inspection found a pending-baseline fault
+  blocking the positive cohort; a failing cohort-specific test pins its isolation in June.
+  Report timestamps now agree with ledger receipts through body re-ingest. Final review found
+  no further actionable issue.
+- Validation: two independent seeds produce byte-identical groups JSON; matrix/drawer states,
+  scenario inventory, edition isolation, attribution and private permissions pass. The linked
+  release executable refuses demo clocks before creating any output. Full Go/SQLite/Postgres
+  regression, build, vet, staticcheck, three targeted race passes, web typecheck, 120 test files /
+  1006 tests, and production SPA build passed. Local server smoke checks returned 200 for
+  health/login/groups/SPA and a mature January cell with q < 0.001. The real browser rendered the
+  seeded matrix. This is not the later responsive parity sign-off or production baseline review.
+- Added the preview runbook and corrected the plan command to print the generated credentials
+  with `go test -v`. The runbook explicitly separates synthetic evaluator data from captured
+  vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
+- Rollback: revert this PR and stop the local preview. No production deployment, workflow
+  publication, evaluator enablement, Apps-branch edit or database migration was performed.

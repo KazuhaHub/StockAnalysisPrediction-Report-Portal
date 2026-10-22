@@ -9,7 +9,6 @@ package app
 import (
 	"net/http"
 	"strings"
-	"time"
 )
 
 type forecastMembersResponse struct {
@@ -90,7 +89,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	now := time.Now()
+	now := s.forecastNow()
 	var periods []forecastPeriod
 	switch mode {
 	case "month":

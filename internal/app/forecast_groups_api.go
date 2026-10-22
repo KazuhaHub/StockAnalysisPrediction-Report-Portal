@@ -30,7 +30,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 
-	now := time.Now()
+	now := s.forecastNow()
 	resp := forecastGroupsResponse{
 		OK:          true,
 		Mode:        mode,
