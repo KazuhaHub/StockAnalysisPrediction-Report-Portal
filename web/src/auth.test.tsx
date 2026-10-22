@@ -27,6 +27,20 @@ const show = () => screen.getByText(/^user=/).textContent
 afterEach(() => vi.unstubAllGlobals())
 
 describe('AuthProvider and a session that ends underneath it', () => {
+  it.each([
+    [undefined, 'none:false'],
+    [{ scope: 'own', external: true }, 'own:true'],
+    [{ scope: 'all', external: false }, 'all:false'],
+  ])('exposes a deny-by-default forecast navigation hint for %j', async (forecast, expected) => {
+    vi.stubGlobal('fetch', () => Promise.resolve(ok({ user: 'alice', admin: false, forecast })))
+    function ForecastProbe() {
+      const { forecast: hint, loading } = useAuth()
+      return <div>{loading ? 'loading' : `${hint.scope}:${hint.external}`}</div>
+    }
+    render(<AuthProvider><ForecastProbe /></AuthProvider>)
+    expect(await screen.findByText(expected)).toBeTruthy()
+  })
+
   let calls: string[]
   beforeEach(() => {
     calls = []

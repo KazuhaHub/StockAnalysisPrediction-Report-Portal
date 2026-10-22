@@ -628,3 +628,17 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   extension passed separately after the full run. Remaining P26 work: prediction cookie/bridge
   gates and shaping, me hints, OU editing/audit/preview, weekly count-only adoption, StockPage
   suppression and the complete cross-surface access matrix. This draft is not ready to merge.
+- Reading-page hint checkpoint: `meJSON` now returns only `forecast: {scope, external}` from the
+  strict resolver, including the shared login payload. Auth context defaults a missing hint to
+  `none`. StockPage skips both prediction reads at `none`, immediately hides loaded forecasts on
+  revocation and suppresses only the server's 403 `forecast_unavailable`; other failures retain
+  the existing inline retry. Tests first failed for absent hints, unwanted reads and retry UI.
+- Review found that an enabled-to-enabled policy change (internal to external, or all to own)
+  could leave old data displayed. Both requests and result states now carry the full user/scope/
+  external identity; symbol history also carries its symbol. Derived values reject old-policy
+  results before effect cleanup. Dynamic regressions clear the old value, require both refetches,
+  and then show the new value. A mutation removing the full-identity effect dependencies failed
+  both regressions; restoring them passed. Independent follow-up review closed the finding.
+- Hint checkpoint validation: full Go suite with Postgres enabled, vet, staticcheck, web typecheck,
+  all 120 Vitest files / 1016 tests and production build passed. Server-side prediction gates and
+  bridge shaping remain pending; navigation suppression does not substitute for those gates.
