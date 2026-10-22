@@ -216,25 +216,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 ## Current progress (2026-10-22)
 
-- **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
-  `main` is at `b235be93`.
-- **In flight.** P11 (this PR, #137): ADR 0037, the ADR/design amendments and the operations runbook.
-  Its independent review is complete, including the source-outage guidance and ADR-reference
-  corrections. It is rebased onto the toolchain fix and awaiting fresh CI. P15 #143 is prepared
-  separately in an isolated worktree; the parallel Apps branches remain untouched.
-- **Next step.** P39b (owner token for every run) is its own Beta after R1b: it needs P38, P39a and
-  P30 deployed, the Dify batch published, and the undeclared-input question answered (§11.1). Then
-  R2a: P15/P26/P27/P28 in the access lane and P13/P22 for docs.
-- **Open questions / known limitations.** The V20 probe fixtures (P7) and the qfq fixture pair (P8)
-  were not captured; synthetic tests replace them. P30 cannot make a legacy `g:<Default>` viewer row
-  inert, because that principal is also the "all" audience (recorded in the log). P31 treats a
-  missing account row as unscoped; a read failure denies. The runbook has no `no_source` row until
-  P23.
-- **Evaluator state.** `forecast_auto` remains OFF. Readiness item 5 needs a real test alert to reach
-  both Email and Slack; the owner also sets the ledger start and the CSI 800 schedule. See
-  `docs/forecast-verification-operations.md` before switching on.
+- **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
+  P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
+  P30 #135, P31 #136. `origin/main` is at `8abb5b12`.
+- **In flight.** P11 #137 is complete but blocked on GO-2026-6809 in Go 1.26.9. The Go
+  1.26.10 update is on the parallel Status branch (#142), not main. P15 is prepared on
+  `feat/forecast-web-foundations`, in an isolated worktree based on main, while that dependency
+  lands. Neither PR may merge with a failing required check.
+- **Next step.** Rebase and verify P11 after the Go update reaches main; then finish P15 and
+  continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
+  review before P19/P20. P39b requires the deployments, Dify publication, target refresh and
+  undeclared-input answer in implementation §11.1; no production action has been performed here.
+- **Known limitations.** P7/P8 still lack the real vendor fixtures documented below. The P15
+  forecast translations are machine-generated, pending owner-arranged human review. Seeded
+  responsive preview screenshots depend on P14. Re-check ADR numbers before P22/P23: the parallel
+  notifications PR #141 already proposes ADR 0038.
+- **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
 
 ### P9 — operating the evaluator
 
@@ -473,3 +470,28 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Review follow-ups.** The source-outage runbook now explicitly describes the evaluator's direct
   Tencent fetch, not the quote panel's configurable source order. The adjusted-price detection
   exception points to ADR 0028 §3 and ADR 0029 §10 rather than the integer-price section.
+
+### P15 — web foundations (2026-10-22)
+
+- Moved the matrix, drawer and their existing tests into `components/forecast`; routes, query
+  contracts, maturity gates and metric values are unchanged. The audit deep link was already
+  implemented and tested by P2, so its files were not changed.
+- Added algorithm-derived significance colours (light red7/green8; dark red8/green6), tested
+  against their actual tints at AA contrast, and a glyph plus textual significance cue. A source
+  scan rejects literal colours in shared, admin and reading-panel forecast components.
+- Added shared probability/signed-number formatting, a significance legend, methodology and the
+  approved disclaimer. Corrected the absolute-upside threshold, flat misses, missing-excess
+  exclusion, and spread/IC null explanations. Reader-page integrations remain P20.
+- Added `--prefix=forecast.` to the existing OpenCC generator. It reconverts only that family,
+  preserves unrelated reviewed translations (including keys absent from the source), and removes
+  stale keys only inside the selected family. Tests pin repeat-run byte stability, empty-prefix
+  rejection and the forecast fixed point. The family remains pending owner-arranged human review.
+- Review found and fixed prefix regeneration deleting unrelated stale keys. The generator's
+  status message now distinguishes a deliberate family reconversion from placeholder repair.
+- Validation: Go build, vet, all SQLite tests, the full app suite with Postgres, staticcheck, web
+  typecheck, 120 web test files / 1006 tests, and the production build passed. The extra prefix
+  preservation regression and updated source scan passed after the full run. Axe checks pass for
+  shared guidance under both themes; jsdom cannot validate layout or contrast, so contrast is
+  measured separately and seeded visual review remains pending P14. No golden fixture changed.
+- Rollback: revert this PR; no data or schema changes. P15 stays draft pending the required CI
+  gate and independent adversarial review. The current main toolchain still has GO-2026-6809.

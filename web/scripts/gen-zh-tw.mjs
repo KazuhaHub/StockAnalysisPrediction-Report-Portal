@@ -4,6 +4,7 @@
 //
 //   node scripts/gen-zh-tw.mjs         fill only keys missing from zh-TW (safe default)
 //   node scripts/gen-zh-tw.mjs --all   reconvert every key from zh-CN (overwrites)
+//   node scripts/gen-zh-tw.mjs --prefix=forecast.   reconvert only this family
 //
 // Run after adding a zh-CN key so you never hand-translate Traditional Chinese.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -21,6 +22,9 @@ const twPath = join(dir, 'zh-TW.json')
 const tw = JSON.parse(readFileSync(twPath, 'utf8'))
 const all = process.argv.includes('--all')
 const force = process.argv.includes('--force')
+const prefixArg = process.argv.find((arg) => arg.startsWith('--prefix='))
+const prefix = prefixArg?.slice('--prefix='.length)
+if (prefixArg && !prefix) throw new Error('--prefix requires a non-empty key prefix')
 
 // The interpolation placeholders a string uses, as a stable set. Traditional conversion never
 // touches them — they are ASCII — so zh-TW must always carry exactly zh-CN's.
@@ -44,10 +48,16 @@ const AFTER_CONVERSION = [
 ]
 const fix = (s) => AFTER_CONVERSION.reduce((acc, [re, to]) => acc.replace(re, to), s)
 
+// Prefix regeneration owns only its family, including removal of stale family keys.
+// Preserve every unrelated translation, including keys absent from the source bundle.
 const out = {}
 let changed = 0
 let restated = 0
 for (const [k, v] of Object.entries(cn)) {
+  if (prefix && !k.startsWith(prefix)) {
+    if (k in tw) out[k] = tw[k]
+    continue
+  }
   // A key that EXISTS in zh-TW is normally left alone: it may have been hand-corrected, and this
   // script's default is additive on purpose. But an existing key whose zh-CN source has since grown
   // or lost a placeholder is not a translation any more — i18next renders the old string and simply
@@ -57,7 +67,7 @@ for (const [k, v] of Object.entries(cn)) {
   //
   // Placeholder drift is therefore reconverted even without --all. Wording drift is not: only the
   // machine-checkable half is safe to overwrite behind the operator's back.
-  if (!all && k in tw && slots(tw[k]) === slots(v)) {
+  if (!all && !prefix && k in tw && slots(tw[k]) === slots(v)) {
     out[k] = tw[k]
     continue
   }
@@ -66,6 +76,11 @@ for (const [k, v] of Object.entries(cn)) {
   if (conv !== tw[k]) changed += 1
   if (drift) restated += 1
   out[k] = conv
+}
+if (prefix) {
+  for (const [key, value] of Object.entries(tw)) {
+    if (!key.startsWith(prefix) && !(key in out)) out[key] = value
+  }
 }
 // zh-CN is the source of truth in BOTH directions: a key deleted there is deleted here. This file
 // is generated in full and holds no hand-written Traditional text, so there is nothing to lose by
@@ -81,7 +96,7 @@ const dropped = Object.keys(tw).filter((k) => !(k in out))
 // reconverting is occasionally the right thing after a converter upgrade; it now has to be asked
 // for twice, and it says what it is about to throw away first.
 const reworded = Object.keys(out).filter((k) => k in tw && out[k] !== tw[k])
-if (all && !force && reworded.length) {
+if (all && !prefix && !force && reworded.length) {
   console.error(`--all would reword ${reworded.length} existing key(s), discarding any hand correction in them. For example:`)
   for (const k of reworded.slice(0, 5)) console.error(`  ${k}\n    have: ${tw[k]}\n    want: ${out[k]}`)
   console.error('Nothing written. Re-run with --all --force if that is genuinely what you want.')
@@ -89,6 +104,6 @@ if (all && !force && reworded.length) {
 }
 
 writeFileSync(twPath, JSON.stringify(out, null, 2) + '\n')
-console.log(`zh-TW: ${changed} key(s) ${all ? 'reconverted' : 'filled'} from zh-CN via OpenCC s2twp`)
-if (!all && restated) console.log(`zh-TW: ${restated} existing key(s) reconverted — their zh-CN placeholders had changed`)
+console.log(`zh-TW: ${changed} key(s) ${all || prefix ? 'reconverted' : 'filled'} from zh-CN via OpenCC s2twp`)
+if (!all && !prefix && restated) console.log(`zh-TW: ${restated} existing key(s) reconverted — their zh-CN placeholders had changed`)
 if (dropped.length) console.log(`zh-TW: dropped ${dropped.length} key(s) no longer in zh-CN: ${dropped.join(', ')}`)
