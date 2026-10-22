@@ -124,3 +124,12 @@ capture the current deletion generation into its internal entry; default/unknown
 values cannot be used to grant a recreated account. Future dispatch still must
 check installation generation, current scopes and connection revision. Storage
 and route wiring remain behind the unanswered schema approval gate.
+
+
+## Toolchain acceptance follow-up
+
+The first draft CI run failed in govulncheck before the backend test step because
+Go 1.26.9 is affected by GO-2026-6809 in crypto/x509. The branch minimum toolchain
+is updated to Go 1.26.10, and checks use that exact compiler. Local govulncheck
+then reported no reachable vulnerabilities. This changes no schema or endpoint.
+Official advisory: https://pkg.go.dev/vuln/GO-2026-6809
