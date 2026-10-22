@@ -368,6 +368,10 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	signer := protocol.Signer{Issuer: issuer, Audience: c.Audience, AppID: c.AppID, InstanceID: c.InstanceID, KeyID: key.KeyID, Key: key.SigningKey}
 	boot, err := client.Handshake(ctx, signer, time.Now())
+	if errors.Is(err, protocol.ErrBusy) {
+		v1err(w, 429, "extension_busy", "extension capacity unavailable")
+		return
+	}
 	if err != nil {
 		v1err(w, 502, "extension_unavailable", "extension backend unavailable")
 		return
@@ -397,8 +401,21 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := client.Do(ctx, in.Method, in.Path, in.Body, assertion)
-	if err != nil || result.Status < 200 || result.Status >= 300 || len(result.Body) > 1048576 || !json.Valid(result.Body) {
-		v1err(w, 502, "extension_unavailable", "extension backend refused or could not complete the request")
+	if errors.Is(err, protocol.ErrBusy) {
+		v1err(w, 429, "extension_busy", "extension capacity unavailable")
+		return
+	}
+	if err != nil || len(result.Body) > 1048576 || !json.Valid(result.Body) {
+		v1err(w, 502, "extension_unavailable", "extension backend unavailable or returned an invalid response")
+		return
+	}
+	if result.Status < 200 || result.Status >= 300 {
+		switch result.Status {
+		case 400, 403, 404, 409, 422, 429:
+			v1err(w, result.Status, "extension_backend_rejected", "extension backend refused the request")
+		default:
+			v1err(w, 502, "extension_unavailable", "extension backend unavailable")
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

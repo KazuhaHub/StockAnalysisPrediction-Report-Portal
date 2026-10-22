@@ -90,10 +90,12 @@ func TestExtensionAdminSealsAndRotatesKeys(t *testing.T) {
 }
 
 type extensionFakeBackend struct {
-	signer     protocol.Signer
-	calls      int
-	viewer     protocol.Viewer
-	beforeSend func()
+	signer         protocol.Signer
+	calls          int
+	responseStatus int
+	responseBody   []byte
+	viewer         protocol.Viewer
+	beforeSend     func()
 }
 
 func (f *extensionFakeBackend) Handshake(context.Context, protocol.Signer, time.Time) (string, error) {
@@ -110,7 +112,15 @@ func (f *extensionFakeBackend) Do(_ context.Context, method, path string, body [
 		return protocol.BackendResponse{}, err
 	}
 	f.viewer = claims.Viewer
-	return protocol.BackendResponse{Status: 200, Body: []byte(`{"ok":true,"items":[]}`)}, nil
+	status := f.responseStatus
+	if status == 0 {
+		status = 200
+	}
+	raw := f.responseBody
+	if raw == nil {
+		raw = []byte(`{"ok":true,"items":[]}`)
+	}
+	return protocol.BackendResponse{Status: status, Body: raw}, nil
 }
 func (f *extensionFakeBackend) Close() {}
 func extensionMint(t *testing.T, s *Server, user string) string {
@@ -222,5 +232,23 @@ func TestExtensionPrincipalDirectoryRequiresCurrentAdmin(t *testing.T) {
 		} else if w.Code != 403 {
 			t.Fatalf("reader directory=%d", w.Code)
 		}
+	}
+}
+
+func TestExtensionProxyReturnsSafeConflictWithoutBackendDetails(t *testing.T) {
+	s := extensionFixture(t)
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
+	w := extensionAdminCall(s, "PUT", extensionSaveBody(0, key))
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	c, _ := s.st.extensionConnection("status")
+	secret, _ := s.extensionSecret(c)
+	issuer, _ := s.st.extensionIssuer()
+	backend := &extensionFakeBackend{signer: protocol.Signer{Issuer: issuer, Audience: c.Audience, AppID: c.AppID, InstanceID: c.InstanceID, KeyID: secret.KeyID, Key: secret.SigningKey}, responseStatus: 409, responseBody: []byte(`{"error":"private-upstream-secret"}`)}
+	s.extensions.clientForTest = func(extensionConnection, extensionPolicy) (extensionBackend, error) { return backend, nil }
+	w = extensionRequest(s, extensionMint(t, s, "admin"), "PUT", "status")
+	if w.Code != 409 || strings.Contains(w.Body.String(), "private-upstream-secret") {
+		t.Fatalf("unsafe conflict=%d %s", w.Code, w.Body.String())
 	}
 }

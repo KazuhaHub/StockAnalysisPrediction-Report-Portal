@@ -2581,6 +2581,23 @@
           }
         }
       }
+    },
+    "/api/v1/notifications/publisher": {
+      "get": {
+        "summary": "Read the authenticated notification publisher namespace without publishing",
+        "description": "Requires a dedicated notify:<name> service credential or authorized app-bound notify token. Generic all, query and ingest scopes are refused. Returns its publisher namespace and event selector only, with Cache-Control: no-store.",
+        "tags": [
+          "Notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current publisher and exact notification event selector"
+          },
+          "401": {
+            "description": "Dedicated publication credential required"
+          }
+        }
+      }
     }
   }
 }

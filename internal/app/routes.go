@@ -176,6 +176,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	v1 := func(pattern string, h http.HandlerFunc) { s.bearer(mux, pattern, h) }
 	v1("POST /api/v1/reports", s.v1Ingest)
 	v1("POST /api/v1/notifications", s.v1PublishNotification)
+	v1("GET /api/v1/notifications/publisher", s.v1NotificationPublisherIdentity)
 	v1("POST /api/v1/extensions/{id}/request", s.v1ExtensionRequest)
 	v1("GET /api/v1/extensions/{id}/principals", s.v1ExtensionPrincipals)
 	v1("GET /api/v1/reports", s.v1QueryReports)
