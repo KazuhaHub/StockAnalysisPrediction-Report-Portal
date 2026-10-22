@@ -729,3 +729,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   reads against their real cookie-authenticated v1 counterparts. Independent review found no
   actionable issue. Full Go regression with Postgres enabled, three targeted race repetitions,
   vet and staticcheck passed; the final orphan/v1 extensions passed in the race run separately.
+- Cross-surface matrix checkpoint: `TestForecastAccessMatrix` exercises the real mux on SQLite
+  and Postgres, with both Default-none and Default-own trees, one account per specified OU,
+  unassigned/restricted/admin/mandated subjects, anonymous requests, persistent query tokens and
+  bridge-token denial on session routes. Two resolved months include frozen own/subtree
+  attribution, a genuinely purged member, rejected diagnostics, and readable/unreadable reports.
+- Explicit fixture expectations pin exact members and own sample sizes, both mature all-months
+  and their numeric spread, required payload/membership/count fields and recursive forbidden
+  paths. The pre-existing authentication wrappers take precedence: a dangling tree returns 503
+  `enrolment_policy_unavailable` before forecast resolution, and missing admin permission returns
+  plain 403 before checking enrolment. These stricter refusals are tested without changing the
+  independent authentication policy. Pure resolver tests separately pin dangling-tree `none`.
+- Independent review found that own groups could disappear without failing the original loop.
+  Both fixture months are now required exactly once. A temporary empty-own-groups mutation fails
+  this check; temporarily removing internal reader/no-membership policy also fails on diagnostic
+  and membership leaks. Both mutations were restored. Follow-up review found no remaining issue.
+- Matrix checkpoint validation: SQLite/Postgres matrix passed, three race repetitions passed,
+  and the full Go suite with Postgres enabled, vet, staticcheck and diff checks passed. Shared
+  Postgres runs were serialized; an initial overlapping invocation was cancelled and discarded.
+  Bound bridge prediction subjects remain to be added with the shared token-identity integration;
+  this matrix checkpoint does not claim that pending P26 contract or P27/P18 UI contracts complete.
