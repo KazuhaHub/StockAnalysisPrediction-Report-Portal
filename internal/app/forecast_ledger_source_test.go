@@ -134,3 +134,86 @@ func TestEvaluatorRuntimeLedgerRespectsDryAndBenchmarkGate(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluatorPreservesTypedStockAndLookbackRefusals(t *testing.T) {
+	for _, widened := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stock", true: "lookback"}[widened], func(t *testing.T) {
+			s := newV1Server(t)
+			setID, e := opsFixture(t, s)
+			fetch := e.fetch
+			e.fetch = nil
+			stockCalls := 0
+			s.quotes.sources = []quoteSource{ledgerWalkSource(quoteSourceTencent, func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
+				if code == "000852" {
+					return fetch(ctx, market, code, from, to)
+				}
+				stockCalls++
+				if !widened || stockCalls > 1 {
+					return nil, &ledgerRefusal{Code: "no_source"}
+				}
+				resp, err := fetch(ctx, market, code, from, to)
+				if err != nil {
+					return nil, err
+				}
+				var bars []QuoteBar
+				for _, b := range resp.Bars {
+					if b.Date > "2026-10-19" {
+						bars = append(bars, b)
+					}
+				}
+				resp.Bars = bars
+				return resp, nil
+			})}
+			if err := e.tick(s); err != nil {
+				t.Fatal(err)
+			}
+			var code string
+			var attempts int
+			if err := s.st.queryRow(`SELECT refusal, attempts FROM prediction_marks WHERE set_id=? AND checkpoint='d5'`, setID).Scan(&code, &attempts); err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := 1
+			if widened {
+				wantCalls = 2
+			}
+			if stockCalls != wantCalls || code != "no_source" || attempts != 0 {
+				t.Fatalf("typed stock fault lost: calls=%d code=%s attempts=%d", stockCalls, code, attempts)
+			}
+		})
+	}
+}
+
+func TestEvaluatorRuntimeBreakerIsSharedAndResetsEachTick(t *testing.T) {
+	s := newV1Server(t)
+	_, e := opsFixture(t, s)
+	for _, symbol := range []string{"600161", "600162", "600163", "600164"} {
+		seedAcceptedSet(t, s, symbol, "2026-10-17")
+	}
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_on='2026-10-16', made_at='2026-10-16T13:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	fetch := e.fetch
+	e.fetch = nil
+	calls := 0
+	s.quotes.sources = []quoteSource{ledgerWalkSource(quoteSourceTencent, func(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
+		calls++
+		if code == "000852" {
+			return fetch(ctx, market, code, from, to)
+		}
+		return nil, errors.New("transport failure")
+	})}
+	for tick := 1; tick <= 2; tick++ {
+		if err := e.tick(s); err != nil {
+			t.Fatal(err)
+		}
+		if calls != tick*4 {
+			t.Fatalf("tick=%d calls=%d, want %d", tick, calls, tick*4)
+		}
+		if e.ledgerPass != nil {
+			t.Fatal("tick retained pass state")
+		}
+		if _, err := s.st.exec(`UPDATE prediction_marks SET next_attempt_at=''`); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

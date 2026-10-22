@@ -230,10 +230,10 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   held by the dependency audit and existing DOMPurify #138 needs coordination permission.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
-  capability isolation, operator-order selection and the uncached walk with isolated health and
-  per-pass breakers are implemented and locally reviewed. Vendor admission, evaluator/readiness
-  wiring and source-panel integration remain outstanding. No P23 PR is open.
-- **Next step.** Wire P23's vendor evidence grants and evaluator source walk, then its readiness,
+  capability isolation, operator-order selection, uncached walk with isolated health/per-pass
+  breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
+  reviewed. Readiness/alerts and source-panel integration remain outstanding. No P23 PR is open.
+- **Next step.** Complete P23's readiness and alert integration at the shared-file coordination gate,
   panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -791,3 +791,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   order confirmation and the source ADR remain outstanding. No Apps branch was edited, no schema
   changed and no production deploy or evaluator enablement occurred. Full checks and independent
   review of the runtime source-path change remain pending; P23 is not release-ready.
+- Runtime application/test head `1f4a79b9` passed full Go/Postgres regression (app package
+  34.980 s), three-repeat targeted race checks (4.712 s), vet, staticcheck and build.
+  Independent read-only review found no actionable implementation issues within this scope.
+  It did not review deferred readiness, alerts or admin integration and used SQLite only.
+- Added test-only evaluator-level controls after review: five sets share exactly three stock
+  delivery failures in one tick, the next tick resets the breaker, and typed stock/widened-lookback
+  refusals preserve `no_source` with zero attempts. Initial controls passed (0.577 s); final full
+  regression and repeat checks including these controls remain pending. Runtime code is unchanged
+  from the reviewed head.
