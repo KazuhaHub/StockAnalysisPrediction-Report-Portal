@@ -52,7 +52,9 @@ identity behavior for rapid deletion/recreation and restore in fixtures before
 claiming the boundary complete.
 
 The backend receives only opaque current OU identities and the effective role,
-not email, password hash, notification preferences or report data. Management
+not email, password hash, notification preferences or report data. Opaque identity
+derivation uses a separate stable seed from the sealed connection record; signing
+key rotation preserves this seed, while registration reset changes the namespace. Management
 options may get administrator-authorized principal labels through a separate
 explicitly allowlisted platform identity-list endpoint; ordinary readers never
 receive the directory. Do not let a frontend invent an OU ID to obtain access.
@@ -106,3 +108,19 @@ body/header timeouts and bounds apply; backend errors expose no secrets.
 
 The schema proposal is `status-storage-and-platform-proposal.md`. No schema or
 route is considered implemented by the contract or shared library alone.
+
+
+## Pre-storage implementation evidence (2026-10-22)
+
+`internal/app/extension_identity.go` reads existing account/current-OU authority in
+one read-only snapshot (repeatable-read on PostgreSQL). The app-bound token expiry,
+account activation, civil-date expiry, current session/creation identity and
+account deletion generation are checked. Opaque account/OU references are bound to
+the application registration and a stable identity seed, with bounded ancestry.
+
+This is an internal projection primitive, not a registered HTTP endpoint. It does
+not expose a directory or enable new capabilities. Future token issuance must
+capture the current deletion generation into its internal entry; default/unknown
+values cannot be used to grant a recreated account. Future dispatch still must
+check installation generation, current scopes and connection revision. Storage
+and route wiring remain behind the unanswered schema approval gate.

@@ -28,7 +28,7 @@ when scopes/version change. App-token identity stays ephemeral in memory.
 | label | TEXT NOT NULL | Administrator-facing label |
 | base_url | TEXT NOT NULL | Fixed trusted backend root, HTTPS except explicit private-network policy |
 | audience | TEXT NOT NULL | Backend assertion audience |
-| secret | TEXT NOT NULL | Sealed JSON key ID/shared signing key; never returned |
+| secret | TEXT NOT NULL | Sealed JSON key ID/shared signing key and independent stable identity seed; never returned |
 | policy | TEXT NOT NULL | Versioned JSON exact path-prefix/method rules and explicit network allowlists; bounded validated object |
 | enabled | INTEGER NOT NULL DEFAULT 0 | Review gate |
 | revision | BIGINT NOT NULL DEFAULT 1 | Compare-and-swap and request fencing |
@@ -48,8 +48,9 @@ revision. No network calls run in the transaction. Request dispatch verifies
 current enabled registration revision before sending, uses a bounded transport,
 strips client authorization/cookies and accepts no client host override.
 
-Use the existing keyring purpose `app-backend:<app_id>:<instance_id>`. A key rotation
-changes revision, key ID and secret together. The backend can accept a short,
+Use the existing keyring purpose `app-backend:<app_id>:<instance_id>`. A signing-key rotation
+changes revision, key ID and signing secret together; it preserves the independent
+identity seed so current account/OU grants do not break on ordinary key rotation. The backend can accept a short,
 explicitly configured old/new verification window; it does not accept arbitrary
 key IDs. No secret survives into a response, audit detail or ZIP.
 

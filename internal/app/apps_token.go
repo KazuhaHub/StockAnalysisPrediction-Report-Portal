@@ -51,12 +51,13 @@ type appTokens struct {
 }
 
 type appTokenEntry struct {
-	scopes         map[string]bool
-	expires        time.Time
-	appID          string
-	username       string
-	sessionRev     int64
-	accountCreated string
+	scopes            map[string]bool
+	expires           time.Time
+	appID             string
+	username          string
+	sessionRev        int64
+	accountCreated    string
+	accountGeneration int64
 }
 
 func (a *appTokens) mintForApp(scopes []string, now time.Time, appID string, user *User) string {
