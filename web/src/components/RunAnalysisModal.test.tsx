@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import RunAnalysisModal from './RunAnalysisModal'
@@ -250,20 +250,33 @@ describe('RunAnalysisModal draws each input as its declared type', () => {
   })
 
   it('uploads a file input and submits the row with the Dify id, not the file', async () => {
-    const user = userEvent.setup()
-    posted.calls = []
-    await open([
-      { key: 'symbol', label: 'Symbol' },
-      // Required, because a required file field is where the validation rule bites: a rule with no
-      // type validates the uploaded list as a string and refuses it, upload or no upload.
-      { key: 'docs', label: 'Docs', type: 'file-list', required: true },
-    ])
-    await waitFor(() => expect(q('input[type="file"]')).toBeTruthy())
-    await user.type(q('#symbol') as HTMLInputElement, '301539')
-    await user.upload(q('input[type="file"]') as HTMLInputElement, new File(['hi'], 'a.pdf', { type: 'application/pdf' }))
-    await screen.findByText('a.pdf')
-    await user.click(screen.getByText('run.run'))
-    await waitFor(() => expect(posted.calls).toHaveLength(1))
-    expect(posted.calls[0].rows).toEqual([{ symbol: '301539', docs: '["dify-1"]' }])
+    // UploadList leaves a 300ms progress callback after unmount. The shared Form teardown only
+    // waits for 10ms debounces; own this test's clock and drain before jsdom removes window.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync })
+      posted.calls = []
+      await open([
+        { key: 'symbol', label: 'Symbol' },
+        // Required, because a required file field is where the validation rule bites: a rule with no
+        // type validates the uploaded list as a string and refuses it, upload or no upload.
+        { key: 'docs', label: 'Docs', type: 'file-list', required: true },
+      ])
+      await waitFor(() => expect(q('input[type="file"]')).toBeTruthy())
+      await user.type(q('#symbol') as HTMLInputElement, '301539')
+      await user.upload(q('input[type="file"]') as HTMLInputElement, new File(['hi'], 'a.pdf', { type: 'application/pdf' }))
+      await screen.findByText('a.pdf')
+      await user.click(screen.getByText('run.run'))
+      await waitFor(() => expect(posted.calls).toHaveLength(1))
+      expect(posted.calls[0].rows).toEqual([{ symbol: '301539', docs: '["dify-1"]' }])
+      cleanup()
+      await act(async () => {
+        await vi.runAllTimersAsync()
+      })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.clearAllTimers()
+      vi.useRealTimers()
+    }
   })
 })

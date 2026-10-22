@@ -335,18 +335,19 @@ backup and restore pick them up.
   - 1-6-4 sends no `owner_token`, so the column would be NULL anyway.
 - **After purge** (`report_id` NULL), a set is readable only by unrestricted users. A restricted
   user cannot prove access to a report that no longer exists. **Fail-closed.**
-- **Per-report and per-symbol routes** sit on `/api/v1` with `query` scope, for machine callers only. The v1 surface is token-only (`routes.go:33`). The SPA reads a report's sets through a **session** route, `GET /api/report/{id}/predictions`, under the same rules above.
-- **The group statistics route** is `/api/admin/forecast/groups`, registered with `PermManage`, not
-  `/api/v1`.
-  - v1 authorizes by token scope alone (`apiui.go:160`, `server.go:981`).
-  - The app bridge mints `query` tokens for any unrestricted user (`apps_api.go:121-141`), so a v1
-    route cannot be limited to managers.
-  - The monthly page is therefore a **core SPA page** (settles D6).
-
-> **Amended 2026-10-20.** Reader access will be extended in R2a by the access model planned as ADR
-> 0039 (per-OU `all`/`own`/`none`, a top-level `/forecast` page, compute governance); it is not
-> written yet. Until it ships, P30/P31 apply: only an effectively restricted OU is a group
-> principal, and an unreadable restriction scopes to nothing.
+- **Prediction reads distinguish credentials.** The SPA uses session routes for report and symbol
+  reads. The v1 routes admit a query token or a valid cookie held at the enrolment wall; cookie
+  forecast reads additionally require current OU scope. Persistent machine diagnostics remain
+  unscoped; bound app tokens use their minting user's decision and never machine diagnostics.
+- **R2a reader access** is specified in [ADR 0039](adr/0039-forecast-verification-for-readers.md):
+  `/forecast` is a core SPA record using session routes `/api/forecast/groups*`, authorized by
+  nearest-inherited `all`/`own`/`none`. Own membership is computed inside the live subtree's frozen
+  attributions. External all omits volume; external drawers list readable, report-backed rows
+  only. `/manage/forecast` becomes operations; admin aliases remain manager-only until P29.
+- These are accepted rollout contracts, not a claim that the reader page or R2b stage switch is
+  deployed. P30/P31's independent report predicates continue to apply: only effectively restricted
+  OUs form group principals, `owner_group` is not consulted, and unreadable restriction scopes
+  to nothing. Forecast permission never grants access to an otherwise unreadable report.
 
 ## 8. What is quantified
 
@@ -564,9 +565,23 @@ Each states its direction.
 18. **Statistics.** Every number carries n, its null and a BH-adjusted p. The label-permutation
     null is reproducible with a fixed seed.
 19. **Access.**
-    - The cohort route is refused to non-`PermManage` users, including holders of app-bridge
-      tokens; R2a replaces this with the per-OU scope planned as ADR 0039.
-    - The per-report route is refused for an unreadable report.
+    - Reader record and member routes require a cookie, the independent enrolment wall and a fresh
+      all/own decision. None, unknown values, failed reads and broken chains deny; navigation is
+      never authorization. Admin aliases remain manager-only; tokens alone get 401 there and on
+      the reader routes. Both permitted and refused subjects are required by the access matrix.
+    - Own members and metrics are exactly the current subtree's attributed population, with
+      membership chosen after filtering. Unassigned Default-own and a child inheriting own have
+      distinct roots; re-parenting changes populations without moving stored attribution.
+    - External all has no coverage, sample sizes, totals or slice denominators, including mature
+      cells; mature metrics retain a threshold badge. External own retains its own counts.
+      External custom ranges refuse; unreadable and orphaned drawer rows are omitted before
+      pagination. No non-admin gets unrecorded. CSV follows the same disclosure rules.
+    - Both SPA and cookie-v1 prediction reads enforce scope and report visibility. Internal
+      readers retain accepted orphan history and optional payload, but not errors/rejected sets;
+      own and external readers get no membership. Bridges recheck their minting user and return
+      accepted report-backed sets without diagnostics; persistent machine reads stay unchanged.
+    - The per-report route answers 404 for an unreadable report. Scope none renders no card,
+      chip, timeline marker, overlay or placeholder; reading stage full cannot widen scope.
     - `owner_group` is never consulted (a test sets it to a readable group on an unreadable report).
     - A `g:` viewer row is written only for an effectively restricted OU, and an unreadable
       restriction or a broken OU chain scopes to nothing (P30/P31).
@@ -610,11 +625,11 @@ There is no backfill.
 - **D4. Membership.** Proposed: the earliest accepted set per `(symbol, group)` decides; if it is degraded or `mismatch`, the symbol is excluded, never replaced by a rerun.
 - **D5. Purge.** Proposed: the ledger outlives reports, has its own off-by-default retention target, and shows in
   the usage list.
-- **D6. Monthly page.** Settled by §7: a core page, manager only. The page has a monthly tab and a
-  custom-range tab (§8.5), and is named 预测验证 (§1.1). Both are settled by the owner on 2026-10-17.
-  **Superseded in R2a** by the access model planned as ADR 0039: the record moves to a top-level
-  `/forecast` page for members of OUs with a scope, and `/manage/forecast` becomes the operations
-  page.
+- **D6. Monthly page.** The original manager-only page decision of 2026-10-17 is superseded by
+  [ADR 0039](adr/0039-forecast-verification-for-readers.md), recording the 2026-10-18/19 reader
+  decisions. The record is a top-level core `/forecast` page for all/own OUs, with internal
+  exploratory ranges and external protections. `/manage/forecast` is operations. Reading-page
+  stages are a separate gate, not a second OU permission.
 - **D7. 3-5 重组决策.** Out of v1, or ask its owner for a deterministic value table first?
 - **D8. Corporate actions.** Proposed: detect from the dividend element that Tencent's unadjusted
   day rows carry on ex-dates (`quote.go:1121`); fall back to the qfq ratio only for the kinds that
