@@ -53,9 +53,12 @@ func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request
 	if user := s.currentActiveUser(r); user != "" {
 		return s.forecastCookiePredictionView(w, user)
 	}
-	// Persistent machine reads retain their diagnostic contract. Bridge identity is integrated
-	// separately with the shared app-token binding work.
-	return forecastPredictionView{}, true
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if s.st.TokenValid(token, "query") {
+		// Persistent machine reads retain their diagnostic contract.
+		return forecastPredictionView{}, true
+	}
+	return s.forecastBridgePredictionView(w, r, token)
 }
 
 func protectedPredictionSets(sets []PredictionSet, view forecastPredictionView) []PredictionSet {

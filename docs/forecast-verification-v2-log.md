@@ -221,12 +221,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P30 #135, P31 #136, P11 #137. R2a: P15 #143. The standalone Go 1.26.10 security fix #144
   is merged; `origin/main` is at `ad618c1f`.
 - **In flight.** P26 #145 on `feat/forecast-record-access`, in the isolated worktree. The strict
-  resolver and population-aware groups/members handlers are implemented, including external
-  shaping, report filtering and pagination. Scoring pools, detached flights and bounded backend
-  capacity settings are implemented. Public reader routes are not registered: per-user limits,
-  the settings form, remaining request gates, previews and reading-page handling remain
-  unfinished. It is not ready to merge. The parallel Apps branches
-  remain untouched; recheck their token changes before integrating the bridge-user binding.
+  resolver, reader routes/populations/redaction, compute governance, per-user settings/limits,
+  cookie and bound-bridge prediction gates, OU settings/audit/preview, weekly count-only adoption
+  and cross-surface SQLite/Postgres matrix are implemented. Final compatibility reconciliation
+  and validation remain before merge. The parallel Apps branches remain untouched; shared
+  identity fields and `mintForApp` match their proposed interface rather than duplicating it.
 - **Next step.** Complete P26, then P27, P28 and P22. P13 still requires production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -749,3 +748,20 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Postgres runs were serialized; an initial overlapping invocation was cancelled and discarded.
   Bound bridge prediction subjects remain to be added with the shared token-identity integration;
   this matrix checkpoint does not claim that pending P26 contract or P27/P18 UI contracts complete.
+- Bridge integration checkpoint: the shared app-token registry now carries its minting user's
+  username, session revision and account creation identity. `mintForApp` and its API call match
+  the interfaces already present in both parallel Apps PRs; its body is byte-identical in both.
+  No notification or extension capability was added, no second identity registry was introduced,
+  and neither parallel branch was changed. This is an in-memory binding, not a schema change.
+- Prediction reads preserve cookie precedence and the persistent query token's diagnostic shape.
+  Bound bridge tokens recheck current scope and account identity/active/expiry/enrolment state.
+  Identity freshness and scope use the same strict account/tree snapshot. Unbound bridges deny;
+  all allowed bridges, including admin-minted ones, return accepted report-backed sets only,
+  without payload, errors or membership. Newly external readers use current report visibility.
+- Bridge regressions first reproduced none-scope HTTP 200 and diagnostics/orphan/stale-account
+  disclosure, then passed. The matrix now includes tokens actually minted by the Internal and
+  InternalNone members, with no skipped v1 probes. Extra controls cover none-to-all updates,
+  restriction filtering before LIMIT, denied-cookie precedence, exact expiry boundaries,
+  non-query/unbound/nil registries and closed-store denial. Independent slice/follow-up review
+  found no actionable issue. Full Go/Postgres regression, build, vet, staticcheck and three
+  targeted bridge/matrix/snapshot race repetitions passed.

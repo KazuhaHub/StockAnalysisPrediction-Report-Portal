@@ -20,6 +20,9 @@ type forecastSubject struct {
 	Admin             bool
 	RestrictedAccount bool
 	GroupID           int64
+	SessionRev        int64
+	CreatedAt         string
+	ExpiresAt         string
 }
 
 type forecastDecision struct {
@@ -49,9 +52,12 @@ func (s *Server) loadForecastSubjectSnapshot(user string, afterAccountRead func(
 	var role string
 	var restricted, active int
 	var group int64
+	var revision int64
+	var created, expires string
 	err = tx.QueryRow(s.st.bind(`SELECT COALESCE(role,'user'), COALESCE(restricted,0),
-		COALESCE(group_id,0), COALESCE(active,1) FROM users WHERE username=?`), user).
-		Scan(&role, &restricted, &group, &active)
+		COALESCE(group_id,0), COALESCE(active,1), COALESCE(session_rev,0),
+		COALESCE(created_at,''), COALESCE(expires_at,'') FROM users WHERE username=?`), user).
+		Scan(&role, &restricted, &group, &active, &revision, &created, &expires)
 	if err != nil {
 		return forecastSubject{}, ouIndex{}, err
 	}
@@ -68,7 +74,8 @@ func (s *Server) loadForecastSubjectSnapshot(user string, afterAccountRead func(
 	if err := tx.Commit(); err != nil {
 		return forecastSubject{}, ouIndex{}, err
 	}
-	return forecastSubject{User: user, Admin: can(role, PermManage), RestrictedAccount: restricted != 0, GroupID: group}, ix, nil
+	return forecastSubject{User: user, Admin: can(role, PermManage), RestrictedAccount: restricted != 0,
+		GroupID: group, SessionRev: revision, CreatedAt: created, ExpiresAt: expires}, ix, nil
 }
 
 func resolveForecastScope(sub forecastSubject, ix ouIndex) forecastDecision {
