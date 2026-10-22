@@ -679,3 +679,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   The full error-code parity guard caught the missing new translation before it was added. The
   final Go run was serialized after the frontend build to avoid the existing dist cleanup/embed
   race during concurrent builds. The branch remains a draft; no production state changed.
+- Admin impact preview checkpoint: `GET /api/admin/forecast/access` reports each OU's nullable
+  own scope, strict effective scope/source, external flag and direct-member account counts, plus
+  overall counts. Unassigned members count under Default; root-OU members and admin overrides
+  are included. Snapshot reads active accounts, the panel timezone and the OU tree through one
+  read-only transaction (repeatable read on Postgres), and returns no account identities.
+- Optional `ou` and `scope` parameters preview all/own/none/inherit on an in-memory tree only.
+  Invalid, missing or duplicate parameters fail before the snapshot; a missing OU is rejected.
+  The response marks a preview and counts accounts whose access changes, excluding source-only
+  changes. Tests compare the hypothetical overview against a real saved scope, prove the preview
+  left persistent policy unchanged, cover Default inheritance and admin-only routing, and check
+  active-account snapshot loading on Postgres. No new schema or production write is involved.
+- Independent review caught expired accounts being included. The snapshot now uses the panel-tz
+  civil date with the same inclusive cutoff rule as login/session validation. The regression
+  first counted the expired account, then passed for expired/today/future/unlimited controls in
+  Pacific/Kiritimati. Follow-up review confirmed the issue closed. Failed store reads return an
+  error rather than a plausible empty summary. Bridge integration, weekly adoption counts and
+  the complete P26 access matrix remain pending.
+- Preview checkpoint validation: full Go regression with Postgres enabled, three targeted race
+  repetitions, vet, staticcheck and diff checks passed after the expiry fix. The extra closed-store
+  regression passed separately after the full run began. Existing required CI checks on the
+  preceding OU-settings commit are green; this preview commit still requires its own CI run.

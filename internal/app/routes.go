@@ -325,6 +325,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "PUT /api/admin/groups/{id}/targets", s.apiGroupTargetsSave)
 	s.admin(mux, "GET /api/admin/settings", s.apiAdminSettings)
 	s.admin(mux, "GET /api/admin/forecast", s.apiForecastSettings)
+	s.admin(mux, "GET /api/admin/forecast/access", s.apiForecastAccess)
 	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
 	// One pass now, in the current mode (P9). Admin, like the switch it stands in for.
 	s.admin(mux, "POST /api/admin/forecast/evaluate", s.apiForecastEvaluate)
