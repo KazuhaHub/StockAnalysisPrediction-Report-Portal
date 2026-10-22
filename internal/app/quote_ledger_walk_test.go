@@ -113,6 +113,40 @@ func TestLedgerWalkCancellationWhileWaitingForSlot(t *testing.T) {
 	}
 }
 
+func TestLedgerWalkCancellationBehindPassGateKeepsPassUsable(t *testing.T) {
+	tick := &ledgerTick{}
+	release, err := tick.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := true
+	defer func() {
+		if held {
+			release()
+		}
+	}()
+	calls := 0
+	c := &quoteCache{sources: []quoteSource{ledgerWalkSource("primary", func(context.Context, string, string, string, string) (*QuoteResp, error) {
+		calls++
+		return &QuoteResp{}, nil
+	})}}
+	cfg := quoteConfig{Order: []string{"primary"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err = c.walkLedger(ctx, cfg, "sh", "601899", "2026-10-01", "2026-10-22", tick)
+	if !errors.Is(err, context.DeadlineExceeded) || calls != 0 || len(c.snapshotLedgerHealth()) != 0 || len(c.sem) != 0 {
+		t.Fatalf("queued cancellation reached upstream or health: calls=%d error=%v", calls, err)
+	}
+	release()
+	held = false
+	retry, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stop()
+	resp, err := c.walkLedger(retry, cfg, "sh", "601899", "2026-10-01", "2026-10-22", tick)
+	if err != nil || resp == nil || calls != 1 {
+		t.Fatalf("cancelled waiter damaged pass progress: calls=%d error=%v", calls, err)
+	}
+}
+
 func TestLedgerWalkConcurrentPassHasOnlyThreeFailures(t *testing.T) {
 	var calls atomic.Int32
 	failure := errors.New("transport failure")

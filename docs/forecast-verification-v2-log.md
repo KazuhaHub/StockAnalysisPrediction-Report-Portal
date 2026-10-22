@@ -230,9 +230,10 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   held by the dependency audit and existing DOMPurify #138 needs coordination permission.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
-  capability isolation and pure operator-order selection are implemented; the actual walker,
-  evaluator/readiness wiring and source-panel integration remain outstanding. No P23 PR is open.
-- **Next step.** Finish P23's uncached source walk and evidence/health isolation, then its readiness,
+  capability isolation, operator-order selection and the uncached walk with isolated health and
+  per-pass breakers are implemented and locally reviewed. Vendor admission, evaluator/readiness
+  wiring and source-panel integration remain outstanding. No P23 PR is open.
+- **Next step.** Wire P23's vendor evidence grants and evaluator source walk, then its readiness,
   panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -755,3 +756,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   sharing one pass now observe the same actual transport failure with exactly three vendor calls.
   Added saturated-upstream cancellation and wrapped typed-refusal controls. Focused walk tests
   passed (1.210 s); post-repair full checks and review follow-up remain pending.
+- Post-repair application/test head `c3bc3865` passed full Go regression with local Postgres
+  enabled (app package 50.775 s), three-repeat targeted race checks (2.259 s), vet, staticcheck
+  and build. Independent follow-up closed the breaker finding with no additional actionable
+  issue, confirming pass/upstream release paths, failure priority and wrapped refusal handling.
+  Review also ran three race-enabled walker repetitions with Postgres disabled.
+- Added a test-only follow-up for a caller cancelled while queued behind the pass gate, then
+  reusing the same tick successfully after release. This pins both cancellation and subsequent
+  progress without a live vendor or database. Three race-enabled walker repetitions including
+  this control passed (1.829 s). No runtime code changed after `c3bc3865`.
