@@ -28,14 +28,15 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('AuthProvider and a session that ends underneath it', () => {
   it.each([
-    [undefined, 'none:false'],
+    [undefined, 'legacy'],
+    [{ scope: 'none', external: false }, 'none:false'],
     [{ scope: 'own', external: true }, 'own:true'],
     [{ scope: 'all', external: false }, 'all:false'],
-  ])('exposes a deny-by-default forecast navigation hint for %j', async (forecast, expected) => {
+  ])('preserves an absent legacy hint separately from an explicit forecast policy for %j', async (forecast, expected) => {
     vi.stubGlobal('fetch', () => Promise.resolve(ok({ user: 'alice', admin: false, forecast })))
     function ForecastProbe() {
       const { forecast: hint, loading } = useAuth()
-      return <div>{loading ? 'loading' : `${hint.scope}:${hint.external}`}</div>
+      return <div>{loading ? 'loading' : hint ? `${hint.scope}:${hint.external}` : 'legacy'}</div>
     }
     render(<AuthProvider><ForecastProbe /></AuthProvider>)
     expect(await screen.findByText(expected)).toBeTruthy()

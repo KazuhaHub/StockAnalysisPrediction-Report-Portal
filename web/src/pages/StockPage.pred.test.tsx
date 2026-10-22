@@ -5,7 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import StockPage from './StockPage'
 import { ApiError } from '../api/client'
 
-const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false }))
+const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false, legacy: false }))
 
 // The reading page's prediction request (P10).
 //
@@ -14,7 +14,7 @@ const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', exter
 // report body always renders.
 
 vi.mock('../auth', () => ({
-  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, forecast: { ...access }, can: () => true, logout: vi.fn() }),
+  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, forecast: access.legacy ? undefined : { scope: access.scope, external: access.external }, can: () => true, logout: vi.fn() }),
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ fontSize: 15, fontWeight: 400, wide: false }) }))
 vi.mock('../lib/datetime', () => ({ isInstant: () => false, formatReportDateTime: (s: string) => s }))
@@ -123,6 +123,7 @@ beforeEach(() => {
   denyForecast = false
   access.scope = 'all'
   access.external = false
+  access.legacy = false
   aDeferred = null
   pendingB = true
   try {
@@ -133,6 +134,19 @@ beforeEach(() => {
 })
 
 describe('StockPage predictions', () => {
+  it('keeps legacy prediction reads when an older server omits the hint, but hides them on explicit none', async () => {
+    access.legacy = true
+    const view = show()
+    expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
+    await waitFor(() => expect(predCalls.length).toBe(2))
+    access.legacy = false
+    access.scope = 'none'
+    view.refreshAccess()
+    expect(screen.queryByText(/1,111\.00/)).toBeNull()
+    expect(screen.queryByText('forecast.chart.overlay')).toBeNull()
+    expect(predCalls.length).toBe(2)
+  })
+
   it.each(['external', 'own'] as const)('drops old-policy data and refetches when the hint changes to %s', async (change) => {
     const view = show()
     expect(await screen.findByText(/1,111\.00/)).toBeTruthy()

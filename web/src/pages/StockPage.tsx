@@ -72,10 +72,12 @@ function writeChartOpen(open: boolean): void {
 export default function StockPage() {
   const { t } = useTranslation()
   const { forecast, user } = useAuth()
-  const forecastEnabled = forecast?.scope === 'all' || forecast?.scope === 'own'
+  // Older servers omit the navigation hint; preserve their existing reading-page requests.
+  // An explicit none still suppresses both reads, and every server response remains authoritative.
+  const forecastEnabled = forecast === undefined || forecast?.scope === 'all' || forecast?.scope === 'own'
   // A still-enabled scope can become narrower. Neither loaded nor in-flight data crosses that
   // boundary; checking only the enabled boolean would keep old internal payloads on screen.
-  const forecastKey = `${user ?? ''}\0${forecast?.scope ?? 'none'}\0${forecast?.external ?? false}`
+  const forecastKey = `${user ?? ''}\0${forecast?.scope ?? 'legacy'}\0${forecast?.external ?? false}`
   const { symbol = '' } = useParams()
   const [sp, setSp] = useSearchParams()
   const navigate = useNavigate()

@@ -223,9 +223,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **In flight.** P26 #145 on `feat/forecast-record-access`, in the isolated worktree. The strict
   resolver, reader routes/populations/redaction, compute governance, per-user settings/limits,
   cookie and bound-bridge prediction gates, OU settings/audit/preview, weekly count-only adoption
-  and cross-surface SQLite/Postgres matrix are implemented. Final compatibility reconciliation
-  and validation remain before merge. The parallel Apps branches remain untouched; shared
-  identity fields and `mintForApp` match their proposed interface rather than duplicating it.
+  and cross-surface SQLite/Postgres matrix are implemented. Independent final review and local
+  validation passed, including older-server hint compatibility. Latest-head CI and the Apps
+  integration sequence remain before merge. The parallel Apps branches remain untouched;
+  shared identity fields and `mintForApp` match their proposed interface. A read-only merge
+  preview still reports overlapping token edits; keep this PR a draft until those are resolved.
 - **Next step.** Complete P26, then P27, P28 and P22. P13 still requires production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -765,3 +767,18 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   non-query/unbound/nil registries and closed-store denial. Independent slice/follow-up review
   found no actionable issue. Full Go/Postgres regression, build, vet, staticcheck and three
   targeted bridge/matrix/snapshot race repetitions passed.
+- Final requirements reconciliation corrected the older-server navigation contract: an omitted
+  `me.forecast` remains undefined and preserves reading-page prediction requests; explicit `none`
+  still prevents both requests and immediately hides existing forecast data. Legacy identity is
+  distinct from known policy identities. Auth and reading-page regressions failed before the
+  correction and passed afterward. This supersedes the earlier deny-by-default hint fallback.
+- Final independent P26 audit found no actionable finding or missing implementation requirement.
+  Local validation passed: full Go suite with Postgres enabled, three targeted race repetitions,
+  build/vet/staticcheck, web typecheck, all 120 Vitest files / 1018 tests, production web build,
+  and a serialized Go embed rebuild after that build. Latest pushed-head CI remains required.
+- Integration hold: read-only `merge-tree` against Apps PR 141 reports `apps_token.go`; against
+  PR 142 it reports `apps_api.go` and `apps_token.go`. Shared mint code is identical, but textual
+  overlap is not a clean integration. Neither branch nor the user's checkout was modified.
+  Coordination authorization was requested before messaging the other development conversation;
+  do not merge this draft until the shared edits have a verified integration order and clean
+  combined validation. No schema, release, deployment, production data or Dify publish occurred.
