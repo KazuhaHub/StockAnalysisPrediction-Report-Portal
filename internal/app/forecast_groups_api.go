@@ -6,10 +6,13 @@ package app
 // population, never a machine-token gate; aggregate statistics are not part of /api/v1.
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -27,6 +30,7 @@ func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool) {
+	generation := s.forecastGeneration()
 	pop := populationFor(d)
 	q := r.URL.Query()
 	mode := q.Get("mode")
@@ -114,7 +118,18 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 
 	populationFrom, _ := s.st.ForecastPopulationFrom()
-	resp.Groups = s.buildForecastGroupsForPopulation(periods, sets, rtype, today, resp.Official, populationFrom, pop)
+	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
+	defer cancel()
+	resp.Groups, err = s.buildForecastGroupsRequest(ctx, periods, sets, rtype, today, resp.Official, populationFrom, pop, generation)
+	if err != nil {
+		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			w.Header().Set("Retry-After", "1")
+			jsonErrorCode(w, http.StatusServiceUnavailable, "forecast_busy", "forecast computation is busy; retry later")
+		} else {
+			jsonErrorCode(w, http.StatusInternalServerError, "forecast_failed", "forecast computation failed")
+		}
+		return
+	}
 	if adminAlias {
 		writeJSON(w, resp)
 	} else {
@@ -131,6 +146,17 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 }
 
 func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation) []forecastGroup {
+	groups, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, rtype, today, official, populationFrom, pop, s.forecastGeneration())
+	if err != nil {
+		return nil
+	}
+	return groups
+}
+
+func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64) ([]forecastGroup, error) {
+	if s.forecastGeneration() != generation {
+		return nil, errForecastBusy
+	}
 	// The cohort's benchmark is the frozen code of its earliest in-population accepted set — a
 	// ledger-wide answer, not just what this range happened to load. A custom range that starts
 	// mid-cohort must not pick a later set and call the cohort something else.
@@ -215,13 +241,14 @@ func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets
 		}
 	}
 	if len(jobs) == 0 {
-		return groups
+		return groups, nil
 	}
 
 	type result struct {
 		gi   int
 		cp   string
 		cell *forecastCell
+		err  error
 	}
 	workers := runtime.GOMAXPROCS(0)
 	if workers > len(jobs) {
@@ -237,15 +264,45 @@ func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets
 			for j := range ch {
 				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp)
 				c, gen := s.cachedForecastCell(key)
-				if c != nil {
-					out <- result{j.gi, j.cp, c}
+				if gen != generation {
+					out <- result{gi: j.gi, cp: j.cp, err: errForecastBusy}
 					continue
 				}
-				c = computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
-				if official && c.State == "mature" {
+				if c != nil {
+					out <- result{gi: j.gi, cp: j.cp, cell: c}
+					continue
+				}
+				members, pending := j.members, j.pending
+				if j.cp == "h12" {
+					members, pending = filterHorizonStd(members), filterHorizonStd(pending)
+				}
+				state, _, _, _, _, _ := forecastCellGate(members, pending, j.cp, j.end, today)
+				if state != "mature" {
+					c = computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
+					out <- result{gi: j.gi, cp: j.cp, cell: c}
+					continue
+				}
+				// A purge starts a new flight generation as well as a new memo generation: a new
+				// request must never join a computation whose inputs preceded that purge.
+				flightKey := key + "\x00generation:" + strconv.FormatUint(gen, 10)
+				c, err := s.forecastCompute.do(ctx, flightKey, official, s.forecastComputeLimits(), func() (*forecastCell, error) {
+					cached, current := s.cachedForecastCell(key)
+					if current != generation {
+						return nil, errForecastBusy
+					}
+					if cached != nil {
+						return cached, nil
+					}
+					computed := computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
+					if official {
+						s.storeForecastCell(key, computed, gen)
+					}
+					return computed, nil
+				})
+				if err == nil && official && c.State == "mature" {
 					s.storeForecastCell(key, c, gen)
 				}
-				out <- result{j.gi, j.cp, c}
+				out <- result{gi: j.gi, cp: j.cp, cell: c, err: err}
 			}
 		}()
 	}
@@ -257,10 +314,26 @@ func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets
 		wg.Wait()
 		close(out)
 	}()
+	var firstErr error
 	for r := range out {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
 		groups[r.gi].Cells[r.cp] = r.cell
 	}
-	return groups
+	if s.forecastGeneration() != generation {
+		return nil, errForecastBusy
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return groups, nil
+}
+
+func (s *Server) forecastGeneration() uint64 {
+	s.forecastGroupsMu.Lock()
+	defer s.forecastGroupsMu.Unlock()
+	return s.forecastGroupsGen
 }
 
 // forecastGroupCellKey is the memo's identity. It deliberately has no `mode`: a whole-month custom

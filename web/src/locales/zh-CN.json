@@ -2118,6 +2118,8 @@
   "err.forecast_eval_running": "已有一次评估正在进行。",
   "err.forecast_not_ready": "评估器尚未满足开启条件。",
   "err.forecast_unavailable": "你的账号暂无预测验证访问权限。",
+  "err.forecast_busy": "预测统计计算繁忙，请稍后重试。",
+  "err.forecast_failed": "预测统计计算失败，请重试。",
   "err.forecast_custom_not_allowed": "外部读者仅可查看正式月度记录。",
   "forecast.eval.awaiting_gate": "等待试运行核对：{{codes}}",
   "forecast.eval.confirmOn": "开启自动结算？",

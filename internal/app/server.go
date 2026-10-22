@@ -86,6 +86,7 @@ type Server struct {
 	// missed the cache before an OU delete and stores after it) is dropped rather than kept for the
 	// life of the process.
 	forecastGroupsGen uint64
+	forecastCompute   forecastCompute
 }
 
 // statusRecorder records the response status code for use in request logging.

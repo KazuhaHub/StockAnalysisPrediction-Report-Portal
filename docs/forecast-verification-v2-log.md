@@ -222,8 +222,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   is merged; `origin/main` is at `ad618c1f`.
 - **In flight.** P26 #145 on `feat/forecast-record-access`, in the isolated worktree. The strict
   resolver and population-aware groups/members handlers are implemented, including external
-  shaping, report filtering and pagination. Public reader routes are not registered: compute
-  governance, remaining request gates, previews/settings and reading-page handling remain
+  shaping, report filtering and pagination. Scoring pools, detached flights and bounded backend
+  capacity settings are implemented. Public reader routes are not registered: per-user limits,
+  the settings form, remaining request gates, previews and reading-page handling remain
   unfinished. It is not ready to merge. The parallel Apps branches
   remain untouched; recheck their token changes before integrating the bridge-user binding.
 - **Next step.** Complete P26, then P27, P28 and P22. P13 still requires production baseline screenshots and owner
@@ -545,7 +546,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   incorrectly mixed the old account and new tree and failed by granting `all`; repeatable read
   passes, and the next request observes the committed account move.
 - This is a partial implementation, not an access rollout. No new reader route is registered yet.
-  Remaining: compute governance before route registration, route gates and full access matrix,
+  Remaining: per-user limits and the limits form before route registration, route gates and full access matrix,
   cookie/bridge prediction shaping, `/api/me`, OU
   settings and preview, compute pools/flights/rate limits, count-only weekly adoption, StockPage
   suppression and the complete security/regression suite. No schema change is included.
@@ -573,3 +574,31 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Reader checkpoint validation: build, vet, full Go suite (SQLite), full Postgres app suite,
   staticcheck, web typecheck, 120 Vitest files / 1006 tests and production web build passed.
   The extra excluded-count regression also passed after the full Go runs were started.
+- Compute checkpoint: only uncached mature scoring occupies a slot. Official and exploratory
+  pools are independent; identical population/range/checkpoint requests share a detached flight.
+  An official follower promotes a queued exploratory flight rather than waiting behind its pool;
+  an already-running shared computation is not duplicated. Caller cancellation does not cancel
+  followers. Waiting is bounded, and scorer panics release capacity with a generic failure.
+- Groups handlers now return a retryable `forecast_busy` (503 plus `Retry-After`) rather than a
+  partial record when capacity is unavailable or the request wait expires. Cache hits and
+  non-mature gates bypass slots. The existing limits API reads/writes all five bounded settings;
+  omitted values remain unchanged, and invalid values are rejected before writes. The two
+  per-user settings are not yet enforced; their limiter and the web form remain pending.
+- Review identified a generation race when a purge occurred after loading sets but before worker
+  admission: stale inputs could acquire the new generation and refill the memo. The request now
+  captures generation before any population reads, carries it through flight/cache operations,
+  and rejects changed generations. A deterministic test deletes sets and purges at the existing
+  settings-read seam between loading and admission. A late-generation mutation failed by serving
+  stale HTTP 200; the fixed path answers 503, leaves the memo empty, and reloads on the next call.
+  Follow-up review confirmed the issue closed. No reader route has been registered yet.
+- The plan assumed an existing limits audit, but the security-save audit did not record limit
+  values. Resolved numeric before/after limits are now recorded under the existing `policy.change`
+  action with target `security/limits` immediately after a real change. This also covers the
+  existing partial-save behavior when a later policy block fails validation. Tests failed first
+  for missing values and for that unaudited partial-save path, then passed; unchanged saves do
+  not create another limits-change row. No secret or schema change is involved.
+- Compute checkpoint validation: build, vet, full SQLite Go suite and full Postgres app suite,
+  staticcheck, three targeted race repetitions, web typecheck, 120 Vitest files / 1006 tests and
+  production build passed. Final full Go tests with Postgres enabled passed again after the
+  limits-audit refinement. Independent review confirmed the generation and audit fixes; the
+  remaining P26 requirements above still block merge.
