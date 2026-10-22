@@ -1135,8 +1135,9 @@ type tencentQuoteBody struct {
 	// element that is an OBJECT ({"nd":"2025","fh_sh":"3.8",…}). Decoding into [][]string therefore
 	// fails outright on any stock that has ever paid a dividend, which is most of them; RawMessage
 	// lets the six we read stay strings and the one we do not read stay unexamined.
-	Day [][]json.RawMessage        `json:"day"`
-	Qt  map[string]json.RawMessage `json:"qt"`
+	Day    [][]json.RawMessage        `json:"day"`
+	QfqDay [][]json.RawMessage        `json:"qfqday"`
+	Qt     map[string]json.RawMessage `json:"qt"`
 }
 
 // fetchTencentQuote fetches history, snapshot and session state for one stock in a single call.
@@ -1195,6 +1196,12 @@ func fetchTencentAt(ctx context.Context, market, code string, bars int, iv quote
 // order as it goes. The same array serves five markets, so every read below that is a UNIT or a
 // FORMAT goes through the market's row in quoteMarkets rather than through a constant.
 func parseTencentQuote(market, code string, body []byte, bars int) (*QuoteResp, error) {
+	return parseTencentDaily(market, code, body, bars, false)
+}
+
+// Adjusted rows are selected only by the detection-only fetch. Ordinary quote and settlement
+// readers never fall back to qfqday: those prices must not replace historical unadjusted closes.
+func parseTencentDaily(market, code string, body []byte, bars int, adjusted bool) (*QuoteResp, error) {
 	target, err := quoteTargetFor(market, code)
 	if err != nil {
 		return nil, err
@@ -1218,6 +1225,12 @@ func parseTencentQuote(market, code string, body []byte, bars int) (*QuoteResp, 
 	var qb tencentQuoteBody
 	if err := json.Unmarshal(raw, &qb); err != nil {
 		return nil, fmt.Errorf("quote: decode tencent %s: %w", sym, err)
+	}
+	if adjusted {
+		if len(qb.QfqDay) == 0 {
+			return nil, fmt.Errorf("quote: tencent %s has no adjusted daily rows", sym)
+		}
+		qb.Day = qb.QfqDay
 	}
 	rawQt, ok := qb.Qt[sym]
 	if !ok {
@@ -1609,7 +1622,7 @@ func fetchTencentRange(ctx context.Context, market, code, from, to string) (*Quo
 
 // fetchTencentAdjustRatio returns the front-adjusted closes for a window, keyed by date. It is the
 // only qfq call in the codebase (ADR 0029 §10), used only to detect an adjustment the unadjusted body
-// cannot name. The parser is the ordinary one: qfq rows have the same shape as bfq rows.
+// cannot name. The shared drift gate validates qfqday with the same rules as unadjusted day rows.
 func fetchTencentAdjustRatio(ctx context.Context, market, code, from, to string) (map[string]int64, error) {
 	sym, err := quoteSymbol(market, code)
 	if err != nil {
@@ -1623,7 +1636,7 @@ func fetchTencentAdjustRatio(ctx context.Context, market, code, from, to string)
 		vendorLogf(rawURL, "quote qfq range fetch failed for %s: %v", sym, err)
 		return nil, err
 	}
-	resp, err := parseTencentQuote(market, code, body, 0)
+	resp, err := parseTencentDaily(market, code, body, 0, true)
 	if err != nil {
 		vendorLogf(rawURL, "quote qfq range parse failed for %s: %v", sym, err)
 		return nil, err
