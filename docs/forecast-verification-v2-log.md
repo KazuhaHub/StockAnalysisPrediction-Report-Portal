@@ -218,22 +218,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136, P11 #137. R2a: P15 #143. The standalone Go 1.26.10 security fix #144
-  is merged. This docs branch starts from main at `ad618c1f`.
+  P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
+  1.26.10 security fix #144 and upload-test timer fix #147 are merged. The vendor-evidence
+  follow-up starts from main at `669810fd`.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; CI is green on `27a5a6af`. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. P22 is prepared in the
-  independent docs lane on `docs/forecast-adr-0039`, without touching runtime or Apps files.
-- **Next step.** Finish P22, resolve the P26 integration sequence, then continue P27 and P28.
+  is pending; neither Apps branch nor the user's checkout was changed. A narrow P7/P8 evidence
+  follow-up on `fix/forecast-qfq-response` reproduces and fixes the real qfqday parsing gap.
+- **Next step.** Validate/review the qfq fix, resolve the P26 integration sequence, then continue P27 and P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
   action has been performed here.
-- **Known limitations.** P7/P8 still lack the real vendor fixtures documented below. The P15
+- **Known limitations.** P7 still lacks live-suspension, delisted and Beijing trading-day evidence;
+  the follow-up captures real 301/689/low-price controls and a P8 bonus/unchanged-ratio pair. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive preview screenshots depend on P14. Re-check ADR numbers before P22/P23: the parallel
-  notifications PR #141 already proposes ADR 0038.
+  responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
+  0038/0040 and P22 uses 0039.
   P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
 
@@ -565,3 +567,31 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   all 12 modal tests, ten repeated upload checks, the full 120-file / 1006-test suite, typecheck,
   and full Go/Postgres regression plus vet/staticcheck. Independent review found no actionable
   issue. Exact-head CI remains mandatory; this is a targeted repair, not a blind retry of P22.
+
+### P7/P8 follow-up — captured adjustment responses (2026-10-22)
+
+- P22 merged as #146 (`669810fd`) after independent review and green combined-head full CI and
+  CodeQL. This follow-up starts from that main, not from the held P26 or an Apps branch.
+- V20 read-only captures produced seven complete Tencent responses, documented with request
+  parameters, SHA-256, an independent issuer notice and explicit evidence limits in
+  `internal/app/testdata/quote/forecast-vendor-evidence.md`. No forecast golden output changes.
+- The real qfq bodies expose `qfqday`, whereas the P8 fetch called the day-only parser. The new
+  actual-fetch regressions first failed with 11/0 and 37/0 raw/adjusted rows. This would keep due
+  marks at source failure because the required adjusted closes are absent, rather than silently
+  resolving unchecked prices. The fix selects qfqday only inside the detection-only fetch and
+  retains the shared field-count, price, candle, snapshot and identity drift gates.
+- Missing/null/empty or malformed adjusted rows fail; they never fall back to raw `day` even
+  when raw rows are present. Tests for null/missing/empty first failed against a naive fallback.
+  Ordinary readers retain unadjusted rows when both keys exist and never consume qfq-only bars.
+- The real transfer's -7.46% raw close move is deliberately not relabelled as the plan's
+  theoretical -9.09%. It still exercises the intended under-limit miss: no cash ExDates signal,
+  no price-limit signal, a ratio-only corporate-action flag, and unchanged raw close/return.
+  Captured ordinary limit-down and 301/689/fen-rounded low-price controls are not excluded.
+- Beijing historical probes returned no daily rows; real halt/delist/Beijing evidence remains a
+  gap, not synthetic data passed off as capture. No production writes, deployment, evaluator
+  enablement, Dify publication, schema change or Apps edits are part of this follow-up.
+- Independent adversarial review found no actionable issue. Full Go regression, separate full
+  Postgres regression, vet, staticcheck, three repeated captured-fixture race runs, web typecheck,
+  all 120 Vitest files / 1006 tests, production web build and a subsequent root-level Go embed
+  build passed. All seven captures retain every response byte plus one terminal LF and match
+  their documented SHA-256. Exact-head full CI and CodeQL remain required before merge.
