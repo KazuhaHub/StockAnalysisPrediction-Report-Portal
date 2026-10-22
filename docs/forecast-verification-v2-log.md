@@ -1444,3 +1444,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   that own readers must not see global purge months; the proposed evidence side table and its
   compatible upgrade path still need approval before any schema write. No production action,
   schema change, Apps edit or separately owned PR mutation was made.
+- A fresh frontend check at documentation head `f417d340` passed typecheck, all 120 Vitest files /
+  1020 tests (41.26 s), the production SPA build and the subsequent serialized Go embed rebuild.
+  No golden fixture changed since `10190278`.
+  Read-only remote checks still show P26 #145 draft with successful required checks, dependency
+  #138 open with a failed Go check, and P37 #151 open with a failed Docker check. No PR was changed.
