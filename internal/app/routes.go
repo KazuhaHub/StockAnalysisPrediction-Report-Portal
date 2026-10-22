@@ -45,13 +45,25 @@ type routeRow struct {
 	pattern string
 	class   authClass
 	perm    string // for authPerm
+	gate    string // an additional handler-enforced policy
 }
 
 // route records the registration and hands it to the mux. Every registration in the server goes
 // through here, and routes_test.go asserts that by reading this package's source.
 func (s *Server) route(mux *http.ServeMux, pattern string, class authClass, perm string, h http.HandlerFunc) {
-	s.routeTable = append(s.routeTable, routeRow{pattern: pattern, class: class, perm: perm})
+	s.routeGated(mux, pattern, class, perm, "", h)
+}
+
+func (s *Server) routeGated(mux *http.ServeMux, pattern string, class authClass, perm, gate string, h http.HandlerFunc) {
+	s.routeTable = append(s.routeTable, routeRow{pattern: pattern, class: class, perm: perm, gate: gate})
 	mux.HandleFunc(pattern, h)
+}
+
+// The annotation is verified against actual refusals in forecast_routes_test.go.
+const gateForecastScope = "forecast_scope"
+
+func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handler) {
+	s.routeGated(mux, pattern, authSession, "", gate, s.requireUserJSON(h))
 }
 
 func (s *Server) public(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
@@ -207,6 +219,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// The reading page asks for the symbol's other sets. Session-scoped, because the SPA must not
 	// use /api/v1 and the viewer scope is what a browser read is gated by.
 	s.session(mux, "GET /api/predictions", s.apiQueryPredictions)
+	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups", s.apiReaderForecastGroups)
+	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups/members", s.apiReaderForecastGroupMembers)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.

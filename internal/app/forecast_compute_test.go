@@ -94,7 +94,7 @@ func TestForecastComputeCachedAndSmallBypassSlots(t *testing.T) {
 	sets := sampleMembers(t, s, 32, nil)
 	periods := []forecastPeriod{{Start: "2025-06-01", End: "2025-06-30", Label: "2025-06"}}
 	all := forecastPopulation{Key: "all"}
-	if _, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, predTestRtype, "2026-10-18", true, time.Time{}, all, s.forecastGeneration()); err != nil {
+	if _, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, predTestRtype, "2026-10-18", true, time.Time{}, all, s.forecastGeneration(), nil); err != nil {
 		t.Fatal(err)
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -103,11 +103,11 @@ func TestForecastComputeCachedAndSmallBypassSlots(t *testing.T) {
 	defer func() { close(release); waitCompute(t, blocker) }()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	groups, err := s.buildForecastGroupsRequest(ctx, periods, sets, predTestRtype, "2026-10-18", true, time.Time{}, all, s.forecastGeneration())
+	groups, err := s.buildForecastGroupsRequest(ctx, periods, sets, predTestRtype, "2026-10-18", true, time.Time{}, all, s.forecastGeneration(), nil)
 	if err != nil || groups[0].Cells["d5"].State != "mature" {
 		t.Fatalf("cached request waited for a slot: %v", err)
 	}
-	groups, err = s.buildForecastGroupsRequest(ctx, periods, sets[:1], predTestRtype, "2026-10-18", true, time.Time{}, forecastPopulation{Key: "small", OUs: []int64{1}}, s.forecastGeneration())
+	groups, err = s.buildForecastGroupsRequest(ctx, periods, sets[:1], predTestRtype, "2026-10-18", true, time.Time{}, forecastPopulation{Key: "small", OUs: []int64{1}}, s.forecastGeneration(), nil)
 	if err != nil || groups[0].Cells["d5"].State != "small" {
 		t.Fatalf("maturity gate took a scoring slot: %v", err)
 	}

@@ -144,6 +144,11 @@ func (s *Server) requireForecastAccess(w http.ResponseWriter, r *http.Request, u
 	return d, true
 }
 
+func forecastRateError(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	jsonErrorCode(w, http.StatusTooManyRequests, "forecast_rate_limited", "forecast request limit exceeded; retry later")
+}
+
 // A nil OU slice is the whole ledger; a non-nil empty slice must remain an empty population.
 type forecastPopulation struct {
 	Key string

@@ -13,12 +13,13 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
-	s.serveForecastGroups(w, r, forecastDecision{Scope: scopeAll, Reason: "admin"}, true)
+	s.serveForecastGroups(w, r, forecastDecision{Scope: scopeAll, Reason: "admin"}, true, nil)
 }
 
 func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
@@ -26,10 +27,28 @@ func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	s.serveForecastGroups(w, r, d, false)
+	var lease *forecastQueryLease
+	q := r.URL.Query()
+	if q.Get("mode") == "custom" {
+		rtype, group := q.Get("rtype"), q.Get("group")
+		if rtype == "" {
+			rtype = predTestRtype
+		}
+		if group == "" {
+			group = "month"
+		}
+		key := strings.Join([]string{populationFor(d).Key, rtype, q.Get("from"), q.Get("to"), group}, "\x00")
+		lease, ok = s.forecastCompute.beginCustom(user, key, s.settingInt(setForecastCustomPerMin, 20, 0, 600), s.forecastEval.clock())
+		if !ok {
+			forecastRateError(w)
+			return
+		}
+		defer lease.release()
+	}
+	s.serveForecastGroups(w, r, d, false, lease)
 }
 
-func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool) {
+func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool, lease *forecastQueryLease) {
 	generation := s.forecastGeneration()
 	pop := populationFor(d)
 	q := r.URL.Query()
@@ -120,7 +139,7 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	populationFrom, _ := s.st.ForecastPopulationFrom()
 	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
 	defer cancel()
-	resp.Groups, err = s.buildForecastGroupsRequest(ctx, periods, sets, rtype, today, resp.Official, populationFrom, pop, generation)
+	resp.Groups, err = s.buildForecastGroupsRequest(ctx, periods, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease)
 	if err != nil {
 		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			w.Header().Set("Retry-After", "1")
@@ -146,14 +165,14 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 }
 
 func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation) []forecastGroup {
-	groups, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, rtype, today, official, populationFrom, pop, s.forecastGeneration())
+	groups, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, rtype, today, official, populationFrom, pop, s.forecastGeneration(), nil)
 	if err != nil {
 		return nil
 	}
 	return groups
 }
 
-func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64) ([]forecastGroup, error) {
+func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease) ([]forecastGroup, error) {
 	if s.forecastGeneration() != generation {
 		return nil, errForecastBusy
 	}
@@ -285,7 +304,7 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 				// A purge starts a new flight generation as well as a new memo generation: a new
 				// request must never join a computation whose inputs preceded that purge.
 				flightKey := key + "\x00generation:" + strconv.FormatUint(gen, 10)
-				c, err := s.forecastCompute.do(ctx, flightKey, official, s.forecastComputeLimits(), func() (*forecastCell, error) {
+				c, err := s.forecastCompute.doForQuery(ctx, flightKey, official, s.forecastComputeLimits(), lease, func() (*forecastCell, error) {
 					cached, current := s.cachedForecastCell(key)
 					if current != generation {
 						return nil, errForecastBusy

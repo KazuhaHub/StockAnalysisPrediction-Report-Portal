@@ -65,6 +65,10 @@ func (s *Server) apiReaderForecastGroupMembers(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	if !s.forecastCompute.allowMembers(user, s.settingInt(setForecastMembersPerMin, 60, 0, 600), s.forecastEval.clock()) {
+		forecastRateError(w)
+		return
+	}
 	s.serveForecastGroupMembers(w, r, user, d, false)
 }
 

@@ -610,3 +610,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   in all six fixture rows and no label overflow. Added a regression test; all 26 forecast
   component/page tests, typecheck and production build passed. Independent review closed the
   long-label overflow finding. Apps code and production state were not changed.
+- Reader governance checkpoint: custom/member request ceilings are per-user, independent fixed
+  windows. Zero removes only the frequency ceiling. A user may have one distinct custom query
+  in flight; identical followers share scoring but spend request budget. Detached flights retain
+  the query lease after an HTTP cancellation, releasing it only when the background work finishes.
+  Rate refusal is `forecast_rate_limited` (429 plus `Retry-After`). Existing admin aliases retain
+  their behavior. The security form now exposes all five bounded settings and preserves zero.
+- Registered the two reader statistics routes through the new `forecast_scope` gate annotation.
+  Route-table tests enforce session-only authentication, the enrolment wall, `none` denial, and
+  refusal of persistent and bridge bearer credentials. Positive all/own sessions receive records,
+  never `unrecorded`, and cannot use the admin aliases. Revoking scope after memo population
+  immediately refuses the same session. The tests first failed for the absent gate/registration;
+  the added positive fixture also required the signing configuration omitted by machine fixtures.
+- Independent limiter/settings/route review found no actionable issue. Full Go tests with
+  Postgres enabled passed; all 120 Vitest files / 1008 tests, typecheck, build, vet, staticcheck,
+  production web build and three targeted race repetitions passed. The final scope-revocation
+  extension passed separately after the full run. Remaining P26 work: prediction cookie/bridge
+  gates and shaping, me hints, OU editing/audit/preview, weekly count-only adoption, StockPage
+  suppression and the complete cross-surface access matrix. This draft is not ready to merge.
