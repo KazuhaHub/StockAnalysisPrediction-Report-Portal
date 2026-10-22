@@ -172,7 +172,9 @@ retaining scoped stock timeline flags. These additions do not expand the machine
   belong to this summary.
 - `next_checkpoint` is the first nonterminal checkpoint in the established checkpoint order.
   It carries the existing reading `phase`, `not_before` and `expected` semantics; a resolved or
-  final-refusal checkpoint is not outstanding. Missing marks remain pending obligations.
+  final-refusal checkpoint is not outstanding, even when receipt timing is unreadable. Missing
+  applicable marks remain pending obligations; nonstandard horizons have no next h12 checkpoint,
+  whether an h12 mark is absent or an old pending row exists.
   Unknown timing omits phase/date rather than manufacturing a deadline. A not-before date
   may already be past while settlement is delayed; an expected date is not observed evidence.
 - `membership` and `counted_set_id` are available only to internal all readers and admins.

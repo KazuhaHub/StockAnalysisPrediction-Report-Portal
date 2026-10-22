@@ -1392,3 +1392,17 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   This fixture does not resolve own-scoped purge history; its evidence schema still awaits
   approval. P20 UI/production observation and Apps/dependency integration holds remain separate.
   No production action, schema change, Apps edit or separately owned PR mutation was made.
+
+### P18 — independent-review checkpoint repair (2026-10-22, validation pending)
+
+- Independent review confirmed an inapplicable next h12 checkpoint on nonstandard-horizon sets
+  after their four session checkpoints were terminal. Added Stock/Run regressions for absent
+  and persisted pending h12 rows on SQLite and Postgres; both controls failed before skipping
+  inapplicable h12 during synthesis and next-checkpoint selection.
+- Requirement audit additionally found that malformed receipt timing erased known terminal
+  phases before summary selection. Added failing phase and Stock/Run regressions for resolved
+  and final-refusal marks. Terminal phases now derive before receipt-date parsing, while unknown
+  nonterminal timing still carries no fabricated phase/date/expected promise.
+- Targeted driver regressions passed (0.824 s). Full regression, repeat performance measurement
+  and review follow-up remain outstanding at this code checkpoint. P17 metadata review and
+  existing schema/integration/production authorization holds remain separate.

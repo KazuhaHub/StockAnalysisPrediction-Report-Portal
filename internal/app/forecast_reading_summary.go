@@ -79,6 +79,9 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 		present[mark.Checkpoint] = true
 	}
 	for _, checkpoint := range predCheckpoints {
+		if checkpoint == "h12" && !set.HorizonStd {
+			continue
+		}
 		if !present[checkpoint] {
 			set.Marks = append(set.Marks, PredictionMark{Checkpoint: checkpoint, Status: markPending})
 		}
@@ -91,6 +94,9 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 		}
 	}
 	for _, checkpoint := range predCheckpoints {
+		if checkpoint == "h12" && !set.HorizonStd {
+			continue
+		}
 		for _, mark := range set.Marks {
 			if mark.Checkpoint == checkpoint && mark.Phase != predPhaseResolved && mark.Phase != predPhaseFinal {
 				out.NextCheckpoint = &forecastReadingCheckpoint{Checkpoint: checkpoint, Phase: mark.Phase, NotBefore: mark.NotBefore, Expected: mark.Expected}

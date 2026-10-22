@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -259,6 +260,88 @@ func TestReadingSummaryRechecksReportVisibility(t *testing.T) {
 	}
 	if got := s.forecastReadingSummary(httptest.NewRequest("GET", "/api/stock/600001", nil), "summary-external", report); got != nil {
 		t.Fatalf("summary trusted an unscoped report object: %+v", got)
+	}
+}
+
+func TestReadingSummaryNonstandardHorizonHasNoNextH12(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) { assertReadingSummaryNonstandardHorizon(t, driver) })
+	}
+}
+
+func assertReadingSummaryNonstandardHorizon(t *testing.T, driver string) {
+	t.Helper()
+	for _, storedH12 := range []bool{false, true} {
+		t.Run(fmt.Sprint("stored-h12-", storedH12), func(t *testing.T) {
+			s := readingSummaryBoundaryServer(t, driver)
+			seedForecastReader(t, s, "summary-own", scopeOwn, false)
+			if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
+				t.Fatal(err)
+			}
+			marks := map[string]gsMark{}
+			for _, checkpoint := range []string{"d5", "d20", "d60", "d120"} {
+				marks[checkpoint] = gsMark{Status: markResolved}
+			}
+			if storedH12 {
+				marks["h12"] = gsMark{Status: markPending}
+			}
+			report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-09-17", HorizonStd: false, Marks: marks}, "Nonstandard horizon")
+			for _, route := range []string{"stock", "run"} {
+				summary := readingSummaryResponse(t, s, "summary-own", route, report, false)["prediction"].(map[string]any)
+				if _, exists := summary["next_checkpoint"]; exists {
+					t.Fatalf("%s invented an inapplicable checkpoint: %v", route, summary)
+				}
+			}
+		})
+	}
+}
+
+func TestReadingSummaryTerminalMarksSurviveUnknownTiming(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) { assertReadingSummaryUnknownTiming(t, readingSummaryBoundaryServer(t, driver)) })
+	}
+}
+
+func readingSummaryBoundaryServer(t *testing.T, driver string) *Server {
+	t.Helper()
+	if driver == "sqlite" {
+		return newV1Server(t)
+	}
+	st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
+	s := &Server{st: st, names: LoadNames(t.TempDir(), st)}
+	s.names.fetch = func(string) string { return "" }
+	t.Cleanup(func() {
+		if err := st.DeleteSetting(setForecastReader); err != nil {
+			t.Error(err)
+		}
+	})
+	return s
+}
+
+func assertReadingSummaryUnknownTiming(t *testing.T, s *Server) {
+	t.Helper()
+	seedForecastReader(t, s, "summary-own", scopeOwn, false)
+	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
+		t.Fatal(err)
+	}
+	marks := map[string]gsMark{}
+	for _, checkpoint := range predCheckpoints {
+		marks[checkpoint] = gsMark{Status: markResolved}
+	}
+	report, set := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-09-17", HorizonStd: true, Marks: marks}, "Terminal despite unknown timing")
+	if _, err := s.st.exec(`UPDATE prediction_sets SET made_at=?,made_on=? WHERE id=?`, "invalid", "invalid", set); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{markResolved, markRefusedFinal} {
+		if _, err := s.st.exec(`UPDATE prediction_marks SET status=? WHERE set_id=?`, status, set); err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range []string{"stock", "run"} {
+			summary := readingSummaryResponse(t, s, "summary-own", route, report, false)["prediction"].(map[string]any)
+			if _, exists := summary["next_checkpoint"]; exists {
+				t.Fatalf("%s reactivated %s marks: %v", route, status, summary)
+			}
+		}
 	}
 }
 

@@ -221,3 +221,18 @@ func TestReadPhaseAnnotationClearsPreviousDerivedValues(t *testing.T) {
 		t.Fatalf("stale derived values: %+v", mark)
 	}
 }
+
+func TestReadTerminalPhasesDoNotRequireReceiptTiming(t *testing.T) {
+	sets := []PredictionSet{{MadeAt: "invalid", MadeOn: "invalid", Marks: []PredictionMark{
+		{Checkpoint: "d5", Status: markResolved, Phase: predPhaseWaiting, NotBefore: "2099-01-01", Expected: true},
+		{Checkpoint: "d20", Status: markRefusedFinal, Phase: predPhaseRetrying, NotBefore: "2099-01-01", Expected: true},
+		{Checkpoint: "d60", Status: markPending, Phase: predPhaseWaiting, NotBefore: "2099-01-01", Expected: true},
+	}}}
+	annotateReadPhases(sets, time.Now())
+	for i, want := range []string{predPhaseResolved, predPhaseFinal, ""} {
+		mark := sets[0].Marks[i]
+		if mark.Phase != want || mark.NotBefore != "" || mark.Expected {
+			t.Fatalf("mark %d lost terminal/unknown state: %+v", i, mark)
+		}
+	}
+}

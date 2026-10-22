@@ -300,6 +300,12 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 		set := &sets[i]
 		for j := range set.Marks {
 			set.Marks[j].Phase, set.Marks[j].NotBefore, set.Marks[j].Expected = "", "", false
+			switch set.Marks[j].Status {
+			case markResolved:
+				set.Marks[j].Phase = predPhaseResolved
+			case markRefusedFinal:
+				set.Marks[j].Phase = predPhaseFinal
+			}
 		}
 		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
 		if !ok {
@@ -324,12 +330,7 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 		weekdays := predProjectSessions(shiftDays(madeOn, -1), 400)
 		for j := range set.Marks {
 			m := &set.Marks[j]
-			switch m.Status {
-			case markResolved:
-				m.Phase = predPhaseResolved
-				continue
-			case markRefusedFinal:
-				m.Phase = predPhaseFinal
+			if m.Status == markResolved || m.Status == markRefusedFinal {
 				continue
 			}
 			if s0Projected && !s0Ready {
