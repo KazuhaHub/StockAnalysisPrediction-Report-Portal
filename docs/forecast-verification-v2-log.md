@@ -218,12 +218,13 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136. `origin/main` is at `8abb5b12`.
-- **In flight.** P11 #137 is complete but blocked on GO-2026-6809 in Go 1.26.9. The Go
-  1.26.10 update is on the parallel Status branch (#142), not main. P15 is prepared on
+  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
+  `origin/main` is at `b235be93`.
+- **In flight.** P11 #137 is reviewed, corrected and rebased onto the toolchain fix, with fresh
+  CI pending. P15 is prepared on
   `feat/forecast-web-foundations`, in an isolated worktree based on main, while that dependency
-  lands. Neither PR may merge with a failing required check.
-- **Next step.** Rebase and verify P11 after the Go update reaches main; then finish P15 and
+  clears CI. Neither PR may merge with a failing required check.
+- **Next step.** Merge P11 after green CI; then finish P15 and
   continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
   review before P19/P20. P39b requires the deployments, Dify publication, target refresh and
   undeclared-input answer in implementation §11.1; no production action has been performed here.
@@ -499,8 +500,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
   fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
   This component preview does not replace P14's seeded full-page acceptance.
-- Rollback: revert this PR; no data or schema changes. P15 stays draft pending required CI.
-  The current main toolchain still has GO-2026-6809.
+- Rollback: revert this PR; no data or schema changes. P15 stays draft pending required CI
+  and the preceding P11 merge. The main toolchain blocker is resolved by #144.
 
 ### P39b precondition audit (2026-10-22)
 
