@@ -1436,6 +1436,8 @@ export interface PredictionMark {
   phase?: 'waiting_s0' | 'waiting' | 'settling' | 'retrying' | 'overdue' | 'resolved' | 'final'
   /** The earliest date the mark can settle; a projection is only a lower bound. */
   not_before?: string
+  /** Based on a published exchange closure schedule, not an observed settlement date. */
+  expected?: boolean
 }
 
 export interface PredictionSetError {

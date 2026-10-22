@@ -293,26 +293,35 @@ func annotateReadPhases(sets []PredictionSet, now time.Time) {
 	annotateReadPhasesWithCalendars(sets, now, nil)
 }
 
-// Reads never fetch a calendar. A published completed-session snapshot can establish an exact
-// historical due date; otherwise weekday dates remain lower bounds, not failed attempts.
+// Reads never fetch a calendar. Published completed sessions and recorded due sessions are
+// evidence; scheduled exchange closures qualify estimates but never shorten the overdue deadline.
 func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calendars map[string][]string) {
 	for i := range sets {
 		set := &sets[i]
 		for j := range set.Marks {
-			set.Marks[j].Phase, set.Marks[j].NotBefore = "", ""
+			set.Marks[j].Phase, set.Marks[j].NotBefore, set.Marks[j].Expected = "", "", false
 		}
 		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
 		if !ok {
 			continue
 		}
 		madeOn := madeAt.In(chinaZone).Format("2006-01-02")
-		sessions := predProjectSessions(shiftDays(madeOn, -1), 220)
+		baseline, baselineExpected := predReadProjection("d5", madeAt, set.HorizonStd, set.S0Date)
 		s0 := set.S0Date
 		s0Projected := s0 == ""
 		if s0Projected {
-			s0 = projectedS0(madeAt)
+			s0 = baseline.S0
+		}
+		cal := calendars[set.BenchCode]
+		calendarUsable := len(cal) > 0 && cal[0] <= madeOn && (set.S0Date == "" || containsDate(cal, set.S0Date))
+		projectionS0 := set.S0Date
+		if calendarUsable && s0Projected {
+			if observed, known := predS0(madeAt, cal); known {
+				s0, projectionS0, baselineExpected = observed, observed, false
+			}
 		}
 		s0Ready := s0 != "" && readSessionCompleted(s0, now)
+		weekdays := predProjectSessions(shiftDays(madeOn, -1), 400)
 		for j := range set.Marks {
 			m := &set.Marks[j]
 			switch m.Status {
@@ -324,32 +333,37 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 				continue
 			}
 			if s0Projected && !s0Ready {
-				m.Phase, m.NotBefore = predPhaseWaitingS0, s0
+				m.Phase, m.NotBefore, m.Expected = predPhaseWaitingS0, s0, baselineExpected
 				continue
 			}
-			sch := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, s0, sessions)
+			sch, expected := predReadProjection(m.Checkpoint, madeAt, set.HorizonStd, projectionS0)
 			exact := false
-			if cal := calendars[set.BenchCode]; len(cal) > 0 && cal[0] <= madeOn {
-				// A frozen start missing from the snapshot is a gap, not permission to replace it.
-				if set.S0Date == "" || containsDate(cal, set.S0Date) {
-					actual := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date, cal)
-					if actual.Known && actual.Due != "" {
-						sch, exact = actual, true
-					}
+			if calendarUsable {
+				actual := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date, cal)
+				if actual.Known && actual.Due != "" {
+					sch, exact, expected = actual, true, false
 				}
 			}
 			if sch.Due == "" {
 				m.Phase = predPhaseWaiting
 				continue
 			}
-			// A recorded session is exact evidence only if it does not precede the conservative
-			// schedule. Malformed or contradictory dates cannot manufacture retry status.
-			if validReportDate(m.SessionDate) && m.SessionDate >= sch.Due {
-				sch.Due, exact = m.SessionDate, true
+			// An observed attempt may contradict a scheduled closure. Validate against the
+			// weekday lower bound, or an already observed calendar due, not the estimate.
+			evidenceBound := sch.Due
+			if !exact {
+				evidenceBound = predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, projectionS0, weekdays).Due
+			}
+			if validReportDate(m.SessionDate) && evidenceBound != "" && m.SessionDate >= evidenceBound {
+				sch.Due, exact, expected = m.SessionDate, true, false
 			}
 			due := dateAtClose(sch.Due)
+			if !exact {
+				// A better display estimate cannot postpone the conservative state clock.
+				due = dateAtClose(evidenceBound)
+			}
 			if due.IsZero() || now.Before(due) {
-				m.Phase, m.NotBefore = predPhaseWaiting, sch.Due
+				m.Phase, m.NotBefore, m.Expected = predPhaseWaiting, sch.Due, expected
 				continue
 			}
 			deadline := 21 * 24 * time.Hour
@@ -364,7 +378,7 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 			default:
 				m.Phase = predPhaseSettling
 			}
-			m.NotBefore = sch.Due
+			m.NotBefore, m.Expected = sch.Due, expected
 		}
 	}
 }

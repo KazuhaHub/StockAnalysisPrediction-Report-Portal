@@ -364,7 +364,8 @@
           "checkpoint": {"type": "string", "enum": ["d5", "d20", "d60", "d120", "h12"]},
           "status": {"type": "string", "enum": ["pending", "resolved", "refused", "refused_final"]},
           "phase": {"type": "string", "enum": ["waiting_s0", "waiting", "settling", "retrying", "overdue", "resolved", "final"], "description": "Derived reader state, not a stored status. Retrying requires an evidenced due session. Overdue starts 48 hours after an exact due close, or 21 days after a projected lower-bound close."},
-          "not_before": {"type": "string", "format": "date", "description": "Earliest settlement date. Without a covering evaluator-published calendar or a recorded due session this is only a weekday lower bound, not a promised trading date."},
+          "not_before": {"type": "string", "format": "date", "description": "Read-time due date: observed evidence when available, an exchange-schedule estimate when expected is true, or otherwise a conservative weekday lower bound."},
+          "expected": {"type": "boolean", "description": "True only for a verified exchange-schedule estimate. It is not observed evidence and cannot shorten the overdue deadline."},
           "source": {"type": "string", "description": "Stored source that produced this checkpoint; never inferred from the current live quote."},
           "direction": {"type": "string", "enum": ["agree", "disagree", "flat", "untested"], "description": "Shared hit verdict, only on resolved marks. Untested includes missing inputs, corporate actions and implied upside below the absolute 5 percent threshold. Flat means a tested zero benchmark excess."},
           "refusal": {"type": "string"},
@@ -2120,7 +2121,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice."
+            "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice. A mark's optional expected flag qualifies an exchange-schedule estimate, never observed settlement evidence."
           }
         },
         "responses": {
@@ -2192,7 +2193,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
-            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required."
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound."
           }
         },
         "responses": {

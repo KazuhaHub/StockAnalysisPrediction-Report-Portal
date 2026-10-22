@@ -225,9 +225,13 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. P16 is in progress in the
-  independent statistics lane; its ordered classifier checkpoint is recorded below.
-- **Next step.** Finish P16 read semantics and its gates; resolve P26's integration sequence before P27/P28.
+  is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26 merge
+  checkpoint is `962e7e15`; P37 integration is under verification in the same isolated P16 worktree.
+  Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
+  Independent P37 #151 is held by the unchanged production dependency audit; existing DOMPurify
+  update #138 needs permission to reconcile and merge. No red CI has been merged.
+- **Next step.** Complete local P16/P37 verification, obtain the purge-evidence schema and dependency
+  PR decisions, and resolve P26's integration sequence before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -1149,3 +1153,51 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   have been deleted. A minimal organization-evidence side table and unknown-history handling
   were proposed for approval; no schema change has been written. Current draft marker reads
   still require that resolution before release. No Apps branch or production state changed.
+
+### P37 — exchange-backed reading projections (2026-10-22)
+
+- Implements build document section 8.7 and owner decision V23(a) independently from P16/P26.
+  The verified SSE 2026 annual closure notice is recorded beside the runtime table. No
+  unverified 2027 dates are included; a missing year anywhere in a checkpoint interval falls
+  back to a weekday lower bound without an expected flag. Government make-up weekends stay closed.
+- Reading marks carry optional `expected: true` only for covered projections. The panel chooses
+  expected versus on-or-after wording; all locales and the OpenAPI read descriptions document
+  the distinction. This is derived response metadata, not a database column or settlement input.
+- Tests pin the demo's d20=2026-10-26 and d60=2026-12-21, receipt-close boundaries, holiday starts,
+  unknown-year and frozen-S0 fallback, and clearing derived qualifiers on terminal marks.
+  Independent review found a frozen S0 outside the generated window could be substituted while
+  retaining the expected flag. A failing regression reproduced it; qualification now requires
+  that the frozen S0 be preserved. Follow-up review found no additional actionable issue.
+- The source guard rejects projection-table use outside the read annotation path, including
+  package initializers. Temporarily adding a table lookup to evaluator wake scheduling made
+  that guard fail; the mutation was restored. A runtime test separately pins the old wake date.
+- Validation: full Go/SQLite regression, full Go regression with Postgres (app package 35.608 s),
+  vet/staticcheck, three-repeat targeted race checks (3.544 s), web typecheck and all 120 Vitest
+  files / 1007 tests passed. The production SPA build and serialized Go embed rebuild passed.
+  December maintenance is documented in the operations runbook. No production, Apps branch,
+  schema, evaluator mode or pending P16/P26 merge was changed.
+- P16 integration must preserve the new qualification flag alongside its published-calendar
+  and overdue rules; a scheduled closure is not exact observed evidence for its 48-hour rule.
+
+### P16 / P37 — local projection integration checkpoint (2026-10-22)
+
+- Preserved P16's phase vocabulary, calendar publication, protected reads and derived metadata
+  alongside P37's expected flag. Updated the reflected OpenAPI mark schema, source-boundary
+  guard and panel tests. The standalone P37 PR remains unchanged and unmerged.
+- Published completed sessions and recorded due-session evidence outrank scheduled closures,
+  including a synthetic unexpected-open-day control. A published S0 also prevents the read
+  from claiming it is still waiting for an already observed start. No read fetch was added.
+- Expected dates never become exact evidence for the 48-hour rule. A deliberate mutation that
+  treated the expected flag as exact evidence failed the new deadline test and was restored.
+  Independent review additionally found the estimate was delaying the 21-day deadline.
+  Added a failing boundary regression, then separated the display estimate from the weekday
+  phase clock: for the September 17 d20 fixture, display remains expected October 26, settling
+  starts at the October 16 lower-bound close, and overdue starts November 6. Follow-up review
+  found no remaining actionable issue.
+- Final full Go regression with Postgres passed (app package 55.284 s); vet/staticcheck and
+  three-repeat targeted race checks passed (3.411 s). Web typecheck and all 120 Vitest files /
+  1020 tests passed. The SPA production build and serialized Go embed rebuild passed.
+- This is a local integration checkpoint, not merge readiness. The own-scoped purge-history
+  evidence schema still awaits approval, as does reconciliation/merge of the existing DOMPurify
+  dependency PR #138 that blocks P37 CI. No production, Apps branch, schema or evaluator mode
+  was changed, and no separately owned PR was modified.

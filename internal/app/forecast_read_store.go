@@ -104,6 +104,7 @@ type PredictionMark struct {
 	// conservative weekday projection by the read route, never stored.
 	Phase     string `json:"phase,omitempty"`
 	NotBefore string `json:"not_before,omitempty"`
+	Expected  bool   `json:"expected,omitempty"`
 }
 
 // QueryPredictionSets returns sets matching the filters, newest first, with their claims and marks.
