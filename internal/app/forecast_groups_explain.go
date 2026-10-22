@@ -12,11 +12,7 @@ func forecastCellWithPendingReasons(cell *forecastCell, members, pending []*grou
 		members, pending = filterHorizonStd(members), filterHorizonStd(pending)
 	}
 	out := *cell
-	out.PendingReasons = map[string]int{
-		predPhaseWaitingS0: 0, predPhaseWaiting: 0, predPhaseSettling: 0, predPhaseRetrying: 0,
-		predPhaseOverdue: 0, predPhaseResolved: 0, predPhaseFinal: 0,
-		"unknown": 0,
-	}
+	out.PendingReasons = forecastPhaseCounts()
 	out.NotBefore, out.Expected = "", false
 	sets := make([]PredictionSet, 0, len(members)+len(pending))
 	refused := 0
@@ -58,4 +54,11 @@ func forecastCellWithPendingReasons(cell *forecastCell, members, pending []*grou
 		}
 	}
 	return &out
+}
+
+func forecastPhaseCounts() map[string]int {
+	return map[string]int{
+		predPhaseWaitingS0: 0, predPhaseWaiting: 0, predPhaseSettling: 0, predPhaseRetrying: 0,
+		predPhaseOverdue: 0, predPhaseResolved: 0, predPhaseFinal: 0, "unknown": 0,
+	}
 }

@@ -1227,3 +1227,28 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - This is not P17 completion. The response-level summary, covered types, limits, timestamps,
   ledger start, evaluator mode and capabilities (with route-gate parity and external-all omission
   tests) remain to implement. No PR, production action, Apps-branch change or database DDL was made.
+
+### P17 — response metadata checkpoint (2026-10-22, review pending)
+
+- Added retained-range summary scalars, classified checkpoint phase totals and the earliest
+  outstanding result date. Mature counts reuse resolved/scored/corporate-action/refusal counters;
+  purged cells and stale mature-cell waiting metadata cannot enter pending totals or next dates.
+  No new query or scorer invocation is used to construct the summary.
+- Added covered types, minimum sample size, active range/compute/request limits, UTC generation
+  time, ledger start, evaluator mode and permission capabilities. The capability helper is shared
+  with route authorization and tested against monthly/custom/member gates across admin, internal
+  and external all/own/none subjects. Capabilities do not promise free capacity or rate budget.
+- External-all requests skip explain generation, and response shaping independently omits every
+  metadata field even when handed a deliberately decorated response. Own-scoped positive controls
+  retain scoped counts and existing frozen S0 semantics. The own-cache isolation test fixes its
+  clock so required generation timestamps do not invalidate the cross-population control.
+- Full regression initially found that an anonymous pointer to an unexported metadata type could
+  serialize but not decode. Exported the metadata type and added typed admin/reader JSON round-trip
+  guards. Full Go regression with Postgres then passed (app package 54.176 s). Targeted race checks
+  passed three times (3.175 s); vet/staticcheck, web typecheck and all 120 Vitest files / 1020 tests
+  passed. The production SPA build and serialized Go embed rebuild passed.
+- Independent review of this response-level checkpoint did not complete because the review
+  runtime reported exhausted credits. The earlier cell-level review does not cover this addition.
+  Do not represent P17 as reviewed or merge-ready; its requirement/contract audit and independent
+  review remain outstanding. No PR was opened, no production or Apps branch changed, and the
+  pending schema/dependency authorization boundaries remain unchanged.

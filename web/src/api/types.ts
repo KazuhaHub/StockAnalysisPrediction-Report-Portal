@@ -1574,6 +1574,31 @@ export interface ForecastGroup {
 }
 
 export interface ForecastGroupsResponse {
+  /** Retained rows in the requested population/range; phase counts use classified members. */
+  summary?: {
+    since: string
+    sets: number
+    accepted: number
+    stocks: number
+    marks_by_phase: Partial<Record<NonNullable<PredictionMark['phase']> | 'unknown', number>>
+    next_result_not_before?: string
+    expected?: boolean
+  }
+  rtypes?: string[]
+  min_n?: number
+  limits?: {
+    max_range_months: number
+    max_week_groups: number
+    official_slots: number
+    explore_slots: number
+    wait_sec: number
+    custom_per_min: number
+    members_per_min: number
+  }
+  generated_at?: string
+  ledger_start?: string
+  capabilities?: { monthly: boolean; custom: boolean; members: boolean }
+  evaluator?: { mode: '0' | 'dry' | '1' }
   ok: boolean
   mode: ForecastMode
   official: boolean

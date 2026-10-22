@@ -122,8 +122,22 @@ func TestExternalAllGetsNoExplainVolume(t *testing.T) {
 		"d5":  {State: "mature", PendingReasons: map[string]int{predPhaseResolved: 32}, FailedCapExceeded: &flag, NotBefore: "2026-10-26", Expected: true},
 		"d20": {State: "pending", PendingReasons: map[string]int{predPhaseWaiting: 32}, FailedCapExceeded: &flag, NotBefore: "2026-11-26", Expected: true},
 	}}}}
+	resp.ForecastGroupsMetadata = &ForecastGroupsMetadata{Summary: forecastGroupsSummary{Sets: 32}, MinN: 30, GeneratedAt: "2026-10-22T00:00:00Z"}
 	before, _ := json.Marshal(resp)
 	protected := forecastReaderGroups(resp, forecastDecision{Scope: scopeAll, External: true})
+	wire, err := json.Marshal(protected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(wire, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"summary", "rtypes", "min_n", "limits", "generated_at", "ledger_start", "capabilities", "evaluator"} {
+		if _, present := fields[key]; present {
+			t.Errorf("external all received response-level %s", key)
+		}
+	}
 	for _, group := range protected.Groups {
 		for _, cell := range group.Cells {
 			if cell.PendingReasons != nil || cell.FailedCapExceeded != nil || cell.NotBefore != "" || cell.Expected {
@@ -132,6 +146,9 @@ func TestExternalAllGetsNoExplainVolume(t *testing.T) {
 		}
 	}
 	own := forecastReaderGroups(resp, forecastDecision{Scope: scopeOwn, External: true})
+	if own.ForecastGroupsMetadata == nil || own.Summary.Sets != 32 {
+		t.Fatal("own reader lost response metadata")
+	}
 	if own.Groups[0].Cells["d20"].PendingReasons[predPhaseWaiting] != 32 {
 		t.Fatal("own reader lost its explanation")
 	}

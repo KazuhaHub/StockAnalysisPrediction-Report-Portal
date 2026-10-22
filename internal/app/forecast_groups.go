@@ -15,6 +15,7 @@ import (
 )
 
 type forecastGroupsResponse struct {
+	*ForecastGroupsMetadata
 	OK             bool                  `json:"ok"`
 	Mode           string                `json:"mode"`
 	Official       bool                  `json:"official"`

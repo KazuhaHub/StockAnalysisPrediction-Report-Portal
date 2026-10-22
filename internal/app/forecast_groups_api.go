@@ -167,7 +167,11 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
 	defer cancel()
-	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, forecastPurgeCacheTag(resp.ExcludedMonths), &now)
+	var readAt *time.Time
+	if !d.External || d.Scope != scopeAll {
+		readAt = &now
+	}
+	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, forecastPurgeCacheTag(resp.ExcludedMonths), readAt)
 	if err != nil {
 		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			w.Header().Set("Retry-After", "1")
@@ -189,6 +193,9 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 			}
 		}
 		sort.SliceStable(resp.Groups, func(i, j int) bool { return resp.Groups[i].Start < resp.Groups[j].Start })
+	}
+	if readAt != nil {
+		resp.ForecastGroupsMetadata = s.forecastGroupsMetadataFor(sets, resp.Groups, now, d)
 	}
 	if adminAlias {
 		writeJSON(w, resp)

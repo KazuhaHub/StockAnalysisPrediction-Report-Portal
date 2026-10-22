@@ -2,6 +2,7 @@ package app
 
 // Reader responses have no unrecorded field, even for an admin using the reader alias.
 type forecastReaderGroupsResponse struct {
+	*ForecastGroupsMetadata
 	OK             bool                  `json:"ok"`
 	Mode           string                `json:"mode"`
 	Official       bool                  `json:"official"`
@@ -56,6 +57,9 @@ func forecastReaderGroups(resp forecastGroupsResponse, d forecastDecision) forec
 	out := forecastReaderGroupsResponse{OK: resp.OK, Mode: resp.Mode, Official: resp.Official,
 		Range: resp.Range, Checkpoints: resp.Checkpoints, Groups: make([]forecastReaderGroup, 0, len(resp.Groups)), ExcludedMonths: resp.ExcludedMonths}
 	hideVolume := d.External && d.Scope == scopeAll
+	if !hideVolume {
+		out.ForecastGroupsMetadata = resp.ForecastGroupsMetadata
+	}
 	for _, g := range resp.Groups {
 		rg := forecastReaderGroup{Label: g.Label, Start: g.Start, End: g.End, Official: g.Official,
 			Bench: g.Bench, Cells: g.Cells, PurgedAt: g.PurgedAt}
