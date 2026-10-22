@@ -28,6 +28,9 @@ func newP31Fixture(t *testing.T) p31Fixture {
 	f.tenant, _ = st.CreateUserGroup("tenant", "", 0)
 	st.SetGroupParent(f.tenant, root)
 	st.SetGroupRestricted(f.tenant, true)
+	if _, err := st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeAll, f.tenant); err != nil {
+		t.Fatal(err)
+	}
 	st.UpsertUser(User{Username: "ext", PasswordHash: "h", Role: "user"})
 	st.SetPrimaryGroup("ext", f.tenant)
 	st.SaveVersion(ReportVersion{Name: "v", Ord: 1, Visibility: VisibilityGroup})
@@ -95,8 +98,8 @@ func TestScopeOnUnreadableRestrictedFlag(t *testing.T) {
 	if sc := f.s.viewerScope("ext"); sc == nil || !sc.denyAll {
 		t.Fatalf("an unreadable account did not deny: %+v", sc)
 	}
-	if code := f.readReport("ext"); code != http.StatusNotFound {
-		t.Errorf("report route with an unreadable account = %d, want 404", code)
+	if code := f.readReport("ext"); code != http.StatusForbidden {
+		t.Errorf("report route with an unreadable account = %d, want 403", code)
 	}
 	if sets := f.readList("ext"); len(sets) != 0 {
 		t.Errorf("list route with an unreadable account returned %d sets", len(sets))
@@ -111,8 +114,8 @@ func TestScopeOnUnreadableOURow(t *testing.T) {
 	if sc := f.s.viewerScope("ext"); sc == nil || !sc.denyAll {
 		t.Fatalf("an unreadable OU table did not deny: %+v", sc)
 	}
-	if code := f.readReport("ext"); code != http.StatusNotFound {
-		t.Errorf("report route with an unreadable OU table = %d, want 404", code)
+	if code := f.readReport("ext"); code != http.StatusForbidden {
+		t.Errorf("report route with an unreadable OU table = %d, want 403", code)
 	}
 }
 
@@ -125,8 +128,8 @@ func TestScopeOnABrokenOUChain(t *testing.T) {
 	if sc := f.s.viewerScope("ext"); sc == nil || !sc.denyAll {
 		t.Fatalf("a dangling chain did not deny: %+v", sc)
 	}
-	if code := f.readReport("ext"); code != http.StatusNotFound {
-		t.Errorf("report route with a dangling chain = %d, want 404", code)
+	if code := f.readReport("ext"); code != http.StatusForbidden {
+		t.Errorf("report route with a dangling chain = %d, want 403", code)
 	}
 }
 

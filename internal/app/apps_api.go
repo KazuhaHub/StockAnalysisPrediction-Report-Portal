@@ -138,7 +138,7 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 	if s.viewerScope(user) != nil {
 		scopes = dropScope(scopes, "query")
 	}
-	token := s.appTok.mint(scopes, time.Now())
+	token := s.appTok.mintForApp(scopes, time.Now(), app.ID, s.st.GetUser(user))
 	writeJSON(w, map[string]any{
 		"app": appJSON(app), "token": token, "scopes": scopes, "expires_in": int(appTokenTTL / time.Second),
 	})

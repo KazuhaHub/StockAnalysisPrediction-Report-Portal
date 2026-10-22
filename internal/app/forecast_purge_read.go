@@ -1,6 +1,23 @@
 package app
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+func forecastPurgeCacheTag(months []forecastPurgedMonth) string {
+	if len(months) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, month := range months {
+		b.WriteString(month.Cohort)
+		b.WriteByte(0)
+		b.WriteString(month.PurgedAt)
+		b.WriteByte(0)
+	}
+	return "\x00purges:" + sha256Hex([]byte(b.String()))
+}
 
 // Include retention-only months even when no surviving set can establish the monthly range.
 func forecastEarliestWithPurges(earliest, rtype string, purges map[[2]string]string) string {

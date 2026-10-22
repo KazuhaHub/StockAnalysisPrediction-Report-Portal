@@ -7,7 +7,9 @@ package app
 // function the matrix uses.
 
 import (
+	"encoding/base64"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -59,11 +61,49 @@ type forecastMember struct {
 }
 
 func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string) {
+	s.serveForecastGroupMembers(w, r, user, forecastDecision{Scope: scopeAll, Reason: "admin"}, true)
+}
+
+func (s *Server) apiReaderForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string) {
+	d, ok := s.requireForecastAccess(w, r, user)
+	if !ok {
+		return
+	}
+	if !s.forecastCompute.allowMembers(user, s.settingInt(setForecastMembersPerMin, 60, 0, 600), s.forecastEval.clock()) {
+		forecastRateError(w)
+		return
+	}
+	s.serveForecastGroupMembers(w, r, user, d, false)
+}
+
+func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string, d forecastDecision, adminAlias bool) {
+	pop := populationFor(d)
 	q := r.URL.Query()
 	population := q.Get("population")
 	if population != "" && population != "scored" && population != "all" {
 		jsonErrorCode(w, http.StatusBadRequest, "bad_population", "population must be scored or all")
 		return
+	}
+	limit, cursor := 100, int64(0)
+	if !adminAlias {
+		if raw := q.Get("limit"); raw != "" {
+			v, err := strconv.Atoi(raw)
+			if err != nil || v < 1 || v > 200 {
+				jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "limit must be between 1 and 200")
+				return
+			}
+			limit = v
+		}
+		if raw := q.Get("cursor"); raw != "" {
+			b, err := base64.RawURLEncoding.DecodeString(raw)
+			if err == nil {
+				cursor, err = strconv.ParseInt(string(b), 10, 64)
+			}
+			if err != nil || cursor <= 0 {
+				jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "invalid member cursor")
+				return
+			}
+		}
 	}
 	mode := q.Get("mode")
 	if mode == "" {
@@ -111,7 +151,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			jsonErrorCode(w, http.StatusBadRequest, "month_takes_no_range", "month mode takes no from, to or group")
 			return
 		}
-		earliest, err := s.st.forecastEarliestMadeOn(rtype)
+		earliest, err := s.st.forecastEarliestMadeOnForPopulation(rtype, pop)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -145,12 +185,17 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if at, purged := purges[[2]string{rtype, period.Start[:7]}]; mode == "month" && purged {
-		writeJSON(w, forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
-			Checkpoint: cp, State: "purged", PurgedAt: at, Population: population, Members: []forecastMember{}})
+		out := forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
+			Checkpoint: cp, State: "purged", PurgedAt: at, Population: population, Members: []forecastMember{}}
+		if adminAlias {
+			writeJSON(w, out)
+		} else {
+			writeJSON(w, forecastReaderMembers(out, d, ""))
+		}
 		return
 	}
 
-	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End)
+	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End, pop)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
@@ -216,12 +261,28 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	}
 	// The STATE comes from the gate, never the scorer: opening a drawer must not cost 10 000
 	// permutations to learn what the matrix already showed.
-	state, _, _, _, _, _ := forecastCellGate(members, pending, cp, period.End, today)
+	state, n, refused, corp, resolved, total := forecastCellGate(members, pending, cp, period.End, today)
 	// An official month's matured cell is frozen in the matrix memo; the drawer must show that same
 	// state, even if a backdated set has since been loaded into the month.
 	if mode == "month" {
-		if c, _ := s.cachedForecastCell(forecastGroupCellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
+		if c, _ := s.cachedForecastCell(pop.cellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
 			state = c.State
+			if c.State == "mature" {
+				n, refused, corp = 0, 0, 0
+				if c.N != nil {
+					n = *c.N
+				}
+				if c.Refused != nil {
+					refused = *c.Refused
+				}
+				if c.CorpAction != nil {
+					corp = *c.CorpAction
+				}
+				// A mature cell has only resolved or finally refused members. Its stored n
+				// excludes corporate actions; reconstruct the two gate counts from that record.
+				resolved = n + corp
+				total = resolved + refused
+			}
 		}
 	}
 	mature := state == "mature"
@@ -242,8 +303,22 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	if population == "all" {
 		out.Population = population
 	}
+	if !adminAlias {
+		out.N, out.Refused, out.CorpAction, out.Resolved, out.Total = n, refused, corp, resolved, total
+	}
+	sc := s.viewerScope(user)
+	if d.External {
+		// A decision that identified an external reader cannot become an unscoped read if a
+		// later account/tree read changed or failed. Retrying the request resolves it afresh.
+		if sc == nil {
+			sc = &ownerScope{denyAll: true}
+		}
+	}
 	var ids []int64
 	for _, gs := range drawerMembers {
+		if d.External && (gs.ReportID == nil || !s.canReadReport(*gs.ReportID, sc)) {
+			continue
+		}
 		m := gs.Marks[cp]
 		reason := forecastMemberExclusion(gs, cp, baselinePending[gs.ID])
 		if population != "all" && reason != "" {
@@ -288,8 +363,38 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		}
 		out.Members = append(out.Members, fm)
 	}
+	nextCursor := ""
+	if !adminAlias {
+		start := 0
+		if cursor > 0 {
+			found := false
+			for i, member := range out.Members {
+				if member.SetID == cursor {
+					start, found = i+1, true
+					break
+				}
+			}
+			if !found {
+				jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "invalid member cursor")
+				return
+			}
+		}
+		end := start + limit
+		if end < len(out.Members) {
+			nextCursor = base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(out.Members[end-1].SetID, 10)))
+		} else {
+			end = len(out.Members)
+		}
+		out.Members = out.Members[start:end]
+		ids = nil
+		for _, member := range out.Members {
+			if member.ReportID != nil {
+				ids = append(ids, *member.ReportID)
+			}
+		}
+	}
 	if len(ids) > 0 {
-		info, err := s.st.reportKindsFor(ids, s.viewerScope(user))
+		info, err := s.st.reportKindsFor(ids, sc)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -306,7 +411,11 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			}
 		}
 	}
-	writeJSON(w, out)
+	if adminAlias {
+		writeJSON(w, out)
+	} else {
+		writeJSON(w, forecastReaderMembers(out, d, nextCursor))
+	}
 }
 
 // Exclusions describe eligibility, not outcomes. They can be shown before the cell matures.

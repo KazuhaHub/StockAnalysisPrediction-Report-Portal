@@ -37,7 +37,8 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     borderRadius: 6,
     padding: '8px 10px',
     minHeight: 64,
-    height: '100%',
+    flex: '1 1 0%',
+    minWidth: 0,
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
@@ -173,8 +174,15 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     fontWeight: 500,
     whiteSpace: 'nowrap',
   }
-  // A definite cell height lets every inner box stretch to the tallest checkpoint in its row.
-  const td: CSSProperties = { padding: 6, verticalAlign: 'top', height: 1 }
+  // Intrinsic grid rows stretch every checkpoint, including wrapped status text and exclusions.
+  // Percentage heights inside auto-sized table cells do not reliably fill the row in browsers.
+  const row: CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: `minmax(140px, 1.2fr) repeat(${resp.checkpoints.length}, minmax(112px, 1fr)) minmax(200px, 1.8fr)`,
+    columnGap: 4,
+    alignItems: 'stretch',
+  }
+  const td: CSSProperties = { padding: 6, minWidth: 0, display: 'flex', alignItems: 'stretch' }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -185,33 +193,37 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
       </Typography.Text>
       <ForecastLegend />
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
-        <table style={{ borderCollapse: 'separate', borderSpacing: 4, width: '100%' }}>
-          <thead>
-            <tr>
-              <th style={th}>{t(mode === 'month' ? 'forecast.col.month' : 'forecast.col.group')}</th>
+        <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + 224 }}>
+          <thead style={{ display: 'block' }}>
+            <tr role="row" style={row}>
+              <th role="columnheader" scope="col" style={th}>{t(mode === 'month' ? 'forecast.col.month' : 'forecast.col.group')}</th>
               {resp.checkpoints.map((cp) => (
-                <th key={cp} style={th}>
+                <th role="columnheader" scope="col" key={cp} style={th}>
                   {t(`forecast.cp.${cp}`)}
                 </th>
               ))}
-              <th style={th}>{t('forecast.col.coverage')}</th>
+              <th role="columnheader" scope="col" style={th}>{t('forecast.col.coverage')}</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody style={{ display: 'grid', rowGap: 4 }}>
             {rows.map((g) => (
-              <tr key={`${g.start}:${g.end}:${g.label}`}>
-                <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 600 }}>
-                  {g.label}
-                  {!g.official && (
-                    <Tag style={{ marginInlineStart: 6 }} color="warning">
-                      {t('forecast.tag.exploratory')}
-                    </Tag>
-                  )}
-                  {g.bench && (
-                    <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>
-                      {t(`forecast.bench.${g.bench}`)}
-                    </Typography.Text>
-                  )}
+              <tr role="row" key={`${g.start}:${g.end}:${g.label}`} style={row}>
+                <td style={{ ...td, fontWeight: 600, overflowWrap: 'anywhere' }}>
+                  <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                    <span>{g.label}</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                      {!g.official && (
+                        <Tag style={{ margin: 0, whiteSpace: 'normal' }} color="warning">
+                          {t('forecast.tag.exploratory')}
+                        </Tag>
+                      )}
+                      {g.bench && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {t(`forecast.bench.${g.bench}`)}
+                        </Typography.Text>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 {resp.checkpoints.map((cp) => (
                   <td key={cp} style={td}>

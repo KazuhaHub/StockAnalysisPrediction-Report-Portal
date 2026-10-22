@@ -140,7 +140,7 @@ func TestClassifierMatchesLegacyStatistics(t *testing.T) {
 func TestUnknownStateIsCountedNotDropped(t *testing.T) {
 	s := newV1Server(t)
 	seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-01-05", State: "future-state"})
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-01-01", "2026-01-31")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-01-01", "2026-01-31", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}

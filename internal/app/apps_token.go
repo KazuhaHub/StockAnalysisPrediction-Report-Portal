@@ -50,8 +50,27 @@ type appTokens struct {
 }
 
 type appTokenEntry struct {
-	scopes  map[string]bool
-	expires time.Time
+	scopes         map[string]bool
+	expires        time.Time
+	appID          string
+	username       string
+	sessionRev     int64
+	accountCreated string
+}
+
+func (a *appTokens) mintForApp(scopes []string, now time.Time, appID string, user *User) string {
+	token := a.mint(scopes, now)
+	if user != nil {
+		a.mu.Lock()
+		entry := a.m[token]
+		entry.appID = appID
+		entry.username = user.Username
+		entry.sessionRev = user.SessionRev
+		entry.accountCreated = user.CreatedAt
+		a.m[token] = entry
+		a.mu.Unlock()
+	}
+	return token
 }
 
 func newAppTokens(ttl time.Duration) *appTokens {

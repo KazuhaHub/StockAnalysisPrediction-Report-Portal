@@ -19,22 +19,92 @@ import (
 	"strings"
 )
 
+type forecastPredictionView struct {
+	scope        *ownerScope
+	protected    bool
+	reader       bool
+	noMembership bool
+}
+
+func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string) (forecastPredictionView, bool) {
+	d := s.forecastAccess(user)
+	if d.Scope == scopeNone {
+		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
+		return forecastPredictionView{}, false
+	}
+	sc := s.viewerScope(user)
+	return forecastPredictionViewFor(d, sc), true
+}
+
+func forecastPredictionViewFor(d forecastDecision, sc *ownerScope) forecastPredictionView {
+	// A deletion or policy change between these reads must not turn an external decision into
+	// nil scope (unrestricted). Match the external member drawer's fail-closed rule.
+	if d.External && sc == nil {
+		sc = &ownerScope{denyAll: true}
+	}
+	return forecastPredictionView{scope: sc, protected: d.External || sc != nil, reader: d.Reason != "admin", noMembership: d.Scope == scopeOwn}
+}
+
+func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request) (forecastPredictionView, bool) {
+	if !s.v1CanRead(w, r) {
+		return forecastPredictionView{}, false
+	}
+	if user := s.currentActiveUser(r); user != "" {
+		return s.forecastCookiePredictionView(w, user)
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if s.st.TokenValid(token, "query") {
+		// Persistent machine reads retain their diagnostic contract.
+		return forecastPredictionView{}, true
+	}
+	return s.forecastBridgePredictionView(w, r, token)
+}
+
+func protectedPredictionSets(sets []PredictionSet, view forecastPredictionView) []PredictionSet {
+	if !view.protected && !view.reader {
+		return sets
+	}
+	out := make([]PredictionSet, 0, len(sets))
+	for _, set := range sets {
+		if set.State != predStateAccepted || view.protected && set.ReportID == nil {
+			continue
+		}
+		set.Errors = nil
+		if view.protected {
+			set.Payload = ""
+		}
+		if view.protected || view.noMembership {
+			set.Membership = ""
+		}
+		out = append(out, set)
+	}
+	return out
+}
+
 // v1ReportPredictions serves every set ever written for one report, oldest first.
 func (s *Server) v1ReportPredictions(w http.ResponseWriter, r *http.Request) {
-	if !s.v1CanRead(w, r) {
+	view, ok := s.forecastV1PredictionView(w, r)
+	if !ok {
 		return
 	}
-	s.serveReportPredictions(w, r, s.queryScope(r))
+	s.serveReportPredictionsView(w, r, view)
 }
 
 // apiReportPredictions is the browser twin of the route above, under the session class.
 func (s *Server) apiReportPredictions(w http.ResponseWriter, r *http.Request, user string) {
-	s.serveReportPredictions(w, r, s.viewerScope(user))
+	if view, ok := s.forecastCookiePredictionView(w, user); ok {
+		s.serveReportPredictionsView(w, r, view)
+	}
 }
 
 // serveReportPredictions is the one implementation both routes share, so a shape or a scope rule
 // cannot apply to one credential and not the other.
 func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, sc *ownerScope) {
+	s.serveReportPredictionsView(w, r, forecastPredictionView{scope: sc, protected: sc != nil})
+}
+
+func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Request, view forecastPredictionView) {
+	sc := view.scope
 	id, err := strconv.ParseInt(strings.TrimSpace(r.PathValue("id")), 10, 64)
 	if err != nil || id <= 0 {
 		jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "id must be a positive integer")
@@ -43,7 +113,9 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 	sets, err := s.st.QueryPredictionSets(PredictionFilter{
 		ReportID:       id,
 		Limit:          200,
-		IncludePayload: includePayload(r, sc),
+		IncludePayload: !view.protected && includePayload(r, sc),
+		AcceptedOnly:   view.protected || view.reader,
+		RequireReport:  view.protected,
 	}, sc)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
@@ -59,9 +131,9 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	identities, identityErr := s.st.reportPredictionIdentities(id, sc)
-	membershipReady := sc == nil && identityErr == nil && s.st.annotateForecastReadMembership(identities) == nil
+	membershipReady := sc == nil && !view.protected && !view.noMembership && identityErr == nil && s.st.annotateForecastReadMembership(identities) == nil
 	display, counted := readPredictionIDs(identities)
-	selected, selectionErr := s.st.includeSelectedPredictionSets(id, sets, display, counted, includePayload(r, sc), sc)
+	selected, selectionErr := s.st.includeSelectedPredictionSets(id, sets, display, counted, !view.protected && includePayload(r, sc), sc)
 	if selectionErr == nil {
 		sets = selected
 	}
@@ -75,6 +147,7 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	s.annotateReadPhases(sets, s.forecastNow())
+	sets = protectedPredictionSets(sets, view)
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
@@ -90,26 +163,36 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 
 // v1QueryPredictions serves sets by symbol and date range, newest first.
 func (s *Server) v1QueryPredictions(w http.ResponseWriter, r *http.Request) {
-	if !s.v1CanRead(w, r) {
+	view, ok := s.forecastV1PredictionView(w, r)
+	if !ok {
 		return
 	}
-	s.serveQueryPredictions(w, r, s.queryScope(r))
+	s.serveQueryPredictionsView(w, r, view)
 }
 
 // apiQueryPredictions is the browser twin, for the reading page's "other predictions of this
 // stock" list. The SPA never calls /api/v1: that machine surface is classed authBearer, and the SPA
 // route is separately scope- and enrolment-gated with the session it already carries.
 func (s *Server) apiQueryPredictions(w http.ResponseWriter, r *http.Request, user string) {
-	s.serveQueryPredictions(w, r, s.viewerScope(user))
+	if view, ok := s.forecastCookiePredictionView(w, user); ok {
+		s.serveQueryPredictionsView(w, r, view)
+	}
 }
 
 func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, sc *ownerScope) {
+	s.serveQueryPredictionsView(w, r, forecastPredictionView{scope: sc, protected: sc != nil})
+}
+
+func (s *Server) serveQueryPredictionsView(w http.ResponseWriter, r *http.Request, view forecastPredictionView) {
+	sc := view.scope
 	q := r.URL.Query()
 	f := PredictionFilter{
-		Symbol: strings.TrimSpace(q.Get("symbol")),
-		RType:  strings.TrimSpace(firstNonEmpty(q.Get("rtype"), q.Get("subtype"))),
-		From:   strings.TrimSpace(q.Get("from")),
-		To:     strings.TrimSpace(q.Get("to")),
+		Symbol:        strings.TrimSpace(q.Get("symbol")),
+		RType:         strings.TrimSpace(firstNonEmpty(q.Get("rtype"), q.Get("subtype"))),
+		From:          strings.TrimSpace(q.Get("from")),
+		To:            strings.TrimSpace(q.Get("to")),
+		AcceptedOnly:  view.protected || view.reader,
+		RequireReport: view.protected,
 	}
 	if f.Symbol == "" {
 		v1err(w, http.StatusBadRequest, "missing_param", "symbol is required")
@@ -124,16 +207,17 @@ func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
-	f.IncludePayload = includePayload(r, sc)
+	f.IncludePayload = !view.protected && includePayload(r, sc)
 	sets, err := s.st.QueryPredictionSets(f, sc)
 	if err != nil {
 		v1err(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
 	s.annotateReadPhases(sets, s.forecastNow())
-	if sc == nil {
+	if sc == nil && !view.protected && !view.noMembership {
 		_ = s.st.annotateForecastReadMembership(sets)
 	}
+	sets = protectedPredictionSets(sets, view)
 	writeJSON(w, map[string]any{"ok": true, "sets": sets, "settlement_paused": s.forecastSettlementPaused()})
 }
 

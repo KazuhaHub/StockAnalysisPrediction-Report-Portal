@@ -183,6 +183,10 @@ func TestAnUnsatisfiableMandateStillHolds(t *testing.T) {
 // Bearer(query) token is not a reader to be held there.
 func TestV1ReadsAreHeldAtTheEnrolmentWall(t *testing.T) {
 	env := mandateServer(t)
+	// Forecast permission does not bypass the independent enrolment wall.
+	if _, err := env.s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE is_default=1 OR id=?", scopeAll, env.ouID); err != nil {
+		t.Fatal(err)
+	}
 	env.s.names = LoadNames(t.TempDir(), env.s.st)
 	env.s.names.fetch = func(string) string { return "" }
 	today := time.Now().Format("2006-01-02")

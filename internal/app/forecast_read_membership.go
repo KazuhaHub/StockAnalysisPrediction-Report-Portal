@@ -105,7 +105,7 @@ func (s *Store) annotateForecastReadMembership(sets []PredictionSet) error {
 		if err != nil {
 			return fmt.Errorf("read membership cohort: %w", err)
 		}
-		all, err := s.loadForecastGroupSets(set.RType, month.Format("2006-01-02"), month.AddDate(0, 1, -1).Format("2006-01-02"))
+		all, err := s.loadForecastGroupSets(set.RType, month.Format("2006-01-02"), month.AddDate(0, 1, -1).Format("2006-01-02"), forecastPopulation{Key: "all"})
 		if err != nil {
 			return err
 		}

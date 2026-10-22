@@ -155,7 +155,7 @@ func TestMembershipOnReadEqualsGroupStatistics(t *testing.T) {
 		firstReport, firstSet := seedReadableMembershipReport(t, s, g, "First decision")
 		g.MadeOn = "2026-01-06"
 		secondReport, secondSet := seedReadableMembershipReport(t, s, g, "Later decision")
-		sets, err := st.loadForecastGroupSets(predTestRtype, "2026-01-01", "2026-01-31")
+		sets, err := st.loadForecastGroupSets(predTestRtype, "2026-01-01", "2026-01-31", forecastPopulation{Key: "all"})
 		if err != nil {
 			t.Fatal(err)
 		}

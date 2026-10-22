@@ -2,20 +2,61 @@ package app
 
 // The group statistics route (plan §7.1).
 //
-// It is under /api/admin and gated by PermManage, not on /api/v1. v1 authorizes by token scope
-// alone, and the app bridge mints query tokens for every unrestricted user, so a v1 route would
-// hand the whole ledger's aggregate to any bridge app. This is a management view.
+// The admin alias keeps the unrecorded count. Reader requests use a fresh scope decision and
+// population, never a machine-token gate; aggregate statistics are not part of /api/v1.
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
+	s.serveForecastGroups(w, r, forecastDecision{Scope: scopeAll, Reason: "admin"}, true, nil)
+}
+
+func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
+	d, ok := s.requireForecastAccess(w, r, user)
+	if !ok {
+		return
+	}
+	var lease *forecastQueryLease
+	q := r.URL.Query()
+	if q.Get("mode") == "custom" {
+		rtype, group := q.Get("rtype"), q.Get("group")
+		if rtype == "" {
+			rtype = predTestRtype
+		}
+		if group == "" {
+			group = "month"
+		}
+		key := strings.Join([]string{populationFor(d).Key, rtype, q.Get("from"), q.Get("to"), group}, "\x00")
+		lease, ok = s.forecastCompute.beginCustom(user, key, s.settingInt(setForecastCustomPerMin, 20, 0, 600), s.forecastEval.clock())
+		if !ok {
+			forecastRateError(w)
+			return
+		}
+		defer lease.release()
+	}
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.serveForecastGroups(rec, r, d, false, lease)
+	if rec.status == http.StatusOK && d.Reason != "admin" {
+		if err := s.forecastViewers.observe(s.st, user, s.forecastEval.clock()); err != nil {
+			log.Print("forecast viewer observation failed")
+		}
+	}
+}
+
+func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool, lease *forecastQueryLease) {
+	generation := s.forecastGeneration()
+	pop := populationFor(d)
 	q := r.URL.Query()
 	mode := q.Get("mode")
 	if mode == "" {
@@ -38,12 +79,15 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 	}
 	// The admin alias keeps its bounded unrecorded integer until P29; it is 0 while the ledger start
 	// is unset (the admin GET's `unrecorded` list is where the "set the ledger start" state is shown).
-	unrecorded, _, _, err := s.st.countForecastUnrecorded(rtype)
-	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-		return
+	var err error
+	if adminAlias {
+		unrecorded, _, _, loadErr := s.st.countForecastUnrecorded(rtype)
+		if loadErr != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		resp.Unrecorded = unrecorded
 	}
-	resp.Unrecorded = unrecorded
 
 	var periods []forecastPeriod
 	loadFrom, loadTo := "", ""
@@ -56,7 +100,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 			jsonErrorCode(w, http.StatusBadRequest, "month_takes_no_range", "month mode takes no from, to or group")
 			return
 		}
-		earliest, err := s.st.forecastEarliestMadeOn(rtype)
+		earliest, err := s.st.forecastEarliestMadeOnForPopulation(rtype, pop)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -106,7 +150,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 
 	var sets []*groupSet
 	if loadFrom != "" && loadTo != "" {
-		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo)
+		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo, pop)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -121,7 +165,18 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 			active = append(active, p)
 		}
 	}
-	resp.Groups = s.buildForecastGroupsWithCache(active, sets, rtype, today, resp.Official, populationFrom, len(resp.ExcludedMonths) == 0)
+	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
+	defer cancel()
+	resp.Groups, err = s.buildForecastGroupsRequestWithCacheTag(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, forecastPurgeCacheTag(resp.ExcludedMonths))
+	if err != nil {
+		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			w.Header().Set("Retry-After", "1")
+			jsonErrorCode(w, http.StatusServiceUnavailable, "forecast_busy", "forecast computation is busy; retry later")
+		} else {
+			jsonErrorCode(w, http.StatusInternalServerError, "forecast_failed", "forecast computation failed")
+		}
+		return
+	}
 	if resp.Official {
 		for _, p := range periods {
 			if at, purged := purges[[2]string{rtype, p.Start[:7]}]; purged {
@@ -135,7 +190,11 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		}
 		sort.SliceStable(resp.Groups, func(i, j int) bool { return resp.Groups[i].Start < resp.Groups[j].Start })
 	}
-	writeJSON(w, resp)
+	if adminAlias {
+		writeJSON(w, resp)
+	} else {
+		writeJSON(w, forecastReaderGroups(resp, d))
+	}
 }
 
 // buildForecastGroups computes every group x checkpoint. The cells are independent — each one's
@@ -143,11 +202,26 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
 func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time) []forecastGroup {
-	return s.buildForecastGroupsWithCache(periods, sets, rtype, today, official, populationFrom, true)
+	return s.buildForecastGroupsForPopulation(periods, sets, rtype, today, official, populationFrom, forecastPopulation{Key: "all"})
 }
 
-// Exploratory ranges containing removed cohorts cannot reuse an old full-population cell.
-func (s *Server) buildForecastGroupsWithCache(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, useCache bool) []forecastGroup {
+func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation) []forecastGroup {
+	groups, err := s.buildForecastGroupsRequest(context.Background(), periods, sets, rtype, today, official, populationFrom, pop, s.forecastGeneration(), nil)
+	if err != nil {
+		return nil
+	}
+	return groups
+}
+
+func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease) ([]forecastGroup, error) {
+	return s.buildForecastGroupsRequestWithCacheTag(ctx, periods, sets, rtype, today, official, populationFrom, pop, generation, lease, "")
+}
+
+// Retention exclusions affect cache and flight identity, never the statistical population seed.
+func (s *Server) buildForecastGroupsRequestWithCacheTag(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease, cacheTag string) ([]forecastGroup, error) {
+	if s.forecastGeneration() != generation {
+		return nil, errForecastBusy
+	}
 	// The cohort's benchmark is the frozen code of its earliest in-population accepted set — a
 	// ledger-wide answer, not just what this range happened to load. A custom range that starts
 	// mid-cohort must not pick a later set and call the cohort something else.
@@ -232,13 +306,14 @@ func (s *Server) buildForecastGroupsWithCache(periods []forecastPeriod, sets []*
 		}
 	}
 	if len(jobs) == 0 {
-		return groups
+		return groups, nil
 	}
 
 	type result struct {
 		gi   int
 		cp   string
 		cell *forecastCell
+		err  error
 	}
 	workers := runtime.GOMAXPROCS(0)
 	if workers > len(jobs) {
@@ -252,17 +327,47 @@ func (s *Server) buildForecastGroupsWithCache(periods []forecastPeriod, sets []*
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				key := forecastGroupCellKey(rtype, j.start, j.end, j.bench, j.cp)
+				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp) + cacheTag
 				c, gen := s.cachedForecastCell(key)
-				if useCache && c != nil {
-					out <- result{j.gi, j.cp, c}
+				if gen != generation {
+					out <- result{gi: j.gi, cp: j.cp, err: errForecastBusy}
 					continue
 				}
-				c = computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
-				if official && c.State == "mature" {
+				if c != nil {
+					out <- result{gi: j.gi, cp: j.cp, cell: c}
+					continue
+				}
+				members, pending := j.members, j.pending
+				if j.cp == "h12" {
+					members, pending = filterHorizonStd(members), filterHorizonStd(pending)
+				}
+				state, _, _, _, _, _ := forecastCellGate(members, pending, j.cp, j.end, today)
+				if state != "mature" {
+					c = computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
+					out <- result{gi: j.gi, cp: j.cp, cell: c}
+					continue
+				}
+				// A purge starts a new flight generation as well as a new memo generation: a new
+				// request must never join a computation whose inputs preceded that purge.
+				flightKey := key + "\x00generation:" + strconv.FormatUint(gen, 10)
+				c, err := s.forecastCompute.doForQuery(ctx, flightKey, official, s.forecastComputeLimits(), lease, func() (*forecastCell, error) {
+					cached, current := s.cachedForecastCell(key)
+					if current != generation {
+						return nil, errForecastBusy
+					}
+					if cached != nil {
+						return cached, nil
+					}
+					computed := computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
+					if official {
+						s.storeForecastCell(key, computed, gen)
+					}
+					return computed, nil
+				})
+				if err == nil && official && c.State == "mature" {
 					s.storeForecastCell(key, c, gen)
 				}
-				out <- result{j.gi, j.cp, c}
+				out <- result{gi: j.gi, cp: j.cp, cell: c, err: err}
 			}
 		}()
 	}
@@ -274,10 +379,26 @@ func (s *Server) buildForecastGroupsWithCache(periods []forecastPeriod, sets []*
 		wg.Wait()
 		close(out)
 	}()
+	var firstErr error
 	for r := range out {
+		if r.err != nil && firstErr == nil {
+			firstErr = r.err
+		}
 		groups[r.gi].Cells[r.cp] = r.cell
 	}
-	return groups
+	if s.forecastGeneration() != generation {
+		return nil, errForecastBusy
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return groups, nil
+}
+
+func (s *Server) forecastGeneration() uint64 {
+	s.forecastGroupsMu.Lock()
+	defer s.forecastGroupsMu.Unlock()
+	return s.forecastGroupsGen
 }
 
 // forecastGroupCellKey is the memo's identity. It deliberately has no `mode`: a whole-month custom

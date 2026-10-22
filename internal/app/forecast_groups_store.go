@@ -50,14 +50,19 @@ type groupSet struct {
 
 // loadForecastGroupSets reads every set of one covered type in a made_on range, oldest first within
 // each symbol so "the earliest accepted set" is a slice scan rather than a sort.
-func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, error) {
+func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopulation) ([]*groupSet, error) {
+	where, ous := forecastPopulationFilter(pop)
+	args := append([]any{rtype, from, to}, ous...)
+	if pop.OUs != nil && len(pop.OUs) == 0 {
+		return []*groupSet{}, nil
+	}
 	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
 			ps.made_at, ps.made_on, ps.cohort, ps.bench_code,
 			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
-		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?
-		ORDER BY ps.symbol, ps.made_at, ps.id`, rtype, from, to)
+		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?`+where+`
+		ORDER BY ps.symbol, ps.made_at, ps.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +139,20 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, erro
 	return out, nil
 }
 
+func forecastPopulationFilter(pop forecastPopulation) (string, []any) {
+	if pop.OUs == nil {
+		return "", nil
+	}
+	if len(pop.OUs) == 0 {
+		return " AND 1=0", nil
+	}
+	args := make([]any, len(pop.OUs))
+	for i, id := range pop.OUs {
+		args[i] = id
+	}
+	return " AND ps.attributed_ou IN (" + placeholders(len(pop.OUs)) + ")", args
+}
+
 // countForecastUnrecorded counts covered reports created since the ledger start that have no set row.
 // It is the one number that catches store_failed: a covered ingest is supposed to leave a row in
 // every outcome, so a report with none means the ledger never heard about it.
@@ -172,8 +191,16 @@ func (s *Store) countPredictionsStoreFailed(since time.Time) (int, error) {
 // forecastEarliestMadeOn is where monthly mode starts: the first month the ledger has anything for.
 // It returns "" when the ledger is empty.
 func (s *Store) forecastEarliestMadeOn(rtype string) (string, error) {
+	return s.forecastEarliestMadeOnForPopulation(rtype, forecastPopulation{Key: "all"})
+}
+
+func (s *Store) forecastEarliestMadeOnForPopulation(rtype string, pop forecastPopulation) (string, error) {
+	filter, args := forecastPopulationFilter(pop)
+	if pop.OUs != nil && len(pop.OUs) == 0 {
+		return "", nil
+	}
 	var v sql.NullString
-	if err := s.queryRow(`SELECT MIN(made_on) FROM prediction_sets WHERE rtype = ?`, rtype).Scan(&v); err != nil {
+	if err := s.queryRow(`SELECT MIN(ps.made_on) FROM prediction_sets ps WHERE ps.rtype = ?`+filter, append([]any{rtype}, args...)...).Scan(&v); err != nil {
 		return "", err
 	}
 	return v.String, nil

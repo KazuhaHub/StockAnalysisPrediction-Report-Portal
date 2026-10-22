@@ -1,13 +1,81 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestPurgeSeparatesInflightCustomStatisticsAcrossProcesses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.db")
+	writerStore, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writerStore.Close() })
+	readerStore, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = readerStore.Close() })
+	writer, reader := &Server{st: writerStore}, &Server{st: readerStore}
+	sampleMembers(t, writer, 35, nil)
+	sampleMembers(t, writer, 35, func(_ int, g *gsSeed) { g.MadeOn = "2025-07-10" })
+	if _, err := writerStore.exec(`UPDATE prediction_marks SET resolved_at=
+		(SELECT made_on FROM prediction_sets WHERE id=prediction_marks.set_id)`); err != nil {
+		t.Fatal(err)
+	}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	previous := forecastPerHook
+	var first atomic.Bool
+	forecastPerHook = func() {
+		if first.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+	}
+	defer func() {
+		close(release)
+		<-done
+		forecastPerHook = previous
+	}()
+	const target = "/?mode=custom&from=2025-06-01&to=2025-07-31&group=all"
+	old := httptest.NewRecorder()
+	go func() {
+		defer close(done)
+		reader.apiForecastGroups(old, httptest.NewRequest("GET", target, nil), "admin")
+	}()
+	select {
+	case <-entered:
+	case <-done:
+		t.Fatalf("request did not reach scoring: %d %s", old.Code, old.Body.String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("request did not reach scoring")
+	}
+	if n, err := writerStore.DeletePredictionsBefore(time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC)); err != nil || n != 35 {
+		t.Fatalf("purge = %d, %v", n, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	w := httptest.NewRecorder()
+	reader.apiForecastGroups(w, httptest.NewRequest("GET", target, nil).WithContext(ctx), "admin")
+	if w.Code != 200 {
+		t.Fatalf("post-purge request joined blocked scoring: %d %s", w.Code, w.Body.String())
+	}
+	var got forecastGroupsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ExcludedMonths) != 1 || got.ExcludedMonths[0].Cohort != "2025-06" || len(got.Groups) != 1 || got.Groups[0].Coverage.Reports != 35 || got.Groups[0].Cells["d5"].State != "mature" {
+		t.Fatalf("post-purge population = %+v", got)
+	}
+}
 
 func TestPurgedMonthBypassesCacheAcrossProcesses(t *testing.T) {
 	writer := routeTableServer(t)
@@ -53,7 +121,7 @@ func TestPurgedMonthBypassesCacheAcrossProcesses(t *testing.T) {
 	if len(mixed.Groups) != 1 || mixed.Groups[0].Coverage.Reports != 35 || len(mixed.ExcludedMonths) != 1 {
 		t.Fatalf("mixed population = %+v", mixed)
 	}
-	kept, err := reader.st.loadForecastGroupSets(predTestRtype, "2025-07-01", "2025-07-31")
+	kept, err := reader.st.loadForecastGroupSets(predTestRtype, "2025-07-01", "2025-07-31", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}

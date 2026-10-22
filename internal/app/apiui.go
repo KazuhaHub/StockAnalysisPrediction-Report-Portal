@@ -272,6 +272,7 @@ func (s *Server) mustEnrollForPage(user string) bool {
 // meJSON is the shared "who am I" payload for /api/me and /api/login (email +
 // mail_enabled drive the "email me when done" opt-in).
 func (s *Server) meJSON(user string) map[string]any {
+	forecast := s.forecastAccess(user)
 	role, name, email := "", user, ""
 	federated, totpEnabled := false, false
 	if usr := s.st.GetUser(user); usr != nil {
@@ -281,6 +282,8 @@ func (s *Server) meJSON(user string) map[string]any {
 	return map[string]any{
 		"user": user, "name": name, "admin": s.isAdmin(user), "role": role, "perms": permsOf(role),
 		"email": email, "mail_enabled": s.emailEnabled(),
+		// Navigation only; every forecast read resolves current policy independently.
+		"forecast": map[string]any{"scope": forecast.Scope, "external": forecast.External},
 		// Security state, so the account page can branch before the user submits: offering a
 		// password change to a federated account, or enrolment to someone already enrolled, is a
 		// dead end they would otherwise only discover on failure.
