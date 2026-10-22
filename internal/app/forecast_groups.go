@@ -15,13 +15,19 @@ import (
 )
 
 type forecastGroupsResponse struct {
-	OK          bool            `json:"ok"`
-	Mode        string          `json:"mode"`
-	Official    bool            `json:"official"`
-	Range       forecastRange   `json:"range"`
-	Checkpoints []string        `json:"checkpoints"`
-	Unrecorded  int             `json:"unrecorded"`
-	Groups      []forecastGroup `json:"groups"`
+	OK             bool                  `json:"ok"`
+	Mode           string                `json:"mode"`
+	Official       bool                  `json:"official"`
+	Range          forecastRange         `json:"range"`
+	Checkpoints    []string              `json:"checkpoints"`
+	Unrecorded     int                   `json:"unrecorded"`
+	Groups         []forecastGroup       `json:"groups"`
+	ExcludedMonths []forecastPurgedMonth `json:"excluded_months,omitempty"`
+}
+
+type forecastPurgedMonth struct {
+	Cohort   string `json:"cohort"`
+	PurgedAt string `json:"purged_at"`
 }
 
 type forecastRange struct {
@@ -35,6 +41,7 @@ type forecastGroup struct {
 	Start    string `json:"start"`
 	End      string `json:"end"`
 	Official bool   `json:"official"`
+	PurgedAt string `json:"purged_at,omitempty"`
 	// Bench is the index every member of this group was frozen with (P4). A range that spans cohorts
 	// with different indexes is split into one group per index, so a cell never pools two baselines.
 	Bench    string                   `json:"bench"`

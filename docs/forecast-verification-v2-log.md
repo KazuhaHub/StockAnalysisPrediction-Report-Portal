@@ -708,3 +708,26 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - This checkpoint is not P16 completion or merge readiness: persistent purge checks, phases,
   drawer population semantics and OpenAPI remain, as does reconciliation with P26's protected
   access rules. No schema, Apps-branch, deployment or workflow-publication change is included.
+
+### P16 — persistent purge-read checkpoint (2026-10-22, in progress)
+
+- Statistics and drawer requests now check persisted retention markers before consulting cell
+  caches. Marker query/scan failures return a database error rather than serving cached metrics.
+  Monthly ranges retain months represented only by markers; those rows and drawers return
+  `purged` with `purged_at`, without scoring or reusing a mature cell.
+- Exploratory populations exclude marked cohorts and disclose sorted `excluded_months` with
+  dates. A request with exclusions bypasses full-population cache entries; unaffected requests
+  retain their existing cache behavior. Later writes into a marked cohort cannot resurrect it.
+  Optional client types describe the new metadata; final visual rendering remains with P19.
+- Tests first failed for the absent purge response fields. The final test uses two independent
+  file-backed SQLite connections and two servers, primes the reader's mature cache, and runs the
+  writer's real retention transaction. Mixed-range controls verify exact surviving metrics,
+  all surviving drawer members and matching exclusions, including same-symbol rows reintroduced
+  into the marked month. Marker-table failure refuses both monthly/custom statistics and drawers.
+- Independent review requested the mixed-range control; the added control closed that gap and
+  follow-up review found no actionable issue. Full Go/SQLite/Postgres regression passed
+  (32.676 s for the app package), as did vet/staticcheck, three repeated purge/golden race passes
+  (13.802 s), web typecheck and the 18 targeted matrix/export tests. Golden files are unchanged.
+- This remains an unmerged P16 checkpoint. Phases, drawer population semantics, OpenAPI and
+  P26 access reconciliation still need completion and final review. No schema or production
+  action was performed.

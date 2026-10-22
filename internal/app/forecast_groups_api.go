@@ -87,6 +87,21 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 	}
 
 	resp.Official = mode == "month"
+	purges, err := s.st.loadPredictionPurgeMarkers()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	if resp.Official {
+		earliest := forecastEarliestWithPurges(loadFrom, rtype, purges)
+		periods = monthlyPeriods(earliest, now)
+		if len(periods) > 0 {
+			loadFrom, loadTo = periods[0].Start, periods[len(periods)-1].End
+			resp.Range.From, resp.Range.To = loadFrom, loadTo
+		}
+	} else {
+		resp.ExcludedMonths = forecastExcludedMonths(rtype, loadFrom, loadTo, purges)
+	}
 	today := now.In(chinaZone).Format("2006-01-02")
 
 	var sets []*groupSet
@@ -99,7 +114,27 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 	}
 
 	populationFrom, _ := s.st.ForecastPopulationFrom()
-	resp.Groups = s.buildForecastGroups(periods, sets, rtype, today, resp.Official, populationFrom)
+	sets = forecastWithoutPurgedSets(sets, rtype, purges)
+	active := make([]forecastPeriod, 0, len(periods))
+	for _, p := range periods {
+		if _, purged := purges[[2]string{rtype, p.Start[:7]}]; !resp.Official || !purged {
+			active = append(active, p)
+		}
+	}
+	resp.Groups = s.buildForecastGroupsWithCache(active, sets, rtype, today, resp.Official, populationFrom, len(resp.ExcludedMonths) == 0)
+	if resp.Official {
+		for _, p := range periods {
+			if at, purged := purges[[2]string{rtype, p.Start[:7]}]; purged {
+				g := forecastGroup{Label: p.Label, Start: p.Start, End: p.End, Official: true, PurgedAt: at,
+					Cells: make(map[string]*forecastCell, len(predCheckpoints))}
+				for _, cp := range predCheckpoints {
+					g.Cells[cp] = &forecastCell{State: "purged"}
+				}
+				resp.Groups = append(resp.Groups, g)
+			}
+		}
+		sort.SliceStable(resp.Groups, func(i, j int) bool { return resp.Groups[i].Start < resp.Groups[j].Start })
+	}
 	writeJSON(w, resp)
 }
 
@@ -108,6 +143,11 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
 func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time) []forecastGroup {
+	return s.buildForecastGroupsWithCache(periods, sets, rtype, today, official, populationFrom, true)
+}
+
+// Exploratory ranges containing removed cohorts cannot reuse an old full-population cell.
+func (s *Server) buildForecastGroupsWithCache(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, useCache bool) []forecastGroup {
 	// The cohort's benchmark is the frozen code of its earliest in-population accepted set — a
 	// ledger-wide answer, not just what this range happened to load. A custom range that starts
 	// mid-cohort must not pick a later set and call the cohort something else.
@@ -214,7 +254,7 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 			for j := range ch {
 				key := forecastGroupCellKey(rtype, j.start, j.end, j.bench, j.cp)
 				c, gen := s.cachedForecastCell(key)
-				if c != nil {
+				if useCache && c != nil {
 					out <- result{j.gi, j.cp, c}
 					continue
 				}

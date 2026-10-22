@@ -390,19 +390,27 @@ func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
 // PurgedPredictionMonths returns the months a pass has purged, keyed by (rtype, cohort), so the monthly
 // page can label them "purged" instead of recomputing them as months with no predictions.
 func (s *Store) PurgedPredictionMonths() map[[2]string]string {
+	out, _ := s.loadPredictionPurgeMarkers()
+	return out
+}
+
+// loadPredictionPurgeMarkers preserves errors for read routes: a failed marker lookup must never
+// authorize serving a stale mature cell as though no retention pass had happened.
+func (s *Store) loadPredictionPurgeMarkers() (map[[2]string]string, error) {
 	out := map[[2]string]string{}
 	rows, err := s.query(`SELECT rtype, cohort, purged_at FROM prediction_purges`)
 	if err != nil {
-		return out
+		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var rtype, cohort, at string
-		if rows.Scan(&rtype, &cohort, &at) == nil {
-			out[[2]string{rtype, cohort}] = at
+		if err := rows.Scan(&rtype, &cohort, &at); err != nil {
+			return nil, err
 		}
+		out[[2]string{rtype, cohort}] = at
 	}
-	return out
+	return out, rows.Err()
 }
 
 // deleteReportChunk deletes one chunk of reports (+ their tracking_items) in a single transaction,

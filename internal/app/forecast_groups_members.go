@@ -12,13 +12,15 @@ import (
 )
 
 type forecastMembersResponse struct {
-	OK         bool   `json:"ok"`
-	Label      string `json:"label"`
-	Start      string `json:"start"`
-	End        string `json:"end"`
-	Bench      string `json:"bench"`
-	Checkpoint string `json:"checkpoint"`
-	State      string `json:"state"`
+	OK             bool                  `json:"ok"`
+	Label          string                `json:"label"`
+	Start          string                `json:"start"`
+	End            string                `json:"end"`
+	Bench          string                `json:"bench"`
+	Checkpoint     string                `json:"checkpoint"`
+	State          string                `json:"state"`
+	PurgedAt       string                `json:"purged_at,omitempty"`
+	ExcludedMonths []forecastPurgedMonth `json:"excluded_months,omitempty"`
 	// The gate's own counts, so the drawer's headline matches the matrix without rescoring.
 	Resolved   int              `json:"resolved"`
 	Total      int              `json:"total"`
@@ -90,6 +92,11 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	}
 
 	now := s.forecastNow()
+	purges, err := s.st.loadPredictionPurgeMarkers()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
 	var periods []forecastPeriod
 	switch mode {
 	case "month":
@@ -102,7 +109,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
 		}
-		periods = monthlyPeriods(earliest, now)
+		periods = monthlyPeriods(forecastEarliestWithPurges(earliest, rtype, purges), now)
 	case "custom":
 		from, to := q.Get("from"), q.Get("to")
 		group := q.Get("group")
@@ -130,12 +137,18 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		jsonErrorCode(w, http.StatusNotFound, "label_not_found", "no such group in this range")
 		return
 	}
+	if at, purged := purges[[2]string{rtype, period.Start[:7]}]; mode == "month" && purged {
+		writeJSON(w, forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
+			Checkpoint: cp, State: "purged", PurgedAt: at, Members: []forecastMember{}})
+		return
+	}
 
 	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	sets = forecastWithoutPurgedSets(sets, rtype, purges)
 	populationFrom, _ := s.st.ForecastPopulationFrom()
 	// Use the matrix's ledger-wide answer, not the loaded slice: the slice can start after a pre-live
 	// set or omit part of the cohort, and then the drawer would show a different population.
@@ -199,6 +212,9 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		Checkpoint: cp,
 		State:      state,
 		Members:    []forecastMember{},
+	}
+	if mode == "custom" {
+		out.ExcludedMonths = forecastExcludedMonths(rtype, period.Start, period.End, purges)
 	}
 	var ids []int64
 	for _, gs := range members {

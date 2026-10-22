@@ -1514,7 +1514,7 @@ export interface ForecastCoverage {
 }
 
 export interface ForecastCell {
-  state: 'open' | 'pending' | 'small' | 'mature'
+  state: 'open' | 'pending' | 'small' | 'mature' | 'purged'
   n?: number
   resolved?: number
   total?: number
@@ -1558,6 +1558,7 @@ export interface ForecastGroup {
   start: string
   end: string
   official: boolean
+  purged_at?: string
   /** The index every member was frozen with (P4); a split custom range has one group per index. */
   bench: string
   coverage: ForecastCoverage
@@ -1572,6 +1573,12 @@ export interface ForecastGroupsResponse {
   checkpoints: ForecastCheckpoint[]
   unrecorded: number
   groups: ForecastGroup[]
+  excluded_months?: ForecastPurgedMonth[]
+}
+
+export interface ForecastPurgedMonth {
+  cohort: string
+  purged_at: string
 }
 
 export interface ForecastMember {
@@ -1603,4 +1610,6 @@ export interface ForecastMembersResponse {
   checkpoint: ForecastCheckpoint
   state: string
   members: ForecastMember[]
+  purged_at?: string
+  excluded_months?: ForecastPurgedMonth[]
 }
