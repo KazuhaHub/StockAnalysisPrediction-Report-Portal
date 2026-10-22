@@ -220,19 +220,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
   1.26.10 security fix #144 and upload-test timer fix #147 are merged. The vendor-evidence
-  follow-up starts from main at `669810fd`.
+  follow-up #148 is merged as `fa250ced`. The halt-evidence branch starts from that main.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; CI is green on `27a5a6af`. It remains a draft because read-only merge
+  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. A narrow P7/P8 evidence
-  follow-up on `fix/forecast-qfq-response` reproduces and fixes the real qfqday parsing gap.
-- **Next step.** Validate/review the qfq fix, resolve the P26 integration sequence, then continue P27 and P28.
+  is pending; neither Apps branch nor the user's checkout was changed. The independent
+  `test/forecast-halt-evidence` lane adds captured suspension/delisting controls without runtime changes.
+- **Next step.** Validate/review the halt evidence, resolve the P26 integration sequence, then continue P27 and P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
   action has been performed here.
-- **Known limitations.** P7 still lacks live-suspension, delisted and Beijing trading-day evidence;
-  the follow-up captures real 301/689/low-price controls and a P8 bonus/unchanged-ratio pair. The P15
+- **Known limitations.** Beijing 30%/listing-day and rights-issue captures remain missing. The
+  follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
+  controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
   responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
   0038/0040 and P22 uses 0039.
@@ -595,3 +597,35 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   all 120 Vitest files / 1006 tests, production web build and a subsequent root-level Go embed
   build passed. All seven captures retain every response byte plus one terminal LF and match
   their documented SHA-256. Exact-head full CI and CodeQL remain required before merge.
+
+### P7 follow-up — live suspension and delisted-response evidence (2026-10-22)
+
+- Starts from main `fa250ced`, independently of P26 and both Apps branches. P26's normal main
+  integration at `840e9a9c` passed full exact-head CI/CodeQL and local combined validation, but
+  remains a draft for shared-token integration ordering; no coordination message is authorized.
+- Six full read-only Tencent captures and independent issuer/exchange references are recorded
+  in `internal/app/testdata/quote/forecast-halt-evidence.md`, with parameters and SHA-256.
+  Existing forecast golden outputs and schema are unchanged.
+- A short live halt has fewer than three later sessions: current-stamp evidence resolves it even
+  with the lag valve set; removing evidence refuses stale/lag instead. A longer halt uses the
+  real classifier, transactional ledger writer, evaluator and qfq fetch replay to settle d5
+  during a halt that began on S0. Stock return is 0; benchmark return is -365 bp from S0, not
+  -363 bp from the earlier traded base_date. Source and flags are asserted on the stored row.
+- A delisted instrument returns empty recent history plus a current-looking snapshot, and real
+  2019 candles in a separate historical window. The pure baseline resolver rejects both arrays
+  for a 2026 receipt. A real evaluator replay of the empty recent response does not promote its
+  snapshot to a baseline: s0_fen remains NULL, no mark resolves, delivery failure spends no
+  attempts, and no qfq call occurs. This is source-availability evidence,
+  not a claim that unavailable delisted history can settle or that the parser detects delisting.
+- Tests first failed for absent capture files. Three temporary production mutations proved
+  guard effectiveness: wrong benchmark anchor, ignored stamp and snapshot-to-candle fabrication
+  each failed its captured test. All mutations were reverted. Corrected stale developer comments
+  about non-cash event text and synthetic ratio examples; no runtime semantics are changed.
+- Independent review found one documentation overclaim (pure historical-array checks versus
+  recent-response evaluator replay); the log and provenance now distinguish those layers, and
+  follow-up review confirmed closure with no further findings. Full Go/Postgres regression,
+  vet/staticcheck, three repeated captured/long-look-back race runs, web typecheck, all 120
+  Vitest files / 1006 tests, production web build and serialized embed rebuild passed. Final
+  captured/arithmetic checks passed after the comment/error-text corrections. Six bodies match
+  their original response bytes plus terminal LF and documented SHA-256. Fresh exact-head CI
+  remains required before merge; no runtime, schema or production change is included.
