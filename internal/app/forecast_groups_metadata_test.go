@@ -143,3 +143,28 @@ func TestGroupSummaryReconcilesMatureAndPendingCells(t *testing.T) {
 		t.Fatalf("summary mixed counts, stale metadata or estimate qualifiers: %+v", got)
 	}
 }
+
+func TestGroupSummaryExcludesPurgedMonthsAndRespectsCustomRange(t *testing.T) {
+	s := routeTableServer(t)
+	for _, month := range []string{"2025-06", "2025-07", "2025-08"} {
+		seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: month + "-10", S0Fen: ip(10000), HorizonStd: true,
+			Marks: map[string]gsMark{"d5": {Status: markResolved}}})
+	}
+	if _, err := s.st.exec(`INSERT INTO prediction_purges(rtype,cohort,purged_at,sets_removed) VALUES(?,?,?,?)`, predTestRtype, "2025-06", "2026-10-22T00:00:00Z", 1); err != nil {
+		t.Fatal(err)
+	}
+	// A late row in a purged month must not resurrect the month in summary scalars or phases.
+	monthly := doGroups(t, s, "/?mode=month")
+	if monthly.ForecastGroupsMetadata == nil || monthly.Summary.Sets != 2 || monthly.Summary.Since != "2025-07-10" || monthly.Summary.MarksByPhase[predPhaseResolved] != 2 {
+		t.Fatalf("purged month reappeared in summary: %+v", monthly.ForecastGroupsMetadata)
+	}
+	custom := doGroups(t, s, "/?mode=custom&from=2025-06-01&to=2025-07-31&group=all")
+	if custom.Summary.Sets != 1 || custom.Summary.Accepted != 1 || custom.Summary.Stocks != 1 || custom.Summary.Since != "2025-07-10" || custom.Summary.MarksByPhase[predPhaseResolved] != 1 || len(custom.ExcludedMonths) != 1 {
+		t.Fatalf("custom summary escaped retained range: %+v", custom.ForecastGroupsMetadata)
+	}
+	for _, phaseCounts := range []map[string]int{monthly.Summary.MarksByPhase, custom.Summary.MarksByPhase} {
+		if phaseCounts["unknown"] != 0 {
+			t.Fatal("valid retained population lost its timing")
+		}
+	}
+}

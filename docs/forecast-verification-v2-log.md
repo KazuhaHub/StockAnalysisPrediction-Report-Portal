@@ -1252,3 +1252,20 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Do not represent P17 as reviewed or merge-ready; its requirement/contract audit and independent
   review remain outstanding. No PR was opened, no production or Apps branch changed, and the
   pending schema/dependency authorization boundaries remain unchanged.
+
+### P17 — summary retention and contract audit (2026-10-22)
+
+- Added a real-route cross-month regression for summary retention boundaries. A marked June
+  containing a late ledger row stays excluded; a June-July custom range counts July only and
+  cannot import August into its scalar or phase totals. The existing monthly record still counts
+  July and August separately, including the same symbol appearing in both cohorts.
+- Documented every response-level explanation field and its population/denominator in the
+  operations runbook. In particular, accepted rows include repeat editions while checkpoint
+  phase counts use classified members; retained counts are not historical all-time totals.
+  Capabilities are permission hints, not available capacity, and delayed next dates may be past.
+- These fields remain on session/admin statistics surfaces, not the machine API. No new machine
+  endpoint or OpenAPI route was added. The earlier typed response round-trip guard remains intact.
+- The new route test passed; three repeats of the summary/metadata/privacy/capability race tests
+  passed (3.714 s), and diff checks passed. No production code changed in this checkpoint.
+  Independent response-level review, final P17 requirement audit and existing authorization
+  holds remain outstanding; this is not merge readiness.

@@ -127,6 +127,36 @@ An interval crossing a missing year must retain the weekday "on or after" wordin
 claim an expected exchange date. In October 2026 the verified runtime table covers 2026 only;
 2027 remains deliberately absent pending its annual notice and December review.
 
+## Reader statistics explanation contract
+
+The session-only groups response and its temporary admin alias may carry the following flattened
+metadata. These fields are not a new machine API and must not be added to `/api/v1` routes merely
+to expose the reader summary. External-all readers receive none of the fields in this section;
+own readers receive only their scoped population. A missing field is not a measured zero.
+
+| Field | Meaning |
+| --- | --- |
+| `summary.since`, `sets`, `accepted`, `stocks` | Earliest retained receipt date, retained row count, accepted row count, and distinct nonempty symbols in the requested range and population. Accepted includes repeat editions; it is not the statistical member count. |
+| `summary.marks_by_phase` | Checkpoint obligations of classified members and pending-baseline candidates represented by the returned cells. Duplicate, rejected and other excluded rows do not create obligations. The h12 population includes standard horizons only. Mature cells contribute resolved and final counts; purged cells contribute nothing. |
+| `summary.next_result_not_before`, `expected` | Earliest outstanding date across the returned cells. It can already be in the past when settlement is delayed. `expected` qualifies an exchange-schedule estimate, not a promised or observed result. Tied estimates retain the flag only if every tied date is qualified. |
+| `rtypes`, `min_n` | Sorted covered report types and the minimum publishable sample size. |
+| `limits` | `max_range_months`, `max_week_groups`, `official_slots`, `explore_slots`, `wait_sec`, `custom_per_min`, and `members_per_min`; the configured ceilings, not remaining budget. |
+| `generated_at`, `ledger_start` | UTC response-generation instant and the declared ledger boundary. An empty ledger start means unset, not the beginning of retained history. |
+| `capabilities` | `monthly`, `custom`, and `members` permission hints from the same decision used by route gates. They do not bypass fresh authorization, validation, rate limits or scorer capacity. |
+| `evaluator.mode` | `0`, `dry`, or `1`; a paused evaluator is distinct from a failed checkpoint. |
+
+Non-mature cells carry `pending_reasons`, `failed_cap_exceeded`, and, when known, `not_before` with
+its optional `expected` qualifier. Phase counts include resolved and final entries to reconcile
+the selected population; unclassifiable timing is counted as `unknown`. The failure-cap flag uses
+the same final-refusal ratio and strict threshold as the existing maturity gate. Explanations are
+request-time copies, not additional scoring and not entries in the mature-cell cache.
+
+Retention exclusions apply before summary construction. A late row in a marked month cannot
+resurrect that month in summary counts. These scalars describe retained data, not all-time totals;
+the separate purge metadata must remain visible where authorized. Historical own attribution is
+still pending the separately approved evidence-storage design, so this contract is not release
+readiness for the current draft.
+
 ## Recording an incident
 
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and
