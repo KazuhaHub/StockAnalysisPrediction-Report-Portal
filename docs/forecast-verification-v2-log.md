@@ -219,15 +219,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144 and upload-test timer fix #147 are merged. The vendor-evidence
-  follow-up #148 is merged as `fa250ced`. The halt-evidence branch starts from that main.
+  1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
+  #149 and P14 isolated seeded preview #150 (`74e8c564`, current main) are merged.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The independent
-  `test/forecast-halt-evidence` lane adds captured suspension/delisting controls without runtime changes.
-- **Next step.** Validate/review the halt evidence, resolve the P26 integration sequence, then continue P27 and P28.
+  is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26/P37
+  integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
+  at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
+  held by the dependency audit and existing DOMPurify #138 needs coordination permission.
+  Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
+  capability isolation and pure operator-order selection are implemented; the actual walker,
+  evaluator/readiness wiring and source-panel integration remain outstanding. No P23 PR is open.
+- **Next step.** Finish P23's uncached source walk and evidence/health isolation, then its readiness,
+  panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -236,7 +242,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
   controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
+  responsive parity and the reading UI still require owner review. Re-check ADR numbers before P23: Apps reserves
   0038/0040 and P22 uses 0039.
   P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
@@ -708,6 +714,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   future walker to turn into `no_source` rather than falling back to a display vendor.
 - Tests were written before the resolver and failed with the empty implementation, then passed
   with operator-order, stable-partition, primary-removal, duplicate/unknown-name, positive market
-  and negative market/code controls. Focused checks passed (0.413 s); full checks and independent
-  review remain pending. No actual vendor grant or evidence flag is enabled yet; this checkpoint
+  and negative market/code controls. Focused checks passed (0.413 s). No actual vendor grant or
+  evidence flag is enabled yet; this checkpoint
   changes no evaluator call site, source order setting, database or production behavior.
+- Code/test head `1432d42e` passed full Go regression with local Postgres enabled (app package
+  34.320 s), three-repeat targeted race checks (1.900 s), vet, staticcheck and build. Independent
+  read-only review found no actionable issues in operator ordering, partition stability, explicit
+  grants, primary requirements or display compatibility. The review used SQLite only and did not
+  cover the still-absent vendor admission, source walk, evaluator, readiness or panel behavior.
