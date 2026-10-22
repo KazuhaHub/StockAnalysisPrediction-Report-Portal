@@ -53,6 +53,8 @@ const (
 type forecastEvaluator struct {
 	mu      sync.Mutex
 	running bool
+	// Immutable copies of validated completed calendars, shared with readers under mu.
+	readCalendars map[string][]string
 	// fetch is the market-data seam. Nil means the real vendor call; a test replaces it so the
 	// evaluator's arithmetic and its session rules are testable without a network.
 	fetch func(ctx context.Context, market, code, from, to string) (*QuoteResp, error)
@@ -339,6 +341,7 @@ func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec b
 		return series, &benchFault{code: "calendar_bad",
 			err: fmt.Errorf("benchmark %q calendar has a zero-volume bar", spec.Code)}
 	}
+	e.publishReadCalendar(spec.Code, completedSessions(series, e.clock()))
 	return series, nil
 }
 

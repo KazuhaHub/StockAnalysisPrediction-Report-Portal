@@ -1428,9 +1428,9 @@ export interface PredictionMark {
   ret_bp?: number
   bench_ret_bp?: number
   attempts?: number
-  /** Reading-page state (P10): waiting_s0 | waiting | retrying | resolved | final. */
-  phase?: 'waiting_s0' | 'waiting' | 'retrying' | 'resolved' | 'final'
-  /** The earliest date the mark can settle, from a weekday projection. */
+  /** Derived reading-page state; retrying requires a recorded due session. */
+  phase?: 'waiting_s0' | 'waiting' | 'settling' | 'retrying' | 'overdue' | 'resolved' | 'final'
+  /** The earliest date the mark can settle; a projection is only a lower bound. */
   not_before?: string
 }
 

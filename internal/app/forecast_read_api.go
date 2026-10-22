@@ -74,7 +74,7 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 			sets[i].Membership = statuses[sets[i].ID]
 		}
 	}
-	annotateReadPhases(sets, s.forecastNow())
+	s.annotateReadPhases(sets, s.forecastNow())
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
@@ -130,7 +130,7 @@ func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, s
 		v1err(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
-	annotateReadPhases(sets, s.forecastNow())
+	s.annotateReadPhases(sets, s.forecastNow())
 	if sc == nil {
 		_ = s.st.annotateForecastReadMembership(sets)
 	}

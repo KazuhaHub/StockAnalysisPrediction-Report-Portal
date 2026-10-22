@@ -3,8 +3,8 @@ package app
 // Checkpoint scheduling (P1, ADR 0029 §4).
 //
 // This file is the ONE statement of the checkpoint arithmetic. The evaluator calls it with the
-// benchmark's COMPLETED sessions; the read path (P10/P16) calls it with a weekday projection, where
-// every date is a lower bound because holidays only ever delay a session. Nothing else computes a
+// benchmark's COMPLETED sessions; the read path uses a published completed-calendar snapshot when
+// it covers the mark, otherwise a weekday projection whose dates are lower bounds. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
 // S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.
@@ -278,15 +278,29 @@ func refusalClassOf(code string) string {
 	return refusalSource
 }
 
-// annotateReadPhases fills each mark's reading-page phase from a WEEKDAY projection, never a vendor
-// calendar. A holiday can make a projected date one or two sessions early, never late, so the page
-// can say "on or after <date>" truthfully without a fetch.
-//
-// The vocabulary is deliberately small, and `retrying` is only ever reached with evidence: a mark
-// that has never recorded a failed attempt is waiting, not failing.
+const (
+	predPhaseWaitingS0 = "waiting_s0"
+	predPhaseWaiting   = "waiting"
+	predPhaseSettling  = "settling"
+	predPhaseRetrying  = "retrying"
+	predPhaseOverdue   = "overdue"
+	predPhaseResolved  = "resolved"
+	predPhaseFinal     = "final"
+)
+
+// annotateReadPhases is the conservative fallback without a published completed calendar.
 func annotateReadPhases(sets []PredictionSet, now time.Time) {
+	annotateReadPhasesWithCalendars(sets, now, nil)
+}
+
+// Reads never fetch a calendar. A published completed-session snapshot can establish an exact
+// historical due date; otherwise weekday dates remain lower bounds, not failed attempts.
+func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calendars map[string][]string) {
 	for i := range sets {
 		set := &sets[i]
+		for j := range set.Marks {
+			set.Marks[j].Phase, set.Marks[j].NotBefore = "", ""
+		}
 		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
 		if !ok {
 			continue
@@ -299,37 +313,58 @@ func annotateReadPhases(sets []PredictionSet, now time.Time) {
 			s0 = projectedS0(madeAt)
 		}
 		s0Ready := s0 != "" && readSessionCompleted(s0, now)
-		today := now.In(chinaZone).Format("2006-01-02")
 		for j := range set.Marks {
 			m := &set.Marks[j]
 			switch m.Status {
 			case markResolved:
-				m.Phase = "resolved"
+				m.Phase = predPhaseResolved
 				continue
 			case markRefusedFinal:
-				m.Phase = "final"
+				m.Phase = predPhaseFinal
 				continue
 			}
 			if s0Projected && !s0Ready {
-				m.Phase, m.NotBefore = "waiting_s0", s0
+				m.Phase, m.NotBefore = predPhaseWaitingS0, s0
 				continue
 			}
 			sch := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, s0, sessions)
+			exact := false
+			if cal := calendars[set.BenchCode]; len(cal) > 0 && cal[0] <= madeOn {
+				// A frozen start missing from the snapshot is a gap, not permission to replace it.
+				if set.S0Date == "" || containsDate(cal, set.S0Date) {
+					actual := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date, cal)
+					if actual.Known && actual.Due != "" {
+						sch, exact = actual, true
+					}
+				}
+			}
 			if sch.Due == "" {
-				m.Phase = "waiting"
+				m.Phase = predPhaseWaiting
 				continue
 			}
-			if today < sch.Due {
-				m.Phase, m.NotBefore = "waiting", sch.Due
+			// A recorded session is exact evidence only if it does not precede the conservative
+			// schedule. Malformed or contradictory dates cannot manufacture retry status.
+			if validReportDate(m.SessionDate) && m.SessionDate >= sch.Due {
+				sch.Due, exact = m.SessionDate, true
+			}
+			due := dateAtClose(sch.Due)
+			if due.IsZero() || now.Before(due) {
+				m.Phase, m.NotBefore = predPhaseWaiting, sch.Due
 				continue
 			}
-			if m.SessionDate != "" {
-				// A recorded due session means the evaluator tried and deferred. That is the only
-				// evidence that makes "retrying" true.
-				m.Phase, m.NotBefore = "retrying", ""
-				continue
+			deadline := 21 * 24 * time.Hour
+			if exact {
+				deadline = 48 * time.Hour
 			}
-			m.Phase, m.NotBefore = "waiting", sch.Due
+			switch {
+			case !now.Before(due.Add(deadline)):
+				m.Phase = predPhaseOverdue
+			case validReportDate(m.SessionDate) && m.SessionDate >= sch.Due:
+				m.Phase = predPhaseRetrying
+			default:
+				m.Phase = predPhaseSettling
+			}
+			m.NotBefore = sch.Due
 		}
 	}
 }

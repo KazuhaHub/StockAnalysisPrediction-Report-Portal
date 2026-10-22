@@ -103,8 +103,8 @@ type PredictionMark struct {
 	BenchRetBp  *int32 `json:"bench_ret_bp,omitempty"`
 	Attempts    int    `json:"attempts"`
 	// Phase and NotBefore are the READING page's words for a mark (P10): a pending mark is not a
-	// failure, and the page must not call it one. Filled from a weekday projection by the read
-	// route, never stored.
+	// failure, and the page must not call it one. Derived from published completed sessions or a
+	// conservative weekday projection by the read route, never stored.
 	Phase     string `json:"phase,omitempty"`
 	NotBefore string `json:"not_before,omitempty"`
 }

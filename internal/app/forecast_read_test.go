@@ -422,9 +422,8 @@ func TestPayloadWithheldFromScopedReader(t *testing.T) {
 	}
 }
 
-// TestReadPhaseNeverClaimsRetryingWithoutEvidence: a pending or deferred mark is "waiting on or
-// after <date>", never "fetch failed". Retrying needs a recorded due session, which is the evidence
-// that an attempt actually happened.
+// TestReadPhaseNeverClaimsRetryingWithoutEvidence: elapsed lower bounds can settle or become
+// overdue without implying a failed fetch. Retrying requires a recorded due session.
 func TestReadPhaseNeverClaimsRetryingWithoutEvidence(t *testing.T) {
 	s := newV1Server(t)
 	_, setID := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
@@ -483,14 +482,14 @@ func TestReadPhaseNeverClaimsRetryingWithoutEvidence(t *testing.T) {
 		t.Errorf("d60 = %q, want waiting (a recorded session before its due date is not a retry)", m.Phase)
 	}
 
-	// After the due date, a deferred mark with no recorded session is still waiting; one with a
-	// recorded session is retrying.
+	// Both deadlines have passed: no attempt is needed to describe a result as overdue, but
+	// neither a refusal nor an elapsed projection is evidence for the word retrying.
 	late := phases(shanghai(2026, time.December, 1, 16, 0))
-	if m := late["d5"]; m.Phase != "waiting" {
-		t.Errorf("d5 after its due date = %q, want waiting (no recorded attempt)", m.Phase)
+	if m := late["d5"]; m.Phase != "overdue" {
+		t.Errorf("d5 after its deadline = %q, want overdue (not retrying)", m.Phase)
 	}
-	if m := late["d20"]; m.Phase != "retrying" {
-		t.Errorf("d20 = %q, want retrying (a due session was recorded)", m.Phase)
+	if m := late["d20"]; m.Phase != "overdue" {
+		t.Errorf("d20 = %q, want overdue (recorded session over 48 hours ago)", m.Phase)
 	}
 
 	// Before S0 has completed, the panel says so rather than inventing a checkpoint date.

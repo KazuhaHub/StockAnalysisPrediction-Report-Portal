@@ -731,3 +731,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - This remains an unmerged P16 checkpoint. Phases, drawer population semantics, OpenAPI and
   P26 access reconciliation still need completion and final review. No schema or production
   action was performed.
+
+### P16 — read-phase and published-calendar checkpoint (2026-10-22, in progress)
+
+- Added the seven reader phase constants. An unresolved mark waits until its 15:30 lower bound,
+  then settles; it becomes overdue after 21 days without an exact date, or 48 hours after an
+  evidenced exact due date. Only a valid recorded due session can produce `retrying`; malformed,
+  contradictory early and future session records do not manufacture a retry. Terminal statuses
+  win, and repeated annotation clears previous derived dates and phases.
+- Readers can reuse immutable copies of evaluator-validated completed calendars without fetching
+  market data. Publication occurs only after index/volume validation and excludes intraday and
+  future sessions. A calendar window replaces rather than joins previous windows. Missing
+  receipt coverage or a frozen start absent from the window retains the conservative fallback;
+  an incomplete window cannot establish an exact deadline. No settlement arithmetic changed.
+- Committed test-only scheduled-closure ranges and source URLs from SSE's 2023, 2024, 2025 and
+  2026 notices. The independent session enumeration checks 39,854 receipt/time/checkpoint/frozen
+  start combinations for the lower-bound property, preserving existing normalized leap-day month
+  arithmetic. These are scheduled-calendar test evidence, not runtime calendars or vendor bars.
+- Initial tests exposed the old indefinitely-waiting/retrying behavior and retained derived
+  metadata. New controls cover nanosecond deadline boundaries, immutable input/output copies,
+  invalid-publication retention, no read-time network call and concurrent publication/readers.
+  Independent checkpoint review found no actionable implementation issue. Full Go/SQLite/Postgres
+  regression passed (45.015 s app package); vet/staticcheck, web typecheck and all 120 Vitest files /
+  1006 tests passed. Three repeated phase/calendar/concurrency/golden race passes also passed
+  (40.334 s). Golden fixtures are unchanged.
+- This does not complete P16: source/direction fields, paused notices, drawer population semantics,
+  OpenAPI and protected-access reconciliation remain. No schema or production action is included.
