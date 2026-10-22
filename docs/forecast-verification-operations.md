@@ -203,8 +203,11 @@ metadata, including when using a cookie on the v1 report route. Persistent machi
 credentials retain their existing shape. Stage off still refuses non-admin session predictions.
 These are server contracts; the P20 card presentation and stale-edition UI guards remain separate.
 
-Final access-matrix expansion and the recorded performance gate remain outstanding. This is not
-authorization to enable full in production.
+The stage access matrix now exercises these server surfaces through the real mux on both drivers
+and both Default-scope variants. The [local performance checkpoint](forecast-reading-performance.md)
+records an actual pre-P18 source comparison and the card/full budget, including prefetch. These
+checks do not replace P20 presentation tests, independent review or production observation, and
+are not authorization to enable full in production.
 
 ## Recording an incident
 

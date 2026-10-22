@@ -1364,3 +1364,31 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Final access-matrix expansion, the recorded performance gate and P20 presentation remain
   outstanding. No schema change, Apps-worktree edit, production action or separately owned PR
   mutation was made. The purge-evidence approval and existing integration holds remain pending.
+
+### P18 — route-stage matrix and local performance checkpoint (2026-10-22)
+
+- Extended `TestForecastAccessMatrix` through the real mux for off/card/full/unknown settings,
+  both Default scope variants and both database drivers. Stock/run, hidden reports, prefetch,
+  session/v1 predictions, me hints and stage-independent record/member controls add 4,032 probes
+  across 21 credential/OU subjects. None leaves readable bodies intact while omitting forecast
+  metadata; enrolment and broken-policy walls retain their exact refusals. Positive required
+  paths prevent a blanket denial from satisfying the matrix. Counted-edition metadata joined
+  the recursive own/external/bridge forbidden-path list. Fixture settings restore presence as
+  well as values so absent reader configuration cannot accidentally become an off-valued key.
+- Added an opt-in, shape-validated reading measurement over 240 reports, 60 dates, 41.5 KB bodies
+  and 1,120 accepted sets. It includes real session/security/gzip wrappers, alternating real and
+  prefetch requests and actual all-population sibling classification where authorized. Used the
+  identical measurement source against exported pre-P18 source `0f0c477f` and current application
+  source `5a483f8b`, serially, with three repetitions on SQLite and local Postgres 18.6.
+- Recorded the method, source checksum, every profile's before/card/full p95 and limitations in
+  `forecast-reading-performance.md`. Worst full real-request p95 was 16.471 ms; worst mixed p95
+  was 15.765 ms, below the local 800 ms budget. These in-process warm local measurements do not
+  replace production transport/load observations or the owner-controlled full-stage rollout.
+- Full Go/Postgres regression passed (app package 63.221 s); three-repeat SQLite route-matrix
+  race checks passed (120.568 s), as did vet/staticcheck. Frontend sources are unchanged from the
+  preceding validated checkpoint. The Go embed rebuild passed. The measurement is skipped by
+  default in regular tests.
+- P18 still needs independent review and a final requirement audit before PR/merge readiness.
+  This fixture does not resolve own-scoped purge history; its evidence schema still awaits
+  approval. P20 UI/production observation and Apps/dependency integration holds remain separate.
+  No production action, schema change, Apps edit or separately owned PR mutation was made.
