@@ -68,12 +68,14 @@ browser token. An assertion authorizes only its signed request.
 The backend pins registration/audience/issuer and verifies before dispatch. Nonces
 are accepted once with a fixed capacity and no eviction of live entries. The
 current library is single-process and its nonce cache is ephemeral. Backend
-startup must establish a fresh pairing generation or retain replay evidence;
-merely restarting with an empty cache and unchanged key is not sufficient for
-production acceptance. Resolve pairing through a trusted bounded handshake before
-Portal enables forwarding. A service's new generation never self-authorizes as a
-new Portal registration without the existing shared-key proof and explicit host
-policy. Restored registrations remain disabled for operator pairing/review.
+startup generates a fresh unpredictable boot ID and pins it in the assertion
+verifier. A signed host challenge/backend answer binds that boot to the fixed
+registration, issuer/audience, existing shared key and exact fresh challenge.
+The host verifies that answer before signing a private request for the boot. Old
+boot assertions are refused even after the in-memory nonce cache was reset.
+A boot is not a new registration or an access grant; restored registrations
+remain disabled for operator pairing/review. The shared library implements the
+cryptographic handshake, while HTTP endpoints/proxy wiring remain pending.
 
 ## Transport policy
 
