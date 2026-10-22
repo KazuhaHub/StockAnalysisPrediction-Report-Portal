@@ -642,3 +642,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Hint checkpoint validation: full Go suite with Postgres enabled, vet, staticcheck, web typecheck,
   all 120 Vitest files / 1016 tests and production build passed. Server-side prediction gates and
   bridge shaping remain pending; navigation suppression does not substitute for those gates.
+- Cookie prediction checkpoint: both SPA prediction reads and both v1 cookie reads now resolve
+  current forecast permission before ledger access. `none` answers `forecast_unavailable` after
+  the independent enrolment wall. External/scoped views return accepted, report-backed sets only;
+  the SQL filters precede LIMIT so newer rejected or orphaned sets cannot hide readable results.
+  Payload, errors and membership pointers are omitted. Persistent machine reads keep diagnostics,
+  rejected sets and orphaned history. New failure-direction tests first reproduced the old 200
+  for `none`, membership leakage and rejected rows consuming a one-row limit. Store controls run
+  on SQLite and Postgres. Existing positive fixtures now explicitly grant forecast access; broken
+  account/tree fixtures expect the new strict 403 instead of the old report-level 404.
+- Review found an external decision could race account deletion or restriction removal and then
+  receive nil (unrestricted) legacy report scope. The shared view composition now substitutes
+  deny-all for an external decision plus nil scope, matching the member drawer. Deterministic
+  deletion and unrestriction interleavings first leaked on both report and symbol reads, then
+  passed with the fallback. Independent follow-up review confirmed the finding closed.
+- Apps PRs 141 and 142 both extend app-token identity using username, session revision and account
+  creation identity. Their shared files remain untouched here; bridge prediction identity is still
+  pending and this draft must not merge before that integration and all other P26 requirements.
+- Final cookie checkpoint validation: full Go suite with Postgres enabled passed after the
+  interleaving fix; three targeted race repetitions, vet and staticcheck passed. No web changes
+  were made in this checkpoint. Independent review has no remaining finding in this slice.
