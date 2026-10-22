@@ -214,15 +214,16 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
 
-## Current progress (2026-10-20)
+## Current progress (2026-10-22)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
   P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136. `main` is at `8abb5b12`.
+  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
+  `main` is at `b235be93`.
 - **In flight.** P11 (this PR, #137): ADR 0037, the ADR/design amendments and the operations runbook.
-  It is complete and pushed; CI is blocked by GO-2026-6809 (Go 1.26.9; fixed in 1.26.10), an
-  unrelated toolchain finding. Rebase and re-run once the Go bump lands on `main`
-  (`kazuha/status-plugin-plan`, PR #142, carries it).
+  Its independent review is complete, including the source-outage guidance and ADR-reference
+  corrections. It is rebased onto the toolchain fix and awaiting fresh CI. P15 #143 is prepared
+  separately in an isolated worktree; the parallel Apps branches remain untouched.
 - **Next step.** P39b (owner token for every run) is its own Beta after R1b: it needs P38, P39a and
   P30 deployed, the Dify batch published, and the undeclared-input question answered (§11.1). Then
   R2a: P15/P26/P27/P28 in the access lane and P13/P22 for docs.
