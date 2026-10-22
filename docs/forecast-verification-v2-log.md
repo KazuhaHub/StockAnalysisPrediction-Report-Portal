@@ -522,3 +522,18 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### CI unblock — upload test timer lifetime (2026-10-22)
+
+- P22's docs-only CI passed all 120 files / 1006 assertions but failed on an unhandled callback
+  from `RunAnalysisModal.test.tsx`: `window is not defined` in `useDelayState`. Installed Ant
+  Design UploadList schedules its progress update after 300ms without unmount cancellation;
+  the existing shared teardown only drains the Form's short debounce through a 20ms wait.
+- Kept the fix out of the ADR PR. The upload integration test now owns its fake clock, advances
+  user interactions, explicitly unmounts and executes pending timers inside act while jsdom still
+  exists, asserts zero pending timers, and restores real time in finally. Production code and
+  global test behavior are unchanged; callback exceptions and runaway chains still fail.
+- The regression first found two timers after unmount without the drain; adding the drain passed
+  all 12 modal tests, ten repeated upload checks, the full 120-file / 1006-test suite, typecheck,
+  and full Go/Postgres regression plus vet/staticcheck. Independent review found no actionable
+  issue. Exact-head CI remains mandatory; this is a targeted repair, not a blind retry of P22.
