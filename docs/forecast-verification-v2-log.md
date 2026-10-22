@@ -228,10 +228,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   is pending; neither Apps branch nor the user's checkout was changed. The locally validated
   P16/P26/P37 integration checkpoint is `10190278`. P17 cell explanations are in progress on
   `feat/forecast-groups-explain`, stacked locally on that checkpoint, without an open PR.
+  Its response metadata and retention-range guards are implemented, but independent response-level
+  review remains outstanding. P18 is proceeding locally on `feat/forecast-reader-server`.
   Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
   Independent P37 #151 is held by the unchanged production dependency audit; existing DOMPurify
   update #138 needs permission to reconcile and merge. No red CI has been merged.
-- **Next step.** Complete P17's response summary/capabilities/limits metadata and integration gates,
+- **Next step.** Complete P17's remaining review/integration gates and P18's reading-page server view,
   obtain the purge-evidence schema and dependency PR decisions, and resolve P26's integration
   sequence before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -1269,3 +1271,43 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   passed (3.714 s), and diff checks passed. No production code changed in this checkpoint.
   Independent response-level review, final P17 requirement audit and existing authorization
   holds remain outstanding; this is not merge readiness.
+
+### P18 — reading-stage gate checkpoint (2026-10-22, in progress)
+
+- Added the existing-meta `forecast_reader` setting with closed off/card/full values, default
+  card, unknown-value refusal and an admin full override. Scope remains an independent gate;
+  full cannot widen none. Session prediction routes, including v1 cookie reads, apply the gate;
+  persistent machine tokens and the independently authorized record remain unchanged.
+- The settings endpoint validates the stage before writes and records `forecast.reader` only
+  on an actual transition. Added audit translations in all three locales. No schema changed.
+- Added helper, settings/audit and real-route tests. The first route run exposed a missing
+  session-signing configuration in the test fixture; repaired the fixture and reran validation.
+  Full Go regression with Postgres, three-repeat targeted race checks, vet/staticcheck, web
+  typecheck and all 120 Vitest files / 1020 tests passed.
+- This is a local, unreviewed checkpoint, not P18 completion or release readiness. Stock/run
+  summaries, timeline flags, prefetch/deep-link/edition behavior, the extended access matrix and
+  the benchmark remain outstanding. The own-scoped purge-evidence schema and upgrade path still
+  require approval. No Apps worktree, production setting or separately owned PR was changed.
+
+### P18 — reading navigation and timeline checkpoint (2026-10-22, in progress)
+
+- Added the resolved `forecast_reader` hint to the shared login/me payload without changing
+  `forecast.scope` or the independent record permission. Tests cover all/own/none, external own,
+  admin overrides, unknown settings and repeated live policy reads. Updated the SPA contract types.
+- A readable `r` now selects its own stock-report date and category before default selection,
+  overriding stale date/category parameters. Selection searches only the already-scoped symbol
+  list; foreign-symbol, absent, invalid and unreadable IDs fall back without disclosing a date.
+  The new positive deep-link test failed before the handler change, then passed on both drivers.
+- Added full-stage stock timeline flags from accepted, covered, report-backed ledger identities
+  intersected with the caller's readable reports. Prefetch retains the flags. A 60-day route
+  fixture covers internal all/own, external all, none and admin, rejected and unsupported rows,
+  same-day unreadable accepted reports, every stage, and real/prefetch requests on both drivers.
+  A fault-injected ledger read failure omits the flags while preserving the report and navigation.
+- Isolated fixture versions from the default version configuration and cleaned temporary stage
+  settings so the shared Postgres test database does not inherit test policy changes. The final
+  full Go/Postgres regression passed (app package 52.506 s); three-repeat targeted race checks
+  passed (9.088 s), as did vet/staticcheck, web typecheck and all 120 Vitest files / 1020 tests.
+  The production SPA build and subsequent serialized Go embed rebuild passed.
+- Reading summaries, sibling-edition behavior, the final access matrix and the 800 ms performance
+  gate remain outstanding. Independent review has not covered this checkpoint. No schema, Apps
+  branch, production setting or separately owned PR changed; this is not P18 completion.

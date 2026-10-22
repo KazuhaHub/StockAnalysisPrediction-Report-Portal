@@ -28,7 +28,7 @@ type forecastPredictionView struct {
 
 func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string) (forecastPredictionView, bool) {
 	d := s.forecastAccess(user)
-	if d.Scope == scopeNone {
+	if s.forecastReaderStage(d) == "off" {
 		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 		return forecastPredictionView{}, false
 	}

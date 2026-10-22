@@ -181,6 +181,7 @@
   "audit.a.auth.password_reset": "reset their password by email",
   "audit.a.auth.step_up": "re-proved identity",
   "audit.a.forecast.auto": "changed the forecast verification schedule",
+  "audit.a.forecast.reader": "changed the forecast reading stage",
   "audit.a.forecast.repair": "repair refusals written by the pre-P1 evaluator",
   "audit.a.forecast.bench": "schedule or promote the forecast benchmark",
   "audit.a.forecast.population": "set the forecast verification ledger start",

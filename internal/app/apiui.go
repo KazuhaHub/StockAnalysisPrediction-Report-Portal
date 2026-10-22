@@ -283,7 +283,8 @@ func (s *Server) meJSON(user string) map[string]any {
 		"user": user, "name": name, "admin": s.isAdmin(user), "role": role, "perms": permsOf(role),
 		"email": email, "mail_enabled": s.emailEnabled(),
 		// Navigation only; every forecast read resolves current policy independently.
-		"forecast": map[string]any{"scope": forecast.Scope, "external": forecast.External},
+		"forecast":        map[string]any{"scope": forecast.Scope, "external": forecast.External},
+		"forecast_reader": s.forecastReaderStage(forecast),
 		// Security state, so the account page can branch before the user submits: offering a
 		// password change to a federated account, or enrolment to someone already enrolled, is a
 		// dead end they would otherwise only discover on failure.
@@ -581,6 +582,16 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		return all[i].Time < all[j].Time
 	})
 	q := r.URL.Query()
+	// Resolve the deep link only within the already-scoped symbol list. A readable report ID
+	// selects its own date and category, even when the URL carries stale navigation parameters.
+	selID, _ := strconv.ParseInt(q.Get("r"), 10, 64)
+	linkedDate, linkedKind := "", ""
+	for _, m := range all {
+		if m.ID == selID {
+			linkedDate, linkedKind = m.Date, repKind(m)
+			break
+		}
+	}
 	var order []string // rdate DESC → newest to oldest
 	byDate := map[string][]Rep{}
 	for _, m := range all {
@@ -590,6 +601,9 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		byDate[m.Date] = append(byDate[m.Date], m)
 	}
 	selDate := q.Get("date")
+	if linkedDate != "" {
+		selDate = linkedDate
+	}
 	if _, ok := byDate[selDate]; !ok {
 		selDate = order[0]
 	}
@@ -609,6 +623,9 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		kinds = append(kinds, k)
 	}
 	selKind := q.Get("kind")
+	if linkedKind != "" {
+		selKind = linkedKind
+	}
 	if !containsStr(kinds, selKind) {
 		selKind = kinds[0]
 	}
@@ -622,14 +639,18 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		kindReps[i].Label = tabLabel(kindReps[i])
 	}
 	kindReps, defID := s.orderAndDefault(kindReps)
-	selID, _ := strconv.ParseInt(q.Get("r"), 10, 64)
 	if !repInList(kindReps, selID) {
 		selID = defID
 	}
 	rep := s.loadRep(r, user, selID)
+	predictedDates := s.forecastTimelineDates(user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {
-		timeline = append(timeline, map[string]any{"date": d, "n": len(byDate[d])})
+		node := map[string]any{"date": d, "n": len(byDate[d])}
+		if predictedDates != nil {
+			node["predicted"] = predictedDates[d]
+		}
+		timeline = append(timeline, node)
 	}
 	subtabs := make([]map[string]any, 0, len(kindReps))
 	for _, m := range kindReps {

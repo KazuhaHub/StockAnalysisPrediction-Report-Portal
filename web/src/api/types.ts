@@ -20,6 +20,7 @@ export interface Me {
   must_enroll_2fa?: boolean
   // Navigation hint only; forecast routes always resolve current policy on the server.
   forecast?: { scope: 'all' | 'own' | 'none'; external: boolean }
+  forecast_reader?: 'off' | 'card' | 'full'
 }
 
 // ---- Batch-run feature ----
@@ -325,6 +326,7 @@ export interface HomeResp {
 export interface TimelineNode {
   date: string
   n: number
+  predicted?: boolean
 }
 
 export interface SubTab {
@@ -520,6 +522,8 @@ export interface CleanupConfig {
 // count. It is one shape for both verbs because the GET answers with exactly what the page and the
 // modal between them need, so a save's reload and a fresh open are the same request.
 export interface ForecastSettings {
+  /** Reading-stage policy; independent of evaluator mode and record access. */
+  reader?: 'off' | 'card' | 'full'
   /** Whether the evaluator's background loop runs. Off by default. Kept for one release. */
   enabled: boolean
   /** The three-way mode (P9): off, dry (plan, write nothing), or on. */

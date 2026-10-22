@@ -77,6 +77,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
+		"reader":  s.forecastReaderStage(forecastDecision{Scope: scopeAll}),
 		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
 		// bundle keeps working.
 		"mode":      forecastMode(s.st.GetSetting(setForecastAuto, "0")),
@@ -118,6 +119,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 // cohort so the caller can show it instead of guessing.
 func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in struct {
+		Reader         json.RawMessage  `json:"reader"`
 		Enabled        *bool            `json:"enabled"`
 		Mode           *json.RawMessage `json:"mode"`
 		Bench          *string          `json:"bench"` // legacy spelling of bench_schedule, through R1b
@@ -138,6 +140,13 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// Validate EVERY field before writing any: a request that changes the benchmark and is then
 	// refused for its ledger start must not have persisted the benchmark. "A refusal writes nothing"
 	// is about the request, not about the one field that happened to be checked last.
+	var readerStage string
+	if len(in.Reader) > 0 {
+		if err := json.Unmarshal(in.Reader, &readerStage); err != nil || !validForecastReaderStage(readerStage) {
+			jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "reader must be off, card or full")
+			return
+		}
+	}
 	var bench string
 	benchSet := false
 	cancel := in.BenchCancel != nil && *in.BenchCancel
@@ -362,6 +371,16 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	if len(in.Reader) > 0 {
+		old := s.st.GetSetting(setForecastReader, "card")
+		if old != readerStage {
+			if err := s.st.SetSetting(setForecastReader, readerStage); err != nil {
+				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+				return
+			}
+			s.recordChange(r, user, AuditForecastReader, "settings", setForecastReader, map[string]any{"from": old, "to": readerStage})
+		}
+	}
 	resp := map[string]any{"ok": true}
 	if effective != "" {
 		resp["effective_cohort"] = effective

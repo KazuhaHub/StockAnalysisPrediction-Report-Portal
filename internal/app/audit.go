@@ -126,7 +126,8 @@ const (
 	AuditPredictionsStoreFailed = "predictions.store_failed"
 	// Turning the evaluator on or off. A background loop that reaches a third party is exactly the
 	// kind of change an operator wants attributed.
-	AuditForecastAuto = "forecast.auto"
+	AuditForecastAuto   = "forecast.auto"
+	AuditForecastReader = "forecast.reader"
 	// Setting the ledger start (P5). Write-once, so the one row that carries it has to say who set
 	// which instant and which sets left the record.
 	AuditForecastPopulation = "forecast.population"
@@ -430,7 +431,7 @@ var auditVocabulary = []string{
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
-	AuditForecastAlert, AuditForecastAlertTest,
+	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present
