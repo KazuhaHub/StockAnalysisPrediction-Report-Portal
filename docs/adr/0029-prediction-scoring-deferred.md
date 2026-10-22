@@ -152,19 +152,22 @@ every fill starts at `S0`'s close, not at the report's own baseline.
   - 1-6-4 sends no `owner_token`, so the column would be NULL anyway.
 - **After a purge** (`report_id` NULL), a set is readable only by unrestricted users. A restricted
   reader cannot prove access to a report that no longer exists. **Fail-closed.**
-- **`/api/v1` is token-only** (`routes.go:33`; enforced by
-  `TestTheMachineSurfaceIsNotASessionClass`, `routes_test.go:123`), so the SPA reads a report's sets
-  through a **session** route, `GET /api/report/{id}/predictions`, under the same rules.
+- **The SPA uses session prediction routes.** The v1 routes are bearer-classed, not token-only:
+  their read handlers also accept a valid cookie held at the independent enrolment wall. The SPA
+  uses `GET /api/report/{id}/predictions` and `/api/predictions`; R2a additionally enforces forecast
+  scope on those routes and on cookie/bridge callers of both v1 prediction reads.
 - **Amended 2026-10-20 (P30/P31).** The forecast reads apply `viewerScope` like every other read. A
   reader's principals are the account, the Default OU (which encodes the "all" audience) and the
   **effectively restricted** OUs on its chain only; an unrestricted container is no longer a
   principal, and a read failure or a broken chain scopes to nothing. Ingest writes a `g:` viewer row
-  only for a restricted OU. (Making the app-bridge token carry its user is R2a, not shipped here.)
-- **The group statistics route is `/api/admin/forecast/groups`, gated on `PermManage` — not
-  `/api/v1`.** v1 authorizes by token scope alone (`tokenOK`, `server.go:1002`), and the app bridge
-  mints `query` tokens for any unrestricted user (`apiAppToken`, `apps_api.go:121`), so a v1 route
-  cannot be limited to managers. This is why the monthly page is a **core SPA page** rather than an
-  app.
+  only for a restricted OU.
+- **Amended by [ADR 0039](0039-forecast-verification-for-readers.md) (R2a).** Reader statistics use
+  session routes `/api/forecast/groups*` and per-OU all/own/none; admin aliases remain `PermManage`
+  until P29. The core record moves to `/forecast`, with `/manage/forecast` for operations. Bound
+  app tokens carry their minting user, enforce current scope and return accepted report-backed
+  predictions without payload/errors/membership; they never authorize statistics. Persistent
+  machine prediction diagnostics remain unchanged. ADR 0039 records the full access, reading-stage
+  and edition contract; its rollout status is separate from this accepted decision.
 
 ### 6. The evaluator ships disabled
 
@@ -596,7 +599,7 @@ decision table):
 | **V18. Alert channels** | 2026-10-19 | Email **and** Slack for every evaluator alert and every store failure; SLOs as in plan §8. |
 | **V24. Test runs** | 2026-10-19 | `run_mode: "test"` on the wire, frozen at ingest into its own bucket. |
 | **V26. Finality** | 2026-10-19 | ≥ 10 sessions past due **and** ≥ 4 mark-specific failed attempts; source outages never count. |
-| **Access model** | 2026-10-19 | Per-OU `all`/`own`/`none`, `NULL` inherits (nearest wins), Default `none`, admins `all`, attribution frozen at insert; the one exception is an OU delete re-attributing its sets to its parent. To be recorded as ADR 0039 in R2a. |
+| **Access model** | 2026-10-19 | Per-OU `all`/`own`/`none`, NULL inherits nearest-wins, Default none, admins all; attribution frozen except OU deletion, live subtree populations, external protections and independent reading stages. Recorded in [ADR 0039](0039-forecast-verification-for-readers.md); implementation/deployment follows its staged rollout. |
 | **Owner token for every run** | 2026-10-19 | After the Dify batch is published, `_rp_owner_token` goes to every run; `_rp_*` inputs are reserved (P39a). Amends ADR 0022 R1. |
 
 Two further questions the implementation plan raised are also settled:
