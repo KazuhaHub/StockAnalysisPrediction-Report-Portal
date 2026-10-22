@@ -217,17 +217,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 ## Current progress (2026-10-20)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
-  `e27c7ea8`.
-- **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P11 (ADR 0037 and the Release 1 amendments) is in this PR and closes R1b's code and
-  docs. What remains before the evaluator can be switched on is not R1b: P39b's own Beta (owner
-  token for every run, after the Dify publish), then R2a/P39b as scheduled. R2a starts with P15.
-- **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
-  fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
-  synthetic coverage that replaces them.
-- **Evaluator state.** `forecast_auto` must remain OFF until R1b ships and the readiness list is
-  green.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
+  P30 #135, P31 #136. `main` is at `8abb5b12`.
+- **In flight.** P11 (this PR, #137): ADR 0037, the ADR/design amendments and the operations runbook.
+  It is complete and pushed; CI is blocked by GO-2026-6809 (Go 1.26.9; fixed in 1.26.10), an
+  unrelated toolchain finding. Rebase and re-run once the Go bump lands on `main`
+  (`kazuha/status-plugin-plan`, PR #142, carries it).
+- **Next step.** P39b (owner token for every run) is its own Beta after R1b: it needs P38, P39a and
+  P30 deployed, the Dify batch published, and the undeclared-input question answered (§11.1). Then
+  R2a: P15/P26/P27/P28 in the access lane and P13/P22 for docs.
+- **Open questions / known limitations.** The V20 probe fixtures (P7) and the qfq fixture pair (P8)
+  were not captured; synthetic tests replace them. P30 cannot make a legacy `g:<Default>` viewer row
+  inert, because that principal is also the "all" audience (recorded in the log). P31 treats a
+  missing account row as unscoped; a read failure denies. The runbook has no `no_source` row until
+  P23.
+- **Evaluator state.** `forecast_auto` remains OFF. Readiness item 5 needs a real test alert to reach
+  both Email and Slack; the owner also sets the ledger start and the CSI 800 schedule. See
+  `docs/forecast-verification-operations.md` before switching on.
 
 ### P9 — operating the evaluator
 
