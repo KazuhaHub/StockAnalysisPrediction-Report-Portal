@@ -60,6 +60,23 @@ and the required week of admin full-stage production observation remain separate
 
 ## Reproduce
 
+### Checkpoint repair remeasurement
+
+After the next-checkpoint and terminal-phase repairs, application source `49b49b407804816274f6f179746788a258c334b9`
+was measured again with the identical measurement file and method above, three serial repetitions
+per driver. Across all three profiles, the largest full-stage per-run p95 values were:
+
+| Driver | Real p95 | Prefetch p95 | Alternating real/prefetch p95 |
+| --- | ---: | ---: | ---: |
+| SQLite | 9.128 ms | 1.254 ms | 9.101 ms |
+| Postgres | 12.767 ms | 3.655 ms | 12.606 ms |
+
+All budget assertions passed. This follow-up does not relabel the earlier before/after tables as
+new measurements or change their limitations. Commit `228a9f0a` adds only standard-horizon positive
+controls to the functional tests; its application code and measurement source are unchanged.
+
+### Commands
+
 From the feature checkout, with the local test Postgres DSN configured as described in AGENTS.md:
 
 ```bash

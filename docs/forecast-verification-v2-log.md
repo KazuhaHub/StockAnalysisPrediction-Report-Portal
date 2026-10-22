@@ -226,14 +226,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
   is pending; neither Apps branch nor the user's checkout was changed. The locally validated
-  P16/P26/P37 integration checkpoint is `10190278`. P17 cell explanations are in progress on
-  `feat/forecast-groups-explain`, stacked locally on that checkpoint, without an open PR.
-  Its response metadata and retention-range guards are implemented, but independent response-level
-  review remains outstanding. P18 is proceeding locally on `feat/forecast-reader-server`.
+  P16/P26/P37 integration checkpoint is `10190278`. P17 cell explanations, response metadata and
+  retention-range guards are implemented and independently reviewed, stacked locally on that
+  checkpoint without an open PR. P18 server pieces and their review repairs are locally validated
+  and independently reviewed at `228a9f0a` on `feat/forecast-reader-server`; no P17/P18 PR is open.
   Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
   Independent P37 #151 is held by the unchanged production dependency audit; existing DOMPurify
   update #138 needs permission to reconcile and merge. No red CI has been merged.
-- **Next step.** Complete P17's remaining review/integration gates and P18's reading-page server view,
+- **Next step.** Complete P17/P18 integration and exact-head CI gates,
   obtain the purge-evidence schema and dependency PR decisions, and resolve P26's integration
   sequence before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -1406,3 +1406,41 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Targeted driver regressions passed (0.824 s). Full regression, repeat performance measurement
   and review follow-up remain outstanding at this code checkpoint. P17 metadata review and
   existing schema/integration/production authorization holds remain separate.
+
+### P17/P18 — review repair validation and server requirement audit (2026-10-22)
+
+- Exact application/test head `228a9f0a` passed full Go regression with Postgres enabled (app
+  package 61.285 s), three-repeat targeted race checks with Postgres disabled (11.509 s), vet,
+  staticcheck and the subsequent serialized Go embed build. Independent read-only follow-up
+  closed the nonstandard-horizon h12 finding and found no additional actionable P18 issues.
+  Separate P17 response-metadata review also completed without actionable findings, including
+  retained-range scalars, classified phases, mature totals, purge exclusion, capabilities and
+  external-all omission. Review used SQLite, not a second concurrent Postgres process.
+- Added positive controls proving that a standard-horizon set still has a next h12 obligation
+  when its four session checkpoints are terminal, whether h12 is absent or stored pending.
+  Both-driver targeted controls passed (0.928 s). The fixes therefore remove only inapplicable
+  obligations rather than hiding every missing checkpoint.
+- Remeasured the repaired application source `49b49b40` using the unchanged opt-in benchmark,
+  three serial repetitions per driver. Maximum full real/prefetch/mixed p95 values were
+  9.128/1.254/9.101 ms on SQLite and 12.767/3.655/12.606 ms on Postgres. All 800 ms assertions
+  passed; the performance document records these separately from the earlier before/after run.
+- Binding implementation section 8.3 audit: `forecast_groups_explain_test.go` covers non-mature
+  phase counts, cap boundaries, earliest dates, 500 frozen state comparisons and external-all
+  volume omission. `forecast_groups_metadata_test.go` covers typed JSON round trips, route-gate
+  capability parity, scoped retained ranges, mature/terminal counts and purged-month exclusion.
+  These are local implementation checks, not resolution of the separate own purge-history leak.
+- Binding implementation section 8.4 audit: stage defaults, unknown/off denial, independent scope
+  gates, admin full and audited changes are covered by `forecast_reader_stage_test.go` and the
+  real-mux reading-stage matrix. Deep-link readable/hidden/foreign-ID controls are in
+  `stock_deeplink_test.go`. Stock/Run summaries, selected-body identity, ledger fail-open behavior,
+  full-stage gating and prefetch omission are in `forecast_reading_summary_test.go`; the scoped
+  60-date timeline fixture and reading matrix check positive and negative flags. Edition fixtures
+  cover empty editions, readable siblings, actual counted editions, cross-analysis/cohort denial
+  and machine/bridge shape preservation. Session non-accepted/error redaction and token isolation
+  are exercised by the credential/access matrix. Store/route variants run on both drivers.
+- This closes the local P17/P18 implementation/review audit, not their integration, CI, release
+  or rollout gates. P20 owns the chip/card/overlay/timeline presentation; production baseline
+  review and a week of admin full-stage observations remain unperformed. The owner has confirmed
+  that own readers must not see global purge months; the proposed evidence side table and its
+  compatible upgrade path still need approval before any schema write. No production action,
+  schema change, Apps edit or separately owned PR mutation was made.
