@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,6 +129,19 @@ func (s *Server) forecastAccess(user string) forecastDecision {
 		return forecastDecision{Scope: scopeNone, Reason: "error"}
 	}
 	return resolveForecastScope(sub, ix)
+}
+
+func (s *Server) requireForecastAccess(w http.ResponseWriter, r *http.Request, user string) (forecastDecision, bool) {
+	d := s.forecastAccess(user)
+	if d.Scope == scopeNone {
+		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
+		return d, false
+	}
+	if d.External && r.URL.Query().Get("mode") == "custom" {
+		jsonErrorCode(w, http.StatusForbidden, "forecast_custom_not_allowed", "custom ranges are unavailable to external readers")
+		return d, false
+	}
+	return d, true
 }
 
 // A nil OU slice is the whole ledger; a non-nil empty slice must remain an empty population.

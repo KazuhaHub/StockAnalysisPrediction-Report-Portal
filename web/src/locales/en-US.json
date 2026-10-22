@@ -2117,6 +2117,8 @@
   "err.forecast_eval_off": "The evaluator is off. Turn it on, or use dry mode first.",
   "err.forecast_eval_running": "A pass is already running.",
   "err.forecast_not_ready": "The evaluator is not ready to be switched on.",
+  "err.forecast_unavailable": "Forecast verification is not available for your account.",
+  "err.forecast_custom_not_allowed": "External readers can only view official monthly records.",
   "forecast.eval.awaiting_gate": "Waiting for a dry-run check: {{codes}}",
   "forecast.eval.confirmOn": "Turn automatic settling on?",
   "forecast.eval.confirmOnBody": "Every readiness item must hold. With the switch on, the portal settles due checkpoints and writes them to the ledger.",

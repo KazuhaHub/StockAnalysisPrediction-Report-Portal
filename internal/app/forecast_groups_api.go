@@ -2,9 +2,8 @@ package app
 
 // The group statistics route (plan §7.1).
 //
-// It is under /api/admin and gated by PermManage, not on /api/v1. v1 authorizes by token scope
-// alone, and the app bridge mints query tokens for every unrestricted user, so a v1 route would
-// hand the whole ledger's aggregate to any bridge app. This is a management view.
+// The admin alias keeps the unrecorded count. Reader requests use a fresh scope decision and
+// population, never a machine-token gate; aggregate statistics are not part of /api/v1.
 
 import (
 	"log"
@@ -16,6 +15,19 @@ import (
 )
 
 func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
+	s.serveForecastGroups(w, r, forecastDecision{Scope: scopeAll, Reason: "admin"}, true)
+}
+
+func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request, user string) {
+	d, ok := s.requireForecastAccess(w, r, user)
+	if !ok {
+		return
+	}
+	s.serveForecastGroups(w, r, d, false)
+}
+
+func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool) {
+	pop := populationFor(d)
 	q := r.URL.Query()
 	mode := q.Get("mode")
 	if mode == "" {
@@ -30,7 +42,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 
-	now := time.Now()
+	now := s.forecastEval.clock()
 	resp := forecastGroupsResponse{
 		OK:          true,
 		Mode:        mode,
@@ -38,12 +50,15 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 	}
 	// The admin alias keeps its bounded unrecorded integer until P29; it is 0 while the ledger start
 	// is unset (the admin GET's `unrecorded` list is where the "set the ledger start" state is shown).
-	unrecorded, _, _, err := s.st.countForecastUnrecorded(rtype)
-	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-		return
+	var err error
+	if adminAlias {
+		unrecorded, _, _, loadErr := s.st.countForecastUnrecorded(rtype)
+		if loadErr != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		resp.Unrecorded = unrecorded
 	}
-	resp.Unrecorded = unrecorded
 
 	var periods []forecastPeriod
 	loadFrom, loadTo := "", ""
@@ -56,7 +71,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 			jsonErrorCode(w, http.StatusBadRequest, "month_takes_no_range", "month mode takes no from, to or group")
 			return
 		}
-		earliest, err := s.st.forecastEarliestMadeOn(rtype)
+		earliest, err := s.st.forecastEarliestMadeOnForPopulation(rtype, pop)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -91,7 +106,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 
 	var sets []*groupSet
 	if loadFrom != "" && loadTo != "" {
-		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo, forecastPopulation{Key: "all"})
+		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo, pop)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -99,8 +114,12 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 	}
 
 	populationFrom, _ := s.st.ForecastPopulationFrom()
-	resp.Groups = s.buildForecastGroups(periods, sets, rtype, today, resp.Official, populationFrom)
-	writeJSON(w, resp)
+	resp.Groups = s.buildForecastGroupsForPopulation(periods, sets, rtype, today, resp.Official, populationFrom, pop)
+	if adminAlias {
+		writeJSON(w, resp)
+	} else {
+		writeJSON(w, forecastReaderGroups(resp, d))
+	}
 }
 
 // buildForecastGroups computes every group x checkpoint. The cells are independent — each one's
@@ -108,6 +127,10 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 // maximum bounds that is 180 cells of 10 000 permutations each; sequentially it misses the plan's
 // three-second budget, and there is nothing to serialise.
 func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time) []forecastGroup {
+	return s.buildForecastGroupsForPopulation(periods, sets, rtype, today, official, populationFrom, forecastPopulation{Key: "all"})
+}
+
+func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation) []forecastGroup {
 	// The cohort's benchmark is the frozen code of its earliest in-population accepted set — a
 	// ledger-wide answer, not just what this range happened to load. A custom range that starts
 	// mid-cohort must not pick a later set and call the cohort something else.
@@ -212,13 +235,13 @@ func (s *Server) buildForecastGroups(periods []forecastPeriod, sets []*groupSet,
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				key := forecastGroupCellKey(rtype, j.start, j.end, j.bench, j.cp)
+				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp)
 				c, gen := s.cachedForecastCell(key)
 				if c != nil {
 					out <- result{j.gi, j.cp, c}
 					continue
 				}
-				c = computeForecastCell(j.members, j.pending, rtype, j.start, j.end, j.cp, today)
+				c = computeForecastCellForPopulation(j.members, j.pending, rtype, j.start, j.end, j.cp, today, pop)
 				if official && c.State == "mature" {
 					s.storeForecastCell(key, c, gen)
 				}

@@ -2117,6 +2117,8 @@
   "err.forecast_eval_off": "評估器已關閉。請先開啟或改用試執行模式。",
   "err.forecast_eval_running": "已有一次評估正在進行。",
   "err.forecast_not_ready": "評估器尚未滿足開啟條件。",
+  "err.forecast_unavailable": "你的賬號暫無預測驗證訪問許可權。",
+  "err.forecast_custom_not_allowed": "外部讀者僅可檢視正式月度記錄。",
   "forecast.eval.awaiting_gate": "等待試執行核對：{{codes}}",
   "forecast.eval.confirmOn": "開啟自動結算？",
   "forecast.eval.confirmOnBody": "以下就緒項必須全部滿足。開啟後，門戶會結算到期的檢查點並寫入賬本。",

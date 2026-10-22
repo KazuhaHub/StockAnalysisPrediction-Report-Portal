@@ -81,6 +81,8 @@ func madeAtBefore(madeAt string, boundary time.Time) bool {
 // the key entirely: a zero would read as a measured spread of zero, which is a different claim.
 type forecastCell struct {
 	State string `json:"state"`
+	// External all readers receive the maturity assurance without the ledger's member count.
+	MinNMet bool `json:"min_n_met,omitempty"`
 
 	N          *int `json:"n,omitempty"`
 	Resolved   *int `json:"resolved,omitempty"`

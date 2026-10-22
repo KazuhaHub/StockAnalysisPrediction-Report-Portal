@@ -2117,6 +2117,8 @@
   "err.forecast_eval_off": "评估器已关闭。请先开启或改用试运行模式。",
   "err.forecast_eval_running": "已有一次评估正在进行。",
   "err.forecast_not_ready": "评估器尚未满足开启条件。",
+  "err.forecast_unavailable": "你的账号暂无预测验证访问权限。",
+  "err.forecast_custom_not_allowed": "外部读者仅可查看正式月度记录。",
   "forecast.eval.awaiting_gate": "等待试运行核对：{{codes}}",
   "forecast.eval.confirmOn": "开启自动结算？",
   "forecast.eval.confirmOnBody": "以下就绪项必须全部满足。开启后，门户会结算到期的检查点并写入账本。",

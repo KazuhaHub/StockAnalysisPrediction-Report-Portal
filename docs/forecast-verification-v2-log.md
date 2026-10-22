@@ -220,10 +220,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143. The standalone Go 1.26.10 security fix #144
   is merged; `origin/main` is at `ad618c1f`.
-- **In flight.** P26 on `feat/forecast-record-access`, in the isolated worktree. The strict
-  snapshot resolver, attribution-filtered loader and population identities are implemented;
-  request integration, external response shaping, compute governance, previews/settings and
-  reading-page handling remain unfinished. It is not ready to merge. The parallel Apps branches
+- **In flight.** P26 #145 on `feat/forecast-record-access`, in the isolated worktree. The strict
+  resolver and population-aware groups/members handlers are implemented, including external
+  shaping, report filtering and pagination. Public reader routes are not registered: compute
+  governance, remaining request gates, previews/settings and reading-page handling remain
+  unfinished. It is not ready to merge. The parallel Apps branches
   remain untouched; recheck their token changes before integrating the bridge-user binding.
 - **Next step.** Complete P26, then P27, P28 and P22. P13 still requires production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -544,8 +545,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   incorrectly mixed the old account and new tree and failed by granting `all`; repeatable read
   passes, and the next request observes the committed account move.
 - This is a partial implementation, not an access rollout. No new reader route is registered yet.
-  Remaining: route gates and full access matrix, reader/admin groups and members integration,
-  external omissions/readability filtering, cookie/bridge prediction shaping, `/api/me`, OU
+  Remaining: compute governance before route registration, route gates and full access matrix,
+  cookie/bridge prediction shaping, `/api/me`, OU
   settings and preview, compute pools/flights/rate limits, count-only weekly adoption, StockPage
   suppression and the complete security/regression suite. No schema change is included.
 - Checkpoint validation: build, vet, full SQLite Go suite, full Postgres app suite, staticcheck,
@@ -553,3 +554,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   attribution source guard initially rejected the new reader; it now permits only that loader's
   single read predicate and explicitly forbids writes there, retaining all original writer checks.
   Independent adversarial review found no actionable issues in this foundation checkpoint.
+- Reader handler checkpoint: groups and members now share population-aware implementations with
+  the admin aliases, which retain their existing response shapes. Internal `all` records match
+  admin records except `unrecorded`; own period bounds, seeds and cached cells are isolated from
+  other OUs. The clock is injectable on both handlers.
+- External `all` shaping omits coverage, unrecorded and every denominator/count, recursively
+  including policy slices. Mature cells retain metrics and `min_n_met`; non-mature cells carry
+  state only. Copies protect cached cells from redaction. External `own` retains its own counts.
+  External members are report-readable only, omit purged/orphaned rows, and paginate after that
+  filtering with opaque cursors and no global total. Custom ranges and none scopes are refused
+  before query validation or ledger reads. Two refusal messages were added to all locales, with
+  zh-TW produced by OpenCC.
+- Review found the member drawer taking frozen matrix state but recomputing counts after a
+  backdated insert. It now takes frozen n/refused/corporate-action counts and reconstructs the
+  mature gate's resolved/total counts. Resolved and pending backdated inserts failed first;
+  regressions now pass, including a cell with both excluded outcome classes. Follow-up review
+  confirmed the issue closed. Existing golden snapshots remain unchanged.
+- Reader checkpoint validation: build, vet, full Go suite (SQLite), full Postgres app suite,
+  staticcheck, web typecheck, 120 Vitest files / 1006 tests and production web build passed.
+  The extra excluded-count regression also passed after the full Go runs were started.
