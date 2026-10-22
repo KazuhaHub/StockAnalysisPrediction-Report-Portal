@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // v1ReportPredictions serves every set ever written for one report, oldest first.
@@ -59,29 +58,32 @@ func (s *Server) serveReportPredictions(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	}
+	identities, identityErr := s.st.reportPredictionIdentities(id, sc)
+	membershipReady := sc == nil && identityErr == nil && s.st.annotateForecastReadMembership(identities) == nil
+	display, counted := readPredictionIDs(identities)
+	selected, selectionErr := s.st.includeSelectedPredictionSets(id, sets, display, counted, includePayload(r, sc), sc)
+	if selectionErr == nil {
+		sets = selected
+	}
+	if membershipReady {
+		statuses := make(map[int64]string, len(identities))
+		for _, set := range identities {
+			statuses[set.ID] = set.Membership
+		}
+		for i := range sets {
+			sets[i].Membership = statuses[sets[i].ID]
+		}
+	}
 	annotateReadPhases(sets, s.forecastNow())
 	// Oldest first here, unlike the list route: a report is read in the order it was written, and its
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
 	out := map[string]any{"ok": true, "sets": sets}
-	if len(sets) > 0 {
-		populationFrom, _ := s.st.ForecastPopulationFrom()
-		// The cohort's benchmark, per set, so the "counted" pointer never lands on a set the statistics
-		// excluded as off-benchmark (P4). A report's revisions can span cohorts, so each candidate is
-		// judged against its own.
-		benchOf := map[string]string{}
-		benchFor := func(cohort string) string {
-			if b, ok := benchOf[cohort]; ok {
-				return b
-			}
-			b := ""
-			if len(sets) > 0 {
-				b, _ = s.st.earliestCohortBench(sets[0].RType, cohort)
-			}
-			benchOf[cohort] = b
-			return b
-		}
-		out["counted_set_id"] = countedSetIDFor(sets, populationFrom, benchFor)
+	if identityErr == nil && selectionErr == nil {
+		out["display_set_id"] = display
+	}
+	if membershipReady && selectionErr == nil {
+		out["counted_set_id"] = counted
 	}
 	writeJSON(w, out)
 }
@@ -129,6 +131,9 @@ func (s *Server) serveQueryPredictions(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	annotateReadPhases(sets, s.forecastNow())
+	if sc == nil {
+		_ = s.st.annotateForecastReadMembership(sets)
+	}
 	writeJSON(w, map[string]any{"ok": true, "sets": sets})
 }
 
@@ -146,40 +151,6 @@ func (s *Server) canReadReport(id int64, sc *ownerScope) bool {
 		return false // unreadable is unreadable; a query failure must not grant access
 	}
 	return n > 0
-}
-
-// countedSetIDFor picks the set the group statistics count for a report, or 0.
-//
-// Membership is "the earliest accepted set per (symbol, group) decides" (D4), and a group is a month
-// of made_on. A report can hold more than one set — a re-ingest with a changed number is a revision —
-// so the member is the earliest ACCEPTED one, and a report can also hold sets that are not members at
-// all (absent, rejected, backtest, or accepted but superseded by an earlier set for the same symbol).
-//
-// A set made before the ledger start (P5) is never a member, so it is skipped here too: otherwise the
-// reading page would point at a set the statistics do not count.
-func countedSetIDFor(sets []PredictionSet, populationFrom time.Time, benchFor func(cohort string) string) int64 {
-	var best PredictionSet
-	found := false
-	for _, s := range sets {
-		if s.State != predStateAccepted {
-			continue
-		}
-		if !populationFrom.IsZero() && madeAtBefore(s.MadeAt, populationFrom) {
-			continue
-		}
-		if benchFor != nil {
-			if bench := benchFor(s.Cohort); bench != "" && s.BenchCode != bench {
-				continue
-			}
-		}
-		if !found || s.MadeAt < best.MadeAt || (s.MadeAt == best.MadeAt && s.ID < best.ID) {
-			best, found = s, true
-		}
-	}
-	if !found {
-		return 0
-	}
-	return best.ID
 }
 
 func reverseSets(sets []PredictionSet) {

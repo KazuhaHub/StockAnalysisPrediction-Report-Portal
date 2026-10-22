@@ -1440,6 +1440,10 @@ export interface PredictionSetError {
   message: string
 }
 
+export type ForecastMembership =
+  | 'member' | 'duplicate' | 'degraded' | 'mismatch' | 'pending_baseline'
+  | 'pre_live' | 'off_benchmark' | 'test' | 'backtest' | 'absent' | 'rejected' | 'unknown'
+
 export interface PredictionSet {
   id: number
   report_id?: number
@@ -1448,6 +1452,12 @@ export interface PredictionSet {
   rtype: string
   title: string
   version: string
+  /** Optional during mixed-version rollout; newer servers always return the stored report date. */
+  report_date?: string
+  /** Global monthly membership, omitted for protected readers and when classification fails. */
+  membership?: ForecastMembership
+  /** Integer basis points, truncated toward zero; absent without a usable base and target. */
+  upside_bp?: number
   made_at: string
   made_on: string
   cohort: string
@@ -1479,6 +1489,7 @@ export interface ReportPredictions {
   ok: boolean
   sets: PredictionSet[]
   counted_set_id?: number
+  display_set_id?: number
 }
 
 export type ForecastMode = 'month' | 'custom'
@@ -1499,6 +1510,7 @@ export interface ForecastCoverage {
   pre_live: number
   test: number
   off_benchmark: number
+  unknown?: number
 }
 
 export interface ForecastCell {

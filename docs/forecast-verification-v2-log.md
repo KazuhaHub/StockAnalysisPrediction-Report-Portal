@@ -686,3 +686,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   populations, display/counted set identity, read fields and integer upside, restricted/error
   omission, cross-process purge markers, revised phases and OpenAPI contract tests. No P16 PR
   is ready to merge, and no schema or production action is included.
+
+### P16 — read identity and membership checkpoint (2026-10-22, in progress)
+
+- Read membership now uses the shared classifier over complete monthly populations, independent
+  of report revision limits and symbol pagination. Restricted readers never load the global
+  population; failed population loads omit membership and counted identity without losing the
+  readable report. Tests compare restricted responses byte for byte before and after another
+  tenant's earlier decision.
+- Display identity prefers the latest accepted revision matching the current body, with the
+  latest accepted revision as fallback. Counted identity comes only from the monthly member.
+  Compact identity scans preserve both selected revisions beyond the 200-set detail limit;
+  supplemental loads require both report and set identity and retain viewer filtering.
+- Added report dates and exact integer upside truncated toward zero, with overflow rejection.
+  Existing report-local counted helpers were removed. SQLite and Postgres tests cover 221
+  revisions, timestamp ties, cross-report supplemental-load rejection and paginated symbol reads.
+  The test fixture writer now uses the existing portable insert-ID helper on both drivers.
+- Independent checkpoint review found no actionable issue. Full Go/SQLite/Postgres regression,
+  build, vet, staticcheck, web typecheck, 120 Vitest files / 1006 tests and production SPA build
+  passed. Existing golden snapshots remain unchanged. Final serialized embed rebuild also passed.
+- This checkpoint is not P16 completion or merge readiness: persistent purge checks, phases,
+  drawer population semantics and OpenAPI remain, as does reconciliation with P26's protected
+  access rules. No schema, Apps-branch, deployment or workflow-publication change is included.

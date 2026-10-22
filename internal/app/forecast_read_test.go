@@ -65,6 +65,10 @@ func TestReportPredictionsRouteReturnsTheSets(t *testing.T) {
 	if code, m := ingestPost(t, s, body); code != http.StatusOK {
 		t.Fatalf("revision ingest: %d %v", code, m)
 	}
+	// The read pointer names a real cohort member, not merely an accepted but unverified set.
+	if _, err := s.st.exec(`UPDATE prediction_sets SET base_check=? WHERE report_id=?`, baseMatch, reportID); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/reports/1/predictions", nil)

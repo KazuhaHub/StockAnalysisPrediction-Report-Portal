@@ -429,18 +429,23 @@ func dropMetaRow(t *testing.T, dump []byte, key string) []byte {
 // TestCountedSetIDSkipsPreLive: the report page's counted_set_id must not point at a set the
 // statistics do not count, so a pre-live set is skipped and an empty result is 0.
 func TestCountedSetIDSkipsPreLive(t *testing.T) {
-	early := PredictionSet{ID: 1, State: predStateAccepted, MadeAt: "2020-06-07T13:00:00Z"}
-	late := PredictionSet{ID: 2, State: predStateAccepted, MadeAt: "2020-07-07T13:00:00Z"}
-	boundary := time.Date(2020, time.June, 8, 0, 0, 0, 0, time.UTC)
-
-	if got := countedSetIDFor([]PredictionSet{early, late}, boundary, nil); got != 2 {
-		t.Errorf("counted_set_id = %d, want 2 (the pre-live set is skipped)", got)
+	s := newV1Server(t)
+	earlyReport, earlySet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2020-06-07", Bench: "sh000852"}, "Before start")
+	lateReport, lateSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2020-07-07", Bench: "sh000852"}, "After start")
+	if err := s.st.SetSetting(setForecastPopulationFrom, "2020-06-08T00:00:00Z"); err != nil {
+		t.Fatal(err)
 	}
-	if got := countedSetIDFor([]PredictionSet{early}, boundary, nil); got != 0 {
-		t.Errorf("counted_set_id = %d, want 0 (the only set is pre-live)", got)
+	_, early := readSemanticReport(t, s, earlyReport, nil)
+	_, late := readSemanticReport(t, s, lateReport, nil)
+	if early["counted_set_id"] != float64(0) || late["counted_set_id"] != float64(lateSet) {
+		t.Fatalf("pre-live boundary disagrees with read membership: early=%v late=%v", early, late)
 	}
-	if got := countedSetIDFor([]PredictionSet{early, late}, time.Time{}, nil); got != 1 {
-		t.Errorf("counted_set_id = %d, want 1 with no boundary", got)
+	if _, err := s.st.exec(`DELETE FROM meta WHERE k=?`, setForecastPopulationFrom); err != nil {
+		t.Fatal(err)
+	}
+	_, early = readSemanticReport(t, s, earlyReport, nil)
+	if early["counted_set_id"] != float64(earlySet) {
+		t.Fatalf("unset start excludes a real member: %v", early)
 	}
 }
 

@@ -25,18 +25,21 @@ import (
 
 // PredictionSet is one set with its claims and marks, as the read API returns it.
 type PredictionSet struct {
-	ID        int64  `json:"id"`
-	ReportID  *int64 `json:"report_id"`
-	State     string `json:"state"`
-	Symbol    string `json:"symbol"`
-	RType     string `json:"rtype"`
-	Title     string `json:"title"`
-	Version   string `json:"version"`
-	MadeAt    string `json:"made_at"`
-	MadeOn    string `json:"made_on"`
-	Cohort    string `json:"cohort"`
-	Zone      string `json:"zone"`
-	BenchCode string `json:"bench_code"`
+	ID         int64  `json:"id"`
+	ReportID   *int64 `json:"report_id"`
+	State      string `json:"state"`
+	Symbol     string `json:"symbol"`
+	RType      string `json:"rtype"`
+	Title      string `json:"title"`
+	Version    string `json:"version"`
+	ReportDate string `json:"report_date"`
+	Membership string `json:"membership,omitempty"`
+	UpsideBP   *int64 `json:"upside_bp,omitempty"`
+	MadeAt     string `json:"made_at"`
+	MadeOn     string `json:"made_on"`
+	Cohort     string `json:"cohort"`
+	Zone       string `json:"zone"`
+	BenchCode  string `json:"bench_code"`
 
 	DecisionStatus    string `json:"decision_status,omitempty"`
 	DecisionQuality   string `json:"decision_quality,omitempty"`
@@ -60,6 +63,7 @@ type PredictionSet struct {
 	// workflow report, so without this the panel would show a set's numbers beside a body that has
 	// since printed different ones.
 	BodyChanged bool `json:"body_changed"`
+	bodyMatches bool
 
 	Errors []predError       `json:"errors,omitempty"`
 	Claims []PredictionClaim `json:"claims"`
@@ -112,6 +116,10 @@ type PredictionMark struct {
 func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]PredictionSet, error) {
 	var where []string
 	var args []any
+	if f.ID > 0 {
+		where = append(where, "ps.id = ?")
+		args = append(args, f.ID)
+	}
 	// The report join is needed for two reasons at once — to filter by the report it belongs to, and
 	// to scope a restricted reader — so it is built once and used by both.
 	join := ""
@@ -162,7 +170,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 	if join != "" {
 		bodyCols = "COALESCE(r.body_md,'') AS body_md, COALESCE(r.body_html,'') AS body_html"
 	}
-	q := fmt.Sprintf(`SELECT ps.id, ps.report_id, ps.state, ps.symbol, ps.rtype, ps.title, ps.version,
+	q := fmt.Sprintf(`SELECT ps.id, ps.report_id, ps.state, ps.symbol, ps.rtype, ps.title, ps.version, ps.report_date,
 			ps.made_at, ps.made_on, ps.cohort, ps.zone, ps.bench_code,
 			ps.decision_status, ps.decision_quality, ps.probability_method, ps.policy_version,
 			ps.horizon_end, ps.horizon_std,
@@ -196,7 +204,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 			bodyHTML   string
 			title, ver sql.NullString
 		)
-		if err := rows.Scan(&ps.ID, &reportID, &ps.State, &ps.Symbol, &ps.RType, &title, &ver,
+		if err := rows.Scan(&ps.ID, &reportID, &ps.State, &ps.Symbol, &ps.RType, &title, &ver, &ps.ReportDate,
 			&ps.MadeAt, &ps.MadeOn, &ps.Cohort, &ps.Zone, &ps.BenchCode,
 			&ps.DecisionStatus, &ps.DecisionQuality, &ps.ProbabilityMethod, &ps.PolicyVersion,
 			&ps.HorizonEnd, &horizonStd,
@@ -221,6 +229,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 		// body_changed compares the hash of what arrived with the hash of what is there now. The
 		// report's own hashing is the same function the ingest path used, so the two are comparable.
 		ps.BodyChanged = bodySHA != "" && bodySHA != sha256Hex([]byte(bodyMD+"\x00"+bodyHTML))
+		ps.bodyMatches = join != "" && bodySHA != "" && !ps.BodyChanged
 		if f.IncludePayload {
 			ps.Payload = payload
 		}
@@ -246,6 +255,13 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 	for i := range out {
 		if c, ok := claims[out[i].ID]; ok {
 			out[i].Claims = c
+			if out[i].S0Fen != nil {
+				for _, claim := range c {
+					if claim.Kind == kindTerminal && claim.PriceFen != nil {
+						out[i].UpsideBP = readUpsideBP(*claim.PriceFen, *out[i].S0Fen)
+					}
+				}
+			}
 		}
 		if m, ok := marks[out[i].ID]; ok {
 			out[i].Marks = m
@@ -256,6 +272,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 
 // PredictionFilter is the query shape both read paths share.
 type PredictionFilter struct {
+	ID             int64 // internal exact-set lookup, still combined with report and viewer scope
 	ReportID       int64
 	Symbol         string
 	RType          string
