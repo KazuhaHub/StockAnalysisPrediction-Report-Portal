@@ -362,7 +362,22 @@ export interface RunResp {
   prediction?: ForecastReadingSummary
 }
 
-export interface ForecastReadingSummary {
+export type ForecastReadingSummary = {
+  has_prediction: false
+  sibling: ForecastReadingEdition
+  counted_edition?: ForecastReadingEdition
+} | ForecastReadingSetSummary
+
+export interface ForecastReadingEdition {
+  report_id: number
+  set_id: number
+  version: string
+  cohort: string
+  url: string
+}
+
+export interface ForecastReadingSetSummary {
+  has_prediction: true
   display_set_id: number
   stance: string
   weight_bp?: number
@@ -376,6 +391,7 @@ export interface ForecastReadingSummary {
   }
   membership?: ForecastMembership
   counted_set_id?: number
+  counted_edition?: ForecastReadingEdition
 }
 
 export interface LinkItem {
@@ -1516,6 +1532,8 @@ export interface ReportPredictions {
   sets: PredictionSet[]
   counted_set_id?: number
   display_set_id?: number
+  sibling?: ForecastReadingEdition
+  counted_edition?: ForecastReadingEdition
   settlement_paused?: boolean
 }
 

@@ -24,6 +24,7 @@ type forecastPredictionView struct {
 	protected    bool
 	reader       bool
 	noMembership bool
+	editions     bool
 }
 
 func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string) (forecastPredictionView, bool) {
@@ -33,7 +34,9 @@ func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string
 		return forecastPredictionView{}, false
 	}
 	sc := s.viewerScope(user)
-	return forecastPredictionViewFor(d, sc), true
+	view := forecastPredictionViewFor(d, sc)
+	view.editions = true
+	return view, true
 }
 
 func forecastPredictionViewFor(d forecastDecision, sc *ownerScope) forecastPredictionView {
@@ -157,6 +160,9 @@ func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Reque
 	}
 	if membershipReady && selectionErr == nil {
 		out["counted_set_id"] = counted
+	}
+	if view.editions && identityErr == nil && selectionErr == nil {
+		s.addReadingEditionLinks(out, id, identities, display, counted, membershipReady, view)
 	}
 	writeJSON(w, out)
 }

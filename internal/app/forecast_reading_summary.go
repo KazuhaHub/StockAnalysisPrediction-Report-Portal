@@ -3,6 +3,14 @@ package app
 import "net/http"
 
 type forecastReadingSummary struct {
+	*ForecastReadingSetSummary
+	HasPrediction  bool                    `json:"has_prediction"`
+	Sibling        *forecastReadingEdition `json:"sibling,omitempty"`
+	CountedEdition *forecastReadingEdition `json:"counted_edition,omitempty"`
+}
+
+// ForecastReadingSetSummary is flattened only when this edition has its own accepted prediction.
+type ForecastReadingSetSummary struct {
 	DisplaySetID   int64                      `json:"display_set_id"`
 	Stance         string                     `json:"stance"`
 	WeightBP       *int32                     `json:"weight_bp,omitempty"`
@@ -49,7 +57,11 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 	}
 	display, counted := readPredictionIDs(identities)
 	if display == 0 {
-		return nil
+		sibling, member, err := s.forecastReadingEditionLinks(*report, view, canSeeMembership, "")
+		if err != nil || sibling == nil {
+			return nil
+		}
+		return &forecastReadingSummary{Sibling: sibling, CountedEdition: member}
 	}
 	sets, err := s.st.QueryPredictionSets(PredictionFilter{ReportID: report.ID, ID: display, AcceptedOnly: true, Limit: 1}, view.scope)
 	if err != nil || len(sets) != 1 {
@@ -72,7 +84,7 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 		}
 	}
 	s.annotateReadPhases(sets, s.forecastNow())
-	out := &forecastReadingSummary{DisplaySetID: set.ID, UpsideBP: set.UpsideBP, BodyChanged: set.BodyChanged}
+	out := &forecastReadingSummary{HasPrediction: true, ForecastReadingSetSummary: &ForecastReadingSetSummary{DisplaySetID: set.ID, UpsideBP: set.UpsideBP, BodyChanged: set.BodyChanged}}
 	for _, claim := range set.Claims {
 		if claim.Kind == kindStance {
 			out.Stance, out.WeightBP = claim.Stance, claim.WeightBp
@@ -95,6 +107,16 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 			if identity.ID == display {
 				out.Membership = identity.Membership
 				break
+			}
+		}
+		if counted == 0 || out.Membership != membershipMember {
+			_, member, err := s.forecastReadingEditionLinks(*report, view, true, set.Cohort)
+			if err != nil {
+				return nil
+			}
+			out.CountedEdition = member
+			if member != nil && out.Membership == membershipDuplicate {
+				out.Membership = ""
 			}
 		}
 	}

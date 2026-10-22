@@ -1337,3 +1337,30 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Sibling-edition links, counted-edition presentation, final access-matrix expansion and the
   recorded 800 ms performance gate remain outstanding. No PR, production action, Apps change or
   schema change was made; the own purge-evidence approval remains pending.
+
+### P18 — readable-edition association checkpoint (2026-10-22, in progress)
+
+- Added explicit empty-edition envelopes and readable sibling links. An edition without an
+  accepted set does not borrow stance, display identity, body-change status or checkpoint data.
+  Links group by symbol/report-date/type, never title, exclude the current version and carry exact
+  report/set/version/cohort identities with a report-ID deep link ending in `#forecast`.
+- Internal all readers and admins receive a separate counted-edition identity. The report's own
+  counted ID stays unchanged; a full-stage duplicate badge is suppressed when the member belongs
+  to a readable sibling. Own and external readers cannot request global classification even by
+  passing an affirmative helper flag; the negative guard failed before enforcing the view policy.
+- Card-stage session routes carry the same optional edition metadata, including v1 cookie reads.
+  Real persistent-query and bridge credentials retain their existing shape. Each edition's card
+  retains only its own sets. Later output in the same version cannot hide an older counted report.
+- Added SQLite/Postgres route fixtures for differing titles, all/own/external/admin subjects,
+  private versions, exact links, card/full stages, empty and populated JSON round trips and
+  retained counted identity. Separate controls reject other symbols/dates/types. A cross-cohort
+  regression initially showed a newer own-report member hiding the displayed month's sibling;
+  repaired both summary and card lookup gates without changing counted-ID selection semantics.
+  A September sibling cannot label an October receipt as counted.
+- Final full Go/Postgres regression passed (app package 55.672 s); three-repeat targeted race
+  checks passed (17.123 s), along with vet/staticcheck, web typecheck and all 120 Vitest files /
+  1020 tests. The production SPA build and subsequent serialized Go embed rebuild passed.
+  Independent review has not covered this checkpoint.
+- Final access-matrix expansion, the recorded performance gate and P20 presentation remain
+  outstanding. No schema change, Apps-worktree edit, production action or separately owned PR
+  mutation was made. The purge-evidence approval and existing integration holds remain pending.

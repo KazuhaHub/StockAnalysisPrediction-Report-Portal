@@ -182,8 +182,29 @@ retaining scoped stock timeline flags. These additions do not expand the machine
   mean prefetch, disabled stage, unsupported type or no accepted prediction; it is not proof of
   a failed evaluator.
 
-This checkpoint does not yet implement the sibling-edition link, final access-matrix expansion
-or recorded performance gate. It is not authorization to enable full in production.
+`has_prediction` distinguishes a populated summary from an empty edition with a readable
+`sibling` link. An empty edition never borrows the sibling's stance, display identity, body-change
+warning or checkpoint. The linked `report_id`, `set_id`, `version`, `cohort` and exact `url`
+identify the actual other edition. Candidates share symbol/report-date/type, not title; they
+must be another version and independently readable. Fallback uses the newest eligible report,
+then its body-matching accepted set. Older readable reports remain eligible for the link to the
+edition that actually counted, even if a later generator output replaced it in the switcher.
+
+Internal all readers and admins may receive `counted_edition`. For a populated current edition,
+it must belong to the same receipt cohort. It does not change the report's own `counted_set_id`.
+An own-report member from a later cohort cannot hide the displayed cohort's counted edition.
+The full-stage summary suppresses a duplicate badge in favor of this explicit edition identity.
+Per-set classifier results on the card route remain factual; presentation should prefer the
+counted-edition label rather than describing the other edition's member as a duplicate.
+Own and external readers never receive counted-edition metadata or cause global classification.
+
+Card/full session prediction reads carry the same optional `sibling` and `counted_edition`
+metadata, including when using a cookie on the v1 report route. Persistent machine and app-bridge
+credentials retain their existing shape. Stage off still refuses non-admin session predictions.
+These are server contracts; the P20 card presentation and stale-edition UI guards remain separate.
+
+Final access-matrix expansion and the recorded performance gate remain outstanding. This is not
+authorization to enable full in production.
 
 ## Recording an incident
 
