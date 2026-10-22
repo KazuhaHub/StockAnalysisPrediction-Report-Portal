@@ -407,7 +407,9 @@ func (src quoteSource) marketIDsFor(ivs ...quoteInterval) []string {
 func defaultQuoteSources() []quoteSource {
 	return []quoteSource{
 		{
-			name: quoteSourceTencent,
+			name:          quoteSourceTencent,
+			cashDividends: true,
+			reportsKind:   true,
 			// fetchAt rather than fetch, because this vendor now has TWO endpoints and only the
 			// interval says which one a request means: fqkline for the daily series, minute/query
 			// for 分时. Wiring it through the interval-blind fetcher would answer a minute request
@@ -420,6 +422,10 @@ func defaultQuoteSources() []quoteSource {
 			// And the same daily endpoint with its two date slots filled — see quoteTencentRangeURL.
 			fetchRange: fetchTencentRange,
 			caps: []quoteCapability{
+				// Tier 1 ledger evidence is measured for mainland daily series only. Beijing
+				// has no usable history; overseas display grants do not imply ledger admission.
+				{markets: func(m *quoteMarket) bool { return m.id == "sh" || m.id == "sz" },
+					intervals: []quoteInterval{quoteIntervalSettled}},
 				// The price, in every market: fqkline answers all five — every fixture in
 				// testdata/quote/ came out of it — and its snapshot half is trusted in all five.
 				{intervals: []quoteInterval{quoteIntervalSnapshot}},

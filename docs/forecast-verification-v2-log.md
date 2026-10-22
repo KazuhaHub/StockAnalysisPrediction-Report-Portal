@@ -765,3 +765,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   reusing the same tick successfully after release. This pins both cancellation and subsequent
   progress without a live vendor or database. Three race-enabled walker repetitions including
   this control passed (1.829 s). No runtime code changed after `c3bc3865`.
+
+### P23 evaluator source-path checkpoint (2026-10-22, in progress)
+
+- Granted Tencent explicit Tier 1 settled access for Shanghai/Shenzhen series, with its measured
+  cash-dividend and instrument-kind evidence flags. Beijing lacks usable history and overseas
+  display capability does not imply ledger admission. Sina/Yahoo still have no writer grant or
+  evidence flags. No Tier 2 fallback was admitted.
+- Runtime evaluator range fetches now use the configured uncached ledger walk instead of a
+  hard-coded Tencent call. Each tick starts fresh breaker state and releases it on exit. Existing
+  isolated arithmetic-test fetch seams retain their previous behavior; new integration controls
+  leave that seam nil and exercise the actual source resolver. Settled-bar completion filtering,
+  frozen baselines, write doors and benchmark checks are unchanged.
+- Typed source refusals survive benchmark, stock and bounded look-back planning. In particular,
+  a missing configured primary records `no_source`, not a generic fetch failure, and never adds
+  a mark-specific attempt. Unknown parser/transport failures remain `fetch_failed`.
+- Red controls showed the old path still attempted a direct Tencent request after the operator
+  removed it; a test transport intercepted the request without reaching the network. After the
+  change, no-source planning and zero attempts pass on both SQLite and Postgres. Positive runtime
+  controls prove repeated calls do not cache, unfinished bars remain excluded, dry mode never
+  resolves marks and mode 1 without a benchmark check still plans without writing. Initial SQLite
+  controls passed (0.705 s); the Postgres no-source control passed (0.661 s).
+- Readiness integration is deliberately not included in this checkpoint: Apps notification PR
+  141 also edits `forecast_ops.go`. That shared-file integration, readiness item 6, alerts, panel,
+  order confirmation and the source ADR remain outstanding. No Apps branch was edited, no schema
+  changed and no production deploy or evaluator enablement occurred. Full checks and independent
+  review of the runtime source-path change remain pending; P23 is not release-ready.
