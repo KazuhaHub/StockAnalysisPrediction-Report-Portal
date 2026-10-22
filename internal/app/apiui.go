@@ -660,12 +660,16 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 			// pointing at a tab and opening it agree.
 			"title": s.repDisplayTitle(&m)})
 	}
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"symbol": symbol, "market": marketPrefix(symbol), "name": s.names.Get(symbol),
 		"selDate": selDate, "selKind": selKind, "selId": selID,
 		"timeline": timeline, "kinds": kinds, "subtabs": subtabs,
 		"rep": repJSON(rep, s.names.Get),
-	})
+	}
+	if prediction := s.forecastReadingSummary(r, user, rep); prediction != nil {
+		out["prediction"] = prediction
+	}
+	writeJSON(w, out)
 }
 
 // apiRun reads a report group (legacy report card / single report): member tabs + selected body.
@@ -692,10 +696,14 @@ func (s *Server) apiRun(w http.ResponseWriter, r *http.Request, user string) {
 			"title": s.repDisplayTitle(&m)})
 	}
 	first := members[0]
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"key": key, "symbol": first.Symbol, "name": s.names.Get(first.Symbol), "date": first.Date,
 		"selId": selID, "tabs": tabs, "rep": repJSON(rep, s.names.Get),
-	})
+	}
+	if prediction := s.forecastReadingSummary(r, user, rep); prediction != nil {
+		out["prediction"] = prediction
+	}
+	writeJSON(w, out)
 }
 
 func repJSON(rep *Rep, nameOf func(string) string) map[string]any {

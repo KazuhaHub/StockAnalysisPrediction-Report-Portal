@@ -12,6 +12,12 @@ import (
 // Identity selection scans only compact metadata. The report's body is loaded once, not repeated
 // per revision, and the payload/claims/marks response remains bounded to 200 sets.
 func (s *Store) reportPredictionIdentities(reportID int64, sc *ownerScope) ([]PredictionSet, error) {
+	return s.reportPredictionIdentitiesWithBodyHash(reportID, sc, "")
+}
+
+// A reading response may already hold its selected body while an ingest replaces the database
+// row. Keep that response's hash for display selection, but recheck current report visibility.
+func (s *Store) reportPredictionIdentitiesWithBodyHash(reportID int64, sc *ownerScope, bodyHash string) ([]PredictionSet, error) {
 	report, err := s.GetNew(reportID, sc)
 	if err != nil {
 		return nil, err
@@ -19,7 +25,9 @@ func (s *Store) reportPredictionIdentities(reportID int64, sc *ownerScope) ([]Pr
 	if report == nil {
 		return nil, errors.New("report is no longer readable")
 	}
-	bodyHash := sha256Hex([]byte(report.MD + "\x00" + report.HTML))
+	if bodyHash == "" {
+		bodyHash = sha256Hex([]byte(report.MD + "\x00" + report.HTML))
+	}
 	rows, err := s.query(`SELECT id,state,rtype,made_at,cohort,body_sha256 FROM prediction_sets WHERE report_id=?`, reportID)
 	if err != nil {
 		return nil, err
@@ -33,6 +41,7 @@ func (s *Store) reportPredictionIdentities(reportID int64, sc *ownerScope) ([]Pr
 			return nil, err
 		}
 		set.bodyMatches = hash != "" && hash == bodyHash
+		set.BodyChanged = hash != "" && hash != bodyHash
 		out = append(out, set)
 	}
 	return out, rows.Err()

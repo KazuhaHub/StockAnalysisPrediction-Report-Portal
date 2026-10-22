@@ -68,6 +68,23 @@ func assertReadSelectionBeyondLimit(t *testing.T, s *Server) {
 	if !seen[first] || !seen[matched] {
 		t.Fatal("selected sets are not present for the reading card")
 	}
+	seedForecastReader(t, s, "selection-summary", scopeAll, false)
+	if err := s.st.SetSetting(setForecastReader, "full"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.st.DeleteSetting(setForecastReader); err != nil {
+			t.Error(err)
+		}
+	})
+	rep, err := s.st.GetNew(report, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := s.forecastReadingSummary(httptest.NewRequest("GET", "/api/stock/600001", nil), "selection-summary", rep)
+	if summary == nil || summary.DisplaySetID != matched || summary.BodyChanged || summary.CountedSetID == nil || *summary.CountedSetID != first {
+		t.Fatalf("reading summary lost compact selection beyond the response cap: %+v", summary)
+	}
 }
 
 func TestSelectedPredictionLookupCannotCrossReports(t *testing.T) {

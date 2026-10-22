@@ -348,6 +348,7 @@ export interface StockResp {
   kinds: string[]
   subtabs: SubTab[]
   rep: Rep | null
+  prediction?: ForecastReadingSummary
 }
 
 export interface RunResp {
@@ -358,6 +359,23 @@ export interface RunResp {
   selId: number
   tabs: SubTab[]
   rep: Rep | null
+  prediction?: ForecastReadingSummary
+}
+
+export interface ForecastReadingSummary {
+  display_set_id: number
+  stance: string
+  weight_bp?: number
+  upside_bp?: number
+  body_changed: boolean
+  next_checkpoint?: {
+    checkpoint: string
+    phase?: PredictionMark['phase']
+    not_before?: string
+    expected: boolean
+  }
+  membership?: ForecastMembership
+  counted_set_id?: number
 }
 
 export interface LinkItem {

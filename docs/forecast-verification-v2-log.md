@@ -1311,3 +1311,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Reading summaries, sibling-edition behavior, the final access matrix and the 800 ms performance
   gate remain outstanding. Independent review has not covered this checkpoint. No schema, Apps
   branch, production setting or separately owned PR changed; this is not P18 completion.
+
+### P18 — selected-body reading summary checkpoint (2026-10-22, in progress)
+
+- Added the optional stock/run `prediction` summary at full stage, using an explicit allowlist:
+  display set, stance/weight, frozen-baseline upside, body-change warning and the next nonterminal
+  checkpoint with the existing phase/date/expected semantics. Missing marks remain obligations;
+  unknown timing cannot invent a phase or deadline. Resolved and final-refusal marks are skipped.
+- Reused compact identity selection rather than a bounded revision page. The existing 220-revision
+  regression now also proves that the reading summary retains the body-matching display set and
+  distinct counted set, on SQLite and Postgres. Rejected revisions cannot become summary chips.
+- A deliberate concurrent-ingest regression initially paired a future prediction with the old
+  selected response body. Added a body-hash-aware identity helper that still rechecks visibility,
+  and derive selection/body-change state against the body already selected for this response.
+  The regression failed before this repair and passed afterward; existing read callers retain
+  their current-body behavior through the unchanged wrapper.
+- Internal own and external readers receive no membership or counted identity and do not invoke
+  global membership classification. Prefetch omits summaries and keeps scoped timeline flags.
+  Fault injection against sets, claims and marks preserves the body on both stock and run routes.
+  Added contract types and documented omission, body-selection, privacy and date semantics in the runbook.
+- Full Go/Postgres regression passed (app package 66.206 s), as did three-repeat targeted race
+  checks (16.127 s), vet/staticcheck, web typecheck, all 120 Vitest files / 1020 tests and the SPA
+  production build. The subsequent serialized Go embed rebuild passed. Independent review has not
+  covered this checkpoint.
+- Sibling-edition links, counted-edition presentation, final access-matrix expansion and the
+  recorded 800 ms performance gate remain outstanding. No PR, production action, Apps change or
+  schema change was made; the own purge-evidence approval remains pending.

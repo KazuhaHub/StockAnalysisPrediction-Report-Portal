@@ -157,6 +157,34 @@ the separate purge metadata must remain visible where authorized. Historical own
 still pending the separately approved evidence-storage design, so this contract is not release
 readiness for the current draft.
 
+## Reading-page summary contract (P18 draft)
+
+The session stock/run response may carry `prediction` at stage `full`; admins resolve to full,
+but none remains an independent refusal for non-admins. `X-Prefetch: 1` omits the summary while
+retaining scoped stock timeline flags. These additions do not expand the machine API.
+
+- `display_set_id` selects the latest accepted set matching the body already chosen for this
+  response, falling back to the latest accepted set. Compact selection is not capped by the
+  200-row card response. A concurrent ingest must not pair a future body's prediction with the
+  body being returned. `body_changed` qualifies the same selected response body.
+- `stance`, optional `weight_bp` and optional `upside_bp` reuse the selected set's claims and
+  frozen-baseline arithmetic. Missing numbers are not zero. Payloads and diagnostics never
+  belong to this summary.
+- `next_checkpoint` is the first nonterminal checkpoint in the established checkpoint order.
+  It carries the existing reading `phase`, `not_before` and `expected` semantics; a resolved or
+  final-refusal checkpoint is not outstanding. Missing marks remain pending obligations.
+  Unknown timing omits phase/date rather than manufacturing a deadline. A not-before date
+  may already be past while settlement is delayed; an expected date is not observed evidence.
+- `membership` and `counted_set_id` are available only to internal all readers and admins.
+  Internal own and every external reader receive neither, and do not trigger global membership
+  classification. Report readability is independently rechecked when constructing a summary.
+- A ledger failure omits the summary, not the report body or its navigation. Absence can also
+  mean prefetch, disabled stage, unsupported type or no accepted prediction; it is not proof of
+  a failed evaluator.
+
+This checkpoint does not yet implement the sibling-edition link, final access-matrix expansion
+or recorded performance gate. It is not authorization to enable full in production.
+
 ## Recording an incident
 
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and
