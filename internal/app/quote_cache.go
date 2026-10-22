@@ -220,6 +220,9 @@ func (g quoteCapability) covers(m *quoteMarket, iv quoteInterval) bool {
 type quoteSource struct {
 	name  string
 	fetch quoteFetchFunc
+	// These are evidence capabilities, not operator-editable preferences.
+	cashDividends bool
+	reportsKind   bool
 	// fetchAt is fetch for a source that needs the interval to answer at all — see
 	// quoteIntervalFetchFunc. Exactly one of the two is set; call prefers this one.
 	fetchAt quoteIntervalFetchFunc

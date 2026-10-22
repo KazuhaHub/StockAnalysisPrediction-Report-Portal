@@ -664,7 +664,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
-# P23 capability-boundary checkpoint (2026-10-22, in progress)
+
+### P23 capability-boundary checkpoint (2026-10-22, in progress)
 
 - Started `feat/quote-ledger-capability` from main `74e8c564`, independently of the held access
   integration. P17/P18 implementation, validation and review remain preserved on
@@ -683,7 +684,30 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   isolated health/breaker/single-slot handling, refusal precedence, evaluator wiring, readiness
   item 6, order auditing/confirmation and panel fields remain outstanding. ADR 0038/0040 belong
   to Apps and 0039 to reader access; the source-policy ADR must use the next free number after
-  rechecking reservations. Full regression and independent review are pending at this checkpoint.
+  rechecking reservations.
 - No source is newly admitted to settlement, no schema is changed and no production action is
   authorized by these tests. The own purge-evidence schema proposal and prior integration holds
   remain undecided.
+- Code/test head `8e7ca037` passed the full Go regression with local Postgres enabled (app
+  package 37.119 s), three-repeat targeted race checks (1.737 s), vet, staticcheck and build.
+  Independent read-only review found no actionable issues within the foundation's scope;
+  it did not review the intentionally absent walker, evaluator, readiness or panel integration.
+- The production SPA build also passed (763 ms). Its original process handle was no longer
+  available at the next observation, so the subsequent Go embed build was rerun explicitly and
+  passed rather than inferring success from the missing handle. No frontend source changed.
+
+### P23 operator-order source selection checkpoint (2026-10-22, in progress)
+
+- Added a pure ledger-chain resolver over the already-loaded operator order and explicit settled
+  grants. It stable-partitions cash-dividend sources first, keeps priority within each class,
+  skips disabled/unknown sources, deduplicates names and preserves market/code predicates. An
+  empty input order remains empty rather than silently restoring shipped display defaults.
+- Added separate evidence flags to the source type and primary selection requiring both cash
+  dividends and reported instrument kind. Either flag alone is insufficient. Shadow-only grants
+  cannot enter the writer chain; an absent primary remains an explicit false result for the
+  future walker to turn into `no_source` rather than falling back to a display vendor.
+- Tests were written before the resolver and failed with the empty implementation, then passed
+  with operator-order, stable-partition, primary-removal, duplicate/unknown-name, positive market
+  and negative market/code controls. Focused checks passed (0.413 s); full checks and independent
+  review remain pending. No actual vendor grant or evidence flag is enabled yet; this checkpoint
+  changes no evaluator call site, source order setting, database or production behavior.
