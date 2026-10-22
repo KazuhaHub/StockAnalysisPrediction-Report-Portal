@@ -45,7 +45,13 @@ func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request,
 		}
 		defer lease.release()
 	}
-	s.serveForecastGroups(w, r, d, false, lease)
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.serveForecastGroups(rec, r, d, false, lease)
+	if rec.status == http.StatusOK && d.Reason != "admin" {
+		if err := s.forecastViewers.observe(s.st, user, s.forecastEval.clock()); err != nil {
+			log.Print("forecast viewer observation failed")
+		}
+	}
 }
 
 func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool, lease *forecastQueryLease) {

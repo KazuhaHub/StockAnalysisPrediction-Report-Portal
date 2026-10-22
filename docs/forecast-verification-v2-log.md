@@ -700,3 +700,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   repetitions, vet, staticcheck and diff checks passed after the expiry fix. The extra closed-store
   regression passed separately after the full run began. Existing required CI checks on the
   preceding OU-settings commit are green; this preview commit still requires its own CI run.
+- Weekly adoption implementation: successful non-admin reader-groups responses add a per-UTC-ISO-week
+  HMAC to an in-memory set under a fresh random salt. The hourly loop writes only a bare integer
+  `forecast_viewers_<week>` equal to this process's initial persisted baseline plus its set size.
+  Repeated flushes are idempotent; restart draws a fresh salt and intentionally yields an upper
+  bound. Failed observations never affect the response and log only a constant diagnostic.
+- Week rollover clears the salt and set, retaining only an integer if the old week's flush needs
+  retry. A monotonic week watermark ignores late older-week requests. Tests cover duplicate and
+  concurrent observations, successful-reader-only counting, ISO-year rollover, failed flush retry,
+  restart baselines, corrupt/overflow counts and SQLite/Postgres storage. A backup dump contains
+  no test viewer username, salt or digest; tracking meta rows contain only the expected key and
+  integer. No schema changes or production writes occurred.
+- Weekly implementation validation: full Go suite with Postgres enabled, three targeted race
+  repetitions, vet and staticcheck passed; additional invalid-baseline and privacy/log checks
+  passed separately. Independent review was retried after an availability failure and remains
+  pending until a result is received. This checkpoint is not eligible for merge without review.
+- Independent weekly review completed with no actionable findings. Its scheduler validation gap
+  is covered by a shared due-decision helper and deterministic before/exact/after-hour and ISO-week
+  boundary tests. The live minute ticker itself is not advanced through a wall-clock boundary.
+  Hourly persistence necessarily permits losing the latest unflushed observations on abrupt
+  termination; the adoption indicator is not an exact analytics ledger.
