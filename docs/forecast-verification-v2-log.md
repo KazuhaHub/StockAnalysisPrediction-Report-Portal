@@ -218,13 +218,15 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136, P11 #137. The standalone Go 1.26.10 security fix #144 is merged;
-  `origin/main` is at `83a64d89`.
-- **In flight.** P15 #143 is reviewed and rebased onto P11, in an isolated worktree on
-  `feat/forecast-web-foundations`. Full local checks passed again under Go 1.26.10; final CI
-  must pass before merge. The parallel Apps branches remain untouched.
-- **Next step.** Finish P15 and
-  continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
+  P30 #135, P31 #136, P11 #137. R2a: P15 #143. The standalone Go 1.26.10 security fix #144
+  is merged. This docs branch starts from main at `ad618c1f`.
+- **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
+  independent review; CI is green on `27a5a6af`. It remains a draft because read-only merge
+  previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
+  is pending; neither Apps branch nor the user's checkout was changed. P22 is prepared in the
+  independent docs lane on `docs/forecast-adr-0039`, without touching runtime or Apps files.
+- **Next step.** Finish P22, resolve the P26 integration sequence, then continue P27 and P28.
+  P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
   action has been performed here.
@@ -522,3 +524,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### P22 — reader access decision record (2026-10-22)
+
+- Prepared in the independent docs lane allowed by implementation section 1.3 while P26's Apps
+  integration sequence awaits coordination. ADR 0039 is accepted design, explicitly not a claim
+  that P26/P27/P28 or R2b reading-stage changes have deployed. Apps PR 141 reserves 0038 and
+  PR 142 uses 0040; neither proposes 0039. Their branches and code remain untouched.
+- Records three-way nearest-OU inheritance, actual Default/subtree distinctions, frozen
+  attribution and its transactional OU-delete exception, population-local membership/cache
+  identity, external volume protection, credential shapes, bounded computation, count-only
+  adoption, reading stages, edition/display rules, disclaimer and rollout/rollback gates.
+- Supersedes design D6, rewrites acceptance condition 19 with negative and positive boundaries,
+  amends design access and ADR 0029 section 5/access decision row. Removes their stale token-only
+  assertion: v1 cookie reads remain behind the independent enrolment wall and forecast scope.
+  Report readability is never widened by aggregate permission; settled per-report checkpoints
+  are distinguished from non-mature aggregate cells and drawer outcomes.
+- Independent adversarial review found no actionable issue or missing P22 contract. All seven
+  relative ADR links/anchors and diff whitespace checks passed. No test or runtime code is added
+  by this docs-only PR; existing guard implementations and golden fixtures are unchanged. Full
+  Go regression with Postgres enabled, vet, staticcheck, web typecheck, all 120 Vitest files /
+  1006 tests, production web build and a serialized embed rebuild passed. CI on the exact pushed
+  head remains required before merge.
