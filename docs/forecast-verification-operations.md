@@ -6,8 +6,10 @@ the reading-page stage switch) are added by the PR that creates them.
 
 ## First response, in order
 
-1. Read the status card on `/manage/forecast`: mode, last pass, `last_error`, `panics`, the counts,
-   `awaiting_gate`, and the per-channel alert delivery.
+1. Read the status card on `/manage/forecast` (mode, last pass, last error, the counters and
+   `awaiting_gate`), and the Alerts card for the last delivery per channel. The heartbeat's
+   per-benchmark bars and the `panics`/`stale_valve_tripped` flags are in
+   `GET /api/admin/forecast` (`heartbeat`) when the card's derived state is not enough.
 2. `GET /healthz/forecast` answers one boolean. 503 with the mode on means the heartbeat is missing or
    older than ten minutes; the process may still be up.
 3. Read the boot/loop log for `forecast evaluator:` lines. A per-set error names the set; a pass
@@ -32,9 +34,12 @@ The heartbeat is older than ten minutes while the mode is not off.
 One of: a due mark unsettled for over six hours, the stale-data valve tripped, or a benchmark
 calendar still ending before today after 18:00 CST on a weekday.
 
-- Look at the benchmark's last bar and source on the card, and at `stale_valve_tripped`.
-- A vendor-wide lag is waited out: nothing is written while the valve is tripped, no attempt moves,
-  and nothing can become final. Never force a settle.
+- Look at the heartbeat's per-benchmark last bar and source, and at `stale_valve_tripped`, in
+  `GET /api/admin/forecast`.
+- A vendor-wide lag is waited out: while the valve is tripped no mark is resolved from a missing bar;
+  a deferral still records the reason, session and wake, no attempt moves, and nothing can become
+  final. Evidence of a halt (a body stamped at or after the session) can still resolve a mark. Never
+  force a settle.
 - One source down: check the configured source order on the quotes panel.
 
 ### `awaiting_gate` names a benchmark

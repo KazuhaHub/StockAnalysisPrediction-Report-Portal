@@ -210,8 +210,8 @@ the self-disable guard); `userJSON` exposes it and the UI edits it with a date p
 
 **Amendments, 2026-10-20.** The `g:<OU>` principal is written only for an **effectively restricted**
 OU, and a restricted reader's principals include only the restricted OUs on its chain (plus the
-Default, which encodes the "all" audience) — P30, ADR 0039. An unrestricted container is no longer a
-sharing path. The owner token's input name is reserved: every `_rp_*` input is hidden, stripped from
+Default, which encodes the "all" audience) — P30. An unrestricted container is no longer a sharing
+path. (The wider per-OU access model is R2a and will be recorded as ADR 0039; it does not exist yet.) The owner token's input name is reserved: every `_rp_*` input is hidden, stripped from
 a submission and recorded per Dify target (P39a). Injecting the token into **every** run, not only a
 restricted OU's, is P39b and follows the Dify batch publish; this ADR's R1 text still describes the
 restricted-only injection that ships today.

@@ -24,10 +24,14 @@ look settled while measuring a different window (plan F04/F05/F12).
 **The baseline is terminal once written.** S0, the base date and the base price are stored on the
 set when they first resolve and are never recomputed, even if a later vendor body revises the bar.
 A NULL `s0_fen` on a terminal row means the return cannot be computed; it is never a reason to
-recompute the price. Returns start at S0, never at the emitted quote.
+recompute the price. Returns start at the stored base, never at the emitted quote; for a stock halted
+on S0 that base is its last printed close before S0, while the benchmark leg still starts at S0.
 
 **Not being due is not a refusal.** A mark whose due session has not appeared, or whose wake is in
-the future, is scheduled. It carries no attempts and cannot become final. The first implementation
+the future, is scheduled. It carries no attempts and cannot become final through the ordinary path.
+The one exception is the set whose START cannot resolve at all: after four attempts and ten sessions
+past S0 the baseline is made terminal and every non-terminal mark is finalised with it, because the
+set can never be scored and leaving it open would keep a cell pending for ever. The first implementation
 refused every mark on its first tick before S0, which is why a one-shot heal exists at boot: those
 rows carry an attempt that never happened. The heal matches only the pre-P1 signature and is
 idempotent (plan F06/F07).
@@ -42,9 +46,10 @@ inputs (plan §5.1, V26).
 **The settlement checks are the answer, not options.** A mark is resolved only from prices the
 market printed: the newest bar must be for a completed session and must be vouched for by the
 vendor's own timestamp; a stock halted on S0 starts from its last traded close inside a bounded
-look-back; a missing benchmark bar makes the mark `unverifiable`; a zero-volume index bar, a stored
-S0 the calendar does not reproduce, a stock body that is not a superset of the benchmark's sessions,
-or an anchor that moved are consistency failures of the whole pass. The daily-limit backstop for an
+look-back; a missing benchmark bar makes the mark `unverifiable`; a zero-volume index bar or a stored
+S0 the calendar does not reproduce is an index-wide source failure (`calendar_bad`, never final); a
+stock bar missing from the index calendar (`calendar_mismatch`) or an anchor that moved
+(`anchor_mismatch`) is mark-specific and does count toward finality. The daily-limit backstop for an
 unreported corporate action is board-aware (10 % main board, 20 % ChiNext/STAR, 30 % Beijing) and is
 computed in fen, not percent (plan F03/F09/F11/F13/F14).
 
@@ -114,8 +119,10 @@ A restore replaces `meta`, so the ephemeral evaluator keys are reset rather than
 heartbeat, the alert state, the dry gate and the alert verification. The mode becomes the lower of
 the dump and the live database (`0` < `dry` < `1`), audited only on a real change, and a result of
 `1` is capped at `dry` with `reason: restore_gates_empty`, because the gates were just reset and
-mode 1 without them would plan every set and write none. A restore never switches the evaluator on
-and never raises a reader's access.
+mode 1 without them would plan every set and write none. A restore never switches the evaluator on.
+Reader access is restored as the dump recorded it: an older dump that lacks the access column can
+only narrow (every OU inherits, and the Default is normalised to none), while a dump taken after step
+`0006` carries its OU scopes verbatim and may be wider than the live database's.
 
 ## The escapes
 
@@ -135,8 +142,10 @@ Five defects reached the first implementation despite the design. Naming their c
   bonus halves the unadjusted close and looked like a crash. The qfq ratio detects it, one call per
   set per tick, and only when a due mark can actually resolve.
 - **F14 — the limit backstop was wrong in both directions.** It recognised 20 % only on `300`/`688`
-  prefixes and compared floating-point percentages, so it fired on ordinary limit days and missed
-  real bonus issues on other boards. It is now board-aware and exact in fen.
+  prefixes, so ChiNext `301`, STAR `689` and Beijing used the 10 % main-board limit and their ordinary
+  limit days were flagged as corporate actions; its basis-point bound also flagged a cheap stock's
+  legal limit day. It is now board-aware (10/20/30 %) and compares fen-rounded limit prices with a
+  one-fen tolerance.
 
 The common cause is not carelessness about the arithmetic; it is that each rule was written against
 a plausible model of the vendor rather than against a recorded body. The fix that prevents a repeat
