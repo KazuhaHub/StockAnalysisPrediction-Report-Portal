@@ -64,6 +64,8 @@ type forecastCoverage struct {
 	// OffBenchmark counts accepted sets frozen with an index other than their cohort's benchmark
 	// (P4). They are counted and kept out of the cell, so a cohort never pools two indexes.
 	OffBenchmark int `json:"off_benchmark"`
+	// Unknown accounts for future or corrupt ledger states without silently losing coverage.
+	Unknown int `json:"unknown,omitempty"`
 }
 
 // madeAtBefore reports whether a set's stored made_at instant is strictly before the boundary. A
@@ -141,29 +143,14 @@ type forecastPeriod struct {
 // can neither be a member nor make a later real set a duplicate (plan B4).
 func forecastMembership(sets []*groupSet, populationFrom time.Time, bench string) (members, pendingBaseline []*groupSet, cov forecastCoverage) {
 	cov.Reports = len(sets)
-	// The symbol's earliest accepted set decides. If it is off-benchmark the symbol is out for the
-	// group, exactly like a degraded first set, and a later on-benchmark set must not revive it.
-	firstBench := map[string]string{}
-	if bench != "" {
-		for _, gs := range sets {
-			if !populationFrom.IsZero() && madeAtBefore(gs.MadeAt, populationFrom) {
-				continue
-			}
-			if gs.State != predStateAccepted {
-				continue
-			}
-			if _, ok := firstBench[gs.Symbol]; !ok {
-				firstBench[gs.Symbol] = gs.BenchCode
-			}
-		}
-	}
-	bySymbol := map[string][]*groupSet{}
+	cohortBench := make(map[string]string)
 	for _, gs := range sets {
-		if !populationFrom.IsZero() && madeAtBefore(gs.MadeAt, populationFrom) {
+		cohortBench[gs.Cohort] = bench
+	}
+	for _, v := range classifyMembership(sets, populationFrom, cohortBench) {
+		switch v.Status {
+		case membershipPreLive:
 			cov.PreLive++
-			continue
-		}
-		switch gs.State {
 		case predStateAbsent:
 			cov.Absent++
 		case predStateRejected:
@@ -172,35 +159,22 @@ func forecastMembership(sets []*groupSet, populationFrom time.Time, bench string
 			cov.Backtest++
 		case predStateTest:
 			cov.Test++
-		case predStateAccepted:
-			if bench != "" && (gs.BenchCode != bench || firstBench[gs.Symbol] != bench) {
-				cov.OffBenchmark++
-				continue
-			}
-			bySymbol[gs.Symbol] = append(bySymbol[gs.Symbol], gs)
-		}
-	}
-	symbols := make([]string, 0, len(bySymbol))
-	for sym := range bySymbol {
-		symbols = append(symbols, sym)
-	}
-	sort.Strings(symbols)
-	for _, sym := range symbols {
-		list := bySymbol[sym]
-		// loadForecastGroupSets orders by made_at, id, so list[0] is the earliest.
-		first := list[0]
-		cov.Duplicate += len(list) - 1
-		switch {
-		case first.BaseCheck == baseCheckPending || first.BaseCheck == baseRefused:
+		case membershipOffBenchmark:
+			cov.OffBenchmark++
+		case membershipDuplicate:
+			cov.Duplicate++
+		case membershipPendingBaseline:
 			cov.PendingBaseline++
-			pendingBaseline = append(pendingBaseline, first)
-		case first.DecisionQuality != predQualityNormal:
+			pendingBaseline = append(pendingBaseline, v.Set)
+		case membershipDegraded:
 			cov.Degraded++
-		case first.BaseCheck == baseMismatch:
+		case membershipMismatch:
 			cov.Mismatch++
-		default:
+		case membershipMember:
 			cov.Member++
-			members = append(members, first)
+			members = append(members, v.Set)
+		default:
+			cov.Unknown++
 		}
 	}
 	return members, pendingBaseline, cov

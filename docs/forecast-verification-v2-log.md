@@ -219,15 +219,15 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144 and upload-test timer fix #147 are merged. The vendor-evidence
-  follow-up #148 is merged as `fa250ced`. The halt-evidence branch starts from that main.
+  1.26.10 security fix #144, upload-test timer fix #147, captured qfq-response fix #148,
+  halt evidence #149 and P14 seeded preview #150 (`74e8c564`) are merged.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The independent
-  `test/forecast-halt-evidence` lane adds captured suspension/delisting controls without runtime changes.
-- **Next step.** Validate/review the halt evidence, resolve the P26 integration sequence, then continue P27 and P28.
+  is pending; neither Apps branch nor the user's checkout was changed. P16 is in progress in the
+  independent statistics lane; its ordered classifier checkpoint is recorded below.
+- **Next step.** Finish P16 read semantics and its gates; resolve P26's integration sequence before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -236,7 +236,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
   controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
+  responsive parity still requires the later layout/reader work and owner review. Re-check ADR numbers before P23: Apps reserves
   0038/0040 and P22 uses 0039.
   P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
@@ -664,3 +664,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
+
+### P16 — ordered membership classifier checkpoint (2026-10-22, in progress)
+
+- Starts from merged main `74e8c564` in an independent statistics lane. P26 draft #145 has
+  integrated that main as `af036007`, with full local validation and exact-head test run
+  39805130175 / CodeQL run 39805121956 completed successfully. It still awaits Apps integration
+  ordering; this P16 work neither removes that hold nor changes either Apps branch.
+- Extracted the pure ordered membership classifier and rebuilt the statistics wrapper on it.
+  Canonical symbol/receipt/id order preserves the permutation inputs. Pre-live and non-accepted
+  rows do not reserve a symbol; pending/degraded/mismatch and off-benchmark first decisions
+  cannot be replaced by a rerun. Unknown states now remain visible in an explicit coverage
+  bucket instead of disappearing, and never become members.
+- Tests first failed for the absent classifier and unknown bucket. Explicit precedence/order
+  tests and 500 deterministic fixtures against an independent frozen old implementation pass;
+  existing golden cells/members remain byte-identical without fixture changes. Independent
+  checkpoint review found no actionable issue. Full Go/SQLite/Postgres regression, vet and
+  staticcheck passed; three repeated classifier/golden race passes also passed (10.037 s),
+  including the final unknown-does-not-reserve and per-cohort-intent controls.
+- This is not P16 completion. Remaining work includes read-time membership against full cohort
+  populations, display/counted set identity, read fields and integer upside, restricted/error
+  omission, cross-process purge markers, revised phases and OpenAPI contract tests. No P16 PR
+  is ready to merge, and no schema or production action is included.
