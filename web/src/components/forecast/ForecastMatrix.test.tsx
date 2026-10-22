@@ -106,4 +106,15 @@ describe('ForecastMatrix', () => {
     const link = screen.getByRole('link', { name: /forecast.cov.rejected/ })
     expect(link.getAttribute('href')).toBe('/manage/audit?action=predictions.reject')
   })
+
+  it('expresses significance in text and glyphs, and removes it when q fails the gate', () => {
+    const { unmount } = show(resp({ ...empty, d5: mature }))
+    expect(screen.getByRole('button').textContent).toContain('▲')
+    expect(screen.getByRole('button').textContent).toContain('q<0.05')
+    expect(screen.getByRole('button').textContent).toContain('forecast.signal.positive')
+    unmount()
+    show(resp({ ...empty, d5: { ...mature, spread_q: 0.05 } }))
+    expect(screen.getByRole('button').textContent).not.toContain('q<0.05')
+    expect(screen.getByRole('button').textContent).not.toContain('▲')
+  })
 })

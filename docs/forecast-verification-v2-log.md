@@ -216,25 +216,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 ## Current progress (2026-10-22)
 
-- **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
-  `main` is at `b235be93`.
-- **In flight.** P11 (this PR, #137): ADR 0037, the ADR/design amendments and the operations runbook.
-  Its independent review is complete, including the source-outage guidance and ADR-reference
-  corrections. It is rebased onto the toolchain fix and awaiting fresh CI. P15 #143 is prepared
-  separately in an isolated worktree; the parallel Apps branches remain untouched.
-- **Next step.** P39b (owner token for every run) is its own Beta after R1b: it needs P38, P39a and
-  P30 deployed, the Dify batch published, and the undeclared-input question answered (§11.1). Then
-  R2a: P15/P26/P27/P28 in the access lane and P13/P22 for docs.
-- **Open questions / known limitations.** The V20 probe fixtures (P7) and the qfq fixture pair (P8)
-  were not captured; synthetic tests replace them. P30 cannot make a legacy `g:<Default>` viewer row
-  inert, because that principal is also the "all" audience (recorded in the log). P31 treats a
-  missing account row as unscoped; a read failure denies. The runbook has no `no_source` row until
-  P23.
-- **Evaluator state.** `forecast_auto` remains OFF. Readiness item 5 needs a real test alert to reach
-  both Email and Slack; the owner also sets the ledger start and the CSI 800 schedule. See
-  `docs/forecast-verification-operations.md` before switching on.
+- **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
+  P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
+  P30 #135, P31 #136, P11 #137. The standalone Go 1.26.10 security fix #144 is merged;
+  `origin/main` is at `83a64d89`.
+- **In flight.** P15 #143 is reviewed and rebased onto P11, in an isolated worktree on
+  `feat/forecast-web-foundations`. Full local checks passed again under Go 1.26.10; final CI
+  must pass before merge. The parallel Apps branches remain untouched.
+- **Next step.** Finish P15 and
+  continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
+  review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
+  the R1b deployment and subsequent Portal target refresh remain outstanding. No production
+  action has been performed here.
+- **Known limitations.** P7/P8 still lack the real vendor fixtures documented below. The P15
+  forecast translations are machine-generated, pending owner-arranged human review. Seeded
+  responsive preview screenshots depend on P14. Re-check ADR numbers before P22/P23: the parallel
+  notifications PR #141 already proposes ADR 0038.
+  P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
+- **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
 
 ### P9 — operating the evaluator
 
@@ -473,3 +472,53 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Review follow-ups.** The source-outage runbook now explicitly describes the evaluator's direct
   Tencent fetch, not the quote panel's configurable source order. The adjusted-price detection
   exception points to ADR 0028 §3 and ADR 0029 §10 rather than the integer-price section.
+
+### P15 — web foundations (2026-10-22)
+
+- Moved the matrix, drawer and their existing tests into `components/forecast`; routes, query
+  contracts, maturity gates and metric values are unchanged. The audit deep link was already
+  implemented and tested by P2, so its files were not changed.
+- Added algorithm-derived significance colours (light red7/green8; dark red8/green6), tested
+  against their actual tints at AA contrast, and a glyph plus textual significance cue. A source
+  scan rejects literal colours in shared, admin and reading-panel forecast components.
+- Added shared probability/signed-number formatting, a significance legend, methodology and the
+  approved disclaimer. Corrected the absolute-upside threshold, flat misses, missing-excess
+  exclusion, and spread/IC null explanations. Reader-page integrations remain P20.
+- Added `--prefix=forecast.` to the existing OpenCC generator. It reconverts only that family,
+  preserves unrelated reviewed translations (including keys absent from the source), and removes
+  stale keys only inside the selected family. Tests pin repeat-run byte stability, empty-prefix
+  rejection and the forecast fixed point. The family remains pending owner-arranged human review.
+- Review found and fixed prefix regeneration deleting unrelated stale keys. The generator's
+  status message now distinguishes a deliberate family reconversion from placeholder repair.
+- Validation: Go build, vet, all SQLite tests, the full app suite with Postgres, staticcheck, web
+  typecheck, 120 web test files / 1006 tests, and the production build passed. The extra prefix
+  preservation regression and updated source scan passed after the full run. Axe checks pass for
+  shared guidance under both themes; jsdom cannot validate layout or contrast, so contrast is
+  measured separately and seeded visual review remains pending P14. No golden fixture changed.
+- Independent adversarial review found no actionable issues. Browser checks of the real shared
+  components in a temporary local harness covered 375/768/1280 px in both themes, with keyboard
+  focus and no page-level horizontal overflow. The owner spotted uneven checkpoint heights;
+  boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
+  fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
+  This component preview does not replace P14's seeded full-page acceptance.
+- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
+  required CI on its final rebased head; independent review and full local checks passed.
+
+### P39b precondition audit (2026-10-22)
+
+- Read the live Dify Console API: all 16 published workflows declare the optional owner input;
+  all 18 ingest-node and 11 child-tool bindings are correct. All 12 workflow-tool providers carry
+  the input and report `synced=true`. Publication occurred on 2026-10-19, so the earlier handoff's
+  pending-publication note is stale. No workflow was modified or published during this audit.
+- With owner authorization for tests, ran the existing wait-only test workflow once with `n=0`
+  and an undeclared fake owner input. Run `57abe025-2ee3-4ee8-a282-ab788578a58e` succeeded on all
+  three nodes; the normalized workflow inputs omitted the undeclared key. The Console draft
+  runtime therefore ignores it. No LLM, HTTP, report ingest or email node exists in that graph.
+- Repeated the same authorized test through the published Service API using the test app's existing
+  key (no key created or exposed). `POST /v1/workflows/run` returned HTTP 200; run
+  `f6a85b7b-73ce-4116-8294-9b0986e84a2c` succeeded on all three steps with `waited_minutes=0`.
+  The undeclared input does not reject a run through the same API path Portal uses. This closes
+  the undeclared-input runtime question in §11.1; deployment and target refresh remain separate gates.
+- Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
+  2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
+  and the subsequent Portal target refresh. No deployment or production-data write was performed.
