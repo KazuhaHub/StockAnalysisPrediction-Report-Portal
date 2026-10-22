@@ -1,11 +1,11 @@
 # Status and generic extension storage proposal
 
-Status: awaiting owner approval. No DDL or migration is implemented by this file.
+Status: Option A accepted by the owner on 2026-10-22. Implementation is in progress.
 Prepared 2026-10-22 for the accepted shared application repository.
 
-## Decision requested
+## Accepted decision
 
-Approve Option A below: a single new generic Portal connection table using the
+The owner approved Option A: a single new generic Portal connection table using the
 next available migration after notification 0007, plus the independent Status
 SQLite tables listed here. Use DB-backed feature settings, purpose-bound sealed
 secrets, fail-closed identity checks, transactional transitions/outbox and paused
@@ -140,5 +140,6 @@ Portal `meta` or its notification tables; rejected because it couples lifecycle,
 weakens relational constraints and bypasses the storage approval boundary. Option
 C puts monitoring in the Portal binary; rejected by the agreed plugin isolation.
 
-Approve A as described, or specify structural changes before any schema code is
-written. Minor implementation helpers do not expand the approved object set.
+The accepted decision authorizes the objects and lifecycle rules above. Minor
+implementation helpers do not expand the approved object set. Further schema
+changes require a separate decision.

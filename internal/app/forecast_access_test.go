@@ -135,13 +135,14 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 			t.Fatalf("cannot wind back: %v", err)
 		}
 	}
-	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
-		t.Fatal(err)
+	for _, step := range src.migrations() {
+		if step.id >= "0006" {
+			if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(step.id)); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	// A pre-0006 dump cannot claim the later notification migration either.
-	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0007")); err != nil {
-		t.Fatal(err)
-	}
+
 	dump := dumpOf(t, src)
 
 	dst := newTestStore(t)

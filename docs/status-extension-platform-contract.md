@@ -1,7 +1,7 @@
 # Generic external application connection contract v1
 
-Status: proposed for S01, storage approval pending. This is a reusable Portal
-platform feature, not an API that currently exists in the deployed Portal.
+Status: Option A accepted 2026-10-22. Platform implementation is under verification
+in the development branch; it is not claimed deployed.
 
 ## API ownership
 
@@ -122,8 +122,8 @@ This is an internal projection primitive, not a registered HTTP endpoint. It doe
 not expose a directory or enable new capabilities. Future token issuance must
 capture the current deletion generation into its internal entry; default/unknown
 values cannot be used to grant a recreated account. Future dispatch still must
-check installation generation, current scopes and connection revision. Storage
-and route wiring remain behind the unanswered schema approval gate.
+check installation generation, current scopes and connection revision. The owner approved storage and lifecycle Option A on 2026-10-22. The following
+implementation update supersedes the preparatory limitations above.
 
 
 ## Toolchain acceptance follow-up
@@ -133,3 +133,26 @@ Go 1.26.9 is affected by GO-2026-6809 in crypto/x509. The branch minimum toolcha
 is updated to Go 1.26.10, and checks use that exact compiler. Local govulncheck
 then reported no reachable vulnerabilities. This changes no schema or endpoint.
 Official advisory: https://pkg.go.dev/vuln/GO-2026-6809
+
+
+## Implementation update after approval (2026-10-22)
+
+Migration 0008 implements the generic connection with declared columns and backup
+coverage, without changing the baseline. Administrator connection CRUD seals keys,
+uses revision checks and has a translated app-management UI. App token issuance
+captures the current deletion generation and registration instance. Reinstall and
+restore disable the connection, clear its old pairing and rotate the instance;
+uninstall removes registration and assets in one transaction.
+
+The app-bound request proxy and shared pinned-transport boot handshake are wired.
+Current identity/role/OU and connection authority are rechecked after the handshake.
+The bridge distinguishes inner read and management capabilities. The additional
+`GET /api/v1/extensions/{id}/principals?kind=ou|user&offset=0` endpoint returns at
+most 100 opaque grant references and labels to a current app-bound administrator.
+It does not grant the iframe session access to administrator routes.
+
+Full Go tests, including a local PostgreSQL instance, passed. Frontend typecheck,
+all 1,008 tests and the production build passed before the final directory/audit
+addition; affected checks are repeated for that addition. No production database,
+backend or market configuration has been changed. Runtime deployment and the
+independent Status packages remain outstanding.

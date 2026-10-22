@@ -15,7 +15,7 @@ interface Props {
 }
 
 // Human-readable copy per known scope; unknown scopes fall back to their raw name.
-const SCOPE_LABEL: Record<string, string> = { query: 'apps.scopeQuery', ingest: 'apps.scopeIngest', notify: 'apps.scopeNotify' }
+const SCOPE_LABEL: Record<string, string> = { query: 'apps.scopeQuery', ingest: 'apps.scopeIngest', notify: 'apps.scopeNotify', 'extension.read': 'apps.scopeExtensionRead', 'extension.manage': 'apps.scopeExtensionManage' }
 
 function scopeIcon(scope: string) {
   if (scope === 'ingest') return <EditOutlined />

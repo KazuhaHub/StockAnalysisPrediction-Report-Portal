@@ -450,6 +450,9 @@ func (s *Store) populationFromRow() string {
 // takes the data back with it rather than leaving a half-loaded database behind.
 func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if err := resetRestoredExtensionConnections(e); err != nil {
+		return err
+	}
 	// Restored pending work may already have reached an external destination
 	// after the backup was made. Never resume it silently on the next boot.
 	if err := e.setSetting("notification_dispatch_paused", "1"); err != nil {
