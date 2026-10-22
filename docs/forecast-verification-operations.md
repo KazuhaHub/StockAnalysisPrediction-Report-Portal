@@ -40,7 +40,9 @@ calendar still ending before today after 18:00 CST on a weekday.
   a deferral still records the reason, session and wake, no attempt moves, and nothing can become
   final. Evidence of a halt (a body stamped at or after the session) can still resolve a mark. Never
   force a settle.
-- One source down: check the configured source order on the quotes panel.
+- One source down: inspect the reported Tencent request or source failure and wait for recovery.
+  Settlement fetches Tencent directly; changing the quotes panel's configured source order does
+  not change the evaluator's source.
 
 ### `awaiting_gate` names a benchmark
 

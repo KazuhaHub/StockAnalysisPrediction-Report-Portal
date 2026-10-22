@@ -57,8 +57,8 @@ computed in fen, not percent (plan F03/F09/F11/F13/F14).
 carries on ex-dates names cash dividends; it does not mention bonus or rights issues, which are the
 case that halves a price. One qfq fetch per set per tick compares the adjusted/unadjusted ratio at
 the base and at the due session, exactly, in integers; a flagged mark is stored but excluded from
-metrics and counted. A failed check never resolves a mark (plan F10, ADR 0028 §10's narrow
-exception).
+metrics and counted. A failed check never resolves a mark (plan F10, ADR 0028 §3's detection-only
+exception, with its detailed bounds in ADR 0029 §10).
 
 ## Governance and the ledger's edges
 

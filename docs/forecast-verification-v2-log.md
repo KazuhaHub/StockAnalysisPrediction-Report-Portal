@@ -469,3 +469,6 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **`docs/forecast-verification-operations.md` is created** with the signals that exist today
   (stalled, lagging, awaiting_gate, store_failed, test/off_benchmark counts, the switch-on sequence,
   scheduling, the ledger start, deploy/restore). Later surfaces add their own rows.
+- **Review follow-ups.** The source-outage runbook now explicitly describes the evaluator's direct
+  Tencent fetch, not the quote panel's configurable source order. The adjusted-price detection
+  exception points to ADR 0028 §3 and ADR 0029 §10 rather than the integer-price section.
