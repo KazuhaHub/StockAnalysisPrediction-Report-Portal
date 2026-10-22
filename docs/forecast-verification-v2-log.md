@@ -214,19 +214,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
 
-## Current progress (2026-10-20)
+## Current progress (2026-10-22)
 
 - **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
-  `e27c7ea8`.
-- **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P31 `fix/tenancy-strict-restricted-read` (§6.9) is in this PR. After it: P11
-  (ADR 0037), the last R1b PR before P39b's own Beta.
-- **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
-  fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
-  synthetic coverage that replaces them.
-- **Evaluator state.** `forecast_auto` must remain OFF until R1b ships and the readiness list is
-  green.
+  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
+  P30 #135, P31 #136. The standalone Go 1.26.10 security fix #144 is merged;
+  `main` is at `b235be93`.
+- **In flight.** P11 (this PR, #137): ADR 0037, the ADR/design amendments and the operations runbook.
+  Its independent review is complete, including the source-outage guidance and ADR-reference
+  corrections. It is rebased onto the toolchain fix and awaiting fresh CI. P15 #143 is prepared
+  separately in an isolated worktree; the parallel Apps branches remain untouched.
+- **Next step.** P39b (owner token for every run) is its own Beta after R1b: it needs P38, P39a and
+  P30 deployed, the Dify batch published, and the undeclared-input question answered (§11.1). Then
+  R2a: P15/P26/P27/P28 in the access lane and P13/P22 for docs.
+- **Open questions / known limitations.** The V20 probe fixtures (P7) and the qfq fixture pair (P8)
+  were not captured; synthetic tests replace them. P30 cannot make a legacy `g:<Default>` viewer row
+  inert, because that principal is also the "all" audience (recorded in the log). P31 treats a
+  missing account row as unscoped; a read failure denies. The runbook has no `no_source` row until
+  P23.
+- **Evaluator state.** `forecast_auto` remains OFF. Readiness item 5 needs a real test alert to reach
+  both Email and Slack; the owner also sets the ledger start and the CSI 800 schedule. See
+  `docs/forecast-verification-operations.md` before switching on.
 
 ### P9 — operating the evaluator
 
@@ -440,3 +448,28 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   account row stays unscoped (a session route has already validated the account; the window is a
   request racing a deletion), while a read failure still denies — the comment now says exactly that
   instead of calling it a machine caller.
+
+### P11 — ADR 0037 and the Release 1 amendments
+
+- **ADR 0037** records the definition repair (S0/dN, terminal baseline, not-due, finality, settlement
+  checks, the adjusted-ratio detection), governance (ledger start, test runs, benchmark schedule,
+  unrecorded), operations (modes, readiness, dry gate, heartbeat, watchdog, health, alert channels,
+  the single-connection rule), the restore rules, and the five escapes (F01, F03, F06, F10, F14)
+  with their causes.
+- **ADR 0029** gains a dated amendment block and in-place notes at §5, §6, §7, §9, §10 and §12; the
+  new settled decisions (V3, V6b, V8, V9, V18, V24, V26, the access model, the owner token) are in
+  §12's table.
+- **ADR 0017** notes that `pre_live`/`test` sets are purged by the ledger's own retention target and
+  that `attributed_ou` is not a retention key. **ADR 0022** records the restricted-only `g:` principal
+  and the reserved `_rp_*` inputs. **ADR 0024** records the P30 amendment to the "both principals"
+  paragraph.
+- **The design document** points from §7 and D6 to ADR 0039 (R2a), corrects §9.2 (the dividend element
+  is a cash signal; the ratio is primary; the exact fen limit backstop), adds the S0-halt rule to
+  §9.3, notes the phase vocabulary in §10, and extends acceptance condition 19 with the forecast
+  scope.
+- **`docs/forecast-verification-operations.md` is created** with the signals that exist today
+  (stalled, lagging, awaiting_gate, store_failed, test/off_benchmark counts, the switch-on sequence,
+  scheduling, the ledger start, deploy/restore). Later surfaces add their own rows.
+- **Review follow-ups.** The source-outage runbook now explicitly describes the evaluator's direct
+  Tencent fetch, not the quote panel's configurable source order. The adjusted-price detection
+  exception points to ADR 0028 §3 and ADR 0029 §10 rather than the integer-price section.

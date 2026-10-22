@@ -14,6 +14,11 @@ order and the acceptance tests — is in
 [forecast-verification-design.md](../forecast-verification-design.md) (draft 4), cited as "design §n".
 Where these disagree, stop and ask; do not pick one.
 
+> **Amendments for Release 1 (2026-10-20).** The decisions below stand; the implementation changed
+> in places where it did not match them. [ADR 0037](0037-forecast-verification-operations.md) records
+> the definition repair, the operating model and the escapes; the notes under §5, §6, §7, §9, §10 and
+> §12 point from here to it. Read 0037 before changing anything this ADR governs.
+
 > **On the file name.** This file is still `0029-prediction-scoring-deferred.md`. The name is now
 > wrong, and it is kept deliberately: a shipped release note links to it by path
 > (`docs/releases/0.x/v0.4.45.md:382`), and there is no ADR index to redirect. Renaming it is a
@@ -150,6 +155,11 @@ every fill starts at `S0`'s close, not at the report's own baseline.
 - **`/api/v1` is token-only** (`routes.go:33`; enforced by
   `TestTheMachineSurfaceIsNotASessionClass`, `routes_test.go:123`), so the SPA reads a report's sets
   through a **session** route, `GET /api/report/{id}/predictions`, under the same rules.
+- **Amended 2026-10-20 (P30/P31).** The forecast reads apply `viewerScope` like every other read. A
+  reader's principals are the account, the Default OU (which encodes the "all" audience) and the
+  **effectively restricted** OUs on its chain only; an unrestricted container is no longer a
+  principal, and a read failure or a broken chain scopes to nothing. Ingest writes a `g:` viewer row
+  only for a restricted OU. (Making the app-bridge token carry its user is R2a, not shipped here.)
 - **The group statistics route is `/api/admin/forecast/groups`, gated on `PermManage` — not
   `/api/v1`.** v1 authorizes by token scope alone (`tokenOK`, `server.go:1002`), and the app bridge
   mints `query` tokens for any unrestricted user (`apiAppToken`, `apps_api.go:121`), so a v1 route
@@ -175,10 +185,24 @@ walks the operator's source chain, which breaks D9, and it serves cached bodies,
 session has **completed**.
 
 Refusals are a recorded outcome with a retry, not a gap: `no_bar`, `stale_bar`, `unverifiable`, each
-with `attempts` and `next_attempt_at`. A refusal that is still refused 10 sessions past due becomes
-`refused_final` and is never retried again — which is what makes a mature cell's inputs fixed (§8).
+with `attempts` and `next_attempt_at`. A refusal that is still refused 10 sessions past due **and**
+has four mark-specific failed attempts becomes `refused_final` and is never retried again — which is
+what makes a mature cell's inputs fixed (§8). Source-class failures never increment attempts. When the
+baseline itself cannot resolve, the same clock is measured from S0: after four attempts and ten
+sessions the baseline becomes terminal and every non-terminal mark is finalised with it.
+
+**Amended by ADR 0037.** The loop has three modes — off, dry and on — and switching on is gated by a
+readiness list that includes a dry pass and a hand check per benchmark. The loop writes a heartbeat,
+an independent watchdog reports `stalled` and `lagging` to Email and Slack, and a status-only
+`/healthz/forecast` exists for an uptime monitor. Finality is the result of mark-specific failures
+only (V26); a source failure never counts. `fetchTencentRange` now lives in `internal/app/quote.go`
+and is called directly, under the shared concurrency ceiling and never through the cache.
 
 ### 7. The tables
+
+> **Amended by ADR 0037.** Each mark's `bench_code` is the set's FROZEN benchmark intent, never the
+> currently configured index. Step `0006` adds the access columns and `attributed_ou`; it does not
+> change any table below.
 
 One migration step in `migrate_steps.go`, declaring four tables, one column and their indices, never
 edited after release. Nothing is added to `baseSchemaStmts()`. **This is the shape the owner signs off
@@ -444,6 +468,14 @@ this target harder to undo than the reports target rather than easier.
 
 ### 9. What is quantified, and the four gates in front of it
 
+> **Amended by ADR 0037.** The buckets are `pre_live` (made before the ledger start: settled, shown,
+> never counted), `test` (the producer declared a test run; never a member, never a duplicate) and
+> `off_benchmark` (frozen with a code other than its cohort's). Membership is computed inside each
+> population, and the hit rate is one shared predicate: a move under 5 % is `untested`; a zero
+> excess is `flat` and stays in the denominator; agree/disagree is the sign of the excess against the
+> move. A member with no benchmark excess at all is `untested` and leaves the denominator, because
+> there is nothing to agree with (not a flat miss).
+
 An overview quantifies only **mature checkpoints of closed groups**. A group is a set of Shanghai
 receipt dates: a calendar month in the official view, or whatever the exploratory view defines.
 
@@ -483,6 +515,11 @@ grouping. The monthly tab takes no parameter that changes its numbers.
 
 ### 10. ADR 0028's "never qfq" rule is amended, narrowly
 
+> **Amended by ADR 0037.** The adjusted/unadjusted ratio is the primary detection signal (the
+> dividend element is a cash signal and cannot name a bonus issue), read by one detection-only call
+> per set per tick and compared exactly in integers; it is never stored and never scored. The unreported-action limit backstop is board-aware (10 % / 20 % / 30 %) and computed in
+> fen, not floating-point percent.
+
 ADR 0028 §3 and `quote.go:986` say **NEVER qfq**, and that rule protects **displayed** prices: a
 front-adjusted series is re-based on every corporate action, so a bar read in July is a different
 number in December, and comparing a nominal target price against it is a systematic bias against every
@@ -497,11 +534,11 @@ checkpoint session. This is a narrow exception, and its bounds are:
 - **detection only**: its numbers are never stored, never scored and never displayed;
 - a flagged mark is resolved and stored, but **excluded from metrics and counted**.
 
-D8 records a preference for doing this from the dividend element that Tencent's unadjusted day rows
-already carry on ex-dates (`quote.go:1121`: a day row is six strings *except on an ex-dividend date*,
-where a seventh element is an object), falling back to the qfq ratio only for the kinds that element
-misses — in which case no amendment to the display rule is needed at all. Whichever way D8 goes, the
-`fetchTencentAdjustRatio` bounds above hold.
+The implementation corrected D8's mechanism. Tencent's unadjusted day rows carry a seventh element on
+an ex-date, but it names a **cash dividend**; no fixture mentions a bonus, capitalisation or rights
+issue, which is the case that halves a price. The qfq ratio is therefore the primary signal, not a
+fallback: one call per set per tick, compared exactly in integers, with a one-fen bound. The dividend
+element remains a one-sided corroborating signal. Both are detection-only, and the bounds above hold.
 
 The amendment is recorded at the point of ADR 0028 where the promise is made, not only here.
 
@@ -544,8 +581,23 @@ own consequence, not the filling-in of an open question.
 | **D4. Membership** — earliest set decides, no rerun promotion? | 2026-10-18 | The earliest `accepted` set per `(symbol, group)` decides; a degraded or `mismatch` first set excludes the symbol, and a rerun cannot replace it. |
 | **D5. Purge** — does the ledger outlive the report? | 2026-10-18 | Yes. `report_id` → NULL; sets survive. The ledger also has its own retention target (§8), which deletes a whole month at a time and only when every set in it is orphaned, fully terminal and past the cutoff. |
 | **D7. 3-5 重组决策** — in or out of v1? | 2026-10-18 | Out of v1. Its values come from an LLM agent and its claims are event probabilities, so nothing in the contract would be code-selected. |
-| **D8. Corporate actions** — dividend element first, qfq fallback? | 2026-10-18 | Yes. Evaluate the dividend element first, use the qfq ratio only for the kinds it misses, exclude and count. The fallback is bounded to one detection-only function (§10). |
+| **D8. Corporate actions** — dividend element first, qfq fallback? | 2026-10-18, mechanism corrected 2026-10-20 | Detect from the adjusted/unadjusted ratio (the only signal that catches a bonus or rights issue), corroborated one-sidedly by the dividend element; exclude and count. One detection-only function, exact integers (§10, ADR 0037). |
 | **D9. Corroboration** — one vendor, or two? | 2026-10-18 | One vendor (Tencent) in v1. The quote stack is primary-plus-fallback, not corroboration, so a second source would be a refusal that can never fire. |
+
+The Release 1 implementation added these settled decisions (details in ADR 0037 and the plan's
+decision table):
+
+| Decision | Settled | Value |
+|---|---|---|
+| **V3. Ledger start** | 2026-10-19 | `2026-10-18T16:00:00Z`, write-once, bounded by the oldest set; sets before it are `pre_live`. |
+| **V6b. Halt on S0** | 2026-10-19 | The start is the stock's last traded close before S0, inside a bounded look-back; the benchmark leg still starts at S0. |
+| **V8. Benchmark governance** | 2026-10-19 | Closed allowlist; effective at the next cohort; explicit schedule/cancel; audited; `sh000906` for 2026-11. |
+| **V9. Tier 1 sources** | 2026-10-19 | Tencent the only writer for scored marks; Sina in shadow; Tier 2 is a separate go/no-go (ADR 0038). |
+| **V18. Alert channels** | 2026-10-19 | Email **and** Slack for every evaluator alert and every store failure; SLOs as in plan §8. |
+| **V24. Test runs** | 2026-10-19 | `run_mode: "test"` on the wire, frozen at ingest into its own bucket. |
+| **V26. Finality** | 2026-10-19 | ≥ 10 sessions past due **and** ≥ 4 mark-specific failed attempts; source outages never count. |
+| **Access model** | 2026-10-19 | Per-OU `all`/`own`/`none`, `NULL` inherits (nearest wins), Default `none`, admins `all`, attribution frozen at insert; the one exception is an OU delete re-attributing its sets to its parent. To be recorded as ADR 0039 in R2a. |
+| **Owner token for every run** | 2026-10-19 | After the Dify batch is published, `_rp_owner_token` goes to every run; `_rp_*` inputs are reserved (P39a). Amends ADR 0022 R1. |
 
 Two further questions the implementation plan raised are also settled:
 
