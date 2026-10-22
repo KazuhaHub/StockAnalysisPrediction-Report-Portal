@@ -2189,6 +2189,7 @@
   "forecast.phase.on_or_after": "预计 {{date}} 或之后",
   "forecast.phase.retrying": "重试中",
   "forecast.phase.settling": "等待结算",
+  "err.bad_population": "成员范围必须为已计分成员或全部成员。",
   "forecast.phase.overdue": "结算已超期",
   "forecast.phase.settlement_paused": "自动结算已暂停。预测仍会保留，恢复结算前不会写入检查点结果。",
   "forecast.phase.resolved": "已结算",

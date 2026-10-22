@@ -2189,6 +2189,7 @@
   "forecast.phase.on_or_after": "On or after {{date}}",
   "forecast.phase.retrying": "Retrying",
   "forecast.phase.settling": "Awaiting settlement",
+  "err.bad_population": "Member population must be scored or all.",
   "forecast.phase.overdue": "Settlement overdue",
   "forecast.phase.settlement_paused": "Automatic settlement is paused. Forecasts remain recorded; checkpoint results will not be written until settlement resumes.",
   "forecast.phase.resolved": "Settled",

@@ -187,7 +187,7 @@ type reportKindName struct {
 	Name string
 }
 
-func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
+func (s *Store) reportKindsFor(ids []int64, sc *ownerScope) (map[int64]reportKindName, error) {
 	uniq := make([]int64, 0, len(ids))
 	seen := map[int64]bool{}
 	for _, id := range ids {
@@ -200,8 +200,13 @@ func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
 	if len(uniq) == 0 {
 		return out, nil
 	}
-	rows, err := s.query(`SELECT id, COALESCE(kind,''), COALESCE(name,'') FROM reports WHERE id IN (`+
-		placeholders(len(uniq))+`)`, int64Args(uniq)...)
+	query := `SELECT r.id, COALESCE(r.kind,''), COALESCE(r.rtype,''), COALESCE(r.name,'') FROM reports r WHERE r.id IN (` + placeholders(len(uniq)) + `)`
+	args := int64Args(uniq)
+	if where, more := sc.where("r."); where != "" {
+		query += " AND " + where
+		args = append(args, more...)
+	}
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -209,9 +214,11 @@ func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
 	for rows.Next() {
 		var id int64
 		var v reportKindName
-		if err := rows.Scan(&id, &v.Kind, &v.Name); err != nil {
+		var rtype string
+		if err := rows.Scan(&id, &v.Kind, &rtype, &v.Name); err != nil {
 			return nil, err
 		}
+		v.Kind = repKind(Rep{Kind: v.Kind, RType: rtype})
 		out[id] = v
 	}
 	return out, rows.Err()

@@ -19,6 +19,7 @@ type forecastMembersResponse struct {
 	Bench          string                `json:"bench"`
 	Checkpoint     string                `json:"checkpoint"`
 	State          string                `json:"state"`
+	Population     string                `json:"population,omitempty"`
 	PurgedAt       string                `json:"purged_at,omitempty"`
 	ExcludedMonths []forecastPurgedMonth `json:"excluded_months,omitempty"`
 	// The gate's own counts, so the drawer's headline matches the matrix without rescoring.
@@ -33,16 +34,17 @@ type forecastMembersResponse struct {
 // forecastMember is one member of a cell with the numbers the drawer shows. ReportID is nil for a
 // purged set, which is how the UI knows not to link it.
 type forecastMember struct {
-	SetID      int64  `json:"set_id"`
-	ReportID   *int64 `json:"report_id"`
-	Symbol     string `json:"symbol"`
-	Name       string `json:"name,omitempty"`
-	Kind       string `json:"kind,omitempty"`
-	ReportDate string `json:"report_date"`
-	MadeAt     string `json:"made_at"`
-	MadeOn     string `json:"made_on"`
-	Stance     string `json:"stance"`
-	Status     string `json:"status"`
+	SetID          int64  `json:"set_id"`
+	ReportID       *int64 `json:"report_id"`
+	Symbol         string `json:"symbol"`
+	Name           string `json:"name,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	ReportDate     string `json:"report_date"`
+	MadeAt         string `json:"made_at"`
+	MadeOn         string `json:"made_on"`
+	Stance         string `json:"stance"`
+	Status         string `json:"status"`
+	ExcludedReason string `json:"excluded_reason,omitempty"`
 
 	CloseFen    *int64   `json:"close_fen,omitempty"`
 	RetBp       *int32   `json:"ret_bp,omitempty"`
@@ -58,6 +60,11 @@ type forecastMember struct {
 
 func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string) {
 	q := r.URL.Query()
+	population := q.Get("population")
+	if population != "" && population != "scored" && population != "all" {
+		jsonErrorCode(w, http.StatusBadRequest, "bad_population", "population must be scored or all")
+		return
+	}
 	mode := q.Get("mode")
 	if mode == "" {
 		mode = "month"
@@ -139,7 +146,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	}
 	if at, purged := purges[[2]string{rtype, period.Start[:7]}]; mode == "month" && purged {
 		writeJSON(w, forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
-			Checkpoint: cp, State: "purged", PurgedAt: at, Members: []forecastMember{}})
+			Checkpoint: cp, State: "purged", PurgedAt: at, Population: population, Members: []forecastMember{}})
 		return
 	}
 
@@ -185,11 +192,27 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		sets = filtered
 	}
 	members, pending, _ := forecastMembership(sets, populationFrom, bench)
+	// The gate always receives the scored checkpoint population. Membership mode additionally
+	// explains candidates blocked by the baseline or this checkpoint, never later duplicate runs.
+	drawerMembers := members
+	baselinePending := map[int64]bool{}
+	if population == "all" {
+		drawerMembers = nil
+		for _, v := range classifyMembership(sets, populationFrom, benchOf) {
+			if v.Status == membershipMember || v.Status == membershipPendingBaseline {
+				drawerMembers = append(drawerMembers, v.Set)
+				baselinePending[v.Set.ID] = v.Status == membershipPendingBaseline
+			}
+		}
+	}
 	today := now.In(chinaZone).Format("2006-01-02")
 	// The gate sees the same population the matrix scores: h12 is a standard-horizon column.
 	if cp == "h12" {
 		members = filterHorizonStd(members)
 		pending = filterHorizonStd(pending)
+	}
+	if population != "all" {
+		drawerMembers = members
 	}
 	// The STATE comes from the gate, never the scorer: opening a drawer must not cost 10 000
 	// permutations to learn what the matrix already showed.
@@ -216,12 +239,14 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 	if mode == "custom" {
 		out.ExcludedMonths = forecastExcludedMonths(rtype, period.Start, period.End, purges)
 	}
+	if population == "all" {
+		out.Population = population
+	}
 	var ids []int64
-	for _, gs := range members {
+	for _, gs := range drawerMembers {
 		m := gs.Marks[cp]
-		// The drawer lists the members the cell scored: a refused or corporate-action mark is not
-		// one of them, and listing it beside the numbers would mix populations.
-		if m.Status != markResolved || m.CorpAction {
+		reason := forecastMemberExclusion(gs, cp, baselinePending[gs.ID])
+		if population != "all" && reason != "" {
 			continue
 		}
 		reportDate := gs.ReportDate
@@ -233,7 +258,10 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			ReportDate: reportDate, MadeAt: gs.MadeAt, MadeOn: gs.MadeOn,
 			Stance: gs.Stance, Status: m.Status,
 		}
-		if mature {
+		if population == "all" {
+			fm.ExcludedReason = reason
+		}
+		if mature && reason == "" {
 			// A non-mature cell has no outcomes to show: even a resolved mark is not a scored member
 			// until the whole cell passes its gates, and sending the numbers invites a reader to
 			// average a cell the matrix refuses to.
@@ -261,7 +289,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		out.Members = append(out.Members, fm)
 	}
 	if len(ids) > 0 {
-		info, err := s.st.reportKindsFor(ids)
+		info, err := s.st.reportKindsFor(ids, s.viewerScope(user))
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
@@ -273,10 +301,37 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 			if v, ok := info[*out.Members[i].ReportID]; ok {
 				out.Members[i].Kind = v.Kind
 				out.Members[i].Name = v.Name
+			} else {
+				out.Members[i].ReportID = nil
 			}
 		}
 	}
 	writeJSON(w, out)
+}
+
+// Exclusions describe eligibility, not outcomes. They can be shown before the cell matures.
+func forecastMemberExclusion(gs *groupSet, cp string, pendingBaseline bool) string {
+	if pendingBaseline {
+		return membershipPendingBaseline
+	}
+	if cp == "h12" && !gs.HorizonStd {
+		return "non_standard_horizon"
+	}
+	m, ok := gs.Marks[cp]
+	if !ok {
+		return "missing_mark"
+	}
+	switch m.Status {
+	case markResolved:
+		if m.CorpAction {
+			return "corp_action"
+		}
+		return ""
+	case markPending, markRefused, markRefusedFinal:
+		return m.Status
+	default:
+		return "unknown_mark_status"
+	}
 }
 
 // reportIDPtr copies the set's report id, so a member row is independent of the loaded set.

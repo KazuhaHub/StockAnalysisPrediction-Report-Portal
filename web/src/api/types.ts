@@ -1593,6 +1593,7 @@ export interface ForecastMember {
   made_on: string
   stance: 'long' | 'no_position'
   status: string
+  excluded_reason?: 'pending_baseline' | 'non_standard_horizon' | 'missing_mark' | 'pending' | 'refused' | 'refused_final' | 'corp_action' | 'unknown_mark_status'
   close_fen?: number
   ret_bp?: number
   bench_ret_bp?: number
@@ -1610,6 +1611,7 @@ export interface ForecastMembersResponse {
   end: string
   checkpoint: ForecastCheckpoint
   state: string
+  population?: 'scored' | 'all'
   members: ForecastMember[]
   purged_at?: string
   excluded_months?: ForecastPurgedMonth[]

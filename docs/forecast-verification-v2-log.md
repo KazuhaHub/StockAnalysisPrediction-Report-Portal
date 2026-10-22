@@ -786,3 +786,28 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   coverage refusal bucket, final contract audit and P26 protected-access reconciliation remain.
   Apps integration PRs #141/#142 remain open at their previous heads; P26 #145 remains held.
   No schema, production deployment or workflow publication was performed.
+
+### P16 — member population and readable links checkpoint (2026-10-22, in progress)
+
+- The legacy management drawer accepts `population=all` to explain all group members and
+  first-decision pending-baseline candidates. Duplicate reruns never become additional members.
+  Exclusion reasons distinguish pending baselines, missing marks, pending/refused/final marks,
+  corporate actions, non-standard h12 horizons and unknown mark statuses. The default/scored
+  population stays unchanged; the statistical gate receives the same inputs as before.
+- Non-mature cells send no outcomes, including for individually resolved marks. Even in a mature
+  cell, excluded rows carry no prices, returns, upside or direction. Membership mode invokes no
+  permutation scorer. Tests cover mixed exclusions, duplicate reruns, mature exclusions and h12.
+- Report links use the existing report-read scope in one batched metadata query; an unreadable or
+  concurrently removed report loses its report ID and link metadata. Visible reports use `repKind`
+  rather than raw stored categories. SQLite/Postgres controls prove both a granted readable
+  report and a hidden sibling, including version grants and a legacy category alias.
+- Initial tests failed for the absent mode and raw category. Fixture setup now uses the actual
+  account restriction setter and version grants rather than assuming account upsert grants read
+  access. Independent review found no actionable issue. Full regression exposed missing UI
+  translations for the new error code; all three locales now cover it. Golden files are unchanged.
+- Validation after that correction: full Go/SQLite/Postgres regression passed, as did vet,
+  staticcheck, three repeated drawer/link/purge/golden race passes (23.730 s), web typecheck and
+  the 10 focused matrix/locale tests. The full 120-file / 1007-test web run passed before the
+  error-message-only locale addition.
+- This checkpoint does not remove the P26 integration hold or make P16 merge-ready. No schema,
+  Apps-branch, deployment or workflow-publication change is included.
