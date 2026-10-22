@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -70,20 +71,39 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 }
 
 func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user string) {
-	writeJSON(w, map[string]any{"groups": userGroupsJSON(s.st.ListUserGroups())})
+	ix, err := s.st.loadOUIndex()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	groups := userGroupsJSON(s.st.ListUserGroups())
+	for _, group := range groups {
+		id := group["id"].(int64)
+		row, ok := ix.ous[id]
+		if !ok {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		d := resolveForecastScope(forecastSubject{User: "preview", GroupID: id}, ix)
+		group["forecast_scope"] = row.scope
+		group["forecast_scope_effective"] = d.Scope
+		group["forecast_scope_source"] = d.Source
+	}
+	writeJSON(w, map[string]any{"groups": groups})
 }
 
 // groupInput is the create/update body. Weight and UrgentUnlimited are pointers so a
 // JSON null means "inherit the Default group" and a value means "override".
 type groupInput struct {
-	Name            string  `json:"name"`
-	Description     string  `json:"description"`
-	Weight          *int    `json:"weight"`
-	UrgentUnlimited *bool   `json:"urgent_unlimited"`
-	AllowUrgent     *bool   `json:"allow_urgent"`
-	MaxQueued       *int    `json:"max_queued"`
-	RunWindow       *string `json:"run_window"`
-	Priority        string  `json:"priority"`
+	ForecastScope   json.RawMessage `json:"forecast_scope"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Weight          *int            `json:"weight"`
+	UrgentUnlimited *bool           `json:"urgent_unlimited"`
+	AllowUrgent     *bool           `json:"allow_urgent"`
+	MaxQueued       *int            `json:"max_queued"`
+	RunWindow       *string         `json:"run_window"`
+	Priority        string          `json:"priority"`
 	// External-user tenancy (ADR 0022). Restricted is a plain flag (absent = leave as-is);
 	// DailyRunQuota is a pointer so null means "inherit the parent OU" and 0 means unlimited.
 	Restricted    *bool `json:"restricted"`
@@ -256,7 +276,10 @@ func (s *Server) apiGroupAdd(w http.ResponseWriter, r *http.Request, user string
 
 func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in groupInput
-	readJSON(r, &in)
+	if err := readJSON(r, &in); err != nil {
+		jsonError(w, http.StatusBadRequest, "bad json")
+		return
+	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		jsonError(w, http.StatusBadRequest, "group name required")
@@ -264,6 +287,11 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 	}
 	id := pathID(r, "id")
 	isDefault := id == s.st.DefaultGroupID()
+	forecastScope, err := parseForecastScopeInput(in.ForecastScope, isDefault)
+	if err != nil {
+		jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_scope", "invalid forecast scope")
+		return
+	}
 	weight, urgent := in.overrides(isDefault)
 	if err := s.st.UpdateGroup(id, name, strings.TrimSpace(in.Description), weight, urgent); err != nil {
 		jsonError(w, http.StatusBadRequest, "group name already exists")
@@ -311,10 +339,21 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 	// An OU's settings decide what its members may run and what they may see, so this is an
 	// access change even when it looks like a rename. The fields that carry consequences are
 	// named; the row says which knobs moved, not their whole prior state.
-	s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), map[string]any{
+	detail := map[string]any{
 		"name": name, "parent": in.ParentID, "restricted": restricted,
 		"quota": quota, "quota_period": in.quotaPeriod(), "priority": in.Priority,
-		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll, "require_2fa": in.Require2FA})
+		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll, "require_2fa": in.Require2FA}
+	if len(in.ForecastScope) != 0 {
+		change, err := s.st.saveGroupForecastScope(id, forecastScope)
+		if err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+		if change != nil {
+			detail["forecast_scope"] = change
+		}
+	}
+	s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), detail)
 	// The count, not just the flag: turning a mandate on asks people to do something at their next
 	// sign-in, and how many is the difference between a policy and a surprise.
 	pending := 0

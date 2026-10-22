@@ -2131,6 +2131,7 @@
   "err.forecast_eval_running": "A pass is already running.",
   "err.forecast_not_ready": "The evaluator is not ready to be switched on.",
   "err.forecast_unavailable": "Forecast verification is not available for your account.",
+  "err.forecast_bad_scope": "Choose all, own, none, or inherit for forecast access.",
   "err.forecast_busy": "Forecast computation is busy. Please try again shortly.",
   "err.forecast_rate_limited": "Too many forecast requests or another custom query is still running. Please try again later.",
   "err.forecast_failed": "Forecast computation failed. Please try again.",

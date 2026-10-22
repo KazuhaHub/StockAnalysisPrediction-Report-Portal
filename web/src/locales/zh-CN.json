@@ -2131,6 +2131,7 @@
   "err.forecast_eval_running": "已有一次评估正在进行。",
   "err.forecast_not_ready": "评估器尚未满足开启条件。",
   "err.forecast_unavailable": "你的账号暂无预测验证访问权限。",
+  "err.forecast_bad_scope": "请选择全部、本组织、无权限或继承作为预测验证访问范围。",
   "err.forecast_busy": "预测统计计算繁忙，请稍后重试。",
   "err.forecast_rate_limited": "预测验证请求过于频繁，或另一个自定义查询仍在运行，请稍后重试。",
   "err.forecast_failed": "预测统计计算失败，请重试。",

@@ -662,3 +662,20 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Final cookie checkpoint validation: full Go suite with Postgres enabled passed after the
   interleaving fix; three targeted race repetitions, vet and staticcheck passed. No web changes
   were made in this checkpoint. Independent review has no remaining finding in this slice.
+- OU scope settings checkpoint: PUT group settings decodes `forecast_scope` as RawMessage so
+  omission leaves it unchanged, explicit null restores inheritance (Default stores `none`), and
+  only `all`, `own` or `none` are accepted. Invalid values are refused before any existing group
+  mutation; tests also prove they do not rename/restrict the OU or emit an audit change.
+  The scope save uses a transaction and locks the prior value on Postgres, returning an exact
+  from/to delta only on change for the existing `group.change` row. No schema changes were made.
+- GET groups now supplies the own nullable value, strict effective scope and source OU. Tests
+  first failed for absent persistence and missing inherited fields, then passed, including exact
+  audit deltas, omitted/null distinction, Default normalization and Postgres storage controls.
+  Independent review found no actionable issue. Added the new refusal translation in all three
+  locales, with Traditional Chinese generated through OpenCC. The access impact preview remains
+  pending, along with bridge integration, adoption counts and the complete access matrix.
+- OU checkpoint validation: full Go suite with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed. Web typecheck, 28 locale/generator tests and production build passed.
+  The full error-code parity guard caught the missing new translation before it was added. The
+  final Go run was serialized after the frontend build to avoid the existing dist cleanup/embed
+  race during concurrent builds. The branch remains a draft; no production state changed.
