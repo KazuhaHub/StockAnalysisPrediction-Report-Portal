@@ -369,7 +369,7 @@ func buildGoldenServer(t *testing.T, spec goldenFixtureSpec) (*Server, []*groupS
 			settleGoldenMarks(t, s, setID, g)
 		}
 	}
-	sets, err := s.st.loadForecastGroupSets(spec.Rtype, goldenFrom, goldenTo)
+	sets, err := s.st.loadForecastGroupSets(spec.Rtype, goldenFrom, goldenTo, forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatalf("load fixture sets: %v", err)
 	}

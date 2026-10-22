@@ -132,7 +132,7 @@ func (s *Server) apiForecastGroupMembers(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End)
+	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End, forecastPopulation{Key: "all"})
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return

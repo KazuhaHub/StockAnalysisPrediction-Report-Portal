@@ -132,7 +132,7 @@ func sampleMembers(t *testing.T, s *Server, n int, mutate func(i int, g *gsSeed)
 		}
 		seedGroupSet(t, s, g)
 	}
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestMembershipCountsDuplicatesAndBaseline(t *testing.T) {
 	pendingBase.Marks = map[string]gsMark{"d5": {Status: markPending}}
 	seedGroupSet(t, s, pendingBase)
 
-	sets, _ := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30")
+	sets, _ := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30", forecastPopulation{Key: "all"})
 	members, pb, cov := forecastMembership(sets, time.Time{}, "")
 	if cov.Member != 1 || cov.Duplicate != 1 || cov.PendingBaseline != 1 || len(members) != 1 || len(pb) != 1 {
 		t.Fatalf("coverage = %+v, members=%d pending=%d", cov, len(members), len(pb))

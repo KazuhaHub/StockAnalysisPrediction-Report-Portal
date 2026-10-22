@@ -218,13 +218,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136, P11 #137. The standalone Go 1.26.10 security fix #144 is merged;
-  `origin/main` is at `83a64d89`.
-- **In flight.** P15 #143 is reviewed and rebased onto P11, in an isolated worktree on
-  `feat/forecast-web-foundations`. Full local checks passed again under Go 1.26.10; final CI
-  must pass before merge. The parallel Apps branches remain untouched.
-- **Next step.** Finish P15 and
-  continue P26, P27, P28 and P22. P13 still requires production baseline screenshots and owner
+  P30 #135, P31 #136, P11 #137. R2a: P15 #143. The standalone Go 1.26.10 security fix #144
+  is merged; `origin/main` is at `ad618c1f`.
+- **In flight.** P26 on `feat/forecast-record-access`, in the isolated worktree. The strict
+  snapshot resolver, attribution-filtered loader and population identities are implemented;
+  request integration, external response shaping, compute governance, previews/settings and
+  reading-page handling remain unfinished. It is not ready to merge. The parallel Apps branches
+  remain untouched; recheck their token changes before integrating the bridge-user binding.
+- **Next step.** Complete P26, then P27, P28 and P22. P13 still requires production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
   action has been performed here.
@@ -501,8 +502,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
   fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
   This component preview does not replace P14's seeded full-page acceptance.
-- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
-  required CI on its final rebased head; independent review and full local checks passed.
+- Merged as #143 after full CI on `cb77ccba` (run 39766606158), including SQLite/Postgres,
+  race, web and container smoke/E2E checks. Independent review and full local checks passed.
+  Rollback: revert the PR; no data or schema changes.
 
 ### P39b precondition audit (2026-10-22)
 
@@ -522,3 +524,32 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### P26 — access implementation in progress (2026-10-22)
+
+- The pure resolver reads the account fields once and the strict OU index in one read-only
+  transaction (Postgres repeatable read). It denies missing/inactive accounts, errors, unknown
+  values and broken chains; nearest-value inheritance and external restrictions are independent
+  passes, so a leaf override cannot hide a restricted ancestor. No authorization result is cached.
+- `own` uses the leaf's actual parent-edge subtree; Default's appended inheritance role does not
+  make unrelated root OUs descendants. The loader filters `attributed_ou` before membership is
+  computed. Existing callers explicitly retain `all` until their request gates are integrated.
+- Population cache and seed helpers retain the exact `all` identity and add the sorted subtree
+  digest for `own`. Existing golden snapshots are unchanged. A deny population has a non-nil
+  empty OU slice, never the nil slice that means the whole ledger.
+- Tests were added first and failed for the missing resolver, population loader and identity
+  helpers. SQLite/Postgres tests pin attribution, account moves, subtree changes, account reads
+  and failure directions. Another OU's earlier set cannot displace the own population's member.
+  A deterministic Postgres interleaving starts and ends denied: using read-committed isolation
+  incorrectly mixed the old account and new tree and failed by granting `all`; repeatable read
+  passes, and the next request observes the committed account move.
+- This is a partial implementation, not an access rollout. No new reader route is registered yet.
+  Remaining: route gates and full access matrix, reader/admin groups and members integration,
+  external omissions/readability filtering, cookie/bridge prediction shaping, `/api/me`, OU
+  settings and preview, compute pools/flights/rate limits, count-only weekly adoption, StockPage
+  suppression and the complete security/regression suite. No schema change is included.
+- Checkpoint validation: build, vet, full SQLite Go suite, full Postgres app suite, staticcheck,
+  web typecheck, 120 Vitest files / 1006 tests and production web build passed. The existing
+  attribution source guard initially rejected the new reader; it now permits only that loader's
+  single read predicate and explicitly forbids writes there, retaining all original writer checks.
+  Independent adversarial review found no actionable issues in this foundation checkpoint.

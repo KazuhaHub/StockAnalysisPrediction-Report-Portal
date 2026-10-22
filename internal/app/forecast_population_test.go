@@ -267,7 +267,7 @@ func TestPreLiveSetsNeverCountOrDuplicate(t *testing.T) {
 	}
 
 	boundary := time.Date(2026, time.October, 18, 16, 0, 0, 0, time.UTC)
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestTestSetsHaveTheirOwnBucket(t *testing.T) {
 	seedTestSet(t, s, "600160", "2026-10-17")
 	seedTestSet(t, s, "600160", "2026-10-18") // same symbol: if it counted, it would be a duplicate
 
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}

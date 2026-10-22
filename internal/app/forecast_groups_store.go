@@ -50,14 +50,24 @@ type groupSet struct {
 
 // loadForecastGroupSets reads every set of one covered type in a made_on range, oldest first within
 // each symbol so "the earliest accepted set" is a slice scan rather than a sort.
-func (s *Store) loadForecastGroupSets(rtype, from, to string) ([]*groupSet, error) {
+func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopulation) ([]*groupSet, error) {
+	where, args := "", []any{rtype, from, to}
+	if pop.OUs != nil {
+		if len(pop.OUs) == 0 {
+			return []*groupSet{}, nil
+		}
+		where = " AND ps.attributed_ou IN (" + placeholders(len(pop.OUs)) + ")"
+		for _, id := range pop.OUs {
+			args = append(args, id)
+		}
+	}
 	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
 			ps.made_at, ps.made_on, ps.cohort, ps.bench_code,
 			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
-		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?
-		ORDER BY ps.symbol, ps.made_at, ps.id`, rtype, from, to)
+		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?`+where+`
+		ORDER BY ps.symbol, ps.made_at, ps.id`, args...)
 	if err != nil {
 		return nil, err
 	}

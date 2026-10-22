@@ -91,7 +91,7 @@ func (s *Server) apiForecastGroups(w http.ResponseWriter, r *http.Request, user 
 
 	var sets []*groupSet
 	if loadFrom != "" && loadTo != "" {
-		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo)
+		sets, err = s.st.loadForecastGroupSets(rtype, loadFrom, loadTo, forecastPopulation{Key: "all"})
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return

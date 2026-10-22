@@ -229,6 +229,10 @@ const predQualityNormal = "normal"
 
 // computeForecastCell applies the maturity gates and, only if all pass, the metrics.
 func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end, cp, today string) *forecastCell {
+	return computeForecastCellForPopulation(members, pendingBaseline, rtype, start, end, cp, today, forecastPopulation{Key: "all"})
+}
+
+func computeForecastCellForPopulation(members, pendingBaseline []*groupSet, rtype, start, end, cp, today string, pop forecastPopulation) *forecastCell {
 	if cp == "h12" {
 		members = filterHorizonStd(members)
 		pendingBaseline = filterHorizonStd(pendingBaseline)
@@ -244,7 +248,7 @@ func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end
 		}
 		return &forecastCell{State: state}
 	}
-	seedParts := []string{rtype, start, end}
+	seedParts := pop.seedParts(rtype, start, end)
 	cell := &forecastCell{State: "mature", N: &n, Refused: &refused, CorpAction: &corp}
 	scored := make([]*groupSet, 0, n)
 	for _, gs := range members {
