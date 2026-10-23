@@ -11,15 +11,17 @@ export function forecastPalette(token: GlobalToken) {
 }
 
 // The coverage bar's segments. In the default theme antd's info colour is the primary colour, so a
-// bar that drew "counted" in the primary and "repeat run" in the info colour drew them identically;
-// the duplicate segment takes a lighter step of the same blue instead (a lighter one in dark mode,
-// where the generated light steps are near-black), and the ledger-start segment is hatched so it is
-// told apart by pattern as well as by shade.
+// bar that drew "counted" in the primary and "repeat run" in the info colour drew them identically.
+// Two steps of one blue were no better: the pair measured 1.47:1 in the dark theme, which is one colour
+// to most eyes. The repeat-run segment takes another hue (purple), the step that is at least 3:1 from
+// the counted segment and from the surface in each theme (dark in the light theme, pale in the dark
+// one, because the algorithm flips the scale). The ledger-start segment is hatched, so it is told apart
+// by pattern as well as by shade, and the repeat-run and missing counts are also chips with a number.
 export function coveragePalette(token: GlobalToken) {
   const dark = token.colorBgBase !== '#fff' && token.colorBgBase !== '#ffffff'
   return {
     member: token.colorPrimary,
-    duplicate: dark ? token.blue7 : token.blue3,
+    duplicate: dark ? token.purple10 : token.purple8,
     missing: token.colorWarning,
     other: token.colorTextQuaternary,
     preLive: `repeating-linear-gradient(135deg, ${token.colorTextTertiary} 0 3px, transparent 3px 6px)`,

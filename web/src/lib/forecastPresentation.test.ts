@@ -82,6 +82,18 @@ describe('forecast presentation', () => {
     const palette = coveragePalette(token)
     const colours = [palette.member, palette.duplicate, palette.missing, palette.other]
     expect(new Set(colours).size).toBe(colours.length)
+    // Distinct strings are not distinct to the eye: the repeat-run segment sits next to the counted
+    // one, and two steps of one blue measured 1.47:1 in the dark theme. It takes another hue, at least
+    // 3:1 (WCAG 1.4.11) from the counted segment and from the surface it is drawn on.
+    const surface = token.colorBgContainer
+    const colourOf = (value: string) => over(value, surface)
+    expect(contrast(colourOf(palette.member), colourOf(palette.duplicate))).toBeGreaterThanOrEqual(3)
+    expect(contrast(colourOf(palette.duplicate), colourOf(surface))).toBeGreaterThanOrEqual(3)
+    expect(contrast(colourOf(palette.member), colourOf(surface))).toBeGreaterThanOrEqual(3)
+    // Its other neighbour is the missing segment: another hue, and not a near-twin in lightness either.
+    expect(contrast(colourOf(palette.duplicate), colourOf(palette.missing))).toBeGreaterThanOrEqual(1.5)
+    const blues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((step) => token[`blue${step}` as keyof typeof token])
+    expect(blues).not.toContain(palette.duplicate)
     // The ledger-start segment is told apart by pattern as well as colour.
     expect(palette.preLive).toContain('repeating-linear-gradient')
     expect(palette.preLive).not.toContain(palette.other)

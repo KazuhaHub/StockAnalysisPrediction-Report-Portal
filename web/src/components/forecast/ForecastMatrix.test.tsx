@@ -455,10 +455,14 @@ describe('ForecastMatrix coverage', () => {
     expect(document.body.textContent).toContain('forecast.cov.summary:{"member":50,"reports":100}')
   })
 
-  it('names the ledger-start, test and off-benchmark buckets as chips, only when they are not empty', () => {
+  // The bar's colours are not the only carrier: every family it draws has its count in visible text
+  // too, so a reader who cannot tell two shades apart still reads how many runs were repeats.
+  it('names the repeat-run and missing buckets, the ledger-start, test and off-benchmark ones as chips, only when they are not empty', () => {
     show(withCoverage({}))
     const chips = Array.from(document.querySelectorAll('[data-chip]')).map((el) => `${(el as HTMLElement).dataset.chip}=${el.textContent}`)
     expect(chips).toEqual([
+      'duplicate=forecast.cov.duplicate:{"n":20}',
+      'absent=forecast.cov.absent:{"n":4}',
       'pre_live=forecast.cov.pre_live:{"n":5}',
       'test=forecast.cov.test:{"n":3}',
       'off_benchmark=forecast.cov.off_benchmark:{"n":2}',
@@ -467,7 +471,7 @@ describe('ForecastMatrix coverage', () => {
   })
 
   it('draws no chip for a bucket that is empty', () => {
-    show(withCoverage({ pre_live: 0, test: 0, off_benchmark: 0, pending_baseline: 0 }))
+    show(withCoverage({ duplicate: 0, absent: 0, pre_live: 0, test: 0, off_benchmark: 0, pending_baseline: 0 }))
     expect(document.querySelectorAll('[data-chip]')).toHaveLength(0)
   })
 

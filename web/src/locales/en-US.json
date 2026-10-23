@@ -951,6 +951,8 @@
   "forecast.cov.summary": "Counted {{member}} / reports {{reports}}",
   "forecast.cov.bar": "Where this group's reports went: {{parts}}",
   "forecast.cov.rejected": "Rejected {{n}}",
+  "forecast.cov.duplicate": "Repeat run {{n}}",
+  "forecast.cov.absent": "Missing {{n}}",
   "forecast.cov.test": "Test runs {{n}}",
   "forecast.cov.pending_baseline": "Unverified baseline {{n}}",
   "forecast.cp.d5": "5 sessions",

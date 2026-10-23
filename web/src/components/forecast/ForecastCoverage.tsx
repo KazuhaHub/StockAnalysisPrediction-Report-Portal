@@ -91,6 +91,8 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
         )}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+        {chip('duplicate', c.duplicate, false)}
+        {chip('absent', c.absent, true)}
         {chip('pre_live', c.pre_live, false)}
         {chip('test', c.test, false)}
         {chip('off_benchmark', c.off_benchmark, true)}

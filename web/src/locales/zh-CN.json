@@ -951,6 +951,8 @@
   "forecast.cov.summary": "计入 {{member}} / 报告 {{reports}}",
   "forecast.cov.bar": "本组报告的去向：{{parts}}",
   "forecast.cov.rejected": "被拒 {{n}}",
+  "forecast.cov.duplicate": "重复运行 {{n}}",
+  "forecast.cov.absent": "缺少预测 {{n}}",
   "forecast.cov.test": "测试运行 {{n}}",
   "forecast.cov.pending_baseline": "基准未核对 {{n}}",
   "forecast.cp.d5": "5 个交易日",
