@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The embedded OpenAPI spec must be valid 3.1 JSON and cover every v1 endpoint
@@ -373,5 +374,40 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 	probPat, _ := schemas["PredictionProbability"].(map[string]any)["pattern"].(string)
 	if probPat != reProb.String() {
 		t.Errorf("PredictionProbability.pattern = %q, Go pattern = %q", probPat, reProb.String())
+	}
+}
+
+// TestOpenAPIDocumentsForecastUnavailableOnPredictionReads ties the documented 403 on the two v1
+// prediction reads to what the handlers answer: the spec names the code, and an app-bridge token
+// (the credential the spec says is always refused) receives exactly that code on both routes.
+func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
+	var spec map[string]any
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
+	}
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	token := s.appTok.mint([]string{"query"}, time.Now())
+	for path, concrete := range map[string]string{
+		"/api/v1/reports/{id}/predictions": "/api/v1/reports/1/predictions",
+		"/api/v1/predictions":              "/api/v1/predictions?symbol=600160",
+	} {
+		get := spec["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)
+		resp, ok := get["responses"].(map[string]any)["403"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s documents no 403 response", path)
+		}
+		props := resp["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)
+		documented, _ := props["code"].(map[string]any)["const"].(string)
+		if documented != "forecast_unavailable" || !strings.Contains(resp["description"].(string), "forecast_unavailable") {
+			t.Fatalf("%s documents the wrong 403 code: %v", path, resp)
+		}
+		w := bridgePredictionRequest(s, token, concrete)
+		if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != documented {
+			t.Fatalf("%s answered %d %s; the spec documents 403 %s", path, w.Code, w.Body.String(), documented)
+		}
+		if !strings.Contains(get["description"].(string), "forecast_unavailable") {
+			t.Errorf("%s: the operation description does not mention the bridge refusal", path)
+		}
 	}
 }

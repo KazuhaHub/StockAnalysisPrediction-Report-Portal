@@ -2003,7 +2003,7 @@
         "operationId": "reportPredictions",
         "summary": "一份报告的结构化预测及其结算结果",
         "x-scope": "query",
-        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。",
+        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "id",
@@ -2028,7 +2028,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound."
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
           }
         },
         "responses": {
@@ -2037,6 +2037,25 @@
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "forecast_unavailable: this credential has no forecast read access. An app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none. Persistent query tokens are not affected. The body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "const": "forecast_unavailable"
+                    }
+                  }
+                }
+              }
+            }
           },
           "404": {
             "description": "No such report, or one this caller may not read"
@@ -2052,7 +2071,7 @@
         "operationId": "queryPredictions",
         "summary": "按股票与日期范围查询结构化预测",
         "x-scope": "query",
-        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。",
+        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "symbol",
@@ -2099,7 +2118,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
-            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound."
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
           }
         },
         "responses": {
@@ -2108,6 +2127,25 @@
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "forecast_unavailable: this credential has no forecast read access. An app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none. Persistent query tokens are not affected. The body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "const": "forecast_unavailable"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
