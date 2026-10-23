@@ -48,6 +48,24 @@ func (s *Server) loadForecastPurgeView(pop forecastPopulation) (forecastPurgeVie
 	return forecastPurgeView{filter: filter, disclosed: disclosed}, nil
 }
 
+// undisclosedTag is the cache identity of a month that retention emptied but this population is not
+// told about, and "" for every other month. Such a month is shown as an ordinary one with no sets,
+// computed over the sets the site-wide filter left, so a cell memoised for it before the purge (by
+// another process, which this one has not heard from) must never answer. The tag follows the
+// marker, so it changes with the purge and with nothing else. For a nil population no month is
+// undisclosed.
+func (v forecastPurgeView) undisclosedTag(rtype string, p forecastPeriod) string {
+	key := [2]string{rtype, p.Start[:7]}
+	if _, disclosed := v.disclosed[key]; disclosed {
+		return ""
+	}
+	at, filtered := v.filter[key]
+	if !filtered {
+		return ""
+	}
+	return forecastPurgeCacheTag([]forecastPurgedMonth{{Cohort: key[1], PurgedAt: at}})
+}
+
 // forecastPurgeHistoryLoggedAt is the unix second of the last log line. Until the evidence table
 // exists, every own read fails the same way, and one line a minute says so without flooding the log.
 var forecastPurgeHistoryLoggedAt atomic.Int64

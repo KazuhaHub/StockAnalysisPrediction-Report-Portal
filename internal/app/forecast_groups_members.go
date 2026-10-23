@@ -195,12 +195,6 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 			}
 			return
 		}
-		if _, purged := purges.filter[key]; purged {
-			// Retired for the site but not disclosed to this population: the record does not list the
-			// month, so there is no group to open, and no cached cell may describe it.
-			jsonErrorCode(w, http.StatusNotFound, "label_not_found", "no such group in this range")
-			return
-		}
 	}
 
 	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End, pop)
@@ -273,7 +267,11 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 	// An official month's matured cell is frozen in the matrix memo; the drawer must show that same
 	// state, even if a backdated set has since been loaded into the month.
 	if mode == "month" {
-		if c, _ := s.cachedForecastCell(pop.cellKey(rtype, period.Start, period.End, bench, cp)); c != nil {
+		// A month retired for the site but not disclosed to this population answers as an ordinary
+		// month with no sets: the sets were filtered above, and the tag keeps a cell memoised before
+		// the purge from describing it.
+		key := pop.cellKey(rtype, period.Start, period.End, bench, cp) + purges.undisclosedTag(rtype, *period)
+		if c, _ := s.cachedForecastCell(key); c != nil {
 			state = c.State
 			if c.State == "mature" {
 				n, refused, corp = 0, 0, 0

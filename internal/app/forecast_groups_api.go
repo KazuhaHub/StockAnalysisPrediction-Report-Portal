@@ -165,9 +165,16 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	sets = forecastWithoutPurgedSets(sets, rtype, purges.filter)
 	active := make([]forecastPeriod, 0, len(periods))
 	for _, p := range periods {
-		if _, purged := purges.filter[[2]string{rtype, p.Start[:7]}]; !resp.Official || !purged {
-			active = append(active, p)
+		if resp.Official {
+			if _, disclosed := purges.disclosed[[2]string{rtype, p.Start[:7]}]; disclosed {
+				continue // listed below as a purged group
+			}
+			// A month retention emptied that this population is not told about stays in the calendar,
+			// computed over the sets that survived the site-wide filter, which is none. It is then
+			// an ordinary month with no sets, and no gap tells the reader it was purged.
+			p.cacheTag = purges.undisclosedTag(rtype, p)
 		}
+		active = append(active, p)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
 	defer cancel()
@@ -287,7 +294,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 		sort.Strings(codes)
 		for _, b := range codes {
 			plans = append(plans, plan{
-				period: forecastPeriod{Start: p.Start, End: p.End, Label: p.Label + " · " + b},
+				period: forecastPeriod{Start: p.Start, End: p.End, Label: p.Label + " · " + b, cacheTag: p.cacheTag},
 				bench:  b,
 				in:     byBench[b],
 			})
@@ -299,6 +306,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 		cp      string
 		start   string
 		end     string
+		tag     string
 		bench   string
 		members []*groupSet
 		pending []*groupSet
@@ -320,7 +328,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 		}
 		for _, cp := range predCheckpoints {
 			jobs = append(jobs, job{gi: i, cp: cp, start: pl.period.Start, end: pl.period.End,
-				bench: pl.bench, members: members, pending: pending})
+				tag: pl.period.cacheTag, bench: pl.bench, members: members, pending: pending})
 		}
 	}
 	if len(jobs) == 0 {
@@ -345,7 +353,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp) + cacheTag
+				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp) + cacheTag + j.tag
 				c, gen := s.cachedForecastCell(key)
 				if gen != generation {
 					out <- result{gi: j.gi, cp: j.cp, err: errForecastBusy}

@@ -154,6 +154,41 @@ func readerGroupLabels(resp forecastReaderGroupsResponse) map[string]forecastRea
 	return out
 }
 
+// sameShape reports whether two groups differ in nothing a reader can see apart from which month
+// they are. It is how the tests prove a month retention emptied, but which a reader is not told
+// about, cannot be told apart from a month that simply held no sets for that reader.
+func sameShape(a, b forecastReaderGroup) bool {
+	a.Label, a.Start, a.End = "", "", ""
+	b.Label, b.Start, b.End = "", "", ""
+	return reflect.DeepEqual(a, b)
+}
+
+func sameDrawerShape(a, b forecastReaderMembersResponse) bool {
+	a.Label, a.Start, a.End = "", "", ""
+	b.Label, b.Start, b.End = "", "", ""
+	return reflect.DeepEqual(a, b)
+}
+
+// requireOrdinaryEmpty fails unless month is listed and looks exactly like control, a month the
+// reader genuinely has no sets in.
+func requireOrdinaryEmpty(t *testing.T, who string, groups map[string]forecastReaderGroup, month, control string) {
+	t.Helper()
+	g, ok := groups[month]
+	if !ok {
+		t.Fatalf("%s: %s is missing from an otherwise complete calendar, which tells the reader it was purged", who, month)
+	}
+	c, ok := groups[control]
+	if !ok {
+		t.Fatalf("%s: control month %s is not listed", who, control)
+	}
+	if g.PurgedAt != "" || g.Cells["d5"] == nil || g.Cells["d5"].State == "purged" || g.Cells["d5"].State == "mature" {
+		t.Fatalf("%s: %s is described as purged or populated: %+v", who, month, g)
+	}
+	if !sameShape(g, c) {
+		t.Fatalf("%s: %s differs from the ordinary empty month %s:\n%+v\n%+v", who, month, control, g, c)
+	}
+}
+
 func purgedCohorts(months []forecastPurgedMonth) []string {
 	out := []string{}
 	for _, m := range months {
@@ -178,9 +213,15 @@ func TestOwnReadersAreToldOnlyAboutPurgedMonthsTheirOUsOwnedSetsIn(t *testing.T)
 			if g, ok := groups["2025-08"]; !ok || g.PurgedAt != "" || g.Cells["d5"].State != "mature" {
 				t.Fatalf("A's live month changed: %+v", g)
 			}
-			for _, month := range []string{"2025-04", "2025-05", "2025-07", "2025-09"} {
+			// Months retention emptied that A was not told about are listed like any month A simply
+			// holds no sets in, and they carry none of the data written after the purge. 2025-07 holds
+			// 35 of A's sets written after the purge, so it is the sharpest case.
+			for _, month := range []string{"2025-07", "2025-09"} {
+				requireOrdinaryEmpty(t, "A", groups, month, "2025-11")
+			}
+			for _, month := range []string{"2025-04", "2025-05"} {
 				if g, ok := groups[month]; ok {
-					t.Fatalf("A is shown purged-month %s it has no evidence for, or data from it: %+v", month, g)
+					t.Fatalf("A is shown %s, before its own range: %+v", month, g)
 				}
 			}
 			for _, g := range got.Groups {
@@ -202,10 +243,10 @@ func TestOwnReadersAreToldOnlyAboutPurgedMonthsTheirOUsOwnedSetsIn(t *testing.T)
 					t.Fatalf("B's evidenced purge %s is not disclosed: %+v", month, g)
 				}
 			}
-			for _, month := range []string{"2025-05", "2025-06", "2025-08", "2025-09"} {
-				if g, ok := groups[month]; ok && (g.PurgedAt != "" || g.Cells["d5"].State == "purged") {
-					t.Fatalf("B is told about purge of %s: %+v", month, g)
-				}
+			// 2025-05 and 2025-09 are legacy markers, 2025-06 is evidenced for A alone: none is B's to
+			// know, and none may leave a gap in B's calendar. 2025-08 is a genuinely empty month for B.
+			for _, month := range []string{"2025-05", "2025-06", "2025-09"} {
+				requireOrdinaryEmpty(t, "B", groups, month, "2025-08")
 			}
 		})
 
@@ -273,10 +314,32 @@ func TestOwnReadersAreToldOnlyAboutPurgedMonthsTheirOUsOwnedSetsIn(t *testing.T)
 			if code != http.StatusOK || june.State != "purged" || june.PurgedAt != purgeHistoryStamp || len(june.Members) != 0 {
 				t.Fatalf("A's evidenced drawer: %d %s", code, body)
 			}
-			for _, label := range []string{"2025-05", "2025-07", "2025-09"} {
+			// A month retention emptied that A is not told about answers exactly as a month A holds no
+			// sets in does. 2025-05 lies before A's range, as 2025-04 does, and both are not found.
+			code, control, body := env.drawer(t, "reader-a", "?label=2025-11&checkpoint=d5")
+			if code != http.StatusOK || control.State == "purged" || len(control.Members) != 0 {
+				t.Fatalf("A's control drawer: %d %s", code, body)
+			}
+			for _, label := range []string{"2025-07", "2025-09"} {
+				code, got, body := env.drawer(t, "reader-a", "?label="+label+"&checkpoint=d5")
+				if code != http.StatusOK || got.State == "purged" || got.PurgedAt != "" || len(got.Members) != 0 || !sameDrawerShape(got, control) {
+					t.Fatalf("A's drawer for undisclosed purge %s differs from an ordinary empty month: %d %s", label, code, body)
+				}
+			}
+			for _, label := range []string{"2025-04", "2025-05"} {
 				code, _, body := env.drawer(t, "reader-a", "?label="+label+"&checkpoint=d5")
 				if code != http.StatusNotFound || !hasCode([]byte(body), "label_not_found") {
-					t.Fatalf("A's drawer for undisclosed purge %s: %d %s", label, code, body)
+					t.Fatalf("A's drawer for %s, before its range: %d %s", label, code, body)
+				}
+			}
+			code, controlB, body := env.drawer(t, "reader-b", "?label=2025-08&checkpoint=d5")
+			if code != http.StatusOK || controlB.State == "purged" {
+				t.Fatalf("B's control drawer: %d %s", code, body)
+			}
+			for _, label := range []string{"2025-05", "2025-06", "2025-09"} {
+				code, got, body := env.drawer(t, "reader-b", "?label="+label+"&checkpoint=d5")
+				if code != http.StatusOK || got.State == "purged" || got.PurgedAt != "" || !sameDrawerShape(got, controlB) {
+					t.Fatalf("B's drawer for undisclosed purge %s differs from an ordinary empty month: %d %s", label, code, body)
 				}
 			}
 			code, aug, body := env.drawer(t, "reader-a", "?label=2025-08&checkpoint=d5&limit=200")
@@ -336,19 +399,25 @@ func TestOwnReadsFailClosedWhenPurgeEvidenceStorageIsMissing(t *testing.T) {
 	})
 }
 
-// A cell cached before a purge by another process must not answer a custom range that now contains
-// the purged month, even when the purge is not one the reader is told about: the cache identity
-// follows what actually filters the sets, not what is disclosed.
-func TestACellCachedBeforeAnUndisclosedPurgeIsNotReusedByACustomRange(t *testing.T) {
+// A cell cached before a purge by another process must not answer a range that now contains the
+// purged month, even when the purge is not one the reader is told about: the cache identity follows
+// what actually filters the sets, not what is disclosed. That holds for the custom range and for the
+// monthly record and its drawer, where the month is listed as an ordinary empty one.
+func TestACellCachedBeforeAnUndisclosedPurgeIsNotReusedByAnyRead(t *testing.T) {
 	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
+		env.sets(t, "2025-05", 35, env.a) // keeps June inside A's calendar once June's sets are gone
 		env.sets(t, "2025-06", 35, env.a)
 		env.sets(t, "2025-08", 35, env.a)
 		record := env.groups(t, "reader-a", "")
 		if g := readerGroupLabels(record)["2025-06"]; g.Cells["d5"].State != "mature" {
 			t.Fatalf("positive control did not cache A's June: %+v", g)
 		}
+		code, before, body := env.drawer(t, "reader-a", "?label=2025-06&checkpoint=d5&limit=200")
+		if code != http.StatusOK || before.State != "mature" || len(before.Members) != 35 {
+			t.Fatalf("positive control did not cache A's June drawer: %d %s", code, body)
+		}
 		// Another process retires June. It leaves a global marker and no evidence for A, as every
-		// marker written before the evidence table existed does.
+		// marker written before the evidence table existed does. This process's memo is not told.
 		if _, err := env.s.st.exec(`DELETE FROM prediction_sets WHERE cohort='2025-06'`); err != nil {
 			t.Fatal(err)
 		}
@@ -361,10 +430,41 @@ func TestACellCachedBeforeAnUndisclosedPurgeIsNotReusedByACustomRange(t *testing
 		if cell == nil || cell.State == "mature" || cell.N != nil && *cell.N != 0 {
 			t.Fatalf("a cell cached before the purge answered the custom range: %+v", cell)
 		}
-		// The monthly drawer must not describe the retired month from the same stale cell.
-		code, _, body := env.drawer(t, "reader-a", "?label=2025-06&checkpoint=d5")
-		if code != http.StatusNotFound {
-			t.Fatalf("drawer served a retired, undisclosed month: %d %s", code, body)
+		// The monthly record lists June as a month A holds no sets in, from nothing the memo held.
+		groups := readerGroupLabels(env.groups(t, "reader-a", ""))
+		requireOrdinaryEmpty(t, "A", groups, "2025-06", "2025-07")
+		// The drawer must not describe the retired month from the same stale cell either.
+		code, june, body := env.drawer(t, "reader-a", "?label=2025-06&checkpoint=d5&limit=200")
+		if code != http.StatusOK || june.State == "mature" || june.State == "purged" || len(june.Members) != 0 {
+			t.Fatalf("drawer served a retired, undisclosed month from the stale cell: %d %s", code, body)
+		}
+		code, july, body := env.drawer(t, "reader-a", "?label=2025-07&checkpoint=d5&limit=200")
+		if code != http.StatusOK || !sameDrawerShape(june, july) {
+			t.Fatalf("drawer for the retired month differs from an ordinary empty one: %d %s", code, body)
+		}
+	})
+}
+
+// A set written after an undisclosed purge must not start A's calendar early either: a leading empty
+// month is the one gap a complete calendar would otherwise leave.
+func TestAnUndisclosedPurgeDoesNotMoveAnOwnReadersFirstMonth(t *testing.T) {
+	purgeHistoryDrivers(t, func(t *testing.T, env *purgeHistoryEnv) {
+		env.purge(t, "2025-05") // a legacy marker: no evidence for anyone
+		env.sets(t, "2025-05", 35, env.a)
+		env.sets(t, "2025-08", 35, env.a)
+
+		got := env.groups(t, "reader-a", "")
+		if got.Range.From != "2025-08-01" || len(got.Groups) == 0 || got.Groups[0].Label != "2025-08" {
+			t.Fatalf("A's calendar starts at %s; sets written after a purge A is not told about must not start it", got.Range.From)
+		}
+		code, _, body := env.drawer(t, "reader-a", "?label=2025-05&checkpoint=d5")
+		if code != http.StatusNotFound || !hasCode([]byte(body), "label_not_found") {
+			t.Fatalf("drawer before A's first month: %d %s", code, body)
+		}
+		// The global history is unchanged for everyone told about it.
+		all := env.groups(t, "reader-all", "")
+		if all.Range.From != "2025-05-01" || readerGroupLabels(all)["2025-05"].PurgedAt != purgeHistoryStamp {
+			t.Fatalf("all reader's history changed: %s", all.Range.From)
 		}
 	})
 }

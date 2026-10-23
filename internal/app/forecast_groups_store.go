@@ -195,10 +195,19 @@ func (s *Store) forecastEarliestMadeOn(rtype string) (string, error) {
 	return s.forecastEarliestMadeOnForPopulation(rtype, forecastPopulation{Key: "all"})
 }
 
+// forecastEarliestMadeOnForPopulation is the first day a population holds a set on. An own population
+// does not count sets inside a month retention has emptied: a set written after the purge is filtered
+// from every read, and letting it start the calendar would leave an empty leading month that a reader
+// who is not told about the purge could only explain by it. The months the population is told about
+// are added back by the caller. The all population is unchanged, because every purged month is
+// already added back for it.
 func (s *Store) forecastEarliestMadeOnForPopulation(rtype string, pop forecastPopulation) (string, error) {
 	filter, args := forecastPopulationFilter(pop)
 	if pop.OUs != nil && len(pop.OUs) == 0 {
 		return "", nil
+	}
+	if pop.OUs != nil {
+		filter += ` AND NOT EXISTS (SELECT 1 FROM prediction_purges pp WHERE pp.rtype = ps.rtype AND pp.cohort = ps.cohort)`
 	}
 	var v sql.NullString
 	if err := s.queryRow(`SELECT MIN(ps.made_on) FROM prediction_sets ps WHERE ps.rtype = ?`+filter, append([]any{rtype}, args...)...).Scan(&v); err != nil {
