@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App } from 'antd'
+import { App, ConfigProvider } from 'antd'
 import { ApiError } from '../../api/client'
 import QuoteSourcesPage from './QuoteSourcesPage'
 
@@ -126,9 +126,11 @@ function tagsIn(row: HTMLElement, testid: string): string[] {
 
 function renderPage() {
   return render(
-    <App>
-      <QuoteSourcesPage />
-    </App>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <App>
+        <QuoteSourcesPage />
+      </App>
+    </ConfigProvider>,
   )
 }
 
@@ -138,6 +140,82 @@ describe('QuoteSourcesPage', () => {
     apiMock.post.mockReset()
     apiMock.get.mockResolvedValue(structuredClone(state))
     apiMock.post.mockResolvedValue(structuredClone(state))
+  })
+
+  it('requires confirmation before saving removal of the ledger primary and cancellation writes nothing', async () => {
+    apiMock.get.mockResolvedValue({ ...structuredClone(state), ledgerChain: ['tencent'], ledgerPrimary: 'tencent', ledgerShadowPeer: '', ledgerHealth: [] })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('tencent')
+    await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
+    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
+    expect(apiMock.post).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'common.cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(apiMock.post).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
+    await user.click(screen.getByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(apiMock.post.mock.calls[0][1].order).toBe('sina')
+  })
+
+  it('renders the missing-primary warning without manufacturing healthy ledger history', async () => {
+    apiMock.get.mockResolvedValue({ ...structuredClone(state), ledgerChain: [], ledgerPrimary: '', ledgerShadowPeer: '', ledgerHealth: [] })
+    renderPage()
+    expect(await screen.findByText('quoteAdmin.ledgerNoPrimary')).toBeTruthy()
+    expect(screen.getByText('quoteAdmin.ledgerNoHistory')).toBeTruthy()
+    expect(screen.getByText('quoteAdmin.ledgerConfigOnly')).toBeTruthy()
+  })
+
+  it('renders only declared settlement capabilities and does not invent telemetry for older servers', async () => {
+    const extended = structuredClone(state)
+    apiMock.get.mockResolvedValue({ ...extended, sources: extended.sources.map((source) => source.source === 'tencent' ? {
+      ...source, settled: ['sh', 'sz'], settledShadow: [], cashDividends: true, reportsKind: true,
+    } : source) })
+    renderPage()
+    await screen.findByText('tencent')
+    const grant = within(sourceRow('tencent')).getByTestId('quote-source-settled')
+    expect(grant.textContent).toContain('quoteAdmin.ledgerSettled')
+    expect(grant.textContent).toContain('quote.market.sh')
+    expect(grant.textContent).toContain('quote.market.sz')
+    expect(within(sourceRow('sina')).queryByTestId('quote-source-settled')).toBeNull()
+    expect(screen.queryByText('quoteAdmin.ledgerConfigOnly')).toBeNull()
+    expect(screen.queryByText('quoteAdmin.ledgerNoPrimary')).toBeNull()
+  })
+
+  it('keeps the primary without prompting and destroys an abandoned removal confirmation', async () => {
+    apiMock.get.mockResolvedValue({ ...structuredClone(state), ledgerChain: ['tencent'], ledgerPrimary: 'tencent', ledgerHealth: [] })
+    apiMock.post.mockResolvedValue({ ...structuredClone(state), ledgerChain: ['tencent'], ledgerPrimary: 'tencent', ledgerHealth: [] })
+    const user = userEvent.setup()
+    const view = renderPage()
+    await screen.findByText('tencent')
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
+    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
+    view.unmount()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(apiMock.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('suppresses repeated save clicks while a request is pending and permits a retry after failure', async () => {
+    let rejectSave!: (reason: Error) => void
+    apiMock.post.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('tencent')
+    const save = screen.getByRole('button', { name: 'common.save' })
+    await user.dblClick(save)
+    expect(apiMock.post).toHaveBeenCalledTimes(1)
+    rejectSave(new Error('save unavailable'))
+    await screen.findByText('common.error')
+    await waitFor(() => expect(save.classList.contains('ant-btn-loading')).toBe(false))
+    await user.click(save)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(2))
   })
 
   it('renders each source with its role, markets and health', async () => {

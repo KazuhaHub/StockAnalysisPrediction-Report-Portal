@@ -99,3 +99,15 @@ takes the new parent's inherited settings.
   ("injected only for restricted OUs"). It ships as its own PR, after the Dify publish.
 - **Also:** document `owner_token` in the portal's `internal/app/openapi.json` `IngestRequest`
   (it is accepted at runtime but undocumented), as a small early PR.
+
+## P25 source-read and HTTP budgets (2026-10-22)
+
+The owner delegated the counting-unit choice after the ambiguity was raised. A source read is
+one complete candidate observation: Sina needs both snapshot and kline, so it normally costs two
+HTTP requests. Preserve the plan's maximum of two comparisons of already-accepted primary bodies,
+and independently cap HTTP request attempts at four per working pass. Redirects consume that
+budget; they must not create an unbounded extra allowance. Retain both counters so two observations
+cannot be mistaken for two network requests. This preserves the planned sample size while making
+the actual upstream cost explicit. No retries beyond the budget or alternate ledger writers are
+admitted. Execute shadow work after primary ledger processing with its own bounded deadline, so
+candidate failure or slowness cannot consume primary settlement time.

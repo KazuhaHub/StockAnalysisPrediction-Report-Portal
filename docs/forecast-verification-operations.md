@@ -1,7 +1,7 @@
 # Forecast verification — runbook
 
-**Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Every signal below exists
-in the current release; entries for later surfaces (the ledger chain's `no_source`, reader access,
+**Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Signals below describe
+this source checkout, not a claim that it is deployed. Entries for later surfaces (reader access,
 the reading-page stage switch) are added by the PR that creates them.
 
 ## First response, in order
@@ -41,8 +41,9 @@ calendar still ending before today after 18:00 CST on a weekday.
   final. Evidence of a halt (a body stamped at or after the session) can still resolve a mark. Never
   force a settle.
 - One source down: inspect the reported Tencent request or source failure and wait for recovery.
-  Settlement fetches Tencent directly; changing the quotes panel's configured source order does
-  not change the evaluator's source.
+  Settlement follows the quotes panel's enabled source order and explicit ledger grants. Tencent
+  remains the only Tier 1 writer; disabling it refuses settlement rather than using a display or
+  shadow source. Restoring it permits normal retry without spending source-outage attempts.
 
 ### `awaiting_gate` names a benchmark
 
@@ -132,3 +133,155 @@ claim an expected exchange date. In October 2026 the verified runtime table cove
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and
 the action taken. A settlement that was waited out (a vendor lag) is not an incident against the
 portal; a `store_failed` or a forced manual edit is.
+
+## Ledger-source diagnostics (P23 local implementation)
+
+The administrator-only `/api/admin/quote` response includes each source's explicit `settled` and
+`settledShadow` market arrays plus `cashDividends` and `reportsKind` evidence flags. Empty grants
+are empty arrays, not null. A display-only wildcard never becomes a ledger grant.
+
+Top-level `ledgerChain`, `ledgerPrimary` and `ledgerShadowPeer` summarize enabled declarations in
+operator order, with cash-dividend writers first. These are configuration diagnostics across the
+declared markets, not proof that every benchmark or stock is eligible: runtime additionally checks
+the actual market/code and the source's symbol predicate. An absent primary or shadow peer is an
+empty string. No shadow peer is advertised until it has an explicit enabled shadow grant.
+
+`ledgerHealth` is a separate array of source health records, with UTC RFC3339 timestamps and an
+empty string for an event that has not happened. It never overwrites the display health fields
+on `sources`. Clearing the display cache clears neither health history. Ledger refusals and caller
+cancellation do not count as vendor failures; three delivery/parser failures stop calls to that
+source for the current evaluator pass, preserving the actual failure rather than misreporting an
+absent configuration. A new pass resets its breaker, not the recorded diagnostic history.
+
+The quote-source management page shows these declarations and the separate settlement history.
+Unavailable telemetry is distinct from an empty process-local history; neither claims readiness.
+A save removing the configured primary requires confirmation. Cancelling or leaving that
+confirmation writes nothing, and repeated save clicks cannot create concurrent requests.
+
+Readiness item 6 (`ledger_chain`) now requires an explicitly enabled settlement chain with a
+primary carrying both evidence capabilities. Removing it prevents switching from dry to mode 1.
+If removed while running, the evaluator card warns instead of claiming health, and the watchdog
+emits `no_source` at most daily through the existing webhook/email/Slack path. The watchdog checks
+this even before a first heartbeat exists; off mode remains silent with only its mode read.
+
+This contract describes local P23 work, not a production rollout. Per-instrument runtime checks,
+the other readiness gates and deployment approval still apply. Do not enable the evaluator on
+the strength of configuration diagnostics alone.
+
+Source-order saves additionally write `quote.order` with the effective `from` and `to` source
+arrays, actor, organizational unit and request address. Equivalent spellings, repeated saves and
+an explicit shipped order versus its reset form do not create duplicate transitions. Because the
+order now controls durable settlement, this dedicated transition and its audit commit together;
+an audit failure rolls the order back and returns an error before other submitted settings are
+written. The existing general policy audit remains separate. This adds no database shape.
+
+## Offline source measurement (P24)
+
+`quote-probe` is a standalone command. It never loads `config.yaml` or `RP_CONFIG`, opens a
+database, changes source grants/order, or writes evaluator health, shadow state or ledger rows.
+Only `capture` makes vendor GET requests. `compare` reads local evidence without a network client.
+Do not use agreement here as a settlement grant or as approval for Tier 2.
+
+Capture a bounded window into a **new** directory (its parent must already exist):
+
+```sh
+report-portal quote-probe capture --out ./probe-2026-10-19 \
+  --from 2026-10-19 --to 2026-10-20 --sources tencent,sina,yahoo
+```
+
+The fixed panel is three indices (`sh:000852`, `sh:000906`, `sh:000300`) and twenty stocks:
+`sh:600000,sh:600519,sh:600036,sh:601318,sh:601899,sh:688001,sh:688981,sh:689009,sz:000001,sz:000333,sz:000651,sz:002594,sz:002415,sz:300750,sz:300059,sz:301308,sz:301269,bj:830799,bj:835185,bj:920002`.
+It is a measurement set, not an investment recommendation. Append operator-supplied suspended
+codes with `--suspended sz:000004,bj:430047`; these are examples of syntax, **not claims that those
+securities are currently suspended**. Each extra must be unique and not already in the fixed panel.
+Suspension is not inferred from missing data. Any compiled-in source can be listed in `--sources`,
+including Yahoo despite its lack of settlement admission. Unknown or duplicate sources are errors.
+
+The output directory is private (0700), and files are private (0600), exclusively created, never
+overwritten. The manifest declares the requested source/target matrix and window, fetch mode,
+response URLs/status/timestamps, raw byte counts/hashes, parsed-response hashes and errors.
+Raw files preserve the HTTP response body before GBK/parser conversion; they are not a packet
+capture of compressed wire traffic. Each body is capped at 512 KiB; oversize and partial reads
+remain failed evidence. A `count` fetch means the source was asked for up to 800 daily bars,
+**not** that it supports a bounded range. Cancellation or local storage failure leaves partial
+evidence for inspection. `complete` means all requested attempts finished, not that all succeeded.
+
+Replay with two explicit anchor dates inside the captured window:
+
+```sh
+report-portal quote-probe compare --in ./probe-2026-10-19 \
+  --primary tencent --anchor-start 2026-10-19 --anchor-end 2026-10-20 --record
+```
+
+Choose dates for which the reference is expected to supply bars. Both primary anchors must exist;
+otherwise that instrument is unavailable. The same date may be used for both anchors to inspect
+one session. The replay trims count/range series to the manifest window, then calls the shared
+shadow comparator: exact integer-fen OHLC and date-set differences, including both anchors, with
+deterministic date/field ordering. Volume is not part of the price comparison. Candidate missing
+dates/anchors are mismatches; failed/truncated/empty evidence is unavailable, never agreement.
+Identity/source, adjustment/cache flags and all supplied bars are validated before comparison.
+
+JSON goes to stdout. `--record` additionally requires the entire fixed panel and creates
+`comparison.json` in the capture directory exclusively. It can record unavailable/mismatching
+results; it is not a success certificate. An existing report is never replaced. Without
+`--record`, replay writes nothing and may inspect a smaller valid capture. Missing/tampered files,
+incomplete matrices, unsupported versions, non-regular/symlink evidence, hash/byte-count failures
+and invalid JSON fail the command. Reads have individual and aggregate bounds (8 MiB manifest,
+2 MiB parsed response, 512 MiB total). The report includes the manifest SHA-256; hashes protect
+against accidental corruption, not a malicious capture author. Preserve the entire directory
+when sharing evidence. Neither replay nor recording follows URLs in the manifest.
+
+Exit zero means the command produced a report/capture; inspect every result's `match`, `mismatch`
+or `unavailable` status. A nonzero exit means command/input/storage/integrity failure. No live
+measurement or production rollout is implied by the synthetic regression tests.
+
+## Bounded Sina shadow comparison (P25)
+
+The administrator settings modal on `/manage/forecast` offers **Off** and **Shadow comparison only**.
+The existing source order still determines whether Sina is enabled. The shipped comparison grant is
+Shanghai/Shenzhen only, using the bounded Sina adapter; it grants neither public display ranges nor
+settlement. Sina and Yahoo still have no dividend/kind evidence flags or writer grant. Off is the
+default. `POST /api/admin/forecast {"fallback":"on"}` is refused with `forecast_bad_fallback`;
+effective off/shadow transitions commit with the dedicated `forecast.fallback` audit.
+
+Shadow does not enable evaluation or trigger an idle pass. During a working evaluator pass it copies
+at most two unique bodies already accepted from the qualified primary, retaining first/last anchors
+and every intervening date/OHLC. Only after primary ledger processing completes does it read the
+candidate, with a separate fifteen-second deadline and shared upstream concurrency. It rechecks mode,
+enabled membership and primary identity before each sample. An aborted primary pass makes no shadow
+calls. Candidate data never enters the settlement planner, cache or source-health counters.
+
+There are two independent limits: two logical candidate reads and four HTTP request attempts per
+pass. One Sina observation normally needs snapshot plus history; redirects also consume HTTP budget.
+A fifth attempt is blocked before transport and recorded as `shadow_budget`, not a vendor failure.
+A genuine fourth-request failure is still a failure. Waiting for a concurrency slot does not bill a
+source call. Caller deadline/cancellation and typed refusals are neutral, not source faults.
+
+Sina's newest untrimmed kline must agree with the snapshot date and close. History is never silently
+replaced by a display-only degradation; an unproven window beyond the full 800-row tail is refused as
+`window_not_covered`. The shared comparator checks integer-fen OHLC, the date union and both anchors.
+A missing candidate anchor is a mismatch; unavailable evidence is not agreement. Comparisons are
+opportunistic samples, not a representative study, independent exchange corroboration, a feed licence
+or Tier 2 writer admission. Use the fixed-panel P24 process for deliberate replay measurements.
+
+The administrator-only `GET /api/admin/forecast` includes `fallback` and `diagnostics`. The latter's
+`status` is `empty`, `ready` or `unavailable`; empty/missing/damaged telemetry must never be read as
+healthy zeros. `shadow` and `calls`, when readable, are one atomic snapshot of the existing-meta keys
+`forecast_state_shadow` and `forecast_state_calls`. A damaged pair is retained and not overwritten.
+No raw response body or vendor error text is stored here. Counts include logical primary/adjustment
+reads, failures and typed refusals; `shadow_http_attempts` covers candidates only, not primary HTTP.
+
+Retained state has up to fourteen UTC days ending at the latest observation and twenty recent results.
+The explicit latest-record timestamp may be old when there is no work or evaluation is off; it is not
+a live health certificate. A delayed observation cannot rewind retention or the timestamp. Each result
+keeps total differences and at most thirty-two details; truncation never turns a mismatch into a match.
+Counter-day dates are UTC; price-bar dates use the instrument timezone. Prices in the difference table
+are integer fen. The card shows the active comparison mode separately from retained history.
+
+For `mismatch`, preserve the result/window/anchors and capture deliberate evidence with P24; do not
+rewrite settled rows or exclude disagreement. For `no_shadow`/`primary_changed`, inspect enabled source
+order. For `shadow_budget`, inspect redirects/request counts rather than extending the budget. For
+unavailable diagnostics, investigate retained state and storage logs; do not delete evidence to make
+the card green. To stop new candidate calls, set comparison Off; the audit/history remain and primary
+evaluation is unchanged. No database change or ledger repair is needed to revert this code. Deployment
+and evaluator enablement still require their separate owner approvals and release gates.

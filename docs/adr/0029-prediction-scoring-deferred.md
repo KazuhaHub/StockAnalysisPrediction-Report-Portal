@@ -181,11 +181,12 @@ party of its own choosing, on every install, whether the operator wanted it or n
 A sixth always-on loop egressing to Chinese market-data vendors by default — including on installs
 where those hosts are unreachable — would invert that.
 
-The evaluator calls `fetchTencentRange` (`quote.go:1570`) **directly**, under `s.quotes.acquire`
-(`quote_cache.go:905`), and **never through `fetchUnder` and never through the cache**: `fetchUnder`
-walks the operator's source chain, which breaks D9, and it serves cached bodies, so a body fetched at
-14:57 could be served at 15:31 and freeze an intraday price. A bar may resolve a mark only once its
-session has **completed**.
+**Amended by [ADR 0041](0041-ledger-grade-market-data.md) (V9/P23).** The evaluator uses
+`walkLedger`, intersecting compiled explicit settlement grants with the operator's source order, rather than calling Tencent
+outside that policy. Tencent remains the only admitted Tier 1 writer. The walk holds one shared
+upstream slot and runs **outside `fetchUnder`, display single-flight and the cache**: a body fetched
+at 14:57 must not be served at 15:31 and freeze an intraday price. A bar may resolve a mark only once
+its session has **completed**. No qualified primary means `no_source`, not display failover.
 
 Refusals are a recorded outcome with a retry, not a gap: `no_bar`, `stale_bar`, `unverifiable`, each
 with `attempts` and `next_attempt_at`. A refusal that is still refused 10 sessions past due **and**
@@ -198,8 +199,9 @@ sessions the baseline becomes terminal and every non-terminal mark is finalised 
 readiness list that includes a dry pass and a hand check per benchmark. The loop writes a heartbeat,
 an independent watchdog reports `stalled` and `lagging` to Email and Slack, and a status-only
 `/healthz/forecast` exists for an uptime monitor. Finality is the result of mark-specific failures
-only (V26); a source failure never counts. `fetchTencentRange` now lives in `internal/app/quote.go`
-and is called directly, under the shared concurrency ceiling and never through the cache.
+only (V26); a source failure never counts. ADR 0041 adds readiness item 6 and a daily `no_source`
+watchdog alert; the production evaluator reaches range fetchers only through its uncached ledger
+walk. Its test-only fetch seam does not grant an alternate production route.
 
 ### 7. The tables
 
@@ -585,7 +587,7 @@ own consequence, not the filling-in of an open question.
 | **D5. Purge** — does the ledger outlive the report? | 2026-10-18 | Yes. `report_id` → NULL; sets survive. The ledger also has its own retention target (§8), which deletes a whole month at a time and only when every set in it is orphaned, fully terminal and past the cutoff. |
 | **D7. 3-5 重组决策** — in or out of v1? | 2026-10-18 | Out of v1. Its values come from an LLM agent and its claims are event probabilities, so nothing in the contract would be code-selected. |
 | **D8. Corporate actions** — dividend element first, qfq fallback? | 2026-10-18, mechanism corrected 2026-10-20 | Detect from the adjusted/unadjusted ratio (the only signal that catches a bonus or rights issue), corroborated one-sidedly by the dividend element; exclude and count. One detection-only function, exact integers (§10, ADR 0037). |
-| **D9. Corroboration** — one vendor, or two? | 2026-10-18 | One vendor (Tencent) in v1. The quote stack is primary-plus-fallback, not corroboration, so a second source would be a refusal that can never fire. |
+| **D9. Corroboration** — one vendor, or two? | 2026-10-18; V9 amendment recorded in ADR 0041 | Tencent is the only Tier 1 writer, admitted through the operator's explicit settlement policy. Public-source integrity checks are not corroboration. Shadow comparison does not grant fallback writing. |
 
 The Release 1 implementation added these settled decisions (details in ADR 0037 and the plan's
 decision table):
@@ -595,7 +597,7 @@ decision table):
 | **V3. Ledger start** | 2026-10-19 | `2026-10-18T16:00:00Z`, write-once, bounded by the oldest set; sets before it are `pre_live`. |
 | **V6b. Halt on S0** | 2026-10-19 | The start is the stock's last traded close before S0, inside a bounded look-back; the benchmark leg still starts at S0. |
 | **V8. Benchmark governance** | 2026-10-19 | Closed allowlist; effective at the next cohort; explicit schedule/cancel; audited; `sh000906` for 2026-11. |
-| **V9. Tier 1 sources** | 2026-10-19 | Tencent the only writer for scored marks; Sina in shadow; Tier 2 is a separate go/no-go (ADR 0038). |
+| **V9. Tier 1 sources** | 2026-10-19 | Tencent the only writer for scored marks; Sina in shadow; Tier 2 is a separate go/no-go ([ADR 0041](0041-ledger-grade-market-data.md), renumbered from the plan's 0038). |
 | **V18. Alert channels** | 2026-10-19 | Email **and** Slack for every evaluator alert and every store failure; SLOs as in plan §8. |
 | **V24. Test runs** | 2026-10-19 | `run_mode: "test"` on the wire, frozen at ingest into its own bucket. |
 | **V26. Finality** | 2026-10-19 | ≥ 10 sessions past due **and** ≥ 4 mark-specific failed attempts; source outages never count. |

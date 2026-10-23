@@ -92,6 +92,7 @@ const (
 	AuditUserChange   = "user.change"
 	AuditGroupChange  = "group.change"
 	AuditPolicyChange = "policy.change"
+	AuditQuoteOrder   = "quote.order"
 
 	// Authentication — the principal acting on its own credentials.
 	AuditLogin                 = "auth.login"
@@ -127,6 +128,8 @@ const (
 	// Turning the evaluator on or off. A background loop that reaches a third party is exactly the
 	// kind of change an operator wants attributed.
 	AuditForecastAuto = "forecast.auto"
+	// Changing comparison-only vendor measurement; never permission for an alternate ledger writer.
+	AuditForecastFallback = "forecast.fallback"
 	// Setting the ledger start (P5). Write-once, so the one row that carries it has to say who set
 	// which instant and which sets left the record.
 	AuditForecastPopulation = "forecast.population"
@@ -422,7 +425,7 @@ var auditVocabulary = []string{
 	AuditIdentityLink, AuditIdentityUnlink, AuditStepUp,
 	AuditUserCreate, AuditUserChange, AuditUserDelete,
 	AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
-	AuditGrantChange, AuditPolicyChange,
+	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
 	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
 	AuditTokenCreate, AuditTokenDelete,
 	AuditAppInstall, AuditAppDelete,
@@ -430,7 +433,7 @@ var auditVocabulary = []string{
 	AuditTargetChange,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
-	AuditForecastAlert, AuditForecastAlertTest,
+	AuditForecastAlert, AuditForecastAlertTest, AuditForecastFallback,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present
