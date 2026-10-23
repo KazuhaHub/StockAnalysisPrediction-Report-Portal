@@ -25,7 +25,7 @@ func ledgerAdminGet(t *testing.T, s *Server) map[string]any {
 func TestLedgerAdminStateDescribesExplicitGrants(t *testing.T) {
 	s := quoteAdminServer(t)
 	out := ledgerAdminGet(t, s)
-	if !reflect.DeepEqual(out["ledgerChain"], []any{quoteSourceTencent}) || out["ledgerPrimary"] != quoteSourceTencent || out["ledgerShadowPeer"] != "" {
+	if !reflect.DeepEqual(out["ledgerChain"], []any{quoteSourceTencent}) || out["ledgerPrimary"] != quoteSourceTencent || out["ledgerShadowPeer"] != quoteSourceSina {
 		t.Fatalf("ledger source state missing or wrong: %+v", out)
 	}
 	if health, ok := out["ledgerHealth"].([]any); !ok || len(health) != 0 {
@@ -40,8 +40,12 @@ func TestLedgerAdminStateDescribesExplicitGrants(t *testing.T) {
 		} else if row["cashDividends"] != false || row["reportsKind"] != false || !reflect.DeepEqual(row["settled"], []any{}) {
 			t.Fatalf("unadmitted writer: %+v", row)
 		}
-		if !reflect.DeepEqual(row["settledShadow"], []any{}) {
-			t.Fatalf("unimplemented shadow fetcher advertised: %+v", row)
+		wantShadow := []any{}
+		if row["source"] == quoteSourceSina {
+			wantShadow = []any{"sh", "sz"}
+		}
+		if !reflect.DeepEqual(row["settledShadow"], wantShadow) {
+			t.Fatalf("wrong shadow-only markets: %+v", row)
 		}
 	}
 	if err := s.st.SetSetting(setQuoteSourceOrder, quoteSourceSina); err != nil {

@@ -2402,8 +2402,15 @@ naming `ledger_chain`; restored → mode `1` allowed again, FC);
   tick, compares OHLC to the fen, date sets and both anchors, persists results in `forecast_state_shadow` and
   `forecast_state_calls`, and never touches ledger tables. `forecast_fallback` ∈ {`off`, `shadow`}; `on` → 400
   `forecast_bad_fallback` until Tier 2. Tests: `TestSinaRangeFiltersByRowDate`, `TestSinaKlineMustAgreeWithItsSnapshot`,
-  `TestShadowNeverWritesTheLedger` (≤ 2 extra calls per tick; ledger rows identical to an `off` run — FC),
+  `TestShadowNeverWritesTheLedger` (≤ 2 extra source reads and ≤ 4 HTTP request attempts per tick, including
+  redirects; ledger rows identical to an `off` run — FC),
   `TestFallbackModesTier1` (FC).
+
+  Counting clarification (2026-10-22, owner delegated the choice): one Sina source read comprises a snapshot
+  request and a kline request. The two-read comparison limit is independent of the four-request HTTP budget;
+  redirects consume the latter and may make a comparison unavailable, never silently extend it. Retain both
+  counters. Run comparisons after the primary ledger work with a separate bounded deadline so a shadow outage
+  cannot spend the primary evaluation deadline. This clarifies the unit, not fallback-writing admission.
 
 ---
 

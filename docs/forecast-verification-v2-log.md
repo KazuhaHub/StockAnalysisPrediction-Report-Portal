@@ -222,7 +222,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
   #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
   PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
-  P23 #152 is merged at `08b1c1a0` after full exact-head validation.
+  P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
+  `c4f0c93c` after independent review and full exact-head CI/CodeQL.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
@@ -232,11 +233,15 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
   P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
-  exact-head CI and local browser verification before merging #152. Current local work is P24
-  `feat/cli-quote-probe`, started from `08b1c1a0`: capture, integrity-checked offline replay,
-  fixed-panel CLI and no-database dispatch guards are implemented and independently reviewed.
-  Full local validation is recorded below; exact-head PR CI remains required before merge.
-- **Next step.** Finish P24's exact-head validation and merge, then P25's bounded shadow
+  exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
+  offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
+  `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
+  implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
+  Persisted diagnostic storage and post-ledger runtime selection/execution are implemented and
+  independently reviewed. Administrator controls/diagnostics and shipped Sina comparison-only
+  admission are implemented and reviewed, with complete local regression. Exact-head PR CI and
+  final merge remain outstanding; no production enablement is implied.
+- **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -1069,3 +1074,215 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   unrelated panel error, and restoring it passes. This was a regression-assertion defect, not a
   missing runtime guard; no production code changed after the full implementation review.
   Follow-up independent review closed it, and three final targeted race repetitions passed (5.764 s).
+
+### P24 merge and P25 bounded history foundation (2026-10-22)
+
+- P24 exact head `6a33df58` passed full CI run `39889303053` (Go/SQLite/Postgres, scoped race
+  4m9s, frontend, workflow lint and Docker/font/smoke gates) and CodeQL run `39889301435`.
+  Main-only full-race/cross-compile lanes were skipped by design on the pull request, not called
+  passing. Reconfirmed Apps #141/#142 heads unchanged and clean read-only merge previews before
+  squash-merging #154 to `c4f0c93c`. PR evidence records both review findings, fixes and guards.
+  No release, deployment, production measurement or Apps mutation followed.
+- Started P25 from that main. `fetchSinaRange` validates the window before HTTP, requests the full
+  800-bar count tail through the existing snapshot/history fetcher, and treats display-path
+  `BarsUnavailable` degradation as an error rather than shadow evidence. Ordinary display behavior
+  is unchanged. No source is advertised as a shadow peer at this foundation stage.
+- The range helper validates source/adjustment/cache flags, all dates/prices and duplicate dates,
+  sorts a copy, and checks the newest untrimmed kline date and exact-fen close against the snapshot
+  in the instrument's timezone. Checking before trimming also catches a bad newest row outside the
+  requested historical window. A full 800-row tail beginning after the requested start returns
+  typed `window_not_covered`; a shorter series does not invent pre-listing or suspended sessions.
+  The returned copy contains only row dates inside the requested window; empty history is refused.
+- Tests failed before implementation. Captured stock fixtures are served by a context-local fake
+  transport with actual GBK conversion and assertions for the 800-row request. Controls cover
+  one-fen disagreement with otherwise valid OHLC, snapshot-date/stamp mismatch, reversed rows and
+  no input mutation, unavailable/empty/nil/duplicate/malformed/over-cap histories, source and cache/
+  adjustment mismatches, exact cap coverage, cancellation and unsupported/invalid requests before
+  HTTP. No test or command here makes a live vendor request.
+- Independent review found no actionable issue; optional coverage was added. Full local
+  Go/SQLite/Postgres passed (app 35.372 s), build/vet/staticcheck passed, and three targeted race
+  repetitions across range/probe/comparator passed (5.507 s). Frontend files are unchanged.
+  Runtime selection/limits, shared comparisons, fallback controls, persisted diagnostics and final
+  full-branch review/CI remain P25 work. This adds no schema, settings, runtime writes or admission.
+  Back out by reverting this helper; no database/state repair is needed.
+
+### P25 fallback controls and explicit network budget (2026-10-22, in progress)
+
+- The owner delegated the ambiguous call-counting choice. Preserved at most two full candidate
+  observations and added an independent ceiling of four HTTP RoundTrip attempts per working
+  pass: Sina normally needs snapshot plus kline for each observation. Redirects consume the same
+  budget, rather than obtaining extra requests. Both units are documented in the decisions/plan.
+  These limits are comparison-only; they grant no alternate writer. Post-ledger scheduling and an
+  independent bounded deadline remain required when integrating execution.
+- Added a context-local cloned-client transport with a mutex-protected shared HTTP budget. It
+  rejects an exhausted budget before the underlying transport; cancelled requests are not sent.
+  Tests exercise actual redirects, two complete fixture-based Sina reads consuming four requests,
+  concurrent attempted overrun, isolation across passes, cancellation and the unchanged global
+  client. This is the network-limit foundation, not runtime enforcement of two selected bodies.
+- The admin settings reader/writer exposes `fallback` as off/shadow only. Invalid strings,
+  non-string values and null return `forecast_bad_fallback` before any submitted field is written;
+  omitted fallback preserves its value. Unsupported stored values, including on, read as off.
+  Each effective transition and `forecast.fallback` audit commit together using the existing meta
+  table, with SQLite/Postgres serialization, whole-transaction contention retries and attributed
+  from/to values. Repeated saves do not create no-op audits. Audit failure rolls the transition
+  back. No database table, column or acceptance contract changed.
+- Tests failed before implementation. New controls cover invalid mixed-field writes, reader/writer
+  round trips, no-op suppression, rollback on an unavailable test audit table, concurrent serial
+  audit chains on SQLite/Postgres and independent SQLite Stores, NULL persisted values, omitted
+  fields and cancellation. Full regression caught missing translations for the new error code;
+  those are fixed in all three locales, with audit-action labels and regenerated Traditional
+  Chinese. An initial test fixture used a string instead of the numeric OU identifier; corrected
+  it to assert the real stored type. Neither issue changed runtime policy.
+- Independent control/budget reviews found no actionable issue; optional coverage was added.
+  Final full Go/SQLite/Postgres passed (app 35.745 s), build/vet/staticcheck passed, three targeted
+  race repetitions passed (6.827 s), web typecheck and 25 locale tests passed. CI's scoped race
+  names now include the new Sina, budget and fallback guards. Full frontend/PR CI and final
+  branch-wide review will be repeated for complete P25 before submission.
+- P25 is not complete: selection of accepted primary bodies, post-ledger comparisons through the
+  shared comparator, persistent shadow/call diagnostics, administrator UI controls/status and final
+  admission tests remain. No production call, deployment, Apps branch change, fallback ledger
+  write or runtime shadow grant occurred. Back out by reverting these controls/helpers; any saved
+  local fallback key is inert/off in the previous build, and no ledger repair is needed.
+
+### P25 durable diagnostic storage (2026-10-22, in progress)
+
+- Added versioned storage in the two planned existing-meta keys, `forecast_state_shadow` and
+  `forecast_state_calls`. One transaction reserves/locks the pair in stable order, loads both,
+  aggregates per-source logical reads, failures, typed refusal counts and explicitly shadow-only
+  HTTP counts, then writes both. A single-statement reader sees one snapshot; bounded,
+  context-cancellable retries handle transient SQLite contention without mixing snapshots.
+  This adds no table, column, migration or database acceptance-contract change.
+- Keeps fourteen UTC-day summaries, the chronologically latest twenty results, and at most
+  thirty-two differences per detailed result. The full difference count and a truncation flag
+  remain explicit; truncated mismatches cannot become agreement. Persistence copies the comparison
+  rather than mutating a live result. No raw quote body or vendor error text enters these counters.
+- Missing state is distinguishable from damaged state: defaults apply only when both rows were
+  genuinely absent. Persisted objects must explicitly carry the supported version, timestamps,
+  arrays and consistent day/counter/evidence shapes. Existing empty/SQL-NULL rows, JSON null,
+  missing/unsupported versions, partial pairs, invalid counters, duplicate days, missing agreement
+  evidence and integer wrap are refused without overwriting the retained evidence. Consumers must
+  show an error as unavailable telemetry, not as a healthy zero; runtime/UI integration remains.
+- Independent review found a real retention-watermark defect: a delayed old run could discard
+  newer observations and regress `updated_at`. The failing regression reproduced it. Retention
+  now uses the maximum of the previous and incoming timestamps; in-window late results merge,
+  expired late results are ignored, and latest-result trimming sorts by timestamp rather than
+  commit order. Follow-up review closed it. Two further findings were fixed: persisted objects
+  could inherit a missing version from defaults, and concurrent SQLite readers could return
+  `SQLITE_BUSY`. Explicit zero-value decoding and bounded whole-read retries closed both without
+  weakening the failing assertions. Remaining optional controls were added.
+- Tests failed before implementation and before hardening. Coverage includes close/reopen
+  durability, fourteen-day retention, out-of-order and expired writes, concurrent serial writers
+  plus snapshot readers on SQLite/Postgres and independent SQLite connections, corrupted JSON and
+  structurally invalid valid JSON, overflow, detail bounds/no input mutation and cancellation.
+  An abort trigger in an isolated SQLite test database fails the second update and proves that
+  neither half of the pair survives. No production schema or database was used for injection.
+- Final full Go/SQLite/Postgres passed (app 36.356 s); build, vet and staticcheck passed. Three
+  final targeted diagnostic race repetitions passed (16.068 s). Independent follow-up review
+  closed every finding. Frontend files are unchanged by this checkpoint. No live vendor,
+  production, Apps branch, evaluator enablement or ledger write occurred.
+- These are storage helpers, not P25 completion. Post-ledger sample selection/execution, primary
+  and candidate call observation, shared runtime comparison, diagnostics/status UI, shadow grants
+  and final full-branch review/CI remain. Back out by reverting the helpers; existing diagnostic
+  meta values are ignored by an older build, and no ledger repair is needed.
+
+### P25 post-ledger runtime integration (2026-10-22, in progress)
+
+- Copies at most two unique, accepted primary instrument bodies, with explicit first/last anchors,
+  and executes candidates only after normal primary ledger processing completes. Early cancellation
+  or panic suppresses candidate work while retaining available primary-call diagnostics. Each sample
+  rechecks fallback mode, operator order and primary identity. The independent candidate deadline is
+  fifteen seconds; upstream concurrency is shared, but responses, transport budget and health are not.
+  Candidates never return to settlement planning. Sampling is opportunistic, not representative or
+  Tier 2 admission evidence. No shipped source has received a shadow grant at this checkpoint.
+- Uses the shared exact-fen comparator after identity, market, currency, timezone, history flags and
+  completed-bar checks. Persists calls, failures, neutral refusals and bounded comparison evidence
+  using the reviewed atomic storage. Includes primary adjustment observations; candidate failures,
+  panic, timeout, mismatches and storage failures cannot retry or alter primary ledger writes.
+- Red/green controls compare the complete ledger checksum against shadow-off output and assert
+  that it already matches before candidate execution. They cover agreement, one-fen mismatch,
+  missing anchor, wrong source, missing history, cached/adjusted data, errors, panic and deadline.
+  Saturated-slot cancellation never enters or bills the adapter. A hidden quota-denial test first
+  reproduced misattribution as a source failure; a transport denial counter fixes attribution even
+  when an adapter degrades its error. A real fourth-request HTTP failure remains a failure. Independent
+  review found duplicate quota refusals; recording each result once closes it, with a pinned guard.
+- Full Go/SQLite/Postgres passed (app 37.996 s), build/vet/staticcheck passed, and three targeted
+  runtime/budget/walk race repetitions passed. Independent follow-up review closed all findings.
+  CI's scoped race selector now explicitly includes the complete ledger-checksum test. No live vendor
+  call, production change, evaluator enablement, Apps edit or alternate ledger writer occurred.
+- P25 remains incomplete: administrator controls/diagnostics presentation, shipped Sina shadow-only
+  grants, final end-to-end admission guards and branch-wide review/full CI are next. Back out by
+  reverting this integration; diagnostics are ignored by an older build and no ledger repair is needed.
+
+### P25 administrator controls and diagnostics (2026-10-22, in progress)
+
+- The administrator settings response now reads the atomic diagnostic pair using the request context.
+  Explicit empty/ready/unavailable states distinguish uninitialised telemetry from measured zero and
+  damaged evidence. A decode/read failure returns no partial state or raw error/body; the reader never
+  repairs or replaces evidence. Existing administrator authentication covers both GET and POST;
+  routed tests deny an ordinary reader and allow an administrator. No reader-scope surface changed.
+- The settings modal offers only off and shadow and posts only changed fields. Its copy explains
+  third-party reads, two logical candidate observations versus four HTTP attempts, source-order
+  membership, post-ledger execution and no evaluator enablement or alternate writing. A status tag
+  shows the current comparison mode without treating retained history as ongoing comparison work.
+- The diagnostic card shows retained daily per-source logical calls (including adjustment checks),
+  source failures, refusal-code counts and explicitly shadow-only HTTP attempts, followed by daily
+  comparison counts and the twenty bounded recent results. Evidence includes both anchors, total
+  differences and compared dates, exact integer-fen values and a truncation warning. Daily counter
+  dates are UTC; bar dates are labelled in the instrument timezone. Copy states that sampling is
+  opportunistic and agreement never grants ledger admission. Missing/damaged telemetry shows a
+  warning or no-record message, not fabricated zero tables. Locale keys cover all three languages;
+  Traditional Chinese is regenerated through the existing OpenCC workflow.
+- The new backend/UI tests failed before implementation. Controls cover no-record versus corruption,
+  preserved damaged input, genuine retained state, route permissions, shadow-only changes without
+  benchmark/evaluator changes, no-op saves, unavailable/partial telemetry, anchors, exact-fen values,
+  a recorded zero versus a missing value, and unhidden truncation. Independent review found no
+  actionable issue. Full Go/SQLite/Postgres passed (app 55.845 s), build/vet/staticcheck passed,
+  three targeted admin/fallback race repetitions passed (14.218 s), and all 122 frontend files /
+  1022 tests, typecheck and production SPA build passed. Final focused locale/UI checks were repeated
+  after clarifying the trading-date header; final complete-branch CI remains a separate gate.
+- An isolated synthetic preview exercised the actual embedded SPA and administrator save endpoint:
+  off to shadow to off, including keyboard selection. The evaluator remained off throughout, verified
+  from the preview database. Desktop dark-mode diagnostics and modal layouts were inspected; no
+  responsive breakpoint, live candidate result or production acceptance is claimed. The temporary
+  browser and server were closed. No production, live vendor, Apps, schema or source grant changed.
+- P25 is still in progress. Shipped Sina comparison-only admission, end-to-end grant guards and final
+  full-branch review/CI remain before submission. Back out by reverting these admin/UI changes;
+  diagnostic evidence stays in the existing meta keys and no ledger repair is needed.
+
+### P25 shipped comparison grant and final local review (2026-10-22)
+
+- Added Sina's explicit Shanghai/Shenzhen `settled_shadow` grant and registered the bounded range
+  adapter only after comparator, runtime, persisted diagnostics and administrator controls were in
+  place. Its cash-dividend/kind flags remain false, `settled` remains absent, and public display-range
+  grants do not expand. Tencent remains the only Tier 1 writer; Beijing, overseas and Yahoo shadow
+  admission remain absent. Default fallback remains off. The quote panel now truthfully declares
+  Sina as its enabled comparison peer. P24 capture now selects Sina's bounded adapter and retains
+  any coverage/coherence failure as failed evidence; it grants nothing and still writes no database.
+- Grant tests failed before wiring and passed afterward. The market matrix rejects alternate writers
+  even when Tencent is disabled, with no vendor call. A real registered Sina adapter runs captured
+  snapshot/history bytes through the pass-local transport budget, shared comparator and durable
+  result path: four accepted dates, both anchors, two measured HTTP requests, match and one-fen
+  mismatch, no ledger or health changes. No global vendor client is replaced. Further guards prove
+  mode/order/primary revocation between samples, aborted-pass suppression, unique two-body sampling
+  and copied primary buffers. These are implementation controls, not new live market measurements.
+- Independent branch-wide review found no admission or P24 integration defect, but one combined
+  SQLite race run exposed fallback-save `SQLITE_BUSY` errors. Isolated repeats and the initial full
+  local race run were green; the failing combined run was still treated as a blocker. A deterministic
+  700 ms held-writer regression reproduced premature failure at 0.36 s with the old six-attempt
+  retry window. The writer now retries complete rolled-back transactions within a five-second total
+  context bound, honoring any earlier caller deadline, with capped exponential jitter. Tests retain
+  all original concurrency/audit assertions and additionally prove exactly one audit after release
+  and no persisted transition after caller timeout. Five targeted race repetitions passed (14.612 s),
+  and the previously failing independent combined suite passed (20.308 s). Follow-up review closed
+  the finding and reported no remaining actionable issue.
+- Final full Go/SQLite/Postgres after hardening passed (app 37.463 s), build/vet/staticcheck passed.
+  The earlier complete runtime/diagnostic/admission race suite passed three repetitions (75.101 s);
+  all 122 frontend files / 1022 tests and typecheck passed on this unchanged frontend. Production
+  SPA build is repeated before submission. The runbook documents controls, budgets, neutral refusals,
+  retention, unavailable telemetry, immutable ledger handling and rollback; ADR 0041 records the
+  actual comparison-only grant. No source, baseline schema, production, Dify, Apps or release action
+  outside the described local implementation occurred.
+- Local P25 implementation/review is complete, not its merge or rollout gates. Exact-head full CI,
+  current Apps merge previews and final PR review remain before merge. Revert the implementation to
+  stop runtime comparisons; existing meta diagnostics are ignored by an older build. No ledger
+  repair is needed and comparison agreement never authorizes Tier 2 writes.

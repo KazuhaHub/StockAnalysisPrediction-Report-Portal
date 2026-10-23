@@ -487,13 +487,20 @@ func defaultQuoteSources() []quoteSource {
 			},
 		},
 		{
-			name:  quoteSourceSina,
-			fetch: fetchSinaQuote,
+			name:       quoteSourceSina,
+			fetch:      fetchSinaQuote,
+			fetchRange: fetchSinaRange,
 			// A-shares only. Sina's Hong Kong and US lines are `rt_hk00700` and `gb_aapl` — 19 and 36
 			// fields in a different order — so pointing the A-share parser at either would not be a
 			// second source, it would be a second shape read as the first. The predicate is the same
 			// `sina` column quoteSinaTarget refuses those two markets on.
 			caps: []quoteCapability{
+				// The bounded adapter validates full-tail snapshot coherence before trimming.
+				// This admits comparison only, never a ledger writer or a public display range.
+				{
+					markets:   func(m *quoteMarket) bool { return m.id == "sh" || m.id == "sz" },
+					intervals: []quoteInterval{quoteIntervalSettledShadow},
+				},
 				{
 					markets:   func(m *quoteMarket) bool { return m.sina },
 					intervals: []quoteInterval{quoteIntervalSnapshot},

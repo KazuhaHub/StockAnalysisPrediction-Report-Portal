@@ -62,6 +62,8 @@ type forecastEvaluator struct {
 	// adjust is the front-adjusted fetch seam. It is the ONE qfq call (ADR 0029 §10) and exists only
 	// to detect a bonus or rights issue the unadjusted body does not name.
 	adjust func(ctx context.Context, market, code, from, to string) (map[string]int64, error)
+	// shadowTimeout is a test seam; production uses a separate fixed candidate deadline.
+	shadowTimeout time.Duration
 
 	// tickFn is a test seam for step's panic recovery. Nil means e.tick.
 	tickFn func(*Server) error
@@ -138,6 +140,12 @@ func (e *forecastEvaluator) tick(s *Server) error {
 	if len(sets) == 0 {
 		return nil
 	}
+	shadow := newForecastShadowPass(s)
+	completed := false
+	defer func() {
+		cancel()
+		shadow.finish(s, e.ledgerPass.snapshotObservations(), e.clock(), completed, e.shadowTimeout)
+	}()
 
 	for _, group := range groupSetsByBench(sets) {
 		if err := ctx.Err(); err != nil {
@@ -194,6 +202,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 			continue
 		}
+		shadow.offer(s, indexSeries)
 		// Fetch every stock body before settling any of them: the stale valve asks whether the
 		// VENDOR's whole feed lags, which is a property of this pass and cannot be answered one
 		// series at a time.
@@ -211,6 +220,13 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		if e.stats != nil {
 			e.stats.StaleValveTripped = valve
 		}
+		if !valve {
+			for i := range stocks {
+				if stockErrs[i] == nil {
+					shadow.offer(s, stocks[i])
+				}
+			}
+		}
 		for i, set := range need {
 			if err := ctx.Err(); err != nil {
 				return nil
@@ -220,6 +236,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 		}
 	}
+	completed = true
 	return nil
 }
 
@@ -627,6 +644,8 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		var aerr error
 		adj, aerr = fetch(ctx, set.Market, set.Symbol, baseDate, last)
+		observation, _ := forecastCallResult(ctx, quoteSourceTencent, aerr)
+		e.ledgerPass.observe(observation)
 		if aerr != nil {
 			// The adjustment check is part of the answer: the mark waits, it is never resolved
 			// without it (F10). A source failure, so no attempt is charged.
