@@ -943,6 +943,7 @@
   "forecast.legend.custom": "各格独立校正；p* 未对区间选择做校正；红色为正、绿色为负（A 股习惯）。",
   "forecast.legend.monthly": "各格独立校正；红色为正、绿色为负（A 股习惯）；成熟格子一经发布不再改变。",
   "forecast.cov.summary": "计入 {{member}} / 报告 {{reports}}",
+  "forecast.cov.bar": "本组报告的去向：{{parts}}",
   "forecast.cov.rejected": "被拒 {{n}}",
   "forecast.cov.test": "测试运行 {{n}}",
   "forecast.cov.pending_baseline": "基准未核对 {{n}}",

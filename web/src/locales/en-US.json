@@ -943,6 +943,7 @@
   "forecast.legend.custom": "Each cell is corrected independently; p* is not corrected for range selection; red is positive, green negative (A-share convention).",
   "forecast.legend.monthly": "Each cell is corrected independently; red is positive, green negative (A-share convention); a mature cell never changes once published.",
   "forecast.cov.summary": "Counted {{member}} / reports {{reports}}",
+  "forecast.cov.bar": "Where this group's reports went: {{parts}}",
   "forecast.cov.rejected": "Rejected {{n}}",
   "forecast.cov.test": "Test runs {{n}}",
   "forecast.cov.pending_baseline": "Unverified baseline {{n}}",

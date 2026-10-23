@@ -420,6 +420,30 @@ describe('ForecastMatrix coverage', () => {
     expect(new Set(backgrounds).size).toBe(backgrounds.length)
   })
 
+  // The segments are empty spans: width and colour carry the counts, and assistive technology reads
+  // neither. The bar is one image whose name lists what each non-empty segment holds.
+  it('gives the bar a text alternative that names every non-empty bucket family with its count', () => {
+    show(withCoverage({}))
+    const bar = screen.getByRole('img', { name: /^forecast\.cov\.bar:/ })
+    const label = bar.getAttribute('aria-label')!
+    for (const part of [
+      'forecast.legend.cov.member 50',
+      'forecast.legend.cov.duplicate 20',
+      'forecast.legend.cov.missing 10',
+      'forecast.legend.cov.other 15',
+      'forecast.legend.cov.pre_live 5',
+    ]) expect(label).toContain(part)
+  })
+
+  it('leaves an empty family out of the bar\'s text alternative, and counts an unknown state in "other"', () => {
+    show(withCoverage({ duplicate: 0, pre_live: 0, absent: 0, rejected: 0, unknown: 5 }))
+    const label = screen.getByRole('img', { name: /^forecast\.cov\.bar:/ }).getAttribute('aria-label')!
+    expect(label).not.toContain('forecast.legend.cov.duplicate')
+    expect(label).not.toContain('forecast.legend.cov.missing')
+    expect(label).not.toContain('forecast.legend.cov.pre_live')
+    expect(label).toContain('forecast.legend.cov.other 20')
+  })
+
   it('keeps an unknown state in the bar so coverage always adds up', () => {
     show(withCoverage({ unknown: 5, member: 45 }))
     expect(widthOf(seg('other'))).toBeCloseTo(20)

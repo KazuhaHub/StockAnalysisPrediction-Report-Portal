@@ -8,8 +8,9 @@ import Quiet from './Quiet'
 
 // Where a group's reports went. The bar's segments add up to the group's reports and each has its
 // own colour (counted, repeat run, missing or rejected, everything else, before the ledger began),
-// but colour is never the only carrier: the counted share is text, and the buckets a reader should
-// not have to decode from a shade are chips with a name and a count.
+// but colour is never the only carrier: the counted share is text, the buckets a reader should not
+// have to decode from a shade are chips with a name and a count, and the bar itself is an image whose
+// text alternative names every non-empty segment with its count (the segments are empty spans).
 //
 // A reader who may not know the ledger's volume has no coverage at all (the server sends none), so
 // there is nothing here for them: no bar, no chip, no number.
@@ -35,10 +36,17 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
 
   const total = Math.max(1, c.reports)
   const share = (n: number) => `${(n / total) * 100}%`
-  const seg = (name: string, n: number, background: string) => (
-    <span key={name} data-seg={name} style={{ display: 'block', height: 8, width: share(n), background }} />
-  )
   const other = c.backtest + c.degraded + c.mismatch + c.pending_baseline + c.test + c.off_benchmark + (c.unknown ?? 0)
+  const families = [
+    ['member', c.member, palette.member],
+    ['duplicate', c.duplicate, palette.duplicate],
+    ['missing', c.absent + c.rejected, palette.missing],
+    ['other', other, palette.other],
+    ['pre_live', c.pre_live, palette.preLive],
+  ] as const
+  const barLabel = t('forecast.cov.bar', {
+    parts: families.filter(([, n]) => n > 0).map(([name, n]) => `${t(`forecast.legend.cov.${name}`)} ${n}`).join(' · '),
+  })
 
   const chip = (name: string, n: number, warn: boolean) =>
     n > 0 ? (
@@ -62,12 +70,10 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
 
   return (
     <div style={{ minWidth: 132, maxWidth: 260 }}>
-      <div style={{ display: 'flex', gap: 1, borderRadius: 4, overflow: 'hidden', background: token.colorFillQuaternary }}>
-        {seg('member', c.member, palette.member)}
-        {seg('duplicate', c.duplicate, palette.duplicate)}
-        {seg('missing', c.absent + c.rejected, palette.missing)}
-        {seg('other', other, palette.other)}
-        {seg('pre_live', c.pre_live, palette.preLive)}
+      <div role="img" aria-label={barLabel} style={{ display: 'flex', gap: 1, borderRadius: 4, overflow: 'hidden', background: token.colorFillQuaternary }}>
+        {families.map(([name, n, background]) => (
+          <span key={name} data-seg={name} style={{ display: 'block', height: 8, width: share(n), background }} />
+        ))}
       </div>
       <div style={{ fontSize: 12, color: token.colorTextSecondary, marginTop: 3 }}>
         {t('forecast.cov.summary', { member: c.member, reports: c.reports })}
