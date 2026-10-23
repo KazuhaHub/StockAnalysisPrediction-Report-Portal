@@ -46,6 +46,12 @@ func forecastPredictionViewFor(d forecastDecision, sc *ownerScope) forecastPredi
 	return forecastPredictionView{scope: sc, protected: d.External || sc != nil, reader: d.Reason != "admin", noMembership: d.Scope == scopeOwn}
 }
 
+// forecastV1PredictionView decides which credential a v1 prediction read is answered for. The order
+// is fixed: a cookie session first (its own forecast decision and read scope), then a persistent
+// query token (the documented machine contract, unscoped), and then nothing else. v1CanRead has
+// already admitted the request, so a Bearer that is neither is an app-bridge token. The bridge
+// registry records no user, so there is no account whose scope the token could stand for; it is
+// refused without reading the ledger, until the shared token binding exists to scope it.
 func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request) (forecastPredictionView, bool) {
 	if !s.v1CanRead(w, r) {
 		return forecastPredictionView{}, false
@@ -58,7 +64,8 @@ func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request
 		// Persistent machine reads retain their diagnostic contract.
 		return forecastPredictionView{}, true
 	}
-	return s.forecastBridgePredictionView(w, r, token)
+	jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
+	return forecastPredictionView{}, false
 }
 
 func protectedPredictionSets(sets []PredictionSet, view forecastPredictionView) []PredictionSet {

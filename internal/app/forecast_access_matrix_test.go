@@ -21,7 +21,7 @@ type forecastMatrixSubject struct {
 	external    bool
 	admin       bool
 	walled      bool
-	bridge      bool
+	bridge      bool // an app-bridge Bearer token: never admitted to a forecast read
 	// Explicit fixture expectations, not a call back into the resolver under test.
 	population  []int64
 	user, token string
@@ -190,8 +190,11 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 		}
 	})
 	subjects = append(subjects, forecastMatrixSubject{name: "machine", token: machineToken},
+		// App-bridge tokens get no forecast reads whichever account minted them (fail closed until the
+		// shared token binding exists), so the minting account's scope changes nothing below.
 		forecastMatrixSubject{name: "bridge-all", scope: scopeAll, bridge: true, token: mintForecastBridge(t, s, "matrix-Internal")},
 		forecastMatrixSubject{name: "bridge-none", scope: scopeNone, bridge: true, token: mintForecastBridge(t, s, "matrix-InternalNone")},
+		forecastMatrixSubject{name: "bridge-admin", scope: scopeAll, bridge: true, token: mintForecastBridge(t, s, "matrix-admin")},
 		forecastMatrixSubject{name: "anonymous"})
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -228,7 +231,9 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 					adminRoute := strings.HasPrefix(p.kind, "admin-")
 					v1 := strings.HasPrefix(p.path, "/api/v1/")
 					switch {
-					case who.user == "" && !((who.name == "machine" || who.bridge) && v1):
+					case who.bridge && v1:
+						want, code = 403, "forecast_unavailable"
+					case who.user == "" && !(who.name == "machine" && v1):
 						want = 401
 					case adminRoute && !who.admin:
 						// The existing permission wrapper refuses before the enrolment wall.
@@ -238,7 +243,7 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 						want, code = 503, "enrolment_policy_unavailable"
 					case who.walled && p.kind != "me":
 						want, code = 403, "enrolment_required"
-					case (who.user != "" || who.bridge) && who.scope == scopeNone && p.kind != "me":
+					case who.user != "" && who.scope == scopeNone && p.kind != "me":
 						want, code = 403, "forecast_unavailable"
 					case who.external && strings.Contains(p.kind, "custom"):
 						want, code = 403, "forecast_custom_not_allowed"
@@ -312,10 +317,10 @@ func assertForecastMatrixShape(t *testing.T, out map[string]any, who forecastMat
 	if !who.admin && who.name != "machine" {
 		forbidden = append(forbidden, "unrecorded", "errors")
 	}
-	if who.external || who.bridge || who.scope == scopeOwn {
+	if who.external || who.scope == scopeOwn {
 		forbidden = append(forbidden, "membership", "counted_set_id", "counted_in_group")
 	}
-	if who.external || who.bridge {
+	if who.external {
 		forbidden = append(forbidden, "payload")
 	}
 	forecastMatrixForbid(t, out, "$", forbidden)
@@ -415,7 +420,7 @@ func assertForecastMatrixShape(t *testing.T, out map[string]any, who forecastMat
 		}
 		if kind == "list" {
 			want = 3 // two accepted reports and one orphan
-			if who.external || who.bridge {
+			if who.external {
 				want = 2
 			} else if full {
 				want = 4 // rejected diagnostics are machine/admin only
@@ -431,13 +436,13 @@ func assertForecastMatrixShape(t *testing.T, out map[string]any, who forecastMat
 			}
 			_, payload := set["payload"]
 			_, errors := set["errors"]
-			if payload != (!who.external && !who.bridge) || errors != full {
+			if payload != !who.external || errors != full {
 				t.Fatalf("payload/errors mismatch: %v", set)
 			}
 		}
 		if kind == "card" {
 			_, membership := out["counted_set_id"]
-			if membership != (!who.external && !who.bridge && who.scope != scopeOwn) {
+			if membership != (!who.external && who.scope != scopeOwn) {
 				t.Fatal("membership badge presence mismatch")
 			}
 		}
