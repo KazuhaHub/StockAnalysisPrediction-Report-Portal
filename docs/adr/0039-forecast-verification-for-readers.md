@@ -56,7 +56,10 @@ hypothetical preview resolve active, non-expired accounts from a consistent snap
 unassigned/root members and admin overrides, without returning account identities or persisting
 the hypothetical setting.
 
-`/api/me` exposes only `{scope, external}` as a navigation hint, not an authorization capability.
+`/api/me` exposes `{scope, external}` as a navigation hint, not an authorization capability. An `own` reader
+also receives `ou`, the display name of the OU their population is rooted at (their own unit, not the ancestor that
+decided the scope), so the record page can say whose reports it covers; nothing is added for the other scopes, and
+a failed name read omits the field.
 An explicit none suppresses reading-page requests and DOM. An omitted hint from an older server
 preserves its legacy reading requests; the response is still authoritative. A stale hint followed
 by `403 forecast_unavailable` renders nothing, while other forecast failures retain an inline

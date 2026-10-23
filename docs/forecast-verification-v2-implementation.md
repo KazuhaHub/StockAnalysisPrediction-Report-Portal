@@ -2030,7 +2030,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 | `GET /api/admin/forecast/access` | admin | — | **New.** Per OU: own value, effective scope, source OU, external flag, account counts per effective scope; plus a hypothetical `?ou=<id>&scope=<v>` preview. Resolves every account that can sign in (unassigned and root-OU members included). | 400 `forecast_bad_scope` |
 | `GET /api/admin/groups` | admin (`routes.go:290`) | — | Adds `forecast_scope` (own value or null), `forecast_scope_effective`, `forecast_scope_source`, all server-resolved. | — |
 | `PUT /api/admin/groups/{id}` | admin (`routes.go:292`) | — | Adds `forecast_scope`, **presence-aware** (decoded through `json.RawMessage`): omitted → unchanged; `null` → inherit (on the Default OU coerced to `"none"`); `"all"`/`"own"`/`"none"` → stored; anything else → 400 `forecast_bad_scope`. Audited in the `group.change` row as `forecast_scope: {from, to}` only when it changes. | 400 `forecast_bad_scope` |
-| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route). | — |
+| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route), plus `ou` for an `own` reader: the display name of the OU their population is rooted at. | — |
 | `GET /api/report/{id}/predictions`, `GET /api/predictions` | session (`routes.go:203,206`) | `all`/`own` for non-admins | Unchanged shape (P10 already withholds payload from scoped callers); `none` → 403. | 403 `forecast_unavailable` |
 | `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; bridge token: the minting user's decision; persistent machine token: unscoped | Cookie: the session-route shape. Bridge: accepted sets only, no payload, no errors, no membership. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
 
@@ -2471,7 +2471,7 @@ means the surface does not exist for that credential.
 | **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | minting user at `none` → 403 `forecast_unavailable`; otherwise accepted sets only |
 | **Anonymous** | 401 | 401 | — | 401 | 401 | — | — | — | — | 401 | 401 |
 
-`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only). `/healthz/forecast` is
+`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only; an `own` reader also gets `ou`, their unit's name). `/healthz/forecast` is
 public and status-only for everyone.
 
 ### 10.2 `TestForecastAccessMatrix`
