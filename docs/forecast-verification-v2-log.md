@@ -236,13 +236,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   checkpoint without an open PR. P18 server pieces and their review repairs are locally validated
   and independently reviewed at `228a9f0a` on `feat/forecast-reader-server`; no P17/P18 PR is open.
   Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
-  Current-main integration of P23/P24/P25/P37 is in progress on that same independent branch.
+  Current-main integration of P23/P24/P25/P37 is locally validated and pushed at `6b92e611` on
+  that same independent branch. P27's request/export foundations are in progress on this held stack.
   P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
   exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
   offline replay, fixed-panel CLI and no-database dispatch guards are merged. P25's bounded Sina
   comparison-only runtime, audited controls, durable counters and administrator diagnostics are
   merged without alternate writers. No production enablement is implied.
-- **Next step.** Validate current-main reader-server integration. Resolve the
+- **Next step.** Continue P27 record-page/navigation/OU-editor wiring and acceptance tests. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -2140,3 +2141,35 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   passed (6.673 s), and published-calendar concurrency plus shadow ledger-isolation checks passed
   (42.755 s). The review explicitly preserves the known purge-history hold rather than treating
   a clean merge or green tests as reader-scope release approval.
+
+### P27 reader-request and export foundations (2026-10-22, in progress)
+
+- Continued non-DDL frontend work on the held integration branch, without opening a new PR or
+  changing Apps. Added a reader-only groups loader for `/api/forecast/groups`, with no management
+  alias or administrator prefetch reuse. Denied/unresolved permission makes no request and clears
+  retained results. Query/identity changes hide stale results; cleanup discards late responses and
+  pending retry timers. Future page wiring must include user/access/population changes in identity.
+- A 403 becomes terminal unavailable, with a no-op retry callback. A 429 or non-busy failure is not
+  automatically retried. Only 503 `forecast_busy` allows three additional attempts, with exponential
+  bounded jitter; an explicit error retry starts a new bounded cycle. Tests pin request counts,
+  actual jitter delays, permission revoke/regrant, identity switches and unmount cancellation.
+- The CSV helper accepts explicit reader context: single-line disclaimer/population and benchmark
+  headers, and mode/official/benchmark on every row. Reader exports omit site-wide unrecorded totals;
+  external-all exports remove the sample-size column even if malformed input carries counts, using
+  only a mature publication-gate flag. Non-mature sample sizes are not exported for any reader.
+  Existing administrator export behavior is unchanged until the management page is split in P27.
+- New tests failed before implementation. A test hook initially returned its mock as an unintended
+  cleanup callback, and timer-spy restoration briefly reinstalled fake timers during global cleanup;
+  both test harness issues were fixed without changing production behavior or weakening assertions.
+  Eighteen final focused tests and typecheck passed. Full frontend regression passed all 123 files /
+  1044 tests. Lint completed with existing unrelated hook warnings; no new warning was introduced.
+  Production SPA and serialized embed builds are repeated at the checkpoint. Independent foundation
+  review found no actionable issue; final defensive retry/count guards are reviewed separately.
+- P27 is not complete: record route/page states, permission-sensitive navigation, reader drawer
+  wiring, operations-page separation/access summary, OU editor inheritance and full accessibility /
+  browser acceptance remain. These helpers are not yet wired to a route, and their tests do not prove
+  page-level enforcement. The schema, Apps integration ordering and production gates remain held;
+  no new database shape, production setting or evaluator mode has been written.
+- Independent follow-up reviewed the final unavailable-state retry and malformed non-mature count
+  guards, reran all eighteen focused tests and reported no new finding. Page-level integration and
+  the held release/security decisions remain separate acceptance work.
