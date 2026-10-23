@@ -71,9 +71,9 @@ details summary{cursor:pointer;color:var(--pri)}
  <div class="row">
   <span class="ctl" data-for="record"><span class="lbl">记录状态</span><select id="recSel"><option value="normal">有数据（上线 8 个月后）</option><option value="empty">空记录（上线首周）</option></select></span>
   <span class="ctl" data-for="record ops report"><span class="lbl">评估器</span><select id="evSel"><option value="healthy">正常</option><option value="off">关闭（线上现状）</option><option value="dry">试运行</option><option value="stale">心跳过期</option><option value="lagging">滞后</option><option value="error">错误</option></select></span>
-  <span class="ctl" data-for="ops"><span class="lbl">行情源</span><select id="srcSel"><option value="ok">正常</option><option value="tencent_down">腾讯不可用</option><option value="no_source">没有账本主源</option><option value="unavailable">统计不可用</option></select></span>
+  <span class="ctl" data-for="ops"><span class="lbl">行情源</span><select id="srcSel"><option value="ok">正常</option><option value="tencent_down">腾讯不可用</option><option value="no_source">没有结算主源</option><option value="unavailable">统计不可用</option></select></span>
   <span class="ctl" data-for="report"><span class="lbl">检查点阶段</span><select id="phSel"><option value="waiting">等待中（真实情况）</option><option value="waiting_s0">等待首个交易日</option><option value="settling">结算中</option><option value="retrying">重试中</option><option value="overdue">逾期</option><option value="final">终局拒绝</option></select></span>
-  <span class="ctl" data-for="report"><span class="lbl">统计归属</span><select id="memSel"><option value="pre_live">早于账本起点（真实情况）</option><option value="member">计入批次（假设）</option><option value="duplicate">同批重复</option><option value="off_benchmark">基准不符</option><option value="test">测试运行</option></select></span>
+  <span class="ctl" data-for="report"><span class="lbl">统计归属</span><select id="memSel"><option value="pre_live">早于账本起点（真实情况）</option><option value="member">计入批次（假设）</option><option value="duplicate">同批重复（假设）</option><option value="off_benchmark">基准不符（假设）</option><option value="test">测试运行（假设）</option></select></span>
  </div>
 </div>
 <header><div class="logo"><i></i>研报门户</div>
@@ -122,16 +122,7 @@ details summary{cursor:pointer;color:var(--pri)}
  </div>
 </div>
 <div class="card" id="recMore"><h3>口径说明</h3>
- <div class="kv">
-  <span class="k">分组</span><span>按报告被门户<b>收到</b>的日期（上海时间）分组。「按月」是正式口径，数字到期后不再变；「自定义区间」可按周/月/季/整段分组，属于探索口径。报告自带的日期不影响分组。</span>
-  <span class="k">成员</span><span>每只股票每批只算最早的一份；仲裁降级、基准价不符、测试运行、回测运行、基准不符不计入，但都列在覆盖里。</span>
-  <span class="k">账本起点</span><span>2026-10-19 00:00（上海时间）之前入账的预测集只用于校验，不计入统计，在覆盖里标为「账本起点前」。</span>
-  <span class="k">起算点</span><span>S0 = 首个收盘晚于入账时刻的交易日：15:00 前收到算当天，15:00 起或非交易日算下一个交易日。之前的行情一律不算，避免"事后知道"。dN = S0 之后第 N 个交易日。</span>
-  <span class="k">超额</span><span>个股涨跌 − 同期冻结基准的涨跌（2026-10 批次为中证1000，2026-11 起为中证800）；送转、除权的样本剔除并计数，停牌按最后成交价计。</span>
-  <span class="k">发布门槛</span><span>批次结束、检查点全部终结、有效样本不少于 30、终局拒绝占比不超过 5%，数字才会出现；否则显示「n = x · 低于 30 · 不发布」或拒绝占比超限。</span>
-  <span class="k">显著性</span><span>把预测在同批成员间随机打乱 10,000 次作为零假设，每格内的 p 值做 Benjamini–Hochberg 校正（各格独立）；样本少于 30 不出数字。</span>
-  <span class="k">声明</span><span>研究验证用途，不构成投资建议</span>
- </div>
+ <div class="kv" id="methKv"></div>
 </div>
 </section>
 
@@ -173,7 +164,7 @@ details summary{cursor:pointer;color:var(--pri)}
 </div>
 <div class="card" style="padding:12px 16px"><b>时间线</b>　<span class="tag blue">2026-09-17</span><span class="tag">2026-10-16</span><span class="sub">（现有组件，选中日期决定下面显示哪份报告）</span></div>
 <div style="margin:0 0 12px"><span class="seg" style="max-width:100%;overflow-x:auto"><button class="on">投资决策建议</button><button>行业分析</button><button>估值分析</button><button>财务分析</button><button>舆情分析</button></span></div>
-<div style="margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="lbl">版本</span><span class="seg" id="edSeg"><button data-e="full" class="on">完整版</button><button data-e="lite">精简版</button></span><span class="sub">同一篇报告可以有多个版本；每个版本带着自己那次运行的预测，没有就是没有。</span></div>
+<div style="margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="lbl">版本</span><span class="seg" id="edSeg"><button data-e="full" class="on">完整版</button><button data-e="lite">精简版</button></span></div>
 <div class="card" style="padding-bottom:14px">
  <div class="rowh">
   <div><h1 id="rTitle"></h1><div class="sub" id="rMeta"></div></div>
@@ -185,7 +176,7 @@ details summary{cursor:pointer;color:var(--pri)}
 </div>
 <div class="card" id="fcCard">
  <div class="rowh" style="align-items:center"><h3 style="margin:0">预测验证</h3><button class="btn" style="padding:2px 10px">收起</button></div>
- <div class="sub" style="margin:4px 0 4px">这份报告入账时的结构化预测，以及之后各检查点的真实结果。选中的报告或版本没有预测时，本区块会直接说明，并在你有权阅读时给出同篇报告其他版本的链接。</div>
+ <div class="sub" style="margin:4px 0 4px">这份报告入账时的结构化预测，以及之后各检查点的真实结果；选中的报告或版本没有预测时，本区块会直接说明。</div>
  <div class="disc" id="fcDisc" style="margin-bottom:12px">研究验证用途，不构成投资建议</div>
  <div id="fcBody"></div>
 </div>
@@ -282,10 +273,10 @@ const HELP={spread:'<b>多空价差</b>：报告看多（有目标仓位）的�
  ic:'<b>排序 IC</b>：报告给的上涨空间（概率加权终值 ÷ 起算价 − 1）排序，与实际超额收益排序的相关系数。0 = 没有排序能力；12 个月前的检查点只算"早期信号"。',
  hit:'<b>方向命中</b>：上涨空间绝对值 ≥ 5% 的股票里，超额收益方向与报告一致的比例，持平计为未命中。旁边的"基准率"是同一批全猜同一方向能拿到的命中率，超过它才有意义。',
  fill:'<b>买入价成交</b>：观察窗口内股价碰到报告建议买入价的比例，以及按买入价成交后到检查点的平均涨跌。买入价由终值按策略推算（÷1.15），不是独立判断。'};
-// P16: when the evaluator mode is off or dry, every reader sees a separate notice; the other evaluator states stay admin-only.
+// P16: when the evaluator mode is off or dry, readers see a separate notice. The mode is volume that P17 withholds from external "all" readers, so they never see it; the other evaluator states stay admin-only.
 const paused=()=>S.ev==='off'||S.ev==='dry', PAUSED_TXT='<b style="color:var(--warn)">自动结算已暂停</b>：到期的检查点暂不结算，恢复后自动补结。';
-const PAUSED_NOTE=()=>paused()?'<br>评估器为「关闭」或「试运行」时，所有能看到预测验证的读者（含外部）都会看到「自动结算已暂停」；其他评估器状态只有管理员看得到。':'';
-const PHASE_TIP='等待：尚未到期；结算中：已到期，收盘后结算；重试中：暂未能结算，稍后自动重试（行情源故障不计入失败次数）；逾期：超过预计结算日仍未结算；终局拒绝：无法核实，不再重试';
+const PAUSED_NOTE=()=>!paused()?'':isAll()?'<br>评估器为「关闭」或「试运行」时，外部「全部」读者看不到「自动结算已暂停」：评估器模式属于全站信息，不向他们开放，他们的待到期格子只显示状态。':'<br>评估器为「关闭」或「试运行」时，内部成员和外部「本单位」读者会看到「自动结算已暂停」；外部「全部」读者看不到；其他评估器状态只有管理员看得到。';
+const PHASE_TIP='等待：尚未到期；结算中：已到期，收盘后结算；重试中：暂未能结算，稍后自动重试（行情源故障不计入失败次数）；逾期：超过预计结算日 48 小时仍未结算（日期只是下界时为 21 天）；终局拒绝：无法核实，不再重试';
 function customGroups(){const f=pd($('#from').value),t=pd($('#to').value);const err=$('#rangeErr');err.hidden=true;
  if(!(f<=t)){err.hidden=false;err.textContent='起始日期必须早于或等于结束日期（range_inverted）';return []}
  const months=(t.getFullYear()-f.getFullYear())*12+t.getMonth()-f.getMonth();
@@ -344,13 +335,26 @@ function renderLegend(){const X=isAll();
  if(X)h+='<span>·　「n ≥ 30」= 样本已达发布门槛，不显示具体数量；待到期的格子只显示状态。</span>';
  else h+=`<span>·　覆盖：</span><span><i class="sw c1"></i>计入</span><span><i class="sw c2"></i>重复运行</span><span><i class="sw c3"></i>缺少/被拒</span><span><i class="sw c4"></i>回测/降级/基准价不符/测试/基准不符</span><span><i class="sw c5"></i>账本起点前</span><span>·　待到期格子：已结算 / 成员数，下方是各阶段数量和「不早于」的日期（只是下界）。</span>`;
  $('#legend').innerHTML=h}
+// The methodology card follows what the reader sees: coverage and custom ranges exist only where the matrix has them, and external "all" readers get no volume wording.
+function renderMethod(){const X=isAll(),E=!!sc().ext;
+ const R=[
+  ['分组',E?'按报告被门户<b>收到</b>的日期（上海时间）按月分组，是正式口径，数字到期后不再变。报告自带的日期不影响分组。':'按报告被门户<b>收到</b>的日期（上海时间）分组。「按月」是正式口径，数字到期后不再变；「自定义区间」可按周/月/季/整段分组，属于探索口径。报告自带的日期不影响分组。'],
+  ['成员',X?'每只股票每批只算最早的一份；仲裁降级、基准价不符、测试运行、回测运行、基准不符不计入统计。':'每只股票每批只算最早的一份；仲裁降级、基准价不符、测试运行、回测运行、基准不符不计入，但都列在覆盖里。'],
+  ['账本起点',X?'2026-10-19 00:00（上海时间）之前入账的预测集只用于校验，不计入统计。':'2026-10-19 00:00（上海时间）之前入账的预测集只用于校验，不计入统计，在覆盖里标为「账本起点前」。'],
+  ['起算点','S0 = 首个收盘晚于入账时刻的交易日：15:00 前收到算当天，15:00 起或非交易日算下一个交易日。之前的行情一律不算，避免"事后知道"。dN = S0 之后第 N 个交易日。'],
+  ['超额',X?'个股涨跌 − 同期冻结基准的涨跌（2026-10 批次为中证1000，2026-11 起为中证800）；送转、除权的样本剔除，停牌按最后成交价计。':'个股涨跌 − 同期冻结基准的涨跌（2026-10 批次为中证1000，2026-11 起为中证800）；送转、除权的样本剔除并计数，停牌按最后成交价计。'],
+  ['发布门槛',X?'批次结束、检查点全部终结、样本达到发布门槛，数字才会出现。格子只显示带「n ≥ 30」的数字，或状态（「待到期」「未达 30 不发布」），不显示具体数量。':'批次结束、检查点全部终结、有效样本不少于 30、终局拒绝占比不超过 5%，数字才会出现；否则显示「n = x · 低于 30 · 不发布」或拒绝占比超限。'],
+  ['显著性','把预测在同批成员间随机打乱 10,000 次作为零假设，每格内的 p 值做 Benjamini–Hochberg 校正（各格独立）；样本少于 30 不出数字。'],
+  ['声明',DISC]];
+ $('#methKv').innerHTML=R.map(r=>`<span class="k">${r[0]}</span><span>${r[1]}</span>`).join('')}
 function renderRecord(){const s=sc(),X=isAll(),denied=!!s.none;
  $('#recDenied').hidden=!denied;$('#recMain').hidden=denied;$('#recMore').hidden=denied;
  $('#recAnnot').innerHTML=`<b>演示说明</b>　位置（V12）：顶层页面 <code>/forecast</code>，在导航栏里单独一项，所有「预测验证」范围不是「无」的读者可见，管理员始终可见；<code>/manage/forecast</code> 只保留运维。<br>${s.note}${PAUSED_NOTE()}`;
  if(denied)return;
+ renderMethod();
  const empty=S.rec==='empty';
  $('#recEmpty').hidden=!empty;$('#recData').hidden=empty;
- $('#evPaused').hidden=!paused();$('#evPaused').innerHTML=PAUSED_TXT;
+ const pz=paused()&&!X;$('#evPaused').hidden=!pz;$('#evPaused').innerHTML=pz?PAUSED_TXT:'';
  $('#popLine').textContent='统计范围：'+(s.pop==='all'?'全部报告':`「${OU}」及其下级单位的报告`);
  const ev=EV[S.ev],pill=$('#evPill');pill.hidden=!s.admin;pill.className='pill '+ev.tone;pill.innerHTML='<i></i>评估器：'+ev.label;
  if(s.ext&&mode==='custom'){mode='month';syncMode()}
@@ -418,18 +422,18 @@ function renderEval(){const e=EV[S.ev],rd=readiness(),bad=rd.filter(x=>!x[1]);
  <div style="margin-top:12px"><button class="btn" ${S.ev==='off'?'disabled':''}>立即评估</button></div>`}
 function renderSrc(){const t=S.src;
  const tc={ok:['正常','ok'],tencent_down:['不可用：最近 3 次请求失败','bad'],no_source:['已从行情源顺序中移除','bad'],unavailable:['统计不可用','warn']}[t];
- const sn={ok:['已比对 12 次：一致 12 · 不一致 0','ok'],tencent_down:['主源不可用时不比对','warn'],no_source:['没有主源，不比对','warn'],unavailable:['统计不可用','warn']}[t];
+ const sn={ok:['已对照 12 次：一致 12 · 不一致 0','ok'],tencent_down:['结算主源不可用时不对照','warn'],no_source:['没有结算主源，不对照','warn'],unavailable:['统计不可用','warn']}[t];
  const banner={
-  ok:['','计分收盘价只来自腾讯不复权日线，腾讯是唯一的写入源。新浪只做影子比较：评估有待处理任务时，在账本处理完成后最多读取 2 份候选数据、发出 4 次 HTTP 请求（含重定向）；比对一致也不赋予它写入资格。'],
-  tencent_down:['warn','腾讯暂时不可用：到期的检查点推迟结算，读者看到「重试中」。源故障不消耗尝试次数，也不会变成终局拒绝；新浪只做比对，不会代替写入。恢复后自动继续。'],
-  no_source:['bad','没有可用的账本主源，结算暂停（no_source）。评估器不会改用比对源写账本。已发出提醒（邮件 + Slack，最多每日一次）；在行情源顺序里恢复一个具备写入资格的源即可继续。'],
+  ok:['','计分收盘价只来自腾讯不复权日线，腾讯是唯一具备结算授权的来源，也就是结算主源。新浪只有仅对照授权：评估有待处理任务时，在结算处理完成后最多读取 2 份候选数据、发出 4 次 HTTP 请求（含重定向）；对照一致也不赋予它结算授权。'],
+  tencent_down:['warn','腾讯暂时不可用：到期的检查点推迟结算，读者看到「重试中」。源故障不消耗尝试次数，也不会变成终局拒绝；新浪只有仅对照授权，不会代替腾讯结算。恢复后自动继续。'],
+  no_source:['bad','没有可用的结算主源，结算已暂停（no_source）。评估器不会改用对照来源结算。已发出提醒（邮件 + Slack，最多每日一次）；在行情源顺序里恢复一个具备结算授权的来源即可继续。'],
   unavailable:['warn','统计不可用。缺失或无法读取的统计不能证明行情源健康，也不会推定为零；已有证据保持原样，不会被覆盖。']}[t];
- $('#srcCard').innerHTML=`<div class="rowh" style="align-items:center"><h3 style="margin:0">行情源</h3><span class="sub">账本主源：${t==='no_source'?'无':'腾讯'}　·　比对对象：${t==='no_source'?'—':'新浪'}</span></div>
+ $('#srcCard').innerHTML=`<div class="rowh" style="align-items:center"><h3 style="margin:0">行情源</h3><span class="sub">结算主源：${t==='no_source'?'无':'腾讯'}　·　对照来源：${t==='no_source'?'—':'新浪'}</span></div>
  <div class="alert ${banner[0]}">${banner[1]}</div>
- <div style="overflow-x:auto"><table><tr><th>行情源</th><th>角色</th><th>授权范围</th><th>状态</th></tr>
- <tr><td><b>腾讯财经</b></td><td><span class="tag ${t==='no_source'?'':'ok'}">${t==='no_source'?'写入源（未在顺序中）':'写入源 · 账本主源'}</span></td><td>仅沪深 · 个股与基准指数 · 不复权日线</td><td><span class="tag ${tc[1]}">${tc[0]}</span></td></tr>
- <tr><td><b>新浪财经</b></td><td><span class="tag blue">影子比较（不写账本）</span></td><td>仅沪深 · 只比对</td><td><span class="tag ${sn[1]}">${sn[0]}</span></td></tr>
- <tr><td><b>Yahoo</b></td><td><span class="tag">未授予</span></td><td>不用于账本</td><td class="muted">—</td></tr></table></div>`}
+ <div style="overflow-x:auto"><table><tr><th>来源</th><th>授权</th><th>覆盖范围</th><th>状态</th></tr>
+ <tr><td><b>腾讯</b></td><td><span class="tag ${t==='no_source'?'':'ok'}">${t==='no_source'?'结算授权（未在顺序中）':'结算授权 · 结算主源'}</span></td><td>仅沪深 · 个股与基准指数 · 不复权日线</td><td><span class="tag ${tc[1]}">${tc[0]}</span></td></tr>
+ <tr><td><b>新浪</b></td><td><span class="tag blue">仅对照授权</span></td><td>仅沪深 · 只对照，不结算</td><td><span class="tag ${sn[1]}">${sn[0]}</span></td></tr>
+ <tr><td><b>雅虎财经</b></td><td><span class="tag">无结算授权</span></td><td>不用于结算</td><td class="muted">—</td></tr></table></div>`}
 function openEval(){const e=EV[S.ev];
  showDrawer('评估器状态',`<div class="kv"><span class="k">状态</span><span><span class="pill ${e.tone}"><i></i>${e.label}</span></span><span class="k">模式</span><span>${{off:'关闭',dry:'试运行',on:'开启'}[e.mode]}</span><span class="k">上次运行</span><span>${e.last}</span><span class="k">心跳</span><span>${e.hb}</span></div><div class="alert ${e.tone==='bad'?'bad':e.tone==='warn'?'warn':''}" style="margin-top:14px">${e.lines.join('<br>')}</div><div><a>在运维页查看完整状态与就绪项 → /manage/forecast</a></div>`)}
 $('#evPill').onclick=openEval;
@@ -458,7 +462,7 @@ const PHASE_TXT={
  waiting_s0:['等待首个交易日','报告在收盘后收到，起算价 S0 要等下一个交易日的收盘；检查点日期随之确定。'],
  settling:['结算中','已到期。收盘（15:30 后）取数结算，结算后不再改变。'],
  retrying:['重试中','暂未能结算，稍后自动重试。行情源故障不计入失败次数，也不会变成终局拒绝。'],
- overdue:['逾期','超过预计结算日仍未结算；其他检查点不受影响。'],
+ overdue:['逾期','超过预计结算日 48 小时仍未结算（日期只是下界时为 21 天）；其他检查点不受影响。'],
  final:['终局拒绝','无法核实：已过到期日 10 个交易日以上，且针对该检查点的核实已失败 4 次以上（行情源故障不计入这一次数）。不再重试，该检查点不计入统计。']};
 function markModel(cp){const p=PROJ[cp],when=p.expected?`预计 ${p.due}`:`预计 ${p.due} 或之后`;
  if(S.ph==='waiting_s0')return {phase:'waiting_s0',when,p};
@@ -470,7 +474,7 @@ const MEM={
  member:['ok','✓ 计入 2026-09 批次统计','','计入 2026-09 批次'],
  pre_live:['',`不计入：早于账本起点（${LEDGER_START}）`,'早于账本起点，只用于校验，不计入统计','不计入：早于账本起点'],
  test:['','测试运行 · 不计入','','测试运行 · 不计入'],
- off_benchmark:['warn','基准不符：本集冻结中证1000，批次基准为中证800，不计入','冻结的基准指数与本批次不同','基准不符 · 不计入'],
+ off_benchmark:['warn','基准不符：本集冻结的基准指数与所在批次不同，不计入','例如：2026-11 批次起基准改为中证800，仍冻结中证1000 的预测集不计入该批次','基准不符 · 不计入'],
  duplicate:['','重复：同批次已有更早的预测集，本份不计入','','重复 · 不计入']};
 function badges(){let h='';
  if(canMember()){const m=MEM[S.mem];h+=`<span class="tag ${m[0]}"${m[2]?` title="${m[2]}"`:''}>${m[1]}</span>`}
@@ -486,7 +490,7 @@ function checkpointsHTML(){const m5=P.d5,models=DATA.cps.map(c=>Object.assign({c
   mt+=`<tr class="${m.phase==='waiting'||m.phase==='waiting_s0'?'muted':''}"><td><b>${m.cp}</b> <span class="muted">${m.label}</span></td><td>${m.when}</td><td colspan="7">${what}</td></tr>`});
  const rule=`<div class="sub" style="margin-top:8px">S0 = 首个收盘晚于入账时刻的交易日（本报告 ${P.report.made_at} 入账 → ${PROJ.d5.s0}）；dN = S0 之后第 N 个交易日；h12 = 入账日起满 12 个月后的首个交易日。「预计」按已核实的交易所休市日历推算（目前只含 2026 年）；「预计 … 或之后」表示日历尚未覆盖，只给下界日期（只排除周末，实际不会更早）。两者都不是结算结果。</div>`;
  const latest=S.ph==='waiting'?`<div class="sub" style="margin-top:8px">截至最新（${P.latest.date}，不计分）：收盘 ${P.latest.close}，自 S0 ${pct(P.latest.close/P.s0.close-1)}，已在 10 月中旬触及建议买入价 ${C.entry}。只有检查点的结果进入统计。</div>`:'';
- return `<div class="card inner"><b>检查点</b>${paused()?`<div class="alert warn" id="evPausedCard" style="margin:8px 0 0">${PAUSED_TXT}</div>`:''}<div class="steps" id="steps" style="margin:12px 0 8px">${steps}</div><div style="overflow-x:auto"><table id="marks">${mt}</table></div>${rule}${latest}</div>`}
+ return `<div class="card inner"><b>检查点</b>${paused()&&!isAll()?`<div class="alert warn" id="evPausedCard" style="margin:8px 0 0">${PAUSED_TXT}</div>`:''}<div class="steps" id="steps" style="margin:12px 0 8px">${steps}</div><div style="overflow-x:auto"><table id="marks">${mt}</table></div>${rule}${latest}</div>`}
 function saidHTML(){const up0=C.terminal/P.s0.close-1,pos=v=>((v-C.bear)/(C.bull-C.bear)*100)+'%';
  return `<div class="card inner" style="margin-top:0"><b>报告当时说</b><div style="margin-top:10px"><div class="kv">
  <span class="k">观点</span><span><span class="tag ok" style="margin:0">看多</span>　目标仓位 ${C.weight}%</span>
@@ -499,13 +503,13 @@ function saidHTML(){const up0=C.terminal/P.s0.close-1,pos=v=>((v-C.bear)/(C.bull
   <div class="pt" style="left:0;transform:none">熊 ${C.bear}<br>${C.pbear}%</div><div class="pt" style="left:${pos(C.base)}">基准 ${C.base}<br>${C.pbase}%</div><div class="pt" style="right:0;left:auto;transform:none;text-align:right">牛 ${C.bull}<br>${C.pb}%</div>
   <div class="cur" style="left:${pos(P.latest.close)}" title="最新收盘"></div></div>
  <div class="sub" style="margin-top:22px">黑色竖线 = 最新收盘 ${P.latest.close}（${P.latest.date}）。到 12 个月时看收盘是否落在熊–牛区间内。</div></div></div>`}
-// The current set shows the state its badge shows. A "duplicate" has an earlier set in the same batch, which is listed and counted. Any other set keeps its real state (before the ledger start), except in the "member" what-if where all of them count.
+// The current set shows the state its badge shows. Every option but pre_live is a what-if that assumes the ledger started before these sets, so in a what-if the other sets count in their own batch; in the real state none of them does. A "duplicate" has an earlier set in the same batch, which is listed and counted.
 function othersHTML(){let ot='<tr><th>报告日期</th><th>收到</th><th>观点</th><th>终值</th><th>建议买入</th><th>状态</th><th></th></tr>';
  const sets=P.other_sets.concat(S.mem==='duplicate'&&canMember()?[{date:'2026-09-10',made:'2026-09-10 20:02',terminal:201.3,entry:175.1,cohort:'2026-09',earlier:true}]:[]);
  const stat=o=>{if(!canMember())return '<span class="tag ok">已入账</span>';
   if(o.earlier)return `<span class="tag ok">计入 ${o.cohort} 批次 · 同批最早的一份</span>`;
   if(o.date===P.report.date){const m=MEM[S.mem];return `<span class="tag ${m[0]}">${m[3]}</span>`}
-  return S.mem==='member'?`<span class="tag ok">计入 ${o.cohort} 批次</span>`:`<span class="tag">${MEM.pre_live[3]}</span>`};
+  return S.mem!=='pre_live'?`<span class="tag ok">计入 ${o.cohort} 批次</span>`:`<span class="tag">${MEM.pre_live[3]}</span>`};
  sets.forEach(o=>ot+=`<tr><td>${o.date}</td><td class="muted">${o.made}</td><td>看多</td><td>${o.terminal}</td><td>${o.entry}</td><td>${stat(o)}</td><td>${o.date===P.report.date?'<span class="muted">当前</span>':'<a>查看</a>'}</td></tr>`);
  return `<div class="card inner"><b>这只股票的其他预测</b><div style="overflow-x:auto"><table style="margin-top:8px">${ot}</table></div></div>`}
 function payloadHTML(){const j=JSON.stringify({schema:'predictions.v1',emitter:{app:'1-6-4',version:'V3.16.2',calculator:'scenario-calc-3.5'},probability_method:C.prob_method,decision_status:C.status,decision_quality:C.quality,baseline:{price:C.emitted.toFixed(2),as_of:C.emitted_asof,source:'company_quote'},horizon_end:C.horizon,claims:[{key:'stance',kind:'stance',stance:'long',target_weight:'0.1000'},{key:'expected_terminal',kind:'terminal_value',price:C.terminal.toFixed(2),p_profit:'0.7500'},{key:'scenario.bull',kind:'scenario',label:'bull',price:C.bull.toFixed(2),probability:'0.2500'},{key:'scenario.base',kind:'scenario',label:'base',price:C.base.toFixed(2),probability:'0.5000'},{key:'scenario.bear',kind:'scenario',label:'bear',price:C.bear.toFixed(2),probability:'0.2500'},{key:'entry_price',kind:'entry_price',price:C.entry.toFixed(2)}]},null,2);
@@ -526,8 +530,8 @@ function renderReport(){const s=sc(),none=!!s.none,lite=S.ed==='lite';
  const ov=!none&&hasSet&&$('#ovChk').checked;
  $('#overlayToggle').hidden=none||!hasSet;$('#chartLegend').hidden=none||!ov;$('#lgSettled').hidden=S.mem==='test';
  $('#chart').innerHTML=chart(ov,S.mem!=='test');
- const note={waiting:'',waiting_s0:'「等待首个交易日」：报告刚在收盘后收到，S0 还没发生。',settling:'「结算中」：模拟 2026-10-26 15:40，d20 已到期、收盘（15:30）后结算。',retrying:'「重试中」：模拟暂未能结算（例如腾讯暂时不可用），稍后自动重试。',overdue:'「逾期」：模拟 d20 超过预计结算日仍未结算。',final:'「终局拒绝」：模拟 d20 已过到期日 10 个交易日以上，且针对该检查点的核实失败 4 次以上；行情源故障不会走到这一步。'}[S.ph];
- $('#repAnnot').innerHTML=`<b>演示说明</b>　瑞芯微 2026-09-17 报告，行情是截至 2026-10-16 的真实数据；这份报告在账本起点（${LEDGER_START}）之前入账，所以真实情况是「不计入」。「检查点阶段」和「统计归属」主要改变文字状态，用来看各种措辞；测试运行没有检查点，所以图上也没有已结算收盘，标题旁也没有徽标（徽标取自已接受的预测集）。没有预测的版本、或读者看不到的测试运行，行情图上也没有叠加层，和下面的卡片一致。${note?'<br>'+note:''}${PAUSED_NOTE()}<br>${s.none?'范围「无」：下面的行情图只剩 K 线，没有预测叠加；报告正文之后也没有预测验证区块和标题旁的徽标，也没有占位。':s.ext?'外部成员：看不到入账原文、统计归属和未入账的集合；测试运行等未接受的集合只有管理员看得到。':s.pop==='own'?'内部成员，范围「本单位」：没有「统计归属」徽标（那是「全部」口径的信息）；测试运行等未接受的集合只有管理员看得到。':'管理员和范围「全部」的内部成员能看到统计归属；未接受的集合（测试运行等）只有管理员看得到。'}`;
+ const note={waiting:'',waiting_s0:'「等待首个交易日」：报告刚在收盘后收到，S0 还没发生。',settling:'「结算中」：模拟 2026-10-26 15:40，d20 已到期、收盘（15:30）后结算。',retrying:'「重试中」：模拟暂未能结算（例如腾讯暂时不可用），稍后自动重试。',overdue:'「逾期」：模拟 d20 超过预计结算日 48 小时仍未结算。',final:'「终局拒绝」：模拟 d20 已过到期日 10 个交易日以上，且针对该检查点的核实失败 4 次以上；行情源故障不会走到这一步。'}[S.ph];
+ $('#repAnnot').innerHTML=`<b>演示说明</b>　瑞芯微 2026-09-17 报告，行情是截至 2026-10-16 的真实数据；这份报告在账本起点（${LEDGER_START}）之前入账，所以真实情况是「不计入」。「检查点阶段」和「统计归属」主要改变文字状态，用来看各种措辞；测试运行没有检查点，所以图上也没有已结算收盘，标题旁也没有徽标（徽标取自已接受的预测集）。没有预测的版本、或读者看不到的测试运行，行情图上也没有叠加层，和下面的卡片一致。${note?'<br>'+note:''}${PAUSED_NOTE()}${S.mem!=='pre_live'&&canMember()?'<br>统计归属是假设：设想账本起点早于下面这些预测集，它们才有批次可归，所以其他预测也按各自的批次计入；真实情况是「早于账本起点」，这个选项只用来看措辞。':''}<br>标题旁的徽标：管理员始终看到；其他读者要等读者阶段（forecast_reader）为 full，默认的 card 阶段只有下面的卡片和图上的叠加层。<br>版本：同一篇报告可以有多个版本，每个版本带着自己那次运行的预测，没有就是没有；同级版本的链接只在读者有权阅读那个版本时出现。<br>${s.none?'范围「无」：下面的行情图只剩 K 线，没有预测叠加；报告正文之后也没有预测验证区块和标题旁的徽标，也没有占位。':s.ext?'外部成员：看不到入账原文、统计归属和未入账的集合；测试运行等未接受的集合只有管理员看得到。':s.pop==='own'?'内部成员，范围「本单位」：没有「统计归属」徽标（那是「全部」口径的信息）；测试运行等未接受的集合只有管理员看得到。':'管理员和范围「全部」的内部成员能看到统计归属；未接受的集合（测试运行等）只有管理员看得到。'}`;
  if(none)return;
  let body;
  if(lite){
@@ -535,8 +539,7 @@ function renderReport(){const s=sc(),none=!!s.none,lite=S.ed==='lite';
   const sibReadable=!(S.mem==='test'&&!s.admin);
   body=`<div style="text-align:center;padding:12px 4px"><div style="font-size:15px;font-weight:600">这个版本没有预测</div><div class="sub" style="margin-top:4px">预测随生成它的那次运行一起入账；这个版本的运行没有带预测，也不会借用其他版本的预测。</div>
   ${sibReadable?'<div style="margin-top:12px"><a data-sibling="1">同一篇报告的「完整版」有预测 → 查看完整版的预测</a></div>':''}
-  ${canMember()&&S.mem==='member'?'<div style="margin-top:12px"><span class="tag ok" style="margin:0">本批次已计入统计，依据「完整版」的预测</span></div>':''}</div>
-  <div class="sub" style="text-align:center">同级版本的链接只在你有权阅读那个版本时出现。</div>`}
+  ${canMember()&&S.mem==='member'?'<div style="margin-top:12px"><span class="tag ok" style="margin:0">本批次已计入统计，依据「完整版」的预测</span></div>':''}</div>`}
  else if(!hasSet){
   body=`<div style="text-align:center;padding:12px 4px"><div style="font-size:15px;font-weight:600">这份报告没有预测</div></div>`}
  else body=`<div id="badges" style="margin-bottom:14px">${badges()}</div>${S.mem==='test'?'<div class="alert warn" id="testNote">测试运行——单独存放，不参与结算。</div>':''}${saidHTML()}${S.mem==='test'?'':checkpointsHTML()}${othersHTML()}${s.ext?'':payloadHTML()}`;

@@ -2907,7 +2907,7 @@ exist yet). It is left exactly as written, not reconstructed from memory, until 
 | Other predictions | bullets linked by receipt date | table with exact links (P20) | |
 | Chart overlay | collapsed, flat lines | toggle always shown; S0 window; dots at settled closes; legend with source; Sunday snap (P10, P20) | |
 | Disclaimer | none | card, chip tooltip, record header, CSV (P15, P20, P27) | V22 |
-| Summary in the report header | missing | chip in the same paint as the body (P18, P20) | not in the demo |
+| Summary in the report header | missing | chip in the same paint as the body (P18, P20) | in the demo; non-admins see it only at stage `full` (§8.4), admins always |
 | Run page | nothing | chip and card (P20) | not in the demo |
 | Record outside Manage | Manage only | `/forecast` with a nav item for OUs not at `none` (P27) | V12 |
 | Scope `none` | — | no record, no card, chip or overlay; no placeholder (P26, P20) | the access model |
