@@ -31,7 +31,8 @@ it('carries the record page, access field and refusal copy in all three language
     'forecast.record.empty_expected', 'forecast.record.unavailable', 'forecast.record.busy',
     'forecast.scope.all', 'forecast.scope.own', 'forecast.scope.none', 'forecast.scope.inherit',
     'forecast.scope.help', 'forecast.scope.external_note',
-    'forecast.cell.min_n_met', 'forecast.cell.small_nocount', 'forecast.cell.pending_plain',
+    'forecast.cell.min_n_met', 'forecast.cell.min_n_met_hint', 'forecast.cell.small_nocount', 'forecast.cell.pending_plain',
+    'forecast.record.status_ready', 'forecast.record.status_empty',
     'err.forecast_unavailable', 'err.forecast_custom_not_allowed', 'err.forecast_busy',
     'err.forecast_rate_limited', 'err.forecast_bad_scope',
   ]

@@ -59,8 +59,11 @@ describe('cellDisplay', () => {
 })
 
 describe('cellDisplay for a reader who may not see counts', () => {
-  // An external reader with the all scope gets the gate's assurance instead of any count: a mature
-  // cell is "n >= 30", never "n=0" and never a number that would reveal the ledger's volume.
+  // An external reader with the all scope gets the gate's assurance instead of any count. The
+  // assurance belongs to the CELL: its member count cleared n >= 30. A metric's own denominator is a
+  // smaller subset with no such minimum (a hit rate over twelve tested reports, an IC over two
+  // pairs), so the flag must never sit in a metric's sample slot, where it would read as that
+  // metric's own n.
   const gated: ForecastCell = {
     state: 'mature',
     min_n_met: true,
@@ -78,27 +81,41 @@ describe('cellDisplay for a reader who may not see counts', () => {
     fill_ret_bp: -120,
   }
 
-  it.each(['spread', 'ic', 'hit', 'fill'] as const)('shows the n >= 30 flag, not a count, on a %s metric', (metric) => {
+  it.each(['spread', 'ic', 'hit', 'fill'] as const)('states the gate once on the cell and never inside the %s sample slot', (metric) => {
     const d = cellDisplay(gated, metric, 'month', t)
-    expect(d?.sub).toContain('forecast.cell.min_n_met')
+    expect(d?.gate).toBe('forecast.cell.min_n_met')
+    expect(d?.sub).not.toContain('forecast.cell.min_n_met')
     expect(d?.sub).not.toContain('forecast.cell.n')
     expect(d?.sub).not.toContain('"n":0')
   })
 
-  it('shows the flag when the metric itself is absent and no count is available', () => {
+  it('leaves a metric\'s sample slot empty rather than borrowing the cell\'s gate for it', () => {
+    // The shape of a 40-member cell whose hit rate rests on 12 tested reports: the reader is told
+    // nothing about the 12, and in particular is not told "n >= 30" beside the hit rate.
+    expect(cellDisplay(gated, 'hit', 'month', t)?.sub).toBe(['q=0.300', 'forecast.cell.base_rate:{"pct":"55%"}'].join(' · '))
+    expect(cellDisplay(gated, 'ic', 'month', t)?.sub).toBe('q=0.047')
+    expect(cellDisplay(gated, 'fill', 'month', t)?.sub).toBe('forecast.cell.after_fill:{"pct":"-1.2"}')
+  })
+
+  it('still carries the cell gate when the metric itself is absent', () => {
     const d = cellDisplay({ ...gated, hit: undefined }, 'hit', 'month', t)
     expect(d?.value).toBe('—')
-    expect(d?.sub).toBe('forecast.cell.min_n_met')
+    expect(d?.sub).toBe('')
+    expect(d?.gate).toBe('forecast.cell.min_n_met')
   })
 
   it('states nothing about the sample rather than inventing a zero when neither a count nor the flag is present', () => {
     const d = cellDisplay({ ...gated, min_n_met: undefined }, 'spread', 'month', t)
     expect(d?.sub).toBe('q=0.041')
+    expect(d?.gate).toBe('')
   })
 
-  it('still prefers a real count when the reader is allowed one', () => {
+  it('prefers a real count, and then has no gate to add', () => {
     const d = cellDisplay({ ...gated, n: 42, min_n_met: undefined }, 'spread', 'month', t)
     expect(d?.sub).toContain('forecast.cell.n:{"n":42}')
+    expect(d?.gate).toBe('')
+    // Even with the flag present beside a real count, the count is what is said.
+    expect(cellDisplay({ ...gated, n: 42 }, 'spread', 'month', t)?.gate).toBe('')
   })
 })
 
@@ -187,6 +204,14 @@ describe('forecastCsv', () => {
     expect(csv).not.toContain('0.041,42')
     expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
     expect(csv).not.toContain('# unrecorded=')
+    // The flag is the cell's, repeated on each metric row; the file says so, because a hit rate or an
+    // IC rests on a smaller subset that has no minimum of its own.
+    expect(csv).toContain('# publication_gate=cell n >= 30; a metric may rest on a smaller subset')
+  })
+
+  it('does not explain a gate flag in an export that has none', () => {
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'Own unit', disclaimer: 'Research only', hideCounts: false })
+    expect(csv).not.toContain('# publication_gate=')
   })
 
   it('exports no volume at all for an external all reader even when the response lacks the coverage field', () => {

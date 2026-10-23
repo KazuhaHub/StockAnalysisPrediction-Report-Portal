@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import ForecastCellDrawer from './ForecastCellDrawer'
 import { ApiError } from '../../api/client'
@@ -167,6 +167,26 @@ describe('ForecastCellDrawer without counts', () => {
     expect(screen.getAllByText('forecast.cell.min_n_met').length).toBeGreaterThan(0)
     expect(document.body.textContent).not.toContain('forecast.drawer.headline')
     expect(document.body.textContent).not.toContain('"members":0')
+  })
+
+  it('puts the flag only where the denominator is the cell\'s own n, and a dash on every other metric', async () => {
+    // The hit, IC, fill, band and calibration denominators are smaller subsets with no minimum of
+    // their own, so "n >= 30" beside them would be a statement the server never made.
+    const full: ForecastCell = {
+      state: 'mature', min_n_met: true,
+      spread_bp: 310, spread_p: 0.012, spread_q: 0.041,
+      ic: 0.2, ic_p: 0.1, ic_q: 0.2,
+      hit: 0.6, hit_null: 0.5, hit_p: 0.1, hit_q: 0.2,
+      fill: 0.3, band: 0.5, calib: 0.55,
+    }
+    show(page([member(1, 'agree')]), { cell: full })
+    await screen.findByText('600001')
+    const lastCell = (metric: string) => {
+      const row = screen.getByText(`forecast.metric.${metric}`).closest('tr')!
+      return within(row).getAllByRole('cell').at(-1)!.textContent
+    }
+    expect(lastCell('spread')).toBe('forecast.cell.min_n_met')
+    for (const metric of ['ic', 'hit', 'fill', 'band', 'calib']) expect(lastCell(metric)).toBe('—')
   })
 
   it('keeps the headline counts for a reader who is allowed them', async () => {

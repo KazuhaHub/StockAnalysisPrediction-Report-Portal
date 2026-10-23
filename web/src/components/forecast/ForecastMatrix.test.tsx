@@ -173,6 +173,34 @@ describe('ForecastMatrix', () => {
       expect(document.body.textContent).not.toContain('"total":0')
     })
 
+    it('states the publication gate once per cell, as its own badge, and not inside the metric line', () => {
+      show(withheld({ ...empty, d5: gated }))
+      const badge = screen.getByText('forecast.cell.min_n_met')
+      expect(badge.getAttribute('title')).toBe('forecast.cell.min_n_met_hint')
+      expect(screen.getAllByText('forecast.cell.min_n_met')).toHaveLength(1)
+      // The line under the value is the corrected value alone: no sample is claimed for the metric.
+      expect(screen.getByText('q=0.041')).toBeTruthy()
+    })
+
+    it.each(['ic', 'hit', 'fill'] as const)('never reads the cell gate as the %s sample size', (metric) => {
+      const cell: ForecastCell = { ...gated, ic: 0.21, ic_q: 0.047, hit: 0.61, hit_null: 0.55, hit_q: 0.3, fill: 0.33, fill_ret_bp: -120 }
+      render(
+        <MemoryRouter>
+          <ForecastMatrix resp={withheld({ ...empty, d5: cell })} metric={metric} mode="month" onOpen={() => undefined} />
+        </MemoryRouter>,
+      )
+      const button = screen.getByRole('button')
+      expect(screen.getAllByText('forecast.cell.min_n_met')).toHaveLength(1)
+      // The badge is a sibling of the metric line, never part of it.
+      const sub = Array.from(button.querySelectorAll('span')).find((n) => n.textContent?.includes('q=') || n.textContent?.includes('after_fill'))!
+      expect(sub.textContent).not.toContain('forecast.cell.min_n_met')
+    })
+
+    it('adds no badge to a cell that carries its count', () => {
+      show(resp({ ...empty, d5: mature }))
+      expect(screen.queryByText('forecast.cell.min_n_met')).toBeNull()
+    })
+
     it('shows a pending cell with no progress bar when the server sent no counts', () => {
       const { container } = show(withheld({ ...empty, d5: { state: 'pending' } }))
       expect(screen.getByText('forecast.cell.pending_plain')).toBeTruthy()

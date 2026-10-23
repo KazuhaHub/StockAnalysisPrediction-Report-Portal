@@ -132,7 +132,25 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
             q&lt;0.05
           </span>
         )}
-        <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>
+        {d.sub && <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>}
+        {d.gate && (
+          // The cell's own assurance, drawn once. It is not the metric's sample size: that
+          // denominator is a smaller subset which has no n >= 30 minimum of its own.
+          <span
+            title={t('forecast.cell.min_n_met_hint')}
+            style={{
+              alignSelf: 'flex-start',
+              fontSize: 11,
+              lineHeight: '16px',
+              padding: '0 5px',
+              borderRadius: 4,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              color: token.colorTextSecondary,
+            }}
+          >
+            {d.gate}
+          </span>
+        )}
         {excluded > 0 && (
           <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
             {t('forecast.cell.excluded', { n: excluded })}

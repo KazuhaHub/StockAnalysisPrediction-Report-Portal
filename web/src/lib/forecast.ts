@@ -19,6 +19,12 @@ import type {
 export interface CellDisplay {
   value: string
   sub: string
+  /**
+   * The cell's publication-gate assurance ("n >= 30"), or '' when there is nothing to assure. It is
+   * a property of the CELL, drawn once beside the metric and never inside a metric's own sample
+   * slot: the metric's denominator is a smaller subset with no minimum of its own.
+   */
+  gate: string
   /** -1 / 0 / +1, and nonzero only when the corrected q passes 0.05. */
   signal: -1 | 0 | 1
 }
@@ -46,14 +52,22 @@ export function correctedText(p: number | undefined, q: number | undefined, mode
 export type Translate = (key: string, opts?: Record<string, unknown>) => string
 
 /**
- * The sample size a cell states. A reader who may not know the ledger's volume (an external reader
- * with the all scope) gets the gate's assurance instead of a count: the cell cleared n >= 30, which
- * is all the number would have told them that they are allowed to know. When neither is present
- * nothing is said, so a missing count is never shown as a measured zero.
+ * The sample size a metric states, when the server sent one. A count the reader may not know is
+ * never replaced by anything here: nothing is said, so a missing count is neither a measured zero
+ * nor a borrowed claim about some other denominator.
  */
-export function sampleText(cell: ForecastCell, n: number | undefined, t: Translate): string {
-  if (n !== undefined) return t('forecast.cell.n', { n })
-  return cell.min_n_met ? t('forecast.cell.min_n_met') : ''
+export function sampleText(n: number | undefined, t: Translate): string {
+  return n === undefined ? '' : t('forecast.cell.n', { n })
+}
+
+/**
+ * The assurance a reader who may not know the ledger's volume gets in place of the cell's count:
+ * the cell cleared the publication gate (n >= 30). It is said only where the count is absent, and
+ * once per cell, because it is a fact about the cell's member count. The IC, hit, band and
+ * calibration denominators are smaller subsets that carry no such minimum.
+ */
+export function gateText(cell: ForecastCell, t: Translate): string {
+  return cell.n === undefined && cell.min_n_met ? t('forecast.cell.min_n_met') : ''
 }
 
 const join = (...parts: string[]) => parts.filter((p) => p !== '').join(' · ')
@@ -65,31 +79,34 @@ export function cellDisplay(
   t: Translate,
 ): CellDisplay | null {
   if (cell.state !== 'mature') return null
+  const gate = gateText(cell, t)
   switch (metric) {
     case 'spread': {
       if (cell.spread_bp === undefined) {
-        return { value: '—', sub: t('forecast.cell.one_arm'), signal: 0 }
+        return { value: '—', sub: t('forecast.cell.one_arm'), gate, signal: 0 }
       }
       const sig: -1 | 0 | 1 =
         cell.spread_q !== undefined && cell.spread_q < 0.05 ? (cell.spread_bp > 0 ? 1 : cell.spread_bp < 0 ? -1 : 0) : 0
       return {
         value: `${num(cell.spread_bp / 100, 1)} pt`,
-        sub: join(correctedText(cell.spread_p, cell.spread_q, mode), sampleText(cell, cell.n, t)),
+        sub: join(correctedText(cell.spread_p, cell.spread_q, mode), sampleText(cell.n, t)),
+        gate,
         signal: sig,
       }
     }
     case 'ic': {
-      if (cell.ic === undefined) return { value: '—', sub: sampleText(cell, cell.n, t), signal: 0 }
+      if (cell.ic === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       const sig: -1 | 0 | 1 =
         cell.ic_q !== undefined && cell.ic_q < 0.05 ? (cell.ic > 0 ? 1 : cell.ic < 0 ? -1 : 0) : 0
       return {
         value: num(cell.ic, 2),
-        sub: join(correctedText(cell.ic_p, cell.ic_q, mode), sampleText(cell, cell.ic_n ?? cell.n, t)),
+        sub: join(correctedText(cell.ic_p, cell.ic_q, mode), sampleText(cell.ic_n ?? cell.n, t)),
+        gate,
         signal: sig,
       }
     }
     case 'hit': {
-      if (cell.hit === undefined) return { value: '—', sub: sampleText(cell, cell.n, t), signal: 0 }
+      if (cell.hit === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       const sig: -1 | 0 | 1 =
         cell.hit_q !== undefined && cell.hit_q < 0.05
           ? cell.hit > (cell.hit_null ?? 0.5)
@@ -103,16 +120,18 @@ export function cellDisplay(
         sub: join(
           correctedText(cell.hit_p, cell.hit_q, mode),
           t('forecast.cell.base_rate', { pct: pct(cell.hit_null ?? 0) }),
-          sampleText(cell, cell.hit_n ?? cell.n, t),
+          sampleText(cell.hit_n ?? cell.n, t),
         ),
+        gate,
         signal: sig,
       }
     }
     case 'fill': {
-      if (cell.fill === undefined) return { value: '—', sub: sampleText(cell, cell.n, t), signal: 0 }
+      if (cell.fill === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       return {
         value: pct(cell.fill),
-        sub: join(t('forecast.cell.after_fill', { pct: num((cell.fill_ret_bp ?? 0) / 100, 1) }), sampleText(cell, cell.n, t)),
+        sub: join(t('forecast.cell.after_fill', { pct: num((cell.fill_ret_bp ?? 0) / 100, 1) }), sampleText(cell.n, t)),
+        gate,
         signal: 0,
       }
     }
@@ -155,12 +174,15 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, r
     ...(!reader ? [`# unrecorded=${resp.unrecorded ?? ''}`] : []),
     `# generated_at=${generatedAt}`,
   ]
+  // Do not trust absence alone, and do not trust the caller alone: either one withholds volume.
+  const volumeHidden = !!reader && (reader.hideCounts || resp.groups.some((g) => !g.coverage))
   if (reader) {
     lines.push(`# disclaimer=${line(reader.disclaimer)}`, `# population=${line(reader.population)}`)
     for (const group of resp.groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
+    // The flag is a fact about the cell, repeated on each of its metric rows. Say so in the file:
+    // a hit rate or an IC rests on a smaller subset that has no minimum of its own.
+    if (volumeHidden) lines.push('# publication_gate=cell n >= 30; a metric may rest on a smaller subset')
   }
-  // Do not trust absence alone, and do not trust the caller alone: either one withholds volume.
-  const volumeHidden = !!reader && (reader.hideCounts || resp.groups.some((g) => !g.coverage))
   const header: string[] = ['group', 'start', 'end', 'checkpoint', 'state', 'metric', 'value', 'null', 'p', 'q',
     volumeHidden ? 'publication_gate' : 'n']
   if (reader && !volumeHidden) header.push('coverage_reports', 'coverage_member')

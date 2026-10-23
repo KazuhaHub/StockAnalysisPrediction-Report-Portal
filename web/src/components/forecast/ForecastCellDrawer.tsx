@@ -109,8 +109,12 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
   const retry = () => (current.errorAt === 'more' ? more() : setRevision((n) => n + 1))
 
   const fmtP = formatProbability
-  // A count the reader may not know is replaced by the gate's assurance, never by a zero.
-  const sample = (n: number | undefined): number | string =>
+  // A count the reader may not know is a dash, never a zero. Only the spread's denominator is the
+  // cell's own n, so only there may the cell's publication gate stand in for a withheld count; the
+  // IC, hit, fill, band and calibration denominators are smaller subsets that carry no n >= 30
+  // minimum, and the gate says nothing about them.
+  const sample = (n: number | undefined): number | string => (n !== undefined ? n : '—')
+  const cellSample = (n: number | undefined): number | string =>
     n !== undefined ? n : cell?.min_n_met ? t('forecast.cell.min_n_met') : '—'
   const rows: { key: string; metric: string; value: string; nullText: string; p: string; q: string; n: number | string }[] = []
   if (cell) {
@@ -122,7 +126,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
         nullText: '0',
         p: fmtP(cell.spread_p),
         q: fmtP(cell.spread_q),
-        n: sample(cell.n),
+        n: cellSample(cell.n),
       })
     }
     if (cell.ic !== undefined) {
