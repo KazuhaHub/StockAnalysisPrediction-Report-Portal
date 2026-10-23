@@ -37,16 +37,45 @@ explicit path; pre-baseline databases must first pass through the documented v0.
 
 The image's entrypoint (`docker-entrypoint.sh`) ignores its arguments: it always ends by starting the
 server. `docker run <image> schema-upgrade` would therefore start the portal, not the upgrade. Bypass
-the entrypoint and give the one-off container the same volumes and environment as the service:
+the entrypoint with `--entrypoint /app/report-portal`, and give the one-off container exactly the
+volumes, environment and network of the service.
+
+**Prefer the compose form.** It reuses the service's volumes, environment and network by construction,
+so there is no volume name or network to get wrong:
+
+```sh
+docker compose run --rm --no-deps --user 10001:10001 --entrypoint /app/report-portal \
+  report-portal schema-upgrade [--apply]
+```
+
+- The service's `image:` decides which release runs, so pin it to the intended tag first (the shipped
+  file uses `:latest` with `pull_policy: always`): the previous tag for the pre-upgrade backup, the new
+  tag for `schema-upgrade`. Drop `--no-deps` if the database service is not already running.
+- `--user 10001:10001` matters for SQLite, see below. Use the deployment's `PUID:PGID` if it sets them.
+
+If you must use plain `docker run`, copy every mount and variable from the running service rather than
+typing them from memory:
 
 ```sh
 docker run --rm --user 10001:10001 --entrypoint /app/report-portal \
-  -v "$PWD/config:/app/config" -v rp-data:/app/data \
+  -v "$PWD/config:/app/config" -v <the service's data volume>:/app/data \
   --env-file portal.env --network <the compose network> \
   ghcr.io/kazuhahub/stockanalysisprediction-report-portal:<tag> \
   schema-upgrade [--apply]
 ```
 
+- **The data volume name is not the name written in the compose file.** Compose prefixes the project name:
+  the shipped file declares `rp-data`, which exists as `<project>_rp-data`. A literal `-v rp-data:/app/data`
+  creates a separate, empty volume. On SQLite that is harmful: `backup` opens (and therefore creates) a
+  fresh empty database there, dumps it without error and exits 0, which looks exactly like a good backup.
+  Read the real name from the running service instead (`docker volume ls` lists them too):
+
+  ```sh
+  docker inspect report-portal --format '{{range .Mounts}}{{.Name}} {{.Destination}}{{println}}{{end}}'
+  ```
+
+  Only SQLite keeps its database in that volume; with the bundled Postgres the database lives in the
+  `db` service and the volume holds no portal data.
 - `--entrypoint /app/report-portal` is what makes the trailing arguments reach the binary.
 - `RP_CONFIG` is already `/app/config/config.yaml` in the image, so mounting the service's config
   directory at `/app/config` is enough. Supply the service's `RP_DB_DRIVER` and `RP_DB_DSN` (and any
@@ -56,12 +85,22 @@ docker run --rm --user 10001:10001 --entrypoint /app/report-portal \
   would otherwise leave a root process creating root-owned journal files next to a database the
   service later opens as an unprivileged user. Postgres needs no particular user but gains nothing from
   root either.
-- With compose, `docker compose run --rm --no-deps --user 10001:10001 --entrypoint /app/report-portal
-  report-portal schema-upgrade` reuses the service's volumes and environment. The service's `image:`
-  decides which release runs, so pin it to the intended tag first (the shipped file uses `:latest` with
-  `pull_policy: always`). Drop `--no-deps` if the database service is not already running.
-- The same invocation with the previous image and `backup -` (redirected to a file, then compressed)
-  takes the pre-upgrade backup from step 2 once the portal is stopped.
+
+**Pre-upgrade backup in a container.** Run the same invocation with the **previous** image and
+`backup -`, redirected to a file on the host and then compressed, once the portal is stopped:
+
+```sh
+docker compose run --rm --no-deps -T --user 10001:10001 --entrypoint /app/report-portal \
+  report-portal backup - | gzip > pre-upgrade-$(date +%F).gz
+```
+
+(`-T` disables the pseudo-terminal, which would otherwise mangle the stream.) The command prints
+`backup: <tables> tables, <rows> rows -> -` on stderr. **Check that the row count is the size of your
+deployment before going on.** A backup that reports a handful of rows and almost no data was taken
+from an empty database, usually because the mount or environment differs from the service's. Then run
+the previous release's restore dry run on a disposable target (`restore <file>` without `--force`):
+it lists the rows per table, and `users` and `reports` must be non-zero and match what the portal
+showed before it was stopped.
 
 On a host install, run `report-portal schema-upgrade` as the account that owns the database with the
 service's configuration and environment.
