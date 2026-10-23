@@ -46,7 +46,10 @@ function normalize(raw: unknown): Announcement[] {
       title: String(a.title ?? '').trim(),
       content: String(a.content ?? '').trim(),
       display: (DISPLAYS.includes(display as AnnouncementDisplay) ? display : 'strip') as AnnouncementDisplay,
-      dismissible: a.dismissible === true,
+      stripDismissible: a.stripDismissible === true,
+      // Only an explicit false locks the popup: a payload from an older server that lacks the field
+      // keeps today's behaviour rather than silently removing "Don't show again".
+      popupDismissible: a.popupDismissible !== false,
       scope: (scope === 'app' ? 'app' : 'home') as AnnouncementScope,
       endsAt: String(a.endsAt ?? '').trim(),
     })

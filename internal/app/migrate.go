@@ -170,6 +170,7 @@ func (s *Store) verifyBaseSchema() error { return s.checkBaseShape(true) }
 // requireEverything distinguishes the two callers. The accepted baseline must have all of it. A
 // mid-create database has only a prefix, so there only what EXISTS has to match.
 func (s *Store) checkBaseShape(requireEverything bool) error {
+	renamed := baseRenames(s.migrations())
 	for _, stmt := range s.baseSchemaStmts() {
 		if isIndexDDL(stmt) {
 			name, ok := parseIndexName(stmt)
@@ -189,10 +190,51 @@ func (s *Store) checkBaseShape(requireEverything bool) error {
 			return s.shapeError("table " + table)
 		}
 		for _, c := range cols {
+			if r, ok := renamed[table+"."+c.name]; ok {
+				if err := s.checkRenamedBaseColumn(r); err != nil {
+					return err
+				}
+				continue
+			}
 			if !s.columnExists(table, c.name) {
 				return s.shapeError("column " + table + "." + c.name)
 			}
 		}
+	}
+	return nil
+}
+
+// checkRenamedBaseColumn verifies a baseline column that a migration step renames (ADR 0042). The
+// baseline declaration keeps the old name — it is frozen for the compatibility window — so which name
+// the database must carry depends on where it is in the sequence:
+//
+//   - the step is recorded: the new name, and the old one must be gone;
+//   - the step is not recorded yet: exactly one of the two. The old name is what every earlier
+//     release wrote; the new one alone is a column the step will find already there and record,
+//     the same rule as a step whose added column already exists.
+//
+// Both names at once, or neither, is a database no release produced, and neither column can be
+// trusted to hold the value — so it is refused rather than guessed at.
+func (s *Store) checkRenamedBaseColumn(r stepRename) error {
+	hasFrom := s.columnExists(r.table, r.from)
+	hasTo := s.columnExists(r.table, r.to)
+	if s.GetSetting(migrationLedgerKey(r.step), "") != "" {
+		if !hasTo {
+			return fmt.Errorf("unsupported database: migration %s renamed %s.%s to %s, and %s.%s is missing",
+				r.step, r.table, r.from, r.to, r.table, r.to)
+		}
+		if hasFrom {
+			return fmt.Errorf("unsupported database: migration %s renamed %s.%s to %s, but %s.%s is present "+
+				"again — refusing to guess which column holds the value", r.step, r.table, r.from, r.to, r.table, r.from)
+		}
+		return nil
+	}
+	switch {
+	case hasFrom && hasTo:
+		return fmt.Errorf("unsupported database: %s carries both %s and %s before migration %s has run — "+
+			"refusing to guess which column holds the value", r.table, r.from, r.to, r.step)
+	case !hasFrom && !hasTo:
+		return s.shapeError("column " + r.table + "." + r.from)
 	}
 	return nil
 }
