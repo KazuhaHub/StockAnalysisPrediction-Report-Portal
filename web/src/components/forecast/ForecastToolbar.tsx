@@ -1,6 +1,7 @@
+import { useId } from 'react'
 import { Button, DatePicker, Segmented, Select, Tag, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
-import dayjs, { type Dayjs } from 'dayjs'
+import dayjs from 'dayjs'
 import type { ForecastGrouping, ForecastMetric, ForecastMode } from '../../api/types'
 import { MONTH_WINDOW, rangePresets, type BenchRun, type RangeLimits } from '../../lib/forecast'
 import { forecastLinkColor } from '../../lib/forecastPresentation'
@@ -9,6 +10,12 @@ import Quiet from './Quiet'
 // The controls under the tabs: which report type, which benchmark the cohorts were scored against,
 // which months or dates, which metric. Each one says what it is without being opened, and they wrap
 // rather than overflow a phone.
+//
+// The custom range is two single-date pickers and a row of quick-range buttons, not one range picker.
+// A range picker's popup holds two month panels, and a presets column beside them made it 748 px: a
+// phone showed one panel and hid the rest off-screen to the left, and a tablet scrolled the page
+// sideways while it was open. A single-date popup is 288 px at any width, and buttons wrap like every
+// other control in this row. (The demo also uses two date inputs.)
 //
 // Nothing here fetches. The page owns the view (it is in the URL) and the toolbar reports changes.
 
@@ -37,7 +44,13 @@ interface Props {
   onChange: (next: Record<string, string>) => void
 }
 
+const DATE = 'YYYY-MM-DD'
 const label = { fontSize: 13 } as const
+const dateInput = { width: 124 } as const
+// The popup is 288 px. By default it flips to the input's other edge when it would overflow, which on
+// a phone puts it off the left of the screen (a 124 px input cannot hold a 288 px popup on its right
+// edge either); shifting keeps it inside the screen whichever side the input is on.
+const popupAlign = { overflow: { adjustX: false, adjustY: true, shiftX: true } } as const
 const item = { display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, minWidth: 0 } as const
 
 export default function ForecastToolbar(p: Props) {
@@ -48,11 +61,9 @@ export default function ForecastToolbar(p: Props) {
   // A type named by the link is shown even when the server did not list it (it is the one asked for).
   const shownType = p.rtype || (types.length === 1 ? types[0] : '')
 
-  const rangeValue: [Dayjs | null, Dayjs | null] | null = p.from && p.to ? [dayjs(p.from), dayjs(p.to)] : null
-  const presets = rangePresets(p.today, p.ledgerStart, p.limits).map((preset) => ({
-    label: t(`forecast.range.preset.${preset.key}`),
-    value: [dayjs(preset.from), dayjs(preset.to)] as [Dayjs, Dayjs],
-  }))
+  const rangeLabel = useId()
+  const presets = rangePresets(p.today, p.ledgerStart, p.limits)
+  const date = (value: string) => (value ? dayjs(value) : null)
 
   return (
     <div data-part="toolbar" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 20px', margin: '12px 0' }}>
@@ -112,21 +123,49 @@ export default function ForecastToolbar(p: Props) {
 
       {p.mode === 'custom' && (
         <>
-          <span data-part="range" style={item}>
-            <Quiet style={label}>{t('forecast.range.custom')}</Quiet>
-            <DatePicker.RangePicker
+          <span data-part="range" role="group" aria-labelledby={rangeLabel} style={item}>
+            <Quiet id={rangeLabel} style={label}>{t('forecast.range.custom')}</Quiet>
+            <DatePicker
               size="small"
-              value={rangeValue}
-              presets={presets}
-              allowEmpty={[true, true]}
-              onChange={(v) => p.onChange({ from: v?.[0]?.format('YYYY-MM-DD') ?? '', to: v?.[1]?.format('YYYY-MM-DD') ?? '' })}
-              style={{ maxWidth: '100%' }}
+              aria-label={t('forecast.range.from')}
+              placeholder={t('forecast.range.from')}
+              format={DATE}
+              popupAlign={popupAlign}
+              value={date(p.from)}
+              onChange={(v) => p.onChange({ from: v?.format(DATE) ?? '' })}
+              style={dateInput}
+            />
+            <span aria-hidden="true">–</span>
+            <DatePicker
+              size="small"
+              aria-label={t('forecast.range.to')}
+              placeholder={t('forecast.range.to')}
+              format={DATE}
+              popupAlign={popupAlign}
+              value={date(p.to)}
+              onChange={(v) => p.onChange({ to: v?.format(DATE) ?? '' })}
+              style={dateInput}
             />
           </span>
+          {presets.length > 0 && (
+            <span data-part="presets" role="group" aria-label={t('forecast.range.presets')} style={item}>
+              {presets.map((preset) => (
+                <Button
+                  key={preset.key}
+                  size="small"
+                  aria-pressed={preset.from === p.from && preset.to === p.to}
+                  onClick={() => p.onChange({ from: preset.from, to: preset.to })}
+                >
+                  {t(`forecast.range.preset.${preset.key}`)}
+                </Button>
+              ))}
+            </span>
+          )}
           <span style={item}>
             <Quiet style={label}>{t('forecast.range.group')}</Quiet>
             <Segmented
               size="small"
+              aria-label={t('forecast.range.group')}
               value={p.group}
               onChange={(v) => p.onChange({ group: v as ForecastGrouping })}
               options={GROUPS.map((g) => ({ value: g, label: t(`forecast.group.${g}`) }))}
@@ -146,6 +185,7 @@ export default function ForecastToolbar(p: Props) {
         <span style={{ maxWidth: '100%', overflowX: 'auto' }}>
           <Segmented
             size="small"
+            aria-label={t('forecast.toolbar.metric')}
             value={p.metric}
             onChange={(v) => p.onChange({ metric: v as ForecastMetric })}
             options={METRICS.map((m) => ({ value: m, label: t(`forecast.metric.${m}`) }))}

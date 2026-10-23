@@ -941,6 +941,94 @@ describe('ForecastRecordPage custom range', () => {
     expect(await screen.findByText('forecast.range.limits:{"months":36,"weeks":26}')).toBeTruthy()
   })
 
+  // The range was one picker whose popup held two month panels and a column of presets: 748 px, which
+  // a phone cannot show and a tablet cannot fit without scrolling the page sideways. Two single-date
+  // pickers open a 288 px popup, and the presets are buttons the page lays out like any other control.
+  it('picks the dates with two single-date pickers, so no popup is wider than a phone', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    const { container } = show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    await waitFor(() => expect(lastUrl()).toContain('mode=custom'))
+    expect(container.querySelector('.ant-picker-range')).toBeNull()
+    expect(container.querySelectorAll('[data-part="toolbar"] .ant-picker')).toHaveLength(2)
+  })
+
+  it('names each date input and groups them under the visible label', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    const group = await screen.findByRole('group', { name: 'forecast.range.custom' })
+    expect((within(group).getByRole('textbox', { name: 'forecast.range.from' }) as HTMLInputElement).value).toBe('2026-10-19')
+    expect((within(group).getByRole('textbox', { name: 'forecast.range.to' }) as HTMLInputElement).value).toBe('2027-06-20')
+  })
+
+  it('offers the quick ranges as buttons, marks the one in force, and a click sets both dates', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    const presets = await screen.findByRole('group', { name: 'forecast.range.presets' })
+    const names = within(presets).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-pressed')])
+    expect(names).toEqual([
+      ['forecast.range.preset.last3', 'false'],
+      ['forecast.range.preset.last6', 'false'],
+      ['forecast.range.preset.last12', 'false'],
+      ['forecast.range.preset.since_ledger', 'true'],
+    ])
+    fireEvent.click(within(presets).getByRole('button', { name: 'forecast.range.preset.last3' }))
+    await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=custom&from=2027-03-20&to=2027-06-20&group=month'))
+    expect(inputs().map((el) => el.value)).toEqual(['2027-03-20', '2027-06-20'])
+    expect(within(presets).getByRole('button', { name: 'forecast.range.preset.last3' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('does not offer a quick range longer than the server accepts', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ limits: { ...limits, max_range_months: 6 } })))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    const presets = await screen.findByRole('group', { name: 'forecast.range.presets' })
+    expect(within(presets).getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'forecast.range.preset.last3',
+      'forecast.range.preset.last6',
+      'forecast.range.preset.since_ledger',
+    ])
+  })
+
+  it('shows an inverted range as the error it is and asks nothing while it is inverted', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show('/forecast?mode=custom&from=2027-06-20&to=2027-01-01&group=month')
+    expect(await screen.findByText('forecast.err.range_inverted')).toBeTruthy()
+    expect(urls().filter((u) => u.includes('mode=custom'))).toEqual([])
+  })
+
+  it('labels the metric and grouping controls with their visible names', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.getByRole('radiogroup', { name: 'forecast.toolbar.metric' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    expect(await screen.findByRole('radiogroup', { name: 'forecast.range.group' })).toBeTruthy()
+  })
+
+  // jsdom has no layout, so a 375/768/1280 px scroll width cannot be measured here (the real-browser
+  // check is recorded with the PR). What can be pinned is the cause of the one overflow found: a
+  // control with a fixed width that a phone cannot hold.
+  it('gives no toolbar control a fixed width a 375 px screen cannot hold', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ rtypes: ['Decision memo', 'Thematic note'] })))
+    show('/forecast?mode=custom&from=2026-10-19&to=2027-06-20&group=month&rtype=Decision+memo')
+    await screen.findByText('+3.1 pt')
+    const toolbar = document.querySelector('[data-part="toolbar"]') as HTMLElement
+    const fixed = [toolbar, ...Array.from(toolbar.querySelectorAll<HTMLElement>('*'))]
+      .flatMap((el) => [el.style.width, el.style.minWidth])
+      .filter((w) => /^\d+(\.\d+)?px$/.test(w))
+      .map((w) => parseFloat(w))
+    expect(fixed.length).toBeGreaterThan(0)
+    // The page gutter and the card padding take 16 + 24 px from each side of the screen.
+    for (const w of fixed) expect(w).toBeLessThanOrEqual(375 - 2 * (16 + 24))
+  })
+
   it('refuses a week grouping the range is too long for, naming the limit, and asks nothing', async () => {
     apiMock.get.mockResolvedValue(record(metadata()))
     show()
