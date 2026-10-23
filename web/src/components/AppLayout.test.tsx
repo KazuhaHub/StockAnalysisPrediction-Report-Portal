@@ -406,7 +406,7 @@ describe('AppLayout forecast record navigation', () => {
   })
 
   it('lets the card width follow the tile count and a tile label wrap to two lines', () => {
-    const rule = (selector: string) => css.match(new RegExp(`${selector.replace(/[.]/g, '\\.')}\\s*(?:\\.ant-btn\\s*)?\\{([^}]*)\\}`))?.[1] ?? ''
+    const rule = (selector: string) => css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:\\.ant-btn\\s*)?\\{([^}]*)\\}`))?.[1] ?? ''
     expect(rule('.rp-workbench-menu')).toMatch(/width:\s*max\(276px,\s*calc\(var\(--rp-workbench-cols,\s*3\)\s*\*\s*92px\s*-\s*4px\)\)/)
     const label = rule('.rp-workbench-menu__item-label')
     expect(label).toMatch(/-webkit-line-clamp:\s*2/)
