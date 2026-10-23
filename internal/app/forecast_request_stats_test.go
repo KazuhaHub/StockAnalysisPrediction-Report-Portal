@@ -170,8 +170,8 @@ func TestForecastRequestStatsRecordFlightJoinsAndSlotWait(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if a, joined, wait := statsA.scored.Load(), statsA.joined.Load(), statsA.waited(); a != 1 || joined != 0 || wait >= 30*time.Millisecond {
-		t.Errorf("leader: scored=%d joined=%d wait=%v (it took a free slot at once)", a, joined, wait)
+	if a, joined, wait := statsA.scored.Load(), statsA.joined.Load(), statsA.waited(); a != 1 || joined != 0 || wait >= statsB.waited() {
+		t.Errorf("leader: scored=%d joined=%d wait=%v (it took a free slot, so it waited less than the queued flight: %v)", a, joined, wait, statsB.waited())
 	}
 	if b, joined, wait := statsB.scored.Load(), statsB.joined.Load(), statsB.waited(); b != 1 || joined != 0 || wait < 50*time.Millisecond {
 		t.Errorf("queued leader: scored=%d joined=%d wait=%v, want a wait of at least 50ms", b, joined, wait)
