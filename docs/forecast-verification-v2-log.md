@@ -232,8 +232,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
   capability isolation, operator-order selection, uncached walk with isolated health/per-pass
   breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
-  reviewed, along with the admin source-diagnostics backend. Readiness/alerts, order auditing/
-  confirmation and source-panel frontend integration remain outstanding. No P23 PR is open.
+  reviewed, along with admin source diagnostics and atomic source-order auditing. Readiness/
+  alerts, order-change confirmation and source-panel frontend integration remain outstanding.
+  No P23 PR is open.
 - **Next step.** Complete P23's readiness and alert integration at the shared-file coordination gate,
   panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -866,3 +867,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   contention retries around the whole rolled-back transaction with context-aware delays. The
   two-connection fixture and both-driver concurrency fixture also assert the actor OU snapshot.
   Final post-repair checks and follow-up review remain pending.
+- Final application/test head `d6763b24` passed full Go/Postgres regression (app package
+  33.568 s), three-repeat SQLite race checks including cross-connection cancellation (6.262 s),
+  vet, staticcheck and the serialized Go embed build. Frontend files are unchanged from the
+  validated label/build checkpoint. Independent follow-up found no actionable repair issue and
+  additionally ran two race-enabled SQLite repetitions. The final read-only Apps merge previews
+  were clean (`0b3240ad`, `b8e8a465`); semantic integration and exact-head CI remain separate.
+- This closes the source-order auditing checkpoint only. No source was deployed, no schema or
+  Apps branch changed, and no separately owned PR was edited or merged. Source-order confirmation,
+  frontend diagnostics, readiness/alerts and the source ADR still need implementation/integration.
