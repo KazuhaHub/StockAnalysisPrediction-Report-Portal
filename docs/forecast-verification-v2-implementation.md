@@ -2874,6 +2874,10 @@ None.
 Acceptance runs on the seeded preview (P14) at 375 and 1280 px, light and dark, against the annotated production
 baseline (P13). The "Today" column is corrected from P13's screenshots before P19 starts.
 
+**Status (2026-10-22).** The demo revision of P13 has landed. The "Today" column below still awaits the owner's
+production screenshots of `/manage/forecast` and of the 600519 reading page (`~/Downloads/forecast-baseline/` does not
+exist yet). It is left exactly as written, not reconstructed from memory, until those screenshots are captured.
+
 | Demo element | Today | After (PR) | Note |
 |---|---|---|---|
 | Header, tabs and toolbar in one card | separate rows | one card (P19) | |
