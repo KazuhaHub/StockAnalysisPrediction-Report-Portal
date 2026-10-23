@@ -276,6 +276,28 @@ describe('ForecastRecordPage tabs', () => {
     expect(urls()).toEqual(['/api/forecast/groups?mode=custom&from=2026-09-01&to=2026-09-30&group=month'])
   })
 
+  it('marks an exploratory result with p* and the exploratory tag, which the record never carries', async () => {
+    const base = record()
+    apiMock.get.mockResolvedValue({
+      ...base,
+      mode: 'custom',
+      official: false,
+      range: { from: '2026-09-01', to: '2026-09-30', group: 'month' },
+      groups: [{ ...base.groups[0], official: false }],
+    })
+    show('/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
+    await screen.findByText('3.1 pt')
+    expect(screen.getByText(/p\*=0\.012/)).toBeTruthy()
+    expect(screen.getByText('forecast.tag.exploratory')).toBeTruthy()
+  })
+
+  it('shows the record without p* or the exploratory tag', async () => {
+    show()
+    await screen.findByText('3.1 pt')
+    expect(screen.queryByText(/p\*=/)).toBeNull()
+    expect(screen.queryByText('forecast.tag.exploratory')).toBeNull()
+  })
+
   it('does not send an inverted range', async () => {
     show('/forecast?mode=custom&from=2026-09-30&to=2026-09-01&group=month')
     expect(await screen.findByText('forecast.err.range_inverted')).toBeTruthy()

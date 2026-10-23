@@ -30,6 +30,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
 import CompactNumberInput from '../../components/CompactNumberInput'
@@ -53,7 +54,10 @@ export default function UsersPage() {
   // back to every account, and so the radio survives a search that hides the selected node.
   const [ouScoped, setOuScoped] = useState(false)
   const [ouSelected, setOuSelected] = useState<number[]>([])
-  const [tab, setTab] = useState('accounts')
+  // A link can land on the groups tab (?tab=groups) and on one unit in it (?ou=<id>), which is how
+  // the forecast access summary points at the OU editor.
+  const [linked] = useSearchParams()
+  const [tab, setTab] = useState(linked.get('tab') === 'groups' ? 'groups' : 'accounts')
   const [selected, setSelected] = useState<string[]>([])
   const [editUser, setEditUser] = useState<UserRow | 'new' | null>(null)
   const [pwUser, setPwUser] = useState<string | null>(null)
@@ -483,7 +487,7 @@ export default function UsersPage() {
       onChange={setTab}
       items={[
         { key: 'accounts', label: t('users.tabAccounts'), children: accounts },
-        { key: 'groups', label: t('users.tabGroups'), children: <GroupsPanel groups={groups} groupsLoading={!settled} onChanged={load} /> },
+        { key: 'groups', label: t('users.tabGroups'), children: <GroupsPanel groups={groups} groupsLoading={!settled} onChanged={load} initialId={Number(linked.get('ou')) || null} /> },
       ]}
     />
   )
@@ -493,12 +497,22 @@ export default function UsersPage() {
 // weight / urgent / priority drive the run queue for its members (group model B): a
 // non-default group either overrides a field or inherits it from the Default group,
 // which every unassigned user falls back to.
-function GroupsPanel({ groups, groupsLoading, onChanged }: { groups: UserGroupRow[]; groupsLoading: boolean; onChanged: () => void }) {
+function GroupsPanel({
+  groups,
+  groupsLoading,
+  onChanged,
+  initialId,
+}: {
+  groups: UserGroupRow[]
+  groupsLoading: boolean
+  onChanged: () => void
+  initialId: number | null
+}) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   // Which OU the detail pane is showing. Held as an id, not the row: the list is refetched after
   // every save, so a held object would go stale the moment it was edited.
-  const [selId, setSelId] = useState<number | null>(null)
+  const [selId, setSelId] = useState<number | null>(initialId)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [newParent, setNewParent] = useState(0)
@@ -550,8 +564,11 @@ function GroupsPanel({ groups, groupsLoading, onChanged }: { groups: UserGroupRo
   const sel = groups.find((g) => g.id === selId) ?? null
   // Default to the root so the pane is never empty on arrival — an admin opening this tab wants to
   // see something, and the Default OU is the one every other setting falls back to.
+  // Also when the held id names nothing (a stale link, or a unit deleted elsewhere).
   useEffect(() => {
-    if (selId == null && groups.length > 0) setSelId((groups.find((g) => g.is_default) ?? groups[0]).id)
+    if (groups.length > 0 && (selId == null || !groups.some((g) => g.id === selId))) {
+      setSelId((groups.find((g) => g.is_default) ?? groups[0]).id)
+    }
   }, [groups, selId])
 
   const createOU = async () => {
