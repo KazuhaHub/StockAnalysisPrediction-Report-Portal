@@ -1,9 +1,58 @@
 package app
 
 import (
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
 	"sort"
 	"strings"
 )
+
+// errForecastPurgeHistoryUnavailable marks a scoped marker lookup that could not be answered, so the
+// read is refused rather than answered from the global history.
+var errForecastPurgeHistoryUnavailable = errors.New("purge history unavailable")
+
+// forecastPurgeView is what one read knows about retention. The two maps differ only for an own
+// population, and they are not interchangeable.
+//
+// filter is the site-wide history. It removes sets from every computation, so no partial data from a
+// month retention has emptied is ever shown, and it keeps cache identity honest across processes.
+//
+// disclosed is the subset this population may be told about: the months its current subtree owned
+// sets in when they were purged. It alone drives the range extension, the exclusion lists, the
+// purged groups and cells, and the drawer's purged state. For a nil population (all readers, the
+// administrator aliases, external-all readers) it is the same map as filter, which keeps their reads
+// exactly as they were.
+type forecastPurgeView struct {
+	filter, disclosed map[[2]string]string
+}
+
+// loadForecastPurgeView fails closed. A population that needs ownership evidence never falls back to
+// the global history when that evidence cannot be read; a nil population never touches it.
+func (s *Server) loadForecastPurgeView(pop forecastPopulation) (forecastPurgeView, error) {
+	filter, err := s.st.loadPredictionPurgeMarkers()
+	if err != nil {
+		return forecastPurgeView{}, err
+	}
+	if pop.OUs == nil {
+		return forecastPurgeView{filter: filter, disclosed: filter}, nil
+	}
+	disclosed, err := s.st.loadPredictionPurgeMarkersForPopulation(pop)
+	if err != nil {
+		log.Printf("forecast purge history for an own population is unavailable: %v", err)
+		return forecastPurgeView{}, fmt.Errorf("%w: %v", errForecastPurgeHistoryUnavailable, err)
+	}
+	return forecastPurgeView{filter: filter, disclosed: disclosed}, nil
+}
+
+func writeForecastPurgeViewError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errForecastPurgeHistoryUnavailable) {
+		jsonErrorCode(w, http.StatusServiceUnavailable, "forecast_purge_history_unavailable", "purge history is unavailable")
+		return
+	}
+	jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+}
 
 func forecastPurgeCacheTag(months []forecastPurgedMonth) string {
 	if len(months) == 0 {

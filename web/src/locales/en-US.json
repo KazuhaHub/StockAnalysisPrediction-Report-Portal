@@ -2191,6 +2191,7 @@
   "err.forecast_busy": "Forecast computation is busy. Please try again shortly.",
   "err.forecast_rate_limited": "Too many forecast requests or another custom query is still running. Please try again later.",
   "err.forecast_failed": "Forecast computation failed. Please try again.",
+  "err.forecast_purge_history_unavailable": "The record's retention history is unavailable. Please contact an administrator.",
   "err.forecast_custom_not_allowed": "External readers can only view official monthly records.",
   "forecast.eval.awaiting_gate": "Waiting for a dry-run check: {{codes}}",
   "forecast.eval.confirmOn": "Turn automatic settling on?",

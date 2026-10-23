@@ -139,9 +139,9 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 	}
 
 	now := s.forecastNow()
-	purges, err := s.st.loadPredictionPurgeMarkers()
+	purges, err := s.loadForecastPurgeView(pop)
 	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		writeForecastPurgeViewError(w, err)
 		return
 	}
 	var periods []forecastPeriod
@@ -156,7 +156,7 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 			return
 		}
-		periods = monthlyPeriods(forecastEarliestWithPurges(earliest, rtype, purges), now)
+		periods = monthlyPeriods(forecastEarliestWithPurges(earliest, rtype, purges.disclosed), now)
 	case "custom":
 		from, to := q.Get("from"), q.Get("to")
 		group := q.Get("group")
@@ -184,15 +184,23 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 		jsonErrorCode(w, http.StatusNotFound, "label_not_found", "no such group in this range")
 		return
 	}
-	if at, purged := purges[[2]string{rtype, period.Start[:7]}]; mode == "month" && purged {
-		out := forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
-			Checkpoint: cp, State: "purged", PurgedAt: at, Population: population, Members: []forecastMember{}}
-		if adminAlias {
-			writeJSON(w, out)
-		} else {
-			writeJSON(w, forecastReaderMembers(out, d, ""))
+	if key := [2]string{rtype, period.Start[:7]}; mode == "month" {
+		if at, purged := purges.disclosed[key]; purged {
+			out := forecastMembersResponse{OK: true, Label: period.Label, Start: period.Start, End: period.End,
+				Checkpoint: cp, State: "purged", PurgedAt: at, Population: population, Members: []forecastMember{}}
+			if adminAlias {
+				writeJSON(w, out)
+			} else {
+				writeJSON(w, forecastReaderMembers(out, d, ""))
+			}
+			return
 		}
-		return
+		if _, purged := purges.filter[key]; purged {
+			// Retired for the site but not disclosed to this population: the record does not list the
+			// month, so there is no group to open, and no cached cell may describe it.
+			jsonErrorCode(w, http.StatusNotFound, "label_not_found", "no such group in this range")
+			return
+		}
 	}
 
 	sets, err := s.st.loadForecastGroupSets(rtype, period.Start, period.End, pop)
@@ -200,7 +208,7 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
-	sets = forecastWithoutPurgedSets(sets, rtype, purges)
+	sets = forecastWithoutPurgedSets(sets, rtype, purges.filter)
 	populationFrom, _ := s.st.ForecastPopulationFrom()
 	// Use the matrix's ledger-wide answer, not the loaded slice: the slice can start after a pre-live
 	// set or omit part of the cohort, and then the drawer would show a different population.
@@ -298,7 +306,7 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 		Members:    []forecastMember{},
 	}
 	if mode == "custom" {
-		out.ExcludedMonths = forecastExcludedMonths(rtype, period.Start, period.End, purges)
+		out.ExcludedMonths = forecastExcludedMonths(rtype, period.Start, period.End, purges.disclosed)
 	}
 	if population == "all" {
 		out.Population = population

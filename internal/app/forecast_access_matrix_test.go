@@ -60,6 +60,7 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 		forecastEval: forecastEvaluator{now: func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) }}}
 	s.names = LoadNames(t.TempDir(), st)
 	s.names.fetch = func(string) string { return "" }
+	ensurePurgeEvidenceTable(t, st)
 	// The shared Postgres database can contain settings from earlier tests.
 	if _, err := st.exec("DELETE FROM meta WHERE k=?", setForecastPopulationFrom); err != nil {
 		t.Fatal(err)

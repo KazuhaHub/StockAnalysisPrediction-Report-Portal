@@ -131,20 +131,24 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 
 	resp.Official = mode == "month"
-	purges, err := s.st.loadPredictionPurgeMarkers()
+	purges, err := s.loadForecastPurgeView(pop)
 	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		writeForecastPurgeViewError(w, err)
 		return
 	}
+	cacheTag := ""
 	if resp.Official {
-		earliest := forecastEarliestWithPurges(loadFrom, rtype, purges)
+		earliest := forecastEarliestWithPurges(loadFrom, rtype, purges.disclosed)
 		periods = monthlyPeriods(earliest, now)
 		if len(periods) > 0 {
 			loadFrom, loadTo = periods[0].Start, periods[len(periods)-1].End
 			resp.Range.From, resp.Range.To = loadFrom, loadTo
 		}
 	} else {
-		resp.ExcludedMonths = forecastExcludedMonths(rtype, loadFrom, loadTo, purges)
+		resp.ExcludedMonths = forecastExcludedMonths(rtype, loadFrom, loadTo, purges.disclosed)
+		// The cache identity follows every month that removes sets, disclosed or not: a cell cached by
+		// another process before an undisclosed purge must not answer a range that now excludes it.
+		cacheTag = forecastPurgeCacheTag(forecastExcludedMonths(rtype, loadFrom, loadTo, purges.filter))
 	}
 	today := now.In(chinaZone).Format("2006-01-02")
 
@@ -158,10 +162,10 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 
 	populationFrom, _ := s.st.ForecastPopulationFrom()
-	sets = forecastWithoutPurgedSets(sets, rtype, purges)
+	sets = forecastWithoutPurgedSets(sets, rtype, purges.filter)
 	active := make([]forecastPeriod, 0, len(periods))
 	for _, p := range periods {
-		if _, purged := purges[[2]string{rtype, p.Start[:7]}]; !resp.Official || !purged {
+		if _, purged := purges.filter[[2]string{rtype, p.Start[:7]}]; !resp.Official || !purged {
 			active = append(active, p)
 		}
 	}
@@ -171,7 +175,7 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	if !d.External || d.Scope != scopeAll {
 		readAt = &now
 	}
-	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, forecastPurgeCacheTag(resp.ExcludedMonths), readAt)
+	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, cacheTag, readAt)
 	if err != nil {
 		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			w.Header().Set("Retry-After", "1")
@@ -183,7 +187,7 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 	if resp.Official {
 		for _, p := range periods {
-			if at, purged := purges[[2]string{rtype, p.Start[:7]}]; purged {
+			if at, purged := purges.disclosed[[2]string{rtype, p.Start[:7]}]; purged {
 				g := forecastGroup{Label: p.Label, Start: p.Start, End: p.End, Official: true, PurgedAt: at,
 					Cells: make(map[string]*forecastCell, len(predCheckpoints))}
 				for _, cp := range predCheckpoints {

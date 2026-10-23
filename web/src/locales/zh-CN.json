@@ -2191,6 +2191,7 @@
   "err.forecast_busy": "预测统计计算繁忙，请稍后重试。",
   "err.forecast_rate_limited": "预测验证请求过于频繁，或另一个自定义查询仍在运行，请稍后重试。",
   "err.forecast_failed": "预测统计计算失败，请重试。",
+  "err.forecast_purge_history_unavailable": "预测记录的清理历史暂不可用，请联系管理员。",
   "err.forecast_custom_not_allowed": "外部读者仅可查看正式月度记录。",
   "forecast.eval.awaiting_gate": "等待试运行核对：{{codes}}",
   "forecast.eval.confirmOn": "开启自动结算？",
