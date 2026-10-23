@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 // The embedded OpenAPI spec must be valid 3.1 JSON and cover every v1 endpoint
@@ -378,8 +379,10 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 }
 
 // TestOpenAPIDocumentsForecastUnavailableOnPredictionReads ties the documented 403 on the two v1
-// prediction reads to what the handlers answer: the spec names the code, and an app-bridge token
-// (the credential the spec says is always refused) receives exactly that code on both routes.
+// prediction reads to what the handlers answer. The 403 has two bodies: forecast_unavailable in the
+// flat {error, code} envelope (an app-bridge token, a session at scope none) and enrolment_required
+// in the v1 Error envelope (a cookie session held at the enrolment wall). The spec documents both as
+// alternatives and every live body must match one of them.
 func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
@@ -387,7 +390,18 @@ func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
 	}
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
-	token := s.appTok.mint([]string{"query"}, time.Now())
+	bridge := s.appTok.mint([]string{"query"}, time.Now())
+	seedForecastReader(t, s, "doc-none", scopeNone, false)
+	walled := seedForecastReader(t, s, "doc-walled", scopeAll, false)
+	if err := s.st.SetGroupRequire2FA(walled, true); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	en := map[string]any{}
+	if err := json.Unmarshal(openapiJSONForLang(t, "en-US"), &en); err != nil {
+		t.Fatal(err)
+	}
 	for path, concrete := range map[string]string{
 		"/api/v1/reports/{id}/predictions": "/api/v1/reports/1/predictions",
 		"/api/v1/predictions":              "/api/v1/predictions?symbol=600160",
@@ -397,17 +411,85 @@ func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s documents no 403 response", path)
 		}
-		props := resp["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)
-		documented, _ := props["code"].(map[string]any)["const"].(string)
-		if documented != "forecast_unavailable" || !strings.Contains(resp["description"].(string), "forecast_unavailable") {
-			t.Fatalf("%s documents the wrong 403 code: %v", path, resp)
+		alternatives, _ := resp["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["oneOf"].([]any)
+		if len(alternatives) != 2 {
+			t.Fatalf("%s: the 403 schema must list both bodies as oneOf, got %v", path, resp["content"])
 		}
-		w := bridgePredictionRequest(s, token, concrete)
-		if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != documented {
-			t.Fatalf("%s answered %d %s; the spec documents 403 %s", path, w.Code, w.Body.String(), documented)
+		var flatCode, nestedCode string
+		for _, alt := range alternatives {
+			props := alt.(map[string]any)["properties"].(map[string]any)
+			if code, ok := props["code"].(map[string]any); ok {
+				if props["error"].(map[string]any)["type"] != "string" {
+					t.Errorf("%s: the flat 403 body must declare error as a string", path)
+				}
+				flatCode, _ = code["const"].(string)
+			} else if e, ok := props["error"].(map[string]any); ok {
+				if e["type"] != "object" || props["ok"].(map[string]any)["const"] != false {
+					t.Errorf("%s: the v1 403 body must declare ok=false and an error object", path)
+				}
+				nestedCode, _ = e["properties"].(map[string]any)["code"].(map[string]any)["const"].(string)
+			}
+		}
+		if flatCode != "forecast_unavailable" || nestedCode != "enrolment_required" {
+			t.Fatalf("%s documents the wrong 403 codes: flat %q, v1 %q", path, flatCode, nestedCode)
+		}
+		base := resp["description"].(string)
+		enGet := en["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)
+		enDesc := enGet["responses"].(map[string]any)["403"].(map[string]any)["description"].(string)
+		for _, desc := range []string{base, enDesc} {
+			if !strings.Contains(desc, flatCode) || !strings.Contains(desc, nestedCode) {
+				t.Errorf("%s: the 403 description must name both codes: %q", path, desc)
+			}
+		}
+		if !strings.ContainsFunc(base, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
+			t.Errorf("%s: the base (zh-CN) 403 description is not Chinese: %q", path, base)
+		}
+		if enDesc == base {
+			t.Errorf("%s: the en-US 403 description was not localized", path)
 		}
 		if !strings.Contains(get["description"].(string), "forecast_unavailable") {
 			t.Errorf("%s: the operation description does not mention the bridge refusal", path)
 		}
+
+		for _, tc := range []struct {
+			who  string
+			req  func() *http.Request
+			flat bool
+			code string
+		}{
+			{"bridge token", func() *http.Request {
+				r := httptest.NewRequest("GET", concrete, nil)
+				r.Header.Set("Authorization", "Bearer "+bridge)
+				return r
+			}, true, flatCode},
+			{"session at none", func() *http.Request { return sessionForPath(t, s, "doc-none", "", concrete) }, true, flatCode},
+			{"session held at the wall", func() *http.Request { return sessionForPath(t, s, "doc-walled", "", concrete) }, false, nestedCode},
+		} {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, tc.req())
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s as %s: %v", path, tc.who, err)
+			}
+			if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != tc.code {
+				t.Fatalf("%s as %s answered %d %s; the spec documents 403 %s", path, tc.who, w.Code, w.Body.String(), tc.code)
+			}
+			_, errIsString := body["error"].(string)
+			if errIsString != tc.flat {
+				t.Errorf("%s as %s: body %s is in the wrong envelope (flat=%v)", path, tc.who, w.Body.String(), tc.flat)
+			}
+			if !tc.flat && body["ok"] != false {
+				t.Errorf("%s as %s: the v1 envelope must carry ok=false: %s", path, tc.who, w.Body.String())
+			}
+		}
 	}
+}
+
+func openapiJSONForLang(t *testing.T, lang string) []byte {
+	t.Helper()
+	out, err := localizedOpenAPIJSON(lang)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

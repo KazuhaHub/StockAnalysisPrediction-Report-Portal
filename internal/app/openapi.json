@@ -2039,20 +2039,53 @@
             "description": "No valid query credentials"
           },
           "403": {
-            "description": "forecast_unavailable: this credential has no forecast read access. An app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none. Persistent query tokens are not affected. The body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}.",
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
                     },
-                    "code": {
-                      "type": "string",
-                      "const": "forecast_unavailable"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -2129,20 +2162,53 @@
             "description": "No valid query credentials"
           },
           "403": {
-            "description": "forecast_unavailable: this credential has no forecast read access. An app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none. Persistent query tokens are not affected. The body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}.",
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
                     },
-                    "code": {
-                      "type": "string",
-                      "const": "forecast_unavailable"
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
