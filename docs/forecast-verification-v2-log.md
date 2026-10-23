@@ -220,7 +220,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
   1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
-  #149 and P14 isolated seeded preview #150 (`74e8c564`, current main) are merged.
+  #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
+  PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
@@ -228,7 +229,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26/P37
   integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
-  held by the dependency audit and existing DOMPurify #138 needs coordination permission.
+  awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
   capability isolation, operator-order selection, uncached walk with isolated health/per-pass
   breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
@@ -950,3 +951,25 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   final read-only Apps previews were also clean (trees `5189479e` and `65177496`); no Apps branch
   was changed or merged. P23 is submitted as draft PR #152 for exact-head CI. Browser layout/
   contrast validation remains separate, and no production rollout is authorized by the review.
+
+### P23 browser verification and dependency unblock (2026-10-22)
+
+- Verified the actual embedded UI against a new isolated synthetic preview database. Light/dark
+  settlement diagnostics and the narrow confirmation dialog are readable; cancelling removal and
+  reloading retains Tencent. Read-only database inspection found no `quote.order` audit and
+  `forecast_auto=0`. Screenshots are local evidence, not production baselines or vendor captures.
+  The preview listener and temporary browser tab were closed; no production data was copied.
+- P23 head `067b9028` passed Go/Postgres, race, frontend, workflow lint and all CodeQL analyses,
+  but Docker's production dependency audit failed on DOMPurify. The audit gate was not weakened.
+- The owner explicitly authorized validating and merging existing PR #138. Its original go-test
+  failure was the stale Go1.26.9 baseline's GO-2026-6809 finding, not the dependency patch.
+  Merged main into that PR without rewriting history; the current-base diff remained only the
+  manifest and lockfile update from DOMPurify3.4.16 to3.4.17. Independent review found no blockers.
+- At dependency head `d7d7ff33`, local typecheck, 120 Vitest files /1006 tests (111.45 s), SPA build
+  (1.20 s), Go build/vet/staticcheck and full SQLite/Postgres Go tests (app46.676 s) passed. The
+  production audit has zero critical/high/moderate findings; five pre-existing low findings remain.
+  Exact-head CI run39882851649, all CodeQL checks and Docker smoke/E2E passed before squash merge
+  to main at `8ab51334`. No attribution trailer was included in the merge message.
+- Integrated that main update into P23 at `21725f0b`; combined local regression and new exact-head
+  CI are pending. P37 needs the same dependency integration/revalidation. No Apps branch,
+  production setting, deployment or database shape was changed.
