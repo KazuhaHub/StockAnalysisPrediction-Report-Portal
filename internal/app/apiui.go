@@ -1161,7 +1161,12 @@ func (s *Server) apiAdminUsers(w http.ResponseWriter, r *http.Request, user stri
 	for _, ro := range roleRegistry {
 		roles = append(roles, map[string]any{"code": ro.Code, "name": ro.Name})
 	}
-	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": userGroupsJSON(s.st.ListUserGroups())})
+	groups, err := s.adminGroupsJSON()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": groups})
 }
 
 // parseExpiry validates an account-validity date from the admin UI: "" clears it (never expires),

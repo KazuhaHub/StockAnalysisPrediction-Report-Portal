@@ -70,24 +70,34 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 	return out
 }
 
-func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user string) {
+// adminGroupsJSON is the OU list the admin console renders, with forecast access resolved by the
+// server from one strict read of the tree. Every admin surface that lists OUs (the groups list and
+// the users list the OU editor lives on) goes through it, so none can describe access differently.
+func (s *Server) adminGroupsJSON() ([]map[string]any, error) {
 	ix, err := s.st.loadOUIndex()
 	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-		return
+		return nil, err
 	}
 	groups := userGroupsJSON(s.st.ListUserGroups())
 	for _, group := range groups {
 		id := group["id"].(int64)
 		row, ok := ix.ous[id]
 		if !ok {
-			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-			return
+			return nil, errDanglingOU
 		}
 		d := resolveForecastScope(forecastSubject{User: "preview", GroupID: id}, ix)
 		group["forecast_scope"] = row.scope
 		group["forecast_scope_effective"] = d.Scope
 		group["forecast_scope_source"] = d.Source
+	}
+	return groups, nil
+}
+
+func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user string) {
+	groups, err := s.adminGroupsJSON()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
 	}
 	writeJSON(w, map[string]any{"groups": groups})
 }
