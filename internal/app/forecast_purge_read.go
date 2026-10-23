@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // errForecastPurgeHistoryUnavailable marks a scoped marker lookup that could not be answered, so the
@@ -40,10 +42,23 @@ func (s *Server) loadForecastPurgeView(pop forecastPopulation) (forecastPurgeVie
 	}
 	disclosed, err := s.st.loadPredictionPurgeMarkersForPopulation(pop)
 	if err != nil {
-		log.Printf("forecast purge history for an own population is unavailable: %v", err)
+		logForecastPurgeHistoryUnavailable(err)
 		return forecastPurgeView{}, fmt.Errorf("%w: %v", errForecastPurgeHistoryUnavailable, err)
 	}
 	return forecastPurgeView{filter: filter, disclosed: disclosed}, nil
+}
+
+// forecastPurgeHistoryLoggedAt is the unix second of the last log line. Until the evidence table
+// exists, every own read fails the same way, and one line a minute says so without flooding the log.
+var forecastPurgeHistoryLoggedAt atomic.Int64
+
+func logForecastPurgeHistoryUnavailable(err error) {
+	now := time.Now().Unix()
+	last := forecastPurgeHistoryLoggedAt.Load()
+	if now-last < 60 || !forecastPurgeHistoryLoggedAt.CompareAndSwap(last, now) {
+		return
+	}
+	log.Printf("forecast purge history for an own population is unavailable, so its reads are refused: %v", err)
 }
 
 func writeForecastPurgeViewError(w http.ResponseWriter, err error) {
