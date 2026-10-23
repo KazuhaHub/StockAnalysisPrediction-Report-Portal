@@ -109,14 +109,11 @@ export default function ForecastToolbar(p: Props) {
           <Tag style={{ margin: 0 }}>
             {p.hidden > 0 ? t('forecast.range.last_n', { n: MONTH_WINDOW }) : t('forecast.range.all')}
           </Tag>
-          {p.hidden > 0 && (
-            <Button type="link" size="small" onClick={() => p.onChange({ older: '1' })} style={link}>
-              {t('forecast.range.show_older', { n: p.hidden })}
-            </Button>
-          )}
-          {p.showOlder && p.total > MONTH_WINDOW && (
-            <Button type="link" size="small" onClick={() => p.onChange({ older: '' })} style={link}>
-              {t('forecast.range.show_recent')}
+          {/* One button whose label flips, not two that replace each other: the reader has just
+              pressed it, and an element that unmounts under the focus hands the focus to the page. */}
+          {(p.hidden > 0 || (p.showOlder && p.total > MONTH_WINDOW)) && (
+            <Button type="link" size="small" onClick={() => p.onChange({ older: p.showOlder ? '' : '1' })} style={link}>
+              {p.showOlder ? t('forecast.range.show_recent') : t('forecast.range.show_older', { n: p.hidden })}
             </Button>
           )}
         </span>

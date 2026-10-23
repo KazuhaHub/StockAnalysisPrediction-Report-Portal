@@ -945,6 +945,26 @@ describe('ForecastRecordPage monthly range', () => {
     expect(rowsDrawn()).toBe(12)
   })
 
+  // The control that folds the older months is the one the reader just pressed: if it is replaced by
+  // its counterpart, keyboard focus falls to the page and the reader loses their place.
+  it('keeps keyboard focus on the same button when it unfolds and folds the older months', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(15) }))
+    show()
+    await screen.findAllByText('+3.1 pt')
+    const toggle = screen.getByRole('button', { name: 'forecast.range.show_older:{"n":3}' })
+    toggle.focus()
+    fireEvent.click(toggle)
+    const recent = await screen.findByRole('button', { name: 'forecast.range.show_recent' })
+    expect(recent).toBe(toggle)
+    expect(document.activeElement).toBe(toggle)
+    fireEvent.click(recent)
+    const older = await screen.findByRole('button', { name: 'forecast.range.show_older:{"n":3}' })
+    expect(older).toBe(toggle)
+    expect(document.activeElement).toBe(toggle)
+    // There is only ever one of them.
+    expect(screen.queryByRole('button', { name: 'forecast.range.show_recent' })).toBeNull()
+  })
+
   it('offers nothing to fold for a short record', async () => {
     apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(5) }))
     show()
