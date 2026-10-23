@@ -6,7 +6,9 @@ package app
 // byte, so every later release proves it changed nothing it did not mean to. The fixture is built
 // through the real write path (InsertPredictionSet for the set/claims/marks, FinishForecastBaseline
 // and SettleForecastMark for the evaluator's own writes), never through hand-written rows, so the
-// golden output is the output the running system produces.
+// Golden cells and real coverage counters come from production code. The archived coverage shape
+// retains only the retired zero refusal placeholder; a separate raw-response test pins its removal
+// from the current API, and a field/value parity guard prevents the adapter hiding any live counter.
 //
 // Regenerate only in a commit whose message explains every changed byte:
 //
@@ -470,7 +472,7 @@ type goldenGroupSnapshot struct {
 	Start    string                   `json:"start"`
 	End      string                   `json:"end"`
 	Official bool                     `json:"official"`
-	Coverage forecastCoverage         `json:"coverage"`
+	Coverage goldenArchivedCoverage   `json:"coverage"`
 	Cells    map[string]*forecastCell `json:"cells"`
 }
 
@@ -509,7 +511,7 @@ func buildGoldenCells(spec goldenFixtureSpec, sets []*groupSet) goldenCellsDoc {
 			}
 			doc.Groups = append(doc.Groups, goldenGroupSnapshot{
 				Grouping: gr.Name, Label: p.Label, Start: p.Start, End: p.End,
-				Official: gr.Official, Coverage: cov, Cells: cells,
+				Official: gr.Official, Coverage: goldenArchivedCoverageOf(cov), Cells: cells,
 			})
 		}
 	}

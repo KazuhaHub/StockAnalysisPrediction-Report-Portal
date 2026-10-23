@@ -82,7 +82,6 @@ describe('forecastCsv', () => {
           backtest: 0,
           degraded: 0,
           mismatch: 0,
-          refused: 0,
           pending_baseline: 0,
           pre_live: 0,
           test: 0,
@@ -109,6 +108,36 @@ describe('forecastCsv', () => {
     expect(csv).toContain('2026-01-05 – 2026-01-11,2026-01-05,2026-01-11,d5,mature,spread_bp,310,0,0.012,0.041,42')
     expect(csv).toContain('2026-01-05 – 2026-01-11,2026-01-05,2026-01-11,d20,open,,,,,,')
     expect(csv).not.toContain('d20,mature')
+  })
+
+  it('labels every reader export row and omits site-wide counts from its header', () => {
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'Own unit\nforged header', disclaimer: 'Research only', hideCounts: false })
+    expect(csv).toContain('# population=Own unit forged header')
+    expect(csv).toContain('# disclaimer=Research only')
+    expect(csv).not.toContain('# unrecorded=')
+    expect(csv).toContain('n,mode,official,bench')
+    const rows = csv.split('\n').filter((line) => line && !line.startsWith('#')).slice(1)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) expect(row.endsWith(',custom,false,sh000852')).toBe(true)
+    expect(csv).toContain('0.041,42,custom,false,sh000852')
+  })
+
+  it('removes count columns even if a malformed external-all response contains them', () => {
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', hideCounts: true })
+    const header = csv.split('\n').find((line) => line.startsWith('group,'))!
+    expect(header.split(',')).not.toContain('n')
+    expect(header).toContain('publication_gate,mode,official,bench')
+    expect(csv).not.toContain('0.041,42')
+    expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
+    expect(csv).not.toContain('# unrecorded=')
+  })
+
+  it('never exports non-mature sample sizes for any reader population', () => {
+    const malformed = structuredClone(resp)
+    malformed.groups[0].cells.d20 = { state: 'pending', n: 987654, total: 987654 }
+    const csv = forecastCsv(malformed, '2026-10-18T00:00:00Z', { population: 'Own unit', disclaimer: 'Research only', hideCounts: false })
+    expect(csv).not.toContain('987654')
+    expect(malformed.groups[0].cells.d20.n).toBe(987654)
   })
 })
 

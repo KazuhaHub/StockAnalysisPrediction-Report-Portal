@@ -133,11 +133,12 @@ func (s *Server) forecastAccess(user string) forecastDecision {
 
 func (s *Server) requireForecastAccess(w http.ResponseWriter, r *http.Request, user string) (forecastDecision, bool) {
 	d := s.forecastAccess(user)
-	if d.Scope == scopeNone {
+	caps := forecastCapabilitiesFor(d)
+	if !caps.Monthly {
 		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 		return d, false
 	}
-	if d.External && r.URL.Query().Get("mode") == "custom" {
+	if !caps.Custom && r.URL.Query().Get("mode") == "custom" {
 		jsonErrorCode(w, http.StatusForbidden, "forecast_custom_not_allowed", "custom ranges are unavailable to external readers")
 		return d, false
 	}

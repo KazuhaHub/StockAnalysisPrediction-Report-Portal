@@ -75,6 +75,57 @@ one transaction re-attributes its sets to its parent, or Default for a deleted r
 children to the same parent, deletes the OU and records the counts in the audit. A root's children
 remain roots. No set may retain a reference to the deleted OU.
 
+### Purge ownership evidence (owner-approved 2026-10-22; implementation incomplete)
+
+`own` must not disclose the site's global purge-month history. The owner approved a separate
+`prediction_purge_owners` table, keyed by `(rtype, cohort, attributed_ou)`, with non-null report
+type/month and a positive, non-null OU id. Before deleting a month's sets, retention snapshots
+their distinct proven OU attributions in the same transaction as the global purge marker and
+set deletion. Scoped marker reads join this evidence to the current allowed subtree. Multiple
+descendant owners do not multiply a month. All readers keep the global history contract.
+
+OU deletion transfers this evidence to the same parent/Default destination as sets, deduplicating
+before removing the old id, in the same transaction as OU removal. If no valid destination exists,
+unprovable evidence is removed rather than left attached to an id that might be reused. Purge and
+OU-delete transactions must take the shared ownership lock **before their first database read or
+set mutation**. Postgres uses a transaction-scoped advisory lock; SQLite reserves the single writer
+before reading. Locking only the final evidence write permits a concurrent OU deletion to miss an
+uncommitted snapshot and is insufficient.
+
+Existing global markers without ownership evidence remain visible to all but are hidden from own;
+there is no guessed historical backfill. This new table requires an explicit operator upgrade for
+existing supported databases, not automatic DDL at server startup. The upgrade step must deliver,
+together with the table, fresh initialization, startup shape verification, membership in the
+dump/restore table set (so a restore replaces the evidence with the dump's rows instead of leaving
+rows keyed by OU ids the restored tree may reuse) and rollback instructions. The reader routes read
+the table only where it exists and fail closed where it does not, so they can be merged ahead of
+that step; no database has the table until the step ships, and the hold below stands until it
+does. No released migration is edited and the frozen baseline stays unchanged. Approval of the
+schema is not authorization to change a production database.
+
+The two reader routes read purge history through one view. The global markers still remove sets
+from every computation and decide cache identity, so no partial data from a month that retention
+has emptied is ever shown to anyone. What a population is *told* comes from the evidence: for an
+own reader, the range extension, the custom exclusion list, the purged groups and cells and the
+drawer's purged state use only the months whose evidence names the current subtree. All readers,
+the administrator aliases and external-all readers keep the global history unchanged.
+
+A month purged globally but not disclosed to an own reader must be indistinguishable from a month
+in which that reader simply holds no sets. The monthly record lists it as an ordinary group
+computed over the sets the site-wide filter left, which is none, and its drawer answers as any
+empty month in range does. Leaving the month out, or answering `label_not_found` for it, would
+turn a gap in an otherwise complete calendar into the very disclosure the owner refused. Two things
+keep the month honest. Its cells carry a cache identity derived from the marker, so a cell
+memoised before the purge (by another process this one has not heard from) never answers; and sets
+inside an undisclosed purged month do not count when the first month of an own calendar is chosen,
+so a set written after the purge cannot start the calendar and leave an empty leading month.
+Months before the reader's own first month are not found, exactly as any month before it.
+
+If the evidence table cannot be read, including before the explicit upgrade has created it, an own
+read answers `503 forecast_purge_history_unavailable` and never falls back to the global markers;
+reads that do not need evidence never touch the table. Retention and OU deletion do not yet write
+or transfer evidence, so the hold on releasing own-scoped reads stands until they do.
+
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
 member or change its numbers. The cohort benchmark remains ledger-wide. Every population keeps

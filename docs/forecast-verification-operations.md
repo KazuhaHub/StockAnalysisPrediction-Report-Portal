@@ -128,6 +128,90 @@ An interval crossing a missing year must retain the weekday "on or after" wordin
 claim an expected exchange date. In October 2026 the verified runtime table covers 2026 only;
 2027 remains deliberately absent pending its annual notice and December review.
 
+## Reader statistics explanation contract
+
+The session-only groups response and its temporary admin alias may carry the following flattened
+metadata. These fields are not a new machine API and must not be added to `/api/v1` routes merely
+to expose the reader summary. External-all readers receive none of the fields in this section;
+own readers receive only their scoped population. A missing field is not a measured zero.
+
+| Field | Meaning |
+| --- | --- |
+| `summary.since`, `sets`, `accepted`, `stocks` | Earliest retained receipt date, retained row count, accepted row count, and distinct nonempty symbols in the requested range and population. Accepted includes repeat editions; it is not the statistical member count. |
+| `summary.marks_by_phase` | Checkpoint obligations of classified members and pending-baseline candidates represented by the returned cells. Duplicate, rejected and other excluded rows do not create obligations. The h12 population includes standard horizons only. Mature cells contribute resolved and final counts; purged cells contribute nothing. |
+| `summary.next_result_not_before`, `expected` | Earliest outstanding date across the returned cells. It can already be in the past when settlement is delayed. `expected` qualifies an exchange-schedule estimate, not a promised or observed result. Tied estimates retain the flag only if every tied date is qualified. |
+| `rtypes`, `min_n` | Sorted covered report types and the minimum publishable sample size. |
+| `limits` | `max_range_months`, `max_week_groups`, `official_slots`, `explore_slots`, `wait_sec`, `custom_per_min`, and `members_per_min`; the configured ceilings, not remaining budget. |
+| `generated_at`, `ledger_start` | UTC response-generation instant and the declared ledger boundary. An empty ledger start means unset, not the beginning of retained history. |
+| `capabilities` | `monthly`, `custom`, and `members` permission hints from the same decision used by route gates. They do not bypass fresh authorization, validation, rate limits or scorer capacity. |
+| `evaluator.mode` | `0`, `dry`, or `1`; a paused evaluator is distinct from a failed checkpoint. |
+
+Non-mature cells carry `pending_reasons`, `failed_cap_exceeded`, and, when known, `not_before` with
+its optional `expected` qualifier. Phase counts include resolved and final entries to reconcile
+the selected population; unclassifiable timing is counted as `unknown`. The failure-cap flag uses
+the same final-refusal ratio and strict threshold as the existing maturity gate. Explanations are
+request-time copies, not additional scoring and not entries in the mature-cell cache.
+
+Retention exclusions apply before summary construction. A late row in a marked month cannot
+resurrect that month in summary counts. These scalars describe retained data, not all-time totals;
+the separate purge metadata must remain visible where authorized. Historical own attribution is
+still pending the separately approved evidence-storage design, so this contract is not release
+readiness for the current draft.
+
+## Reading-page summary contract (P18 draft)
+
+The session stock/run response may carry `prediction` at stage `full`; admins resolve to full,
+but none remains an independent refusal for non-admins. `X-Prefetch: 1` omits the summary while
+retaining scoped stock timeline flags. These additions do not expand the machine API.
+
+- `display_set_id` selects the latest accepted set matching the body already chosen for this
+  response, falling back to the latest accepted set. Compact selection is not capped by the
+  200-row card response. A concurrent ingest must not pair a future body's prediction with the
+  body being returned. `body_changed` qualifies the same selected response body.
+- `stance`, optional `weight_bp` and optional `upside_bp` reuse the selected set's claims and
+  frozen-baseline arithmetic. Missing numbers are not zero. Payloads and diagnostics never
+  belong to this summary.
+- `next_checkpoint` is the first nonterminal checkpoint in the established checkpoint order.
+  It carries the existing reading `phase`, `not_before` and `expected` semantics; a resolved or
+  final-refusal checkpoint is not outstanding, even when receipt timing is unreadable. Missing
+  applicable marks remain pending obligations; nonstandard horizons have no next h12 checkpoint,
+  whether an h12 mark is absent or an old pending row exists.
+  Unknown timing omits phase/date rather than manufacturing a deadline. A not-before date
+  may already be past while settlement is delayed; an expected date is not observed evidence.
+- `membership` and `counted_set_id` are available only to internal all readers and admins.
+  Internal own and every external reader receive neither, and do not trigger global membership
+  classification. Report readability is independently rechecked when constructing a summary.
+- A ledger failure omits the summary, not the report body or its navigation. Absence can also
+  mean prefetch, disabled stage, unsupported type or no accepted prediction; it is not proof of
+  a failed evaluator.
+
+`has_prediction` distinguishes a populated summary from an empty edition with a readable
+`sibling` link. An empty edition never borrows the sibling's stance, display identity, body-change
+warning or checkpoint. The linked `report_id`, `set_id`, `version`, `cohort` and exact `url`
+identify the actual other edition. Candidates share symbol/report-date/type, not title; they
+must be another version and independently readable. Fallback uses the newest eligible report,
+then its body-matching accepted set. Older readable reports remain eligible for the link to the
+edition that actually counted, even if a later generator output replaced it in the switcher.
+
+Internal all readers and admins may receive `counted_edition`. For a populated current edition,
+it must belong to the same receipt cohort. It does not change the report's own `counted_set_id`.
+An own-report member from a later cohort cannot hide the displayed cohort's counted edition.
+The full-stage summary suppresses a duplicate badge in favor of this explicit edition identity.
+Per-set classifier results on the card route remain factual; presentation should prefer the
+counted-edition label rather than describing the other edition's member as a duplicate.
+Own and external readers never receive counted-edition metadata or cause global classification.
+
+Card/full session prediction reads carry the same optional `sibling` and `counted_edition`
+metadata, including when using a cookie on the v1 report route. Persistent machine and app-bridge
+credentials retain their existing shape. Stage off still refuses non-admin session predictions.
+These are server contracts; the P20 card presentation and stale-edition UI guards remain separate.
+
+The stage access matrix now exercises these server surfaces through the real mux on both drivers
+and both Default-scope variants. The [local performance checkpoint](forecast-reading-performance.md)
+records an actual pre-P18 source comparison and the card/full budget, including prefetch. These
+checks do not replace P20 presentation tests, independent review or production observation, and
+are not authorization to enable full in production.
+
 ## Recording an incident
 
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and

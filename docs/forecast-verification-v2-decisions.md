@@ -111,3 +111,13 @@ cannot be mistaken for two network requests. This preserves the planned sample s
 the actual upstream cost explicit. No retries beyond the budget or alternate ledger writers are
 admitted. Execute shadow work after primary ledger processing with its own bounded deadline, so
 candidate failure or slowness cannot consume primary settlement time.
+
+## Own-scoped purge history (2026-10-22)
+
+The owner refused disclosure of global purge months to own readers and approved
+`prediction_purge_owners` with primary key `(rtype, cohort, attributed_ou)`, pre-delete transactional
+snapshot, current-subtree reads, same-transaction OU reattribution with deduplication, and no guessed
+legacy backfill. Existing supported databases require an explicit upgrade; startup must not
+silently create the table. See ADR 0039 for the evidence and serialization contract. Schema approval
+does not authorize production upgrade, and the own-history release hold stays until upgrade,
+business-path wiring, dual-driver access tests and independent review are complete.

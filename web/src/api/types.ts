@@ -20,6 +20,7 @@ export interface Me {
   must_enroll_2fa?: boolean
   // Navigation hint only; forecast routes always resolve current policy on the server.
   forecast?: { scope: 'all' | 'own' | 'none'; external: boolean }
+  forecast_reader?: 'off' | 'card' | 'full'
 }
 
 // ---- Batch-run feature ----
@@ -325,6 +326,7 @@ export interface HomeResp {
 export interface TimelineNode {
   date: string
   n: number
+  predicted?: boolean
 }
 
 export interface SubTab {
@@ -346,6 +348,7 @@ export interface StockResp {
   kinds: string[]
   subtabs: SubTab[]
   rep: Rep | null
+  prediction?: ForecastReadingSummary
 }
 
 export interface RunResp {
@@ -356,6 +359,39 @@ export interface RunResp {
   selId: number
   tabs: SubTab[]
   rep: Rep | null
+  prediction?: ForecastReadingSummary
+}
+
+export type ForecastReadingSummary = {
+  has_prediction: false
+  sibling: ForecastReadingEdition
+  counted_edition?: ForecastReadingEdition
+} | ForecastReadingSetSummary
+
+export interface ForecastReadingEdition {
+  report_id: number
+  set_id: number
+  version: string
+  cohort: string
+  url: string
+}
+
+export interface ForecastReadingSetSummary {
+  has_prediction: true
+  display_set_id: number
+  stance: string
+  weight_bp?: number
+  upside_bp?: number
+  body_changed: boolean
+  next_checkpoint?: {
+    checkpoint: string
+    phase?: PredictionMark['phase']
+    not_before?: string
+    expected: boolean
+  }
+  membership?: ForecastMembership
+  counted_set_id?: number
+  counted_edition?: ForecastReadingEdition
 }
 
 export interface LinkItem {
@@ -520,6 +556,8 @@ export interface CleanupConfig {
 // count. It is one shape for both verbs because the GET answers with exactly what the page and the
 // modal between them need, so a save's reload and a fresh open are the same request.
 export interface ForecastSettings {
+  /** Reading-stage policy; independent of evaluator mode and record access. */
+  reader?: 'off' | 'card' | 'full'
   /** Comparison only; alternate ledger writers are not admitted. Optional for cached responses. */
   fallback?: 'off' | 'shadow'
   diagnostics?: ForecastDiagnostics
@@ -1468,9 +1506,11 @@ export interface PredictionMark {
   ret_bp?: number
   bench_ret_bp?: number
   attempts?: number
-  /** Reading-page state (P10): waiting_s0 | waiting | retrying | resolved | final. */
-  phase?: 'waiting_s0' | 'waiting' | 'retrying' | 'resolved' | 'final'
-  /** The earliest date the mark can settle, from a weekday projection. */
+  source?: string
+  direction?: 'agree' | 'disagree' | 'flat' | 'untested'
+  /** Derived reading-page state; retrying requires a recorded due session. */
+  phase?: 'waiting_s0' | 'waiting' | 'settling' | 'retrying' | 'overdue' | 'resolved' | 'final'
+  /** The earliest date the mark can settle; a projection is only a lower bound. */
   not_before?: string
   /** Based on a published exchange closure schedule, not an observed settlement date. */
   expected?: boolean
@@ -1482,6 +1522,10 @@ export interface PredictionSetError {
   message: string
 }
 
+export type ForecastMembership =
+  | 'member' | 'duplicate' | 'degraded' | 'mismatch' | 'pending_baseline'
+  | 'pre_live' | 'off_benchmark' | 'test' | 'backtest' | 'absent' | 'rejected' | 'unknown'
+
 export interface PredictionSet {
   id: number
   report_id?: number
@@ -1490,6 +1534,12 @@ export interface PredictionSet {
   rtype: string
   title: string
   version: string
+  /** Optional during mixed-version rollout; newer servers always return the stored report date. */
+  report_date?: string
+  /** Global monthly membership, omitted for protected readers and when classification fails. */
+  membership?: ForecastMembership
+  /** Integer basis points, truncated toward zero; absent without a usable base and target. */
+  upside_bp?: number
   made_at: string
   made_on: string
   cohort: string
@@ -1513,14 +1563,16 @@ export interface PredictionSet {
   claims: PredictionClaim[]
   marks: PredictionMark[]
   payload?: string
-  /** The cohort this set is the counted member of, or '' when it is not one. */
-  counted_in_group?: string
 }
 
 export interface ReportPredictions {
   ok: boolean
   sets: PredictionSet[]
   counted_set_id?: number
+  display_set_id?: number
+  sibling?: ForecastReadingEdition
+  counted_edition?: ForecastReadingEdition
+  settlement_paused?: boolean
 }
 
 export type ForecastMode = 'month' | 'custom'
@@ -1536,15 +1588,19 @@ export interface ForecastCoverage {
   backtest: number
   degraded: number
   mismatch: number
-  refused: number
   pending_baseline: number
   pre_live: number
   test: number
   off_benchmark: number
+  unknown?: number
 }
 
 export interface ForecastCell {
-  state: 'open' | 'pending' | 'small' | 'mature'
+  state: 'open' | 'pending' | 'small' | 'mature' | 'purged'
+  pending_reasons?: Partial<Record<NonNullable<PredictionMark['phase']> | 'unknown', number>>
+  failed_cap_exceeded?: boolean
+  not_before?: string
+  expected?: boolean
   n?: number
   resolved?: number
   total?: number
@@ -1588,6 +1644,7 @@ export interface ForecastGroup {
   start: string
   end: string
   official: boolean
+  purged_at?: string
   /** The index every member was frozen with (P4); a split custom range has one group per index. */
   bench: string
   coverage: ForecastCoverage
@@ -1595,6 +1652,31 @@ export interface ForecastGroup {
 }
 
 export interface ForecastGroupsResponse {
+  /** Retained rows in the requested population/range; phase counts use classified members. */
+  summary?: {
+    since: string
+    sets: number
+    accepted: number
+    stocks: number
+    marks_by_phase: Partial<Record<NonNullable<PredictionMark['phase']> | 'unknown', number>>
+    next_result_not_before?: string
+    expected?: boolean
+  }
+  rtypes?: string[]
+  min_n?: number
+  limits?: {
+    max_range_months: number
+    max_week_groups: number
+    official_slots: number
+    explore_slots: number
+    wait_sec: number
+    custom_per_min: number
+    members_per_min: number
+  }
+  generated_at?: string
+  ledger_start?: string
+  capabilities?: { monthly: boolean; custom: boolean; members: boolean }
+  evaluator?: { mode: '0' | 'dry' | '1' }
   ok: boolean
   mode: ForecastMode
   official: boolean
@@ -1602,6 +1684,12 @@ export interface ForecastGroupsResponse {
   checkpoints: ForecastCheckpoint[]
   unrecorded: number
   groups: ForecastGroup[]
+  excluded_months?: ForecastPurgedMonth[]
+}
+
+export interface ForecastPurgedMonth {
+  cohort: string
+  purged_at: string
 }
 
 export interface ForecastMember {
@@ -1615,6 +1703,7 @@ export interface ForecastMember {
   made_on: string
   stance: 'long' | 'no_position'
   status: string
+  excluded_reason?: 'pending_baseline' | 'non_standard_horizon' | 'missing_mark' | 'pending' | 'refused' | 'refused_final' | 'corp_action' | 'unknown_mark_status'
   close_fen?: number
   ret_bp?: number
   bench_ret_bp?: number
@@ -1632,5 +1721,8 @@ export interface ForecastMembersResponse {
   end: string
   checkpoint: ForecastCheckpoint
   state: string
+  population?: 'scored' | 'all'
   members: ForecastMember[]
+  purged_at?: string
+  excluded_months?: ForecastPurgedMonth[]
 }

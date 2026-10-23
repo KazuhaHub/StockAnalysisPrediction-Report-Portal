@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -33,8 +34,7 @@ type forecastMatrixSet struct {
 	readable       bool
 }
 
-// TestForecastAccessMatrix pins the P26 columns of plan section 10.2 through the real mux.
-// P18 adds the stage/chip/overlay columns.
+// TestForecastAccessMatrix pins record, credential and reading-stage contracts through the real mux.
 func TestForecastAccessMatrix(t *testing.T) {
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
@@ -58,11 +58,28 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"},
 		loginThr: newLoginThrottle(), v1Rate: newRateLimiter(), appTok: newAppTokens(time.Hour),
 		forecastEval: forecastEvaluator{now: func() time.Time { return time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC) }}}
+	s.names = LoadNames(t.TempDir(), st)
+	s.names.fetch = func(string) string { return "" }
+	ensurePurgeEvidenceTable(t, st)
 	// The shared Postgres database can contain settings from earlier tests.
-	for key, value := range map[string]string{setRequire2FAForStaff: "0", setForecastCustomPerMin: "0", setForecastMembersPerMin: "0", setForecastPopulationFrom: "", setForecastUnrecordedFloorID: ""} {
-		prior := st.GetSetting(key, "")
+	if _, err := st.exec("DELETE FROM meta WHERE k=?", setForecastPopulationFrom); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{setRequire2FAForStaff: "0", setForecastCustomPerMin: "0", setForecastMembersPerMin: "0", setForecastUnrecordedFloorID: "", setForecastReader: "card"} {
+		var prior string
+		err := st.queryRow("SELECT v FROM meta WHERE k=?", key).Scan(&prior)
+		if err != nil && err != sql.ErrNoRows {
+			t.Fatal(err)
+		}
+		present := err == nil
 		t.Cleanup(func() {
-			if err := st.SetSetting(key, prior); err != nil {
+			var err error
+			if present {
+				err = st.SetSetting(key, prior)
+			} else {
+				err = st.DeleteSetting(key)
+			}
+			if err != nil {
 				t.Error(err)
 			}
 		})
@@ -271,6 +288,7 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 			}
 		})
 	}
+	runForecastReadingStageMatrix(t, s, mux, subjects, ledger, readableReport, hiddenReport)
 }
 
 func nullableID(id int64) any {
@@ -315,7 +333,7 @@ func assertForecastMatrixShape(t *testing.T, out map[string]any, who forecastMat
 		forbidden = append(forbidden, "unrecorded", "errors")
 	}
 	if who.external || who.scope == scopeOwn {
-		forbidden = append(forbidden, "membership", "counted_set_id", "counted_in_group")
+		forbidden = append(forbidden, "membership", "counted_set_id", "counted_in_group", "counted_edition")
 	}
 	if who.external {
 		forbidden = append(forbidden, "payload")

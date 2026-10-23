@@ -107,7 +107,7 @@ export default function StockPage() {
   // That key is what makes a stale response harmless and, more importantly, what stops the render
   // that already shows report B's header from painting report A's marks: the derived values below
   // are empty until the state's key matches the report on screen.
-  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; counted?: number; err: string }>({
+  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; counted?: number; paused?: boolean; err: string }>({
     sets: [],
     err: '',
   })
@@ -216,7 +216,7 @@ export default function StockPage() {
       .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
         if (cancelled || predForRef.current !== forId) return
-        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], counted: r.counted_set_id, err: '' })
+        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], counted: r.counted_set_id, paused: r.settlement_paused, err: '' })
       })
       .catch((e) => {
         if (cancelled || predForRef.current !== forId) return
@@ -559,6 +559,7 @@ export default function StockPage() {
                 <PredictionPanel
                   sets={predSets}
                   countedSetID={predCounted}
+                  settlementPaused={predCurrent ? pred.paused : undefined}
                   otherSets={otherSets}
                   latestClose={quote?.snapshot.last}
                   latestDate={quote?.snapshot.asOf?.slice(0, 10)}

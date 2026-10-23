@@ -357,6 +357,112 @@
           }
         }
       },
+      "PredictionReadMark": {
+        "type": "object",
+        "required": ["checkpoint", "status", "halted", "corp_action", "attempts"],
+        "properties": {
+          "checkpoint": {"type": "string", "enum": ["d5", "d20", "d60", "d120", "h12"]},
+          "status": {"type": "string", "enum": ["pending", "resolved", "refused", "refused_final"]},
+          "phase": {"type": "string", "enum": ["waiting_s0", "waiting", "settling", "retrying", "overdue", "resolved", "final"], "description": "Derived reader state, not a stored status. Retrying requires an evidenced due session. Overdue starts 48 hours after an exact due close, or 21 days after a projected lower-bound close."},
+          "not_before": {"type": "string", "format": "date", "description": "Read-time due date: observed evidence when available, an exchange-schedule estimate when expected is true, or otherwise a conservative weekday lower bound."},
+          "expected": {"type": "boolean", "description": "True only for a verified exchange-schedule estimate. It is not observed evidence and cannot shorten the overdue deadline."},
+          "source": {"type": "string", "description": "Stored source that produced this checkpoint; never inferred from the current live quote."},
+          "direction": {"type": "string", "enum": ["agree", "disagree", "flat", "untested"], "description": "Shared hit verdict, only on resolved marks. Untested includes missing inputs, corporate actions and implied upside below the absolute 5 percent threshold. Flat means a tested zero benchmark excess."},
+          "refusal": {"type": "string"},
+          "session_date": {"type": "string", "format": "date"},
+          "bar_date": {"type": "string", "format": "date"},
+          "halted": {"type": "boolean"},
+          "corp_action": {"type": "boolean"},
+          "close_fen": {"type": "integer", "format": "int64"},
+          "low_fen": {"type": "integer", "format": "int64"},
+          "high_fen": {"type": "integer", "format": "int64"},
+          "ret_bp": {"type": "integer", "format": "int32"},
+          "bench_ret_bp": {"type": "integer", "format": "int32"},
+          "attempts": {"type": "integer", "minimum": 0}
+        }
+      },
+      "PredictionReadClaim": {
+        "type": "object",
+        "required": ["key", "kind"],
+        "properties": {
+          "key": {"type": "string"},
+          "kind": {"type": "string", "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"]},
+          "stance": {"type": "string", "enum": ["long", "no_position"]},
+          "label": {"type": "string", "enum": ["bull", "base", "bear"]},
+          "price_fen": {"type": "integer", "format": "int64"},
+          "prob_bp": {"type": "integer", "minimum": 0, "maximum": 10000},
+          "weight_bp": {"type": "integer", "minimum": 0, "maximum": 10000}
+        }
+      },
+      "PredictionReadSet": {
+        "type": "object",
+        "required": ["id", "report_id", "state", "symbol", "rtype", "title", "version", "report_date", "made_at", "made_on", "cohort", "zone", "bench_code", "horizon_std", "baseline_check", "body_changed", "claims", "marks"],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "report_id": {"type": ["integer", "null"], "format": "int64", "description": "Null after report retention; the prediction ledger can outlive its report."},
+          "state": {"type": "string", "enum": ["accepted", "test", "backtest", "absent", "rejected"]},
+          "symbol": {"type": "string"},
+          "rtype": {"type": "string"},
+          "title": {"type": "string"},
+          "version": {"type": "string"},
+          "report_date": {"type": "string", "format": "date"},
+          "made_at": {"type": "string", "format": "date-time"},
+          "made_on": {"type": "string", "format": "date"},
+          "cohort": {"type": "string"},
+          "zone": {"type": "string"},
+          "bench_code": {"type": "string"},
+          "membership": {"type": "string", "enum": ["member", "duplicate", "degraded", "mismatch", "pending_baseline", "pre_live", "off_benchmark", "test", "backtest", "absent", "rejected", "unknown"], "description": "Monthly membership in the complete all-report population, never inferred from this response's pagination or this report's revisions. Omitted for protected readers and on classification errors."},
+          "upside_bp": {"type": "integer", "format": "int64", "description": "(terminal minus S0) / S0 in basis points, truncated toward zero. Absent without usable inputs or on integer overflow."},
+          "horizon_std": {"type": "boolean"},
+          "horizon_end": {"type": "string", "format": "date"},
+          "baseline_check": {"type": "string", "enum": ["pending", "match", "mismatch", "refused", "refused_final"]},
+          "baseline_emitted_fen": {"type": "integer", "format": "int64"},
+          "baseline_as_of": {"type": "string"},
+          "baseline_source": {"type": "string"},
+          "s0_date": {"type": "string", "format": "date"},
+          "s0_fen": {"type": "integer", "format": "int64"},
+          "body_changed": {"type": "boolean"},
+          "decision_status": {"type": "string"},
+          "decision_quality": {"type": "string"},
+          "probability_method": {"type": "string"},
+          "policy_version": {"type": "string"},
+          "errors": {"type": "array", "items": {"type": "object"}},
+          "payload": {"type": "string", "description": "Original JSON as text, only when explicitly requested and permitted."},
+          "claims": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadClaim"}},
+          "marks": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadMark"}}
+        }
+      },
+      "PredictionReadEdition": {
+        "type": "object",
+        "required": ["report_id", "set_id", "version", "cohort", "url"],
+        "properties": {
+          "report_id": {"type": "integer", "format": "int64", "description": "The sibling edition's report."},
+          "set_id": {"type": "integer", "format": "int64", "description": "The accepted set of that edition the link stands for."},
+          "version": {"type": "string", "description": "The written form (edition) of that report."},
+          "cohort": {"type": "string", "description": "The set's receipt month, YYYY-MM."},
+          "url": {"type": "string", "description": "Reading-page path that opens that edition's report at its forecast panel."}
+        }
+      },
+      "PredictionReadResponse": {
+        "type": "object",
+        "required": ["ok", "sets", "settlement_paused"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "sets": {"type": "array", "maxItems": 200, "items": {"$ref": "#/components/schemas/PredictionReadSet"}},
+          "settlement_paused": {"type": "boolean", "description": "True when the evaluator is off, in dry mode, or has an unknown mode. This notice is separate from the historical phase and never changes stored outcomes."}
+        }
+      },
+      "ReportPredictionReadResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/PredictionReadResponse"},
+          {"type": "object", "properties": {
+            "display_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Latest accepted set matching the current report body; otherwise latest accepted set. Zero means none. Omitted if identity selection fails. A nonzero selected set is retained within the 200-set detail cap."},
+            "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."},
+            "sibling": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions only. Present when this report has no accepted set of its own and another readable edition of the same symbol, date and report type has one. Never present for a persistent query token."},
+            "counted_edition": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions that may see membership only (internal all readers and administrators). The readable edition whose accepted set is this analysis's monthly member when that is not this report's own set. Omitted for own-scoped and external readers."}
+          }}
+        ]
+      },
       "PredictionPayload": {
         "type": "object",
         "required": ["schema"],
@@ -2003,7 +2109,7 @@
         "operationId": "reportPredictions",
         "summary": "一份报告的结构化预测及其结算结果",
         "x-scope": "query",
-        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
+        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚，最多 200 集，被选为展示和计入统计的两集一定保留。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。display_set_id 跟随报告当前正文；counted_set_id 是该报告在统一的全体月度分类中的计入集，对受保护的读者或分类出错时省略。membership 与结算阶段是读取时才算出的元数据，settlement_paused 是独立的评估器提示。某个检查点的 expected 为 true 时，not_before 是由核实过的交易所休市安排推出的预计日期，不是已观察到的交易日；没有该标记时，显示的日期仍只是不早于该日的下限。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回，并可附带指向同一分析另一写成形式的 sibling 与 counted_edition 链接；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "id",
@@ -2028,16 +2134,17 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, up to 200; the sets selected for display and for the group statistics are always retained. Each carries its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `display_set_id` follows the report's current body. `counted_set_id` is this report's monthly member from the shared complete-population classifier, and is omitted for protected readers and on classification errors. Membership and settlement phases are read-time metadata; `settlement_paused` is a separate evaluator notice. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access and may also carry `sibling` and `counted_edition` links to another written form of the same analysis; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
           },
           "zh-TW": {
             "summary": "一份報告的結構化預測及其結算結果",
-            "description": "返回該報告歷次入庫寫入的預測集（含被拒、缺席、回測），按寫入時間從早到晚。每集帶其預測項與各檢查點的結算結果。可見性跟隨報告本身的閱讀許可權：讀不到的報告返回 404，而不是空列表。counted_set_id 是參與分組統計的那一集（每個「股票×月份」取最早被接受的一集），0 表示該報告沒有參與統計的集。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
+            "description": "返回該報告歷次入庫寫入的預測集（含被拒、缺席、回測），按寫入時間從早到晚，最多 200 集，被選為展示和計入統計的兩集一定保留。每集帶其預測項與各檢查點的結算結果。可見性跟隨報告本身的閱讀許可權：讀不到的報告返回 404，而不是空列表。display_set_id 跟隨報告當前正文；counted_set_id 是該報告在統一的全體月度分類中的計入集，對受保護的讀者或分類出錯時省略。membership 與結算階段是讀取時才算出的後設資料，settlement_paused 是獨立的評估器提示。某個檢查點的 expected 為 true 時，not_before 是由核實過的交易所休市安排推出的預計日期，不是已觀察到的交易日；沒有該標記時，顯示的日期仍只是不早於該日的下限。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回，並可附帶指向同一分析另一寫成形式的 sibling 與 counted_edition 連結；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReportPredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"
@@ -2164,7 +2271,8 @@
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"

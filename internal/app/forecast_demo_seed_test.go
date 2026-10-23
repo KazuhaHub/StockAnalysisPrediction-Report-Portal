@@ -121,6 +121,11 @@ func writeForecastDemoDB(t *testing.T, output string) (info forecastDemoInfo, er
 		return info, err
 	}
 	defer st.Close()
+	// The preview stands for an upgraded database: own-scoped accounts read purge history from the
+	// ownership evidence table and are refused without it.
+	if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+		return info, err
+	}
 	s := &Server{st: st, cfg: &config.Config{SecretKey: hex.EncodeToString(secret)}}
 	// Every ingest carries a name, so this writer has no name-provider dependency.
 	s.names = LoadNames(filepath.Dir(output), st)

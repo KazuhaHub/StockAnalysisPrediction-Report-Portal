@@ -12,6 +12,9 @@ import (
 func seedForecastReader(t *testing.T, s *Server, user, scope string, external bool) int64 {
 	t.Helper()
 	mustAddUser(t, s, user, false)
+	if scope == scopeOwn {
+		ensurePurgeEvidenceTable(t, s.st)
+	}
 	ou := seedOU(t, s.st, 0, scope)
 	if _, err := s.st.exec("UPDATE users SET group_id=?,restricted=? WHERE username=?", ou, boolInt(external), user); err != nil {
 		t.Fatal(err)
@@ -53,6 +56,7 @@ func TestReaderAndAdminGetIdenticalAllRecords(t *testing.T) {
 
 func TestReaderGroupsOwnUsesIsolatedCache(t *testing.T) {
 	s := newV1Server(t)
+	s.forecastEval.now = func() time.Time { return dateAtClose("2026-10-22") }
 	ou := seedForecastReader(t, s, "reader", scopeOwn, false)
 	sampleMembers(t, s, 32, nil)
 	if _, err := s.st.exec("UPDATE prediction_sets SET attributed_ou=?", ou); err != nil {

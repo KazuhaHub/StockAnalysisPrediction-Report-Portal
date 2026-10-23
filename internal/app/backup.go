@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -353,10 +354,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// because the restore's own transaction is about to delete the `meta` rows that hold them
 	// (§3.3). `forecast_population_from` is write-once and must never move silently, so a dump that
 	// disagrees with the live value is refused; a dump that lacks it inherits the live one.
-	prior := restorePrior{
-		populationFrom: s.populationFromRow(),
-		autoMode:       s.GetSetting(setForecastAuto, ""),
-	}
+	prior := s.captureRestorePrior()
 
 	rep := &RestoreReport{
 		Rows:     map[string]int64{},
@@ -434,6 +432,17 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 type restorePrior struct {
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
+	readerStage    string // the live reading stage as the readers resolve it: off, card or full
+}
+
+// captureRestorePrior reads the live values a restore must reconcile. It runs on the pool, before the
+// restore transaction opens.
+func (s *Store) captureRestorePrior() restorePrior {
+	return restorePrior{
+		populationFrom: s.populationFromRow(),
+		autoMode:       s.GetSetting(setForecastAuto, ""),
+		readerStage:    storedForecastReaderStage(s.poolExec()),
+	}
 }
 
 // populationFromRow reads the raw stored ledger start without going through GetSetting's parse, so a
@@ -523,6 +532,9 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 	if err := applyRestoreEvaluator(e, prior.autoMode); err != nil {
 		return err
 	}
+	if err := applyRestoreReaderStage(e, prior.readerStage); err != nil {
+		return err
+	}
 	// A restored older dump brings every forecast_scope back NULL; the Default OU is normalised to
 	// none here, on the same transaction, exactly as at boot (P38).
 	if err := ensureDefaultForecastScope(e); err != nil {
@@ -550,7 +562,7 @@ func applyRestoreEvaluator(e migExec, live string) error {
 		if err := e.setSetting(setForecastAuto, final); err != nil {
 			return fmt.Errorf("cap the evaluator mode through the restore: %w", err)
 		}
-		if err := auditRestoreChange(e, map[string]any{"from": dump, "to": final}); err != nil {
+		if err := auditRestoreChange(e, AuditForecastAuto, setForecastAuto, map[string]any{"from": dump, "to": final}); err != nil {
 			return err
 		}
 	}
@@ -560,13 +572,68 @@ func applyRestoreEvaluator(e migExec, live string) error {
 		if err := e.setSetting(setForecastAuto, forecastModeDry); err != nil {
 			return fmt.Errorf("cap the evaluator mode at dry: %w", err)
 		}
-		if err := auditRestoreChange(e, map[string]any{
+		if err := auditRestoreChange(e, AuditForecastAuto, setForecastAuto, map[string]any{
 			"from": forecastModeOn, "to": forecastModeDry, "reason": "restore_gates_empty",
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// applyRestoreReaderStage applies §3.3's rule for the reading stage: a restore never raises it. The
+// result is the lower of the dump and the live database in off < card < full. Both sides are
+// resolved the way the readers resolve them (see storedForecastReaderStage). A real change from the
+// restored value leaves an audit row attributed to `system`, so an operator can see that the stage
+// did not survive the restore as dumped.
+func applyRestoreReaderStage(e migExec, live string) error {
+	dump := storedForecastReaderStage(e)
+	final := lowerForecastReaderStage(dump, live)
+	if final == dump {
+		return nil
+	}
+	if err := e.setSetting(setForecastReader, final); err != nil {
+		return fmt.Errorf("cap the reading stage through the restore: %w", err)
+	}
+	return auditRestoreChange(e, AuditForecastReader, setForecastReader, map[string]any{"from": dump, "to": final})
+}
+
+// storedForecastReaderStage is the stage the stored forecast_reader row stands for, resolved as the
+// readers resolve it: no row or a NULL is the default (card), a stored value is itself when it is a
+// stage and off otherwise. A stored empty string is therefore off, not unset. A read that fails is
+// off as well, because a restore that cannot see the stage must not guess a higher one.
+func storedForecastReaderStage(e migExec) string {
+	var v sql.NullString
+	switch err := e.queryRow(`SELECT v FROM meta WHERE k=?`, setForecastReader).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "card"
+	case err != nil:
+		return "off"
+	case !v.Valid:
+		return "card"
+	case validForecastReaderStage(v.String):
+		return v.String
+	default:
+		return "off"
+	}
+}
+
+// lowerForecastReaderStage orders off < card < full.
+func lowerForecastReaderStage(a, b string) string {
+	rank := func(stage string) int {
+		switch stage {
+		case "full":
+			return 2
+		case "card":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(a) <= rank(b) {
+		return a
+	}
+	return b
 }
 
 // lowerForecastMode orders off < dry < 1.
@@ -589,14 +656,14 @@ func lowerForecastMode(a, b string) string {
 
 // auditRestoreChange writes the restore's own audit row through the restore transaction, so a
 // rolled-back restore does not leave a claim about a change that did not happen.
-func auditRestoreChange(e migExec, detail map[string]any) error {
+func auditRestoreChange(e migExec, action, key string, detail map[string]any) error {
 	body, err := json.Marshal(detail)
 	if err != nil {
 		return err
 	}
 	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,?,?,?,?,?,?,?)`, time.Now().UTC().Format(time.RFC3339), "system", 0,
-		AuditForecastAuto, "settings", setForecastAuto, string(body), "")
+		action, "settings", key, string(body), "")
 	return err
 }
 

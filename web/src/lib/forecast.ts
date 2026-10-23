@@ -113,25 +113,38 @@ export function checkpointKey(cp: ForecastCheckpoint): string {
  * for the official record, so mode, official and the chosen range travel with the file itself. A
  * spreadsheet loses everything else about where the numbers came from.
  */
-export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string): string {
+export interface ForecastCsvReader {
+  population: string
+  disclaimer: string
+  /** External all readers must never export sample-size/count columns. */
+  hideCounts: boolean
+}
+
+export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, reader?: ForecastCsvReader): string {
   const lines = [
     `# mode=${resp.mode}`,
     `# official=${resp.official}`,
     `# range=${resp.range.from}..${resp.range.to}`,
     `# group=${resp.range.group ?? ''}`,
     `# checkpoints=${resp.checkpoints.join('|')}`,
-    `# unrecorded=${resp.unrecorded}`,
+    ...(!reader ? [`# unrecorded=${resp.unrecorded}`] : []),
     `# generated_at=${generatedAt}`,
   ]
+  if (reader) {
+    const line = (value: string) => value.replace(/[\r\n]/g, ' ')
+    lines.push(`# disclaimer=${line(reader.disclaimer)}`, `# population=${line(reader.population)}`)
+    for (const group of resp.groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
+  }
   const header = ['group', 'start', 'end', 'checkpoint', 'state', 'metric', 'value', 'null', 'p', 'q', 'n']
   const rows: (string | number)[][] = []
   for (const g of resp.groups) {
+    const firstRow = rows.length
     for (const cp of resp.checkpoints) {
       const c = g.cells[cp]
       if (!c) continue
       if (c.state !== 'mature') {
         // One row for the state, so a reader sees why the cell is blank rather than a missing row.
-        rows.push([g.label, g.start, g.end, cp, c.state, '', '', '', '', '', c.n ?? c.total ?? ''])
+        rows.push([g.label, g.start, g.end, cp, c.state, '', '', '', '', '', reader ? '' : c.n ?? c.total ?? ''])
         continue
       }
       const base = [g.label, g.start, g.end, cp, c.state]
@@ -154,6 +167,20 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string): 
       if (c.band !== undefined) rows.push([...base, 'band', c.band, '', '', '', c.band_n ?? n])
       if (c.calib !== undefined) rows.push([...base, 'calib', c.calib, '', '', '', c.calib_n ?? n])
     }
+    if (reader) {
+      for (let index = firstRow; index < rows.length; index++) {
+        if (reader.hideCounts) {
+          // Do not trust absence in the response: remove the count even if it is supplied.
+          rows[index].pop()
+          rows[index].push(rows[index][4] === 'mature' ? 'n >= 30' : '')
+        }
+        rows[index].push(resp.mode, String(g.official), g.bench)
+      }
+    }
+  }
+  if (reader) {
+    if (reader.hideCounts) header[header.length - 1] = 'publication_gate'
+    header.push('mode', 'official', 'bench')
   }
   return `${lines.join('\n')}\n${toCSV(header, rows)}\n`
 }

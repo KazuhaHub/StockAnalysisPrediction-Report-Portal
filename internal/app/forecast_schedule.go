@@ -3,8 +3,9 @@ package app
 // Checkpoint scheduling (P1, ADR 0029 §4).
 //
 // This file is the ONE statement of the checkpoint arithmetic. The evaluator calls it with the
-// benchmark's COMPLETED sessions; the read path uses a verified exchange-schedule projection or
-// a weekday lower bound when coverage is missing. Neither is observed settlement evidence. Nothing else computes a
+// benchmark's COMPLETED sessions; the read path prefers a published completed-calendar snapshot,
+// otherwise a verified exchange-schedule estimate or a weekday lower bound. Estimates are never
+// observed settlement evidence. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
 // S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.
@@ -278,63 +279,108 @@ func refusalClassOf(code string) string {
 	return refusalSource
 }
 
-// annotateReadPhases uses the exchange closure schedule for expected dates and weekday lower
-// bounds for intervals without verified coverage. It never fetches a vendor calendar.
-//
-// The vocabulary is deliberately small, and `retrying` is only ever reached with evidence: a mark
-// that has never recorded a failed attempt is waiting, not failing.
+const (
+	predPhaseWaitingS0 = "waiting_s0"
+	predPhaseWaiting   = "waiting"
+	predPhaseSettling  = "settling"
+	predPhaseRetrying  = "retrying"
+	predPhaseOverdue   = "overdue"
+	predPhaseResolved  = "resolved"
+	predPhaseFinal     = "final"
+)
+
+// annotateReadPhases is the conservative fallback without a published completed calendar.
 func annotateReadPhases(sets []PredictionSet, now time.Time) {
+	annotateReadPhasesWithCalendars(sets, now, nil)
+}
+
+// Reads never fetch a calendar. Published completed sessions and recorded due sessions are
+// evidence; scheduled exchange closures qualify estimates but never shorten the overdue deadline.
+func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calendars map[string][]string) {
 	for i := range sets {
 		set := &sets[i]
 		for j := range set.Marks {
 			set.Marks[j].Phase, set.Marks[j].NotBefore, set.Marks[j].Expected = "", "", false
+			switch set.Marks[j].Status {
+			case markResolved:
+				set.Marks[j].Phase = predPhaseResolved
+			case markRefusedFinal:
+				set.Marks[j].Phase = predPhaseFinal
+			}
 		}
 		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
 		if !ok {
 			continue
 		}
+		madeOn := madeAt.In(chinaZone).Format("2006-01-02")
 		baseline, baselineExpected := predReadProjection("d5", madeAt, set.HorizonStd, set.S0Date)
 		s0 := set.S0Date
 		s0Projected := s0 == ""
 		if s0Projected {
 			s0 = baseline.S0
 		}
+		cal := calendars[set.BenchCode]
+		calendarUsable := len(cal) > 0 && cal[0] <= madeOn && (set.S0Date == "" || containsDate(cal, set.S0Date))
+		projectionS0 := set.S0Date
+		if calendarUsable && s0Projected {
+			if observed, known := predS0(madeAt, cal); known {
+				s0, projectionS0, baselineExpected = observed, observed, false
+			}
+		}
 		s0Ready := s0 != "" && readSessionCompleted(s0, now)
-		today := now.In(chinaZone).Format("2006-01-02")
+		weekdays := predProjectSessions(shiftDays(madeOn, -1), 400)
 		for j := range set.Marks {
 			m := &set.Marks[j]
-			m.Expected = false
-			switch m.Status {
-			case markResolved:
-				m.Phase = "resolved"
-				continue
-			case markRefusedFinal:
-				m.Phase = "final"
+			if m.Status == markResolved || m.Status == markRefusedFinal {
 				continue
 			}
 			if s0Projected && !s0Ready {
-				m.Phase, m.NotBefore = "waiting_s0", s0
-				m.Expected = baselineExpected
+				m.Phase, m.NotBefore, m.Expected = predPhaseWaitingS0, s0, baselineExpected
 				continue
 			}
-			sch, expected := predReadProjection(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date)
+			sch, expected := predReadProjection(m.Checkpoint, madeAt, set.HorizonStd, projectionS0)
+			exact := false
+			if calendarUsable {
+				actual := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date, cal)
+				if actual.Known && actual.Due != "" {
+					sch, exact, expected = actual, true, false
+				}
+			}
 			if sch.Due == "" {
-				m.Phase = "waiting"
+				m.Phase = predPhaseWaiting
 				continue
 			}
-			if today < sch.Due {
-				m.Phase, m.NotBefore = "waiting", sch.Due
-				m.Expected = expected
+			// An observed attempt may contradict a scheduled closure. Validate against the
+			// weekday lower bound, or an already observed calendar due, not the estimate.
+			evidenceBound := sch.Due
+			if !exact {
+				evidenceBound = predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, projectionS0, weekdays).Due
+			}
+			if validReportDate(m.SessionDate) && evidenceBound != "" && m.SessionDate >= evidenceBound {
+				sch.Due, exact, expected = m.SessionDate, true, false
+			}
+			due := dateAtClose(sch.Due)
+			if !exact {
+				// A better display estimate cannot postpone the conservative state clock.
+				due = dateAtClose(evidenceBound)
+			}
+			if due.IsZero() || now.Before(due) {
+				m.Phase, m.NotBefore, m.Expected = predPhaseWaiting, sch.Due, expected
 				continue
 			}
-			if m.SessionDate != "" {
-				// A recorded due session means the evaluator tried and deferred. That is the only
-				// evidence that makes "retrying" true.
-				m.Phase, m.NotBefore = "retrying", ""
-				continue
+			deadline := 21 * 24 * time.Hour
+			if exact {
+				deadline = 48 * time.Hour
 			}
-			m.Phase, m.NotBefore = "waiting", sch.Due
-			m.Expected = expected
+			switch {
+			case !now.Before(due.Add(deadline)):
+				m.Phase = predPhaseOverdue
+			case validReportDate(m.SessionDate) && m.SessionDate >= sch.Due:
+				m.Phase = predPhaseRetrying
+			default:
+				m.Phase = predPhaseSettling
+			}
+			m.NotBefore, m.Expected = sch.Due, expected
 		}
 	}
 }

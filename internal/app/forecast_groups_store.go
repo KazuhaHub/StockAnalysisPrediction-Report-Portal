@@ -35,6 +35,7 @@ type groupSet struct {
 
 	HorizonStd bool
 	S0Fen      *int64
+	S0Date     string
 
 	Marks map[string]PredictionMark
 
@@ -58,7 +59,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 	}
 	rows, err := s.query(`SELECT ps.id, ps.report_id, ps.symbol, ps.report_date, ps.state,
 			ps.made_at, ps.made_on, ps.cohort, ps.bench_code,
-			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen,
+			ps.decision_quality, ps.base_check, ps.horizon_std, ps.s0_fen, ps.s0_date,
 			ps.policy_version, ps.probability_method, ps.probability_transform
 		FROM prediction_sets ps
 		WHERE ps.rtype = ? AND ps.made_on >= ? AND ps.made_on <= ?`+where+`
@@ -79,7 +80,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 		)
 		if err := rows.Scan(&gs.ID, &reportID, &gs.Symbol, &gs.ReportDate, &gs.State, &gs.MadeAt, &gs.MadeOn,
 			&gs.Cohort, &gs.BenchCode,
-			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0,
+			&gs.DecisionQuality, &gs.BaseCheck, &horizonStd, &s0, &gs.S0Date,
 			&gs.PolicyVersion, &gs.ProbabilityMethod, &gs.ProbabilityTransform); err != nil {
 			return nil, err
 		}
@@ -194,10 +195,19 @@ func (s *Store) forecastEarliestMadeOn(rtype string) (string, error) {
 	return s.forecastEarliestMadeOnForPopulation(rtype, forecastPopulation{Key: "all"})
 }
 
+// forecastEarliestMadeOnForPopulation is the first day a population holds a set on. An own population
+// does not count sets inside a month retention has emptied: a set written after the purge is filtered
+// from every read, and letting it start the calendar would leave an empty leading month that a reader
+// who is not told about the purge could only explain by it. The months the population is told about
+// are added back by the caller. The all population is unchanged, because every purged month is
+// already added back for it.
 func (s *Store) forecastEarliestMadeOnForPopulation(rtype string, pop forecastPopulation) (string, error) {
 	filter, args := forecastPopulationFilter(pop)
 	if pop.OUs != nil && len(pop.OUs) == 0 {
 		return "", nil
+	}
+	if pop.OUs != nil {
+		filter += ` AND NOT EXISTS (SELECT 1 FROM prediction_purges pp WHERE pp.rtype = ps.rtype AND pp.cohort = ps.cohort)`
 	}
 	var v sql.NullString
 	if err := s.queryRow(`SELECT MIN(ps.made_on) FROM prediction_sets ps WHERE ps.rtype = ?`+filter, append([]any{rtype}, args...)...).Scan(&v); err != nil {
@@ -214,7 +224,7 @@ type reportKindName struct {
 	Name string
 }
 
-func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
+func (s *Store) reportKindsFor(ids []int64, sc *ownerScope) (map[int64]reportKindName, error) {
 	uniq := make([]int64, 0, len(ids))
 	seen := map[int64]bool{}
 	for _, id := range ids {
@@ -227,8 +237,13 @@ func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
 	if len(uniq) == 0 {
 		return out, nil
 	}
-	rows, err := s.query(`SELECT id, COALESCE(kind,''), COALESCE(name,'') FROM reports WHERE id IN (`+
-		placeholders(len(uniq))+`)`, int64Args(uniq)...)
+	query := `SELECT r.id, COALESCE(r.kind,''), COALESCE(r.rtype,''), COALESCE(r.name,'') FROM reports r WHERE r.id IN (` + placeholders(len(uniq)) + `)`
+	args := int64Args(uniq)
+	if where, more := sc.where("r."); where != "" {
+		query += " AND " + where
+		args = append(args, more...)
+	}
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,9 +251,11 @@ func (s *Store) reportKindsFor(ids []int64) (map[int64]reportKindName, error) {
 	for rows.Next() {
 		var id int64
 		var v reportKindName
-		if err := rows.Scan(&id, &v.Kind, &v.Name); err != nil {
+		var rtype string
+		if err := rows.Scan(&id, &v.Kind, &rtype, &v.Name); err != nil {
 			return nil, err
 		}
+		v.Kind = repKind(Rep{Kind: v.Kind, RType: rtype})
 		out[id] = v
 	}
 	return out, rows.Err()

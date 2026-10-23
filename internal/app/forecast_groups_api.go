@@ -131,6 +131,25 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 
 	resp.Official = mode == "month"
+	purges, err := s.loadForecastPurgeView(pop)
+	if err != nil {
+		writeForecastPurgeViewError(w, err)
+		return
+	}
+	cacheTag := ""
+	if resp.Official {
+		earliest := forecastEarliestWithPurges(loadFrom, rtype, purges.disclosed)
+		periods = monthlyPeriods(earliest, now)
+		if len(periods) > 0 {
+			loadFrom, loadTo = periods[0].Start, periods[len(periods)-1].End
+			resp.Range.From, resp.Range.To = loadFrom, loadTo
+		}
+	} else {
+		resp.ExcludedMonths = forecastExcludedMonths(rtype, loadFrom, loadTo, purges.disclosed)
+		// The cache identity follows every month that removes sets, disclosed or not: a cell cached by
+		// another process before an undisclosed purge must not answer a range that now excludes it.
+		cacheTag = forecastPurgeCacheTag(forecastExcludedMonths(rtype, loadFrom, loadTo, purges.filter))
+	}
 	today := now.In(chinaZone).Format("2006-01-02")
 
 	var sets []*groupSet
@@ -143,9 +162,27 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	}
 
 	populationFrom, _ := s.st.ForecastPopulationFrom()
+	sets = forecastWithoutPurgedSets(sets, rtype, purges.filter)
+	active := make([]forecastPeriod, 0, len(periods))
+	for _, p := range periods {
+		if resp.Official {
+			if _, disclosed := purges.disclosed[[2]string{rtype, p.Start[:7]}]; disclosed {
+				continue // listed below as a purged group
+			}
+			// A month retention emptied that this population is not told about stays in the calendar,
+			// computed over the sets that survived the site-wide filter, which is none. It is then
+			// an ordinary month with no sets, and no gap tells the reader it was purged.
+			p.cacheTag = purges.undisclosedTag(rtype, p)
+		}
+		active = append(active, p)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.forecastComputeLimits().Wait)
 	defer cancel()
-	resp.Groups, err = s.buildForecastGroupsRequest(ctx, periods, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease)
+	var readAt *time.Time
+	if !d.External || d.Scope != scopeAll {
+		readAt = &now
+	}
+	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, cacheTag, readAt)
 	if err != nil {
 		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			w.Header().Set("Retry-After", "1")
@@ -154,6 +191,22 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 			jsonErrorCode(w, http.StatusInternalServerError, "forecast_failed", "forecast computation failed")
 		}
 		return
+	}
+	if resp.Official {
+		for _, p := range periods {
+			if at, purged := purges.disclosed[[2]string{rtype, p.Start[:7]}]; purged {
+				g := forecastGroup{Label: p.Label, Start: p.Start, End: p.End, Official: true, PurgedAt: at,
+					Cells: make(map[string]*forecastCell, len(predCheckpoints))}
+				for _, cp := range predCheckpoints {
+					g.Cells[cp] = &forecastCell{State: "purged"}
+				}
+				resp.Groups = append(resp.Groups, g)
+			}
+		}
+		sort.SliceStable(resp.Groups, func(i, j int) bool { return resp.Groups[i].Start < resp.Groups[j].Start })
+	}
+	if readAt != nil {
+		resp.ForecastGroupsMetadata = s.forecastGroupsMetadataFor(sets, resp.Groups, now, d)
 	}
 	if adminAlias {
 		writeJSON(w, resp)
@@ -179,6 +232,16 @@ func (s *Server) buildForecastGroupsForPopulation(periods []forecastPeriod, sets
 }
 
 func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease) ([]forecastGroup, error) {
+	return s.buildForecastGroupsRequestWithCacheTag(ctx, periods, sets, rtype, today, official, populationFrom, pop, generation, lease, "")
+}
+
+// Retention exclusions affect cache and flight identity, never the statistical population seed.
+func (s *Server) buildForecastGroupsRequestWithCacheTag(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease, cacheTag string) ([]forecastGroup, error) {
+	return s.buildForecastGroupsRequestWithReadTime(ctx, periods, sets, rtype, today, official, populationFrom, pop, generation, lease, cacheTag, nil)
+}
+
+// Dynamic explanations are added after scoring and never stored in the mature-cell memo.
+func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, periods []forecastPeriod, sets []*groupSet, rtype, today string, official bool, populationFrom time.Time, pop forecastPopulation, generation uint64, lease *forecastQueryLease, cacheTag string, readAt *time.Time) ([]forecastGroup, error) {
 	if s.forecastGeneration() != generation {
 		return nil, errForecastBusy
 	}
@@ -231,7 +294,7 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 		sort.Strings(codes)
 		for _, b := range codes {
 			plans = append(plans, plan{
-				period: forecastPeriod{Start: p.Start, End: p.End, Label: p.Label + " · " + b},
+				period: forecastPeriod{Start: p.Start, End: p.End, Label: p.Label + " · " + b, cacheTag: p.cacheTag},
 				bench:  b,
 				in:     byBench[b],
 			})
@@ -243,14 +306,17 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 		cp      string
 		start   string
 		end     string
+		tag     string
 		bench   string
 		members []*groupSet
 		pending []*groupSet
 	}
 	groups := make([]forecastGroup, len(plans))
+	membersByGroup, pendingByGroup := make([][]*groupSet, len(plans)), make([][]*groupSet, len(plans))
 	jobs := make([]job, 0, len(plans)*len(predCheckpoints))
 	for i, pl := range plans {
 		members, pending, cov := forecastMembership(pl.in, populationFrom, pl.bench)
+		membersByGroup[i], pendingByGroup[i] = members, pending
 		groups[i] = forecastGroup{
 			Label:    pl.period.Label,
 			Start:    pl.period.Start,
@@ -262,7 +328,7 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 		}
 		for _, cp := range predCheckpoints {
 			jobs = append(jobs, job{gi: i, cp: cp, start: pl.period.Start, end: pl.period.End,
-				bench: pl.bench, members: members, pending: pending})
+				tag: pl.period.cacheTag, bench: pl.bench, members: members, pending: pending})
 		}
 	}
 	if len(jobs) == 0 {
@@ -287,7 +353,7 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 		go func() {
 			defer wg.Done()
 			for j := range ch {
-				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp)
+				key := pop.cellKey(rtype, j.start, j.end, j.bench, j.cp) + cacheTag + j.tag
 				c, gen := s.cachedForecastCell(key)
 				if gen != generation {
 					out <- result{gi: j.gi, cp: j.cp, err: errForecastBusy}
@@ -340,11 +406,19 @@ func (s *Server) buildForecastGroupsRequest(ctx context.Context, periods []forec
 		close(out)
 	}()
 	var firstErr error
+	var readCalendars map[string][]string
+	if readAt != nil {
+		readCalendars = s.forecastEval.readCalendarSnapshot()
+	}
 	for r := range out {
 		if r.err != nil && firstErr == nil {
 			firstErr = r.err
 		}
-		groups[r.gi].Cells[r.cp] = r.cell
+		cell := r.cell
+		if readAt != nil && r.err == nil {
+			cell = forecastCellWithPendingReasons(cell, membersByGroup[r.gi], pendingByGroup[r.gi], r.cp, *readAt, readCalendars)
+		}
+		groups[r.gi].Cells[r.cp] = cell
 	}
 	if s.forecastGeneration() != generation {
 		return nil, errForecastBusy
