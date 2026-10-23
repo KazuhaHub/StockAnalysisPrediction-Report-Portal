@@ -19,7 +19,8 @@ export interface Me {
   /** The account must set up a second factor before it can use the portal (see the enrolment gate). */
   must_enroll_2fa?: boolean
   // Navigation hint only; forecast routes always resolve current policy on the server.
-  forecast?: { scope: 'all' | 'own' | 'none'; external: boolean }
+  // `ou` names the OU an `own` reader's population is rooted at; it is absent for the other scopes.
+  forecast?: { scope: ForecastScope; external: boolean; ou?: string }
   forecast_reader?: 'off' | 'card' | 'full'
 }
 
@@ -487,6 +488,12 @@ export interface UserGroupRow {
   passkey_enroll?: boolean | null
   /** Members of this OU must have a second factor. Sticky down the tree. */
   require_2fa?: boolean | null
+  // Forecast verification access, resolved by the server. forecast_scope is this OU's own value
+  // (null = inherit the parent OU); the other two say what applies to its members and which OU
+  // decided it. Absent on a server that predates the access model.
+  forecast_scope?: ForecastScope | null
+  forecast_scope_effective?: ForecastScope
+  forecast_scope_source?: number
 }
 
 // Per-OU run allow-list matrix (ADR 0022 R3): which workflows a group may run, on which surfaces.
@@ -1572,6 +1579,9 @@ export interface ReportPredictions {
   settlement_paused?: boolean
 }
 
+/** Who may read the forecast record from an OU (user_groups.forecast_scope). */
+export type ForecastScope = 'all' | 'own' | 'none'
+
 export type ForecastMode = 'month' | 'custom'
 export type ForecastGrouping = 'week' | 'month' | 'quarter' | 'all'
 export type ForecastMetric = 'spread' | 'ic' | 'hit' | 'fill'
@@ -1594,6 +1604,11 @@ export interface ForecastCoverage {
 
 export interface ForecastCell {
   state: 'open' | 'pending' | 'small' | 'mature' | 'purged'
+  /**
+   * An external reader with the all scope gets this instead of any count: the cell cleared the
+   * n >= 30 gate, but how many reports it holds would reveal the ledger's volume.
+   */
+  min_n_met?: boolean
   pending_reasons?: Partial<Record<NonNullable<PredictionMark['phase']> | 'unknown', number>>
   failed_cap_exceeded?: boolean
   not_before?: string
@@ -1644,7 +1659,8 @@ export interface ForecastGroup {
   purged_at?: string
   /** The index every member was frozen with (P4); a split custom range has one group per index. */
   bench: string
-  coverage: ForecastCoverage
+  /** Absent for an external reader with the all scope: coverage would reveal the ledger's volume. */
+  coverage?: ForecastCoverage
   cells: Record<ForecastCheckpoint, ForecastCell>
 }
 
@@ -1679,7 +1695,8 @@ export interface ForecastGroupsResponse {
   official: boolean
   range: { from: string; to: string; group?: ForecastGrouping }
   checkpoints: ForecastCheckpoint[]
-  unrecorded: number
+  /** Only the administrator alias carries this; the reader route never does. */
+  unrecorded?: number
   groups: ForecastGroup[]
   excluded_months?: ForecastPurgedMonth[]
 }
@@ -1716,10 +1733,42 @@ export interface ForecastMembersResponse {
   label: string
   start: string
   end: string
+  bench?: string
   checkpoint: ForecastCheckpoint
   state: string
   population?: 'scored' | 'all'
   members: ForecastMember[]
   purged_at?: string
   excluded_months?: ForecastPurgedMonth[]
+  /** The reader route pages by cursor; an external all reader gets no totals or counts at all. */
+  next_cursor?: string
+  n?: number
+  total?: number
+  resolved?: number
+  refused?: number
+  corp_action?: number
+}
+
+/** GET /api/admin/forecast/access: who can read the record, per OU, resolved by the server. */
+export interface ForecastScopeCounts {
+  all: number
+  own: number
+  none: number
+}
+
+export interface ForecastOUAccess {
+  id: number
+  forecast_scope: ForecastScope | null
+  forecast_scope_effective: ForecastScope
+  forecast_scope_source: number
+  external: boolean
+  counts: ForecastScopeCounts
+}
+
+export interface ForecastAccessOverview {
+  ok: boolean
+  preview: boolean
+  affected: number
+  counts: ForecastScopeCounts
+  groups: ForecastOUAccess[]
 }
