@@ -1505,7 +1505,11 @@ func (c *quoteCache) clear() quoteCacheStats {
 // quoteSourceInfo is one compiled-in source as the panel sees it, before the operator's order and
 // the health counters are laid over it.
 type quoteSourceInfo struct {
-	Name string
+	Name          string
+	Settled       []string
+	SettledShadow []string
+	CashDividends bool
+	ReportsKind   bool
 	// Markets is the UNION over the intervals — every market this source can say anything about.
 	Markets []string
 	// Daily and Intraday are the same claim split by what it is a claim ABOUT, because the union
@@ -1531,11 +1535,15 @@ func (c *quoteCache) describeSources() []quoteSourceInfo {
 	out := make([]quoteSourceInfo, 0, len(c.sources))
 	for _, src := range c.sources {
 		out = append(out, quoteSourceInfo{
-			Name:       src.name,
-			Markets:    src.marketIDs(),
-			Daily:      src.marketIDsFor(quoteIntervalDaily),
-			Intraday:   src.marketIDsFor(quoteIntervalIntraday),
-			Intraday5D: src.marketIDsFor(quoteIntervalIntraday5D),
+			Name:          src.name,
+			Settled:       src.marketIDsFor(quoteIntervalSettled),
+			SettledShadow: src.marketIDsFor(quoteIntervalSettledShadow),
+			CashDividends: src.cashDividends,
+			ReportsKind:   src.reportsKind,
+			Markets:       src.marketIDs(),
+			Daily:         src.marketIDsFor(quoteIntervalDaily),
+			Intraday:      src.marketIDsFor(quoteIntervalIntraday),
+			Intraday5D:    src.marketIDsFor(quoteIntervalIntraday5D),
 		})
 	}
 	return out

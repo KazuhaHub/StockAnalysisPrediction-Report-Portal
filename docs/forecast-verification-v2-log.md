@@ -805,3 +805,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vet, staticcheck and build. Test-only follow-up review confirmed the shared/reset breaker
   fixture and actual widened-lookback path with no findings. No golden fixture or frontend source
   changed. This closes the runtime-source checkpoint, not P23's remaining integration/CI gates.
+
+### P23 administrator source diagnostics checkpoint (2026-10-22, in progress)
+
+- Extended the existing admin quote response with per-source explicit settled/shadow market arrays
+  and cash-dividend/instrument-kind evidence flags. Added configured ledger-chain/primary/shadow
+  summaries and separate ledger-health records. Missing grants and unused health are arrays,
+  absent primary/shadow are empty strings, and unset health timestamps remain empty strings.
+- Configuration summaries describe enabled declarations across their markets; runtime still
+  checks the actual instrument and symbol predicate. They are not a substitute for readiness.
+  The runbook documents this distinction and the unchanged deployment/enablement boundary.
+- Red tests first showed all new diagnostics absent. Focused tests then passed (0.526 s), proving
+  shipped grants, disabled-primary omission, operator order, explicit shadow selection, display
+  wildcard exclusion, distinct display/ledger failure counters, health preservation on cache clear
+  and denial to a non-admin reader through the real session/admin wrappers.
+- This changes only quote-source backend files outside Apps PRs 141/142's listed file sets.
+  Frontend panel rendering, source-order audit/confirmation, readiness/alerts and the source ADR
+  remain outstanding. No schema, production, Apps branch or separately owned PR changed. Full
+  Go/Postgres, repeated race/static checks and independent review are pending at this checkpoint.

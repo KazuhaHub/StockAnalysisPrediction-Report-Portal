@@ -117,3 +117,26 @@ test alert, then switch on if that is intended.
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and
 the action taken. A settlement that was waited out (a vendor lag) is not an incident against the
 portal; a `store_failed` or a forced manual edit is.
+
+## Ledger-source diagnostics (P23 local implementation)
+
+The administrator-only `/api/admin/quote` response includes each source's explicit `settled` and
+`settledShadow` market arrays plus `cashDividends` and `reportsKind` evidence flags. Empty grants
+are empty arrays, not null. A display-only wildcard never becomes a ledger grant.
+
+Top-level `ledgerChain`, `ledgerPrimary` and `ledgerShadowPeer` summarize enabled declarations in
+operator order, with cash-dividend writers first. These are configuration diagnostics across the
+declared markets, not proof that every benchmark or stock is eligible: runtime additionally checks
+the actual market/code and the source's symbol predicate. An absent primary or shadow peer is an
+empty string. No shadow peer is advertised until it has an explicit enabled shadow grant.
+
+`ledgerHealth` is a separate array of source health records, with UTC RFC3339 timestamps and an
+empty string for an event that has not happened. It never overwrites the display health fields
+on `sources`. Clearing the display cache clears neither health history. Ledger refusals and caller
+cancellation do not count as vendor failures; three delivery/parser failures stop calls to that
+source for the current evaluator pass, preserving the actual failure rather than misreporting an
+absent configuration. A new pass resets its breaker, not the recorded diagnostic history.
+
+This contract describes the local P23 work, not a production rollout. Readiness item 6, watchdog
+integration, source-panel presentation and source-order confirmation remain separate integration
+work. Do not enable the evaluator on the strength of configuration diagnostics alone.
