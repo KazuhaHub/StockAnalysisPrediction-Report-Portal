@@ -519,8 +519,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
   fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
   This component preview does not replace P14's seeded full-page acceptance.
-- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
-  required CI on its final rebased head; independent review and full local checks passed.
+- Merged as #143 after full CI on `cb77ccba` (run 39766606158), including SQLite/Postgres,
+  race, web and container smoke/E2E checks. Independent review and full local checks passed.
+  Rollback: revert the PR; no data or schema changes.
 
 ### P39b precondition audit (2026-10-22)
 
@@ -540,6 +541,261 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### P26 — access implementation in progress (2026-10-22)
+
+- The pure resolver reads the account fields once and the strict OU index in one read-only
+  transaction (Postgres repeatable read). It denies missing/inactive accounts, errors, unknown
+  values and broken chains; nearest-value inheritance and external restrictions are independent
+  passes, so a leaf override cannot hide a restricted ancestor. No authorization result is cached.
+- `own` uses the leaf's actual parent-edge subtree; Default's appended inheritance role does not
+  make unrelated root OUs descendants. The loader filters `attributed_ou` before membership is
+  computed. Existing callers explicitly retain `all` until their request gates are integrated.
+- Population cache and seed helpers retain the exact `all` identity and add the sorted subtree
+  digest for `own`. Existing golden snapshots are unchanged. A deny population has a non-nil
+  empty OU slice, never the nil slice that means the whole ledger.
+- Tests were added first and failed for the missing resolver, population loader and identity
+  helpers. SQLite/Postgres tests pin attribution, account moves, subtree changes, account reads
+  and failure directions. Another OU's earlier set cannot displace the own population's member.
+  A deterministic Postgres interleaving starts and ends denied: using read-committed isolation
+  incorrectly mixed the old account and new tree and failed by granting `all`; repeatable read
+  passes, and the next request observes the committed account move.
+- This is a partial implementation, not an access rollout. No new reader route is registered yet.
+  Remaining: per-user limits and the limits form before route registration, route gates and full access matrix,
+  cookie/bridge prediction shaping, `/api/me`, OU
+  settings and preview, compute pools/flights/rate limits, count-only weekly adoption, StockPage
+  suppression and the complete security/regression suite. No schema change is included.
+- Checkpoint validation: build, vet, full SQLite Go suite, full Postgres app suite, staticcheck,
+  web typecheck, 120 Vitest files / 1006 tests and production web build passed. The existing
+  attribution source guard initially rejected the new reader; it now permits only that loader's
+  single read predicate and explicitly forbids writes there, retaining all original writer checks.
+  Independent adversarial review found no actionable issues in this foundation checkpoint.
+- Reader handler checkpoint: groups and members now share population-aware implementations with
+  the admin aliases, which retain their existing response shapes. Internal `all` records match
+  admin records except `unrecorded`; own period bounds, seeds and cached cells are isolated from
+  other OUs. The clock is injectable on both handlers.
+- External `all` shaping omits coverage, unrecorded and every denominator/count, recursively
+  including policy slices. Mature cells retain metrics and `min_n_met`; non-mature cells carry
+  state only. Copies protect cached cells from redaction. External `own` retains its own counts.
+  External members are report-readable only, omit purged/orphaned rows, and paginate after that
+  filtering with opaque cursors and no global total. Custom ranges and none scopes are refused
+  before query validation or ledger reads. Two refusal messages were added to all locales, with
+  zh-TW produced by OpenCC.
+- Review found the member drawer taking frozen matrix state but recomputing counts after a
+  backdated insert. It now takes frozen n/refused/corporate-action counts and reconstructs the
+  mature gate's resolved/total counts. Resolved and pending backdated inserts failed first;
+  regressions now pass, including a cell with both excluded outcome classes. Follow-up review
+  confirmed the issue closed. Existing golden snapshots remain unchanged.
+- Reader checkpoint validation: build, vet, full Go suite (SQLite), full Postgres app suite,
+  staticcheck, web typecheck, 120 Vitest files / 1006 tests and production web build passed.
+  The extra excluded-count regression also passed after the full Go runs were started.
+- Compute checkpoint: only uncached mature scoring occupies a slot. Official and exploratory
+  pools are independent; identical population/range/checkpoint requests share a detached flight.
+  An official follower promotes a queued exploratory flight rather than waiting behind its pool;
+  an already-running shared computation is not duplicated. Caller cancellation does not cancel
+  followers. Waiting is bounded, and scorer panics release capacity with a generic failure.
+- Groups handlers now return a retryable `forecast_busy` (503 plus `Retry-After`) rather than a
+  partial record when capacity is unavailable or the request wait expires. Cache hits and
+  non-mature gates bypass slots. The existing limits API reads/writes all five bounded settings;
+  omitted values remain unchanged, and invalid values are rejected before writes. The two
+  per-user settings are not yet enforced; their limiter and the web form remain pending.
+- Review identified a generation race when a purge occurred after loading sets but before worker
+  admission: stale inputs could acquire the new generation and refill the memo. The request now
+  captures generation before any population reads, carries it through flight/cache operations,
+  and rejects changed generations. A deterministic test deletes sets and purges at the existing
+  settings-read seam between loading and admission. A late-generation mutation failed by serving
+  stale HTTP 200; the fixed path answers 503, leaves the memo empty, and reloads on the next call.
+  Follow-up review confirmed the issue closed. No reader route has been registered yet.
+- The plan assumed an existing limits audit, but the security-save audit did not record limit
+  values. Resolved numeric before/after limits are now recorded under the existing `policy.change`
+  action with target `security/limits` immediately after a real change. This also covers the
+  existing partial-save behavior when a later policy block fails validation. Tests failed first
+  for missing values and for that unaudited partial-save path, then passed; unchanged saves do
+  not create another limits-change row. No secret or schema change is involved.
+- Compute checkpoint validation: build, vet, full SQLite Go suite and full Postgres app suite,
+  staticcheck, three targeted race repetitions, web typecheck, 120 Vitest files / 1006 tests and
+  production build passed. Final full Go tests with Postgres enabled passed again after the
+  limits-audit refinement. Independent review confirmed the generation and audit fixes; the
+  remaining P26 requirements above still block merge.
+- Matrix alignment correction: replaced unreliable percentage heights inside native table cells
+  with shared grid tracks and stretched flex cells. Mixed mature, pending, small and open states
+  now share the same top/bottom edges within each row, including wrapped text and exclusions.
+  Group labels and metadata wrap within the first track instead of overlapping a checkpoint.
+  Browser checks at 1100, 740 and 360 pixel container widths confirmed equal card rectangles
+  in all six fixture rows and no label overflow. Added a regression test; all 26 forecast
+  component/page tests, typecheck and production build passed. Independent review closed the
+  long-label overflow finding. Apps code and production state were not changed.
+- Reader governance checkpoint: custom/member request ceilings are per-user, independent fixed
+  windows. Zero removes only the frequency ceiling. A user may have one distinct custom query
+  in flight; identical followers share scoring but spend request budget. Detached flights retain
+  the query lease after an HTTP cancellation, releasing it only when the background work finishes.
+  Rate refusal is `forecast_rate_limited` (429 plus `Retry-After`). Existing admin aliases retain
+  their behavior. The security form now exposes all five bounded settings and preserves zero.
+- Registered the two reader statistics routes through the new `forecast_scope` gate annotation.
+  Route-table tests enforce session-only authentication, the enrolment wall, `none` denial, and
+  refusal of persistent and bridge bearer credentials. Positive all/own sessions receive records,
+  never `unrecorded`, and cannot use the admin aliases. Revoking scope after memo population
+  immediately refuses the same session. The tests first failed for the absent gate/registration;
+  the added positive fixture also required the signing configuration omitted by machine fixtures.
+- Independent limiter/settings/route review found no actionable issue. Full Go tests with
+  Postgres enabled passed; all 120 Vitest files / 1008 tests, typecheck, build, vet, staticcheck,
+  production web build and three targeted race repetitions passed. The final scope-revocation
+  extension passed separately after the full run. Remaining P26 work: prediction cookie/bridge
+  gates and shaping, me hints, OU editing/audit/preview, weekly count-only adoption, StockPage
+  suppression and the complete cross-surface access matrix. This draft is not ready to merge.
+- Reading-page hint checkpoint: `meJSON` now returns only `forecast: {scope, external}` from the
+  strict resolver, including the shared login payload. Auth context defaults a missing hint to
+  `none`. StockPage skips both prediction reads at `none`, immediately hides loaded forecasts on
+  revocation and suppresses only the server's 403 `forecast_unavailable`; other failures retain
+  the existing inline retry. Tests first failed for absent hints, unwanted reads and retry UI.
+- Review found that an enabled-to-enabled policy change (internal to external, or all to own)
+  could leave old data displayed. Both requests and result states now carry the full user/scope/
+  external identity; symbol history also carries its symbol. Derived values reject old-policy
+  results before effect cleanup. Dynamic regressions clear the old value, require both refetches,
+  and then show the new value. A mutation removing the full-identity effect dependencies failed
+  both regressions; restoring them passed. Independent follow-up review closed the finding.
+- Hint checkpoint validation: full Go suite with Postgres enabled, vet, staticcheck, web typecheck,
+  all 120 Vitest files / 1016 tests and production build passed. Server-side prediction gates and
+  bridge shaping remain pending; navigation suppression does not substitute for those gates.
+- Cookie prediction checkpoint: both SPA prediction reads and both v1 cookie reads now resolve
+  current forecast permission before ledger access. `none` answers `forecast_unavailable` after
+  the independent enrolment wall. External/scoped views return accepted, report-backed sets only;
+  the SQL filters precede LIMIT so newer rejected or orphaned sets cannot hide readable results.
+  Payload, errors and membership pointers are omitted. Persistent machine reads keep diagnostics,
+  rejected sets and orphaned history. New failure-direction tests first reproduced the old 200
+  for `none`, membership leakage and rejected rows consuming a one-row limit. Store controls run
+  on SQLite and Postgres. Existing positive fixtures now explicitly grant forecast access; broken
+  account/tree fixtures expect the new strict 403 instead of the old report-level 404.
+- Review found an external decision could race account deletion or restriction removal and then
+  receive nil (unrestricted) legacy report scope. The shared view composition now substitutes
+  deny-all for an external decision plus nil scope, matching the member drawer. Deterministic
+  deletion and unrestriction interleavings first leaked on both report and symbol reads, then
+  passed with the fallback. Independent follow-up review confirmed the finding closed.
+- Apps PRs 141 and 142 both extend app-token identity using username, session revision and account
+  creation identity. Their shared files remain untouched here; bridge prediction identity is still
+  pending and this draft must not merge before that integration and all other P26 requirements.
+- Final cookie checkpoint validation: full Go suite with Postgres enabled passed after the
+  interleaving fix; three targeted race repetitions, vet and staticcheck passed. No web changes
+  were made in this checkpoint. Independent review has no remaining finding in this slice.
+- OU scope settings checkpoint: PUT group settings decodes `forecast_scope` as RawMessage so
+  omission leaves it unchanged, explicit null restores inheritance (Default stores `none`), and
+  only `all`, `own` or `none` are accepted. Invalid values are refused before any existing group
+  mutation; tests also prove they do not rename/restrict the OU or emit an audit change.
+  The scope save uses a transaction and locks the prior value on Postgres, returning an exact
+  from/to delta only on change for the existing `group.change` row. No schema changes were made.
+- GET groups now supplies the own nullable value, strict effective scope and source OU. Tests
+  first failed for absent persistence and missing inherited fields, then passed, including exact
+  audit deltas, omitted/null distinction, Default normalization and Postgres storage controls.
+  Independent review found no actionable issue. Added the new refusal translation in all three
+  locales, with Traditional Chinese generated through OpenCC. The access impact preview remains
+  pending, along with bridge integration, adoption counts and the complete access matrix.
+- OU checkpoint validation: full Go suite with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed. Web typecheck, 28 locale/generator tests and production build passed.
+  The full error-code parity guard caught the missing new translation before it was added. The
+  final Go run was serialized after the frontend build to avoid the existing dist cleanup/embed
+  race during concurrent builds. The branch remains a draft; no production state changed.
+- Admin impact preview checkpoint: `GET /api/admin/forecast/access` reports each OU's nullable
+  own scope, strict effective scope/source, external flag and direct-member account counts, plus
+  overall counts. Unassigned members count under Default; root-OU members and admin overrides
+  are included. Snapshot reads active accounts, the panel timezone and the OU tree through one
+  read-only transaction (repeatable read on Postgres), and returns no account identities.
+- Optional `ou` and `scope` parameters preview all/own/none/inherit on an in-memory tree only.
+  Invalid, missing or duplicate parameters fail before the snapshot; a missing OU is rejected.
+  The response marks a preview and counts accounts whose access changes, excluding source-only
+  changes. Tests compare the hypothetical overview against a real saved scope, prove the preview
+  left persistent policy unchanged, cover Default inheritance and admin-only routing, and check
+  active-account snapshot loading on Postgres. No new schema or production write is involved.
+- Independent review caught expired accounts being included. The snapshot now uses the panel-tz
+  civil date with the same inclusive cutoff rule as login/session validation. The regression
+  first counted the expired account, then passed for expired/today/future/unlimited controls in
+  Pacific/Kiritimati. Follow-up review confirmed the issue closed. Failed store reads return an
+  error rather than a plausible empty summary. Bridge integration, weekly adoption counts and
+  the complete P26 access matrix remain pending.
+- Preview checkpoint validation: full Go regression with Postgres enabled, three targeted race
+  repetitions, vet, staticcheck and diff checks passed after the expiry fix. The extra closed-store
+  regression passed separately after the full run began. Existing required CI checks on the
+  preceding OU-settings commit are green; this preview commit still requires its own CI run.
+- Weekly adoption implementation: successful non-admin reader-groups responses add a per-UTC-ISO-week
+  HMAC to an in-memory set under a fresh random salt. The hourly loop writes only a bare integer
+  `forecast_viewers_<week>` equal to this process's initial persisted baseline plus its set size.
+  Repeated flushes are idempotent; restart draws a fresh salt and intentionally yields an upper
+  bound. Failed observations never affect the response and log only a constant diagnostic.
+- Week rollover clears the salt and set, retaining only an integer if the old week's flush needs
+  retry. A monotonic week watermark ignores late older-week requests. Tests cover duplicate and
+  concurrent observations, successful-reader-only counting, ISO-year rollover, failed flush retry,
+  restart baselines, corrupt/overflow counts and SQLite/Postgres storage. A backup dump contains
+  no test viewer username, salt or digest; tracking meta rows contain only the expected key and
+  integer. No schema changes or production writes occurred.
+- Weekly implementation validation: full Go suite with Postgres enabled, three targeted race
+  repetitions, vet and staticcheck passed; additional invalid-baseline and privacy/log checks
+  passed separately. Independent review was retried after an availability failure and remains
+  pending until a result is received. This checkpoint is not eligible for merge without review.
+- Independent weekly review completed with no actionable findings. Its scheduler validation gap
+  is covered by a shared due-decision helper and deterministic before/exact/after-hour and ISO-week
+  boundary tests. The live minute ticker itself is not advanced through a wall-clock boundary.
+  Hourly persistence necessarily permits losing the latest unflushed observations on abrupt
+  termination; the adoption indicator is not an exact analytics ledger.
+- Access-table reconciliation: internal non-admin prediction readers now receive accepted sets
+  without error diagnostics, while retaining payload and orphaned history. Internal `own` readers
+  also omit membership pointers because those refer to the all-population record. Admin and
+  persistent-machine diagnostic contracts remain unchanged. Both SQL filters precede LIMIT.
+- Regression tests first exposed rejected rows, errors and own membership, then passed after the
+  view-policy correction. Positive controls retain internal payload/orphans and compare both SPA
+  reads against their real cookie-authenticated v1 counterparts. Independent review found no
+  actionable issue. Full Go regression with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed; the final orphan/v1 extensions passed in the race run separately.
+- Cross-surface matrix checkpoint: `TestForecastAccessMatrix` exercises the real mux on SQLite
+  and Postgres, with both Default-none and Default-own trees, one account per specified OU,
+  unassigned/restricted/admin/mandated subjects, anonymous requests, persistent query tokens and
+  bridge-token denial on session routes. Two resolved months include frozen own/subtree
+  attribution, a genuinely purged member, rejected diagnostics, and readable/unreadable reports.
+- Explicit fixture expectations pin exact members and own sample sizes, both mature all-months
+  and their numeric spread, required payload/membership/count fields and recursive forbidden
+  paths. The pre-existing authentication wrappers take precedence: a dangling tree returns 503
+  `enrolment_policy_unavailable` before forecast resolution, and missing admin permission returns
+  plain 403 before checking enrolment. These stricter refusals are tested without changing the
+  independent authentication policy. Pure resolver tests separately pin dangling-tree `none`.
+- Independent review found that own groups could disappear without failing the original loop.
+  Both fixture months are now required exactly once. A temporary empty-own-groups mutation fails
+  this check; temporarily removing internal reader/no-membership policy also fails on diagnostic
+  and membership leaks. Both mutations were restored. Follow-up review found no remaining issue.
+- Matrix checkpoint validation: SQLite/Postgres matrix passed, three race repetitions passed,
+  and the full Go suite with Postgres enabled, vet, staticcheck and diff checks passed. Shared
+  Postgres runs were serialized; an initial overlapping invocation was cancelled and discarded.
+  Bound bridge prediction subjects remain to be added with the shared token-identity integration;
+  this matrix checkpoint does not claim that pending P26 contract or P27/P18 UI contracts complete.
+- Bridge integration checkpoint: the shared app-token registry now carries its minting user's
+  username, session revision and account creation identity. `mintForApp` and its API call match
+  the interfaces already present in both parallel Apps PRs; its body is byte-identical in both.
+  No notification or extension capability was added, no second identity registry was introduced,
+  and neither parallel branch was changed. This is an in-memory binding, not a schema change.
+- Prediction reads preserve cookie precedence and the persistent query token's diagnostic shape.
+  Bound bridge tokens recheck current scope and account identity/active/expiry/enrolment state.
+  Identity freshness and scope use the same strict account/tree snapshot. Unbound bridges deny;
+  all allowed bridges, including admin-minted ones, return accepted report-backed sets only,
+  without payload, errors or membership. Newly external readers use current report visibility.
+- Bridge regressions first reproduced none-scope HTTP 200 and diagnostics/orphan/stale-account
+  disclosure, then passed. The matrix now includes tokens actually minted by the Internal and
+  InternalNone members, with no skipped v1 probes. Extra controls cover none-to-all updates,
+  restriction filtering before LIMIT, denied-cookie precedence, exact expiry boundaries,
+  non-query/unbound/nil registries and closed-store denial. Independent slice/follow-up review
+  found no actionable issue. Full Go/Postgres regression, build, vet, staticcheck and three
+  targeted bridge/matrix/snapshot race repetitions passed.
+- Final requirements reconciliation corrected the older-server navigation contract: an omitted
+  `me.forecast` remains undefined and preserves reading-page prediction requests; explicit `none`
+  still prevents both requests and immediately hides existing forecast data. Legacy identity is
+  distinct from known policy identities. Auth and reading-page regressions failed before the
+  correction and passed afterward. This supersedes the earlier deny-by-default hint fallback.
+- Final independent P26 audit found no actionable finding or missing implementation requirement.
+  Local validation passed: full Go suite with Postgres enabled, three targeted race repetitions,
+  build/vet/staticcheck, web typecheck, all 120 Vitest files / 1018 tests, production web build,
+  and a serialized Go embed rebuild after that build. Latest pushed-head CI remains required.
+- Integration hold: read-only `merge-tree` against Apps PR 141 reports `apps_token.go`; against
+  PR 142 it reports `apps_api.go` and `apps_token.go`. Shared mint code is identical, but textual
+  overlap is not a clean integration. Neither branch nor the user's checkout was modified.
+  Coordination authorization was requested before messaging the other development conversation;
+  do not merge this draft until the shared edits have a verified integration order and clean
+  combined validation. No schema, release, deployment, production data or Dify publish occurred.
 
 ### P22 — reader access decision record (2026-10-22)
 
@@ -610,6 +866,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   build passed. All seven captures retain every response byte plus one terminal LF and match
   their documented SHA-256. Exact-head full CI and CodeQL remain required before merge.
 
+### P26 — integrate independently validated main changes (2026-10-22)
+
+- Integrates main at `fa250ced`: P22 #146, upload timer lifetime #147 and captured adjustment
+  parsing #148, each independently reviewed with green exact-head CI and CodeQL before merge.
+- The merge had only a running-log conflict. Both sides' append-only evidence is retained; the
+  progress summary distinguishes previously green P26 `27a5a6af` from the new combined head,
+  which must be validated again. No runtime conflict required a manual resolution.
+- P26 remains a draft awaiting authorized Apps integration coordination. This merge does not
+  claim that its shared-token overlap with Apps PRs 141/142 is resolved and changes neither
+  Apps branch nor the original user checkout. No production action is included.
+- Independent merge review found no actionable issue and verified all imported files except
+  the resolved log are byte-identical to main. Combined full Go tests with Postgres enabled,
+  vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests, production build and serialized
+  embed rebuild passed. Three-repeat bridge/snapshot/captured-fixture race validation and
+  exact-head CI remain to be confirmed; the Apps sequencing hold remains independent of them.
+
 ### P7 follow-up — live suspension and delisted-response evidence (2026-10-22)
 
 - Starts from main `fa250ced`, independently of P26 and both Apps branches. P26's normal main
@@ -676,6 +948,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
+
+### P26 — integrate seeded preview and captured halt evidence (2026-10-22)
+
+- Normal merge of main `74e8c564` brings independently validated #149 and P14 #150 into the
+  held P26 draft. Both histories' append-only evidence is retained in this log.
+- Resolved overlapping reader functions by retaining P26's authorization and protected-set
+  projection while selecting P14's `forecastNow` for periods and read phases. Custom/member
+  ceilings and adoption observations keep their separate operational clock.
+- New real-seed integration tests exercise the own/sub-OU population below 30, external-all
+  metrics without coverage or sample size, none denial and exact operational-week adoption.
+  Moving the demo clock cannot replenish either request ceiling. Temporary wrong-clock
+  mutations failed the period assertion, adoption persistence and both limiter subtests;
+  every mutation was restored before validation.
+- Independent review found no actionable issue in the conflict resolutions or new tests and
+  confirmed incoming seed/clock/evidence files match main. Full Go regression with Postgres,
+  build/vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests and three-repeat
+  access-matrix/demo-clock race checks passed (174.475 s). Supplemental three-repeat
+  bridge/snapshot/captured-fixture race checks also passed (221.801 s). The serialized
+  SPA/embed rebuild passed; exact-head CI remains required for the new combined commit.
+- P26 stays a draft for the existing Apps integration sequencing hold. No Apps branch,
+  original user checkout, production database, workflow publication or evaluator mode changed.
 
 ### P37 — exchange-backed reading projections (2026-10-22)
 

@@ -116,8 +116,10 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 	// The report join is needed for two reasons at once — to filter by the report it belongs to, and
 	// to scope a restricted reader — so it is built once and used by both.
 	join := ""
-	if f.ReportID > 0 {
+	if f.ReportID > 0 || f.RequireReport {
 		join = " JOIN reports r ON r.id = ps.report_id"
+	}
+	if f.ReportID > 0 {
 		where = append(where, "ps.report_id = ?")
 		args = append(args, f.ReportID)
 	}
@@ -151,6 +153,11 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 		// a query names something, or it is refused. The caller enforces this too; this is the store's
 		// own guard against a future caller that forgets.
 		return nil, fmt.Errorf("no filter")
+	}
+	// A visibility restriction is not a substitute for the caller naming a selection.
+	if f.AcceptedOnly {
+		where = append(where, "ps.state = ?")
+		args = append(args, predStateAccepted)
 	}
 	limit := f.Limit
 	if limit <= 0 || limit > 200 {
@@ -263,6 +270,8 @@ type PredictionFilter struct {
 	From, To       string // made_on range, inclusive, YYYY-MM-DD
 	Limit          int
 	IncludePayload bool
+	AcceptedOnly   bool
+	RequireReport  bool
 }
 
 // predictionClaimsFor loads claims for a batch of set ids. One round trip rather than one per set:

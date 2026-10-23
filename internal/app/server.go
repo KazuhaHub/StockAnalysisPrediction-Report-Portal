@@ -89,6 +89,8 @@ type Server struct {
 	// missed the cache before an OU delete and stores after it) is dropped rather than kept for the
 	// life of the process.
 	forecastGroupsGen uint64
+	forecastCompute   forecastCompute
+	forecastViewers   forecastViewers
 }
 
 // statusRecorder records the response status code for use in request logging.
@@ -271,6 +273,7 @@ func RunServer(cfgPath string) {
 	// The watchdog is its own goroutine on purpose: the failure it exists to report is the evaluator
 	// having stopped, which it could not do from inside that loop.
 	go s.forecastWatchdog()
+	go s.forecastViewerLoop()
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

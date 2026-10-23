@@ -306,6 +306,7 @@ func TestBrowserRouteIsASessionRoute(t *testing.T) {
 // 404 the store test asserts is the one a caller actually gets.
 func TestReportPredictionsRouteRefusesAnUnreadableReportAtHTTPLevel(t *testing.T) {
 	s := newV1Server(t)
+	seedForecastReader(t, s, "someone", scopeAll, false)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/report/999/predictions", nil)
 	req.SetPathValue("id", "999")
@@ -333,6 +334,7 @@ func TestSymbolRouteIsASessionRoute(t *testing.T) {
 
 func TestSymbolPredictionsSessionRouteReturnsSets(t *testing.T) {
 	s := newV1Server(t)
+	seedForecastReader(t, s, "someone", scopeAll, false)
 	seedLedgerFor(t, s, "600160", "2026-10-17", "# v1")
 	seedLedgerFor(t, s, "600160", "2026-10-16", "# v2")
 

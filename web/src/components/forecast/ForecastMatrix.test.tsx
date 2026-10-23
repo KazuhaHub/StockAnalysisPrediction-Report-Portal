@@ -63,6 +63,27 @@ function show(r: ForecastGroupsResponse, mode: 'month' | 'custom' = 'month') {
 }
 
 describe('ForecastMatrix', () => {
+  it('stretches every checkpoint to its row height across mixed states', () => {
+    show(resp({
+      d5: { ...mature, refused: 3 },
+      d20: { ...mature, spread_bp: -210, spread_q: 0.2 },
+      d60: { state: 'pending', resolved: 31, total: 42 },
+      d120: { state: 'small', n: 12 },
+      h12: { state: 'open' },
+    }))
+    const rows = screen.getAllByRole('row')
+    expect(rows[1].style.display).toBe('grid')
+    expect(rows[1].style.gridTemplateColumns).toBe(rows[0].style.gridTemplateColumns)
+    const cells = rows[1].querySelectorAll('td')
+    for (const cell of Array.from(cells).slice(1, 6)) {
+      expect(cell.style.display).toBe('flex')
+      expect(cell.style.alignItems).toBe('stretch')
+      const box = cell.firstElementChild as HTMLElement
+      expect(box.style.flex).toBe('1 1 0%')
+      expect(box.style.height).toBe('')
+    }
+  })
+
   it('renders a mature cell with its value, q and n', () => {
     show(resp({ ...empty, d5: mature }))
     expect(screen.getByText('3.1 pt')).toBeTruthy()
@@ -99,6 +120,10 @@ describe('ForecastMatrix', () => {
     )
     expect(screen.getByText('forecast.tag.exploratory')).toBeTruthy()
     expect(screen.getByText(/p\*=0.012/)).toBeTruthy()
+    const labelCell = screen.getByText('2026-09').closest('td')!
+    expect(labelCell.style.whiteSpace).not.toBe('nowrap')
+    expect(labelCell.style.overflowWrap).toBe('anywhere')
+    expect(screen.getByText('forecast.tag.exploratory').parentElement!.style.flexWrap).toBe('wrap')
   })
 
   it('highlights a rejected count and links it to the audit log', () => {

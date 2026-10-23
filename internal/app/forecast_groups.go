@@ -81,6 +81,8 @@ func madeAtBefore(madeAt string, boundary time.Time) bool {
 // the key entirely: a zero would read as a measured spread of zero, which is a different claim.
 type forecastCell struct {
 	State string `json:"state"`
+	// External all readers receive the maturity assurance without the ledger's member count.
+	MinNMet bool `json:"min_n_met,omitempty"`
 
 	N          *int `json:"n,omitempty"`
 	Resolved   *int `json:"resolved,omitempty"`
@@ -229,6 +231,10 @@ const predQualityNormal = "normal"
 
 // computeForecastCell applies the maturity gates and, only if all pass, the metrics.
 func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end, cp, today string) *forecastCell {
+	return computeForecastCellForPopulation(members, pendingBaseline, rtype, start, end, cp, today, forecastPopulation{Key: "all"})
+}
+
+func computeForecastCellForPopulation(members, pendingBaseline []*groupSet, rtype, start, end, cp, today string, pop forecastPopulation) *forecastCell {
 	if cp == "h12" {
 		members = filterHorizonStd(members)
 		pendingBaseline = filterHorizonStd(pendingBaseline)
@@ -244,7 +250,7 @@ func computeForecastCell(members, pendingBaseline []*groupSet, rtype, start, end
 		}
 		return &forecastCell{State: state}
 	}
-	seedParts := []string{rtype, start, end}
+	seedParts := pop.seedParts(rtype, start, end)
 	cell := &forecastCell{State: "mature", N: &n, Refused: &refused, CorpAction: &corp}
 	scored := make([]*groupSet, 0, n)
 	for _, gs := range members {

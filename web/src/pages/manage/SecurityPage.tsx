@@ -53,7 +53,7 @@ interface LockoutCfg {
   scope: string
 }
 
-// The session lifetime and the two request ceilings (internal/app/limits.go). Every value the
+// Session lifetime, request ceilings and forecast capacity (internal/app/limits.go). Every value the
 // server reports is the one in force, including on a portal that has never saved them, so the form
 // opens on what the portal is doing rather than on this file's idea of it.
 interface LimitsCfg {
@@ -61,6 +61,11 @@ interface LimitsCfg {
   login_fail_max: number
   login_fail_window_min: number
   apiv1_rate_per_min: number
+  forecast_slots_official: number
+  forecast_slots_explore: number
+  forecast_wait_sec: number
+  forecast_custom_per_min: number
+  forecast_members_per_min: number
 }
 
 interface GroupRow {
@@ -412,6 +417,25 @@ export default function SecurityPage() {
               after={t('security.perMin')}
             />
           </Row>
+          <Typography.Title level={5}>{t('security.forecastLimits')}</Typography.Title>
+          {([
+            ['forecast_slots_official', 'security.forecastSlotsOfficial', 'security.forecastSlotsOfficialHint', 1, 8, 'security.slots'],
+            ['forecast_slots_explore', 'security.forecastSlotsExplore', 'security.forecastSlotsExploreHint', 0, 8, 'security.slots'],
+            ['forecast_wait_sec', 'security.forecastWait', 'security.forecastWaitHint', 1, 60, 'security.seconds'],
+            ['forecast_custom_per_min', 'security.forecastCustomRate', 'security.forecastCustomRateHint', 0, 600, 'security.perMin'],
+            ['forecast_members_per_min', 'security.forecastMembersRate', 'security.forecastMembersRateHint', 0, 600, 'security.perMin'],
+          ] as const).map(([key, label, hint, min, max, unit]) => (
+            <Row key={key} label={t(label)} hint={t(hint)}>
+              <CompactNumberInput
+                aria-label={t(label)}
+                min={min}
+                max={max}
+                value={limits[key]}
+                onChange={(v) => setLimits({ ...limits, [key]: v ?? min })}
+                after={t(unit)}
+              />
+            </Row>
+          ))}
         </Space>
       </Card>
 

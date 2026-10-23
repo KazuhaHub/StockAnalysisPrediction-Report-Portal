@@ -529,7 +529,7 @@ func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
 		s := newV1Server(t)
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
 		seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-10-13", Bench: "sh000905"})
-		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -551,7 +551,7 @@ func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
 		s := newV1Server(t)
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-01", Bench: "sh000905"})
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-02", Bench: "sh000852"})
-		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -574,7 +574,7 @@ func TestCustomRangeSlicesByBenchmark(t *testing.T) {
 	s := newV1Server(t)
 	seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
 	seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-11-12", Bench: "sh000906"})
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-11-30")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-11-30", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}

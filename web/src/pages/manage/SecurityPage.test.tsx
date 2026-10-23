@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import SecurityPage from './SecurityPage'
@@ -26,7 +26,8 @@ const policy = {
   },
   registration: { enabled: false, require_verify: true, domains: '', default_group: '', expiry_days: '' },
   login: { mode: 'dual', effective: 'dual', sso_only: false, sso_available: false },
-  limits: { session_ttl_hours: 168, login_fail_max: 10, login_fail_window_min: 15, apiv1_rate_per_min: 0 },
+  limits: { session_ttl_hours: 168, login_fail_max: 10, login_fail_window_min: 15, apiv1_rate_per_min: 0,
+    forecast_slots_official: 2, forecast_slots_explore: 2, forecast_wait_sec: 10, forecast_custom_per_min: 20, forecast_members_per_min: 60 },
   twofa: { totp_enroll: true, passkey_enroll: true, require_staff: false },
   recovery: { enabled: true },
   lockout: { enabled: false, duration_min: 30, scope: 'ip_account' },
@@ -47,6 +48,28 @@ function mount(overrides: Partial<typeof policy> = {}) {
 beforeEach(() => vi.clearAllMocks())
 
 describe('the login-protection page', () => {
+  it('edits all five bounded forecast limits and preserves zero exploration capacity', async () => {
+    mount()
+    await screen.findByText('security.forecastSlotsOfficial')
+    const fields = [
+      ['forecastSlotsOfficial', 'forecast_slots_official', 1, 8, 3],
+      ['forecastSlotsExplore', 'forecast_slots_explore', 0, 8, 0],
+      ['forecastWait', 'forecast_wait_sec', 1, 60, 5],
+      ['forecastCustomRate', 'forecast_custom_per_min', 0, 600, 0],
+      ['forecastMembersRate', 'forecast_members_per_min', 0, 600, 9],
+    ] as const
+    for (const [label, , min, max, value] of fields) {
+      const input = screen.getByRole('spinbutton', { name: `security.${label}` })
+      expect(input.getAttribute('aria-valuemin')).toBe(String(min))
+      expect(input.getAttribute('aria-valuemax')).toBe(String(max))
+      fireEvent.change(input, { target: { value: String(value) } })
+      fireEvent.blur(input)
+    }
+    await userEvent.click(screen.getByText('common.save'))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
+    const body = apiMock.post.mock.calls[0][1] as { limits: Record<string, number> }
+    for (const [, key, , , value] of fields) expect(body.limits[key]).toBe(value)
+  })
   it('renders the second-factor, recovery and lockout cards', async () => {
     mount()
     expect(await screen.findByText('security.twofaTitle')).toBeTruthy()

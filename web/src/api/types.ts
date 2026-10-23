@@ -18,6 +18,8 @@ export interface Me {
   passkey_allowed?: boolean
   /** The account must set up a second factor before it can use the portal (see the enrolment gate). */
   must_enroll_2fa?: boolean
+  // Navigation hint only; forecast routes always resolve current policy on the server.
+  forecast?: { scope: 'all' | 'own' | 'none'; external: boolean }
 }
 
 // ---- Batch-run feature ----
