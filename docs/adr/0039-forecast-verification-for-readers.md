@@ -247,6 +247,17 @@ are idempotent; week rollover discards private material. Restart may count the s
 abrupt termination may lose unflushed observations. There is no adoption target yet: the owner
 sets one after observing a month of R2a.
 
+The reader surfaces are observable without recording who read. Process counters (statistics
+requests, cache hits, flights joined, scored cells, busy, rate-limited, drawer opens and refusals by
+reason code) are flushed hourly into one `meta` row per UTC day, `forecast_signals_<date>`: a flat
+JSON object of integers over a closed list of names, so a name, token or hash cannot reach it. A
+flush adds only the events counted since the last successful one, so repeating it changes nothing and
+a failed one is retried without loss or double counting; an unreadable row is left untouched. Rows
+older than 14 days are deleted. A statistics request slower than three seconds logs one line with the
+scope and population kinds and its cell, cache, flight and wait figures, and a refusal logs its reason
+code at most once a minute per reason; neither line carries an account, an OU id, a path or a query.
+The operations runbook interprets them.
+
 ## Reading stages, editions and presentation
 
 R2b adds audited `forecast_reader` = off/card/full, default card; an unknown value is off. Admins

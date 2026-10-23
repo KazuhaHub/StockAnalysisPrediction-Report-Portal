@@ -1,5 +1,9 @@
 """Runtime checks shared by the container smoke and functional tests."""
+import base64
+import hashlib
+import hmac
 from html.parser import HTMLParser
+import re
 import subprocess
 import time
 import urllib.error
@@ -61,3 +65,43 @@ def unused_totp_step(used, now=None):
         if step not in used:
             return step
     raise RuntimeError('No unused TOTP step available')
+
+
+_SECRET_KEY_LINE = re.compile(r"""^\s*secret_key\s*:\s*["']?([^"'#\s]+)""")
+
+
+def parse_secret_key(config_text):
+    """The secret_key value in a config.yaml, or "" when there is none.
+
+    The colon must follow the key name directly, so a secret_key_previous line is never mistaken for
+    the live key, and a commented-out line is not read at all.
+    """
+    for line in config_text.splitlines():
+        match = _SECRET_KEY_LINE.match(line)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def container_secret_key(container):
+    """The key a running container signs with: RP_SECRET_KEY when it was given one, otherwise the
+    config file its entrypoint generated. "" when neither can be read."""
+    env = subprocess.run(['docker', 'exec', container, 'printenv', 'RP_SECRET_KEY'],
+                         capture_output=True, text=True, timeout=30)
+    if env.returncode == 0 and env.stdout.strip():
+        return env.stdout.strip()
+    config = subprocess.run(['docker', 'exec', container, 'sh', '-c', 'cat "${RP_CONFIG:-/app/config/config.yaml}"'],
+                            capture_output=True, text=True, timeout=30)
+    return parse_secret_key(config.stdout) if config.returncode == 0 else ""
+
+
+def owner_token(secret, ou, user, ttl=3600, now=None):
+    """The signed attribution token a run carries to ingest (mintOwnerToken in server.go).
+
+    The portal mints it for a run and a workflow echoes it back as `owner_token`; a set's frozen OU
+    comes from this token alone. Building a valid one is the same path a real run takes: nothing the
+    ingest verifies is skipped.
+    """
+    message = "ot1|%d|%s|%d" % (ou, user, int(time.time() if now is None else now) + ttl)
+    signature = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(message.encode()).rstrip(b"=").decode() + "." + signature

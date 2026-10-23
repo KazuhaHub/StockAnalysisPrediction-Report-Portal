@@ -467,6 +467,54 @@ func TestRestoreRulesForForecastKeys(t *testing.T) {
 			})
 		}
 	})
+
+	// forecast_signals_<date> (section 12.1): the daily counters come back from the dump, like every
+	// other observation. The dump's meta replaces the live one, so a day the live database counted
+	// but the dump lacks is gone, and a day both hold takes the dump's figures; nothing is merged.
+	// After the restore a flush continues the dumped day instead of overwriting it.
+	t.Run("forecast_signals", func(t *testing.T) {
+		eachRestoreDriver(t, func(t *testing.T, dst *Store) {
+			const (
+				sharedDay = "2026-10-20"
+				liveDay   = "2026-10-21"
+			)
+			src := newTestStore(t)
+			if err := src.SetSetting(forecastSignalsKey(sharedDay), `{"requests":5,"refused.ou_none":2}`); err != nil {
+				t.Fatal(err)
+			}
+			dump := dumpOf(t, src)
+			if err := dst.SetSetting(forecastSignalsKey(sharedDay), `{"requests":9}`); err != nil {
+				t.Fatal(err)
+			}
+			if err := dst.SetSetting(forecastSignalsKey(liveDay), `{"requests":1}`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if got := dst.GetSetting(forecastSignalsKey(sharedDay), ""); got != `{"requests":5,"refused.ou_none":2}` {
+				t.Fatalf("the shared day reads %q after the restore, want the dump's row exactly", got)
+			}
+			if got := dst.GetSetting(forecastSignalsKey(liveDay), ""); got != "" {
+				t.Fatalf("a day only the live database held survived the restore: %q", got)
+			}
+			// The first flush after a restore adds to the dumped figures.
+			var g forecastSignals
+			day := time.Date(2026, time.October, 20, 12, 0, 0, 0, time.UTC)
+			g.add(sigRequests, day)
+			if err := g.flush(dst, day); err != nil {
+				t.Fatalf("flush after restore: %v", err)
+			}
+			raw := dst.GetSetting(forecastSignalsKey(sharedDay), "")
+			got, err := decodeForecastSignalDay(raw)
+			if err != nil {
+				t.Fatalf("row after the flush is unreadable: %q: %v", raw, err)
+			}
+			if got[sigRequests] != 6 || got[sigRefusedPrefix+"ou_none"] != 2 {
+				t.Fatalf("row after the flush = %v, want requests=6 and the dumped refusals kept", got)
+			}
+		})
+	})
 }
 
 // A restore that cannot read the live reading stage must not guess the default: the failed read

@@ -240,9 +240,11 @@ response lists each item with its state (P9):
 5. Alert channels verified: a test alert delivered to **both** the configured Email recipients and the Slack
    webhook within the last 30 days (`forecast_alert_test_ok_at`, P41).
 
-Item 6, "the ledger chain is not empty", is **not** in this list until P23 (R2b) builds the chain. Before P23 the
-evaluator calls `fetchTencentRange` directly (`forecast_eval.go:211-216`), so a `quote_source_order` check would gate
-nothing. P23 appends it as item 6 (§8.8).
+6. The ledger chain is usable: `ledger_chain` (`forecastReadiness` in `forecast_ops.go`), true when an explicitly
+   enabled settlement chain exists and its primary carries both evidence capabilities (P23, §8.8). It was not in this
+   list before P23, because the evaluator then called `fetchTencentRange` directly (`forecast_eval.go:211-216`) and a
+   `quote_source_order` check would have gated nothing. It is now: with it red, mode `1` is refused (409
+   `forecast_not_ready`) and the watchdog's `no_source` reason fires.
 
 ### 1.5 Read-only checks before each deploy (owner)
 
@@ -500,8 +502,8 @@ adds its rows) asserts every row of this table on both drivers. FC.
 | meta | `forecast_dry_gate`, `forecast_alert_test_ok_at` | Reset. A restored database must be re-checked before mode `1`. |
 | meta | `forecast_alert_email_to`, `forecast_alert_slack_url` | From the dump. |
 | meta | `forecast_reader` | The lower of dump and live (`off` < `card` < `full`). |
-| meta | compute limits, `forecast_fallback`, shadow and call statistics, weekly viewer counts | From the dump. |
-| column | `user_groups.forecast_scope` | From the dump; an older dump lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`. So a restore can only narrow access, never widen it. |
+| meta | compute limits, `forecast_fallback`, shadow and call statistics, weekly viewer counts, `forecast_signals_<date>` counters | From the dump. |
+| column | `user_groups.forecast_scope` | From the dump, verbatim. An older dump (before step `0006`) lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`, so that restore can only narrow access. A dump taken after step `0006` can be wider than the live database, so after any restore the operator compares `GET /api/admin/forecast/access` with the values saved beforehand (§12.3). `TestRestoreBringsOUScopesBackAsDumped` pins this. |
 | column | `prediction_sets.attributed_ou` | From the dump; an older dump lacks it and every set reads as unattributed (true for that dump). |
 | enum value | `prediction_sets.state = 'test'` | An older binary drops it from coverage (`forecastMembership`, `forecast_groups.go:115-157`); a display gap only. |
 | enum value | `prediction_sets.base_check = 'refused_final'` | An older binary reads a member with final refusals: the same meaning. |
@@ -2665,13 +2667,16 @@ Dify rejected undeclared inputs, revert P39b first.
 - **Heartbeat** `meta.forecast_eval_state` (P9), written by the pass only while the mode is not off: mode,
   `last_tick_at`, pass statistics, per-benchmark calendar state, the dry sample, `awaiting_gate`.
 - **Persisted counters:** `forecast_state_calls` (14 days of calls, failures and refusals by code, per source),
-  `forecast_state_shadow` (P25), access and compute counters (requests, cache hits, flights joined, busy,
-  rate-limited, refusals by reason, drawer opens) kept in memory and flushed daily to `meta`, and the weekly distinct
-  viewer count (an integer; the salt lives in memory only, §7.3.5).
+  `forecast_state_shadow` (P25), access and compute counters (requests, cache hits, flights joined, scored cells,
+  busy, rate-limited, refusals by reason, drawer opens) kept in memory and flushed to `meta` as one row per UTC day,
+  `forecast_signals_<YYYY-MM-DD>` (a flat JSON object of integers over a closed list of names, so no identity can
+  reach it; the loop flushes hourly, a flush with nothing new changes nothing, and rows older than 14 days are
+  deleted), and the weekly distinct viewer count (an integer; the salt lives in memory only, §7.3.5).
 - **Logs** (`log/slog`, `component=forecast_eval`): one line per pass; one line per set error with `set_id`, `bench`,
   `source`, `reason`; nothing for sets that are not due. The groups routes log `forecast groups: scope= pop= mode=
-  cells= scored= cached= flight= wait_ms= dur_ms=` when over 3 s. Access refusals log their reason (never the
-  username of a refused anonymous caller).
+  cells= scored= cached= flight= wait_ms= dur_ms=` when over 3 s (`scope` and `pop` are kinds, never an account or an
+  OU id). Access refusals log `forecast access: refused reason=<code> n=<count>`, at most one line a minute per
+  reason, with the reason code only: no account, path or query.
 - **Watchdog** (its own goroutine, 60 s, `recover`): `stalled` (heartbeat > 10 min; at most hourly), `lagging` (oldest
   due mark unsettled > 6 h, or a weekday past 18:00 CST with a stale calendar, or the valve tripped; at most daily),
   `no_source` (empty ledger chain; at most daily; from P23 on, because there is no chain before it). Nothing while off.
@@ -2711,11 +2716,11 @@ Dify rejected undeclared inputs, revert P39b first.
 | An `off_benchmark` count appears | — | `forecast.bench` audit and reconciliation rows | Explain it in the release note; never re-score. |
 | A `test` count appears | — | the emitter and `run_mode` of those sets | Expected for Dify test-app runs; if a production run was marked `test`, fix the producer (the set stays a test). |
 | Setting the ledger start | — | candidate list against Dify issue #1 | Save `2026-10-18T16:00:00Z` once. Permanent; survives restores. |
-| Switching the evaluator on | — | §1.4 readiness list | Record the hand-checked closes in the dry-run gate; then `1`. |
+| Switching the evaluator on | — | §1.4 readiness list, all six items (item 6 `ledger_chain`) | Record the hand-checked closes in the dry-run gate; repair the source order if `ledger_chain` is red; then `1`. |
 | Scheduling a benchmark | — | the response's `effective_cohort` | CSI 800: must read `2026-11`. If the deploy slipped past 2026-10-31, use §1.2's contingency. |
-| An OU's members report "forecast missing" | — | `/api/admin/forecast/access` for that OU | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
-| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20. |
-| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test | A restore never raises the mode or the stage, resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. |
+| An OU's members report "forecast missing" | — | `GET /api/admin/forecast/access` for that OU; then the day's `refused.<code>` counters | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
+| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20; for a release containing step `0009`, the explicit offline upgrade first (the procedure document `forecast-purge-ownership-upgrade.md` ships with step `0009`). |
+| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test, `GET /api/admin/forecast/access` | A restore never raises the mode or the stage (each becomes the lower of the dump and the live value; an unreadable stage counts as `off`; the stage change is audited `forecast.reader`), resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. **OU scopes and attribution come back exactly as dumped and can widen access** (the audit log with them): save `GET /api/admin/forecast/access` before restoring, compare after, and set incident OUs back to `none` before readers return. |
 | December | — | the exchanges' closure notice | Update the projection table (P37). |
 | Reading-page incident | — | — | `forecast_reader=off` (immediate, audited). |
 | Record incident | — | — | Set the affected OUs to `none` (immediate, audited). |
@@ -2724,6 +2729,10 @@ Dify rejected undeclared inputs, revert P39b first.
 ---
 
 ## 13. Rollout and rollback per release
+
+The "Readiness list" of the Evaluator on row is all six items of §1.4 on the status card, including item 6,
+`ledger_chain` (`forecastReadiness` in `forecast_ops.go`): an enabled settlement chain whose primary carries both
+evidence capabilities. While it is red, mode `1` is refused (409 `forecast_not_ready`).
 
 | Release | Before deploy | Deploy and verify | Owner actions after deploy | Rollback |
 |---|---|---|---|---|
@@ -2790,8 +2799,12 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
       `reserved_inputs` visible on the 16 targets).
 
 **Before switching the evaluator on**
-- [ ] §1.4 readiness list green on the status card; dry-run check recorded for every benchmark code the list names
-      (`sh000852` for the pre-live sets even before any in-population set exists; `sh000906` once November sets exist).
+- [ ] §1.4 readiness list green on the status card, all six items; dry-run check recorded for every benchmark code the
+      list names (`sh000852` for the pre-live sets even before any in-population set exists; `sh000906` once November
+      sets exist).
+- [ ] Readiness item 6, `ledger_chain` (`forecast_ops.go`): the quote-source panel shows an enabled settlement chain
+      whose primary carries both evidence capabilities. A red item 6 refuses mode `1` (409 `forecast_not_ready`) and,
+      if the primary is removed while running, the watchdog sends `no_source`.
 
 **Before R2a**
 - [ ] Owner: Q4 run. Disclaimer wording approved (V22, 2026-10-19). zh-TW `forecast.*` family: machine-generated,

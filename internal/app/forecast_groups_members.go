@@ -70,10 +70,15 @@ func (s *Server) apiReaderForecastGroupMembers(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !s.forecastCompute.allowMembers(user, s.settingInt(setForecastMembersPerMin, 60, 0, 600), s.forecastEval.clock()) {
+		s.forecastSignal(sigRateLimited)
 		forecastRateError(w)
 		return
 	}
-	s.serveForecastGroupMembers(w, r, user, d, false)
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.serveForecastGroupMembers(rec, r, user, d, false)
+	if rec.status == http.StatusOK {
+		s.forecastSignal(sigDrawerOpens)
+	}
 }
 
 func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Request, user string, d forecastDecision, adminAlias bool) {

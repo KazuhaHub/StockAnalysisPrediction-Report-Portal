@@ -30,6 +30,13 @@ type forecastPredictionView struct {
 func (s *Server) forecastCookiePredictionView(w http.ResponseWriter, user string) (forecastPredictionView, bool) {
 	d := s.forecastAccess(user)
 	if s.forecastReaderStage(d) == "off" {
+		// A reader whose scope is none is refused for that, whatever the stage; stage_off is the
+		// refusal of a reader the scope would admit.
+		reason := "stage_off"
+		if d.Scope == scopeNone {
+			reason = forecastRefusalReason(d)
+		}
+		s.noteForecastRefusal(reason)
 		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 		return forecastPredictionView{}, false
 	}
@@ -66,6 +73,7 @@ func (s *Server) forecastV1PredictionView(w http.ResponseWriter, r *http.Request
 		// Persistent machine reads retain their diagnostic contract.
 		return forecastPredictionView{}, true
 	}
+	s.noteForecastRefusal("bridge_token")
 	jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 	return forecastPredictionView{}, false
 }

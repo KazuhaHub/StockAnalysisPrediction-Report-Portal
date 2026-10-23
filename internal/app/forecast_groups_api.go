@@ -40,6 +40,7 @@ func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request,
 		key := strings.Join([]string{populationFor(d).Key, rtype, q.Get("from"), q.Get("to"), group}, "\x00")
 		lease, ok = s.forecastCompute.beginCustom(user, key, s.settingInt(setForecastCustomPerMin, 20, 0, 600), s.forecastEval.clock())
 		if !ok {
+			s.forecastSignal(sigRateLimited)
 			forecastRateError(w)
 			return
 		}
@@ -55,9 +56,14 @@ func (s *Server) apiReaderForecastGroups(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d forecastDecision, adminAlias bool, lease *forecastQueryLease) {
+	started := time.Now()
+	stats := &forecastRequestStats{sig: &s.forecastSignals, now: s.forecastEval.clock}
+	r = r.WithContext(withForecastRequestStats(r.Context(), stats))
+	s.forecastSignal(sigRequests)
 	generation := s.forecastGeneration()
 	pop := populationFor(d)
 	q := r.URL.Query()
+	defer func() { s.logSlowForecastGroups(d, pop, q.Get("mode"), stats, time.Since(started)) }()
 	mode := q.Get("mode")
 	if mode == "" {
 		mode = "month"
@@ -187,6 +193,7 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 	resp.Groups, err = s.buildForecastGroupsRequestWithReadTime(ctx, active, sets, rtype, today, resp.Official, populationFrom, pop, generation, lease, cacheTag, readAt)
 	if err != nil {
 		if errors.Is(err, errForecastBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			s.forecastSignal(sigBusy)
 			w.Header().Set("Retry-After", "1")
 			jsonErrorCode(w, http.StatusServiceUnavailable, "forecast_busy", "forecast computation is busy; retry later")
 		} else {
@@ -333,6 +340,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 				tag: pl.period.cacheTag, bench: pl.bench, members: members, pending: pending})
 		}
 	}
+	forecastRequestStatsFrom(ctx).setCells(len(jobs))
 	if len(jobs) == 0 {
 		return groups, nil
 	}
@@ -362,6 +370,7 @@ func (s *Server) buildForecastGroupsRequestWithReadTime(ctx context.Context, per
 					continue
 				}
 				if c != nil {
+					forecastRequestStatsFrom(ctx).addCached()
 					out <- result{gi: j.gi, cp: j.cp, cell: c}
 					continue
 				}
