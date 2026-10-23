@@ -1,8 +1,8 @@
 # Forecast verification — runbook
 
 **Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Signals below describe
-this source checkout, not a claim that it is deployed. Entries for later surfaces (reader access,
-the reading-page stage switch) are added by the PR that creates them.
+this source checkout, not a claim that it is deployed. Reader access, the reading-page stage switch and
+their signals are covered under "Reader surfaces".
 
 ## First response, in order
 
@@ -79,13 +79,20 @@ A set was frozen with a code other than its cohort's active benchmark.
 
 ### Switching the evaluator on
 
-The readiness list is code. Until every item holds, `POST /api/admin/forecast {"mode":"1"}` answers
-409 `forecast_not_ready` and names the failing items.
+The readiness list is code (`forecastReadiness` in `internal/app/forecast_ops.go`). Until every item
+holds, `POST /api/admin/forecast {"mode":"1"}` answers 409 `forecast_not_ready` and names the failing
+items. There are six: `binary`, `population` (the ledger start is set), `dry_pass`, `dry_gate`,
+`alerts` and, item 6, `ledger_chain`.
 
 1. `dry`, then "Evaluate now"; read the sample and `last_error`.
 2. Record a dry-run check for every benchmark in use (the card lists the codes).
 3. Send a test alert that reaches **both** channels (the readiness stamp is written only then).
-4. Switch to `1`. The change, the actor and the readiness list are audited (`forecast.auto`).
+4. Check item 6, `ledger_chain`: the quote-source panel must show an enabled settlement chain whose
+   primary carries both evidence capabilities. Without it settlement refuses every mark and the
+   watchdog reports `no_source`, so the mode is refused rather than allowed to idle. If the item is
+   red, repair the source order on the panel (a save that removes the primary asks for
+   confirmation and is audited as `quote.order`); do not work around it.
+5. Switch to `1`. The change, the actor and the readiness list are audited (`forecast.auto`).
 
 ### Scheduling a benchmark
 
@@ -106,12 +113,39 @@ Take the ADR 0027 backup. For R1a-β2 also record the heal predicate's count (Q3
 than step `0006` refuses a database that records it: rolling back across the access schema is
 restore-only.
 
+A release that contains step `0009` (the owner-approved `prediction_purge_owners` table, which lets
+an `own` reader be shown only the purged months of their own OU subtree) needs the explicit offline
+upgrade in [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md) first. Normal
+startup refuses a database that lacks the step and never applies it: stop every portal instance and
+other writer, take the backup with the previous release, run `report-portal schema-upgrade`, then
+`report-portal schema-upgrade --apply`, then `schema-upgrade` again until nothing is pending. Steps
+`0007` and `0008` belong to other work and ship with their own releases. A binary that does not know
+`0009` refuses its ledger row, so rolling back across it is restore-only: restore the verified
+pre-upgrade backup, never delete the row or drop the table. That document is the source of truth for
+the sequence; this paragraph is only the reminder that it exists.
+
 ### After a restore
 
 A restore resets the heartbeat, the alert state, the dry gate and the alert verification. The mode
 becomes the lower of the dump and live values, and a restored `1` is capped at `dry`
 (`restore_gates_empty`, audited). Re-check deliberately: run a dry pass, record the gates, send the
 test alert, then switch on if that is intended.
+
+The reader surfaces follow the same rule: a restore never raises anything.
+
+- **Reading stage.** `forecast_reader` becomes the lower of the dump and the live value
+  (`off` < `card` < `full`). Both sides are read the way readers read them: an unset value is the
+  default `card`, but an empty, unrecognised or unreadable value counts as `off`. A result that
+  differs from the dumped value is audited as `forecast.reader` with actor `system`. After a restore
+  from a dump taken at `full`, the stage is therefore whatever the live database had if that was
+  lower; raise it again deliberately, one step at a time.
+- **OU scopes and attribution** come back from the dump. A dump from before step `0006` has neither:
+  every OU inherits, the Default OU is set to `none` and every set reads as unattributed, so a
+  restore can only narrow access. Read `GET /api/admin/forecast/access` before telling anyone
+  access is as it was.
+- **Counters.** The `forecast_signals_<date>` rows and the weekly viewer counts come back from the
+  dump. They are observations, not settings; a gap in them after a restore is the restore, not an
+  outage.
 
 ## December projection-calendar maintenance
 
@@ -211,6 +245,136 @@ and both Default-scope variants. The [local performance checkpoint](forecast-rea
 records an actual pre-P18 source comparison and the card/full budget, including prefetch. These
 checks do not replace P20 presentation tests, independent review or production observation, and
 are not authorization to enable full in production.
+
+## Reader surfaces: signals and incidents
+
+Two switches govern what a non-administrator reads, and they are independent. Each OU has a forecast
+scope (`all`, `own` or `none`; a child inherits its parent unless it sets its own; the Default OU
+reads `none`; administrators always read `all`). The reading stage `forecast_reader` (`off`, `card`,
+`full`; administrators always read `full`) governs the per-report surfaces and never widens a scope.
+The statistics page (`/forecast`, `GET /api/forecast/groups` and `/groups/members`) follows the scope
+alone. Both changes are audited, need no restart, and apply to the next request.
+
+### Signals
+
+**Slow statistics request.** One log line for each statistics request, on the reader route and the
+temporary admin alias, that took longer than three seconds:
+
+```text
+forecast groups: scope=own pop=ou mode=month cells=85 scored=1 cached=0 flight=0 wait_ms=0 dur_ms=3412
+```
+
+| Field | Meaning |
+| --- | --- |
+| `scope`, `pop` | The effective scope (`all` or `own`) and the kind of population (`all`, or `ou` for a subtree). Never an account name and never the OU ids. |
+| `mode` | `month`, `custom`, or `other` for a value the route rejects. |
+| `cells` | Group by checkpoint cells the request needed. |
+| `scored` | Cells whose scoring this request started and saw complete. |
+| `cached` | Cells answered from the mature-cell memo. |
+| `flight` | Cells that joined a computation another request had already started. |
+| `wait_ms` | The longest any one of its cells waited for a scoring slot, or for an answer when it gave up. Zero for a cell that took a free slot or joined a running flight. |
+| `dur_ms` | The whole request. |
+
+Reading it: `scored` above zero with `wait_ms` near zero is a cold cache, not contention. A `wait_ms`
+close to the wait ceiling (`forecast_wait_sec`) means the pool was saturated and the request ended in
+a 503 `forecast_busy` (compare the `busy` counter). `flight` above zero with `scored=0` is a request
+queued behind identical work. The performance target is a monthly view at or under three seconds
+on a cold cache; cached requests never wait for a slot.
+
+**Access refusals.** `forecast access: refused reason=<code> n=<count>`, at most one line a minute
+for each reason; `n` is how many refusals of that reason the line stands for. The line never names
+an account, a path or a query. The counters below are exact; the log only says it is happening.
+
+| Code | Refused because |
+| --- | --- |
+| `ou_none` | The account's effective scope is `none` (the expected answer for an OU nobody has opened up). |
+| `default_null` | No OU on the chain sets a value and the Default OU is unset. |
+| `dangling_group`, `cyclic_chain` | The OU tree is broken (a parent that no longer exists, or a loop); the account resolves to `none` until it is repaired. |
+| `unknown_value` | A stored scope that is not `all`, `own` or `none`. |
+| `error` | The account or the tree could not be read; the portal refuses rather than guesses. |
+| `anonymous` | No signed-in user. |
+| `custom_not_allowed` | An external account asked for a custom range. By design. |
+| `stage_off` | The reading stage is `off` and the account's scope would otherwise admit it. |
+| `bridge_token` | An installed app's token asked for a forecast read; refused until the shared token binding lands. |
+| `other` | A reason outside this list (a bug if it is ever non-zero). |
+
+**Counters.** The portal counts these in memory and flushes them every hour to `meta`, one row for
+each UTC day, `forecast_signals_<YYYY-MM-DD>`, holding a flat JSON object of integers. A flush that
+has nothing new changes nothing, and rows older than 14 days are deleted. Names come from a closed
+list, so no account, token or hash can reach a row.
+
+| Counter | Counts |
+| --- | --- |
+| `requests` | Statistics requests that passed the access gate (served or failed after it). |
+| `cache_hits` | Cells answered from the memo. |
+| `flights_joined` | Cells that joined another request's computation. |
+| `scored` | Cells scored. |
+| `busy` | 503 `forecast_busy` answers. |
+| `rate_limited` | 429 `forecast_rate_limited` answers, on both reader routes. |
+| `drawer_opens` | Member lists served (the cell drawer); an invalid request is not an open. |
+| `refused.<code>` | Refusals, by the codes above. |
+
+```sql
+SELECT k, v FROM meta WHERE k LIKE 'forecast_signals_%' ORDER BY k;
+```
+
+A restart loses at most the events since the last hourly flush. An unreadable row is never
+overwritten: the flush logs `forecast signals: flush failed` every hour and keeps the counts in
+memory; deleting the damaged row lets the next flush write them. The weekly distinct-viewer figure
+(`forecast_viewers_<ISO week>`, an integer; the figure is an upper bound after a restart) is the
+adoption indicator and is separate.
+
+### An OU's members report "forecast missing"
+
+Expected for every OU at `none`, which is where each starts; nothing is broken.
+
+1. `GET /api/admin/forecast/access` lists every OU with its stored value (`forecast_scope`, null for
+   inherit), the value it resolves to (`forecast_scope_effective`), the OU that supplied it
+   (`forecast_scope_source`), whether it is external, and how many accounts resolve to each scope.
+   `?ou=<id>&scope=all|own|none|inherit` previews a change and reports how many accounts it
+   would change (`affected`) without writing anything.
+2. If the OU resolves to `none` and that is not intended, set its scope in the OU editor
+   (`PUT /api/admin/groups/{id}` with `forecast_scope`). It is audited as `group.change` with the
+   `forecast_scope` change, and applies to the next request.
+3. If it resolves to `all` or `own` and the account still reads nothing, look at that day's refusal
+   counters and log lines. `stage_off` means the reading stage is `off` (below). `dangling_group`
+   or `cyclic_chain` means the tree needs repairing in the OU editor. `unknown_value` means the scope
+   needs saving again. `error` means the database could not be read; look at the database and the
+   log. `custom_not_allowed` and `bridge_token` are by design.
+4. An `own` reader sees only the sets attributed to their OU's subtree. An OU with no attributed sets
+   yet reads an empty record, not an error.
+
+### Reading-page incident: `forecast_reader=off`
+
+The reading-page card, its summary or the timeline marks are wrong or too slow (`/api/stock` over its
+800 ms budget).
+
+Set the reading stage to `off`: `POST /api/admin/forecast {"reader":"off"}`, or the settings dialog
+on `/manage/forecast`. It is immediate, needs no restart or schema change, and is audited as
+`forecast.reader` with `{from,to}` only when the value really changes. Non-administrators are then
+refused on the per-report prediction reads (403 `forecast_unavailable`, counted as `stage_off`),
+which the reading page treats as absence: no forecast and no error. Administrators still read
+`full`, so the defect can be reproduced. The statistics page is a different surface and stays as the
+OU scopes leave it. `card` is the middle step: the per-report card without the full-stage summary and
+timeline marks.
+
+Recovery goes up one step at a time (`card`, then `full`), each a recorded change. A restore never
+raises the stage (see "After a restore").
+
+### Record incident: set the affected OUs to `none`
+
+Use this when a reader may see records they should not (a population, attribution or scoping defect),
+or when the statistics themselves are suspect and need to stop being read.
+
+Set the forecast scope of each affected OU to `none` in the OU editor. It is immediate and audited
+(`group.change`). A child that inherits stops reading too, but an OU that has its own explicit value
+does not follow its parent, so setting the Default OU to `none` is not enough on its own: set the
+explicit ones. When the extent is not yet known, set every OU. Administrators keep `all`, so the
+record can still be inspected. No cache needs purging: a cell is keyed by the population it was
+computed for. Confirm with `GET /api/admin/forecast/access` (every affected OU resolves to `none`)
+and with `refused.ou_none` rising, then follow "Recording an incident". Access is given back by the
+same edit, as a decision and not before the cause is understood. If only the reading page is
+involved, `forecast_reader=off` is the smaller step.
 
 ## Recording an incident
 
