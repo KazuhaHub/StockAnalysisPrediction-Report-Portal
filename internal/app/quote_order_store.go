@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func effectiveQuoteOrder(raw string) []string {
@@ -23,6 +24,23 @@ func (s *Store) saveQuoteOrder(ctx context.Context, raw string, entry AuditEntry
 		return fmt.Errorf("unknown quote source %q", unknown)
 	}
 	raw = strings.Join(names, ",")
+	for attempt := 0; ; attempt++ {
+		err := s.saveQuoteOrderOnce(ctx, raw, entry)
+		if err == nil || !isContentionErr(err) || attempt == 5 {
+			return err
+		}
+		// Retry the complete rolled-back transaction, never an individual audit/write step.
+		timer := time.NewTimer(time.Duration(10<<attempt) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Store) saveQuoteOrderOnce(ctx context.Context, raw string, entry AuditEntry) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -31,7 +49,7 @@ func (s *Store) saveQuoteOrder(ctx context.Context, raw string, entry AuditEntry
 	if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO NOTHING`), setQuoteSourceOrder, ""); err != nil {
 		return err
 	}
-	q := `SELECT v FROM meta WHERE k=?`
+	q := `SELECT COALESCE(v,'') FROM meta WHERE k=?`
 	if s.driver == "postgres" {
 		q += " FOR UPDATE"
 	}

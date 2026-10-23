@@ -852,3 +852,17 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   `b4741355` and PR 142 head `c4402084`; inspected audit hunks are disjoint. Post-change previews,
   full checks and independent review remain pending. No Apps branch or separately owned PR was
   edited. UI confirmation, readiness/alerts, panel presentation and the source ADR remain open.
+- Initial application/test head `9d622e4c` passed full Go/Postgres regression (app package
+  43.964 s), three-repeat targeted race checks (6.655 s), vet/staticcheck, frontend typecheck,
+  all 120 Vitest files / 1006 tests (44.54 s), and the production SPA build (902 ms).
+  The standalone source branch has fewer web tests than the separate P17/P18 integration stack.
+  Independent review found no actionable issue in this initial scope.
+- Post-change read-only merge previews were also clean against the same Apps heads (trees
+  `4ab55e26` and `d828a5e3`). This proves textual compatibility only, not combined runtime
+  verification, and neither branch was changed or merged.
+- Strengthened validation exposed two additional boundaries: a permitted NULL meta value failed
+  to match the existing reader's shipped-default semantics, and independent SQLite connections
+  could transiently contend. Added failing controls, coalesced the nullable read, and bounded
+  contention retries around the whole rolled-back transaction with context-aware delays. The
+  two-connection fixture and both-driver concurrency fixture also assert the actor OU snapshot.
+  Final post-repair checks and follow-up review remain pending.

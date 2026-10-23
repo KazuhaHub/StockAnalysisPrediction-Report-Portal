@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -57,14 +58,44 @@ func TestQuoteOrderTransactionSerializesBothDrivers(t *testing.T) {
 	})
 }
 
-func assertQuoteOrderTransaction(t *testing.T, st *Store) {
-	t.Helper()
-	if err := st.DeleteSetting(setQuoteSourceOrder); err != nil {
+func TestQuoteOrderTransactionAcrossSQLiteConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "orders.db")
+	first, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { first.Close() })
+	second, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { second.Close() })
+	assertQuoteOrderTransaction(t, first, second)
+}
+
+func TestQuoteOrderNullValueMeansShippedDefault(t *testing.T) {
+	st := newTestStore(t)
+	if _, err := st.exec(`INSERT INTO meta(k,v) VALUES(?,NULL)`, setQuoteSourceOrder); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	entry := AuditEntry{Actor: "admin", IP: "203.0.113.8"}
+	if err := st.saveQuoteOrder(ctx, "sina", AuditEntry{Actor: "admin"}); err != nil {
+		t.Fatalf("nullable setting did not retain reader semantics: %v", err)
+	}
+}
+
+func assertQuoteOrderTransaction(t *testing.T, st *Store, peers ...*Store) {
+	t.Helper()
+	if err := st.DeleteSetting(setQuoteSourceOrder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.exec(`INSERT INTO meta(k,v) VALUES(?,NULL)`, setQuoteSourceOrder); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	entry := AuditEntry{Actor: "admin", ActorOU: 42, IP: "203.0.113.8"}
 	if err := st.saveQuoteOrder(ctx, "sina", entry); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +109,11 @@ func assertQuoteOrderTransaction(t *testing.T, st *Store) {
 			if i%2 == 0 {
 				order = "tencent,sina"
 			}
-			errs <- st.saveQuoteOrder(ctx, order, entry)
+			writer := st
+			if len(peers) > 0 && i%2 == 0 {
+				writer = peers[0]
+			}
+			errs <- writer.saveQuoteOrder(ctx, order, entry)
 		}(i)
 	}
 	wg.Wait()
@@ -88,7 +123,7 @@ func assertQuoteOrderTransaction(t *testing.T, st *Store) {
 			t.Fatal(err)
 		}
 	}
-	rows, err := st.query(`SELECT detail FROM audit_log WHERE action='quote.order' ORDER BY id`)
+	rows, err := st.query(`SELECT detail, actor_ou FROM audit_log WHERE action='quote.order' ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +132,12 @@ func assertQuoteOrderTransaction(t *testing.T, st *Store) {
 	count := 0
 	for rows.Next() {
 		var raw string
-		if err := rows.Scan(&raw); err != nil {
+		var ou int64
+		if err := rows.Scan(&raw, &ou); err != nil {
 			t.Fatal(err)
+		}
+		if ou != entry.ActorOU {
+			t.Fatalf("lost actor OU snapshot: %d", ou)
 		}
 		var delta struct {
 			From []string `json:"from"`
