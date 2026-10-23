@@ -236,8 +236,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   confirmation, source-panel frontend integration, readiness item 6 and daily no-source alerts.
   ADR 0041 records V9, renumbered to avoid Apps' 0038/0040. Full local Go/Postgres, frontend and
   targeted race checks passed; the final branch-wide review and exact-head PR CI remain gates.
-  No P23 PR is open yet.
-- **Next step.** Submit P23 after final branch-wide review, verify exact-head SQLite/Postgres CI
+  P23 is now draft PR #152. Final branch-wide review found no confirmed actionable issue;
+  exact-head full CI and browser verification remain release validation, not a deployment grant.
+- **Next step.** Verify P23 #152 exact-head SQLite/Postgres CI
   and dependency audits, then proceed to P24/P25 without admitting fallback writes. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -943,3 +944,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   `b4741355` and `c4402084` (trees `92bf3b6d` and `8bfe71d4`). This establishes textual compatibility
   only, not combined behavior or permission to merge those branches. Final docs/workflow-head
   previews, branch-wide review and exact-head CI remain required before merging P23.
+- Final branch-wide independent review found no confirmed actionable issue or missing P23 §8.8
+  requirement. The prior breaker/terminology findings are closed. Combined targeted race checks
+  passed with Postgres disabled in that independent review. At docs/workflow head `b2cf51c6`, the
+  final read-only Apps previews were also clean (trees `5189479e` and `65177496`); no Apps branch
+  was changed or merged. P23 is submitted as draft PR #152 for exact-head CI. Browser layout/
+  contrast validation remains separate, and no production rollout is authorized by the review.
