@@ -21,6 +21,19 @@ const auth = vi.hoisted(() => ({
   },
 }))
 
+// A pass-through that remembers what the toolbar was given on every render. The page keeps what the
+// last answer said about itself between requests, and a render cannot be inspected once the effects
+// that follow it have run.
+const toolbar = vi.hoisted(() => ({ rendered: [] as Array<{ rtypes?: string[]; rtype: string }> }))
+vi.mock('../components/forecast/ForecastToolbar', async (original) => {
+  const actual = await original<typeof import('../components/forecast/ForecastToolbar')>()
+  return {
+    default: (props: Parameters<typeof actual.default>[0]) => {
+      toolbar.rendered.push({ rtypes: props.rtypes, rtype: props.rtype })
+      return actual.default(props)
+    },
+  }
+})
 vi.mock('../api/client', async (original) => ({
   ...(await original<typeof import('../api/client')>()),
   api: apiMock,
@@ -79,6 +92,7 @@ beforeEach(() => {
   apiMock.get.mockReset()
   csvMock.downloadCSV.mockReset()
   auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: false } }
+  toolbar.rendered.length = 0
   apiMock.get.mockImplementation((url: string) =>
     Promise.resolve(url.startsWith('/api/forecast/groups/members') ? members : record()))
 })
@@ -842,6 +856,21 @@ describe('ForecastRecordPage evaluator pill', () => {
 })
 
 describe('ForecastRecordPage report type', () => {
+  // What an answer says about itself (the covered types, the limits, the clock) is volume. It is kept
+  // between requests, and it dies with the identity it described: not one render later.
+  it('does not draw the previous reader\'s covered types for even one render after the identity changes', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ rtypes: ['Decision memo', 'Sector note'] })))
+    const view = render(<MemoryRouter initialEntries={['/forecast?rtype=Decision+memo']}><ForecastRecordPage /></MemoryRouter>)
+    await screen.findByText('+3.1 pt')
+    await waitFor(() => expect(toolbar.rendered.some((r) => r.rtypes?.length === 2)).toBe(true))
+    apiMock.get.mockReturnValue(new Promise(() => {}))
+    toolbar.rendered.length = 0
+    auth.value = { ...auth.value, user: 'someone-else' }
+    view.rerender(<MemoryRouter initialEntries={['/forecast?rtype=Decision+memo']}><ForecastRecordPage /></MemoryRouter>)
+    await waitFor(() => expect(toolbar.rendered.length).toBeGreaterThan(0))
+    expect(toolbar.rendered.map((r) => r.rtypes)).not.toContainEqual(['Decision memo', 'Sector note'])
+  })
+
   const open = async (types: string[]) => {
     apiMock.get.mockResolvedValue(record(metadata({ rtypes: types })))
     show()

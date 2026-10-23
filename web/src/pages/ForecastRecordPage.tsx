@@ -92,9 +92,11 @@ export default function ForecastRecordPage() {
   )
 
   // What the last answer said about itself. It outlives the answer (a tab switch is a new request)
-  // and dies with the identity it described.
-  const [heldMeta, setHeldMeta] = useState<ReaderMeta>()
-  useEffect(() => setHeldMeta(undefined), [identity])
+  // and dies with the identity it described: it is stored with that identity and read only while the
+  // identity is still the current one, so no render, not even the one that changes it, draws the
+  // previous reader's covered types, limits or clock.
+  const [held, setHeld] = useState<{ identity: string; meta: ReaderMeta }>()
+  const heldMeta = held?.identity === identity ? held.meta : undefined
 
   // A custom view waits until both dates are present, so an empty tab does not spend a permutation
   // run on the whole ledger, and until the range is one the server would accept. Whether to ask is
@@ -111,8 +113,8 @@ export default function ForecastRecordPage() {
 
   const data: ForecastGroupsResponse | undefined = record.kind === 'ready' ? record.data : undefined
   useEffect(() => {
-    if (data) setHeldMeta(metaOf(data))
-  }, [data])
+    if (data) setHeld({ identity, meta: metaOf(data) })
+  }, [data, identity])
   const meta = data ? metaOf(data) : heldMeta
   const limits = limitsOf(meta)
 
