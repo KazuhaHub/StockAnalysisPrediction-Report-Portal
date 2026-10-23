@@ -102,6 +102,7 @@ func TestExternalCustomRangeRefused(t *testing.T) {
 // statement, taken from the same decision that picked the cohort.
 func TestReaderGroupsStateThePopulationTheServerUsed(t *testing.T) {
 	s := newV1Server(t)
+	ensurePurgeEvidenceTable(t, s.st) // an own read needs the evidence an upgraded database has
 	s.forecastEval.now = func() time.Time { return dateAtClose("2026-10-22") }
 	parent := seedOU(t, s.st, 0, scopeOwn)
 	child := seedOU(t, s.st, parent, nil)
