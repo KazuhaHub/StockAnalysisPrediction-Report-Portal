@@ -1037,6 +1037,8 @@
   "forecast.eval.pill.stale_hint": "超过 {{minutes}} 分钟没有心跳，评估器可能已经停止。看门狗会通过邮件和 Slack 提醒。",
   "forecast.eval.pill.lagging_hint": "最早到期的检查点已超过 {{hours}} 小时未结算。读者看到的是「等待结算」或「重试中」，不是失败。",
   "forecast.eval.pill.error_hint": "上一轮出错，下一轮会自动重试；已结算的结果不受影响。",
+  "forecast.eval.pill.off_hint": "自动结算已关闭。关闭期间不会结算任何检查点，各批次会继续等待，记录不会更新。",
+  "forecast.eval.pill.dry_hint": "评估器处于试运行：它会规划每一次到期结算，但不写入，所以在正式开启前不会有新结果进入记录。",
   "forecast.eval.pill.state": "状态",
   "forecast.cell.reason": "{{phase}} {{n}}",
   "forecast.cell.not_before": "不早于 {{date}}",

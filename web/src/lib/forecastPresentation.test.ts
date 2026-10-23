@@ -11,7 +11,37 @@ function luminance(hex: string) {
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
 }
 
+// A colour token as [r, g, b] over a background: antd's text colours are translucent black or white.
+function over(colour: string, background: string): [number, number, number] {
+  const solid = (value: string): [number, number, number] =>
+    value.startsWith('#')
+      ? (value.replace('#', '').match(/../g)!.map((v) => parseInt(v, 16)) as [number, number, number])
+      : (value.match(/[\d.]+/g)!.slice(0, 3).map(Number) as [number, number, number])
+  const alpha = colour.startsWith('rgba') ? Number(colour.match(/[\d.]+/g)![3]) : 1
+  const fg = solid(colour)
+  const bg = solid(background)
+  return [0, 1, 2].map((i) => fg[i] * alpha + bg[i] * (1 - alpha)) as [number, number, number]
+}
+const contrast = (a: [number, number, number], b: [number, number, number]) => {
+  const lum = ([r, g, bl]: [number, number, number]) =>
+    [r, g, bl].map((v) => v / 255).map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
 describe('forecast presentation', () => {
+  // The drawer's field names and the page's quiet notes use the secondary text colour. antd's default
+  // for a description label is its tertiary colour, which measures 3.36:1 on white.
+  it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('keeps the secondary text colour above AA contrast on the surface of each theme', (algorithm) => {
+    const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
+    for (const surface of [token.colorBgContainer, token.colorBgElevated]) {
+      expect(contrast(over(token.colorTextSecondary, surface), over(surface, surface))).toBeGreaterThanOrEqual(4.5)
+    }
+    // And the colour this replaces really is under it, so the test would notice a regression to it.
+    expect(contrast(over(token.colorTextTertiary, token.colorBgElevated), over(token.colorBgElevated, token.colorBgElevated))).toBeLessThan(4.5)
+  })
+
   it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('keeps significant text above AA contrast on its actual tint', (algorithm) => {
     const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
     const palette = forecastPalette(token)

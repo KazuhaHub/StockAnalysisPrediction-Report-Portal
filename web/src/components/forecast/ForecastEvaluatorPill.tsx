@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Descriptions, Drawer, theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -16,8 +16,14 @@ import Quiet from './Quiet'
 // It reads the one admin route that carries the heartbeat (the reader response only knows the
 // evaluator's mode), and a failed read is this component's own: the record beside it does not wait
 // for it and does not hide behind it.
+//
+// The age of the heartbeat is computed on this page's clock, so the heartbeat itself has to be read
+// again: a page left open for ten minutes would otherwise call a healthy evaluator stale.
 
 const MODE_KEY = { '0': 'off', dry: 'dry', '1': 'on' } as const
+// Well inside the stall threshold (ten minutes): a snapshot is never old enough, on its own, to make a
+// running evaluator look stopped.
+const REFRESH_MS = 60_000
 
 export default function ForecastEvaluatorPill() {
   const { t } = useTranslation()
@@ -28,17 +34,42 @@ export default function ForecastEvaluatorPill() {
   // Re-render the age on its own clock: a page left open must go stale without a reload.
   const [nowMs, setNowMs] = useState(() => Date.now())
 
+  // Only the newest request may write: a slow answer must not overwrite a newer one, and nothing
+  // writes once the pill is gone.
+  const latest = useRef(0)
+  const supersede = useCallback(() => ++latest.current, [])
   const load = useCallback(() => {
-    setFailed(false)
+    const mine = supersede()
     api
       .get<ForecastSettings>('/api/admin/forecast')
-      // A reply that is not a settings object is a failed read, not something to render.
-      .then((value) => (Array.isArray(value?.readiness) ? setSettings(value) : setFailed(true)))
-      .catch(() => setFailed(true))
-  }, [])
+      .then((value) => {
+        if (mine !== latest.current) return
+        // A reply that is not a settings object is a failed read, not something to render.
+        if (Array.isArray(value?.readiness)) {
+          setSettings(value)
+          setFailed(false)
+        } else setFailed(true)
+      })
+      .catch(() => {
+        if (mine === latest.current) setFailed(true)
+      })
+  }, [supersede])
   useEffect(() => {
     load()
-  }, [load])
+    const refresh = setInterval(() => {
+      if (!document.hidden) load()
+    }, REFRESH_MS)
+    // A tab that was in the background for a while has an old snapshot and a new clock.
+    const visible = () => {
+      if (!document.hidden) load()
+    }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      clearInterval(refresh)
+      document.removeEventListener('visibilitychange', visible)
+      supersede()
+    }
+  }, [load, supersede])
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 30_000)
     return () => clearInterval(id)
@@ -48,7 +79,7 @@ export default function ForecastEvaluatorPill() {
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
         <Quiet style={{ fontSize: 12 }}>{t('forecast.eval.pill.unavailable')}</Quiet>
-        <Button size="small" type="link" onClick={load}>{t('common.retry')}</Button>
+        <Button size="small" type="link" onClick={load} style={{ color: forecastLinkColor(token) }}>{t('common.retry')}</Button>
       </span>
     )
   }
@@ -70,9 +101,9 @@ export default function ForecastEvaluatorPill() {
   const explanation = () => {
     switch (status) {
       case 'off':
-        return <Alert type="info" showIcon title={t('forecast.eval.offHint')} />
+        return <Alert type="info" showIcon title={t('forecast.eval.pill.off_hint')} />
       case 'dry':
-        return <Alert type="info" showIcon title={t('forecast.eval.dryHint')} />
+        return <Alert type="info" showIcon title={t('forecast.eval.pill.dry_hint')} />
       case 'healthy':
         return hb ? (
           <Alert type="success" showIcon title={t('forecast.eval.pill.pass', { sets: hb.pass.sets, resolved: hb.pass.resolved })} />
@@ -99,14 +130,19 @@ export default function ForecastEvaluatorPill() {
         size="small"
         shape="round"
         aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true)
+          // What the drawer shows should be current, not whatever the last timer tick left.
+          load()
+        }}
         icon={<span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />}
       >
         {t('forecast.eval.pill', { status: statusText })}
       </Button>
       <Drawer open={open} onClose={() => setOpen(false)} title={t('forecast.eval.status.title')} size={420} destroyOnHidden>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Descriptions column={1} size="small">
+          {/* antd draws the field names in its tertiary colour, which is under AA on white (3.4:1). */}
+          <Descriptions column={1} size="small" styles={{ label: { color: token.colorTextSecondary } }}>
             <Descriptions.Item label={t('forecast.eval.pill.state')}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />

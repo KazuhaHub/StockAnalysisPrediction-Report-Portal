@@ -1037,6 +1037,8 @@
   "forecast.eval.pill.stale_hint": "No heartbeat for more than {{minutes}} minutes: the evaluator may have stopped. The watchdog alerts by email and Slack.",
   "forecast.eval.pill.lagging_hint": "The oldest due checkpoint has waited more than {{hours}} hours. Readers see \"Awaiting settlement\" or \"Retrying\", not a failure.",
   "forecast.eval.pill.error_hint": "The last pass failed and is retried on the next tick; results already settled are unaffected.",
+  "forecast.eval.pill.off_hint": "Automatic settling is off. No checkpoint settles while it is off, so cohorts keep waiting and the record does not change.",
+  "forecast.eval.pill.dry_hint": "The evaluator is in dry-run mode: it plans every due settlement and writes nothing, so no new result reaches the record until it is switched on.",
   "forecast.eval.pill.state": "State",
   "forecast.cell.reason": "{{phase}} {{n}}",
   "forecast.cell.not_before": "Not before {{date}}",

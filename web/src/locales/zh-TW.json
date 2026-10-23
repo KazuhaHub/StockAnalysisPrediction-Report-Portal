@@ -1037,6 +1037,8 @@
   "forecast.eval.pill.stale_hint": "超過 {{minutes}} 分鐘沒有心跳，評估器可能已經停止。看門狗會通過郵件和 Slack 提醒。",
   "forecast.eval.pill.lagging_hint": "最早到期的檢查點已超過 {{hours}} 小時未結算。讀者看到的是「等待結算」或「重試中」，不是失敗。",
   "forecast.eval.pill.error_hint": "上一輪出錯，下一輪會自動重試；已結算的結果不受影響。",
+  "forecast.eval.pill.off_hint": "自動結算已關閉。關閉期間不會結算任何檢查點，各批次會繼續等待，記錄不會更新。",
+  "forecast.eval.pill.dry_hint": "評估器處於試執行：它會規劃每一次到期結算，但不寫入，所以在正式開啟前不會有新結果進入記錄。",
   "forecast.eval.pill.state": "狀態",
   "forecast.cell.reason": "{{phase}} {{n}}",
   "forecast.cell.not_before": "不早於 {{date}}",
