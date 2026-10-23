@@ -91,6 +91,8 @@ type Server struct {
 	forecastGroupsGen uint64
 	forecastCompute   forecastCompute
 	forecastViewers   forecastViewers
+	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
+	forecastSignals forecastSignals
 }
 
 // statusRecorder records the response status code for use in request logging.
@@ -274,6 +276,7 @@ func RunServer(cfgPath string) {
 	// having stopped, which it could not do from inside that loop.
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
+	go s.forecastSignalsLoop()
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
