@@ -73,14 +73,21 @@ export default function ForecastRecordPage() {
     patch({ from: v?.[0]?.format('YYYY-MM-DD') ?? '', to: v?.[1]?.format('YYYY-MM-DD') ?? '' })
   const rangeValue: [Dayjs | null, Dayjs | null] | null = view.from && view.to ? [dayjs(view.from), dayjs(view.to)] : null
 
-  const population = own
-    ? forecast?.ou
-      ? t('forecast.record.population_own', { ou: forecast.ou })
-      : t('forecast.record.population_own_unnamed')
-    : t('forecast.record.population_all')
-
   const data: ForecastGroupsResponse | undefined = record.kind === 'ready' ? record.data : undefined
   const groups = data?.groups ?? []
+
+  // The population is the one the answer states, because the hint was read when the session started
+  // and the scope may have changed since. The hint speaks only until an answer arrives (and for a
+  // server that states none). An answer that says "own" without a unit name stays unnamed: it must
+  // not borrow a name from a hint that may describe another unit.
+  const stated = data?.scope
+  const populationOwn = stated ? stated === 'own' : own
+  const populationOu = stated ? data?.scope_ou : forecast?.ou
+  const population = populationOwn
+    ? populationOu
+      ? t('forecast.record.population_own', { ou: populationOu })
+      : t('forecast.record.population_own_unnamed')
+    : t('forecast.record.population_all')
 
   const exportCsv = () => {
     if (!data) return
@@ -103,7 +110,6 @@ export default function ForecastRecordPage() {
         return (
           <div aria-busy="true">
             <Skeleton active title paragraph={{ rows: 6 }} />
-            <span className="rp-sr-only" role="status">{t('common.loading')}</span>
           </div>
         )
       case 'idle':
@@ -166,6 +172,29 @@ export default function ForecastRecordPage() {
     }
   }
 
+  // A reader the server turned away has no population to describe and nothing to filter or export:
+  // only the title and the refusal, so the header cannot claim a population they cannot see.
+  if (record.kind === 'unavailable') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <Typography.Title level={4} style={{ margin: 0 }}>
+          {t('forecast.record.title')}
+        </Typography.Title>
+        <Card>{body()}</Card>
+      </div>
+    )
+  }
+
+  // What a screen reader is told about the page's state. It is deliberately not the content: the
+  // matrix is dozens of buttons, and a metric switch rewrites every one of them. A failure is left to
+  // the alert, which announces itself.
+  const status =
+    record.kind === 'loading'
+      ? t('common.loading')
+      : record.kind === 'ready'
+        ? t(groups.length === 0 ? 'forecast.record.status_empty' : 'forecast.record.status_ready')
+        : ''
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 12 }}>
@@ -221,7 +250,8 @@ export default function ForecastRecordPage() {
           />
         </div>
 
-        <div aria-live="polite">{body()}</div>
+        <span className="rp-sr-only" role="status">{status}</span>
+        {body()}
       </Card>
 
       <ForecastMethodology />

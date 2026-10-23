@@ -258,6 +258,120 @@ describe('ForecastRecordPage header', () => {
   })
 })
 
+// The navigation hint is read once, when the session starts. The numbers are not: each answer was
+// computed for the population the server decided on at that request. The header and the export
+// therefore name the population the answer states, and the hint only until an answer arrives.
+describe('ForecastRecordPage population', () => {
+  it('names the population the answer states when the hint has gone stale', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
+    apiMock.get.mockResolvedValue(record({ scope: 'all' }))
+    show()
+    await screen.findByText('3.1 pt')
+    expect(screen.getByText('forecast.record.population_all')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('population_own')
+  })
+
+  it('follows an answer that narrows the population, and names the unit it was rooted at', async () => {
+    apiMock.get.mockResolvedValue(record({ scope: 'own', scope_ou: 'Desk' }))
+    show()
+    await screen.findByText('3.1 pt')
+    expect(screen.getByText('forecast.record.population_own:{"ou":"Desk"}')).toBeTruthy()
+    expect(screen.queryByText('forecast.record.population_all')).toBeNull()
+  })
+
+  it('does not borrow a stale unit name when the answer is own but names none', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
+    apiMock.get.mockResolvedValue(record({ scope: 'own' }))
+    show()
+    await screen.findByText('3.1 pt')
+    expect(screen.getByText('forecast.record.population_own_unnamed')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('Old Desk')
+  })
+
+  it('labels the export with the population of the answer, not of the hint', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
+    apiMock.get.mockResolvedValue(record({ scope: 'all' }))
+    show()
+    await screen.findByText('3.1 pt')
+    fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
+    const [, text] = csvMock.downloadCSV.mock.calls[0] as [string, string]
+    expect(text).toContain('# population=forecast.record.population_all')
+    expect(text).not.toContain('Old Desk')
+  })
+})
+
+// A reader the server turned away has no population to describe and nothing to filter or export, so
+// the page says only what it is and why they cannot see it.
+describe('ForecastRecordPage without access', () => {
+  const absent = [
+    'forecast.record.population_all', 'forecast.record.subtitle', 'forecast.disclaimer',
+    'forecast.tab.month', 'forecast.tab.custom', 'forecast.metric.spread', 'forecast.export.button',
+    'forecast.methodology.title',
+  ]
+  const onlyTitleAndRefusal = async () => {
+    expect(await screen.findByText('forecast.record.unavailable')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'forecast.record.title' })).toBeTruthy()
+    for (const text of absent) expect(screen.queryByText(text), text).toBeNull()
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.queryByRole('button', { name: /forecast.export.button/ })).toBeNull()
+    expect(screen.queryByRole('radio')).toBeNull()
+  }
+
+  it('shows only the title and the refusal to a reader whose scope is none', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'none', external: false } }
+    show()
+    await onlyTitleAndRefusal()
+  })
+
+  it('shows only the title and the refusal when the server refuses a reader the hint allowed', async () => {
+    apiMock.get.mockRejectedValue(new ApiError(403, 'no', 'forecast_unavailable'))
+    show()
+    await onlyTitleAndRefusal()
+  })
+})
+
+// The matrix is dozens of cell buttons: it must not sit inside a live region, or every metric switch
+// reads the whole table aloud. One small status region says what state the page is in instead.
+describe('ForecastRecordPage live region', () => {
+  it('does not put the matrix inside a live region', async () => {
+    show()
+    await screen.findByText('3.1 pt')
+    const table = screen.getByRole('table')
+    expect(table.closest('[aria-live]')).toBeNull()
+    expect(table.closest('[role="status"]')).toBeNull()
+    expect(table.closest('[role="alert"]')).toBeNull()
+  })
+
+  it('announces the state, and only the state, in one status region', async () => {
+    let resolve!: (value: ForecastGroupsResponse) => void
+    apiMock.get.mockImplementation(() => new Promise<ForecastGroupsResponse>((done) => { resolve = done }))
+    show()
+    expect(screen.getByRole('status').textContent).toBe('common.loading')
+    await act(async () => resolve(record()))
+    await screen.findByText('3.1 pt')
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_ready')
+    // Changing the metric rewrites every cell but is not a new state to announce.
+    fireEvent.click(screen.getByText('forecast.metric.ic'))
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_ready')
+  })
+
+  it('announces an empty record as empty', async () => {
+    apiMock.get.mockResolvedValue(record({ groups: [] }))
+    show()
+    await screen.findByText('forecast.record.empty')
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_empty')
+  })
+
+  it('leaves a failure to its own alert instead of announcing it twice', async () => {
+    apiMock.get.mockRejectedValueOnce(new Error('offline'))
+    const { container } = show()
+    await screen.findByText('offline')
+    expect(container.querySelector('.ant-alert-error')?.getAttribute('role')).toBe('alert')
+    expect(screen.getByRole('status').textContent).toBe('')
+  })
+})
+
 describe('ForecastRecordPage tabs', () => {
   it('offers the exploratory tab to an internal reader and loads it only once a range is chosen', async () => {
     show('/forecast?mode=custom')

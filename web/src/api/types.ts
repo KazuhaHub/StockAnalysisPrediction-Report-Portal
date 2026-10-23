@@ -1699,6 +1699,13 @@ export interface ForecastGroupsResponse {
   unrecorded?: number
   groups: ForecastGroup[]
   excluded_months?: ForecastPurgedMonth[]
+  /**
+   * The population these numbers cover, as the server decided it for this request: the navigation
+   * hint is read once per session and can be stale, this cannot. Absent from an older server.
+   */
+  scope?: 'all' | 'own'
+  /** For an own population, the unit it is rooted at. Never present for the all scope. */
+  scope_ou?: string
 }
 
 export interface ForecastPurgedMonth {

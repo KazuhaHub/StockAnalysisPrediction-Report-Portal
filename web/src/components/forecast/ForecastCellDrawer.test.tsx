@@ -183,7 +183,8 @@ describe('ForecastCellDrawer without counts', () => {
     await screen.findByText('600001')
     const lastCell = (metric: string) => {
       const row = screen.getByText(`forecast.metric.${metric}`).closest('tr')!
-      return within(row).getAllByRole('cell').at(-1)!.textContent
+      const cellsInRow = within(row).getAllByRole('cell')
+      return cellsInRow[cellsInRow.length - 1].textContent
     }
     expect(lastCell('spread')).toBe('forecast.cell.min_n_met')
     for (const metric of ['ic', 'hit', 'fill', 'band', 'calib']) expect(lastCell(metric)).toBe('—')
