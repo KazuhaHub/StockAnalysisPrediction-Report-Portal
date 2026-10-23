@@ -24,8 +24,10 @@ type forecastFlight struct {
 	err      error
 	official bool
 	started  bool
-	callers  int
-	queries  map[*forecastUserQuery]bool
+	// startedAt is when the flight took its scoring slot; a caller measures its wait against it.
+	startedAt time.Time
+	callers   int
+	queries   map[*forecastUserQuery]bool
 }
 
 type forecastUserQuery struct {
@@ -72,6 +74,8 @@ func (c *forecastCompute) doForQuery(ctx context.Context, key string, official b
 	if lease != nil && lease.owner != c {
 		return nil, errForecastCompute
 	}
+	stats := forecastRequestStatsFrom(ctx)
+	entered := time.Now()
 	c.mu.Lock()
 	if lease != nil && lease.released {
 		c.mu.Unlock()
@@ -82,7 +86,8 @@ func (c *forecastCompute) doForQuery(ctx context.Context, key string, official b
 	}
 	c.cfg = cfg
 	f := c.flights[key]
-	if f == nil {
+	leader := f == nil
+	if leader {
 		f = &forecastFlight{done: make(chan struct{}), official: official}
 		c.flights[key] = f
 		go c.execute(key, f, cfg.Wait, fn)
@@ -103,15 +108,31 @@ func (c *forecastCompute) doForQuery(ctx context.Context, key string, official b
 	f.callers++
 	c.wakeLocked()
 	c.mu.Unlock()
+	if !leader {
+		stats.addJoined()
+	}
 	defer func() { c.mu.Lock(); f.callers--; c.mu.Unlock() }()
 	timer := time.NewTimer(cfg.Wait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
+		stats.addWait(time.Since(entered))
 		return nil, ctx.Err()
 	case <-timer.C:
+		stats.addWait(time.Since(entered))
 		return nil, errForecastBusy
 	case <-f.done:
+		c.mu.Lock()
+		startedAt := f.startedAt
+		c.mu.Unlock()
+		if startedAt.IsZero() {
+			stats.addWait(time.Since(entered)) // never reached a slot: it waited until it gave up
+		} else {
+			stats.addWait(startedAt.Sub(entered)) // zero when it joined a flight already running
+		}
+		if leader && f.err == nil {
+			stats.addScored()
+		}
 		return f.cell, f.err
 	}
 }
@@ -132,6 +153,7 @@ func (c *forecastCompute) acquire(f *forecastFlight, wait time.Duration) (int, e
 		if c.active[pool] < slots {
 			c.active[pool]++
 			f.started = true
+			f.startedAt = time.Now()
 			c.mu.Unlock()
 			return pool, nil
 		}

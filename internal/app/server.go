@@ -92,7 +92,9 @@ type Server struct {
 	forecastCompute   forecastCompute
 	forecastViewers   forecastViewers
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
-	forecastSignals forecastSignals
+	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
+	forecastSignals    forecastSignals
+	forecastSlowGroups time.Duration
 }
 
 // statusRecorder records the response status code for use in request logging.
