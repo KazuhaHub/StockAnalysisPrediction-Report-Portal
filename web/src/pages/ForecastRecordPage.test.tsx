@@ -1098,6 +1098,61 @@ describe('ForecastRecordPage custom range', () => {
     expect(presets.querySelectorAll('.anticon-check')).toHaveLength(1)
   })
 
+  // Both dates are always filled, so committing each edit asked the server for the range in between
+  // (new "from", old "to") that nobody chose, and spent the reader's custom-range allowance on it.
+  describe('editing the dates', () => {
+    // As a reader does: focus the input, type, and confirm with Enter.
+    const type = (input: HTMLInputElement, value: string) => {
+      fireEvent.focus(input)
+      fireEvent.change(input, { target: { value } })
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 13, charCode: 13 })
+    }
+    const openCustom = async () => {
+      apiMock.get.mockResolvedValue(record(metadata()))
+      show()
+      await screen.findByText('+3.1 pt')
+      fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+      await waitFor(() => expect(lastUrl()).toContain('mode=custom'))
+      return apiMock.get.mock.calls.length
+    }
+
+    it('holds an edited date until the reader applies it, then asks once for the range chosen', async () => {
+      const before = await openCustom()
+      const [from, to] = inputs()
+      type(from, '2026-12-01')
+      type(to, '2027-03-31')
+      expect(inputs().map((el) => el.value)).toEqual(['2026-12-01', '2027-03-31'])
+      expect(apiMock.get.mock.calls.length).toBe(before)
+      fireEvent.click(screen.getByRole('button', { name: 'forecast.range.apply' }))
+      await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=custom&from=2026-12-01&to=2027-03-31&group=month'))
+      expect(urls().slice(before)).toEqual(['/api/forecast/groups?mode=custom&from=2026-12-01&to=2027-03-31&group=month'])
+    })
+
+    it('cannot apply while a date is missing, and asks nothing for the half-edited range', async () => {
+      const before = await openCustom()
+      fireEvent.click(document.querySelector('[data-part="range"] .ant-picker-clear') as HTMLElement)
+      expect(inputs()).toHaveLength(1)
+      expect((screen.getByRole('button', { name: 'forecast.range.apply' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(apiMock.get.mock.calls.length).toBe(before)
+    })
+
+    it('puts the dates back to the range in force when a quick range replaces an unapplied edit', async () => {
+      const before = await openCustom()
+      type(inputs()[0], '2026-12-01')
+      fireEvent.click(screen.getByRole('button', { name: 'forecast.range.preset.last3' }))
+      await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=custom&from=2027-03-20&to=2027-06-20&group=month'))
+      expect(inputs().map((el) => el.value)).toEqual(['2027-03-20', '2027-06-20'])
+      expect(apiMock.get.mock.calls.length).toBe(before + 1)
+    })
+
+    it('shows an applied inverted range as the error it is', async () => {
+      await openCustom()
+      type(inputs()[0], '2027-07-01')
+      fireEvent.click(screen.getByRole('button', { name: 'forecast.range.apply' }))
+      expect(await screen.findByText('forecast.err.range_inverted')).toBeTruthy()
+    })
+  })
+
   it('does not offer a quick range longer than the server accepts', async () => {
     apiMock.get.mockResolvedValue(record(metadata({ limits: { ...limits, max_range_months: 6 } })))
     show()

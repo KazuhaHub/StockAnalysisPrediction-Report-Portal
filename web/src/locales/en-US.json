@@ -1102,6 +1102,7 @@
   "forecast.range.from": "Start date",
   "forecast.range.to": "End date",
   "forecast.range.presets": "Quick ranges",
+  "forecast.range.apply": "Apply",
   "forecast.err.range_too_long": "The range cannot exceed {{months}} months.",
   "forecast.err.week_range_too_long": "Weekly grouping is limited to {{weeks}} weeks: shorten the range or group more coarsely.",
   "forecast.record.default_rtype": "Use the default report type",

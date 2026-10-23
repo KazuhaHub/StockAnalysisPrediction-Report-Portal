@@ -1102,6 +1102,7 @@
   "forecast.range.from": "起始日期",
   "forecast.range.to": "结束日期",
   "forecast.range.presets": "快捷区间",
+  "forecast.range.apply": "应用",
   "forecast.err.range_too_long": "区间不能超过 {{months}} 个月。",
   "forecast.err.week_range_too_long": "按周分组最多 {{weeks}} 周，请缩短区间或改用更粗的分组。",
   "forecast.record.default_rtype": "改用默认报告类型",

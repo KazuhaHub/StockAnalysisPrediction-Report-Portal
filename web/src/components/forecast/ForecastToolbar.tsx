@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Button, DatePicker, Segmented, Select, Tag, theme } from 'antd'
 import { CheckOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +17,10 @@ import Quiet from './Quiet'
 // phone showed one panel and hid the rest off-screen to the left, and a tablet scrolled the page
 // sideways while it was open. A single-date popup is 288 px at any width, and buttons wrap like every
 // other control in this row. (The demo also uses two date inputs.)
+//
+// Both dates are always filled, so an edit to one end is also an edit to a range nobody chose: change
+// "from", and the range (new from, old to) is not the one the reader is building. The two inputs are
+// therefore a draft that is committed together, with Apply, and the quick ranges commit at once.
 //
 // Nothing here fetches. The page owns the view (it is in the URL) and the toolbar reports changes.
 
@@ -66,6 +70,10 @@ export default function ForecastToolbar(p: Props) {
   const rangeLabel = useId()
   const presets = rangePresets(p.today, p.ledgerStart, p.limits)
   const date = (value: string) => (value ? dayjs(value) : null)
+  // The dates being edited. The range in force (the URL) replaces them whenever it changes: a quick
+  // range, a link, the page opening the tab on its default.
+  const [draft, setDraft] = useState({ from: p.from, to: p.to })
+  useEffect(() => setDraft({ from: p.from, to: p.to }), [p.from, p.to])
 
   return (
     <div data-part="toolbar" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 20px', margin: '12px 0' }}>
@@ -130,8 +138,8 @@ export default function ForecastToolbar(p: Props) {
               placeholder={t('forecast.range.from')}
               format={DATE}
               popupAlign={popupAlign}
-              value={date(p.from)}
-              onChange={(v) => p.onChange({ from: v?.format(DATE) ?? '' })}
+              value={date(draft.from)}
+              onChange={(v) => setDraft((d) => ({ ...d, from: v?.format(DATE) ?? '' }))}
               style={dateInput}
             />
             <span aria-hidden="true">–</span>
@@ -141,10 +149,16 @@ export default function ForecastToolbar(p: Props) {
               placeholder={t('forecast.range.to')}
               format={DATE}
               popupAlign={popupAlign}
-              value={date(p.to)}
-              onChange={(v) => p.onChange({ to: v?.format(DATE) ?? '' })}
+              value={date(draft.to)}
+              onChange={(v) => setDraft((d) => ({ ...d, to: v?.format(DATE) ?? '' }))}
               style={dateInput}
             />
+            {/* Never disabled for being unchanged: the button the reader has just pressed must not
+                become inert under the focus. A repeat press asks for the range already in force,
+                which the page answers from what it holds. */}
+            <Button size="small" disabled={!draft.from || !draft.to} onClick={() => p.onChange({ from: draft.from, to: draft.to })}>
+              {t('forecast.range.apply')}
+            </Button>
           </span>
           {presets.length > 0 && (
             <span data-part="presets" role="group" aria-label={t('forecast.range.presets')} style={item}>
