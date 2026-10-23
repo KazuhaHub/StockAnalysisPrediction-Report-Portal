@@ -194,6 +194,39 @@ func TestPredictionCookieRoutesRequireForecastScope(t *testing.T) {
 	}
 }
 
+// TestV1CookieAppliesForecastScope: a cookie holder on the v1 prediction reads is held to the cookie
+// user's own forecast decision, after the enrolment wall (#108) has had its say. A none user is
+// refused with forecast_unavailable on both reads; a user held at the wall gets enrolment_required
+// (the wall comes first, even for a none user); an allowed user is served.
+func TestV1CookieAppliesForecastScope(t *testing.T) {
+	s := tokenServer(t)
+	seedForecastReader(t, s, "v1-all", scopeAll, false)
+	seedForecastReader(t, s, "v1-none", scopeNone, false)
+	walled := seedForecastReader(t, s, "v1-walled-none", scopeNone, false)
+	if err := s.st.SetGroupRequire2FA(walled, true); err != nil {
+		t.Fatal(err)
+	}
+	report, _ := seedLedgerFor(t, s, "600160", "2026-10-17", "# body")
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	for _, path := range []string{"/api/v1/reports/" + itoa64(report) + "/predictions", "/api/v1/predictions?symbol=600160"} {
+		for _, tc := range []struct {
+			user, code string
+			status     int
+		}{
+			{"v1-none", "forecast_unavailable", http.StatusForbidden},
+			{"v1-walled-none", "enrolment_required", http.StatusForbidden},
+			{"v1-all", "", http.StatusOK},
+		} {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, sessionForPath(t, s, tc.user, "", path))
+			if w.Code != tc.status || tc.code != "" && forecastMatrixErrorCode(t, w.Body.Bytes()) != tc.code {
+				t.Errorf("%s as %s: %d %s", path, tc.user, w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
 func TestExternalPredictionReadsFilterBeforeLimitAndHideDiagnostics(t *testing.T) {
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
