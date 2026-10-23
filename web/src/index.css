@@ -1617,6 +1617,21 @@ body {
   outline-offset: 1px;
 }
 
+/* A table in the cell drawer that is wider than the drawer scrolls inside one region that the keyboard can
+   reach (see ScrollRegion). The table keeps its natural width; the region does the scrolling. */
+.rp-fc-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.rp-fc-scroll .ant-table-content > table {
+  width: max-content;
+  min-width: 100%;
+}
+.rp-fc-scroll:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 1px;
+}
+
 /* The record page's one card: roomy on a desktop, tight enough on a phone that the matrix keeps its width. */
 .rp-fc-card > .ant-card-body {
   padding: 16px;

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { ForecastCell, ForecastMode } from '../../api/types'
 import { cellDisplay, type Translate } from '../../lib/forecast'
 import { formatProbability, formatSigned } from '../../lib/forecastPresentation'
+import ScrollRegion from './ScrollRegion'
 
 // The numbers behind a mature cell, as the drawer states them: every metric with its null, its p and
 // (on the record) its corrected q, then the same metrics per policy version.
@@ -101,21 +102,22 @@ export function MetricsTable({ cell, mode }: { cell: ForecastCell; mode: Forecas
   const { t } = useTranslation()
   const custom = mode === 'custom'
   return (
-    <Table
-      size="small"
-      rowKey="key"
-      pagination={false}
-      dataSource={metricRows(cell, t)}
-      scroll={{ x: 'max-content' }}
-      columns={[
-        { title: t('forecast.drawer.metric'), dataIndex: 'metric', key: 'metric' },
-        { title: t('forecast.drawer.value'), dataIndex: 'value', key: 'value' },
-        { title: t('forecast.drawer.null'), dataIndex: 'nullText', key: 'nullText' },
-        { title: custom ? t('forecast.drawer.p_star') : t('forecast.drawer.p'), dataIndex: 'p', key: 'p' },
-        ...(custom ? [] : [{ title: t('forecast.drawer.q'), dataIndex: 'q', key: 'q' }]),
-        { title: t('forecast.drawer.n'), dataIndex: 'n', key: 'n' },
-      ]}
-    />
+    <ScrollRegion label={t('forecast.drawer.results')}>
+      <Table
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={metricRows(cell, t)}
+        columns={[
+          { title: t('forecast.drawer.metric'), dataIndex: 'metric', key: 'metric' },
+          { title: t('forecast.drawer.value'), dataIndex: 'value', key: 'value' },
+          { title: t('forecast.drawer.null'), dataIndex: 'nullText', key: 'nullText' },
+          { title: custom ? t('forecast.drawer.p_star') : t('forecast.drawer.p'), dataIndex: 'p', key: 'p' },
+          ...(custom ? [] : [{ title: t('forecast.drawer.q'), dataIndex: 'q', key: 'q' }]),
+          { title: t('forecast.drawer.n'), dataIndex: 'n', key: 'n' },
+        ]}
+      />
+    </ScrollRegion>
   )
 }
 
@@ -139,20 +141,21 @@ export function SlicesTable({ cell, mode }: { cell: ForecastCell; mode: Forecast
       <Typography.Title level={5} style={{ marginTop: 0 }}>
         {t('forecast.drawer.slices')}
       </Typography.Title>
-      <Table
-        size="small"
-        rowKey="policy_version"
-        pagination={false}
-        dataSource={slices}
-        scroll={{ x: 'max-content' }}
-        columns={[
-          { title: t('forecast.drawer.policy'), dataIndex: 'policy_version', key: 'policy' },
-          { title: t('forecast.metric.spread'), key: 'spread', render: (_: unknown, s: ForecastCell) => metric(s, 'spread') },
-          { title: t('forecast.metric.ic'), key: 'ic', render: (_: unknown, s: ForecastCell) => metric(s, 'ic') },
-          { title: t('forecast.metric.hit'), key: 'hit', render: (_: unknown, s: ForecastCell) => metric(s, 'hit') },
-          { title: t('forecast.drawer.n'), key: 'n', render: (_: unknown, s: ForecastCell) => sampleOf(s) },
-        ]}
-      />
+      <ScrollRegion label={t('forecast.drawer.slices')}>
+        <Table
+          size="small"
+          rowKey="policy_version"
+          pagination={false}
+          dataSource={slices}
+          columns={[
+            { title: t('forecast.drawer.policy'), dataIndex: 'policy_version', key: 'policy' },
+            { title: t('forecast.metric.spread'), key: 'spread', render: (_: unknown, s: ForecastCell) => metric(s, 'spread') },
+            { title: t('forecast.metric.ic'), key: 'ic', render: (_: unknown, s: ForecastCell) => metric(s, 'ic') },
+            { title: t('forecast.metric.hit'), key: 'hit', render: (_: unknown, s: ForecastCell) => metric(s, 'hit') },
+            { title: t('forecast.drawer.n'), key: 'n', render: (_: unknown, s: ForecastCell) => sampleOf(s) },
+          ]}
+        />
+      </ScrollRegion>
     </div>
   )
 }

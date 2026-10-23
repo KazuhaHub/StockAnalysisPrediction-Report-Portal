@@ -311,6 +311,33 @@ describe('ForecastCellDrawer membership mode', () => {
   })
 })
 
+// A table wider than the drawer scrolls sideways, which on a phone is every one of them. A scroll
+// area with nothing focusable in it cannot be scrolled from the keyboard (a member without a report
+// is plain text), so each table sits in a named region that can take focus itself.
+describe('ForecastCellDrawer scrolling', () => {
+  const cell: ForecastCell = {
+    state: 'mature', n: 42, spread_bp: 310, spread_p: 0.012, spread_q: 0.041,
+    slices: [{ state: 'mature', n: 36, spread_bp: 120, spread_p: 0.2, spread_q: 0.3, policy_version: 'v3-1' }, { state: 'small', n: 12, policy_version: 'v3-2' }],
+  }
+
+  it('puts the results, the slices and the members each in a focusable, named region', async () => {
+    show(page([member(1, 'agree')]), { cell })
+    await screen.findByText('600001')
+    const regions = screen.getAllByRole('region')
+    expect(regions.map((r) => r.getAttribute('aria-label'))).toEqual(['forecast.drawer.results', 'forecast.drawer.slices', 'forecast.drawer.members'])
+    for (const region of regions) {
+      expect(region.getAttribute('tabindex')).toBe('0')
+      expect(region.querySelector('table')).not.toBeNull()
+    }
+  })
+
+  it('names the members region in membership mode too, where it is the only table', async () => {
+    show(page([{ ...member(1), status: 'pending', excluded_reason: 'pending' }], { population: 'all', state: 'pending' }), { cell: { state: 'pending' } })
+    await screen.findByText('600001')
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['forecast.drawer.members'])
+  })
+})
+
 describe('ForecastCellDrawer mature content', () => {
   const full: ForecastCell = {
     state: 'mature', n: 42, refused: 1, corp_action: 2,

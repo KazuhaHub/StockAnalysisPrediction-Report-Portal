@@ -966,6 +966,7 @@
   "forecast.drawer.q": "q (BH)",
   "forecast.drawer.n": "n",
   "forecast.drawer.members": "Members",
+  "forecast.drawer.results": "Results",
   "forecast.drawer.load_more": "Load more",
   "forecast.stance.long": "Long",
   "forecast.stance.no_position": "No position",

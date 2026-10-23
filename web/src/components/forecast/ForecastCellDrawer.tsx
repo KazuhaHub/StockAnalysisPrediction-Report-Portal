@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
 import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
+import ScrollRegion from './ScrollRegion'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -277,15 +278,16 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
               action={<Button size="small" onClick={retry}>{t('common.retry')}</Button>}
             />
           )}
-          <Table<ForecastMember>
-            size="small"
-            rowKey="set_id"
-            loading={current.loading}
-            pagination={false}
-            dataSource={current.members}
-            scroll={{ x: 'max-content' }}
-            columns={membership ? membershipColumns : scoredColumns}
-          />
+          <ScrollRegion label={t('forecast.drawer.members')}>
+            <Table<ForecastMember>
+              size="small"
+              rowKey="set_id"
+              loading={current.loading}
+              pagination={false}
+              dataSource={current.members}
+              columns={membership ? membershipColumns : scoredColumns}
+            />
+          </ScrollRegion>
           {current.next && (
             <div style={{ textAlign: 'center', marginTop: 12 }}>
               <Button onClick={more} loading={current.loading}>
