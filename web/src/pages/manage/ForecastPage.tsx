@@ -15,7 +15,7 @@ import ForecastAlerts from './ForecastAlerts'
 import ForecastLedgerStart from './ForecastLedgerStart'
 import ForecastDiagnostics from './ForecastDiagnostics'
 
-// 预测验证运维 (forecast operations): the administrator's page for running the prediction ledger
+// Forecast operations: the administrator's page for running the prediction ledger
 // (ADR 0029).
 //
 // It holds what only an operator needs: the evaluator's status and backlog, its settings and the

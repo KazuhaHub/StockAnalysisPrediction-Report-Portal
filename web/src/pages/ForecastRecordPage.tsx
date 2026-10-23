@@ -14,17 +14,18 @@ import { downloadCSV } from '../lib/csv'
 import { forecastCsv, groupsQuery, readView } from '../lib/forecast'
 import { useForecastRecord } from '../lib/useForecastRecord'
 
-// 预测验证 (forecast verification) for readers: the record of what each report predicted against what
+// Forecast verification for readers: the record of what each report predicted against what
 // the market did (ADR 0029, ADR 0039).
 //
 // This page asks the reader routes and nothing else. Who may see what is decided by the server on
 // every request; the navigation hint in `me.forecast` only decides what this page offers, so a stale
 // hint produces a refusal that the page shows, not a leak.
 //
-// Two views over one engine. 按月 is the RECORD: the calendar decides its groups, and a mature cell can
-// never change again. 自定义区间 is EXPLORATORY: because that freedom lets a reader search for a
-// flattering window, every p in it is p* and the export says so in its header. External readers get
-// the record only; a custom range would let them difference the ledger's volume out of it.
+// Two views over one engine. The monthly view is the RECORD: the calendar decides its groups, and a
+// mature cell can never change again. The custom range is EXPLORATORY: because that freedom lets a
+// reader search for a flattering window, every p in it is p* and the export says so in its header.
+// External readers get the record only; a custom range would let them difference the ledger's volume
+// out of it.
 
 const GROUPS = ['week', 'month', 'quarter', 'all'] as const
 const METRICS = ['spread', 'ic', 'hit', 'fill'] as const
