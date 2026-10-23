@@ -184,13 +184,14 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
+
+	var parent sql.NullInt64
+	var isDefault int
+	// First database operation of the transaction: nothing above this line reads or writes.
 	owned := migExec{s: s, ex: tx}
 	if err := lockPredictionOwnership(owned); err != nil {
 		return 0, 0, err
 	}
-
-	var parent sql.NullInt64
-	var isDefault int
 	if err := tx.QueryRow(s.bind(`SELECT parent_id, COALESCE(is_default,0) FROM user_groups WHERE id=?`), id).
 		Scan(&parent, &isDefault); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
