@@ -8,6 +8,10 @@ import (
 // Purge ownership is evidence, not a reconstruction from today's report grants. These primitives
 // are intentionally not registered with startup migrations: existing databases require an explicit
 // operator upgrade before the read/cleanup/delete paths can adopt this contract.
+//
+// The table is also not yet part of the backup table set, so a restore neither clears nor reloads
+// it. No database has the table until the upgrade step ships, and that step must register it with
+// backup and restore, because evidence is keyed by OU ids that a restored tree may reuse.
 
 // lockPredictionOwnership must be the first database operation in both the retention and OU-delete
 // transactions, before inspecting or reassigning sets. Holding it only around the evidence writes

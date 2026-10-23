@@ -470,6 +470,9 @@ func (s *Server) v1CanRead(w http.ResponseWriter, r *http.Request) bool {
 	}
 	holds, err := s.enrolmentHolds(r, u)
 	if err != nil {
+		if s.refuseForecastReadOnBrokenTree(w, r, u) {
+			return false
+		}
 		v1err(w, http.StatusServiceUnavailable, "enrolment_policy_unavailable",
 			"the sign-in policy could not be read, so this request was refused rather than allowed")
 		return false

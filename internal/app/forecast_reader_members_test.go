@@ -126,6 +126,7 @@ func TestExternalDrawerListsOnlyReadableReports(t *testing.T) {
 	if _, err := s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeOwn, f.ou); err != nil {
 		t.Fatal(err)
 	}
+	ensurePurgeEvidenceTable(t, s.st)
 	own := read("")
 	if own["n"] != float64(32) || len(own["members"].([]any)) != 2 {
 		t.Fatalf("own lost counts/readability filter: %v", own)

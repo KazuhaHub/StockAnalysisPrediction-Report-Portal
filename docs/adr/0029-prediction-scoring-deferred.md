@@ -155,7 +155,11 @@ every fill starts at `S0`'s close, not at the report's own baseline.
 - **The SPA uses session prediction routes.** The v1 routes are bearer-classed, not token-only:
   their read handlers also accept a valid cookie held at the independent enrolment wall. The SPA
   uses `GET /api/report/{id}/predictions` and `/api/predictions`; R2a additionally enforces forecast
-  scope on those routes and on cookie/bridge callers of both v1 prediction reads.
+  scope on those routes and on cookie callers of both v1 prediction reads. App-bridge tokens get no
+  forecast reads: both v1 prediction reads answer them `403 forecast_unavailable` without reading
+  the ledger (fail closed, stricter than before R2a, when a bridge query token received the
+  unscoped machine shape) until the shared token binding from the notification work lands, after
+  which a follow-up re-enables scoped bridge reads on that binding.
 - **Amended 2026-10-20 (P30/P31).** The forecast reads apply `viewerScope` like every other read. A
   reader's principals are the account, the Default OU (which encodes the "all" audience) and the
   **effectively restricted** OUs on its chain only; an unrestricted container is no longer a
@@ -163,9 +167,10 @@ every fill starts at `S0`'s close, not at the report's own baseline.
   only for a restricted OU.
 - **Amended by [ADR 0039](0039-forecast-verification-for-readers.md) (R2a).** Reader statistics use
   session routes `/api/forecast/groups*` and per-OU all/own/none; admin aliases remain `PermManage`
-  until P29. The core record moves to `/forecast`, with `/manage/forecast` for operations. Bound
-  app tokens carry their minting user, enforce current scope and return accepted report-backed
-  predictions without payload/errors/membership; they never authorize statistics. Persistent
+  until P29. The core record moves to `/forecast`, with `/manage/forecast` for operations.
+  App-bridge tokens get no forecast reads: both v1 prediction reads answer `403 forecast_unavailable`
+  and read nothing from the ledger, until the shared token binding from the notification work lands
+  and a follow-up re-enables scoped bridge reads on it; they never authorize statistics. Persistent
   machine prediction diagnostics remain unchanged. ADR 0039 records the full access, reading-stage
   and edition contract; its rollout status is separate from this accepted decision.
 

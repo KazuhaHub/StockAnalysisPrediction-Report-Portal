@@ -8,6 +8,7 @@ package app
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -371,6 +372,127 @@ func TestRestoreRulesForForecastKeys(t *testing.T) {
 	if _, err := dstD.restoreFrom(bytes.NewReader(dumpD), true); err != nil {
 		t.Fatalf("equivalent instants written differently were refused: %v", err)
 	}
+
+	// forecast_reader (P18): a restore never raises the reading stage. The result is the lower of the
+	// dump and the live database in off < card < full, as the readers resolve them: an unset row (or a
+	// NULL) is the default card, a stored empty string or any other unknown value is off.
+	t.Run("forecast_reader", func(t *testing.T) {
+		const (
+			unset = "\x00unset" // no meta row
+			null  = "\x00null"  // a meta row whose value is NULL
+		)
+		for _, tc := range []struct{ name, dump, live, want string }{
+			{"full dump over live card", "full", "card", "card"},
+			{"full dump over live off", "full", "off", "off"},
+			{"card dump over live off", "card", "off", "off"},
+			{"card dump over live full", "card", "full", "card"},
+			{"off dump over live full", "off", "full", "off"},
+			{"off dump over live card", "off", "card", "off"},
+			{"equal stages", "full", "full", "full"},
+			{"full dump over unset live", "full", unset, "card"},
+			{"full dump over null live", "full", null, "card"},
+			{"unset dump under live off", unset, "off", "off"},
+			{"unset dump under live full", unset, "full", unset},
+			{"unset on both sides", unset, unset, unset},
+			{"unknown live value never wins over a real stage", "full", "bogus", "off"},
+			{"unknown dump value is not raised", "bogus", "full", "bogus"},
+			// A stored empty string is not an unset row: the readers resolve it to off.
+			{"full dump over stored-empty live", "full", "", "off"},
+			{"card dump over stored-empty live", "card", "", "off"},
+			{"unset dump over stored-empty live", unset, "", "off"},
+			{"stored-empty dump over live full", "", "full", ""},
+			{"stored-empty dump over live card", "", "card", ""},
+			{"stored-empty dump over unset live", "", unset, ""},
+			{"stored-empty on both sides", "", "", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				eachRestoreDriver(t, func(t *testing.T, dst *Store) {
+					seed := func(st *Store, v string) {
+						t.Helper()
+						if _, err := st.exec(`DELETE FROM meta WHERE k=?`, setForecastReader); err != nil {
+							t.Fatal(err)
+						}
+						switch v {
+						case unset:
+						case null:
+							if _, err := st.exec(`INSERT INTO meta(k,v) VALUES(?,NULL)`, setForecastReader); err != nil {
+								t.Fatal(err)
+							}
+						default:
+							if err := st.SetSetting(setForecastReader, v); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					// The oracle is the readers' own resolution of a stage, not the restore's.
+					runtime := func(st *Store) string {
+						return (&Server{st: st}).forecastReaderStage(forecastDecision{Scope: scopeAll})
+					}
+					src := newTestStore(t)
+					seed(src, tc.dump)
+					dump := dumpOf(t, src)
+					seed(dst, tc.live)
+					dumpStage, liveStage := runtime(src), runtime(dst)
+					if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
+						t.Fatalf("restore: %v", err)
+					}
+					if got, want := runtime(dst), lowerForecastReaderStage(dumpStage, liveStage); got != want {
+						t.Fatalf("stage after restore reads as %q; the lower of dump (%s) and live (%s) is %q",
+							got, dumpStage, liveStage, want)
+					}
+					var raw sql.NullString
+					err := dst.queryRow(`SELECT v FROM meta WHERE k=?`, setForecastReader).Scan(&raw)
+					if err != nil && err != sql.ErrNoRows {
+						t.Fatal(err)
+					}
+					if tc.want == unset {
+						if raw.Valid {
+							t.Fatalf("stage row after restore = %q, want it absent", raw.String)
+						}
+					} else if !raw.Valid || raw.String != tc.want {
+						t.Fatalf("stage row after restore = %q (present=%v), want %q", raw.String, raw.Valid, tc.want)
+					}
+					// Only a real change leaves a system audit row, and it names both stages.
+					rows, _ := dst.ListAudit(AuditFilter{Action: AuditForecastReader})
+					final := runtime(dst)
+					changed := final != dumpStage
+					if changed != (len(rows) == 1) || len(rows) > 1 {
+						t.Fatalf("audit rows = %+v; changed=%v", rows, changed)
+					}
+					if changed && (rows[0].Actor != "system" || !strings.Contains(rows[0].Detail, final) ||
+						!strings.Contains(rows[0].Detail, dumpStage)) {
+						t.Fatalf("audit row = %+v", rows[0])
+					}
+				})
+			})
+		}
+	})
+}
+
+// A restore that cannot read the live reading stage must not guess the default: the failed read
+// counts as off, so the stage can only come out lower, never higher, than it was.
+func TestRestorePriorTreatsAnUnreadableReaderStageAsOff(t *testing.T) {
+	st := newTestStore(t)
+	if err := st.SetSetting(setForecastReader, "full"); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.captureRestorePrior().readerStage; got != "full" {
+		t.Fatalf("a readable stage was captured as %q", got)
+	}
+	if err := st.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.captureRestorePrior().readerStage; got != "off" {
+		t.Fatalf("an unreadable stage was captured as %q, want off", got)
+	}
+}
+
+// eachRestoreDriver runs a restore scenario into a SQLite store and, when configured, into Postgres.
+// A restore replaces every table, so neither destination needs seeding beyond what the scenario sets.
+func eachRestoreDriver(t *testing.T, fn func(t *testing.T, dst *Store)) {
+	t.Helper()
+	t.Run("sqlite", func(t *testing.T) { fn(t, newTestStore(t)) })
+	t.Run("postgres", func(t *testing.T) { fn(t, pgStore(t)) })
 }
 
 // ledgerStartValue is the decided V3 value, used by several tests.

@@ -1,9 +1,91 @@
 package app
 
 import (
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 )
+
+// errForecastPurgeHistoryUnavailable marks a scoped marker lookup that could not be answered, so the
+// read is refused rather than answered from the global history.
+var errForecastPurgeHistoryUnavailable = errors.New("purge history unavailable")
+
+// forecastPurgeView is what one read knows about retention. The two maps differ only for an own
+// population, and they are not interchangeable.
+//
+// filter is the site-wide history. It removes sets from every computation, so no partial data from a
+// month retention has emptied is ever shown, and it keeps cache identity honest across processes.
+//
+// disclosed is the subset this population may be told about: the months its current subtree owned
+// sets in when they were purged. It alone drives the range extension, the exclusion lists, the
+// purged groups and cells, and the drawer's purged state. For a nil population (all readers, the
+// administrator aliases, external-all readers) it is the same map as filter, which keeps their reads
+// exactly as they were.
+type forecastPurgeView struct {
+	filter, disclosed map[[2]string]string
+}
+
+// loadForecastPurgeView fails closed. A population that needs ownership evidence never falls back to
+// the global history when that evidence cannot be read; a nil population never touches it.
+func (s *Server) loadForecastPurgeView(pop forecastPopulation) (forecastPurgeView, error) {
+	filter, err := s.st.loadPredictionPurgeMarkers()
+	if err != nil {
+		return forecastPurgeView{}, err
+	}
+	if pop.OUs == nil {
+		return forecastPurgeView{filter: filter, disclosed: filter}, nil
+	}
+	disclosed, err := s.st.loadPredictionPurgeMarkersForPopulation(pop)
+	if err != nil {
+		logForecastPurgeHistoryUnavailable(err)
+		return forecastPurgeView{}, fmt.Errorf("%w: %v", errForecastPurgeHistoryUnavailable, err)
+	}
+	return forecastPurgeView{filter: filter, disclosed: disclosed}, nil
+}
+
+// undisclosedTag is the cache identity of a month that retention emptied but this population is not
+// told about, and "" for every other month. Such a month is shown as an ordinary one with no sets,
+// computed over the sets the site-wide filter left, so a cell memoised for it before the purge (by
+// another process, which this one has not heard from) must never answer. The tag follows the
+// marker, so it changes with the purge and with nothing else. For a nil population no month is
+// undisclosed.
+func (v forecastPurgeView) undisclosedTag(rtype string, p forecastPeriod) string {
+	key := [2]string{rtype, p.Start[:7]}
+	if _, disclosed := v.disclosed[key]; disclosed {
+		return ""
+	}
+	at, filtered := v.filter[key]
+	if !filtered {
+		return ""
+	}
+	return forecastPurgeCacheTag([]forecastPurgedMonth{{Cohort: key[1], PurgedAt: at}})
+}
+
+// forecastPurgeHistoryLoggedAt is the unix second of the last log line. Until the evidence table
+// exists, every own read fails the same way, and one line a minute says so without flooding the log.
+var forecastPurgeHistoryLoggedAt atomic.Int64
+
+func logForecastPurgeHistoryUnavailable(err error) {
+	now := time.Now().Unix()
+	last := forecastPurgeHistoryLoggedAt.Load()
+	if now-last < 60 || !forecastPurgeHistoryLoggedAt.CompareAndSwap(last, now) {
+		return
+	}
+	log.Printf("forecast purge history for an own population is unavailable, so its reads are refused: %v", err)
+}
+
+func writeForecastPurgeViewError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errForecastPurgeHistoryUnavailable) {
+		jsonErrorCode(w, http.StatusServiceUnavailable, "forecast_purge_history_unavailable", "purge history is unavailable")
+		return
+	}
+	jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+}
 
 func forecastPurgeCacheTag(months []forecastPurgedMonth) string {
 	if len(months) == 0 {

@@ -107,7 +107,7 @@ describe('AnnouncementsProvider', () => {
 describe('inScope', () => {
   const a = (over: Partial<Announcement>): Announcement => ({
     id: 1, level: 'notice', title: '', content: '', display: 'strip',
-    dismissible: false, scope: 'home', endsAt: '', ...over,
+    stripDismissible: false, popupDismissible: true, scope: 'home', endsAt: '', ...over,
   })
 
   it('keeps a home announcement on Home and lets an app one follow the reader', () => {

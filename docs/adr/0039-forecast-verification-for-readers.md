@@ -97,10 +97,37 @@ uncommitted snapshot and is insufficient.
 
 Existing global markers without ownership evidence remain visible to all but are hidden from own;
 there is no guessed historical backfill. This new table requires an explicit operator upgrade for
-existing supported databases, not automatic DDL at server startup. Fresh initialization, startup
-shape verification, dump/restore handling and rollback instructions must be delivered together
-before business routes adopt it. No released migration is edited and the frozen baseline stays
-unchanged. Approval of the schema is not authorization to change a production database.
+existing supported databases, not automatic DDL at server startup. The upgrade step must deliver,
+together with the table, fresh initialization, startup shape verification, membership in the
+dump/restore table set (so a restore replaces the evidence with the dump's rows instead of leaving
+rows keyed by OU ids the restored tree may reuse) and rollback instructions. The reader routes read
+the table only where it exists and fail closed where it does not, so they can be merged ahead of
+that step; no database has the table until the step ships, and the hold below stands until it
+does. No released migration is edited and the frozen baseline stays unchanged. Approval of the
+schema is not authorization to change a production database.
+
+The two reader routes read purge history through one view. The global markers still remove sets
+from every computation and decide cache identity, so no partial data from a month that retention
+has emptied is ever shown to anyone. What a population is *told* comes from the evidence: for an
+own reader, the range extension, the custom exclusion list, the purged groups and cells and the
+drawer's purged state use only the months whose evidence names the current subtree. All readers,
+the administrator aliases and external-all readers keep the global history unchanged.
+
+A month purged globally but not disclosed to an own reader must be indistinguishable from a month
+in which that reader simply holds no sets. The monthly record lists it as an ordinary group
+computed over the sets the site-wide filter left, which is none, and its drawer answers as any
+empty month in range does. Leaving the month out, or answering `label_not_found` for it, would
+turn a gap in an otherwise complete calendar into the very disclosure the owner refused. Two things
+keep the month honest. Its cells carry a cache identity derived from the marker, so a cell
+memoised before the purge (by another process this one has not heard from) never answers; and sets
+inside an undisclosed purged month do not count when the first month of an own calendar is chosen,
+so a set written after the purge cannot start the calendar and leave an empty leading month.
+Months before the reader's own first month are not found, exactly as any month before it.
+
+If the evidence table cannot be read, including before the explicit upgrade has created it, an own
+read answers `503 forecast_purge_history_unavailable` and never falls back to the global markers;
+reads that do not need evidence never touch the table. Retention and OU deletion do not yet write
+or transfer evidence, so the hold on releasing own-scoped reads stands until they do.
 
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
@@ -130,7 +157,7 @@ retain admin diagnostics until the separately gated P29 removal.
 | Any non-admin at none | `403 forecast_unavailable`; no navigation item | Same refusal; no card, chip, timeline mark or overlay | No forecast data |
 | Enrolment-held session | `403 enrolment_required` before business data | Same independent wall, including v1 cookie reads | No business data; a missing admin permission may refuse earlier |
 | Persistent query token | `401` on session and admin routes | Unscoped v1 machine contract | Payload with `include=payload`; membership, non-accepted states, errors and orphan history retained |
-| App-bridge token | `401` on record, drawer and admin routes | Minting user at none is denied; otherwise accepted, report-backed v1 sets only | No payload, membership, errors or orphans, even for an admin-minted bridge |
+| App-bridge token | `401` on record, drawer and admin routes | `403 forecast_unavailable` on both v1 prediction reads, whoever minted it; the ledger is not read | No forecast data (fail closed until the shared token binding lands) |
 | Anonymous | `401` | `401` | None |
 
 The SPA uses `/api/report/{id}/predictions` and `/api/predictions`. The v1 report and symbol
@@ -138,12 +165,30 @@ prediction routes also admit a valid cookie through the independent enrolment wa
 cookie shape follows the same scope rules. Route classification as bearer is not a token-only
 claim. An unreadable report answers 404, not a list that confirms its existence.
 
-Bridge identity lives in the existing in-memory app-token registry. The minting user is rechecked
-on prediction reads, including account incarnation/revision, active state, expiry, current scope
-and enrolment. This is not a persistent machine token and cannot fall through to machine shape
-when its binding is missing. Restricted users still cannot mint a query bridge under the current
-app-platform policy; a user restricted after mint is filtered by current report visibility.
-No parallel forecast identity registry or broader app capability is introduced.
+App-bridge tokens get no forecast reads. The in-memory app-token registry records scopes and
+expiry but no user, so a bridge token carries no account whose forecast scope it could stand for,
+and the portal does not invent one here. The v1 prediction reads therefore resolve their
+credential in a fixed order: a cookie session (its own decision and read scope), then a persistent
+query token (the unchanged machine contract), and then nothing else. Any other Bearer that the v1
+read gate admitted is a bridge token and is refused with `403 forecast_unavailable` before the
+ledger is touched. This is deliberately stricter than the behaviour before this ADR, where a
+bridge query token received the unscoped machine shape.
+
+The refusal holds until the shared token binding from the notification work lands, which records
+the minting identity in the existing app-token registry. A follow-up then re-enables scoped bridge
+reads on that binding: the minting user rechecked on every read (account incarnation and session
+revision, active state, expiry, current scope, enrolment), accepted report-backed sets only, and no
+payload, membership, errors or orphans even for an admin-minted bridge. Until then no parallel
+forecast identity registry or broader app capability is introduced. The access decision itself is
+unchanged: it is taken only from a cookie session's strict account and tree snapshot.
+
+An account whose OU chain is broken (a dangling or cyclic parent) resolves to none. A dangling
+parent also leaves the enrolment policy unreadable, which every other route reports as
+`503 enrolment_policy_unavailable`; on the forecast reads the definite answer, `403
+forecast_unavailable`, is returned instead, so the subject sees what the table promises a none
+account. A cyclic chain does not trip the wall: the policy walks past a cycle, so such an account
+reaches the forecast gate and is refused there with the same `403 forecast_unavailable`. A
+transient store error is not a structural reason and keeps the retryable 503.
 
 ## External protection is response shaping, not CSS
 
@@ -236,8 +281,9 @@ card or off through the audited setting, without hiding the report itself.
   decision. A second per-OU stage would duplicate the access model and was not selected.
 - Filtering after membership would let another tenant change own results. Hiding counts in the
   browser would leave them available on the wire. Neither is a permission boundary.
-- Treating an app query token as a machine token would bypass none and expose diagnostics. Its
-  minting user must remain part of prediction authorization.
+- Treating an app query token as a machine token would bypass none and expose diagnostics. A bridge
+  token records no minting user today, so it is refused outright; once the shared token binding
+  lands, the minting user must be part of prediction authorization when scoped bridge reads return.
 - Recomputing attribution from the current user would rewrite history. The live tree determines
   subtree inclusion, while stored attribution identifies the OU; deletion is the explicit exception.
 

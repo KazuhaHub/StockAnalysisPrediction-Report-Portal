@@ -96,7 +96,8 @@ func readingEditionLink(report Rep, set PredictionSet) *forecastReadingEdition {
 }
 
 // Card-stage session reads need the same edition links as full-stage summaries. The credential
-// view opts in explicitly; persistent tokens and app-bridge reads keep their existing contract.
+// view opts in explicitly. Persistent tokens keep their existing contract, and an app-bridge token
+// never reaches this point because the v1 reads refuse it first.
 func (s *Server) addReadingEditionLinks(out map[string]any, reportID int64, identities []PredictionSet, display, counted int64, membership bool, view forecastPredictionView) {
 	cohort, displayMembership := "", ""
 	for _, identity := range identities {

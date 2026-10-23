@@ -119,7 +119,7 @@ All decisions are made. This table only says which PR each one drives. The decis
 | 6 | Ledger start bounded by `populationBound` = 2026-10-19T07:00:00Z, value open | Value fixed at `2026-10-18T16:00:00Z`; the bound mechanism stays as a guard | Decisions page, V3. |
 | 7 | Unrecorded floor from `meta['mig:0004']` | Floor captured from the **ledger start** instant when it is saved (same transaction) | The owner's instruction ("the B1 fix with the ledger-start mechanism"). One boundary, one meaning of "since the ledger began". |
 | 8 | Alerts as webhook events only | Webhook events **plus** a forecast alert dispatcher that sends Email (existing `sendEmail`, `email.go:67`) and Slack (incoming-webhook text format) — P41 | V18 names Email and Slack. The portal's webhooks POST signed JSON (`webhook_run.go:33-77`), which Slack cannot render, and nothing in the code speaks Slack today. |
-| 9 | App-bridge token: "accepted sets only" | The bridge token records its minting user (in memory) and prediction reads apply that user's scope; `none` gets 403 | Without it, an internal user at `none` could read every set through any installed app (`apiAppToken` mints `query` for every unrestricted user, `apps_api.go:121-141`; `appTokenEntry` carries no user, `apps_token.go:46-57`). |
+| 9 | App-bridge token: "accepted sets only" | App-bridge tokens get no forecast reads: both v1 prediction reads answer `403 forecast_unavailable` and read nothing from the ledger (fail closed). The order is cookie session, then persistent query token (the unchanged machine contract), then refusal. The refusal holds until the shared token binding from the notification work lands (it records the minting identity in the existing app-token registry); a follow-up then re-enables scoped bridge reads on that binding (minting user rechecked, accepted report-backed sets only) | Without a refusal, an internal user at `none` could read every set through any installed app (`apiAppToken` mints `query` for every unrestricted user, `apps_api.go:121-141`; `appTokenEntry` carries no user, `apps_token.go:46-57`). The notification work adds that binding itself, so P26 leaves `apps_token.go` and `apps_api.go` untouched rather than duplicate it. This is stricter than main, where a bridge query token received the unscoped machine shape. |
 | 10 | Owner token for internal runs: not covered | P30 writes the `g:<OU>` viewer principal only for an effectively restricted OU, and P39b depends on P30 instead of repeating the rule at its call site | `AddReportViewer` writes `g:<OU>` for any OU (`version.go:381-394`) and every restricted reader's principals include every OU up its chain, Default included (`report_owner.go:162-185`). Injecting tokens into internal runs without this would make internal reports readable by tenants under any `visibility=group` version — plan defect D4, amplified. |
 | 11 | `fetchTencentRange` at `quote.go:1570`; `prefetch.ts:47`; unrecorded copy at `en-US.json:811`; v1 forecast routes at `routes.go:181-182` | `quote.go:1588`; `prefetch.ts:48`; `en-US.json:815`; `routes.go:184-185` | The code moved. |
 | 12 | Owner-token injection is unconditional on the portal side | P39a first hides and strips reserved `_rp_*` inputs everywhere a target's input list is shown or accepted | Once the 16 Dify workflows declare `_rp_owner_token`, a target refresh (`dify_refresh.go:185-200`) copies it into the stored input list, which the batch form and CSV templates render as a user-facing field. Nothing filters `_rp_*` today (only `report_owner.go:61` mentions the prefix). |
@@ -1907,13 +1907,13 @@ the `AuditPage` deep link; the existing matrix and drawer tests stay green.
 ### 7.3 P26 `feat/forecast-record-access` — the scope resolver, reader routes, external protections, compute governance
 
 **Goal.** Implement the access model: every non-admin forecast surface — the record, its routes, the reading-page
-data routes, the v1 prediction reads for cookie and bridge callers — asks one pure resolver over one consistent
-read.
+data routes, the v1 prediction reads for cookie callers — asks one pure resolver over one consistent
+read. App-bridge tokens are refused on those reads (row 9 of §0.3).
 
 **Files.** `internal/app/forecast_access.go` (new), `internal/app/forecast_groups_api.go`,
 `internal/app/forecast_groups_members.go`, `internal/app/forecast_groups_store.go`, `internal/app/forecast_read_api.go`,
-`internal/app/forecast_compute.go` (new: pools, flights, per-user limits), `internal/app/apps_token.go`,
-`internal/app/apps_api.go`, `internal/app/apiui.go` (`meJSON`), `internal/app/user_admin_api.go`,
+`internal/app/forecast_compute.go` (new: pools, flights, per-user limits),
+`internal/app/apiui.go` (`meJSON`), `internal/app/user_admin_api.go`,
 `internal/app/routes.go` (the `gate` field, §7.3.4), `internal/app/routes_test.go`, `internal/app/limits.go`,
 `internal/app/audit.go`, and the web side of the 403: `web/src/pages/StockPage.tsx`, `web/src/pages/StockPage.test.tsx`,
 `web/src/api/types.ts` (`Me.forecast`), `web/src/auth.tsx` (exposes `me.forecast`).
@@ -1978,6 +1978,13 @@ found:
   `dangling_group`; a cycle or a depth over 64 resolves to `none` with `cyclic_chain`. Without this the walk would stop
   at the missing row, the external flag would be read from a shortened chain, and a tenant under a restricted ancestor
   would be treated as internal.
+  On the forecast read routes that `none` is what the caller is told (403 `forecast_unavailable`, the matrix's `Dangling`
+  subject) even though a dangling parent also leaves the enrolment policy unreadable; the wall defers to this
+  definite refusal only on those routes and only for a `dangling_group` or `cyclic_chain` decision, and every other
+  route keeps its 503 `enrolment_policy_unavailable` for a dangling chain. A cyclic chain does not make the policy
+  unreadable (the wall walks past a cycle), so a cyclic account reaches the forecast gate and is refused there with the
+  same 403. A transient store error is not a structural reason and stays a retryable 503.
+  (`TestBrokenOUChainAnswersForecastUnavailableOnForecastReads`.)
 - **No lenient helper.** The gate never calls `isRestricted`, `isAdmin`, `GetUser`, `groupChain`,
   `EffectiveGroupSettings` or `GroupRestrictedEffective`. A source-scan test enforces it.
 - **No caching of the decision.** A user moved by an SSO rule gets the new decision on the next request.
@@ -2032,7 +2039,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 | `PUT /api/admin/groups/{id}` | admin (`routes.go:292`) | — | Adds `forecast_scope`, **presence-aware** (decoded through `json.RawMessage`): omitted → unchanged; `null` → inherit (on the Default OU coerced to `"none"`); `"all"`/`"own"`/`"none"` → stored; anything else → 400 `forecast_bad_scope`. Audited in the `group.change` row as `forecast_scope: {from, to}` only when it changes. | 400 `forecast_bad_scope` |
 | `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route), plus `ou` for an `own` reader: the display name of the OU their population is rooted at. | — |
 | `GET /api/report/{id}/predictions`, `GET /api/predictions` | session (`routes.go:203,206`) | `all`/`own` for non-admins | Unchanged shape (P10 already withholds payload from scoped callers); `none` → 403. | 403 `forecast_unavailable` |
-| `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; bridge token: the minting user's decision; persistent machine token: unscoped | Cookie: the session-route shape. Bridge: accepted sets only, no payload, no errors, no membership. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
+| `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; persistent machine token: unscoped; any other Bearer (an app-bridge token): refused | Cookie: the session-route shape. Bridge: no forecast read, 403 `forecast_unavailable`, ledger not read. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
 
 **The `gate` annotation does not exist yet; P26 adds it.** `routeRow` today has `pattern`, `class` and `perm`
 (`routes.go:44-48`), so a test cannot ask which routes sit behind the forecast scope. This PR adds
@@ -2054,10 +2061,12 @@ func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handle
 true (`TestForecastGatedRoutesDenyANoneUser`, below): a table row that says `forecast_scope` but whose handler skips
 `forecastAccess` fails there.
 
-**Bridge tokens carry their user.** `appTokenEntry` (`apps_token.go:52-55`) gains `user string`; `mint(scopes,
-user, now)`; a new `lookup(tok, now) (user string, ok bool)`. Tokens stay in memory only (no schema). The two v1
-prediction handlers branch on the credential: cookie (`currentActiveUser`), bridge (`appTok.lookup`), or persistent
-token (`s.st.TokenValid`).
+**Bridge tokens get no forecast reads.** The app-token registry (`apps_token.go:52-55`) records scopes and expiry
+but no user, and the notification work adds the shared binding that will; P26 therefore leaves `apps_token.go` and
+`apps_api.go` byte-identical to main. The two v1 prediction handlers resolve the credential in a fixed order: cookie
+(`currentActiveUser`), then persistent token (`s.st.TokenValid`, the unchanged machine contract), then refusal: any other
+Bearer that `v1CanRead` admitted is a bridge token and gets 403 `forecast_unavailable` before the ledger is read. A
+follow-up, after the shared binding lands, re-enables scoped bridge reads on it.
 
 **Statistics are never reachable by a token.** The reader routes are session routes; a Bearer token alone gets 401.
 
@@ -2116,8 +2125,11 @@ token (`s.st.TokenValid`).
 - `TestMeForecastMatchesTheGate`: for every matrix subject, `/api/me.forecast.scope` equals the route outcome. BI
 - `TestGroupSaveForecastScope`: omitted → unchanged; `null` → NULL (Default → `none`); bad value → 400; audit only on
   change. FC
-- `TestBridgeTokenCarriesItsUser`: a token minted by a `none` user → 403 on v1 prediction reads; by an `all` user →
-  accepted sets only, no payload. FC
+- `TestBridgeTokenGetsNoForecastReads`: a bridge token minted by `appTok.mint` with the `query` scope, whoever the
+  minting account was (`none`, `own`, `all`, admin) → 403 `forecast_unavailable` on both v1 prediction reads, with
+  nothing but the error in the body; `TestBridgeDenialReadsNothingFromTheLedger` proves no ledger read happens;
+  `TestPersistentQueryTokenKeepsTheMachineView` and `TestCookieReaderStaysScopedOnV1Reads` prove the two credentials
+  around it are unchanged. FC
 - `TestV1CookieAppliesForecastScope`: a cookie of a `none` user → 403 `forecast_unavailable` on both v1 prediction
   reads (after passing #108's wall). FC
 - `TestForecastComputeIsBounded`: cached official requests never wait; exploratory saturation → 503 with
@@ -2471,7 +2483,7 @@ means the surface does not exist for that credential.
 | **Restricted account** (account flag) in an internal OU at `all` | as external `all` (the OU's scope with the external protections) | as external `all` | as external `all` | as external `all` | as external `all` | as external `all` | no | no | no | 403 | as external `all` |
 | **Session held at the enrolment wall** | 403 `enrolment_required` | 403 `enrolment_required` | — | 403 `enrolment_required` | 403 (`/api/stock` is gated) | — | — | — | — | 403 `enrolment_required` | 403 `enrolment_required` (#108, `v1CanRead`) |
 | **Persistent machine token** (`query`) | 401 (session route) | 401 | — | — (session route: 401) | — | — | with `include=payload` | `counted_set_id` | yes (machine shape) | 401 | 200, machine shape, unscoped |
-| **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | minting user at `none` → 403 `forecast_unavailable`; otherwise accepted sets only |
+| **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | 403 `forecast_unavailable` whoever minted it (fail closed until the shared token binding lands) |
 | **Anonymous** | 401 | 401 | — | 401 | 401 | — | — | — | — | 401 | 401 |
 
 `/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only; an `own` reader also gets `ou`, their unit's name). `/healthz/forecast` is
@@ -2493,8 +2505,8 @@ card-route and v1 columns, and extended by P18 to the chip, timeline and stage c
 - Accounts: one admin in `InternalNone` (still `all`); one member per OU (including `DefChild` and `Dangling`); an
   unassigned member (Default → `none`; in variant B `own` over Default and `DefChild`); a
   restricted account in `Internal`; an account under a 2FA mandate without a factor.
-- Credentials: each account's cookie; one persistent `query` token; bridge tokens minted by the `Internal` member and
-  by the `InternalNone` member; no credential.
+- Credentials: each account's cookie; one persistent `query` token; bridge tokens minted by the `Internal` member, the
+  `InternalNone` member and the admin (all refused alike on the v1 reads); no credential.
 - Variant B reruns the table with Default stored `own` instead of `none`, to pin the Default-subtree rule.
 - Ledger: two mature months with ≥ 30 members in `all`; sets attributed to `InternalOwn`, `InternalOwnSub`, `ExtOwn`
   and unattributed sets; one purged (orphaned) set; one rejected set; a report readable by `ExtAll` and one that is
@@ -2736,7 +2748,7 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
 | **ADR 0037 (new) — Forecast verification operations** | The definition repair (code brought to ADR 0029 §4 and design §9.4); not-due is not a refusal; finality only after mark-specific attempts (V26); the terminal baseline; the heal (and why the plan's "not due" check was dropped); the ledger start (membership only) and test runs at ingest; benchmark governance with the allowlist including `sh000906` and the CSI 800 schedule; the bounded `unrecorded`; the restore rules of §3.3; dry mode, the readiness list and the per-benchmark dry-run gate; heartbeat, watchdog, health route, alert channels (Email + Slack) and SLOs; the single-connection transaction rule; the escapes F01, F03, F06, F10, F14 with their causes. | P11 |
 | **[ADR 0041](adr/0041-ledger-grade-market-data.md) — Ledger-grade market data on the shared source policy** | Renumbered from the baseline plan's 0038. Amends ADR 0029 D9 and §6: the evaluator walks the operator's chain restricted to explicit `settled` grants; one writer in Tier 1, no fallback writes for scored marks (V9); the candidate-source table; the separate evidence chain; Tier 2 entry criteria and proposed step `0007`, still requiring owner approval. A mark's `bench_code` remains frozen intent. Records at ADR 0028 §1 that stored closes are single-vendor, from an unlicensed public endpoint, integrity-checked, not corroborated. | P23 |
 | **ADR 0039 (new) — Forecast verification for readers** | The three-way OU scope, Google Workspace style inheritance (a child OU inherits its parent's setting and may override it), Default `none`, admins `all`; frozen attribution and the owner token for every run, with its **one sanctioned exception: deleting an OU re-attributes that OU's sets to its parent (a root's to the Default OU) in the delete transaction, audited with counts, so no set references a deleted id** (replaces the 409 guard); re-parenting follows the live tree; the external protections; the access matrix (§10); compute governance; the reading-page integration and the stage switch; edition rules; the disclaimer. Supersedes design D6; amends ADR 0029 §5's statistics bullet. | P22 |
-| **ADR 0029 (amend in place, pointing to 0037, 0039 and 0041)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; the bridge token carries its user; statistics access per 0039. §6: see 0041 for the uncached policy-governed ledger walk; refusal classes, dry mode and finality remain per V26/0037. §7: mark `bench_code` is frozen intent. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: detection-only qfq and the corrected limit backstop. §12: approved V3, V6b, V8, V9, access-model, V12–V15 and V24–V26 amendments. | P11 (R1 rows), P22 (access rows), P23 (V9) |
+| **ADR 0029 (amend in place, pointing to 0037, 0039 and 0041)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; app-bridge tokens get no forecast reads (403 `forecast_unavailable`) until the shared token binding lands; statistics access per 0039. §6: see 0041 for the uncached policy-governed ledger walk; refusal classes, dry mode and finality remain per V26/0037. §7: mark `bench_code` is frozen intent. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: detection-only qfq and the corrected limit backstop. §12: approved V3, V6b, V8, V9, access-model, V12–V15 and V24–V26 amendments. | P11 (R1 rows), P22 (access rows), P23 (V9) |
 | ADR 0022 | R1 amended for the owner token on every run and the restricted-only `g:` principal (§11.3); P30's reader-side rule. | P39b, P30 |
 | ADR 0024 | Editions and forecast sets (C17); the restricted-only OU principal (P30). | P18, P30 |
 | ADR 0028 | Note at §1 (single-vendor stored closes) and at §3 (the detection-only qfq exception now exists). | P23, P8 |
