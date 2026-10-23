@@ -138,9 +138,13 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 			t.Fatalf("cannot wind back: %v", err)
 		}
 	}
-	for _, id := range []string{"0006", "0009", "0010"} {
-		if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(id)); err != nil {
-			t.Fatal(err)
+	// Every step from 0006 on goes: a database before P38 records none of them, and steps numbered
+	// between 0006 and the explicit one (the apps steps) must not be left claiming their tables.
+	for _, step := range src.migrations() {
+		if step.id >= "0006" {
+			if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(step.id)); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	dump := dumpOf(t, src)

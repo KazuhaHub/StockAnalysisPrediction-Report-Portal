@@ -285,8 +285,14 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 			}
 			value["tables"] = tables
 			if !claim {
-				migrations := value["migrations"].([]any)
-				value["migrations"] = migrations[:len(migrations)-1]
+				// By id, not by position: steps that land between 0006 and 0009 are not this step.
+				migrations := []any{}
+				for _, id := range value["migrations"].([]any) {
+					if id != "0009" {
+						migrations = append(migrations, id)
+					}
+				}
+				value["migrations"] = migrations
 			}
 		}
 		if name, ok := value["table"].(string); ok {
@@ -305,4 +311,52 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 		}
 	}
 	return out.Bytes()
+}
+
+// runMigrations is the entry point the startup path and the other migration tests share: it applies
+// the automatic steps and holds back an explicit one that the database has not recorded.
+func TestRunMigrationsHoldsBackAnUnrecordedExplicitStep(t *testing.T) {
+	st := newTestStore(t)
+	if err := st.runMigrations(); err != nil {
+		t.Fatalf("a fully upgraded database: %v", err)
+	}
+	for _, q := range []string{`DROP TABLE prediction_purge_owners`, `DELETE FROM meta WHERE k='mig:0009'`} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := st.runMigrations()
+	if err == nil || !strings.Contains(err.Error(), "schema-upgrade --apply") {
+		t.Fatalf("an unrecorded explicit step was not refused with the upgrade instructions: %v", err)
+	}
+	if st.tableExists("prediction_purge_owners") || recorded(st, "0009") {
+		t.Fatal("the refused run created the explicit step")
+	}
+}
+
+// The explicit step is numbered after the notification (0007) and extension (0008) steps, which
+// merge first, so on a branch that does not have them yet the list reads 0001..0006 then 0009. After
+// they land it must read 0001..0008 then 0009: nothing else may take a number, and 0009 stays the
+// only step that startup will not apply by itself.
+func TestPurgeEvidenceIsTheLastStepAndTheOnlyExplicitOne(t *testing.T) {
+	steps := newTestStore(t).migrations()
+	ids := make([]string, len(steps))
+	for i, m := range steps {
+		ids[i] = m.id
+		if m.explicit != (m.id == "0009") {
+			t.Errorf("step %s explicit = %v; only 0009 may be explicit", m.id, m.explicit)
+		}
+	}
+	if ids[len(ids)-1] != "0009" {
+		t.Fatalf("steps %v: 0009 must be last", ids)
+	}
+	earlier := ids[:len(ids)-1]
+	for i, id := range earlier {
+		if id != fmt.Sprintf("%04d", i+1) {
+			t.Fatalf("steps %v: expected 0001..%04d then 0009, found %s at position %d", ids, len(earlier), id, i+1)
+		}
+	}
+	if n := len(earlier); n != 6 && n != 8 {
+		t.Fatalf("steps %v: the steps before 0009 are 0001..0006, plus 0007 and 0008 once the notification and extension steps have landed", ids)
+	}
 }

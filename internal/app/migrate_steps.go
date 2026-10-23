@@ -599,8 +599,15 @@ func migration0006() migration {
 
 // ---------- running them ----------
 
-// runMigrations applies what this build knows and this database has not recorded, then verifies every
-// step's declared products.
+// runMigrations is the startup path. It applies the automatic steps this database has not recorded
+// and refuses to apply an explicit step on its own; see runMigrationsWithExplicit.
+func (s *Store) runMigrations() error { return s.runMigrationsWithExplicit(false) }
+
+// runMigrationsWithExplicit applies what this build knows and this database has not recorded, then
+// verifies every step's declared products. An explicit step (one that alters an existing supported
+// database in a way an operator must sanction) is applied only when allowExplicit is set, which is
+// the case for a database that does not exist yet and for the offline schema-upgrade command. Any
+// other caller finds an unrecorded explicit step refused, before any earlier step has written DDL.
 //
 // The "written by a newer release" check belongs HERE rather than in the runner below: it is a
 // judgement about the database as a whole, made once at startup against the full list this build
