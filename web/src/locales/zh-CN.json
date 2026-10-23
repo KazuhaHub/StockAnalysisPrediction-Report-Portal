@@ -89,6 +89,7 @@
   "announcementAdmin.crowded": "当前有 {{count}} 条公告同时生效。读者一次看不完这么多，考虑合并几条、给旧的设置结束时间，或先关掉一部分。",
   "announcementAdmin.deleteConfirm": "确定删除这条公告？",
   "announcementAdmin.dismissible": "允许读者关闭",
+  "announcementAdmin.dismissibleHint": "开启后条带显示关闭按钮；关闭后不显示，读者此前关闭过的条带也会重新显示。弹窗始终提供「知道了」和「不再显示」。",
   "announcementAdmin.display": "展示方式",
   "announcementAdmin.display.both": "条带 + 弹窗",
   "announcementAdmin.display.popup": "仅弹窗",

@@ -309,6 +309,52 @@ func TestReaderFeedHonoursEnabledEmptyAndWindow(t *testing.T) {
 	}
 }
 
+// "Readers can close it" is enforced in the browser, so the server's whole part is handing every
+// reader the current value. Switching it off has to change the feed's bytes, and with them the
+// ETag: a polling tab that got a 304 for its old tag would keep drawing the close button.
+func TestReaderFeedCarriesDismissibleAndAFlipChangesTheTag(t *testing.T) {
+	s := newV1Server(t)
+	id := mustAddAnnouncement(t, s, `{"title":"维护通知","dismissible":true}`)
+
+	first := httptest.NewRecorder()
+	s.apiAnnouncements(first, httptest.NewRequest("GET", "/api/announcements", nil), "admin")
+	tag := first.Header().Get("ETag")
+	if items := readerFeed(t, s, "admin"); len(items) != 1 || items[0]["dismissible"] != true {
+		t.Fatalf("reader feed before the edit = %v, want one dismissible row", items)
+	}
+
+	// The editor's PUT, which always sends the switch.
+	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
+		`{"title":"维护通知","dismissible":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("edit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	req := httptest.NewRequest("GET", "/api/announcements", nil)
+	req.Header.Set("If-None-Match", tag)
+	again := httptest.NewRecorder()
+	s.apiAnnouncements(again, req, "admin")
+	if again.Code != http.StatusOK {
+		t.Fatalf("poll with the pre-edit tag = %d, want 200 carrying the change", again.Code)
+	}
+	var out struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(again.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode reader feed: %v", err)
+	}
+	if len(out.Items) != 1 || out.Items[0]["dismissible"] != false {
+		t.Fatalf("reader feed after the edit = %v, want dismissible=false", out.Items)
+	}
+
+	// A writer that omits the field leaves it alone rather than switching it back on.
+	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
+		`{"title":"维护通知（更新）"}`); rec.Code != http.StatusOK {
+		t.Fatalf("partial edit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if s.st.GetAnnouncement(id).Dismissible {
+		t.Errorf("a PUT without dismissible switched it back on")
+	}
+}
+
 func TestWindowRejectsAnInvertedRange(t *testing.T) {
 	s := newV1Server(t)
 	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)

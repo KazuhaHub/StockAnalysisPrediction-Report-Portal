@@ -123,15 +123,18 @@ function useFold(expanded: boolean) {
 function useReaderState(items: Announcement[]) {
   const { user } = useAuth()
   const [closed, setClosed] = useState<Record<number, boolean>>({})
-  // The payload's identity: what is on offer AND what each one says. It is what the memo below
-  // depends on, so a navigation alone never rebuilds this.
-  const identity = items.map((a) => `${a.id}:${announcementSig(a)}`).join(',')
+  // The payload's identity: what is on offer, what each one says, and whether readers may dismiss
+  // it. It is what the memos depend on, so a navigation alone never rebuilds them — while the
+  // operator switching "readers can close it" off does, on the next poll, and the band re-checks.
+  const identity = items.map((a) => `${a.id}:${announcementSig(a)}:${a.dismissible ? 1 : 0}`).join(',')
   const dismissals = useMemo<DismissalState>(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- identity IS the dependency on `items`
     () => loadDismissals(user || '', items),
     [user, identity],
   )
-  const open = items.filter((a) => !closed[a.id] && !dismissals.bannerDismissed(a))
+  // A row closed in this render comes back if the payload stops allowing it to be closed: the
+  // reader may have closed it from the previous payload in the minute before the poll caught up.
+  const open = items.filter((a) => !(a.dismissible && closed[a.id]) && !dismissals.bannerDismissed(a))
   const close = (a: Announcement) => {
     dismissBanner(user || '', a)
     setClosed((prev) => ({ ...prev, [a.id]: true }))
