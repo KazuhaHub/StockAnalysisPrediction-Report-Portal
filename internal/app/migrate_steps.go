@@ -217,7 +217,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010(), migration0007()}
+		migration0006(), migration0010(), migration0009()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).
@@ -259,11 +259,12 @@ func migration0010() migration {
 }
 
 // The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
-// not prove OU membership, so this step never backfills them. Tier 2 provenance has not shipped;
-// its previously proposed 0007 id must move to the next free id if that work is later approved.
-func migration0007() migration {
+// not prove OU membership, so this step never backfills them. Steps 0007 and 0008 are reserved by
+// the notification and extension work, which lands first; Tier 2 provenance has not shipped and
+// must take the next free id after this one if that work is later approved.
+func migration0009() migration {
 	return migration{
-		id: "0007", explicit: true,
+		id: "0009", explicit: true,
 		tables:  []string{"prediction_purge_owners"},
 		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
 		restore: restoreRule{olderDumpOK: true},

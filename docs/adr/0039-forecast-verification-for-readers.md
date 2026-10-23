@@ -129,8 +129,9 @@ read answers `503 forecast_purge_history_unavailable` and never falls back to th
 reads that do not need evidence never touch the table. Retention and OU deletion do not yet write
 or transfer evidence, so the hold on releasing own-scoped reads stands until they do.
 
-The implementation assigns this evidence to step `0007`; the unapproved Tier 2 provenance proposal
-moves to `0008`, subject to a fresh identifier check. Existing supported databases use the offline
+The implementation assigns this evidence to step `0009`, after the notification (`0007`) and
+extension (`0008`) steps, which merge first; the unapproved Tier 2 provenance proposal moves to
+`0010`, subject to a fresh identifier check. Existing supported databases use the offline
 `schema-upgrade` command (inspection by default, mutation only with `--apply`). Startup refuses an
 unrecorded explicit step before applying even earlier automatic steps. A fresh database creates the
 step with the rest of its schema. Every startup checks the evidence columns, exact primary key,
