@@ -132,3 +132,66 @@ func TestExternalDrawerListsOnlyReadableReports(t *testing.T) {
 		t.Fatalf("own lost counts/readability filter: %v", own)
 	}
 }
+
+// A halted stock settles on its last traded close. The drawer tags that row so a reader does not
+// mistake a flat return for a quiet stock, but only on a scored row of a mature cell: a halt flag
+// on a cell that has not matured would be an outcome the matrix itself refuses to publish.
+func TestMembersFlagHaltedMarksOnScoredRowsOfMatureCells(t *testing.T) {
+	s := newV1Server(t)
+	sampleMembers(t, s, predMatureMinN+2, func(i int, g *gsSeed) {
+		m := g.Marks["d5"]
+		m.Halted = i == 0
+		g.Marks["d5"] = m
+	})
+	resp := doMembers(t, s, "/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5")
+	if resp.State != "mature" {
+		t.Fatalf("state = %q", resp.State)
+	}
+	halted := 0
+	for _, m := range resp.Members {
+		if m.Halted {
+			halted++
+		}
+	}
+	if halted != 1 {
+		t.Fatalf("halted rows = %d, want 1", halted)
+	}
+	raw := httptest.NewRecorder()
+	s.apiForecastGroupMembers(raw, httptest.NewRequest("GET", "/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5", nil), "admin")
+	var wire struct {
+		Members []map[string]any `json:"members"`
+	}
+	if err := json.Unmarshal(raw.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	flagged := 0
+	for _, m := range wire.Members {
+		if _, ok := m["halted"]; ok {
+			flagged++
+		}
+	}
+	if flagged != 1 {
+		t.Fatalf("rows carrying the halted key = %d, want only the halted one", flagged)
+	}
+}
+
+func TestMembersOfANonMatureCellCarryNoHaltedFlag(t *testing.T) {
+	s := newV1Server(t)
+	sampleMembers(t, s, predMatureMinN+2, func(i int, g *gsSeed) {
+		m := g.Marks["d5"]
+		m.Halted = true
+		if i == 0 {
+			m.Status = markPending
+		}
+		g.Marks["d5"] = m
+	})
+	resp := doMembers(t, s, "/api/admin/forecast/groups/members?mode=custom&from=2025-06-01&to=2025-06-30&group=month&label=2025-06&checkpoint=d5&population=all")
+	if resp.State != "pending" {
+		t.Fatalf("state = %q, want pending", resp.State)
+	}
+	for _, m := range resp.Members {
+		if m.Halted {
+			t.Fatalf("a member of a pending cell is tagged halted: %+v", m)
+		}
+	}
+}
