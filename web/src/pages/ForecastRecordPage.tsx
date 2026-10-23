@@ -211,7 +211,8 @@ export default function ForecastRecordPage() {
           </div>
         )}
 
-        <div style={{ marginBottom: 12 }}>
+        {/* Four long labels do not fit a phone: scroll inside the card instead of hanging out of it. */}
+        <div style={{ marginBottom: 12, maxWidth: '100%', overflowX: 'auto' }}>
           <Segmented
             value={view.metric}
             onChange={(v) => patch({ metric: v as ForecastMetric })}
