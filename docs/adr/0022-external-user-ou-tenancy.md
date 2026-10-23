@@ -66,7 +66,7 @@ to the unrestricted root subtree → `restricted=false` → every new check is s
 | `user_groups.parent_id` | `BIGINT` (NULL = root) | OU tree; Default group is root |
 | `user_groups.restricted` | `INTEGER DEFAULT 0` | internal/external switch, inherited down the tree |
 | `user_groups.daily_run_quota` | `INTEGER` (NULL = inherit, 0 = unlimited) | R2 |
-| `reports.owner_group` | `BIGINT` (NULL = internal/legacy/unattributed) | R1 attribution |
+| `reports.owner_group` | `BIGINT` (NULL = unattributed: legacy, no token, or generated before <release>; otherwise the OU that generated it) | R1 attribution |
 | `idx_reports_owner` | `INDEX ON reports(owner_group, rdate)` | R1 read/reuse path |
 | `group_targets` | `(group_id BIGINT, target_id BIGINT, surfaces TEXT DEFAULT '', PRIMARY KEY(group_id,target_id))` | R3 allow-list |
 | `users.expires_at` | `TEXT` (NULL = never) | R4 account validity |
@@ -94,9 +94,16 @@ and is unattributed; the run still starts. The workflow echoes the token back in
 `owner_group` **first-writer-wins** (`StampReportOwner`: `UPDATE ... WHERE id=? AND owner_group IS NULL`).
 A missing/invalid/expired token leaves `owner_group` **NULL** (unattributed). Since <release> an internal
 report's `owner_group` records the generating OU too; it remains attribution and audit only, never a read
-key (ADR 0024). A payload-supplied owner is never trusted. The submitter's `u:<user>` viewer row is always
-written; the `g:<OU>` viewer principal only for an effectively restricted OU (P30), so attributing an
-internal report shares it with no one. (The `run_id → batch_items.run_id → batch_jobs.created_by` chain
+key (ADR 0024). A payload-supplied owner is never trusted. The submitter's `u:<user>` viewer row is
+written when the token still names that account: not for a person who has since been deleted (a workflow
+cannot be stopped by deleting its submitter, and a late ingest must not put the name back for the next
+holder), and not for an account created after the token was minted. The `g:<OU>` viewer principal is
+written only when the submitter's own reads are scoped and the OU is effectively restricted (P30), so
+attributing an internal report shares it with no one, and neither does the run of an unrestricted account
+(an admin) placed in a tenant's OU: it is attributed to that OU and counts in its own population, but is
+not shared with the tenant. The token is added to the inputs of every provider type, a manifest plugin
+target included; a backend that forwards or validates its inputs strictly must accept the key before
+this ships. (The `run_id → batch_items.run_id → batch_jobs.created_by` chain
 remains an optional best-effort fallback, deferred — the token is the authoritative path.)
 
 **Read scoping (P2, shipped).** For restricted viewers only (`viewerScope(user)` — nil for admins,
@@ -253,8 +260,11 @@ refresh, and it neither backfills nor re-attributes existing reports.
 
 ## Consequences
 
-- **Internal users unchanged by construction** — the master predicate + fail-closed NULL owner mean no
-  internal path changes behaviour until a restricted OU is created.
+- **Internal reads unchanged by construction** — the master predicate + fail-closed NULL owner mean no
+  internal *read* path changes behaviour until a restricted OU is created. Since <release> internal
+  *runs* are attributed too: their inputs carry the owner token, and their reports get an `owner_group`
+  stamp and the submitter's `u:` viewer row. That records who asked and which OU they belong to; it
+  widens nobody's reads.
 - **Read-filter completeness is the top risk.** The owner predicate must be added to *every* read path;
   missing one silently defeats R1. Guarded by a per-path audit + tests (the checklist above).
 - **Attribution depends on the Dify workflow echoing the token.** A blank/mismatched token lands
