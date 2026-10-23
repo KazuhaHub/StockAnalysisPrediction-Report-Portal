@@ -237,8 +237,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
   `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
   implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
-  Persisted diagnostic storage is implemented and reviewed; runtime selection, source-call tracking
-  and shadow admission/execution remain outstanding.
+  Persisted diagnostic storage and post-ledger runtime selection/execution are implemented and
+  independently reviewed. Administrator diagnostics/UI and shipped shadow admission remain outstanding.
 - **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
@@ -1182,3 +1182,31 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   and candidate call observation, shared runtime comparison, diagnostics/status UI, shadow grants
   and final full-branch review/CI remain. Back out by reverting the helpers; existing diagnostic
   meta values are ignored by an older build, and no ledger repair is needed.
+
+### P25 post-ledger runtime integration (2026-10-22, in progress)
+
+- Copies at most two unique, accepted primary instrument bodies, with explicit first/last anchors,
+  and executes candidates only after normal primary ledger processing completes. Early cancellation
+  or panic suppresses candidate work while retaining available primary-call diagnostics. Each sample
+  rechecks fallback mode, operator order and primary identity. The independent candidate deadline is
+  fifteen seconds; upstream concurrency is shared, but responses, transport budget and health are not.
+  Candidates never return to settlement planning. Sampling is opportunistic, not representative or
+  Tier 2 admission evidence. No shipped source has received a shadow grant at this checkpoint.
+- Uses the shared exact-fen comparator after identity, market, currency, timezone, history flags and
+  completed-bar checks. Persists calls, failures, neutral refusals and bounded comparison evidence
+  using the reviewed atomic storage. Includes primary adjustment observations; candidate failures,
+  panic, timeout, mismatches and storage failures cannot retry or alter primary ledger writes.
+- Red/green controls compare the complete ledger checksum against shadow-off output and assert
+  that it already matches before candidate execution. They cover agreement, one-fen mismatch,
+  missing anchor, wrong source, missing history, cached/adjusted data, errors, panic and deadline.
+  Saturated-slot cancellation never enters or bills the adapter. A hidden quota-denial test first
+  reproduced misattribution as a source failure; a transport denial counter fixes attribution even
+  when an adapter degrades its error. A real fourth-request HTTP failure remains a failure. Independent
+  review found duplicate quota refusals; recording each result once closes it, with a pinned guard.
+- Full Go/SQLite/Postgres passed (app 37.996 s), build/vet/staticcheck passed, and three targeted
+  runtime/budget/walk race repetitions passed. Independent follow-up review closed all findings.
+  CI's scoped race selector now explicitly includes the complete ledger-checksum test. No live vendor
+  call, production change, evaluator enablement, Apps edit or alternate ledger writer occurred.
+- P25 remains incomplete: administrator controls/diagnostics presentation, shipped Sina shadow-only
+  grants, final end-to-end admission guards and branch-wide review/full CI are next. Back out by
+  reverting this integration; diagnostics are ignored by an older build and no ledger repair is needed.

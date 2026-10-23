@@ -24,9 +24,10 @@ func withQuoteShadowHTTPBudget(ctx context.Context) (context.Context, *quoteShad
 }
 
 type quoteShadowHTTPBudget struct {
-	mu   sync.Mutex
-	used int
-	base http.RoundTripper
+	mu     sync.Mutex
+	used   int
+	denied int
+	base   http.RoundTripper
 }
 
 func (budget *quoteShadowHTTPBudget) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -35,6 +36,7 @@ func (budget *quoteShadowHTTPBudget) RoundTrip(request *http.Request) (*http.Res
 	}
 	budget.mu.Lock()
 	if budget.used >= forecastShadowMaxHTTPAttempts {
+		budget.denied++
 		budget.mu.Unlock()
 		return nil, &ledgerRefusal{Code: "shadow_budget"}
 	}
@@ -47,4 +49,10 @@ func (budget *quoteShadowHTTPBudget) attempts() int {
 	budget.mu.Lock()
 	defer budget.mu.Unlock()
 	return budget.used
+}
+
+func (budget *quoteShadowHTTPBudget) denials() int {
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	return budget.denied
 }

@@ -14,10 +14,29 @@ func (r *ledgerRefusal) Error() string { return "ledger: " + r.Code }
 
 // One instance belongs to one evaluator pass. Lifetime, not wall-clock time, resets the breaker.
 type ledgerTick struct {
-	mu        sync.Mutex
-	failures  map[string]int
-	lastError map[string]error
-	gate      chan struct{}
+	mu           sync.Mutex
+	failures     map[string]int
+	lastError    map[string]error
+	gate         chan struct{}
+	observations []forecastCallObservation
+}
+
+func (tick *ledgerTick) observe(observation forecastCallObservation) {
+	if tick == nil {
+		return
+	}
+	tick.mu.Lock()
+	defer tick.mu.Unlock()
+	tick.observations = append(tick.observations, observation)
+}
+
+func (tick *ledgerTick) snapshotObservations() []forecastCallObservation {
+	if tick == nil {
+		return nil
+	}
+	tick.mu.Lock()
+	defer tick.mu.Unlock()
+	return append([]forecastCallObservation{}, tick.observations...)
 }
 
 // Serialize walks within a pass without sharing their responses. A context-aware gate keeps a
@@ -79,6 +98,7 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 	c.init()
 	chain := c.ledgerChain(cfg, target)
 	if _, ok := ledgerPrimary(chain); !ok {
+		tick.observe(forecastCallObservation{Source: "configuration", Refusal: "no_source"})
 		return nil, &ledgerRefusal{Code: "no_source"}
 	}
 	release, err := c.acquire(ctx)
@@ -92,6 +112,7 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 			continue
 		}
 		if failure, blocked := tick.blocked(src.name); blocked {
+			tick.observe(forecastCallObservation{Source: src.name, Refusal: "breaker"})
 			if firstErr == nil {
 				firstErr = failure
 			}
@@ -109,6 +130,17 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 				err = fmt.Errorf("ledger: source %q returned no response", src.name)
 			}
 		}
+		callErr := err
+		if ctx.Err() != nil {
+			callErr = ctx.Err()
+		}
+		observation, _ := forecastCallResult(ctx, src.name, callErr)
+		if src.fetchRange == nil {
+			observation.Calls = 0
+			observation.Failure = false
+			observation.Refusal = "missing_fetcher"
+		}
+		tick.observe(observation)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
