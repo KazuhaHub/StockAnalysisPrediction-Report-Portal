@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Table, Tag, Typography, theme } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
@@ -88,12 +88,18 @@ export default function ForecastReadingCard({
   // vanishing. It has no marks and no checkpoint table; only production sets are scored. An accepted
   // set always wins the panel when there is one — a test set must never shadow the record.
   const set = readingSet(sets, displaySetID)
+  useEffect(() => {
+    if (loading || window.location.hash !== '#forecast') return
+    const frame = requestAnimationFrame(() => document.getElementById('forecast')?.scrollIntoView?.({ block: 'start' }))
+    return () => cancelAnimationFrame(frame)
+  }, [loading, set?.id])
+  const anchorStyle = { marginTop: 12, scrollMarginTop: 'calc(var(--rp-header-h, 64px) + 16px)' }
   if (loading) {
-    return <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')}><Skeleton active /></Card>
+    return <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}><Skeleton active /></Card>
   }
   if (!set) {
     return (
-      <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={{ marginTop: 12 }}>
+      <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}>
         <Typography.Text>{t('forecast.reading.no_forecast')}</Typography.Text>
         {sibling && <div style={{ marginTop: 8 }}><Link to={sibling.url}>{t('forecast.reading.other_edition')}</Link></div>}
         <Typography.Paragraph style={{ color: token.colorTextSecondary, margin: '12px 0 0' }}>{t('forecast.disclaimer')}</Typography.Paragraph>
@@ -218,7 +224,7 @@ export default function ForecastReadingCard({
           {open ? <UpOutlined /> : <DownOutlined />} {open ? t('forecast.panel.collapse') : t('forecast.panel.expand')}
         </Button>
       }
-      style={{ marginTop: 12 }}
+      style={anchorStyle}
     >
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

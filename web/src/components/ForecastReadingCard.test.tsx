@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import type { PredictionSet } from '../api/types'
 import ForecastReadingCard from './ForecastReadingCard'
@@ -44,6 +44,21 @@ function show(sets: PredictionSet[], extra: Partial<React.ComponentProps<typeof 
 }
 
 describe('ForecastReadingCard', () => {
+  it('honors the forecast deep link after asynchronous card loading', async () => {
+    const original = Element.prototype.scrollIntoView
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    window.history.replaceState(null, '', '#forecast')
+    try {
+      const view = show([], { loading: true })
+      expect(scroll).not.toHaveBeenCalled()
+      view.rerender(<MemoryRouter><ForecastReadingCard sets={[accepted]} otherSets={[]} symbol="600519" /></MemoryRouter>)
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({ block: 'start' }))
+    } finally {
+      window.history.replaceState(null, '', window.location.pathname)
+      Element.prototype.scrollIntoView = original
+    }
+  })
   it('shows settlement paused separately from a mark phase', () => {
     show([{ ...accepted, marks: [{ checkpoint: 'd5', status: 'pending', phase: 'settling' }] }], { settlementPaused: true })
     expect(screen.getByText('forecast.phase.settlement_paused')).toBeTruthy()

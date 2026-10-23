@@ -18,11 +18,11 @@ export default function ForecastSummaryChip({ prediction, loading = false }: Pro
   if (!prediction) return <div aria-hidden="true" style={{ height: 28 }} />
 
   const chip = prediction.has_prediction ? (
-    <Tag tabIndex={0} style={{ color: token.colorText, background: prediction.stance === 'long' ? token.colorInfoBg : undefined }} data-testid="forecast-summary-chip">
+    <a href="#forecast"><Tag style={{ color: token.colorText, background: prediction.stance === 'long' ? token.colorInfoBg : undefined }} data-testid="forecast-summary-chip">
       {t(`forecast.stance.${prediction.stance}`)}
       {prediction.weight_bp !== undefined ? ` · ${(prediction.weight_bp / 100).toFixed(0)}%` : ''}
       {prediction.upside_bp !== undefined ? ` · ${prediction.upside_bp >= 0 ? '+' : ''}${(prediction.upside_bp / 100).toFixed(1)}%` : ''}
-    </Tag>
+    </Tag></a>
   ) : (
     <Link to={prediction.sibling.url}>
       <Tag data-testid="forecast-summary-chip">{t('forecast.reading.sibling_chip')}</Tag>

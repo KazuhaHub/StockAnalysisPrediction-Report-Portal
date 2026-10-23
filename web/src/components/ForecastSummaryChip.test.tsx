@@ -14,6 +14,7 @@ describe('ForecastSummaryChip', () => {
     )
     expect(screen.getByTestId('forecast-summary-chip').textContent).toContain('+12.3%')
     expect(screen.getByTestId('forecast-summary-chip').textContent).toContain('65%')
+    expect(screen.getByRole('link').getAttribute('href')).toBe('#forecast')
     fireEvent.mouseOver(screen.getByTestId('forecast-summary-chip'))
     expect(await screen.findByText('forecast.disclaimer')).toBeTruthy()
   })

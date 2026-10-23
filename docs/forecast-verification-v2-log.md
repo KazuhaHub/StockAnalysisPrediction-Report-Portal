@@ -2243,10 +2243,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   The summary slot is reserved on warmed responses. Shared Go/vitest fixtures pin completed bars and
   the open-left/closed-right low window. The read API adds the linked report category for exact
   date/category/ID navigation, without a schema change. The full web suite passes 130 files and 1437
-  tests; Go build/vet and SQLite/Postgres suites pass. Synthetic browser checks cover 375/768/1280 px,
+  tests, plus the asynchronous deep-link regression added during final review; Go build/vet and
+  SQLite/Postgres suites pass. Synthetic browser checks cover 375/768/1280 px,
   stock/run mounting, pending/settled cards, contrast/axe and scope-none suppression.
 - **Demo (#167).** Browser sweep covers seven scopes, three views, two widths and light/dark themes,
   with no page overflow or script errors. This proves the draft demo's behavior, not production
   baseline fidelity or owner visual acceptance. Traditional Chinese remains generated pending human
   review. No release, production database, workflow or evaluator mode changed during this handoff.
+- **CI teardown.** A full P20 run passed every assertion but found UploadList's uncancelled 300ms
+  progress callback after jsdom teardown. The upload test file now drains that known timer before its
+  environment closes; it does not change the upload component or suppress unhandled errors.
 
