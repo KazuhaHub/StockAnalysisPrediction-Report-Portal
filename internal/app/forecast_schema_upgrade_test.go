@@ -329,6 +329,15 @@ func TestRunMigrationsHoldsBackAnUnrecordedExplicitStep(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "schema-upgrade --apply") {
 		t.Fatalf("an unrecorded explicit step was not refused with the upgrade instructions: %v", err)
 	}
+	// The operator who meets this message is told where the whole procedure is written down, and
+	// that path has to exist.
+	const runbook = "docs/forecast-purge-ownership-upgrade.md"
+	if !strings.Contains(err.Error(), runbook) {
+		t.Fatalf("the refusal does not name the runbook %s: %v", runbook, err)
+	}
+	if _, statErr := os.Stat(filepath.Join("..", "..", runbook)); statErr != nil {
+		t.Fatalf("the refusal names a runbook that does not exist: %v", statErr)
+	}
 	if st.tableExists("prediction_purge_owners") || recorded(st, "0009") {
 		t.Fatal("the refused run created the explicit step")
 	}

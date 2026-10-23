@@ -203,13 +203,16 @@ type migration struct {
 	id string
 	// explicit forbids implicit upgrade of an existing database at server startup.
 	explicit bool
-	columns  []colRef
-	tables   []string
-	indices  []string
-	renames  []colRename
-	restore  restoreRule
-	up       func(migExec) error
-	verify   func(migExec) error
+	// runbook is the repository path of the operator procedure for an explicit step. A refused
+	// startup names it, because the person reading the refusal is mid-deployment.
+	runbook string
+	columns []colRef
+	tables  []string
+	indices []string
+	renames []colRename
+	restore restoreRule
+	up      func(migExec) error
+	verify  func(migExec) error
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step. The order
@@ -264,7 +267,7 @@ func migration0010() migration {
 // must take the next free id after this one if that work is later approved.
 func migration0009() migration {
 	return migration{
-		id: "0009", explicit: true,
+		id: "0009", explicit: true, runbook: "docs/forecast-purge-ownership-upgrade.md",
 		tables:  []string{"prediction_purge_owners"},
 		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
 		restore: restoreRule{olderDumpOK: true},
@@ -631,7 +634,7 @@ func (s *Store) runMigrationsWithExplicit(allowExplicit bool) error {
 				return err
 			}
 			if recorded == "" {
-				return fmt.Errorf("migration %s requires an explicit offline upgrade: stop the portal, take a pre-upgrade backup with the previous release, then run report-portal schema-upgrade --apply; server startup does not alter this schema", m.id)
+				return fmt.Errorf("migration %s requires an explicit offline upgrade: stop the portal, take a pre-upgrade backup with the previous release, then run report-portal schema-upgrade --apply%s; server startup does not alter this schema", m.id, runbookHint(m))
 			}
 			if err := s.verifyMigrationProducts(s.poolExec(), []migration{m}); err != nil {
 				return err
@@ -639,6 +642,14 @@ func (s *Store) runMigrationsWithExplicit(allowExplicit bool) error {
 		}
 	}
 	return s.runMigrationSteps(steps)
+}
+
+// runbookHint is the clause that points a refused operator at the written procedure.
+func runbookHint(m migration) string {
+	if m.runbook == "" {
+		return ""
+	}
+	return " (procedure: " + m.runbook + ")"
 }
 
 // runMigrationSteps is the runner itself, taking the list so the framework's contract can be tested
