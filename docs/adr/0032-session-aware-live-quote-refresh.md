@@ -163,6 +163,14 @@ corroboration, adjustment basis, exchange-calendar semantics, correction policy,
 provenance. ADR 0028 and ADR 0029 deliberately keep that outside the live display path. This ADR
 adds no database shape and makes no durability promise.
 
+**Forecast-ledger amendment: [ADR 0041](0041-ledger-grade-market-data.md).** The separate ledger
+now owns durable unadjusted closes, session semantics and immutable outcomes under ADR 0029/0037.
+Tier 1 does not fulfill independent source corroboration or additional supplier/evidence provenance:
+its public-source closes are single-vendor and integrity-checked. Existing finality/restore rules
+govern correction, not refreshing the display cache. Additional provenance and any wider source
+admission remain subject to the Tier 2 decision and owner-approved schema. This does not make
+the display cache durable or its automatic refresh a ledger writer.
+
 ### 7. Refresh failures do not silently become current data
 
 An initial failure keeps the current surface behavior. A background failure may leave the last

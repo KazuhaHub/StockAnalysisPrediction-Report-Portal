@@ -55,6 +55,14 @@ func predReadProjection(cp string, madeAt time.Time, horizonStd bool, frozenS0 s
 		}
 		day = day.AddDate(0, 0, 1)
 	}
+	// Preserving an open frozen date is not enough: it must also reproduce the receipt rule.
+	// A contradictory stored baseline stays immutable, but cannot qualify a reading estimate.
+	if frozenS0 != "" {
+		derived, ok := predS0(madeAt, sessions)
+		if !ok || derived != frozenS0 {
+			return fallback()
+		}
+	}
 	sch := predScheduleFor(cp, madeAt, horizonStd, frozenS0, sessions)
 	if !sch.Known || sch.Due == "" || frozenS0 != "" && sch.S0 != frozenS0 {
 		return fallback()

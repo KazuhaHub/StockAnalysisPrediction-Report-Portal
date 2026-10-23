@@ -558,6 +558,9 @@ export interface CleanupConfig {
 export interface ForecastSettings {
   /** Reading-stage policy; independent of evaluator mode and record access. */
   reader?: 'off' | 'card' | 'full'
+  /** Comparison only; alternate ledger writers are not admitted. Optional for cached responses. */
+  fallback?: 'off' | 'shadow'
+  diagnostics?: ForecastDiagnostics
   /** Whether the evaluator's background loop runs. Off by default. Kept for one release. */
   enabled: boolean
   /** The three-way mode (P9): off, dry (plan, write nothing), or on. */
@@ -595,6 +598,38 @@ export interface ForecastSettings {
   /** Unrecorded covered reports since the ledger start (P2), and ledger store failures in 30 days.
    *  `ok` is false while the ledger start is unset, when a count would be meaningless. */
   unrecorded?: ForecastUnrecorded[]
+}
+
+export interface ForecastShadowResult {
+  at: string
+  target: { market: string; code: string }
+  primary: string
+  candidate: string
+  anchors: [string, string]
+  status: 'match' | 'mismatch' | 'unavailable'
+  reason?: string
+  difference_count: number
+  truncated: boolean
+  comparison?: {
+    match: boolean
+    compared_dates: number
+    differences: { date: string; field: string; anchor: boolean; primary?: number; candidate?: number }[]
+  }
+}
+
+export interface ForecastDiagnostics {
+  status: 'empty' | 'ready' | 'unavailable'
+  max_reads: number
+  max_http_attempts: number
+  shadow?: {
+    updated_at: string
+    days: { date: string; selected: number; reads: number; http_attempts: number; matches: number; mismatches: number; unavailable: number }[]
+    recent: ForecastShadowResult[]
+  }
+  calls?: {
+    updated_at: string
+    days: { date: string; sources: Record<string, { calls: number; failures: number; refusals: Record<string, number>; shadow_http_attempts: number }> }[]
+  }
 }
 
 export interface ForecastPassStats {
@@ -647,7 +682,7 @@ export interface ForecastHeartbeat {
 }
 
 export interface ForecastReadinessItem {
-  key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts'
+  key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts' | 'ledger_chain'
   ok: boolean
   detail?: string
 }

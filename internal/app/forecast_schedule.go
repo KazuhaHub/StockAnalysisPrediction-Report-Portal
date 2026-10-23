@@ -3,8 +3,9 @@ package app
 // Checkpoint scheduling (P1, ADR 0029 §4).
 //
 // This file is the ONE statement of the checkpoint arithmetic. The evaluator calls it with the
-// benchmark's COMPLETED sessions; the read path uses a published completed-calendar snapshot when
-// it covers the mark, otherwise a weekday projection whose dates are lower bounds. Nothing else computes a
+// benchmark's COMPLETED sessions; the read path prefers a published completed-calendar snapshot,
+// otherwise a verified exchange-schedule estimate or a weekday lower bound. Estimates are never
+// observed settlement evidence. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
 // S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.

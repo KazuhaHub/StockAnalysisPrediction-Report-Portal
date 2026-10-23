@@ -70,6 +70,29 @@ func TestReaderStageChangesAreValidatedAndAudited(t *testing.T) {
 	}
 }
 
+func TestReaderStageAndShadowControlsValidateBeforeEitherWrite(t *testing.T) {
+	s := newV1Server(t)
+	for _, body := range []string{`{"reader":"broken","fallback":"shadow"}`, `{"reader":"full","fallback":"on"}`} {
+		if w := saveForecastSettings(t, s, body); w.Code != 400 {
+			t.Fatalf("mixed invalid controls accepted: %s => %d %s", body, w.Code, w.Body.String())
+		}
+		if s.st.GetSetting(setForecastReader, "card") != "card" || s.st.GetSetting(setForecastFallback, "off") != "off" {
+			t.Fatal("invalid mixed control request partially persisted")
+		}
+	}
+	if w := saveForecastSettings(t, s, `{"reader":"full","fallback":"shadow"}`); w.Code != 200 {
+		t.Fatalf("independent valid controls rejected: %d %s", w.Code, w.Body.String())
+	}
+	if s.st.GetSetting(setForecastReader, "") != "full" || s.st.GetSetting(setForecastFallback, "") != "shadow" {
+		t.Fatal("merged setting fields lost a control")
+	}
+	for _, action := range []string{AuditForecastReader, AuditForecastFallback} {
+		if _, total := s.st.ListAudit(AuditFilter{Action: action}); total != 1 {
+			t.Fatalf("merged audit vocabulary lost %s: %d", action, total)
+		}
+	}
+}
+
 func TestReaderStageSeparatesCookieReadsFromMachineAndRecord(t *testing.T) {
 	s := newV1Server(t)
 	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}

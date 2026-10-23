@@ -55,6 +55,13 @@ this tree polls anything on a market's clock, and no existing primitive would le
 
 ### 1. The durability split: a shown price and a stored price are different objects
 
+> **Tier 1 amendment (V9), recorded in [ADR 0041](0041-ledger-grade-market-data.md).** The
+> forecast ledger now stores single-vendor closes from an undocumented, unlicensed public endpoint.
+> They are integrity-checked, not corroborated. Tencent is the only admitted writer, subject to the
+> compiled explicit settlement grants intersected with the operator's source order; an outage pauses settlement rather than failing over to
+> a display source. The corroboration requirement below is not claimed fulfilled by Tier 1.
+> Display caching remains memory-only and grants no durable-price authority.
+
 This is the decision every other one falls out of, so it is stated first and in the strongest form.
 
 **A price shown on screen may fail over between sources. A price written into a permanent record must

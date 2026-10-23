@@ -41,6 +41,10 @@ func TestProjectionRespectsReceiptCloseAndHolidayStarts(t *testing.T) {
 		if !expected || sch.S0 != tc.s0 || sch.Due != tc.d5 {
 			t.Errorf("%s: got %+v/%v, want S0=%s d5=%s", tc.receipt, sch, expected, tc.s0, tc.d5)
 		}
+		frozen, qualified := predReadProjection("d5", made, true, tc.s0)
+		if !qualified || frozen != sch {
+			t.Errorf("valid frozen baseline lost qualification: %s got %+v/%v want %+v", tc.receipt, frozen, qualified, sch)
+		}
 	}
 }
 
@@ -51,6 +55,10 @@ func TestMissingYearDegradesToOnOrAfter(t *testing.T) {
 		{"2026-09-17T16:00:00+08:00", "h12", ""},
 		{"2026-09-17T16:00:00+08:00", "d5", "2026-09-25"},
 		{"2026-09-17T16:00:00+08:00", "d5", "2026-09-01"},
+		{"2026-09-17T16:00:00+08:00", "d5", "2026-09-16"},
+		{"2026-09-17T16:00:00+08:00", "d5", "2026-09-17"},
+		{"2026-09-17T14:59:59+08:00", "d5", "2026-09-18"},
+		{"2026-09-17T16:00:00+08:00", "d5", "2026-09-21"},
 	} {
 		made, err := time.Parse(time.RFC3339, tc.made)
 		if err != nil {

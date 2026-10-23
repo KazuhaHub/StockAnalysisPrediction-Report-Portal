@@ -209,14 +209,14 @@ func TestHealthzForecastIsStatusOnly(t *testing.T) {
 	}
 }
 
-// TestReadinessHasNoLedgerChainItemBeforeP23: exactly items 1–5 on this PR.
-func TestReadinessHasNoLedgerChainItemBeforeP23(t *testing.T) {
+// The source-policy gate is appended without changing the first five item keys.
+func TestReadinessIncludesLedgerChainItem(t *testing.T) {
 	s := newV1Server(t)
 	items := s.forecastReadiness(time.Now())
-	if len(items) != 5 {
-		t.Fatalf("readiness items = %d, want 5", len(items))
+	if len(items) != 6 {
+		t.Fatalf("readiness items = %d, want 6", len(items))
 	}
-	want := []string{"binary", "population", "dry_pass", "dry_gate", "alerts"}
+	want := []string{"binary", "population", "dry_pass", "dry_gate", "alerts", "ledger_chain"}
 	for i, key := range want {
 		if items[i].Key != key {
 			t.Errorf("item %d = %q, want %q", i, items[i].Key, key)

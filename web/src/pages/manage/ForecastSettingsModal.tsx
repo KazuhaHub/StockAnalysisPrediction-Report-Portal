@@ -7,8 +7,8 @@ import type { ForecastSettings } from '../../api/types'
 // The evaluator's settings, as a modal opened from the verification page's header.
 //
 // The benchmark setting. Since P9 the evaluator's ON/OFF/DRY switch lives on the operating card
-// beside the readiness list that gates it, so this modal has one job: the index NEW sets are written
-// with. A change is effective from the NEXT cohort (P4): the sets already written keep the index they
+// beside the readiness list that gates it. This modal controls comparison-only shadow reads and
+// the index NEW sets are written with. A benchmark change is effective from the NEXT cohort (P4): sets keep the index they
 // were frozen with, so nothing on the ledger is re-scored. The modal posts only the fields the admin
 // actually changed.
 export default function ForecastSettingsModal({
@@ -25,6 +25,7 @@ export default function ForecastSettingsModal({
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [bench, setBench] = useState(value.bench_next || value.bench)
+  const [fallback, setFallback] = useState<'off' | 'shadow'>(value.fallback || 'off')
   const [busy, setBusy] = useState(false)
 
   // Seed the draft from the page's copy each time the modal opens. Without this, a modal closed
@@ -33,8 +34,9 @@ export default function ForecastSettingsModal({
   useEffect(() => {
     if (open) {
       setBench(value.bench_next || value.bench)
+      setFallback(value.fallback || 'off')
     }
-  }, [open, value.bench, value.bench_next])
+  }, [open, value.bench, value.bench_next, value.fallback])
 
   const benchOptions = value.bench_codes.map((code) => ({
     value: code,
@@ -45,6 +47,7 @@ export default function ForecastSettingsModal({
     const payload: Record<string, unknown> = {}
     const chosen = value.bench_next || value.bench
     if (bench !== chosen) payload.bench_schedule = bench
+    if (fallback !== (value.fallback || 'off')) payload.fallback = fallback
     if (Object.keys(payload).length === 0) {
       onClose()
       return
@@ -89,6 +92,23 @@ export default function ForecastSettingsModal({
       cancelText={t('common.cancel')}
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        <div>
+          <Typography.Text>{t('forecast.settings.fallback')}</Typography.Text>
+          <Select
+            value={fallback}
+            onChange={setFallback}
+            disabled={busy}
+            aria-label={t('forecast.settings.fallback')}
+            options={[
+              { value: 'off', label: t('forecast.settings.fallbackOff') },
+              { value: 'shadow', label: t('forecast.settings.fallbackShadow') },
+            ]}
+            style={{ width: '100%', marginTop: 4 }}
+          />
+          <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+            {t('forecast.settings.fallbackHint')}
+          </Typography.Text>
+        </div>
         <div>
           <Typography.Text>{t('forecast.settings.bench')}</Typography.Text>
           <Select

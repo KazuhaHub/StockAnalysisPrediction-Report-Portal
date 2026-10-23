@@ -3,10 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -17,6 +20,14 @@ import (
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "quote-probe":
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			if err := app.QuoteProbeCommand(ctx, os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "quote-probe: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "version": // report-portal version — print version/commit/build date
 			fmt.Println(version.String())
 			return

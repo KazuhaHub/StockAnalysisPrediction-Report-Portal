@@ -52,3 +52,18 @@ func TestPublishedS0OutranksClosureProjection(t *testing.T) {
 		t.Fatalf("observed start lost to a scheduled closure: %+v", got)
 	}
 }
+
+func TestReaderProjectionRetainsReceiptConsistentQualification(t *testing.T) {
+	for _, frozen := range []string{"2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21"} {
+		sets := projectionReadSet("d5")
+		sets[0].S0Date = frozen
+		annotateReadPhasesWithCalendars(sets, dateAtClose("2026-09-19"), nil)
+		mark := sets[0].Marks[0]
+		if mark.Expected != (frozen == "2026-09-18") {
+			t.Fatalf("combined reader lost receipt consistency: frozen=%s mark=%+v", frozen, mark)
+		}
+		if sets[0].S0Date != frozen || mark.Phase != predPhaseWaiting || mark.NotBefore == "" {
+			t.Fatalf("qualification changed frozen state or suppressed waiting: %s %+v", frozen, sets[0])
+		}
+	}
+}

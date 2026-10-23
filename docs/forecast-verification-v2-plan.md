@@ -1,5 +1,10 @@
 # Forecast verification v2: plan
 
+> **Identifier update (2026-10-22).** The market-data ADR called 0038 in this baseline plan is
+> [ADR 0041](adr/0041-ledger-grade-market-data.md). Notifications uses 0038 and external application
+> connections uses 0040. References below retain their historical numbering; the implementation
+> plan and the actual ADR are authoritative. This changes no source-admission decision.
+
 | | |
 |---|---|
 | Status | Proposal for owner review. None of it is implemented. |
