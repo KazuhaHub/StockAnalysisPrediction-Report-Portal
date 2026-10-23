@@ -356,6 +356,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	prior := restorePrior{
 		populationFrom: s.populationFromRow(),
 		autoMode:       s.GetSetting(setForecastAuto, ""),
+		readerStage:    s.GetSetting(setForecastReader, ""),
 	}
 
 	rep := &RestoreReport{
@@ -433,6 +434,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 type restorePrior struct {
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
+	readerStage    string // the live forecast_reader, "" when unset
 }
 
 // populationFromRow reads the raw stored ledger start without going through GetSetting's parse, so a
@@ -522,6 +524,9 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 	if err := applyRestoreEvaluator(e, prior.autoMode); err != nil {
 		return err
 	}
+	if err := applyRestoreReaderStage(e, prior.readerStage); err != nil {
+		return err
+	}
 	// A restored older dump brings every forecast_scope back NULL; the Default OU is normalised to
 	// none here, on the same transaction, exactly as at boot (P38).
 	if err := ensureDefaultForecastScope(e); err != nil {
@@ -549,7 +554,7 @@ func applyRestoreEvaluator(e migExec, live string) error {
 		if err := e.setSetting(setForecastAuto, final); err != nil {
 			return fmt.Errorf("cap the evaluator mode through the restore: %w", err)
 		}
-		if err := auditRestoreChange(e, map[string]any{"from": dump, "to": final}); err != nil {
+		if err := auditRestoreChange(e, AuditForecastAuto, setForecastAuto, map[string]any{"from": dump, "to": final}); err != nil {
 			return err
 		}
 	}
@@ -559,13 +564,62 @@ func applyRestoreEvaluator(e migExec, live string) error {
 		if err := e.setSetting(setForecastAuto, forecastModeDry); err != nil {
 			return fmt.Errorf("cap the evaluator mode at dry: %w", err)
 		}
-		if err := auditRestoreChange(e, map[string]any{
+		if err := auditRestoreChange(e, AuditForecastAuto, setForecastAuto, map[string]any{
 			"from": forecastModeOn, "to": forecastModeDry, "reason": "restore_gates_empty",
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// applyRestoreReaderStage applies §3.3's rule for the reading stage: a restore never raises it. The
+// result is the lower of the dump and the live database in off < card < full, an unset side counting
+// as the default (card) and an unrecognised value as off, which is how the readers treat it. A real
+// change from the restored value leaves an audit row attributed to `system`, so an operator can see
+// that the stage did not survive the restore as dumped.
+func applyRestoreReaderStage(e migExec, live string) error {
+	dumpRaw := e.setting(setForecastReader)
+	dump, liveStage := effectiveForecastReaderStage(dumpRaw), effectiveForecastReaderStage(live)
+	final := lowerForecastReaderStage(dump, liveStage)
+	if final == dump {
+		return nil
+	}
+	if err := e.setSetting(setForecastReader, final); err != nil {
+		return fmt.Errorf("cap the reading stage through the restore: %w", err)
+	}
+	return auditRestoreChange(e, AuditForecastReader, setForecastReader, map[string]any{"from": dump, "to": final})
+}
+
+// effectiveForecastReaderStage is the stage a stored value stands for: the default when unset, and
+// off for anything the readers would not recognise.
+func effectiveForecastReaderStage(stored string) string {
+	switch {
+	case stored == "":
+		return "card"
+	case validForecastReaderStage(stored):
+		return stored
+	default:
+		return "off"
+	}
+}
+
+// lowerForecastReaderStage orders off < card < full.
+func lowerForecastReaderStage(a, b string) string {
+	rank := func(stage string) int {
+		switch stage {
+		case "full":
+			return 2
+		case "card":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(a) <= rank(b) {
+		return a
+	}
+	return b
 }
 
 // lowerForecastMode orders off < dry < 1.
@@ -588,14 +642,14 @@ func lowerForecastMode(a, b string) string {
 
 // auditRestoreChange writes the restore's own audit row through the restore transaction, so a
 // rolled-back restore does not leave a claim about a change that did not happen.
-func auditRestoreChange(e migExec, detail map[string]any) error {
+func auditRestoreChange(e migExec, action, key string, detail map[string]any) error {
 	body, err := json.Marshal(detail)
 	if err != nil {
 		return err
 	}
 	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,?,?,?,?,?,?,?)`, time.Now().UTC().Format(time.RFC3339), "system", 0,
-		AuditForecastAuto, "settings", setForecastAuto, string(body), "")
+		action, "settings", key, string(body), "")
 	return err
 }
 

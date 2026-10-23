@@ -8,6 +8,7 @@ package app
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -371,6 +372,81 @@ func TestRestoreRulesForForecastKeys(t *testing.T) {
 	if _, err := dstD.restoreFrom(bytes.NewReader(dumpD), true); err != nil {
 		t.Fatalf("equivalent instants written differently were refused: %v", err)
 	}
+
+	// forecast_reader (P18): a restore never raises the reading stage. The result is the lower of the
+	// dump and the live database in off < card < full, an unset side counting as the default card.
+	t.Run("forecast_reader", func(t *testing.T) {
+		const unset = ""
+		for _, tc := range []struct{ name, dump, live, want string }{
+			{"full dump over live card", "full", "card", "card"},
+			{"full dump over live off", "full", "off", "off"},
+			{"card dump over live off", "card", "off", "off"},
+			{"card dump over live full", "card", "full", "card"},
+			{"off dump over live full", "off", "full", "off"},
+			{"off dump over live card", "off", "card", "off"},
+			{"equal stages", "full", "full", "full"},
+			{"full dump over unset live", "full", unset, "card"},
+			{"unset dump under live off", unset, "off", "off"},
+			{"unset dump under live full", unset, "full", unset},
+			{"unset on both sides", unset, unset, unset},
+			{"unknown live value never wins over a real stage", "full", "bogus", "off"},
+			{"unknown dump value is not raised", "bogus", "full", "bogus"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				eachRestoreDriver(t, func(t *testing.T, dst *Store) {
+					src := newTestStore(t)
+					if tc.dump != unset {
+						if err := src.SetSetting(setForecastReader, tc.dump); err != nil {
+							t.Fatal(err)
+						}
+					}
+					dump := dumpOf(t, src)
+					if _, err := dst.exec(`DELETE FROM meta WHERE k=?`, setForecastReader); err != nil {
+						t.Fatal(err)
+					}
+					if tc.live != unset {
+						if err := dst.SetSetting(setForecastReader, tc.live); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
+						t.Fatalf("restore: %v", err)
+					}
+					var raw sql.NullString
+					err := dst.queryRow(`SELECT v FROM meta WHERE k=?`, setForecastReader).Scan(&raw)
+					if err != nil && err != sql.ErrNoRows {
+						t.Fatal(err)
+					}
+					if got := raw.String; got != tc.want {
+						t.Fatalf("stage after restore = %q (present=%v), want %q", got, raw.Valid, tc.want)
+					}
+					// Only a real change leaves a system audit row, and it names both stages.
+					rows, _ := dst.ListAudit(AuditFilter{Action: AuditForecastReader})
+					effective := func(v string) string {
+						if v == unset {
+							return "card"
+						}
+						return v
+					}
+					changed := effective(tc.want) != effective(tc.dump)
+					if changed != (len(rows) == 1) || len(rows) > 1 {
+						t.Fatalf("audit rows = %+v; changed=%v", rows, changed)
+					}
+					if changed && (rows[0].Actor != "system" || !strings.Contains(rows[0].Detail, effective(tc.want))) {
+						t.Fatalf("audit row = %+v", rows[0])
+					}
+				})
+			})
+		}
+	})
+}
+
+// eachRestoreDriver runs a restore scenario into a SQLite store and, when configured, into Postgres.
+// A restore replaces every table, so neither destination needs seeding beyond what the scenario sets.
+func eachRestoreDriver(t *testing.T, fn func(t *testing.T, dst *Store)) {
+	t.Helper()
+	t.Run("sqlite", func(t *testing.T) { fn(t, newTestStore(t)) })
+	t.Run("postgres", func(t *testing.T) { fn(t, pgStore(t)) })
 }
 
 // ledgerStartValue is the decided V3 value, used by several tests.
