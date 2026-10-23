@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import type { ForecastCell, ForecastGroupsResponse } from '../../api/types'
 import ForecastMatrix from './ForecastMatrix'
@@ -227,13 +227,13 @@ describe('ForecastMatrix', () => {
     it('shows a pending cell with no progress bar when the server sent no counts', () => {
       const { container } = show(withheld({ ...empty, d5: { state: 'pending' } }))
       expect(screen.getByText('forecast.cell.pending_plain')).toBeTruthy()
-      expect(container.querySelector('[style*="height: 4px"]')).toBeNull()
+      expect(container.querySelector('[data-part="progress"]')).toBeNull()
     })
 
     it('says a small cell is below the gate without stating how many names it has', () => {
       show(withheld({ ...empty, d5: { state: 'small' } }))
       expect(screen.getByText('forecast.cell.small_nocount')).toBeTruthy()
-      expect(screen.getByText('forecast.cell.small_hint')).toBeTruthy()
+      expect(document.body.textContent).not.toContain('forecast.cell.small:')
     })
 
     it('names a purged cell instead of leaving it blank', () => {
@@ -253,3 +253,132 @@ describe('ForecastMatrix', () => {
     })
   })
 })
+
+// The cell states a young ledger spends most of its life in. Each one has to say what the cell is
+// waiting for, and none of them may show a number the matrix refuses to publish.
+describe('ForecastMatrix cell states', () => {
+  const cellOf = (state: string) => document.querySelector(`[data-state="${state}"]`) as HTMLElement
+
+  it('draws an open cell with a dashed border, and makes it neither a button nor a link', () => {
+    show(resp({ ...empty, d5: mature }))
+    const open = cellOf('open')
+    expect(open.style.borderStyle).toBe('dashed')
+    expect(open.tagName).not.toBe('BUTTON')
+    expect(within(open).queryByRole('button')).toBeNull()
+    expect(open.textContent).toBe('forecast.cell.open_month')
+  })
+
+  it('says whether an unfinished group is a month or a custom group', () => {
+    show({ ...resp({ ...empty }), mode: 'custom', official: false }, 'custom')
+    expect(cellOf('open').textContent).toBe('forecast.cell.open')
+  })
+
+  it('shows a small cell as its size, the gate and that nothing is published, with no progress bar', () => {
+    show(resp({ ...empty, d5: { state: 'small', n: 12 } }))
+    const small = cellOf('small')
+    expect(small.textContent).toContain('forecast.cell.small:{"n":12}')
+    expect(small.querySelector('[data-part="progress"]')).toBeNull()
+    expect(small.textContent).not.toContain('forecast.cell.pending')
+  })
+
+  it('shows a payload with metrics on a small cell as nothing but the gate text', () => {
+    show(resp({ ...empty, d5: { state: 'small', n: 12, spread_bp: 999, ic: 0.9, hit: 0.9, fill: 0.9 } as ForecastCell }))
+    expect(cellOf('small').textContent).not.toMatch(/pt|0\.9|90%/)
+  })
+
+  it('gives a pending cell its progress, the phases that hold it and the earliest date', () => {
+    show(resp({
+      ...empty,
+      d5: {
+        state: 'pending', resolved: 31, total: 42, not_before: '2026-10-26',
+        pending_reasons: { resolved: 31, waiting: 8, retrying: 2, overdue: 1, waiting_s0: 0, settling: 0, final: 0, unknown: 0 },
+      },
+    }))
+    const pending = cellOf('pending')
+    expect(pending.textContent).toContain('forecast.cell.pending:{"done":31,"total":42}')
+    expect(pending.querySelector('[data-part="progress"]')).not.toBeNull()
+    expect(pending.textContent).toContain('forecast.cell.reason:{"phase":"forecast.phase.waiting","n":8}')
+    expect(pending.textContent).toContain('forecast.cell.reason:{"phase":"forecast.phase.retrying","n":2}')
+    expect(pending.textContent).toContain('forecast.cell.reason:{"phase":"forecast.phase.overdue","n":1}')
+    expect(pending.textContent).not.toContain('forecast.phase.resolved')
+    expect(pending.textContent).toContain('forecast.cell.not_before:{"date":"2026-10-26"}')
+  })
+
+  it('words a calendar-backed date as expected and leaves a lower bound as "not before"', () => {
+    show(resp({ ...empty, d5: { state: 'pending', resolved: 0, total: 5, not_before: '2026-10-26', expected: true } }))
+    expect(cellOf('pending').textContent).toContain('forecast.cell.expected:{"date":"2026-10-26"}')
+    expect(cellOf('pending').textContent).not.toContain('forecast.cell.not_before')
+  })
+
+  it('tells the twelve-month checkpoint as the month it can start from', () => {
+    show(resp({ ...empty, h12: { state: 'pending', resolved: 0, total: 5, not_before: '2027-05-14' } }))
+    expect(cellOf('pending').textContent).toContain('forecast.cell.from_month:{"month":"2027-05"}')
+    expect(cellOf('pending').textContent).not.toContain('2027-05-14')
+  })
+
+  it('draws no reasons and no date when the server explained nothing', () => {
+    show(resp({ ...empty, d5: { state: 'pending', resolved: 4, total: 9 } }))
+    const text = cellOf('pending').textContent!
+    expect(text).toContain('forecast.cell.pending:{"done":4,"total":9}')
+    expect(text).not.toContain('forecast.cell.reason')
+    expect(text).not.toContain('forecast.cell.not_before')
+  })
+
+  it('names the final-refusal cap as the reason a finished cell does not publish', () => {
+    show(resp({ ...empty, d5: { state: 'pending', resolved: 47, total: 50, failed_cap_exceeded: true, pending_reasons: { final: 3, resolved: 47 } } }))
+    const text = cellOf('pending').textContent!
+    expect(text).toContain('forecast.cell.cap:{"refused":3,"total":50,"pct":6}')
+    expect(text).toContain('forecast.cell.cap_hint')
+  })
+
+  it('shows an external reader\'s pending cell as its state alone, even if a malformed payload carries reasons', () => {
+    show(withheld({ ...empty, d5: { state: 'pending', pending_reasons: { waiting: 5 }, not_before: '2026-10-26', failed_cap_exceeded: true } }))
+    const text = cellOf('pending').textContent!
+    expect(text).toBe('forecast.cell.pending_plain')
+  })
+
+  it('shows a purged cell as purged, not as an empty box', () => {
+    show(resp({ ...empty, d5: { state: 'purged' } }))
+    expect(cellOf('purged').textContent).toBe('forecast.cell.purged')
+    expect(cellOf('purged').tagName).not.toBe('BUTTON')
+  })
+
+  it('draws a mature value at 18px and weight 600, signed, as a button with hover and focus styling', () => {
+    show(resp({ ...empty, d5: mature }))
+    const button = cellOf('mature')
+    expect(button.tagName).toBe('BUTTON')
+    expect(button.className).toContain('rp-fc-cell')
+    const value = screen.getByText('+3.1 pt')
+    expect(value.style.fontSize).toBe('18px')
+    expect(value.style.fontWeight).toBe('600')
+  })
+
+  it.each([
+    ['pending', { state: 'pending', resolved: 3, total: 9 } as ForecastCell],
+    ['small', { state: 'small', n: 12 } as ForecastCell],
+  ])('opens a %s cell\'s members when it is pressed, because membership is settled before results are', (state, cell) => {
+    const onOpen = vi.fn()
+    render(
+      <MemoryRouter>
+        <ForecastMatrix resp={resp({ ...empty, d5: cell })} metric="spread" mode="month" onOpen={onOpen} />
+      </MemoryRouter>,
+    )
+    const button = cellOf(state)
+    expect(button.tagName).toBe('BUTTON')
+    fireEvent.click(button)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen.mock.calls[0][1]).toBe('d5')
+  })
+
+  it('does not offer a drawer for an open or a purged cell, which have no settled membership to list', () => {
+    show(resp({ ...empty, d5: { state: 'purged' } }))
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it.each(['open', 'pending', 'small', 'purged'] as const)('never reads a metric from a %s cell, whatever the payload carries', (state) => {
+    show(resp({ ...empty, d5: { state, resolved: 1, total: 2, n: 3, spread_bp: 999, spread_q: 0.001, ic: 0.9, hit: 0.9, fill: 0.9 } as ForecastCell }))
+    expect(document.body.textContent).not.toMatch(/9\.99|10\.0 pt|\+9\.9|90%|q<0\.05/)
+    expect(document.querySelector('[data-state="mature"]')).toBeNull()
+  })
+})
+

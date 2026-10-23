@@ -927,9 +927,8 @@
   "forecast.col.coverage": "覆盖",
   "forecast.cell.open_month": "本月未结束",
   "forecast.cell.open": "本组未结束",
-  "forecast.cell.small": "样本 {{n}} 只 < 30",
-  "forecast.cell.small_hint": "不出数字",
-  "forecast.cell.small_nocount": "样本不足 30 只",
+  "forecast.cell.small": "n = {{n}} · 低于 30 · 不发布",
+  "forecast.cell.small_nocount": "低于 30 · 不发布",
   "forecast.cell.pending_plain": "尚未全部到期",
   "forecast.cell.purged": "按保留策略已清除",
   "forecast.cell.min_n_met": "n ≥ 30",
@@ -2331,5 +2330,12 @@
   "forecast.eval.pill.stale_hint": "超过 {{minutes}} 分钟没有心跳，评估器可能已经停止。看门狗会通过邮件和 Slack 提醒。",
   "forecast.eval.pill.lagging_hint": "最早到期的检查点已超过 {{hours}} 小时未结算。读者看到的是「等待结算」或「重试中」，不是失败。",
   "forecast.eval.pill.error_hint": "上一轮出错，下一轮会自动重试；已结算的结果不受影响。",
-  "forecast.eval.pill.state": "状态"
+  "forecast.eval.pill.state": "状态",
+  "forecast.cell.reason": "{{phase}} {{n}}",
+  "forecast.cell.not_before": "不早于 {{date}}",
+  "forecast.cell.expected": "预计 {{date}}",
+  "forecast.cell.from_month": "{{month}} 起",
+  "forecast.cell.cap": "终局拒绝 {{refused}}/{{total}}（{{pct}}%）",
+  "forecast.cell.cap_hint": "超过 5% 上限 · 不发布",
+  "forecast.phase.unknown": "未知"
 }

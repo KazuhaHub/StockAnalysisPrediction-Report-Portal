@@ -927,9 +927,8 @@
   "forecast.col.coverage": "覆蓋",
   "forecast.cell.open_month": "本月未結束",
   "forecast.cell.open": "本組未結束",
-  "forecast.cell.small": "樣本 {{n}} 只 < 30",
-  "forecast.cell.small_hint": "不出數字",
-  "forecast.cell.small_nocount": "樣本不足 30 只",
+  "forecast.cell.small": "n = {{n}} · 低於 30 · 不釋出",
+  "forecast.cell.small_nocount": "低於 30 · 不釋出",
   "forecast.cell.pending_plain": "尚未全部到期",
   "forecast.cell.purged": "按保留策略已清除",
   "forecast.cell.min_n_met": "n ≥ 30",
@@ -2331,5 +2330,12 @@
   "forecast.eval.pill.stale_hint": "超過 {{minutes}} 分鐘沒有心跳，評估器可能已經停止。看門狗會通過郵件和 Slack 提醒。",
   "forecast.eval.pill.lagging_hint": "最早到期的檢查點已超過 {{hours}} 小時未結算。讀者看到的是「等待結算」或「重試中」，不是失敗。",
   "forecast.eval.pill.error_hint": "上一輪出錯，下一輪會自動重試；已結算的結果不受影響。",
-  "forecast.eval.pill.state": "狀態"
+  "forecast.eval.pill.state": "狀態",
+  "forecast.cell.reason": "{{phase}} {{n}}",
+  "forecast.cell.not_before": "不早於 {{date}}",
+  "forecast.cell.expected": "預計 {{date}}",
+  "forecast.cell.from_month": "{{month}} 起",
+  "forecast.cell.cap": "終局拒絕 {{refused}}/{{total}}（{{pct}}%）",
+  "forecast.cell.cap_hint": "超過 5% 上限 · 不釋出",
+  "forecast.phase.unknown": "未知"
 }

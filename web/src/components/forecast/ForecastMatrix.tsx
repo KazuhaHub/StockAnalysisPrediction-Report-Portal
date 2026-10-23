@@ -3,15 +3,14 @@ import { Tag, Typography, theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type {
-  ForecastCell,
   ForecastCheckpoint,
   ForecastGroup,
   ForecastGroupsResponse,
   ForecastMetric,
   ForecastMode,
 } from '../../api/types'
-import { cellDisplay, gateText } from '../../lib/forecast'
-import { forecastPalette } from '../../lib/forecastPresentation'
+import { gateText } from '../../lib/forecast'
+import ForecastCellView from './ForecastCellView'
 import ForecastLegend from './ForecastLegend'
 
 // The verification matrix (plan §8.1).
@@ -39,128 +38,8 @@ interface Props {
 export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink = true }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const palette = forecastPalette(token)
   // The gate flag's explanation is drawn once, as text, and each flagged cell points at it.
   const gateHintId = useId()
-
-  const box: CSSProperties = {
-    borderRadius: 6,
-    padding: '8px 10px',
-    minHeight: 64,
-    flex: '1 1 0%',
-    minWidth: 0,
-    boxSizing: 'border-box',
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    gap: 2,
-  }
-
-  const cellBox = (c: ForecastCell, cp: ForecastCheckpoint, g: ForecastGroup) => {
-    if (c.state === 'open') {
-      return (
-        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          {t(mode === 'month' ? 'forecast.cell.open_month' : 'forecast.cell.open')}
-        </div>
-      )
-    }
-    if (c.state === 'small') {
-      return (
-        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          <span>{c.n === undefined ? t('forecast.cell.small_nocount') : t('forecast.cell.small', { n: c.n })}</span>
-          <span style={{ fontSize: 12 }}>{t('forecast.cell.small_hint')}</span>
-        </div>
-      )
-    }
-    if (c.state === 'purged') {
-      return (
-        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          {t('forecast.cell.purged')}
-        </div>
-      )
-    }
-    if (c.state === 'pending' && c.total === undefined) {
-      // The server sent no denominator, so there is no progress to draw: a bar at 0 of 0 would say
-      // nothing has matured, which nobody knows.
-      return (
-        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          {t('forecast.cell.pending_plain')}
-        </div>
-      )
-    }
-    if (c.state === 'pending') {
-      const done = c.resolved ?? 0
-      const total = c.total ?? 0
-      return (
-        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          <span>{t('forecast.cell.pending', { done, total })}</span>
-          <div style={{ height: 4, borderRadius: 2, background: token.colorFillSecondary, overflow: 'hidden' }}>
-            <div
-              style={{
-                height: 4,
-                width: `${total > 0 ? Math.min(100, (done / total) * 100) : 0}%`,
-                background: token.colorTextTertiary,
-              }}
-            />
-          </div>
-        </div>
-      )
-    }
-
-    const d = cellDisplay(c, metric, mode, t)
-    if (!d) return null
-    const excluded = (c.refused ?? 0) + (c.corp_action ?? 0)
-    const tone = d.signal > 0 ? palette.positive : d.signal < 0 ? palette.negative : palette.neutral
-    return (
-      <button
-        type="button"
-        aria-describedby={d.gate ? gateHintId : undefined}
-        onClick={() => onOpen(g, cp)}
-        style={{
-          ...box,
-          background: tone.background,
-          color: tone.foreground,
-          border: `1px solid ${token.colorBorderSecondary}`,
-          textAlign: 'left',
-          cursor: 'pointer',
-          font: 'inherit',
-          width: '100%',
-        }}
-      >
-        <span style={{ fontWeight: 600, fontSize: 15 }}>{d.value}</span>
-        {d.signal !== 0 && (
-          <span style={{ fontSize: 12 }}>
-            <span aria-hidden="true">{d.signal > 0 ? '▲' : '▼'} </span>
-            <span className="rp-sr-only">{t(d.signal > 0 ? 'forecast.signal.positive' : 'forecast.signal.negative')}: </span>
-            q&lt;0.05
-          </span>
-        )}
-        {d.sub && <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>}
-        {d.gate && (
-          // The cell's own assurance, drawn once. It is not the metric's sample size: that
-          // denominator is a smaller subset which has no n >= 30 minimum of its own.
-          <span
-            style={{
-              alignSelf: 'flex-start',
-              fontSize: 11,
-              lineHeight: '16px',
-              padding: '0 5px',
-              borderRadius: 4,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              color: token.colorTextSecondary,
-            }}
-          >
-            {d.gate}
-          </span>
-        )}
-        {excluded > 0 && (
-          <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
-            {t('forecast.cell.excluded', { n: excluded })}
-          </span>
-        )}
-      </button>
-    )
-  }
 
   const coverageBar = (g: ForecastGroup) => {
     const c = g.coverage
@@ -291,7 +170,16 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                 </td>
                 {resp.checkpoints.map((cp) => (
                   <td key={cp} style={td}>
-                    {g.cells[cp] ? cellBox(g.cells[cp], cp, g) : null}
+                    {g.cells[cp] ? (
+                      <ForecastCellView
+                        cell={g.cells[cp]}
+                        cp={cp}
+                        metric={metric}
+                        mode={mode}
+                        gateHintId={gateHintId}
+                        onOpen={() => onOpen(g, cp)}
+                      />
+                    ) : null}
                   </td>
                 ))}
                 {showCoverage && <td style={td}>{coverageBar(g)}</td>}

@@ -1601,3 +1601,18 @@ body {
   white-space: nowrap;
   border: 0;
 }
+
+/* Forecast verification matrix: a cell that opens the member drawer. The border colour lives here and
+   not in the component's inline style so that hover and keyboard focus can change it. */
+.rp-fc-cell {
+  border-color: var(--ant-color-border-secondary);
+  cursor: pointer;
+}
+.rp-fc-cell:hover,
+.rp-fc-cell:focus-visible {
+  border-color: var(--ant-color-primary);
+}
+.rp-fc-cell:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 1px;
+}

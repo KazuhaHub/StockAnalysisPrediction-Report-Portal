@@ -927,9 +927,8 @@
   "forecast.col.coverage": "Coverage",
   "forecast.cell.open_month": "This month has not ended",
   "forecast.cell.open": "This group has not ended",
-  "forecast.cell.small": "Only {{n}} names < 30",
-  "forecast.cell.small_hint": "no numbers",
-  "forecast.cell.small_nocount": "Fewer than 30 names",
+  "forecast.cell.small": "n = {{n}} · below 30 · not published",
+  "forecast.cell.small_nocount": "Below 30 · not published",
   "forecast.cell.pending_plain": "Not all matured yet",
   "forecast.cell.purged": "Removed by retention",
   "forecast.cell.min_n_met": "n ≥ 30",
@@ -2331,5 +2330,12 @@
   "forecast.eval.pill.stale_hint": "No heartbeat for more than {{minutes}} minutes: the evaluator may have stopped. The watchdog alerts by email and Slack.",
   "forecast.eval.pill.lagging_hint": "The oldest due checkpoint has waited more than {{hours}} hours. Readers see \"Awaiting settlement\" or \"Retrying\", not a failure.",
   "forecast.eval.pill.error_hint": "The last pass failed and is retried on the next tick; results already settled are unaffected.",
-  "forecast.eval.pill.state": "State"
+  "forecast.eval.pill.state": "State",
+  "forecast.cell.reason": "{{phase}} {{n}}",
+  "forecast.cell.not_before": "Not before {{date}}",
+  "forecast.cell.expected": "Expected {{date}}",
+  "forecast.cell.from_month": "From {{month}}",
+  "forecast.cell.cap": "Final refusals {{refused}}/{{total}} ({{pct}}%)",
+  "forecast.cell.cap_hint": "Above the 5% cap · not published",
+  "forecast.phase.unknown": "Unknown"
 }
