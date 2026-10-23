@@ -184,6 +184,137 @@ describe('OrgUnitDetail', () => {
   })
 })
 
+// Forecast verification access is the one setting here the SERVER resolves: the form shows the
+// server's effective value and the unit that decided it, and sends the field only when the admin
+// changed it, so saving a name can never rewrite an access decision.
+describe('OrgUnitDetail — forecast verification access', () => {
+  const withScope = (o: Partial<UserGroupRow>) => g(o)
+  const DEFAULT = withScope({
+    id: 1, name: 'Default', is_default: true, weight: 2, allow_urgent: true, max_queued: 5, run_window: '',
+    forecast_scope: 'none', forecast_scope_effective: 'none', forecast_scope_source: 1,
+  })
+  const INTERNAL = withScope({
+    id: 3, name: 'Internal', parent_id: 1, forecast_scope: 'all', forecast_scope_effective: 'all', forecast_scope_source: 3,
+  })
+
+  beforeEach(() => {
+    put.mockReset().mockResolvedValue({})
+    get.mockReset().mockResolvedValue({ targets: [], granted: [] })
+  })
+
+  const body = () => put.mock.calls[0][1] as Record<string, unknown>
+  // The field's own container, so a control is never confused with the same control in another card.
+  const field = () => screen.getByText('forecast.scope.label').closest('div') as HTMLElement
+  const save = async () => {
+    fireEvent.click(screen.getAllByText('common.save')[0])
+    await waitFor(() => expect(put).toHaveBeenCalled())
+  }
+
+  it('shows the field with its help, under the forecast verification card', () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 3 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    expect(screen.getByText('forecast.scope.label')).toBeTruthy()
+    expect(screen.getByText('forecast.scope.help')).toBeTruthy()
+  })
+
+  it('names the inherited value and the unit it comes from, as the server resolved them', () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 3 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    const labels = screen.getAllByText(/ou\.inheritedAs/).map((n) => n.textContent ?? '')
+    expect(labels.some((l) => l.includes('"from":"Internal"') && l.includes('"value":"forecast.scope.all"'))).toBe(true)
+  })
+
+  it('inherits from the Default unit when the unit has no parent', () => {
+    const root = withScope({ id: 2, name: 'Root', forecast_scope: null, forecast_scope_effective: 'none', forecast_scope_source: 1 })
+    mount(root, [DEFAULT, root])
+    const labels = screen.getAllByText(/ou\.inheritedAs/).map((n) => n.textContent ?? '')
+    expect(labels.some((l) => l.includes('"from":"Default"') && l.includes('"value":"forecast.scope.none"'))).toBe(true)
+  })
+
+  it('offers what inheriting WOULD mean, not the unit\'s own override', () => {
+    // Desk overrides to none, under Internal (all): inheriting would give "all" from Internal.
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: 'none', forecast_scope_effective: 'none', forecast_scope_source: 2 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    const labels = screen.getAllByText(/ou\.inheritedAs/).map((n) => n.textContent ?? '')
+    expect(labels.some((l) => l.includes('"from":"Internal"') && l.includes('"value":"forecast.scope.all"'))).toBe(true)
+  })
+
+  it('offers no inherit option on the Default unit, which inherits from nobody', () => {
+    mount(DEFAULT, [DEFAULT])
+    expect(screen.getByText('forecast.scope.label')).toBeTruthy()
+    // Its stored value is shown in the control instead.
+    expect(screen.getByText('forecast.scope.none')).toBeTruthy()
+    const labels = screen.queryAllByText(/ou\.inheritedAs.*forecast\.scope/)
+    expect(labels).toHaveLength(0)
+  })
+
+  it('shows the external protections only for an effectively restricted unit', () => {
+    const plain = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 3 })
+    const { unmount } = mount(plain, [DEFAULT, INTERNAL, plain])
+    expect(screen.queryByText('forecast.scope.external_note')).toBeNull()
+    unmount()
+    const external = withScope({ id: 4, name: 'Client', parent_id: 3, restricted: true, restricted_effective: true, forecast_scope: 'all', forecast_scope_effective: 'all', forecast_scope_source: 4 })
+    mount(external, [DEFAULT, INTERNAL, external])
+    expect(screen.getByText('forecast.scope.external_note')).toBeTruthy()
+  })
+
+  it('shows the note on a unit that is restricted only through its parent', () => {
+    const ext = withScope({ id: 4, name: 'Parent', parent_id: 1, restricted: true, restricted_effective: true, forecast_scope: 'all', forecast_scope_effective: 'all', forecast_scope_source: 4 })
+    const child = withScope({ id: 5, name: 'Child', parent_id: 4, restricted: false, restricted_effective: true, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 4 })
+    mount(child, [DEFAULT, ext, child])
+    expect(screen.getByText('forecast.scope.external_note')).toBeTruthy()
+  })
+
+  it('does not send the field when it was not changed', async () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 3 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    await save()
+    expect('forecast_scope' in body()).toBe(false)
+  })
+
+  it('does not send an unchanged override either', async () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: 'own', forecast_scope_effective: 'own', forecast_scope_source: 2 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    await save()
+    expect('forecast_scope' in body()).toBe(false)
+  })
+
+  it('sends the chosen scope once the admin picks one', async () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: 'own', forecast_scope_effective: 'own', forecast_scope_source: 2 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    fireEvent.mouseDown(within(field()).getByRole('combobox'))
+    fireEvent.click(await screen.findByText('forecast.scope.none', { selector: '.ant-select-item-option-content' }))
+    await save()
+    expect(body().forecast_scope).toBe('none')
+  })
+
+  it('sends null to go back to inheriting, and only then', async () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: 'own', forecast_scope_effective: 'own', forecast_scope_source: 2 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    fireEvent.click(within(field()).getByText(/ou\.inheritedAs/))
+    await save()
+    expect(body().forecast_scope).toBeNull()
+  })
+
+  it('starts overriding from a unit that inherits, sending the chosen value', async () => {
+    const child = withScope({ id: 2, name: 'Desk', parent_id: 3, forecast_scope: null, forecast_scope_effective: 'all', forecast_scope_source: 3 })
+    mount(child, [DEFAULT, INTERNAL, child])
+    fireEvent.click(within(field()).getByText('ou.override'))
+    await waitFor(() => expect(within(field()).getByRole('combobox')).toBeTruthy())
+    await save()
+    // Picking "set here" without choosing a value pins what is in effect, as the other fields do.
+    expect(body().forecast_scope).toBe('all')
+  })
+
+  it('does not show the field, and sends nothing, when the server did not resolve access', async () => {
+    const old = withScope({ id: 2, name: 'Desk', parent_id: 1 })
+    mount(old, [DEFAULT, old])
+    expect(screen.queryByText('forecast.scope.label')).toBeNull()
+    await save()
+    expect('forecast_scope' in body()).toBe(false)
+  })
+})
+
 // Deleting an OU sweeps the announcement grants naming it, which can leave an announcement
 // addressed to nobody: still enabled, still "live", reaching no one and reporting nothing. The
 // operator is shown that while it is still avoidable, and decides. The server refuses without a

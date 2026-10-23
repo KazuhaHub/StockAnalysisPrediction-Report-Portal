@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import { App, Breadcrumb, Button, Card, Checkbox, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Button, Card, Checkbox, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tag, Typography } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-import type { GroupTargetRow, GroupTargetsResp, UserGroupRow } from '../../api/types'
+import type { ForecastScope, GroupTargetRow, GroupTargetsResp, UserGroupRow } from '../../api/types'
 import InheritField from './InheritField'
 import { ouPath, resolveOU, type UrgentPolicy } from './ouSettings'
 
 const RUN_SURFACES = ['run', 'batch', 'recurring', 'chat'] as const
+const FORECAST_SCOPES = ['all', 'own', 'none'] as const
 // The windows a run cap can be measured over. "total" is the life of the ACCOUNT — a trial with a
 // fixed number of runs — and is the one that never refills.
 const QUOTA_PERIODS = ['day', 'week', 'month', 'total'] as const
@@ -41,6 +42,25 @@ interface Draft {
   passkeyAllowed: boolean
   requireInherit: boolean
   require2fa: boolean
+  // Who may read the forecast record from this OU. null = inherit the parent OU; the Default OU
+  // inherits from nobody, so it always holds a value.
+  forecastScope: ForecastScope | null
+}
+
+// The forecast scope this OU stores, as the form edits it. The Default OU stores 'none' rather than
+// NULL, so a NULL read there (an older dump) shows the value that is in force.
+const storedForecastScope = (g: UserGroupRow): ForecastScope | null =>
+  g.forecast_scope ?? (g.is_default ? 'none' : null)
+
+// What an OU would inherit if it set nothing itself, as the server resolved it for the unit it
+// would inherit from: its parent, or the Default OU for a root. The OU's own fields describe what
+// is in effect NOW, which is the override it would be replacing.
+function inheritedForecast(g: UserGroupRow, groups: UserGroupRow[]): { value: ForecastScope; from: string } {
+  const def = groups.find((x) => x.is_default)
+  const parent = (g.parent_id ? groups.find((x) => x.id === g.parent_id) : undefined) ?? def
+  const value = parent?.forecast_scope_effective ?? 'none'
+  const source = groups.find((x) => x.id === parent?.forecast_scope_source) ?? parent ?? def
+  return { value, from: source?.name ?? '' }
 }
 
 // One announcement that names the OU being deleted. `orphaned` means this OU is its ONLY recipient,
@@ -78,6 +98,7 @@ function draftOf(g: UserGroupRow, def: UserGroupRow | undefined, groups: UserGro
     passkeyAllowed: r.passkeyAllowed.value,
     requireInherit: !isDefault && g.require_2fa == null,
     require2fa: r.require2fa.value,
+    forecastScope: storedForecastScope(g),
   }
 }
 
@@ -118,6 +139,10 @@ export default function OrgUnitDetail({
     groups,
   )
 
+  // Absent on a server that predates the access model: then there is nothing true to show or send.
+  const hasForecast = group.forecast_scope_effective !== undefined
+  const forecastInherit = inheritedForecast(group, groups)
+
   const [d, setD] = useState<Draft>(() => draftOf(group, def, groups))
   const [saving, setSaving] = useState(false)
   const [impact, setImpact] = useState<AffectedAnnouncement[] | null>(null)
@@ -156,6 +181,9 @@ export default function OrgUnitDetail({
         passkey_enroll: d.passkeyInherit ? null : d.passkeyAllowed,
         require_2fa: d.requireInherit ? null : d.require2fa,
         ...(isDefault ? {} : { parent_id: d.parent_id }),
+        // Presence-aware on the server: omitted leaves the stored value alone, so a save that
+        // changed only the name can never rewrite who may read the record.
+        ...(hasForecast && d.forecastScope !== storedForecastScope(group) ? { forecast_scope: d.forecastScope } : {}),
       })
       // Turning a mandate on asks people to do something at their next sign-in, and how many is the
       // difference between a policy and a surprise.
@@ -369,6 +397,33 @@ export default function OrgUnitDetail({
           <Switch checked={d.require2fa} onChange={(v) => set('require2fa', v)} />
         </InheritField>
       </Card>
+
+      {hasForecast && (
+        <Card size="small" title={t('nav.forecast_record')}>
+          <InheritField
+            label={t('forecast.scope.label')}
+            hint={t('forecast.scope.help')}
+            from={forecastInherit.from}
+            inherited={t(`forecast.scope.${forecastInherit.value}`)}
+            inheriting={d.forecastScope == null}
+            // Choosing "set here" without picking a value pins what is in effect, as the other
+            // fields do.
+            onInheritingChange={(v) => set('forecastScope', v ? null : (group.forecast_scope_effective ?? 'none'))}
+            canInherit={!isDefault}
+          >
+            <Select
+              size="small"
+              style={{ width: 150 }}
+              value={d.forecastScope ?? undefined}
+              onChange={(v) => set('forecastScope', v)}
+              options={FORECAST_SCOPES.map((v) => ({ value: v, label: t(`forecast.scope.${v}`) }))}
+            />
+          </InheritField>
+          {group.restricted_effective && (
+            <Alert type="info" showIcon title={t('forecast.scope.external_note')} />
+          )}
+        </Card>
+      )}
 
       {!isDefault && (
         <Card size="small" title={t('ou.sectionTenancy')}>
