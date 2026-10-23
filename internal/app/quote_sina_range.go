@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// fetchSinaRange is comparison-only groundwork. Sina has a count endpoint, not a range endpoint:
+// fetchSinaRange is comparison-only. Sina has a count endpoint, not a range endpoint:
 // request the full bounded tail, validate its newest observation, then trim by actual row dates.
-// This does not grant a writer/shadow capability or change the ordinary display degradation path.
+// Capability grants are separate; this never grants a writer or changes display degradation.
 func fetchSinaRange(ctx context.Context, market, code, from, to string) (*QuoteResp, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

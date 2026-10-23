@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 )
@@ -23,12 +24,18 @@ func (s *Store) saveForecastFallback(ctx context.Context, next string, entry Aud
 	if next != "off" && next != "shadow" {
 		return fmt.Errorf("fallback must be off or shadow")
 	}
+	// Bound total contention time, not just retry count: a burst across independent SQLite
+	// connections can outlast a short lockstep schedule. The caller's earlier deadline still wins.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	for attempt := 0; ; attempt++ {
 		err := s.saveForecastFallbackOnce(ctx, next, entry)
-		if err == nil || !isContentionErr(err) || attempt == 5 {
+		if err == nil || !isContentionErr(err) {
 			return err
 		}
-		timer := time.NewTimer(time.Duration(10<<attempt) * time.Millisecond)
+		ceiling := time.Duration(10<<min(attempt, 4)) * time.Millisecond
+		delay := ceiling/2 + time.Duration(rand.Int64N(int64(ceiling/2)))
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

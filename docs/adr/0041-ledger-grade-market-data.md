@@ -37,7 +37,9 @@ The operator controls enabled membership and priority through the source order.
 Sources declare `cashDividends` and `reportsKind` independently. Tencent has both and an explicit
 `settled` grant for Shanghai and Shenzhen. Beijing history and overseas display support do not
 implicitly admit settlement. Sina and Yahoo have neither evidence flag and no writer grant.
-No shadow grant is advertised before its range fetcher/comparator is implemented in P25.
+Sina has an explicit Shanghai/Shenzhen `settled_shadow` grant backed by P25's bounded range
+adapter and shared comparator. Yahoo has no shadow grant. Neither gains a writer grant, and the
+Sina shadow grant does not advertise a public display-range capability.
 
 ### 2. The operator's chain governs settlement, without fallback writes in Tier 1
 
@@ -99,15 +101,18 @@ comparison. Unmeasured capabilities must stay ungranted.
 | Source | Present scope | Missing evidence before wider admission |
 |---|---|---|
 | Tencent | Tier 1 writer for explicit Shanghai/Shenzhen instruments; cash signal plus detection-only adjusted/unadjusted ratios | Undocumented public delivery, no independent corroboration or feed licence |
-| Sina | Display source; count-based history capped at 800 bars; P25 comparison-only candidate | Window coverage, snapshot/history coherence and index identity measurements; no declared corporate-action evidence |
+| Sina | Display source; bounded comparison-only adapter over the 800-bar count tail, with window and snapshot/history coherence guards | Live coverage/coherence and index identity measurements; no declared corporate-action evidence |
 | Yahoo | Opt-in display source; candidate for A-share stock/index and event captures | A-share coverage/accuracy and index identity; dividend/split/adjusted-close evidence not admitted merely because an endpoint can return it |
 | EastMoney | No ledger implementation; investigation candidate only | Deployment reachability, symbol mapping, bars, identity and corporate-action evidence all need measurement; no licence established here |
 | Licensed feed | No implementation or procurement commitment | Contracted coverage, redistribution rights and measured conformance to the same integrity/evidence gates |
 
 P25 may compare at most two already-accepted primary bodies per working tick. OHLC, date sets and
 both anchors are compared to the fen. Results/call counts live in meta, never ledger tables;
-`forecast_fallback` is `off` or `shadow`, never fallback writing. P24 replay uses that same
-comparator. Neither work item is claimed complete by this ADR.
+`forecast_fallback` is `off` or `shadow`, never fallback writing. Two logical candidate reads and
+four HTTP attempts (including redirects) are independent per-pass limits. Comparisons run after
+primary ledger work with a separate deadline. P24 replay uses that same comparator. Local tests
+establish implementation behavior, not live measurements or production rollout; exact-head CI
+and release evidence are recorded separately in the implementation log.
 
 ### 6. Tier 2 requires a separate decision and approved database shape
 

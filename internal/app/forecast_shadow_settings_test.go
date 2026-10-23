@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestFallbackModesTier1(t *testing.T) {
@@ -95,6 +97,85 @@ func TestForecastFallbackTransactionAcrossSQLiteConnections(t *testing.T) {
 	}
 	defer second.Close()
 	assertFallbackTransitionChain(t, first, second)
+}
+
+func TestForecastFallbackWaitsForTransientSQLiteWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "locked-fallback.db")
+	owner, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	peer, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	if err := owner.SetSetting(setForecastFallback, "off"); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := owner.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.Exec(`UPDATE meta SET v=v WHERE k=?`, setForecastFallback); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- peer.saveForecastFallback(ctx, "shadow", AuditEntry{Actor: "admin"}) }()
+	select {
+	case err := <-done:
+		t.Fatalf("writer did not wait through transient contention: %v", err)
+	case <-time.After(700 * time.Millisecond):
+	}
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("released writer was not retried: %v", err)
+	}
+	if got := owner.GetSetting(setForecastFallback, ""); got != "shadow" {
+		t.Fatalf("released save lost its transition: %s", got)
+	}
+	if _, total := owner.ListAudit(AuditFilter{Action: AuditForecastFallback}); total != 1 {
+		t.Fatalf("retries did not commit exactly one audit: %d", total)
+	}
+}
+
+func TestForecastFallbackRetryStopsAtCallerDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cancelled-fallback.db")
+	owner, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	peer, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	lock, err := owner.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.Exec(`INSERT INTO meta(k,v) VALUES(?,?)`, setForecastFallback, "off"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := peer.saveForecastFallback(ctx, "shadow", AuditEntry{}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("retry ignored caller deadline: %v", err)
+	}
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := owner.GetSetting(setForecastFallback, "missing"); got != "missing" {
+		t.Fatalf("cancelled retry persisted a transition: %s", got)
+	}
 }
 
 func TestForecastFallbackOmittedFieldAndNullStoredValue(t *testing.T) {

@@ -1,7 +1,7 @@
 # Forecast verification — runbook
 
-**Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Every signal below exists
-in the current release; entries for later surfaces (the ledger chain's `no_source`, reader access,
+**Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Signals below describe
+this source checkout, not a claim that it is deployed. Entries for later surfaces (reader access,
 the reading-page stage switch) are added by the PR that creates them.
 
 ## First response, in order
@@ -41,8 +41,9 @@ calendar still ending before today after 18:00 CST on a weekday.
   final. Evidence of a halt (a body stamped at or after the session) can still resolve a mark. Never
   force a settle.
 - One source down: inspect the reported Tencent request or source failure and wait for recovery.
-  Settlement fetches Tencent directly; changing the quotes panel's configured source order does
-  not change the evaluator's source.
+  Settlement follows the quotes panel's enabled source order and explicit ledger grants. Tencent
+  remains the only Tier 1 writer; disabling it refuses settlement rather than using a display or
+  shadow source. Restoring it permits normal retry without spending source-outage attempts.
 
 ### `awaiting_gate` names a benchmark
 
@@ -218,3 +219,54 @@ when sharing evidence. Neither replay nor recording follows URLs in the manifest
 Exit zero means the command produced a report/capture; inspect every result's `match`, `mismatch`
 or `unavailable` status. A nonzero exit means command/input/storage/integrity failure. No live
 measurement or production rollout is implied by the synthetic regression tests.
+
+## Bounded Sina shadow comparison (P25)
+
+The administrator settings modal on `/manage/forecast` offers **Off** and **Shadow comparison only**.
+The existing source order still determines whether Sina is enabled. The shipped comparison grant is
+Shanghai/Shenzhen only, using the bounded Sina adapter; it grants neither public display ranges nor
+settlement. Sina and Yahoo still have no dividend/kind evidence flags or writer grant. Off is the
+default. `POST /api/admin/forecast {"fallback":"on"}` is refused with `forecast_bad_fallback`;
+effective off/shadow transitions commit with the dedicated `forecast.fallback` audit.
+
+Shadow does not enable evaluation or trigger an idle pass. During a working evaluator pass it copies
+at most two unique bodies already accepted from the qualified primary, retaining first/last anchors
+and every intervening date/OHLC. Only after primary ledger processing completes does it read the
+candidate, with a separate fifteen-second deadline and shared upstream concurrency. It rechecks mode,
+enabled membership and primary identity before each sample. An aborted primary pass makes no shadow
+calls. Candidate data never enters the settlement planner, cache or source-health counters.
+
+There are two independent limits: two logical candidate reads and four HTTP request attempts per
+pass. One Sina observation normally needs snapshot plus history; redirects also consume HTTP budget.
+A fifth attempt is blocked before transport and recorded as `shadow_budget`, not a vendor failure.
+A genuine fourth-request failure is still a failure. Waiting for a concurrency slot does not bill a
+source call. Caller deadline/cancellation and typed refusals are neutral, not source faults.
+
+Sina's newest untrimmed kline must agree with the snapshot date and close. History is never silently
+replaced by a display-only degradation; an unproven window beyond the full 800-row tail is refused as
+`window_not_covered`. The shared comparator checks integer-fen OHLC, the date union and both anchors.
+A missing candidate anchor is a mismatch; unavailable evidence is not agreement. Comparisons are
+opportunistic samples, not a representative study, independent exchange corroboration, a feed licence
+or Tier 2 writer admission. Use the fixed-panel P24 process for deliberate replay measurements.
+
+The administrator-only `GET /api/admin/forecast` includes `fallback` and `diagnostics`. The latter's
+`status` is `empty`, `ready` or `unavailable`; empty/missing/damaged telemetry must never be read as
+healthy zeros. `shadow` and `calls`, when readable, are one atomic snapshot of the existing-meta keys
+`forecast_state_shadow` and `forecast_state_calls`. A damaged pair is retained and not overwritten.
+No raw response body or vendor error text is stored here. Counts include logical primary/adjustment
+reads, failures and typed refusals; `shadow_http_attempts` covers candidates only, not primary HTTP.
+
+Retained state has up to fourteen UTC days ending at the latest observation and twenty recent results.
+The explicit latest-record timestamp may be old when there is no work or evaluation is off; it is not
+a live health certificate. A delayed observation cannot rewind retention or the timestamp. Each result
+keeps total differences and at most thirty-two details; truncation never turns a mismatch into a match.
+Counter-day dates are UTC; price-bar dates use the instrument timezone. Prices in the difference table
+are integer fen. The card shows the active comparison mode separately from retained history.
+
+For `mismatch`, preserve the result/window/anchors and capture deliberate evidence with P24; do not
+rewrite settled rows or exclude disagreement. For `no_shadow`/`primary_changed`, inspect enabled source
+order. For `shadow_budget`, inspect redirects/request counts rather than extending the budget. For
+unavailable diagnostics, investigate retained state and storage logs; do not delete evidence to make
+the card green. To stop new candidate calls, set comparison Off; the audit/history remain and primary
+evaluation is unchanged. No database change or ledger repair is needed to revert this code. Deployment
+and evaluator enablement still require their separate owner approvals and release gates.

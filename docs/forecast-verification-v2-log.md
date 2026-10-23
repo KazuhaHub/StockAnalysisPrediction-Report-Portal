@@ -238,8 +238,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
   implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
   Persisted diagnostic storage and post-ledger runtime selection/execution are implemented and
-  independently reviewed. Administrator controls and diagnostics/UI are implemented and reviewed;
-  shipped shadow admission and final branch-wide verification remain outstanding.
+  independently reviewed. Administrator controls/diagnostics and shipped Sina comparison-only
+  admission are implemented and reviewed, with complete local regression. Exact-head PR CI and
+  final merge remain outstanding; no production enablement is implied.
 - **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
@@ -1247,3 +1248,41 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - P25 is still in progress. Shipped Sina comparison-only admission, end-to-end grant guards and final
   full-branch review/CI remain before submission. Back out by reverting these admin/UI changes;
   diagnostic evidence stays in the existing meta keys and no ledger repair is needed.
+
+### P25 shipped comparison grant and final local review (2026-10-22)
+
+- Added Sina's explicit Shanghai/Shenzhen `settled_shadow` grant and registered the bounded range
+  adapter only after comparator, runtime, persisted diagnostics and administrator controls were in
+  place. Its cash-dividend/kind flags remain false, `settled` remains absent, and public display-range
+  grants do not expand. Tencent remains the only Tier 1 writer; Beijing, overseas and Yahoo shadow
+  admission remain absent. Default fallback remains off. The quote panel now truthfully declares
+  Sina as its enabled comparison peer. P24 capture now selects Sina's bounded adapter and retains
+  any coverage/coherence failure as failed evidence; it grants nothing and still writes no database.
+- Grant tests failed before wiring and passed afterward. The market matrix rejects alternate writers
+  even when Tencent is disabled, with no vendor call. A real registered Sina adapter runs captured
+  snapshot/history bytes through the pass-local transport budget, shared comparator and durable
+  result path: four accepted dates, both anchors, two measured HTTP requests, match and one-fen
+  mismatch, no ledger or health changes. No global vendor client is replaced. Further guards prove
+  mode/order/primary revocation between samples, aborted-pass suppression, unique two-body sampling
+  and copied primary buffers. These are implementation controls, not new live market measurements.
+- Independent branch-wide review found no admission or P24 integration defect, but one combined
+  SQLite race run exposed fallback-save `SQLITE_BUSY` errors. Isolated repeats and the initial full
+  local race run were green; the failing combined run was still treated as a blocker. A deterministic
+  700 ms held-writer regression reproduced premature failure at 0.36 s with the old six-attempt
+  retry window. The writer now retries complete rolled-back transactions within a five-second total
+  context bound, honoring any earlier caller deadline, with capped exponential jitter. Tests retain
+  all original concurrency/audit assertions and additionally prove exactly one audit after release
+  and no persisted transition after caller timeout. Five targeted race repetitions passed (14.612 s),
+  and the previously failing independent combined suite passed (20.308 s). Follow-up review closed
+  the finding and reported no remaining actionable issue.
+- Final full Go/SQLite/Postgres after hardening passed (app 37.463 s), build/vet/staticcheck passed.
+  The earlier complete runtime/diagnostic/admission race suite passed three repetitions (75.101 s);
+  all 122 frontend files / 1022 tests and typecheck passed on this unchanged frontend. Production
+  SPA build is repeated before submission. The runbook documents controls, budgets, neutral refusals,
+  retention, unavailable telemetry, immutable ledger handling and rollback; ADR 0041 records the
+  actual comparison-only grant. No source, baseline schema, production, Dify, Apps or release action
+  outside the described local implementation occurred.
+- Local P25 implementation/review is complete, not its merge or rollout gates. Exact-head full CI,
+  current Apps merge previews and final PR review remain before merge. Revert the implementation to
+  stop runtime comparisons; existing meta diagnostics are ignored by an older build. No ledger
+  repair is needed and comparison agreement never authorizes Tier 2 writes.
