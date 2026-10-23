@@ -565,6 +565,11 @@ func TestPurgeEvidenceWritesNeverCallThePoolInsideATransaction(t *testing.T) {
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
+			// The leaked call still waits for the only connection, which the transaction holds, and
+			// the cleanups registered by the fixtures use that connection too. Closing the store
+			// fails every waiter, so the run reports this failure instead of hanging until the
+			// package timeout and aborting every test after it.
+			_ = st.Close()
 			t.Fatalf("%s deadlocked: a pool call inside the transaction", name)
 		}
 	}
