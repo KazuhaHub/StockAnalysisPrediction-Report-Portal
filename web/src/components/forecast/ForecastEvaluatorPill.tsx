@@ -186,7 +186,19 @@ export default function ForecastEvaluatorPill() {
           </Button>
         )
       )}
-      <Drawer open={open} onClose={close} title={t('forecast.eval.status.title')} size={420} destroyOnHidden>
+      <Drawer
+        open={open}
+        onClose={close}
+        title={t('forecast.eval.status.title')}
+        size={420}
+        destroyOnHidden
+        autoFocus={false}
+        afterOpenChange={(visible) => {
+          // Focus the stable content after the entrance animation, rather than letting the drawer
+          // wrapper race the retry effect and leave focus outside the dialog's labelled element.
+          if (visible) body.current?.focus()
+        }}
+      >
         <div ref={body} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 16, outline: 'none' }}>
           {failed ? (
             <>
