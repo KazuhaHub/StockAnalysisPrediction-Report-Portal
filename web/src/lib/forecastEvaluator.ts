@@ -11,6 +11,15 @@ export const STALLED_MS = 10 * 60_000
 /** The oldest due, unsettled checkpoint may wait this long before the evaluator counts as lagging. */
 export const LAGGING_MINUTES = 360
 
+// How often the record page's pill re-reads the operations settings. The read is not cheap (it counts
+// rows in the ledger and the reports table), so it is made rarely: the heartbeat's age is computed on
+// this page's clock, and what the read has to guarantee is only that a running evaluator, which writes
+// a heartbeat every minute and may spend two more on a pass, never looks stopped between two reads.
+/** Between two reads while the tab is open and visible. Under half the stall threshold, with room for a pass. */
+export const REFRESH_MS = 5 * 60_000
+/** A tab that becomes visible again re-reads at once, unless it has read this recently. */
+export const REREAD_MIN_MS = 60_000
+
 export type EvaluatorStatus = 'off' | 'dry' | 'healthy' | 'stale' | 'lagging' | 'error'
 
 export function evaluatorStatus(s: ForecastSettings, nowMs: number): EvaluatorStatus {

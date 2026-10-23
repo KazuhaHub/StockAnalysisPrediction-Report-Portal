@@ -4,6 +4,7 @@ import { theme } from 'antd'
 import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
 import type { ForecastSettings } from '../../api/types'
+import { REFRESH_MS, REREAD_MIN_MS } from '../../lib/forecastEvaluator'
 import { forecastLinkColor } from '../../lib/forecastPresentation'
 import ForecastEvaluatorPill from './ForecastEvaluatorPill'
 
@@ -149,15 +150,19 @@ describe('ForecastEvaluatorPill', () => {
 
     // A page left open past the stall threshold must not call a healthy evaluator stale just because
     // the pill never asked again: the age grows on its own clock, so the heartbeat has to be re-read.
-    it('reads the heartbeat again on a timer shorter than the stall threshold, so a healthy evaluator stays healthy', async () => {
+    // The read is not cheap (it counts rows in the ledger and the reports table), so it is made a few
+    // times inside the stall threshold, not once a minute.
+    it('reads the heartbeat again inside the stall threshold, so a healthy evaluator stays healthy, but not every minute', async () => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
       apiMock.get.mockImplementation(() => Promise.resolve(settings()))
       show()
       await tick(0)
       expect(pill().textContent).toContain('forecast.eval.status.healthy')
-      await tick(11 * 60_000)
+      await tick(REFRESH_MS - 60_000)
+      expect(apiMock.get).toHaveBeenCalledTimes(1)
+      await tick(11 * 60_000 - (REFRESH_MS - 60_000))
       expect(pill().textContent).toContain('forecast.eval.status.healthy')
-      expect(apiMock.get.mock.calls.length).toBeGreaterThan(5)
+      expect(apiMock.get).toHaveBeenCalledTimes(1 + Math.floor((11 * 60_000) / REFRESH_MS))
     })
 
     it('still turns stale when the refreshed heartbeat is really old', async () => {
@@ -186,7 +191,7 @@ describe('ForecastEvaluatorPill', () => {
       await tick(0)
       expect(pill().textContent).toContain('forecast.eval.status.healthy')
       apiMock.get.mockRejectedValue(new Error('offline'))
-      await tick(60_000)
+      await tick(REFRESH_MS)
       expect(screen.getByText('forecast.eval.pill.unavailable')).toBeTruthy()
       expect(screen.queryByRole('button', { name: /forecast\.eval\.pill:/ })).toBeNull()
     })
@@ -197,18 +202,33 @@ describe('ForecastEvaluatorPill', () => {
       apiMock.get.mockImplementationOnce(() => new Promise<ForecastSettings>((done) => { first = done }))
       apiMock.get.mockImplementation(() => Promise.resolve(settings({ mode: '0', heartbeat: null })))
       show()
-      await tick(60_000)
+      await tick(REFRESH_MS)
       expect(pill().textContent).toContain('forecast.eval.status.off')
       await act(async () => first(settings()))
       expect(pill().textContent).toContain('forecast.eval.status.off')
     })
 
-    it('reads it again when the tab becomes visible, since its clock moved while it was away', async () => {
+    it('reads it again when the tab becomes visible after a while, since its clock moved while it was away', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
       show()
-      await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+      await tick(0)
       expect(apiMock.get).toHaveBeenCalledTimes(1)
+      await tick(REREAD_MIN_MS)
       document.dispatchEvent(new Event('visibilitychange'))
-      await waitFor(() => expect(apiMock.get).toHaveBeenCalledTimes(2))
+      await tick(0)
+      expect(apiMock.get).toHaveBeenCalledTimes(2)
+    })
+
+    // Flicking between tabs must not turn into a settings read per flick.
+    it('does not read it again on a tab switch right after it has just been read', async () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+      show()
+      await tick(0)
+      expect(apiMock.get).toHaveBeenCalledTimes(1)
+      await tick(REREAD_MIN_MS - 1_000)
+      for (let i = 0; i < 5; i++) document.dispatchEvent(new Event('visibilitychange'))
+      await tick(0)
+      expect(apiMock.get).toHaveBeenCalledTimes(1)
     })
 
     it('stops asking once the page is gone', async () => {

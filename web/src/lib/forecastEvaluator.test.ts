@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ForecastSettings } from '../api/types'
-import { evaluatorStatus } from './forecastEvaluator'
+import { evaluatorStatus, REFRESH_MS, REREAD_MIN_MS, STALLED_MS } from './forecastEvaluator'
 
 // The evaluator's state is derived from the heartbeat's age and the last pass, never from a flag the
 // server sets, so a page left open goes stale by itself. The operations card and the record page's
@@ -53,5 +53,21 @@ describe('evaluatorStatus', () => {
     expect(evaluatorStatus(settings({}, { errors: 1 }), NOW)).toBe('error')
     expect(evaluatorStatus(settings({}, { panics: 1 }), NOW)).toBe('error')
     expect(evaluatorStatus(settings({ readiness: [{ key: 'ledger_chain', ok: false }] }), NOW)).toBe('error')
+  })
+})
+
+// The pill on the record page re-reads the operations settings, which count rows in the ledger and the
+// reports table on every call. It has to ask rarely enough to spare that, and often enough that a
+// running evaluator, whose heartbeat ages on this page's clock between reads, never reads as stopped.
+describe('how often the record page re-reads the evaluator', () => {
+  it('is not every minute, and not so rarely that a running evaluator looks stalled between reads', () => {
+    expect(REFRESH_MS).toBeGreaterThanOrEqual(5 * 60_000)
+    // A running evaluator writes a heartbeat every minute, and a pass may run for two more.
+    expect(REFRESH_MS + 3 * 60_000).toBeLessThan(STALLED_MS)
+  })
+
+  it('lets a returning tab re-read after a minute, ahead of the next scheduled read, but not on every flick', () => {
+    expect(REREAD_MIN_MS).toBeGreaterThanOrEqual(60_000)
+    expect(REREAD_MIN_MS).toBeLessThan(REFRESH_MS)
   })
 })

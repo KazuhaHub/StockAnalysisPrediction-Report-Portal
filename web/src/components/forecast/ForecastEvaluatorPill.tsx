@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
-import { evaluatorStatus, LAGGING_MINUTES, STALLED_MS, type EvaluatorStatus } from '../../lib/forecastEvaluator'
+import { evaluatorStatus, LAGGING_MINUTES, REFRESH_MS, REREAD_MIN_MS, STALLED_MS, type EvaluatorStatus } from '../../lib/forecastEvaluator'
 import { forecastLinkColor } from '../../lib/forecastPresentation'
 import Quiet from './Quiet'
 
@@ -18,12 +18,12 @@ import Quiet from './Quiet'
 // for it and does not hide behind it.
 //
 // The age of the heartbeat is computed on this page's clock, so the heartbeat itself has to be read
-// again: a page left open for ten minutes would otherwise call a healthy evaluator stale.
+// again: a page left open for ten minutes would otherwise call a healthy evaluator stale. The route it
+// reads counts rows in the ledger and the reports table, so that read is made every few minutes (see
+// REFRESH_MS), not every minute, and a tab that merely becomes visible again does not repeat a read
+// that has just been made.
 
 const MODE_KEY = { '0': 'off', dry: 'dry', '1': 'on' } as const
-// Well inside the stall threshold (ten minutes): a snapshot is never old enough, on its own, to make a
-// running evaluator look stopped.
-const REFRESH_MS = 60_000
 
 export default function ForecastEvaluatorPill() {
   const { t } = useTranslation()
@@ -37,9 +37,11 @@ export default function ForecastEvaluatorPill() {
   // Only the newest request may write: a slow answer must not overwrite a newer one, and nothing
   // writes once the pill is gone.
   const latest = useRef(0)
+  const askedAt = useRef(0)
   const supersede = useCallback(() => ++latest.current, [])
   const load = useCallback(() => {
     const mine = supersede()
+    askedAt.current = Date.now()
     api
       .get<ForecastSettings>('/api/admin/forecast')
       .then((value) => {
@@ -59,9 +61,10 @@ export default function ForecastEvaluatorPill() {
     const refresh = setInterval(() => {
       if (!document.hidden) load()
     }, REFRESH_MS)
-    // A tab that was in the background for a while has an old snapshot and a new clock.
+    // A tab that was in the background for a while has an old snapshot and a new clock. One that was
+    // read a moment ago does not: flicking between tabs is not a reason to count the ledger again.
     const visible = () => {
-      if (!document.hidden) load()
+      if (!document.hidden && Date.now() - askedAt.current >= REREAD_MIN_MS) load()
     }
     document.addEventListener('visibilitychange', visible)
     return () => {
