@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { Button, DatePicker, Segmented, Select, Tag, theme } from 'antd'
+import { CheckOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import type { ForecastGrouping, ForecastMetric, ForecastMode } from '../../api/types'
@@ -149,16 +150,23 @@ export default function ForecastToolbar(p: Props) {
           </span>
           {presets.length > 0 && (
             <span data-part="presets" role="group" aria-label={t('forecast.range.presets')} style={item}>
-              {presets.map((preset) => (
-                <Button
-                  key={preset.key}
-                  size="small"
-                  aria-pressed={preset.from === p.from && preset.to === p.to}
-                  onClick={() => p.onChange({ from: preset.from, to: preset.to })}
-                >
-                  {t(`forecast.range.preset.${preset.key}`)}
-                </Button>
-              ))}
+              {presets.map((preset) => {
+                // The range in force is drawn as selected, not only exposed as pressed: border, tint and
+                // a check in the page's AA link colour, so the state is not carried by colour alone.
+                const pressed = preset.from === p.from && preset.to === p.to
+                return (
+                  <Button
+                    key={preset.key}
+                    size="small"
+                    aria-pressed={pressed}
+                    icon={pressed ? <CheckOutlined aria-hidden="true" /> : undefined}
+                    style={pressed ? { borderColor: link.color, color: link.color, background: token.colorPrimaryBg } : undefined}
+                    onClick={() => p.onChange({ from: preset.from, to: preset.to })}
+                  >
+                    {t(`forecast.range.preset.${preset.key}`)}
+                  </Button>
+                )
+              })}
             </span>
           )}
           <span style={item}>

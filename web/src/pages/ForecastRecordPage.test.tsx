@@ -1039,6 +1039,39 @@ describe('ForecastRecordPage custom range', () => {
     expect(within(presets).getByRole('button', { name: 'forecast.range.preset.last3' }).getAttribute('aria-pressed')).toBe('true')
   })
 
+  // aria-pressed tells a screen reader which range is in force; a sighted reader had four identical
+  // buttons. The selected one is drawn in the page's link colour with a border, a tint and a check, so
+  // the state is not carried by colour alone.
+  it('draws the quick range in force as selected, and the others plainly', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    const presets = await screen.findByRole('group', { name: 'forecast.range.presets' })
+    const probe = document.createElement('span')
+    probe.style.color = forecastLinkColor(theme.getDesignToken())
+    const pressed = within(presets).getByRole('button', { pressed: true })
+    expect(pressed.textContent).toBe('forecast.range.preset.since_ledger')
+    expect(pressed.style.borderColor).toBe(probe.style.color)
+    expect(pressed.style.color).toBe(probe.style.color)
+    expect(pressed.style.background).not.toBe('')
+    expect(pressed.querySelector('.anticon-check')).not.toBeNull()
+    // The check is a picture: the button's name is its label alone.
+    expect(within(presets).getByRole('button', { name: 'forecast.range.preset.since_ledger' })).toBe(pressed)
+    const others = within(presets).getAllByRole('button', { pressed: false })
+    expect(others).toHaveLength(3)
+    for (const other of others) {
+      expect(other.style.borderColor).toBe('')
+      expect(other.style.color).toBe('')
+      expect(other.querySelector('.anticon-check')).toBeNull()
+    }
+    // Choosing another moves the mark with it.
+    fireEvent.click(within(presets).getByRole('button', { name: 'forecast.range.preset.last3' }))
+    await waitFor(() => expect(within(presets).getByRole('button', { pressed: true }).textContent).toBe('forecast.range.preset.last3'))
+    expect(within(presets).getAllByRole('button', { pressed: true })).toHaveLength(1)
+    expect(presets.querySelectorAll('.anticon-check')).toHaveLength(1)
+  })
+
   it('does not offer a quick range longer than the server accepts', async () => {
     apiMock.get.mockResolvedValue(record(metadata({ limits: { ...limits, max_range_months: 6 } })))
     show()
