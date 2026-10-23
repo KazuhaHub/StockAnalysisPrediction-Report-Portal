@@ -90,10 +90,10 @@ afterEach(() => {
 describe('ForecastRecordPage requests', () => {
   it('asks only the reader routes, for every view and for the drawer, and never an admin route', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
     fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.month' }))
-    fireEvent.click(await screen.findByText('3.1 pt'))
+    fireEvent.click(await screen.findByText('+3.1 pt'))
     await waitFor(() => expect(urls().some((u) => u.startsWith('/api/forecast/groups/members'))).toBe(true))
     expect(urls().length).toBeGreaterThan(1)
     for (const u of urls()) {
@@ -104,7 +104,7 @@ describe('ForecastRecordPage requests', () => {
 
   it('reads the monthly record by default and sends no range with it', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
   })
 
@@ -126,7 +126,7 @@ describe('ForecastRecordPage requests', () => {
   it('lets an administrator in on the reader route even without a hint', async () => {
     auth.value = { user: 'root', admin: true, forecast: undefined }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
   })
 })
@@ -138,9 +138,9 @@ describe('ForecastRecordPage states', () => {
     const { container } = show()
     expect(container.querySelector('.ant-skeleton')).not.toBeNull()
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull()
-    expect(screen.queryByText('3.1 pt')).toBeNull()
+    expect(screen.queryByText('+3.1 pt')).toBeNull()
     await act(async () => resolve(record()))
-    expect(await screen.findByText('3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
     expect(container.querySelector('.ant-skeleton')).toBeNull()
   })
 
@@ -179,7 +179,7 @@ describe('ForecastRecordPage states', () => {
     expect(apiMock.get).toHaveBeenCalledTimes(1)
     apiMock.get.mockResolvedValueOnce(record())
     fireEvent.click(screen.getByRole('button', { name: 'common.retry' }))
-    expect(await screen.findByText('3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
   })
 
   it('shows any other failure as an alert with a retry button', async () => {
@@ -189,7 +189,7 @@ describe('ForecastRecordPage states', () => {
     expect(container.querySelector('.ant-alert-error')).not.toBeNull()
     apiMock.get.mockResolvedValueOnce(record())
     fireEvent.click(screen.getByRole('button', { name: 'common.retry' }))
-    expect(await screen.findByText('3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
   })
 
   // The record a young portal really has: the open month is a group, so the list is not empty, and
@@ -238,7 +238,7 @@ describe('ForecastRecordPage states', () => {
   it('does not call the record empty once any cell has a result', async () => {
     apiMock.get.mockResolvedValue(record({ summary }))
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(document.body.textContent).not.toContain('forecast.record.empty')
     expect(screen.getByRole('status').textContent).toBe('forecast.record.status_ready')
   })
@@ -269,7 +269,7 @@ describe('ForecastRecordPage states', () => {
 describe('ForecastRecordPage header', () => {
   it('names the population, and carries the disclaimer, for an all reader', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_all')).toBeTruthy()
     expect(screen.getAllByText('forecast.disclaimer').length).toBeGreaterThan(0)
     expect(screen.getByRole('heading', { name: 'forecast.record.title' })).toBeTruthy()
@@ -278,14 +278,14 @@ describe('ForecastRecordPage header', () => {
   it('names the reader\'s own unit for an own reader', async () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Research Desk' } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_own:{"ou":"Research Desk"}')).toBeTruthy()
   })
 
   it('does not invent a unit name when the server gave none', async () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_own_unnamed')).toBeTruthy()
     expect(document.body.textContent).not.toContain('population_own:')
   })
@@ -293,7 +293,7 @@ describe('ForecastRecordPage header', () => {
   it('says all reports for an administrator whatever the hint says', async () => {
     auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_all')).toBeTruthy()
   })
 })
@@ -306,7 +306,7 @@ describe('ForecastRecordPage population', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
     apiMock.get.mockResolvedValue(record({ scope: 'all' }))
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_all')).toBeTruthy()
     expect(document.body.textContent).not.toContain('population_own')
   })
@@ -314,7 +314,7 @@ describe('ForecastRecordPage population', () => {
   it('follows an answer that narrows the population, and names the unit it was rooted at', async () => {
     apiMock.get.mockResolvedValue(record({ scope: 'own', scope_ou: 'Desk' }))
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_own:{"ou":"Desk"}')).toBeTruthy()
     expect(screen.queryByText('forecast.record.population_all')).toBeNull()
   })
@@ -323,7 +323,7 @@ describe('ForecastRecordPage population', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
     apiMock.get.mockResolvedValue(record({ scope: 'own' }))
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.record.population_own_unnamed')).toBeTruthy()
     expect(document.body.textContent).not.toContain('Old Desk')
   })
@@ -332,7 +332,7 @@ describe('ForecastRecordPage population', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: false, ou: 'Old Desk' } }
     apiMock.get.mockResolvedValue(record({ scope: 'all' }))
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
     const [, text] = csvMock.downloadCSV.mock.calls[0] as [string, string]
     expect(text).toContain('# population=forecast.record.population_all')
@@ -375,7 +375,7 @@ describe('ForecastRecordPage without access', () => {
 describe('ForecastRecordPage live region', () => {
   it('does not put the matrix inside a live region', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     const table = screen.getByRole('table')
     expect(table.closest('[aria-live]')).toBeNull()
     expect(table.closest('[role="status"]')).toBeNull()
@@ -388,7 +388,7 @@ describe('ForecastRecordPage live region', () => {
     show()
     expect(screen.getByRole('status').textContent).toBe('common.loading')
     await act(async () => resolve(record()))
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getAllByRole('status')).toHaveLength(1)
     expect(screen.getByRole('status').textContent).toBe('forecast.record.status_ready')
     // Changing the metric rewrites every cell but is not a new state to announce.
@@ -437,7 +437,7 @@ describe('ForecastRecordPage tabs', () => {
   it('requests a custom range with its dates and grouping', async () => {
     apiMock.get.mockResolvedValue(record({ mode: 'custom', official: false, range: { from: '2026-09-01', to: '2026-09-30', group: 'month' } }))
     show('/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(urls()).toEqual(['/api/forecast/groups?mode=custom&from=2026-09-01&to=2026-09-30&group=month'])
   })
 
@@ -451,14 +451,14 @@ describe('ForecastRecordPage tabs', () => {
       groups: [{ ...base.groups[0], official: false }],
     })
     show('/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText(/p\*=0\.012/)).toBeTruthy()
     expect(screen.getByText('forecast.tag.exploratory')).toBeTruthy()
   })
 
   it('shows the record without p* or the exploratory tag', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.queryByText(/p\*=/)).toBeNull()
     expect(screen.queryByText('forecast.tag.exploratory')).toBeNull()
   })
@@ -473,7 +473,7 @@ describe('ForecastRecordPage tabs', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
     apiMock.get.mockResolvedValue(withheld())
     show('/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.queryByRole('tab', { name: 'forecast.tab.custom' })).toBeNull()
     expect(screen.queryByText('forecast.custom.banner')).toBeNull()
     expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
@@ -485,7 +485,7 @@ describe('ForecastRecordPage tabs', () => {
     expect(await screen.findByText('err.forecast_custom_not_allowed')).toBeTruthy()
     apiMock.get.mockResolvedValueOnce(record())
     fireEvent.click(screen.getByRole('button', { name: 'forecast.record.show_monthly' }))
-    expect(await screen.findByText('3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
   })
 })
 
@@ -494,7 +494,7 @@ describe('ForecastRecordPage volume', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
     apiMock.get.mockResolvedValue(withheld())
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(document.body.textContent).toContain('forecast.cell.min_n_met')
     expect(screen.queryByText('forecast.col.coverage')).toBeNull()
     expect(document.body.textContent).not.toMatch(/forecast\.cell\.n:|forecast\.cov\./)
@@ -503,14 +503,14 @@ describe('ForecastRecordPage volume', () => {
   it('keeps coverage and counts for an external reader of their own unit', async () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: true, ou: 'Client A' } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByText('forecast.col.coverage')).toBeTruthy()
     expect(document.body.textContent).toContain('forecast.cell.n:{"n":42}')
   })
 
   it('does not link a reader to the administrator audit log', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.queryByRole('link', { name: /forecast.cov.rejected/ })).toBeNull()
     expect(document.body.textContent).toContain('forecast.cov.rejected')
   })
@@ -518,7 +518,7 @@ describe('ForecastRecordPage volume', () => {
   it('lets an administrator follow rejected sets to the audit log', async () => {
     auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     expect(screen.getByRole('link', { name: /forecast.cov.rejected/ }).getAttribute('href')).toBe('/manage/audit?action=predictions.reject')
   })
 })
@@ -532,7 +532,7 @@ describe('ForecastRecordPage export', () => {
 
   it('exports the reader view with its disclaimer, population and benchmark, and labels every row', async () => {
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
     const { name, text, header } = exported()
     expect(name).toBe('forecast-month-2026-09-01-2026-09-30.csv')
@@ -551,7 +551,7 @@ describe('ForecastRecordPage export', () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
     apiMock.get.mockResolvedValue(withheld())
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
     const { text, header } = exported()
     expect(header).not.toContain('n')
@@ -565,7 +565,7 @@ describe('ForecastRecordPage export', () => {
   it('exports the sample size and coverage for an external reader of their own unit', async () => {
     auth.value = { user: 'reader', admin: false, forecast: { scope: 'own', external: true, ou: 'Client A' } }
     show()
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
     const { text, header } = exported()
     expect(header).toContain('n')
@@ -584,7 +584,7 @@ describe('ForecastRecordPage export', () => {
 describe('ForecastRecordPage drawer', () => {
   it('opens the drawer on the reader members route for the clicked cell', async () => {
     show()
-    fireEvent.click(await screen.findByText('3.1 pt'))
+    fireEvent.click(await screen.findByText('+3.1 pt'))
     const drawer = await screen.findByRole('dialog')
     expect(within(drawer).getByText(/2026-09/)).toBeTruthy()
     await waitFor(() => expect(urls().some((u) => u.startsWith('/api/forecast/groups/members?'))).toBe(true))
@@ -604,7 +604,7 @@ describe('ForecastRecordPage accessibility', () => {
         </MemoryRouter>
       </ConfigProvider>,
     )
-    await screen.findByText('3.1 pt')
+    await screen.findByText('+3.1 pt')
     // jsdom cannot measure layout or contrast; the palette suite measures contrast separately.
     const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
     expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])

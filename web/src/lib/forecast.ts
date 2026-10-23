@@ -1,8 +1,9 @@
 import { toCSV } from './csv'
-import { formatProbability } from './forecastPresentation'
+import { formatProbability, formatSigned } from './forecastPresentation'
 import type {
   ForecastCell,
   ForecastCheckpoint,
+  ForecastGroup,
   ForecastGroupsResponse,
   ForecastMetric,
   ForecastMode,
@@ -88,7 +89,7 @@ export function cellDisplay(
       const sig: -1 | 0 | 1 =
         cell.spread_q !== undefined && cell.spread_q < 0.05 ? (cell.spread_bp > 0 ? 1 : cell.spread_bp < 0 ? -1 : 0) : 0
       return {
-        value: `${num(cell.spread_bp / 100, 1)} pt`,
+        value: `${formatSigned(cell.spread_bp / 100, 1)} pt`,
         sub: join(correctedText(cell.spread_p, cell.spread_q, mode), sampleText(cell.n, t)),
         gate,
         signal: sig,
@@ -99,7 +100,7 @@ export function cellDisplay(
       const sig: -1 | 0 | 1 =
         cell.ic_q !== undefined && cell.ic_q < 0.05 ? (cell.ic > 0 ? 1 : cell.ic < 0 ? -1 : 0) : 0
       return {
-        value: num(cell.ic, 2),
+        value: formatSigned(cell.ic, 2),
         sub: join(correctedText(cell.ic_p, cell.ic_q, mode), sampleText(cell.ic_n ?? cell.n, t)),
         gate,
         signal: sig,
@@ -130,7 +131,7 @@ export function cellDisplay(
       if (cell.fill === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       return {
         value: pct(cell.fill),
-        sub: join(t('forecast.cell.after_fill', { pct: num((cell.fill_ret_bp ?? 0) / 100, 1) }), sampleText(cell.n, t)),
+        sub: join(t('forecast.cell.after_fill', { pct: formatSigned((cell.fill_ret_bp ?? 0) / 100, 1) }), sampleText(cell.n, t)),
         gate,
         signal: 0,
       }
@@ -167,6 +168,8 @@ export interface ForecastCsvReader {
   publicationGate: string
   /** External all readers must never export sample-size/count columns. */
   hideCounts: boolean
+  /** The report type the numbers are about, when the reader's view names one. */
+  rtype?: string
 }
 
 export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, reader?: ForecastCsvReader): string {
@@ -184,6 +187,7 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, r
   const volumeHidden = !!reader && (reader.hideCounts || resp.groups.some((g) => !g.coverage))
   if (reader) {
     lines.push(`# disclaimer=${line(reader.disclaimer)}`, `# population=${line(reader.population)}`)
+    if (reader.rtype) lines.push(`# rtype=${line(reader.rtype)}`)
     for (const group of resp.groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
     // The flag is a fact about the cell, repeated on each of its metric rows. Say so in the file:
     // a hit rate or an IC rests on a smaller subset that has no minimum of its own.
@@ -239,13 +243,15 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, r
 }
 
 /** The query string a matrix request uses. Kept in one place so a link and a fetch agree. */
-export function groupsQuery(mode: ForecastMode, from: string, to: string, group: ForecastGrouping): string {
+export function groupsQuery(mode: ForecastMode, from: string, to: string, group: ForecastGrouping, rtype = ''): string {
   const p = new URLSearchParams({ mode })
   if (mode === 'custom') {
     p.set('from', from)
     p.set('to', to)
     p.set('group', group)
   }
+  // Absent means the server's default report type; the page names one only when the reader chose it.
+  if (rtype) p.set('rtype', rtype)
   return p.toString()
 }
 
@@ -256,6 +262,8 @@ export function readView(sp: URLSearchParams): {
   to: string
   group: ForecastGrouping
   metric: ForecastMetric
+  rtype: string
+  older: boolean
 } {
   const mode: ForecastMode = sp.get('mode') === 'custom' ? 'custom' : 'month'
   const group = sp.get('group')
@@ -266,5 +274,173 @@ export function readView(sp: URLSearchParams): {
     to: sp.get('to') ?? '',
     group: group === 'week' || group === 'quarter' || group === 'all' ? group : 'month',
     metric: metric === 'ic' || metric === 'hit' || metric === 'fill' ? metric : 'spread',
+    rtype: sp.get('rtype') ?? '',
+    older: sp.get('older') === '1',
   }
+}
+
+// ── The record page's view helpers ───────────────────────────────────────────────────────────────
+
+/** How many calendar months of the record a monthly view opens with. */
+export const MONTH_WINDOW = 12
+
+/**
+ * The groups a view draws. The monthly record folds everything older than the newest twelve months
+ * behind a "show older" switch so a long-running portal does not open on dozens of rows. A custom
+ * range is never folded: its extent is the range the reader chose.
+ */
+export function visibleGroups<T>(groups: T[], mode: ForecastMode, showOlder: boolean): { shown: T[]; hidden: number } {
+  if (mode !== 'month' || showOlder || groups.length <= MONTH_WINDOW) return { shown: groups, hidden: 0 }
+  return { shown: groups.slice(-MONTH_WINDOW), hidden: groups.length - MONTH_WINDOW }
+}
+
+export interface BenchRun {
+  bench: string
+  from: string
+  to: string
+}
+
+/**
+ * The benchmarks of the groups on screen as runs of consecutive groups. Every cohort is scored
+ * against the index frozen when it was recorded, so a change of benchmark shows up here as a new run
+ * and not as a quiet relabelling of old rows. A group that states none (nothing recorded in it yet)
+ * is skipped.
+ */
+export function benchRuns(groups: ForecastGroup[]): BenchRun[] {
+  const runs: BenchRun[] = []
+  for (const g of groups) {
+    if (!g.bench) continue
+    const last = runs[runs.length - 1]
+    if (last && last.bench === g.bench) last.to = g.label
+    else runs.push({ bench: g.bench, from: g.label, to: g.label })
+  }
+  return runs
+}
+
+// The phases a pending cell can still be waiting in, in the order a reader thinks about them.
+// `resolved` is the progress bar, not a reason.
+const REASON_PHASES = ['waiting_s0', 'waiting', 'settling', 'retrying', 'overdue', 'final', 'unknown'] as const
+
+/** The non-empty phase counts of a pending cell. An unknown phase stays visible rather than vanishing. */
+export function pendingReasonParts(cell: ForecastCell): { phase: string; n: number }[] {
+  const reasons = cell.pending_reasons ?? {}
+  return REASON_PHASES.flatMap((phase) => {
+    const n = reasons[phase] ?? 0
+    return n > 0 ? [{ phase, n }] : []
+  })
+}
+
+/**
+ * The final-refusal cap (more than 5% of a cohort refused for good) is what holds a finished cell
+ * back from publishing, and only the server's flag says so. The ratio is a convenience for the
+ * sentence: with no member count there is no ratio to state.
+ */
+export function capExceeded(cell: ForecastCell): { refused: number; total: number | undefined; pct: number | undefined } | null {
+  if (cell.failed_cap_exceeded !== true) return null
+  const refused = cell.pending_reasons?.final ?? 0
+  const total = cell.total
+  return { refused, total, pct: total !== undefined && total > 0 ? Math.round((refused / total) * 100) : undefined }
+}
+
+/**
+ * The earliest date a pending cell can finish. The twelve-month checkpoint is a coarse horizon, so
+ * it is told as a month; every other checkpoint as the date. Either is a lower bound, never a promise.
+ */
+export function notBeforeInfo(cell: ForecastCell, cp: ForecastCheckpoint): { date: string; expected: boolean } | null {
+  if (!cell.not_before) return null
+  return { date: cp === 'h12' ? cell.not_before.slice(0, 7) : cell.not_before, expected: !!cell.expected }
+}
+
+// ── Custom range ─────────────────────────────────────────────────────────────────────────────────
+
+export interface RangeLimits {
+  maxMonths: number
+  maxWeekGroups: number
+}
+
+const PANEL_ZONE = 'Asia/Shanghai'
+
+/** The civil date (YYYY-MM-DD) of a server instant in the panel timezone, or '' for a bad instant. */
+export function civilDate(instant: string | undefined): string {
+  if (!instant) return ''
+  const at = new Date(instant)
+  if (Number.isNaN(at.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: PANEL_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(at)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+const isoOf = (d: Date) => d.toISOString().slice(0, 10)
+const utc = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d))
+}
+
+/** Calendar-month arithmetic that clamps to the last day (31 January + 1 month = 28/29 February). */
+function addMonthsClamped(iso: string, months: number): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const first = new Date(Date.UTC(y, m - 1 + months, 1))
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate()
+  return isoOf(new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last))))
+}
+
+/**
+ * The server's range checks, run before a request so a refusal costs nothing and can say what the
+ * limit is. The server stays the authority: the "too long" comparison uses the same overflow-
+ * normalising month addition, and a limit of 0 (unknown) is never enforced here.
+ */
+export function rangeProblem(
+  from: string,
+  to: string,
+  group: ForecastGrouping,
+  limits: RangeLimits | undefined,
+): '' | 'inverted' | 'too_long' | 'week_too_long' {
+  if (!from || !to) return ''
+  if (from > to) return 'inverted'
+  if (!limits) return ''
+  if (limits.maxMonths > 0) {
+    const [y, m, d] = from.split('-').map(Number)
+    if (to > isoOf(new Date(Date.UTC(y, m - 1 + limits.maxMonths, d)))) return 'too_long'
+  }
+  if (group === 'week' && limits.maxWeekGroups > 0) {
+    const days = Math.round((utc(to).getTime() - utc(from).getTime()) / 86_400_000) + 1
+    if (days > limits.maxWeekGroups * 7) return 'week_too_long'
+  }
+  return ''
+}
+
+const RELATIVE_PRESETS = [['last3', 3], ['last6', 6], ['last12', 12]] as const
+
+export interface RangePreset {
+  key: 'last3' | 'last6' | 'last12' | 'since_ledger'
+  from: string
+  to: string
+}
+
+/**
+ * Quick ranges ending today (the panel date). A relative preset longer than the server allows is not
+ * offered; the ledger preset is clamped to the longest range the server accepts, and is offered only
+ * when the ledger start is known and has passed.
+ */
+export function rangePresets(today: string, ledgerStart: string | undefined, limits: RangeLimits | undefined): RangePreset[] {
+  const longest = limits && limits.maxMonths > 0 ? limits.maxMonths : Infinity
+  const out: RangePreset[] = RELATIVE_PRESETS.filter(([, months]) => months <= longest).map(([key, months]) => ({
+    key, from: addMonthsClamped(today, -months), to: today,
+  }))
+  if (ledgerStart && ledgerStart <= today) {
+    const earliest = Number.isFinite(longest) ? addMonthsClamped(today, -longest) : ledgerStart
+    out.push({ key: 'since_ledger', from: ledgerStart > earliest ? ledgerStart : earliest, to: today })
+  }
+  return out
+}
+
+/**
+ * The range a custom tab opens on, so it is never a blank form: the record since the ledger began,
+ * or the last six months when that start is not known.
+ */
+export function defaultRange(today: string, ledgerStart: string | undefined, limits: RangeLimits | undefined): { from: string; to: string } {
+  const presets = rangePresets(today, ledgerStart, limits)
+  const chosen = presets.find((p) => p.key === 'since_ledger') ?? presets.find((p) => p.key === 'last6') ?? presets[0]
+  return chosen ? { from: chosen.from, to: chosen.to } : { from: addMonthsClamped(today, -1), to: today }
 }

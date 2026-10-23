@@ -94,7 +94,7 @@ describe('ForecastMatrix', () => {
 
   it('renders a mature cell with its value, q and n', () => {
     show(resp({ ...empty, d5: mature }))
-    expect(screen.getByText('3.1 pt')).toBeTruthy()
+    expect(screen.getByText('+3.1 pt')).toBeTruthy()
     expect(screen.getByText(/q=0.041/)).toBeTruthy()
     expect(document.body.textContent).toContain('forecast.cov.summary:')
   })
@@ -162,7 +162,7 @@ describe('ForecastMatrix', () => {
         d120: { state: 'open' },
         h12: { state: 'purged' },
       }))
-      expect(screen.getByText('3.1 pt')).toBeTruthy()
+      expect(screen.getByText('+3.1 pt')).toBeTruthy()
       expect(document.body.textContent).toContain('forecast.cell.min_n_met')
       // No coverage column, no coverage cell, no count of any kind.
       expect(screen.queryByText('forecast.col.coverage')).toBeNull()
