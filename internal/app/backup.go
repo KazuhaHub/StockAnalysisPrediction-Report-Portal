@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -353,11 +354,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// because the restore's own transaction is about to delete the `meta` rows that hold them
 	// (§3.3). `forecast_population_from` is write-once and must never move silently, so a dump that
 	// disagrees with the live value is refused; a dump that lacks it inherits the live one.
-	prior := restorePrior{
-		populationFrom: s.populationFromRow(),
-		autoMode:       s.GetSetting(setForecastAuto, ""),
-		readerStage:    s.GetSetting(setForecastReader, ""),
-	}
+	prior := s.captureRestorePrior()
 
 	rep := &RestoreReport{
 		Rows:     map[string]int64{},
@@ -434,7 +431,17 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 type restorePrior struct {
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
-	readerStage    string // the live forecast_reader, "" when unset
+	readerStage    string // the live reading stage as the readers resolve it: off, card or full
+}
+
+// captureRestorePrior reads the live values a restore must reconcile. It runs on the pool, before the
+// restore transaction opens.
+func (s *Store) captureRestorePrior() restorePrior {
+	return restorePrior{
+		populationFrom: s.populationFromRow(),
+		autoMode:       s.GetSetting(setForecastAuto, ""),
+		readerStage:    storedForecastReaderStage(s.poolExec()),
+	}
 }
 
 // populationFromRow reads the raw stored ledger start without going through GetSetting's parse, so a
@@ -574,14 +581,13 @@ func applyRestoreEvaluator(e migExec, live string) error {
 }
 
 // applyRestoreReaderStage applies §3.3's rule for the reading stage: a restore never raises it. The
-// result is the lower of the dump and the live database in off < card < full, an unset side counting
-// as the default (card) and an unrecognised value as off, which is how the readers treat it. A real
-// change from the restored value leaves an audit row attributed to `system`, so an operator can see
-// that the stage did not survive the restore as dumped.
+// result is the lower of the dump and the live database in off < card < full. Both sides are
+// resolved the way the readers resolve them (see storedForecastReaderStage). A real change from the
+// restored value leaves an audit row attributed to `system`, so an operator can see that the stage
+// did not survive the restore as dumped.
 func applyRestoreReaderStage(e migExec, live string) error {
-	dumpRaw := e.setting(setForecastReader)
-	dump, liveStage := effectiveForecastReaderStage(dumpRaw), effectiveForecastReaderStage(live)
-	final := lowerForecastReaderStage(dump, liveStage)
+	dump := storedForecastReaderStage(e)
+	final := lowerForecastReaderStage(dump, live)
 	if final == dump {
 		return nil
 	}
@@ -591,14 +597,21 @@ func applyRestoreReaderStage(e migExec, live string) error {
 	return auditRestoreChange(e, AuditForecastReader, setForecastReader, map[string]any{"from": dump, "to": final})
 }
 
-// effectiveForecastReaderStage is the stage a stored value stands for: the default when unset, and
-// off for anything the readers would not recognise.
-func effectiveForecastReaderStage(stored string) string {
-	switch {
-	case stored == "":
+// storedForecastReaderStage is the stage the stored forecast_reader row stands for, resolved as the
+// readers resolve it: no row or a NULL is the default (card), a stored value is itself when it is a
+// stage and off otherwise. A stored empty string is therefore off, not unset. A read that fails is
+// off as well, because a restore that cannot see the stage must not guess a higher one.
+func storedForecastReaderStage(e migExec) string {
+	var v sql.NullString
+	switch err := e.queryRow(`SELECT v FROM meta WHERE k=?`, setForecastReader).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
 		return "card"
-	case validForecastReaderStage(stored):
-		return stored
+	case err != nil:
+		return "off"
+	case !v.Valid:
+		return "card"
+	case validForecastReaderStage(v.String):
+		return v.String
 	default:
 		return "off"
 	}
