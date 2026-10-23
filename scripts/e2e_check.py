@@ -849,26 +849,23 @@ def forecast_access_checks():
           and sc3 == 403, f"{sc} stored={row.get('forecast_scope')} effective={row.get('forecast_scope_effective')} member={sc3}")
 
     # ---- own: the subtree population, by frozen attribution
-    # Own reads are held closed until the purge ownership evidence ships (explicit step 0009, ADR 0039):
-    # without it an own reader could not be told which purged months are its own, so every own read of
-    # the record, the drawer and a custom range answers 503 forecast_purge_history_unavailable and never
-    # falls back to the site-wide history. The attribution the own population will use is already
-    # frozen at ingest, so it is checked here; step 0009 turns the 503 checks into subtree-count checks.
+    # Step 0009 supplies ownership evidence, so record and drawer reads now answer with exactly the
+    # attributed subtree. An empty OU must stay empty rather than borrowing the site-wide population.
     own_sets = set_ids(OWN, SUB)
     expect = {"fcown": len(own_sets), "fcsub": len(set_ids(SUB)), "fcother": len(set_ids(OTHER)), "fcempty": 0}
     check("G", "Own: ingest froze each set's attribution to its OU subtree (3 / 1 / 1 / 0)",
           expect == {"fcown": 3, "fcsub": 1, "fcother": 1, "fcempty": 0}, f"attributed={expect} ledger={total_rows}")
-    held = {}
+    populations = {}
     for name, session in (("fcown", fcown), ("fcsub", fcsub), ("fcother", fcother), ("fcempty", fcempty)):
         sc, body = session.req("GET", "/api/forecast/groups")
-        held[name] = (sc, code_of(body), reports_in(body) if sc == 200 else None)
-    check("G", "Own: until the purge evidence ships, every own record read fails closed (503), never the ledger",
-          all(v[0] == 503 and v[1] == "forecast_purge_history_unavailable" for v in held.values()), short(held, 200))
+        populations[name] = (sc, reports_in(body) if sc == 200 else None)
+    check("G", "Own: every record contains exactly its attributed subtree, including an empty OU",
+          all(populations[name] == (200, count) for name, count in expect.items()), short(populations, 200))
     label = ((adm.get("groups") or [{}])[0]).get("label", "")
     query = urllib.parse.urlencode({"label": label, "checkpoint": "d5", "population": "all"})
     sc, drawer = fcown.req("GET", "/api/forecast/groups/members?" + query)
-    check("G", "Own: the members drawer fails closed the same way",
-          sc == 503 and code_of(drawer) == "forecast_purge_history_unavailable" and not drawer.get("members"),
+    check("G", "Own: the members drawer contains exactly the attributed subtree",
+          sc == 200 and {m.get("set_id") for m in drawer.get("members", [])} == own_sets,
           f"{sc} label={label} {short(drawer)}")
     sc, card = fcown.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
     check("G", "Own: the reading page's predictions answer 200 for any readable report, with no membership badge "
@@ -876,8 +873,8 @@ def forecast_access_checks():
           sc == 200 and len(card.get("sets") or []) >= 1 and all(not s.get("membership") for s in card["sets"]),
           f"{sc} {short(card)}")
     sc, cust = fcown.req("GET", custom)
-    check("G", "Own: a custom range fails closed the same way",
-          sc == 503 and code_of(cust) == "forecast_purge_history_unavailable", f"{sc} {short(cust)}")
+    check("G", "Own: a custom range contains exactly the attributed subtree",
+          sc == 200 and reports_in(cust) == len(own_sets), f"{sc} {short(cust)}")
 
     # ---- an external member at all: the whole ledger, without its volumes, monthly only
     # Per-cell volumes (n, totals) exist only on a mature cell, and a mature cell needs a settled
