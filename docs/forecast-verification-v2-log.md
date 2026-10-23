@@ -219,16 +219,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
   P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
   P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144, upload-test timer fix #147, captured qfq-response fix #148,
-  halt evidence #149 and P14 seeded preview #150 (`74e8c564`) are merged.
+  1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
+  #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
+  PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
+  P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
+  `c4f0c93c` after independent review and full exact-head CI/CodeQL.
+  P25 #155 is merged at `402a0fa0` after exact-head CI/CodeQL and independent review.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The next normal merge
-  integrates main at `74e8c564`, retaining P26's scoped readers and P14's read-only demo clock;
-  that combined head requires fresh independent review and validation.
-- **Next step.** Validate P26's combined head, resolve its Apps integration sequence, then continue P27 and P28.
+  is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26/P37
+  integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
+  at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 is now
+  integrating main `402a0fa0`, including the DOMPurify #138 dependency fix, for fresh validation.
+  P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
+  exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
+  offline replay, fixed-panel CLI and no-database dispatch guards are merged. P25's bounded Sina
+  comparison-only runtime, audited controls, durable counters and administrator diagnostics are
+  merged without alternate writers. No production enablement is implied.
+- **Next step.** Complete current-base P37 review/CI. Resolve the
+  purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -237,8 +248,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
   controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
   forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive preview acceptance still requires the later reader/layout work and owner review.
-  Re-check ADR numbers before P23: Apps reserves
+  responsive parity and the reading UI still require owner review. Re-check ADR numbers before P23: Apps reserves
   0038/0040 and P22 uses 0039.
   P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
 - **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
@@ -959,3 +969,675 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   SPA/embed rebuild passed; exact-head CI remains required for the new combined commit.
 - P26 stays a draft for the existing Apps integration sequencing hold. No Apps branch,
   original user checkout, production database, workflow publication or evaluator mode changed.
+
+### P37 — exchange-backed reading projections (2026-10-22)
+
+- Implements build document section 8.7 and owner decision V23(a) independently from P16/P26.
+  The verified SSE 2026 annual closure notice is recorded beside the runtime table. No
+  unverified 2027 dates are included; a missing year anywhere in a checkpoint interval falls
+  back to a weekday lower bound without an expected flag. Government make-up weekends stay closed.
+- Reading marks carry optional `expected: true` only for covered projections. The panel chooses
+  expected versus on-or-after wording; all locales and the OpenAPI read descriptions document
+  the distinction. This is derived response metadata, not a database column or settlement input.
+- Tests pin the demo's d20=2026-10-26 and d60=2026-12-21, receipt-close boundaries, holiday starts,
+  unknown-year and frozen-S0 fallback, and clearing derived qualifiers on terminal marks.
+  Independent review found a frozen S0 outside the generated window could be substituted while
+  retaining the expected flag. A failing regression reproduced it; qualification now requires
+  that the frozen S0 be preserved. Follow-up review found no additional actionable issue.
+- The source guard rejects projection-table use outside the read annotation path, including
+  package initializers. Temporarily adding a table lookup to evaluator wake scheduling made
+  that guard fail; the mutation was restored. A runtime test separately pins the old wake date.
+- Validation: full Go/SQLite regression, full Go regression with Postgres (app package 35.608 s),
+  vet/staticcheck, three-repeat targeted race checks (3.544 s), web typecheck and all 120 Vitest
+  files / 1007 tests passed. The production SPA build and serialized Go embed rebuild passed.
+  December maintenance is documented in the operations runbook. No production, Apps branch,
+  schema, evaluator mode or pending P16/P26 merge was changed.
+- P16 integration must preserve the new qualification flag alongside its published-calendar
+  and overdue rules; a scheduled closure is not exact observed evidence for its 48-hour rule.
+
+### P23 capability-boundary checkpoint (2026-10-22, in progress)
+
+- Started `feat/quote-ledger-capability` from main `74e8c564`, independently of the held access
+  integration. P17/P18 implementation, validation and review remain preserved on
+  `feat/forecast-reader-server` at `8734b287`; this branch does not contain that stack.
+- Read-only inspection of Apps PRs 141/142 found no overlap with `quote.go`, `quote_cache.go` or
+  the new capability tests. No Apps branch, original checkout or production state was changed.
+- Added internal-only `settled` and `settled_shadow` capability identifiers. They remain outside
+  the public display interval inventory and range map. An absent declaration still grants the
+  existing display wildcard but cannot grant ledger access. Explicit grants preserve market and
+  code boundaries, distinguish writer from shadow, and reject unresolved markets.
+- Display cache entry and source-dispatch paths refuse ledger intervals before any cache lookup,
+  flight creation or upstream call. Red tests demonstrated both undeclared authorization and a
+  warm-cache hit before the repair; the initial focused controls passed after it. Added controls
+  for all three display fetcher shapes and unchanged cache occupancy on refusal.
+- This is a P23 foundation, not P23 completion. Source flags/grants, operator-order ledger walk,
+  isolated health/breaker/single-slot handling, refusal precedence, evaluator wiring, readiness
+  item 6, order auditing/confirmation and panel fields remain outstanding. ADR 0038/0040 belong
+  to Apps and 0039 to reader access; the source-policy ADR must use the next free number after
+  rechecking reservations.
+- No source is newly admitted to settlement, no schema is changed and no production action is
+  authorized by these tests. The own purge-evidence schema proposal and prior integration holds
+  remain undecided.
+- Code/test head `8e7ca037` passed the full Go regression with local Postgres enabled (app
+  package 37.119 s), three-repeat targeted race checks (1.737 s), vet, staticcheck and build.
+  Independent read-only review found no actionable issues within the foundation's scope;
+  it did not review the intentionally absent walker, evaluator, readiness or panel integration.
+- The production SPA build also passed (763 ms). Its original process handle was no longer
+  available at the next observation, so the subsequent Go embed build was rerun explicitly and
+  passed rather than inferring success from the missing handle. No frontend source changed.
+
+### P23 operator-order source selection checkpoint (2026-10-22, in progress)
+
+- Added a pure ledger-chain resolver over the already-loaded operator order and explicit settled
+  grants. It stable-partitions cash-dividend sources first, keeps priority within each class,
+  skips disabled/unknown sources, deduplicates names and preserves market/code predicates. An
+  empty input order remains empty rather than silently restoring shipped display defaults.
+- Added separate evidence flags to the source type and primary selection requiring both cash
+  dividends and reported instrument kind. Either flag alone is insufficient. Shadow-only grants
+  cannot enter the writer chain; an absent primary remains an explicit false result for the
+  future walker to turn into `no_source` rather than falling back to a display vendor.
+- Tests were written before the resolver and failed with the empty implementation, then passed
+  with operator-order, stable-partition, primary-removal, duplicate/unknown-name, positive market
+  and negative market/code controls. Focused checks passed (0.413 s). No actual vendor grant or
+  evidence flag is enabled yet; this checkpoint
+  changes no evaluator call site, source order setting, database or production behavior.
+- Code/test head `1432d42e` passed full Go regression with local Postgres enabled (app package
+  34.320 s), three-repeat targeted race checks (1.900 s), vet, staticcheck and build. Independent
+  read-only review found no actionable issues in operator ordering, partition stability, explicit
+  grants, primary requirements or display compatibility. The review used SQLite only and did not
+  cover the still-absent vendor admission, source walk, evaluator, readiness or panel behavior.
+
+### P23 uncached source-walk checkpoint (2026-10-22, in progress)
+
+- Added a ledger-only bounded range walk. It validates the window through `quoteParseWindow`,
+  rejects unbounded dates, resolves the instrument, requires a primary and holds one shared
+  upstream slot across the whole chain. It never enters display cache or single-flight. A
+  missing range fetcher or nil success response is an error, never an accepted price series.
+- Tier 1 calls only explicitly granted sources with both evidence flags. A source without
+  corporate-action or instrument-kind evidence cannot become a writer just because a primary
+  failed. Actual shipped grants remain disabled pending the full wiring/readiness change.
+- Each evaluator pass will own a fresh `ledgerTick`: three transport/parser failures stop further
+  calls to that source in that pass. Typed ledger refusals do not trip the breaker or change vendor
+  health. Caller cancellation stops the walk without recording vendor failure. Separate ledger
+  health snapshots preserve the display counters, and the first called source's refusal wins
+  when every called source fails. A new pass reopens its own breaker.
+- Tests first failed against an empty walk, then passed for invalid windows, absent primary,
+  primary failure plus evidence-free fallback, nil responses, refusal priority, repeated uncached
+  success, health isolation, typed-refusal neutrality and cancellation. A saturated-slot fixture
+  leaves exactly one upstream slot available and exercises two sources under a two-second context
+  deadline, asserting the slot remains held during both calls and is released afterward.
+- Initial focused tests passed (0.556 s); full Go/Postgres, repeated race/static checks and
+  independent review are pending. No evaluator call site, admin API, actual vendor grant, source
+  order, schema, Apps file or production state changed. This remains incomplete P23, not a new
+  settlement admission or authorization to enable the evaluator.
+- The initial full Go/Postgres run passed (app package 34.861 s), as did three-repeat targeted
+  race checks (1.625 s), vet, staticcheck and build. Independent review then found that an exhausted
+  breaker incorrectly returned `no_source` for an otherwise configured primary. A new exact-error
+  control failed on the fourth walk before preserving that source's real failure in pass state.
+- Added a context-aware pass gate so concurrent walks cannot overrun the three-failure ceiling;
+  each still performs its own uncached fetch rather than joining a shared result. Twenty callers
+  sharing one pass now observe the same actual transport failure with exactly three vendor calls.
+  Added saturated-upstream cancellation and wrapped typed-refusal controls. Focused walk tests
+  passed (1.210 s); post-repair full checks and review follow-up remain pending.
+- Post-repair application/test head `c3bc3865` passed full Go regression with local Postgres
+  enabled (app package 50.775 s), three-repeat targeted race checks (2.259 s), vet, staticcheck
+  and build. Independent follow-up closed the breaker finding with no additional actionable
+  issue, confirming pass/upstream release paths, failure priority and wrapped refusal handling.
+  Review also ran three race-enabled walker repetitions with Postgres disabled.
+- Added a test-only follow-up for a caller cancelled while queued behind the pass gate, then
+  reusing the same tick successfully after release. This pins both cancellation and subsequent
+  progress without a live vendor or database. Three race-enabled walker repetitions including
+  this control passed (1.829 s). No runtime code changed after `c3bc3865`.
+
+### P23 evaluator source-path checkpoint (2026-10-22, in progress)
+
+- Granted Tencent explicit Tier 1 settled access for Shanghai/Shenzhen series, with its measured
+  cash-dividend and instrument-kind evidence flags. Beijing lacks usable history and overseas
+  display capability does not imply ledger admission. Sina/Yahoo still have no writer grant or
+  evidence flags. No Tier 2 fallback was admitted.
+- Runtime evaluator range fetches now use the configured uncached ledger walk instead of a
+  hard-coded Tencent call. Each tick starts fresh breaker state and releases it on exit. Existing
+  isolated arithmetic-test fetch seams retain their previous behavior; new integration controls
+  leave that seam nil and exercise the actual source resolver. Settled-bar completion filtering,
+  frozen baselines, write doors and benchmark checks are unchanged.
+- Typed source refusals survive benchmark, stock and bounded look-back planning. In particular,
+  a missing configured primary records `no_source`, not a generic fetch failure, and never adds
+  a mark-specific attempt. Unknown parser/transport failures remain `fetch_failed`.
+- Red controls showed the old path still attempted a direct Tencent request after the operator
+  removed it; a test transport intercepted the request without reaching the network. After the
+  change, no-source planning and zero attempts pass on both SQLite and Postgres. Positive runtime
+  controls prove repeated calls do not cache, unfinished bars remain excluded, dry mode never
+  resolves marks and mode 1 without a benchmark check still plans without writing. Initial SQLite
+  controls passed (0.705 s); the Postgres no-source control passed (0.661 s).
+- Readiness integration is deliberately not included in this checkpoint: Apps notification PR
+  141 also edits `forecast_ops.go`. That shared-file integration, readiness item 6, alerts, panel,
+  order confirmation and the source ADR remain outstanding. No Apps branch was edited, no schema
+  changed and no production deploy or evaluator enablement occurred. Full checks and independent
+  review of the runtime source-path change remain pending; P23 is not release-ready.
+- Runtime application/test head `1f4a79b9` passed full Go/Postgres regression (app package
+  34.980 s), three-repeat targeted race checks (4.712 s), vet, staticcheck and build.
+  Independent read-only review found no actionable implementation issues within this scope.
+  It did not review deferred readiness, alerts or admin integration and used SQLite only.
+- Added test-only evaluator-level controls after review: five sets share exactly three stock
+  delivery failures in one tick, the next tick resets the breaker, and typed stock/widened-lookback
+  refusals preserve `no_source` with zero attempts. Initial controls passed (0.577 s); final full
+  regression and repeat checks including these controls remain pending. Runtime code is unchanged
+  from the reviewed head.
+- Final application/test head `13251660` passed full Go/Postgres regression (app package
+  34.262 s), three-repeat targeted race checks including the added evaluator controls (6.796 s),
+  vet, staticcheck and build. Test-only follow-up review confirmed the shared/reset breaker
+  fixture and actual widened-lookback path with no findings. No golden fixture or frontend source
+  changed. This closes the runtime-source checkpoint, not P23's remaining integration/CI gates.
+
+### P23 administrator source diagnostics checkpoint (2026-10-22, in progress)
+
+- Extended the existing admin quote response with per-source explicit settled/shadow market arrays
+  and cash-dividend/instrument-kind evidence flags. Added configured ledger-chain/primary/shadow
+  summaries and separate ledger-health records. Missing grants and unused health are arrays,
+  absent primary/shadow are empty strings, and unset health timestamps remain empty strings.
+- Configuration summaries describe enabled declarations across their markets; runtime still
+  checks the actual instrument and symbol predicate. They are not a substitute for readiness.
+  The runbook documents this distinction and the unchanged deployment/enablement boundary.
+- Red tests first showed all new diagnostics absent. Focused tests then passed (0.526 s), proving
+  shipped grants, disabled-primary omission, operator order, explicit shadow selection, display
+  wildcard exclusion, distinct display/ledger failure counters, health preservation on cache clear
+  and denial to a non-admin reader through the real session/admin wrappers.
+- This changes only quote-source backend files outside Apps PRs 141/142's listed file sets.
+  Frontend panel rendering, source-order audit/confirmation, readiness/alerts and the source ADR
+  remain outstanding. No schema, production, Apps branch or separately owned PR changed. Full
+  Go/Postgres, repeated race/static checks and independent review are pending at this checkpoint.
+- Application/test head `746c31bd` passed full Go/Postgres regression (app package 33.041 s),
+  three-repeat targeted race checks (3.537 s), vet, staticcheck and build. Independent read-only
+  review found no actionable issues in array/empty shapes, declarations, admin authorization,
+  wildcard exclusion or health separation/cache-clear behavior. Review used SQLite only.
+- Added a test-only direct-helper control for duplicate/unknown configured source names and a
+  primary declaring both writer/shadow grants: the primary is not its own peer. Runtime source
+  is unchanged after the reviewed head. Three race-enabled admin-test repetitions including this
+  control passed (3.414 s). Frontend, readiness, alert and audit work remain unreviewed
+  and outstanding; no production, schema or Apps action was performed.
+
+### P23 source-order audit checkpoint (2026-10-22, in progress)
+
+- Added the dedicated `quote.order` action and three locale labels (zh-TW generated through the
+  normal OpenCC script). It records effective source arrays, not raw spelling, and preserves the
+  actor/OU/address. Equivalent or repeated order saves do not add a transition. The existing
+  general quote-policy audit is unchanged and remains a separate record.
+- Source order now governs durable settlement, so its dedicated audit and setting update share
+  one transaction. Audit failure rolls the order back and refuses the request before other
+  submitted fields are written. The transaction acquires SQLite's writer lock before its read
+  and locks the Postgres settings row; all work uses the transaction handle. No schema changed.
+- Red controls showed the previous handler wrote no dedicated transition and reported success
+  after an audit failure. Focused audit/vocabulary/locale/legacy-policy tests passed after the
+  change (0.727 s), including both drivers. Ten concurrent order changes form a serial audit
+  chain ending at the persisted configuration under a two-second context deadline.
+- Read-only merge previews at pre-change head `24003238` were clean against Apps PR 141 head
+  `b4741355` and PR 142 head `c4402084`; inspected audit hunks are disjoint. Post-change previews,
+  full checks and independent review remain pending. No Apps branch or separately owned PR was
+  edited. UI confirmation, readiness/alerts, panel presentation and the source ADR remain open.
+- Initial application/test head `9d622e4c` passed full Go/Postgres regression (app package
+  43.964 s), three-repeat targeted race checks (6.655 s), vet/staticcheck, frontend typecheck,
+  all 120 Vitest files / 1006 tests (44.54 s), and the production SPA build (902 ms).
+  The standalone source branch has fewer web tests than the separate P17/P18 integration stack.
+  Independent review found no actionable issue in this initial scope.
+- Post-change read-only merge previews were also clean against the same Apps heads (trees
+  `4ab55e26` and `d828a5e3`). This proves textual compatibility only, not combined runtime
+  verification, and neither branch was changed or merged.
+- Strengthened validation exposed two additional boundaries: a permitted NULL meta value failed
+  to match the existing reader's shipped-default semantics, and independent SQLite connections
+  could transiently contend. Added failing controls, coalesced the nullable read, and bounded
+  contention retries around the whole rolled-back transaction with context-aware delays. The
+  two-connection fixture and both-driver concurrency fixture also assert the actor OU snapshot.
+  Final post-repair checks and follow-up review remain pending.
+- Final application/test head `d6763b24` passed full Go/Postgres regression (app package
+  33.568 s), three-repeat SQLite race checks including cross-connection cancellation (6.262 s),
+  vet, staticcheck and the serialized Go embed build. Frontend files are unchanged from the
+  validated label/build checkpoint. Independent follow-up found no actionable repair issue and
+  additionally ran two race-enabled SQLite repetitions. The final read-only Apps merge previews
+  were clean (`0b3240ad`, `b8e8a465`); semantic integration and exact-head CI remain separate.
+- This closes the source-order auditing checkpoint only. No source was deployed, no schema or
+  Apps branch changed, and no separately owned PR was edited or merged. Source-order confirmation,
+  frontend diagnostics, readiness/alerts and the source ADR still need implementation/integration.
+
+### P23 quote-source management UI checkpoint (2026-10-22, in progress)
+
+- Added optional settlement grants/evidence and a separate configuration/health card. Missing
+  server fields retain the old display; unavailable health is not rendered as an empty or healthy
+  history. The card states that configured declarations are not runtime readiness approval.
+- Saving an order that removes the configured settlement primary requires confirmation. Cancel
+  and unmount before confirmation write nothing. A pending-save guard suppresses duplicate
+  requests and resets after rejection so the operator can retry. Loading feedback starts only
+  when the request is sent, not while waiting for the confirmation.
+- Initial failing tests pinned missing confirmation and no-primary diagnostics. Page tests use
+  disabled theme motion so jsdom does not retain a closing modal over the next interaction.
+  Component tests cover unavailable/empty and source-specific telemetry, plus axe markup checks
+  in both themes (not visual contrast/layout, which jsdom cannot measure).
+- Typecheck, all 121 Vitest files / 1014 tests (40.98 s), production SPA build (1.13 s), and the
+  subsequent serialized Go embed build passed. One additional test-only duplicate-click/failure
+  retry control then passed with both focused files: 27 tests (4.94 s). Independent read-only
+  review found no actionable issue in confirmation, cleanup, compatibility or diagnostics.
+- This is local work only: no deploy, schema edit, Apps branch mutation or separately owned PR
+  change. Readiness item 6, watchdog integration and the source ADR remain outstanding. The
+  own-scoped purge-history evidence proposal still requires owner approval before any DDL.
+
+### P23 readiness and no-source watchdog checkpoint (2026-10-22, in progress)
+
+- Appended readiness item 6, `ledger_chain`, preserving the first five keys. It uses the same
+  explicit configured grants as the source panel and additionally requires both evidence flags
+  on a primary. Display wildcards and display-only sources cannot satisfy it. Runtime still
+  checks eligibility for each actual instrument, independently of these configuration gates.
+- Switching from dry to mode 1 now fails with `forecast_not_ready` naming `ledger_chain` when
+  that primary is absent, and succeeds after restoration when the other gates hold. Removing
+  a primary while already running does not rewrite the mode: settlement refuses via the ledger
+  walker, the evaluator card warns and does not claim health, and the watchdog sends `no_source`
+  through the existing webhook/email/Slack path at most daily. Its check precedes the missing-
+  heartbeat early return. Off mode still performs only the mode read and writes nothing.
+- Initial red controls exposed all three missing boundaries: the sixth item, the mode gate and
+  the no-source emission. Tests cover display-only orders, missing grants/evidence, restoration,
+  daily repeat/suppression and both delivery channels. The frontend tests reproduce removal in
+  both dry and running modes. Independent read-only review found no actionable issue and
+  suggested an explicit absent-heartbeat control; added it together with an off single-read
+  assertion and reran targeted race checks three times (8.559 s).
+- Full Go/Postgres tests passed (app package 49.775 s), as did vet/staticcheck, typecheck, all
+  121 Vitest files / 1017 tests (50.54 s), the production SPA build (761 ms), and the subsequent
+  serialized Go embed build. The absent-heartbeat addition after the full run is test-only.
+- No database shape, production setting, Apps branch or separately owned PR changed. This
+  checkpoint does not complete P23: the source ADR and exact-head CI/integration remain open.
+
+### P23 source ADR and integration preparation (2026-10-22)
+
+- Added ADR 0041 for the approved V9 Tier 1 policy. Live PR-head checks confirmed Apps 141/142
+  still reserve 0038/0040; the source decision was renumbered rather than changing their files.
+  Updated ADR 0028's durability promise, ADR 0029's direct-call/D9 text and ADR 0032's stored-price
+  boundary, with current implementation-plan pointers and a historical-plan identifier note.
+- The ADR distinguishes integrity from corroboration, compiled grants from operator ordering,
+  and local P23 control/observability from pending P24/P25 measurements. It records candidate
+  evidence gaps and the later separate evidence chain/Tier 2 decision without authorizing any
+  schema change or fallback writer. Document review found one wording issue conflating compiled
+  grants with operator authority; corrected it. Relative links resolve and diff checks pass.
+- Expanded the PR race selector with `Ledger|QuoteOrder|Readiness`; these new concurrent paths
+  otherwise did not all match the existing forecast selector. The added selection passed locally
+  under race (9.437 s). No application source changed after the prior full local validation.
+- Read-only merge previews at runtime head `5ff9465b` were clean against the verified Apps heads
+  `b4741355` and `c4402084` (trees `92bf3b6d` and `8bfe71d4`). This establishes textual compatibility
+  only, not combined behavior or permission to merge those branches. Final docs/workflow-head
+  previews, branch-wide review and exact-head CI remain required before merging P23.
+- Final branch-wide independent review found no confirmed actionable issue or missing P23 §8.8
+  requirement. The prior breaker/terminology findings are closed. Combined targeted race checks
+  passed with Postgres disabled in that independent review. At docs/workflow head `b2cf51c6`, the
+  final read-only Apps previews were also clean (trees `5189479e` and `65177496`); no Apps branch
+  was changed or merged. P23 is submitted as draft PR #152 for exact-head CI. Browser layout/
+  contrast validation remains separate, and no production rollout is authorized by the review.
+
+### P23 browser verification and dependency unblock (2026-10-22)
+
+- Verified the actual embedded UI against a new isolated synthetic preview database. Light/dark
+  settlement diagnostics and the narrow confirmation dialog are readable; cancelling removal and
+  reloading retains Tencent. Read-only database inspection found no `quote.order` audit and
+  `forecast_auto=0`. Screenshots are local evidence, not production baselines or vendor captures.
+  The preview listener and temporary browser tab were closed; no production data was copied.
+- P23 head `067b9028` passed Go/Postgres, race, frontend, workflow lint and all CodeQL analyses,
+  but Docker's production dependency audit failed on DOMPurify. The audit gate was not weakened.
+- The owner explicitly authorized validating and merging existing PR #138. Its original go-test
+  failure was the stale Go1.26.9 baseline's GO-2026-6809 finding, not the dependency patch.
+  Merged main into that PR without rewriting history; the current-base diff remained only the
+  manifest and lockfile update from DOMPurify 3.4.16 to 3.4.17. Independent review found no blockers.
+- At dependency head `d7d7ff33`, local typecheck, 120 Vitest files / 1006 tests (111.45 s), SPA build
+  (1.20 s), Go build/vet/staticcheck and full SQLite/Postgres Go tests (app 46.676 s) passed. The
+  production audit has zero critical/high/moderate findings; five pre-existing low findings remain.
+  Exact-head CI run 39882851649, all CodeQL checks and Docker smoke/E2E passed before squash merge
+  to main at `8ab51334`. No attribution trailer was included in the merge message.
+- Integrated that main update into P23 at `21725f0b`; combined local regression and new exact-head
+  CI are pending. P37 needs the same dependency integration/revalidation. No Apps branch,
+  production setting, deployment or database shape was changed.
+
+### P23 merge and P24 comparator foundation (2026-10-22)
+
+- P23 head `a829788c` passed all exact-head CI checks (test run `39883951228` plus CodeQL),
+  including Docker after the dependency fix. Combined local Go/Postgres tests passed (app 86.572 s),
+  as did typecheck, 121 Vitest files / 1017 tests (116.75 s), SPA build (709 ms), serialized Go build,
+  vet and staticcheck. The final read-only Apps merge previews were clean (`2624cfbf`, `db035a20`)
+  against unchanged verified heads. No branch of that separate work was changed or merged.
+- Re-read the final diff and retained the independent review/guard evidence in PR #152's body,
+  then squash-merged it to main at `08b1c1a0`. No production rollout or evaluator enablement followed.
+- Started `feat/cli-quote-probe` from that new main. Added a pure, I/O-free comparison foundation
+  for P24 replay and later P25 shadow use. It compares exact integer-fen OHLC and the union of dates,
+  identifies either anchor's mismatches, preserves differing prices and returns deterministic
+  date/field ordering without mutating either body. Agreement is not source admission.
+- Empty, duplicate-date, malformed-date or invalid-price evidence is not agreement. Both primary
+  anchors must exist; a missing candidate date remains an explicit mismatch rather than an ignored
+  row. Volume is deliberately not a price comparison. Initial tests failed before implementation;
+  a fixture-ordering error was corrected with an explicit OHLC-ordered helper. Three targeted
+  race repetitions passed (1.860 s), including non-anchor OHLC, both anchors and exact-fen values.
+- This is a foundation checkpoint, not P24 completion: command dispatch, raw captures, manifest
+  safety, fixed-panel replay and candidate-source controls remain. It adds no schema, settings,
+  network calls or runtime shadow execution. Independent review and full branch validation remain
+  required before submitting P24.
+
+### P24 raw-capture foundation (2026-10-22, in progress)
+
+- Independent comparator review found no confirmed issue; exact-fen/date/anchor comparisons,
+  deterministic output and no I/O/input mutation were verified. It remains shared groundwork,
+  not runtime shadow admission.
+- Added capture orchestration with no Store/config dependency. It accepts only registered sources
+  and validated canonical targets/windows, reserves a new 0700 directory, writes 0600 raw/parsed
+  files exclusively, and records hashes, response status, capture time, content type and bounded-
+  body/error metadata. Count-based candidate captures are explicitly labeled rather than claimed
+  as bounded range support. Candidate measurement never changes grants or source order.
+- A private context-local client override records only probe requests. Ordinary requests still
+  use the original pooled vendor client; the process-wide pointer is never swapped. Binary bodies
+  are preserved before parser/GBK conversion. HTTP/non-2xx/read failures remain recorded evidence;
+  local file errors abort, and cancellation leaves an incomplete manifest without further calls.
+  A complete manifest means all requested attempts finished, not that vendors supplied valid data.
+- Tests failed before implementation. Additional controls cover private permissions, independent
+  SHA-256 expectations, existing directory/symlink refusal, bad input before network/output,
+  Yahoo as a display-only candidate, oversized/partial bodies, cancellation, local write collision
+  and context isolation. No test here performs a live vendor request.
+- Independent capture review found a parent-directory substitution gap: O_EXCL protected leaf
+  files but not a replaced parent path. The failing regression reproduced writes into a foreign
+  directory. All writes now use a retained os.Root; the original directory retains every file,
+  the foreign directory stays empty, and a final identity check refuses to mark replaced/moved
+  output complete. Follow-up review closed the finding without additional actionable issues.
+- Final application/test head passed full Go/Postgres regression (app 35.809 s), build, vet and
+  staticcheck. Three repeated targeted race runs including the independent hash control passed
+  (2.136 s). Frontend files are unchanged. CLI dispatch, fixed panel, offline integrity checks,
+  replay/record output and an end-to-end no-database CLI guard remain before P24 can be submitted.
+  No schema, production, Apps branch or separately owned PR changed in this checkpoint.
+
+### P24 offline replay and command integration (2026-10-22)
+
+- Added `quote-probe capture|compare` dispatch before the server/configuration path. Capture uses
+  the fixed three-index/twenty-stock panel across main, ChiNext, STAR, 689 and Beijing codes, plus
+  unique operator-supplied suspended codes. Source selection accepts every compiled-in candidate,
+  including Yahoo, without granting settlement or changing runtime source order/health.
+- The version-1 manifest now declares the source/target matrix, allowing replay to reject missing,
+  reordered or duplicate attempts rather than silently shrink the denominator. Offline replay
+  validates complete/version/window/anchors, canonical targets, identity/source, unadjusted and
+  uncached parsed evidence, all bar validity, exact generated leaf names, regular-file/inode checks,
+  byte counts and SHA-256 hashes. Reads use a retained directory root and individual/aggregate
+  limits; no manifest URL or source fetcher is executed. Hashes detect corruption, not forgery by
+  the evidence author. Raw bodies and normalized parser output are both retained and verified.
+- Count-based history is explicitly labeled and filtered by row date to the capture window before
+  the common shadow comparator. Exact-fen OHLC, date sets and explicit anchors are compared;
+  missing candidate dates remain mismatches, whereas failed/truncated/empty evidence or missing
+  primary anchors is unavailable. No agreement grants admission. Both anchors can be one session.
+- Comparison JSON is deterministic and includes the manifest hash. Without `--record`, replay is
+  read-only. `--record` requires the whole fixed panel, rechecks the manifest identity and creates
+  a private `comparison.json` exclusively; it records failures/mismatches as such, not a pass
+  certificate. Existing files/symlinks are never replaced. The operations runbook documents flags,
+  panel, limits, exit semantics, evidence trust boundary and rollback (revert the command; existing
+  evidence remains files, with no database/state repair).
+- New tests failed before replay/CLI implementation. Controls cover shared-comparator equivalence,
+  repeat determinism, exact one-fen mismatches, matches and count-window isolation, primary/candidate
+  failures, missing anchors, malformed/unknown/trailing JSON, hashes/lengths, path traversal,
+  symlinks, identity/source/adjustment/cache refusal, incomplete matrices and read budgets. Full-panel
+  capture/record uses only a local fake vendor; the database sentinel and directory contents stay
+  identical. Linked-binary help/error checks use a named-pipe `RP_CONFIG` tripwire: an accidental
+  configuration read/server start would hang and fail. Output errors, existing record/symlink and
+  a changed manifest before recording are explicit failures. These guards are positive and negative
+  controls, not source-text matching. The CI scoped race lane now includes both probe/comparator.
+- Independent comparator, capture and full CLI/replay reviews passed. The capture review's real
+  parent-directory substitution finding was fixed and regression-tested in the earlier checkpoint.
+  Final local full Go/SQLite/Postgres passed (app 34.512 s); build, vet and staticcheck passed.
+  Targeted race tests passed three repetitions (5.959 s). Web typecheck, all 121 files/1017 tests
+  (41.70 s) and production SPA build (688 ms) passed. The linked-binary dispatch guard also passed.
+  Exact-head PR CI remains the merge gate. No live vendor measurement, production, schema,
+  evaluator enablement, Apps branch mutation or fallback write occurred.
+- Final guard review found the initial manifest-replacement test accepted any recording error, so
+  the unrelated partial-panel refusal could mask removal of the intended hash gate. Tightened it
+  to require the exact manifest-change failure. Temporarily removing that gate now fails with the
+  unrelated panel error, and restoring it passes. This was a regression-assertion defect, not a
+  missing runtime guard; no production code changed after the full implementation review.
+  Follow-up independent review closed it, and three final targeted race repetitions passed (5.764 s).
+
+### P24 merge and P25 bounded history foundation (2026-10-22)
+
+- P24 exact head `6a33df58` passed full CI run `39889303053` (Go/SQLite/Postgres, scoped race
+  4m9s, frontend, workflow lint and Docker/font/smoke gates) and CodeQL run `39889301435`.
+  Main-only full-race/cross-compile lanes were skipped by design on the pull request, not called
+  passing. Reconfirmed Apps #141/#142 heads unchanged and clean read-only merge previews before
+  squash-merging #154 to `c4f0c93c`. PR evidence records both review findings, fixes and guards.
+  No release, deployment, production measurement or Apps mutation followed.
+- Started P25 from that main. `fetchSinaRange` validates the window before HTTP, requests the full
+  800-bar count tail through the existing snapshot/history fetcher, and treats display-path
+  `BarsUnavailable` degradation as an error rather than shadow evidence. Ordinary display behavior
+  is unchanged. No source is advertised as a shadow peer at this foundation stage.
+- The range helper validates source/adjustment/cache flags, all dates/prices and duplicate dates,
+  sorts a copy, and checks the newest untrimmed kline date and exact-fen close against the snapshot
+  in the instrument's timezone. Checking before trimming also catches a bad newest row outside the
+  requested historical window. A full 800-row tail beginning after the requested start returns
+  typed `window_not_covered`; a shorter series does not invent pre-listing or suspended sessions.
+  The returned copy contains only row dates inside the requested window; empty history is refused.
+- Tests failed before implementation. Captured stock fixtures are served by a context-local fake
+  transport with actual GBK conversion and assertions for the 800-row request. Controls cover
+  one-fen disagreement with otherwise valid OHLC, snapshot-date/stamp mismatch, reversed rows and
+  no input mutation, unavailable/empty/nil/duplicate/malformed/over-cap histories, source and cache/
+  adjustment mismatches, exact cap coverage, cancellation and unsupported/invalid requests before
+  HTTP. No test or command here makes a live vendor request.
+- Independent review found no actionable issue; optional coverage was added. Full local
+  Go/SQLite/Postgres passed (app 35.372 s), build/vet/staticcheck passed, and three targeted race
+  repetitions across range/probe/comparator passed (5.507 s). Frontend files are unchanged.
+  Runtime selection/limits, shared comparisons, fallback controls, persisted diagnostics and final
+  full-branch review/CI remain P25 work. This adds no schema, settings, runtime writes or admission.
+  Back out by reverting this helper; no database/state repair is needed.
+
+### P25 fallback controls and explicit network budget (2026-10-22, in progress)
+
+- The owner delegated the ambiguous call-counting choice. Preserved at most two full candidate
+  observations and added an independent ceiling of four HTTP RoundTrip attempts per working
+  pass: Sina normally needs snapshot plus kline for each observation. Redirects consume the same
+  budget, rather than obtaining extra requests. Both units are documented in the decisions/plan.
+  These limits are comparison-only; they grant no alternate writer. Post-ledger scheduling and an
+  independent bounded deadline remain required when integrating execution.
+- Added a context-local cloned-client transport with a mutex-protected shared HTTP budget. It
+  rejects an exhausted budget before the underlying transport; cancelled requests are not sent.
+  Tests exercise actual redirects, two complete fixture-based Sina reads consuming four requests,
+  concurrent attempted overrun, isolation across passes, cancellation and the unchanged global
+  client. This is the network-limit foundation, not runtime enforcement of two selected bodies.
+- The admin settings reader/writer exposes `fallback` as off/shadow only. Invalid strings,
+  non-string values and null return `forecast_bad_fallback` before any submitted field is written;
+  omitted fallback preserves its value. Unsupported stored values, including on, read as off.
+  Each effective transition and `forecast.fallback` audit commit together using the existing meta
+  table, with SQLite/Postgres serialization, whole-transaction contention retries and attributed
+  from/to values. Repeated saves do not create no-op audits. Audit failure rolls the transition
+  back. No database table, column or acceptance contract changed.
+- Tests failed before implementation. New controls cover invalid mixed-field writes, reader/writer
+  round trips, no-op suppression, rollback on an unavailable test audit table, concurrent serial
+  audit chains on SQLite/Postgres and independent SQLite Stores, NULL persisted values, omitted
+  fields and cancellation. Full regression caught missing translations for the new error code;
+  those are fixed in all three locales, with audit-action labels and regenerated Traditional
+  Chinese. An initial test fixture used a string instead of the numeric OU identifier; corrected
+  it to assert the real stored type. Neither issue changed runtime policy.
+- Independent control/budget reviews found no actionable issue; optional coverage was added.
+  Final full Go/SQLite/Postgres passed (app 35.745 s), build/vet/staticcheck passed, three targeted
+  race repetitions passed (6.827 s), web typecheck and 25 locale tests passed. CI's scoped race
+  names now include the new Sina, budget and fallback guards. Full frontend/PR CI and final
+  branch-wide review will be repeated for complete P25 before submission.
+- P25 is not complete: selection of accepted primary bodies, post-ledger comparisons through the
+  shared comparator, persistent shadow/call diagnostics, administrator UI controls/status and final
+  admission tests remain. No production call, deployment, Apps branch change, fallback ledger
+  write or runtime shadow grant occurred. Back out by reverting these controls/helpers; any saved
+  local fallback key is inert/off in the previous build, and no ledger repair is needed.
+
+### P25 durable diagnostic storage (2026-10-22, in progress)
+
+- Added versioned storage in the two planned existing-meta keys, `forecast_state_shadow` and
+  `forecast_state_calls`. One transaction reserves/locks the pair in stable order, loads both,
+  aggregates per-source logical reads, failures, typed refusal counts and explicitly shadow-only
+  HTTP counts, then writes both. A single-statement reader sees one snapshot; bounded,
+  context-cancellable retries handle transient SQLite contention without mixing snapshots.
+  This adds no table, column, migration or database acceptance-contract change.
+- Keeps fourteen UTC-day summaries, the chronologically latest twenty results, and at most
+  thirty-two differences per detailed result. The full difference count and a truncation flag
+  remain explicit; truncated mismatches cannot become agreement. Persistence copies the comparison
+  rather than mutating a live result. No raw quote body or vendor error text enters these counters.
+- Missing state is distinguishable from damaged state: defaults apply only when both rows were
+  genuinely absent. Persisted objects must explicitly carry the supported version, timestamps,
+  arrays and consistent day/counter/evidence shapes. Existing empty/SQL-NULL rows, JSON null,
+  missing/unsupported versions, partial pairs, invalid counters, duplicate days, missing agreement
+  evidence and integer wrap are refused without overwriting the retained evidence. Consumers must
+  show an error as unavailable telemetry, not as a healthy zero; runtime/UI integration remains.
+- Independent review found a real retention-watermark defect: a delayed old run could discard
+  newer observations and regress `updated_at`. The failing regression reproduced it. Retention
+  now uses the maximum of the previous and incoming timestamps; in-window late results merge,
+  expired late results are ignored, and latest-result trimming sorts by timestamp rather than
+  commit order. Follow-up review closed it. Two further findings were fixed: persisted objects
+  could inherit a missing version from defaults, and concurrent SQLite readers could return
+  `SQLITE_BUSY`. Explicit zero-value decoding and bounded whole-read retries closed both without
+  weakening the failing assertions. Remaining optional controls were added.
+- Tests failed before implementation and before hardening. Coverage includes close/reopen
+  durability, fourteen-day retention, out-of-order and expired writes, concurrent serial writers
+  plus snapshot readers on SQLite/Postgres and independent SQLite connections, corrupted JSON and
+  structurally invalid valid JSON, overflow, detail bounds/no input mutation and cancellation.
+  An abort trigger in an isolated SQLite test database fails the second update and proves that
+  neither half of the pair survives. No production schema or database was used for injection.
+- Final full Go/SQLite/Postgres passed (app 36.356 s); build, vet and staticcheck passed. Three
+  final targeted diagnostic race repetitions passed (16.068 s). Independent follow-up review
+  closed every finding. Frontend files are unchanged by this checkpoint. No live vendor,
+  production, Apps branch, evaluator enablement or ledger write occurred.
+- These are storage helpers, not P25 completion. Post-ledger sample selection/execution, primary
+  and candidate call observation, shared runtime comparison, diagnostics/status UI, shadow grants
+  and final full-branch review/CI remain. Back out by reverting the helpers; existing diagnostic
+  meta values are ignored by an older build, and no ledger repair is needed.
+
+### P25 post-ledger runtime integration (2026-10-22, in progress)
+
+- Copies at most two unique, accepted primary instrument bodies, with explicit first/last anchors,
+  and executes candidates only after normal primary ledger processing completes. Early cancellation
+  or panic suppresses candidate work while retaining available primary-call diagnostics. Each sample
+  rechecks fallback mode, operator order and primary identity. The independent candidate deadline is
+  fifteen seconds; upstream concurrency is shared, but responses, transport budget and health are not.
+  Candidates never return to settlement planning. Sampling is opportunistic, not representative or
+  Tier 2 admission evidence. No shipped source has received a shadow grant at this checkpoint.
+- Uses the shared exact-fen comparator after identity, market, currency, timezone, history flags and
+  completed-bar checks. Persists calls, failures, neutral refusals and bounded comparison evidence
+  using the reviewed atomic storage. Includes primary adjustment observations; candidate failures,
+  panic, timeout, mismatches and storage failures cannot retry or alter primary ledger writes.
+- Red/green controls compare the complete ledger checksum against shadow-off output and assert
+  that it already matches before candidate execution. They cover agreement, one-fen mismatch,
+  missing anchor, wrong source, missing history, cached/adjusted data, errors, panic and deadline.
+  Saturated-slot cancellation never enters or bills the adapter. A hidden quota-denial test first
+  reproduced misattribution as a source failure; a transport denial counter fixes attribution even
+  when an adapter degrades its error. A real fourth-request HTTP failure remains a failure. Independent
+  review found duplicate quota refusals; recording each result once closes it, with a pinned guard.
+- Full Go/SQLite/Postgres passed (app 37.996 s), build/vet/staticcheck passed, and three targeted
+  runtime/budget/walk race repetitions passed. Independent follow-up review closed all findings.
+  CI's scoped race selector now explicitly includes the complete ledger-checksum test. No live vendor
+  call, production change, evaluator enablement, Apps edit or alternate ledger writer occurred.
+- P25 remains incomplete: administrator controls/diagnostics presentation, shipped Sina shadow-only
+  grants, final end-to-end admission guards and branch-wide review/full CI are next. Back out by
+  reverting this integration; diagnostics are ignored by an older build and no ledger repair is needed.
+
+### P25 administrator controls and diagnostics (2026-10-22, in progress)
+
+- The administrator settings response now reads the atomic diagnostic pair using the request context.
+  Explicit empty/ready/unavailable states distinguish uninitialised telemetry from measured zero and
+  damaged evidence. A decode/read failure returns no partial state or raw error/body; the reader never
+  repairs or replaces evidence. Existing administrator authentication covers both GET and POST;
+  routed tests deny an ordinary reader and allow an administrator. No reader-scope surface changed.
+- The settings modal offers only off and shadow and posts only changed fields. Its copy explains
+  third-party reads, two logical candidate observations versus four HTTP attempts, source-order
+  membership, post-ledger execution and no evaluator enablement or alternate writing. A status tag
+  shows the current comparison mode without treating retained history as ongoing comparison work.
+- The diagnostic card shows retained daily per-source logical calls (including adjustment checks),
+  source failures, refusal-code counts and explicitly shadow-only HTTP attempts, followed by daily
+  comparison counts and the twenty bounded recent results. Evidence includes both anchors, total
+  differences and compared dates, exact integer-fen values and a truncation warning. Daily counter
+  dates are UTC; bar dates are labelled in the instrument timezone. Copy states that sampling is
+  opportunistic and agreement never grants ledger admission. Missing/damaged telemetry shows a
+  warning or no-record message, not fabricated zero tables. Locale keys cover all three languages;
+  Traditional Chinese is regenerated through the existing OpenCC workflow.
+- The new backend/UI tests failed before implementation. Controls cover no-record versus corruption,
+  preserved damaged input, genuine retained state, route permissions, shadow-only changes without
+  benchmark/evaluator changes, no-op saves, unavailable/partial telemetry, anchors, exact-fen values,
+  a recorded zero versus a missing value, and unhidden truncation. Independent review found no
+  actionable issue. Full Go/SQLite/Postgres passed (app 55.845 s), build/vet/staticcheck passed,
+  three targeted admin/fallback race repetitions passed (14.218 s), and all 122 frontend files /
+  1022 tests, typecheck and production SPA build passed. Final focused locale/UI checks were repeated
+  after clarifying the trading-date header; final complete-branch CI remains a separate gate.
+- An isolated synthetic preview exercised the actual embedded SPA and administrator save endpoint:
+  off to shadow to off, including keyboard selection. The evaluator remained off throughout, verified
+  from the preview database. Desktop dark-mode diagnostics and modal layouts were inspected; no
+  responsive breakpoint, live candidate result or production acceptance is claimed. The temporary
+  browser and server were closed. No production, live vendor, Apps, schema or source grant changed.
+- P25 is still in progress. Shipped Sina comparison-only admission, end-to-end grant guards and final
+  full-branch review/CI remain before submission. Back out by reverting these admin/UI changes;
+  diagnostic evidence stays in the existing meta keys and no ledger repair is needed.
+
+### P25 shipped comparison grant and final local review (2026-10-22)
+
+- Added Sina's explicit Shanghai/Shenzhen `settled_shadow` grant and registered the bounded range
+  adapter only after comparator, runtime, persisted diagnostics and administrator controls were in
+  place. Its cash-dividend/kind flags remain false, `settled` remains absent, and public display-range
+  grants do not expand. Tencent remains the only Tier 1 writer; Beijing, overseas and Yahoo shadow
+  admission remain absent. Default fallback remains off. The quote panel now truthfully declares
+  Sina as its enabled comparison peer. P24 capture now selects Sina's bounded adapter and retains
+  any coverage/coherence failure as failed evidence; it grants nothing and still writes no database.
+- Grant tests failed before wiring and passed afterward. The market matrix rejects alternate writers
+  even when Tencent is disabled, with no vendor call. A real registered Sina adapter runs captured
+  snapshot/history bytes through the pass-local transport budget, shared comparator and durable
+  result path: four accepted dates, both anchors, two measured HTTP requests, match and one-fen
+  mismatch, no ledger or health changes. No global vendor client is replaced. Further guards prove
+  mode/order/primary revocation between samples, aborted-pass suppression, unique two-body sampling
+  and copied primary buffers. These are implementation controls, not new live market measurements.
+- Independent branch-wide review found no admission or P24 integration defect, but one combined
+  SQLite race run exposed fallback-save `SQLITE_BUSY` errors. Isolated repeats and the initial full
+  local race run were green; the failing combined run was still treated as a blocker. A deterministic
+  700 ms held-writer regression reproduced premature failure at 0.36 s with the old six-attempt
+  retry window. The writer now retries complete rolled-back transactions within a five-second total
+  context bound, honoring any earlier caller deadline, with capped exponential jitter. Tests retain
+  all original concurrency/audit assertions and additionally prove exactly one audit after release
+  and no persisted transition after caller timeout. Five targeted race repetitions passed (14.612 s),
+  and the previously failing independent combined suite passed (20.308 s). Follow-up review closed
+  the finding and reported no remaining actionable issue.
+- Final full Go/SQLite/Postgres after hardening passed (app 37.463 s), build/vet/staticcheck passed.
+  The earlier complete runtime/diagnostic/admission race suite passed three repetitions (75.101 s);
+  all 122 frontend files / 1022 tests and typecheck passed on this unchanged frontend. Production
+  SPA build is repeated before submission. The runbook documents controls, budgets, neutral refusals,
+  retention, unavailable telemetry, immutable ledger handling and rollback; ADR 0041 records the
+  actual comparison-only grant. No source, baseline schema, production, Dify, Apps or release action
+  outside the described local implementation occurred.
+- Local P25 implementation/review is complete, not its merge or rollout gates. Exact-head full CI,
+  current Apps merge previews and final PR review remain before merge. Revert the implementation to
+  stop runtime comparisons; existing meta diagnostics are ignored by an older build. No ledger
+  repair is needed and comparison agreement never authorizes Tier 2 writes.
+
+### P25 merge and P37 current-main integration (2026-10-22)
+
+- P25 #155 merged as `402a0fa04c493096130d5f26ab9dfbbf693ca14b` after independent branch-wide
+  review and exact-head validation at `f95ba872d523c89c4e4c4de4d7198e2d5ffeae32`. Full PR CI
+  `39897457304` and CodeQL `39897453146` passed. The scoped race job completed successfully;
+  main-only full-race shards and release cross-compilation were skipped by policy, not passed.
+  Read-only merge previews against Apps PR 141 head `b4741355118c28d95dcf3c096115963ce5936f01`
+  and PR 142 head `c4402084f245d957e32d758339f1053853307664` were textually clean. Neither
+  Apps branch changed, and combined runtime acceptance was not claimed. Final local embedded-SPA
+  inspection declared Tencent as the sole writer and Sina as the comparison-only peer; evaluation
+  and comparison remained off, and the isolated preview server/browser were stopped.
+- Resumed P37 #151 in its existing clean calendar worktree, preserving its prior implementation
+  and tests. Merged current main `402a0fa0`; only the execution log conflicted. Both historical
+  sections are retained, and current progress now reflects actual merges and remaining gates.
+  DOMPurify 3.4.17 is included from the owner-approved #138 merge, without a duplicate dependency
+  change or audit bypass. Complete current-base validation and independent re-review are next.
+
+- Current-base full Go/SQLite/Postgres passed (app 92.973 s); build, vet and staticcheck passed.
+  Three targeted projection/read-isolation race repetitions passed (2.746 s). Web typecheck and
+  all 122 test files / 1023 tests passed. The production dependency audit has zero moderate/high/
+  critical findings and five existing low-severity KaTeX/transitive findings; no audit bypass was
+  used. SPA build and serialized embed build are checked before committing the integration.
+  The SSE 2026 annual notice and current official closure listing were re-read: all seven table
+  spans match the notice, while no verified 2027 notice was found in that listing. Unknown years
+  therefore remain deliberately absent rather than inventing next-year closure data. Independent
+  current-base review and exact-head PR CI remain required before merge.
+
+### P37 receipt-consistent frozen baseline hardening (2026-10-22)
+
+- Current-base adversarial review found another qualifier edge: a frozen open S0 within the
+  generated session window could be preserved while contradicting receipt-derived S0. Receipt
+  `2026-09-17T16:00:00+08:00` with frozen `2026-09-16` incorrectly claimed an expected d5 date.
+  New earlier/same-day-after-close/later frozen-date controls reproduced the defect before repair.
+  Qualification now additionally requires that the exchange-schedule `predS0` reproduce frozen S0;
+  otherwise it retains the existing unqualified weekday fallback without changing stored data.
+- Every valid receipt/holiday fixture now also supplies its correct frozen S0 and requires the
+  identical qualified schedule, preventing a blanket frozen-baseline refusal. Three targeted
+  local race repetitions passed (2.683 s); independent follow-up race repetitions passed (2.602 s)
+  and explicitly closed the finding with no further actionable issue. Final full Go/Postgres
+  regression is repeated after the repair; unchanged frontend validation remains recorded above.

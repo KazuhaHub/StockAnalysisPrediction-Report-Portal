@@ -2028,7 +2028,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do."
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound."
           }
         },
         "responses": {
@@ -2099,7 +2099,7 @@
         "x-i18n": {
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
-            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required."
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound."
           }
         },
         "responses": {

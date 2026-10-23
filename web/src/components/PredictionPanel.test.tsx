@@ -45,6 +45,14 @@ function show(sets: PredictionSet[], extra: Partial<React.ComponentProps<typeof 
 }
 
 describe('PredictionPanel', () => {
+  it('qualifies only calendar-backed projections as expected', () => {
+    show([{ ...accepted, marks: [
+      { checkpoint: 'd20', status: 'pending', phase: 'waiting', not_before: '2026-10-26', expected: true },
+      { checkpoint: 'd120', status: 'pending', phase: 'waiting', not_before: '2027-03-15' },
+    ] }])
+    expect(screen.getAllByText('forecast.phase.expected')).toHaveLength(1)
+    expect(screen.getAllByText('forecast.phase.on_or_after')).toHaveLength(1)
+  })
   it('renders nothing when the report has no accepted set', () => {
     const { container } = show([{ ...accepted, state: 'absent' }])
     expect(container.firstChild).toBeNull()

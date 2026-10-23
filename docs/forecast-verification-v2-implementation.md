@@ -2358,7 +2358,11 @@ missing from the table degrades to the weekday "on or after" projection. Settlem
 **Tests.** `TestProjectionMatchesKnownCalendars` (the demo's 2026-09-17 report projects d20 = 2026-10-26 and d60 =
 2026-12-21, BI); `TestMissingYearDegradesToOnOrAfter` (FC); `TestSettlementNeverReadsTheTable` (source scan, FC).
 
-### 8.8 P23 `feat/quote-ledger-capability` — Tier 1 on the shared source policy, and ADR 0038 (V9)
+### 8.8 P23 `feat/quote-ledger-capability` — Tier 1 on the shared source policy, and ADR 0041 (V9)
+
+The source-policy ADR is [0041](adr/0041-ledger-grade-market-data.md), renumbered from the
+baseline plan's 0038 to avoid the notifications ADR. Apps also reserves 0040; neither is changed
+by this work. Recheck current identifiers before adding any later ADR or migration.
 
 - Two new intervals: `settled` (ledger-grade daily bars that may be written) and `settled_shadow` (compared, never
   written), each granted only explicitly (a `servesExplicit` that ignores the empty-capability wildcard of
@@ -2378,7 +2382,7 @@ missing from the table degrades to the weekday "on or after" projection. Settlem
 - Order saves are audited (`quote.order`); the UI confirms before a save that removes the ledger's primary.
   `GET /api/admin/quote` (`routes.go:401`) adds `settled`, `settledShadow`, `cashDividends`, `reportsKind`,
   `ledgerChain`, `ledgerPrimary`, `ledgerShadowPeer`, `ledgerHealth`.
-- ADR 0038 in the same PR (§14).
+- ADR 0041 in the same PR (§14).
 
 **Tests.** `TestSettledRequiresAnExplicitGrant` (FC); `TestLedgerChainFollowsOperatorOrder` (Tencent removed → walk
 returns `no_source`; a panicking stub is never called — FC); `TestLedgerFetchNeverCaches` (FC); `TestReadinessItemSixNeedsALedgerChain` (empty chain → 409 `forecast_not_ready`
@@ -2398,8 +2402,15 @@ naming `ledger_chain`; restored → mode `1` allowed again, FC);
   tick, compares OHLC to the fen, date sets and both anchors, persists results in `forecast_state_shadow` and
   `forecast_state_calls`, and never touches ledger tables. `forecast_fallback` ∈ {`off`, `shadow`}; `on` → 400
   `forecast_bad_fallback` until Tier 2. Tests: `TestSinaRangeFiltersByRowDate`, `TestSinaKlineMustAgreeWithItsSnapshot`,
-  `TestShadowNeverWritesTheLedger` (≤ 2 extra calls per tick; ledger rows identical to an `off` run — FC),
+  `TestShadowNeverWritesTheLedger` (≤ 2 extra source reads and ≤ 4 HTTP request attempts per tick, including
+  redirects; ledger rows identical to an `off` run — FC),
   `TestFallbackModesTier1` (FC).
+
+  Counting clarification (2026-10-22, owner delegated the choice): one Sina source read comprises a snapshot
+  request and a kline request. The two-read comparison limit is independent of the four-request HTTP budget;
+  redirects consume the latter and may make a comparison unavailable, never silently extend it. Retain both
+  counters. Run comparisons after the primary ledger work with a separate bounded deadline so a shadow outage
+  cannot spend the primary evaluation deadline. This clarifies the unit, not fallback-writing admission.
 
 ---
 
@@ -2720,9 +2731,9 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
 | Document | Change | PR |
 |---|---|---|
 | **ADR 0037 (new) — Forecast verification operations** | The definition repair (code brought to ADR 0029 §4 and design §9.4); not-due is not a refusal; finality only after mark-specific attempts (V26); the terminal baseline; the heal (and why the plan's "not due" check was dropped); the ledger start (membership only) and test runs at ingest; benchmark governance with the allowlist including `sh000906` and the CSI 800 schedule; the bounded `unrecorded`; the restore rules of §3.3; dry mode, the readiness list and the per-benchmark dry-run gate; heartbeat, watchdog, health route, alert channels (Email + Slack) and SLOs; the single-connection transaction rule; the escapes F01, F03, F06, F10, F14 with their causes. | P11 |
-| **ADR 0038 (new) — Ledger-grade market data on the shared source policy** | Amends ADR 0029 D9 and §6: the evaluator walks the operator's chain restricted to explicit `settled` grants; one writer in Tier 1, no fallback writes for scored marks (V9); the candidate-source table; the separate evidence chain; Tier 2 entry criteria and migration `0007`. Corrects ADR 0029 §7 (a mark's `bench_code` is the frozen intent). Records at ADR 0028 §1 that stored closes are single-vendor, from an unlicensed public endpoint, integrity-checked, not corroborated. | P23 |
+| **[ADR 0041](adr/0041-ledger-grade-market-data.md) — Ledger-grade market data on the shared source policy** | Renumbered from the baseline plan's 0038. Amends ADR 0029 D9 and §6: the evaluator walks the operator's chain restricted to explicit `settled` grants; one writer in Tier 1, no fallback writes for scored marks (V9); the candidate-source table; the separate evidence chain; Tier 2 entry criteria and proposed step `0007`, still requiring owner approval. A mark's `bench_code` remains frozen intent. Records at ADR 0028 §1 that stored closes are single-vendor, from an unlicensed public endpoint, integrity-checked, not corroborated. | P23 |
 | **ADR 0039 (new) — Forecast verification for readers** | The three-way OU scope, Google Workspace style inheritance (a child OU inherits its parent's setting and may override it), Default `none`, admins `all`; frozen attribution and the owner token for every run, with its **one sanctioned exception: deleting an OU re-attributes that OU's sets to its parent (a root's to the Default OU) in the delete transaction, audited with counts, so no set references a deleted id** (replaces the 409 guard); re-parenting follows the live tree; the external protections; the access matrix (§10); compute governance; the reading-page integration and the stage switch; edition rules; the disclaimer. Supersedes design D6; amends ADR 0029 §5's statistics bullet. | P22 |
-| **ADR 0029 (amend in place, pointing to 0037–0039)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; the bridge token carries its user; statistics access per 0039. §6: see 0038; the refusal vocabulary and its two classes; dry mode; finality per V26 (also corrects `fetchTencentRange` to `quote.go:1588`). §7: note on mark `bench_code`. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: the qfq fallback is implemented, detection-only; the corrected limit backstop. §12: new rows D10 onward — V3 (ledger start), V6b, V8 + CSI 800, V9, the access model (replacing V10/V11/V13d), V12/V14, V13, V15, V24, V25, V26. | P11 (R1 rows), P22 (access rows), P23 (V9) |
+| **ADR 0029 (amend in place, pointing to 0037, 0039 and 0041)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; the bridge token carries its user; statistics access per 0039. §6: see 0041 for the uncached policy-governed ledger walk; refusal classes, dry mode and finality remain per V26/0037. §7: mark `bench_code` is frozen intent. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: detection-only qfq and the corrected limit backstop. §12: approved V3, V6b, V8, V9, access-model, V12–V15 and V24–V26 amendments. | P11 (R1 rows), P22 (access rows), P23 (V9) |
 | ADR 0022 | R1 amended for the owner token on every run and the restricted-only `g:` principal (§11.3); P30's reader-side rule. | P39b, P30 |
 | ADR 0024 | Editions and forecast sets (C17); the restricted-only OU principal (P30). | P18, P30 |
 | ADR 0028 | Note at §1 (single-vendor stored closes) and at §3 (the detection-only qfq exception now exists). | P23, P8 |

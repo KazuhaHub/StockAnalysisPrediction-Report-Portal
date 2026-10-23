@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Card, InputNumber, Space, Switch, Table, Tag, Typography } from 'antd'
 import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -7,6 +7,7 @@ import { api, errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
 import StickyActionBar from '../../components/StickyActionBar'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
+import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -67,6 +68,10 @@ type QuoteAdminSource = {
   lastError: string
   lastErrorAt: string
   consecutiveFailures: number
+  settled?: string[]
+  settledShadow?: string[]
+  cashDividends?: boolean
+  reportsKind?: boolean
 }
 
 type QuoteAdminState = {
@@ -83,6 +88,10 @@ type QuoteAdminState = {
   homeCards: boolean
   /** Whether visible quote surfaces follow the server's session-aware refresh advice. */
   autoRefresh: boolean
+  ledgerChain?: string[]
+  ledgerPrimary?: string
+  ledgerShadowPeer?: string
+  ledgerHealth?: QuoteLedgerHealth[]
 }
 
 // Go's time.Time has no empty form on the wire: a source that has never answered arrives as the zero
@@ -145,7 +154,12 @@ function fmtBytes(n: number): string {
 
 export default function QuoteSourcesPage() {
   const { t } = useTranslation()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
+  const [ledger, setLedger] = useState<QuoteLedgerState | null>(null)
+  const [saving, setSaving] = useState(false)
+  const savePending = useRef(false)
+  const active = useRef(true)
+  const cancelConfirmation = useRef<(() => void) | null>(null)
 
   const [rows, setRows] = useState<QuoteAdminSource[]>([])
   const [cacheEntries, setCacheEntries] = useState(0)
@@ -171,6 +185,12 @@ export default function QuoteSourcesPage() {
   const [loadErr, setLoadErr] = useState('')
 
   const apply = (st: QuoteAdminState) => {
+    setLedger(typeof st.ledgerPrimary === 'string' && Array.isArray(st.ledgerChain) ? {
+      ledgerPrimary: st.ledgerPrimary,
+      ledgerChain: st.ledgerChain,
+      ledgerShadowPeer: st.ledgerShadowPeer,
+      ledgerHealth: Array.isArray(st.ledgerHealth) ? st.ledgerHealth : undefined,
+    } : null)
     // Sorted by the server's own position field rather than trusted as it arrives. The failover
     // order IS the setting being edited here, while the health half of each row comes from
     // snapshotHealth, which walks a Go map and sorts it by source NAME — so a page that read the
@@ -217,11 +237,17 @@ export default function QuoteSourcesPage() {
   }
 
   useEffect(() => {
+    active.current = true
     load()
+    return () => {
+      active.current = false
+      cancelConfirmation.current?.()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const save = async () => {
+    if (savePending.current) return
     // One field carries both the order and the on/off flags because one SETTING does:
     // quote_source_order is a comma list, and a source missing from it is disabled. Sending the
     // enabled sources in display order is therefore the whole of the writer.
@@ -257,7 +283,24 @@ export default function QuoteSourcesPage() {
     }
     if (homeCardsKnown) body.homeCards = homeCards
     if (autoRefreshKnown) body.autoRefresh = autoRefresh
+    savePending.current = true
     try {
+      if (ledger?.ledgerPrimary && !rows.some((r) => r.enabled && r.source === ledger.ledgerPrimary)) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          const confirmation = modal.confirm({
+            title: t('quoteAdmin.ledgerRemoveTitle'),
+            content: t('quoteAdmin.ledgerRemoveBody', { source: sourceLabel(ledger.ledgerPrimary) }),
+            okText: t('quoteAdmin.ledgerRemoveConfirm'),
+            cancelText: t('common.cancel'),
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          })
+          cancelConfirmation.current = () => { confirmation.destroy(); resolve(false) }
+        })
+        cancelConfirmation.current = null
+        if (!confirmed || !active.current) return
+      }
+      setSaving(true)
       const st = await api.post<QuoteAdminState>('/api/admin/quote', body)
       message.success(t('common.saved'))
       // The server CLAMPS both TTLs to their floors, so the value now in force is the one in the
@@ -268,6 +311,9 @@ export default function QuoteSourcesPage() {
       else await load()
     } catch (e) {
       message.error(errText(e, t))
+    } finally {
+      savePending.current = false
+      if (active.current) setSaving(false)
     }
   }
 
@@ -411,6 +457,11 @@ export default function QuoteSourcesPage() {
               sort by either. The label is the range strip's own 5日 — the reader and the operator
               are looking at the same button. */}
           {capLine(t('quote.range.5d'), r.intraday5d, 'quote-source-intraday5d')}
+          {Array.isArray(r.settled) ? capLine(t('quoteAdmin.ledgerSettled'), r.settled, 'quote-source-settled') : null}
+          {Array.isArray(r.settledShadow) ? capLine(t('quoteAdmin.ledgerSettledShadow'), r.settledShadow, 'quote-source-settled-shadow') : null}
+          {typeof r.cashDividends === 'boolean' && typeof r.reportsKind === 'boolean' ? (
+            <Typography.Text type="secondary">{t('quoteAdmin.ledgerEvidence', { cash: t(r.cashDividends ? 'quoteAdmin.ledgerYes' : 'quoteAdmin.ledgerNo'), kind: t(r.reportsKind ? 'quoteAdmin.ledgerYes' : 'quoteAdmin.ledgerNo') })}</Typography.Text>
+          ) : null}
         </Space>
       ),
     },
@@ -536,6 +587,7 @@ export default function QuoteSourcesPage() {
           </div>
         </Card>
 
+        {ledger ? <QuoteLedgerStatus state={ledger} sourceLabel={sourceLabel} stamp={stampOrNever} /> : null}
         <Card title={t('quoteAdmin.cache')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {row(
@@ -637,7 +689,7 @@ export default function QuoteSourcesPage() {
             TTLs and both quote switches, so a Save button inside the cache card would be a button
             that saves more than the card it sits in says it does. */}
         <StickyActionBar>
-          <Button type="primary" onClick={save}>
+          <Button type="primary" onClick={save} loading={saving} aria-label={t('common.save')}>
             {t('common.save')}
           </Button>
         </StickyActionBar>
