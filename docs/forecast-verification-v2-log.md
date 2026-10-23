@@ -222,6 +222,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
   #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
   PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
+  P23 #152 is merged at `08b1c1a0` after full exact-head validation.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
@@ -230,17 +231,18 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
-  Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
+  P23 `feat/quote-ledger-capability`, based directly on main, implemented explicit
   capability isolation, operator-order selection, uncached walk with isolated health/per-pass
   breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
   reviewed, along with admin source diagnostics, atomic source-order auditing, primary-removal
   confirmation, source-panel frontend integration, readiness item 6 and daily no-source alerts.
   ADR 0041 records V9, renumbered to avoid Apps' 0038/0040. Full local Go/Postgres, frontend and
   targeted race checks passed; the final branch-wide review and exact-head PR CI remain gates.
-  P23 is now draft PR #152. Final branch-wide review found no confirmed actionable issue;
-  exact-head full CI and browser verification remain release validation, not a deployment grant.
-- **Next step.** Verify P23 #152 exact-head SQLite/Postgres CI
-  and dependency audits, then proceed to P24/P25 without admitting fallback writes. Resolve the
+  Final branch-wide review, full exact-head CI and local browser verification passed before
+  merging #152. Current local work is P24 `feat/cli-quote-probe`, started from `08b1c1a0`;
+  its pure comparison foundation is implemented, with capture/manifest/replay still outstanding.
+- **Next step.** Complete P24's database-free CLI capture/manifest/replay, then P25's bounded shadow
+  comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -964,12 +966,35 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - The owner explicitly authorized validating and merging existing PR #138. Its original go-test
   failure was the stale Go1.26.9 baseline's GO-2026-6809 finding, not the dependency patch.
   Merged main into that PR without rewriting history; the current-base diff remained only the
-  manifest and lockfile update from DOMPurify3.4.16 to3.4.17. Independent review found no blockers.
-- At dependency head `d7d7ff33`, local typecheck, 120 Vitest files /1006 tests (111.45 s), SPA build
-  (1.20 s), Go build/vet/staticcheck and full SQLite/Postgres Go tests (app46.676 s) passed. The
+  manifest and lockfile update from DOMPurify 3.4.16 to 3.4.17. Independent review found no blockers.
+- At dependency head `d7d7ff33`, local typecheck, 120 Vitest files / 1006 tests (111.45 s), SPA build
+  (1.20 s), Go build/vet/staticcheck and full SQLite/Postgres Go tests (app 46.676 s) passed. The
   production audit has zero critical/high/moderate findings; five pre-existing low findings remain.
-  Exact-head CI run39882851649, all CodeQL checks and Docker smoke/E2E passed before squash merge
+  Exact-head CI run 39882851649, all CodeQL checks and Docker smoke/E2E passed before squash merge
   to main at `8ab51334`. No attribution trailer was included in the merge message.
 - Integrated that main update into P23 at `21725f0b`; combined local regression and new exact-head
   CI are pending. P37 needs the same dependency integration/revalidation. No Apps branch,
   production setting, deployment or database shape was changed.
+
+### P23 merge and P24 comparator foundation (2026-10-22)
+
+- P23 head `a829788c` passed all exact-head CI checks (test run `39883951228` plus CodeQL),
+  including Docker after the dependency fix. Combined local Go/Postgres tests passed (app 86.572 s),
+  as did typecheck, 121 Vitest files / 1017 tests (116.75 s), SPA build (709 ms), serialized Go build,
+  vet and staticcheck. The final read-only Apps merge previews were clean (`2624cfbf`, `db035a20`)
+  against unchanged verified heads. No branch of that separate work was changed or merged.
+- Re-read the final diff and retained the independent review/guard evidence in PR #152's body,
+  then squash-merged it to main at `08b1c1a0`. No production rollout or evaluator enablement followed.
+- Started `feat/cli-quote-probe` from that new main. Added a pure, I/O-free comparison foundation
+  for P24 replay and later P25 shadow use. It compares exact integer-fen OHLC and the union of dates,
+  identifies either anchor's mismatches, preserves differing prices and returns deterministic
+  date/field ordering without mutating either body. Agreement is not source admission.
+- Empty, duplicate-date, malformed-date or invalid-price evidence is not agreement. Both primary
+  anchors must exist; a missing candidate date remains an explicit mismatch rather than an ignored
+  row. Volume is deliberately not a price comparison. Initial tests failed before implementation;
+  a fixture-ordering error was corrected with an explicit OHLC-ordered helper. Three targeted
+  race repetitions passed (1.860 s), including non-anchor OHLC, both anchors and exact-fen values.
+- This is a foundation checkpoint, not P24 completion: command dispatch, raw captures, manifest
+  safety, fixed-panel replay and candidate-source controls remain. It adds no schema, settings,
+  network calls or runtime shadow execution. Independent review and full branch validation remain
+  required before submitting P24.
