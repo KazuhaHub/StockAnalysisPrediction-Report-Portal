@@ -865,7 +865,7 @@ def forecast_access_checks():
     query = urllib.parse.urlencode({"label": label, "checkpoint": "d5", "population": "all"})
     sc, drawer = fcown.req("GET", "/api/forecast/groups/members?" + query)
     check("G", "Own: the members drawer contains exactly the attributed subtree",
-          sc == 200 and {m.get("set_id") for m in drawer.get("members", [])} == own_sets,
+          sc == 200 and {m.get("set_id") for m in drawer.get("members", [])} == set(own_sets),
           f"{sc} label={label} {short(drawer)}")
     sc, card = fcown.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
     check("G", "Own: the reading page's predictions answer 200 for any readable report, with no membership badge "
