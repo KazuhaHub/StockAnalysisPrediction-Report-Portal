@@ -214,7 +214,12 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           </Typography.Text>
         )}
         {cell && cell.n === undefined && cell.min_n_met && (
-          <Typography.Text type="secondary">{t('forecast.cell.min_n_met')}</Typography.Text>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography.Text type="secondary">{t('forecast.cell.min_n_met')}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('forecast.cell.min_n_met_hint')}
+            </Typography.Text>
+          </div>
         )}
 
         <Table

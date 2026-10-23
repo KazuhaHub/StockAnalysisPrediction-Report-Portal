@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useId, type CSSProperties } from 'react'
 import { Tag, Typography, theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -10,7 +10,7 @@ import type {
   ForecastMetric,
   ForecastMode,
 } from '../../api/types'
-import { cellDisplay } from '../../lib/forecast'
+import { cellDisplay, gateText } from '../../lib/forecast'
 import { forecastPalette } from '../../lib/forecastPresentation'
 import ForecastLegend from './ForecastLegend'
 
@@ -40,6 +40,8 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const palette = forecastPalette(token)
+  // The gate flag's explanation is drawn once, as text, and each flagged cell points at it.
+  const gateHintId = useId()
 
   const box: CSSProperties = {
     borderRadius: 6,
@@ -112,6 +114,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
     return (
       <button
         type="button"
+        aria-describedby={d.gate ? gateHintId : undefined}
         onClick={() => onOpen(g, cp)}
         style={{
           ...box,
@@ -137,7 +140,6 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
           // The cell's own assurance, drawn once. It is not the metric's sample size: that
           // denominator is a smaller subset which has no n >= 30 minimum of its own.
           <span
-            title={t('forecast.cell.min_n_met_hint')}
             style={{
               alignSelf: 'flex-start',
               fontSize: 11,
@@ -214,6 +216,12 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
     )
   }
 
+  // A flag stands where a count would have been, so it needs its meaning on the page: the badge
+  // alone says "n >= 30" and nothing about which sample that is, and a hover title is not reachable
+  // from a keyboard or a phone.
+  const showsGate = resp.groups.some((g) =>
+    Object.values(g.cells ?? {}).some((c) => c?.state === 'mature' && gateText(c, t) !== ''),
+  )
   const rows = [...resp.groups].reverse()
   // The column exists only when the server sent coverage for at least one group.
   const showCoverage = resp.groups.some((g) => g.coverage)
@@ -243,6 +251,11 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Typography.Text>
       <ForecastLegend />
+      {showsGate && (
+        <Typography.Text id={gateHintId} type="secondary" style={{ fontSize: 12 }}>
+          {t('forecast.cell.min_n_met_hint')}
+        </Typography.Text>
+      )}
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
         <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + (showCoverage ? 224 : 0) }}>
           <thead style={{ display: 'block' }}>

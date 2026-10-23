@@ -169,6 +169,18 @@ describe('ForecastCellDrawer without counts', () => {
     expect(document.body.textContent).not.toContain('"members":0')
   })
 
+  it('says in the drawer that the flag belongs to the cell and a metric may rest on fewer', async () => {
+    show(page([member(1, 'agree')]), { cell: gated })
+    await screen.findByText('600001')
+    expect(screen.getByText('forecast.cell.min_n_met_hint')).toBeTruthy()
+  })
+
+  it('has no gate explanation for a cell that carries its count', async () => {
+    show(page([member(1, 'agree')]), { cell: { ...gated, min_n_met: undefined, n: 42 } })
+    await screen.findByText('600001')
+    expect(screen.queryByText('forecast.cell.min_n_met_hint')).toBeNull()
+  })
+
   it('puts the flag only where the denominator is the cell\'s own n, and a dash on every other metric', async () => {
     // The hit, IC, fill, band and calibration denominators are smaller subsets with no minimum of
     // their own, so "n >= 30" beside them would be a statement the server never made.

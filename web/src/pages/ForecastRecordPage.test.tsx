@@ -609,4 +609,18 @@ describe('ForecastRecordPage accessibility', () => {
     const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
     expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
+
+  // The two shapes the default fixture does not cover: the gate hint that flagged cells point at, and
+  // the note above a matrix with nothing to show yet.
+  it.each([
+    ['an external all response', () => withheld(), { scope: 'all', external: true } as Me['forecast'], 'forecast.cell.min_n_met_hint'],
+    ['a record with no result yet', () => record({}, open), { scope: 'all', external: false } as Me['forecast'], 'forecast.record.empty'],
+  ])('has no axe violations for %s', async (_name, response, hint, expected) => {
+    auth.value = { user: 'reader', admin: false, forecast: hint }
+    apiMock.get.mockResolvedValue(response())
+    const { container } = show()
+    await screen.findByText(expected)
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+  })
 })

@@ -176,10 +176,33 @@ describe('ForecastMatrix', () => {
     it('states the publication gate once per cell, as its own badge, and not inside the metric line', () => {
       show(withheld({ ...empty, d5: gated }))
       const badge = screen.getByText('forecast.cell.min_n_met')
-      expect(badge.getAttribute('title')).toBe('forecast.cell.min_n_met_hint')
+      // The explanation is visible text and not a hover title, which a keyboard or a phone never sees.
+      expect(badge.hasAttribute('title')).toBe(false)
       expect(screen.getAllByText('forecast.cell.min_n_met')).toHaveLength(1)
       // The line under the value is the corrected value alone: no sample is claimed for the metric.
       expect(screen.getByText('q=0.041')).toBeTruthy()
+    })
+
+    it('explains the gate in one visible line, tied to every flagged cell', () => {
+      show(withheld({ ...empty, d5: gated, d20: gated, d60: { ...gated, spread_bp: -200 } }))
+      const hint = screen.getByText('forecast.cell.min_n_met_hint')
+      expect(hint.tagName).not.toBe('TITLE')
+      expect(hint.id).not.toBe('')
+      const buttons = screen.getAllByRole('button')
+      expect(buttons).toHaveLength(3)
+      for (const button of buttons) expect(button.getAttribute('aria-describedby')).toBe(hint.id)
+      expect(screen.getAllByText('forecast.cell.min_n_met_hint')).toHaveLength(1)
+    })
+
+    it('says nothing about the gate where every mature cell carries its count', () => {
+      show(resp({ ...empty, d5: mature }))
+      expect(screen.queryByText('forecast.cell.min_n_met_hint')).toBeNull()
+      expect(screen.getByRole('button').hasAttribute('aria-describedby')).toBe(false)
+    })
+
+    it('does not explain a gate that no cell shows', () => {
+      show(withheld({ ...empty, d5: { state: 'pending' } }))
+      expect(screen.queryByText('forecast.cell.min_n_met_hint')).toBeNull()
     })
 
     it.each(['ic', 'hit', 'fill'] as const)('never reads the cell gate as the %s sample size', (metric) => {
