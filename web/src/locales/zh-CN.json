@@ -900,6 +900,7 @@
   "forecast.metric.hit": "方向命中",
   "forecast.metric.hit.help": "预测涨跌空间绝对值 ≥ 5% 的标的中，超额收益方向与预测一致的占比；持平计为未命中。缺少超额收益的标的不参与检验，也不计入分母。",
   "forecast.disclaimer": "研究验证用途，不构成投资建议",
+  "forecast.csv.header.publication_gate": "发布门槛：n >= 30 标记属于整个单元格；其中单项指标所依据的样本可能是更小的子集。",
   "forecast.signal.positive": "显著正向结果",
   "forecast.signal.negative": "显著负向结果",
   "forecast.legend.title": "显著性图例",

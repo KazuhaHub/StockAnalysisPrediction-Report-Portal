@@ -159,6 +159,12 @@ export function checkpointKey(cp: ForecastCheckpoint): string {
 export interface ForecastCsvReader {
   population: string
   disclaimer: string
+  /**
+   * The sentence that says the n >= 30 flag belongs to the cell, in the reader's language. It is
+   * written only into an export that carries the flag. The `# key=` identifiers around it stay
+   * English: they are the file's vocabulary, not prose.
+   */
+  publicationGate: string
   /** External all readers must never export sample-size/count columns. */
   hideCounts: boolean
 }
@@ -181,7 +187,7 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, r
     for (const group of resp.groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
     // The flag is a fact about the cell, repeated on each of its metric rows. Say so in the file:
     // a hit rate or an IC rests on a smaller subset that has no minimum of its own.
-    if (volumeHidden) lines.push('# publication_gate=cell n >= 30; a metric may rest on a smaller subset')
+    if (volumeHidden) lines.push(`# publication_gate=${line(reader.publicationGate)}`)
   }
   const header: string[] = ['group', 'start', 'end', 'checkpoint', 'state', 'metric', 'value', 'null', 'p', 'q',
     volumeHidden ? 'publication_gate' : 'n']

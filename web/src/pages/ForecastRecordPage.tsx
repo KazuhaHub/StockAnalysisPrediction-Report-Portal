@@ -100,6 +100,7 @@ export default function ForecastRecordPage() {
       forecastCsv(data, new Date().toISOString(), {
         population,
         disclaimer: t('forecast.disclaimer'),
+        publicationGate: t('forecast.csv.header.publication_gate'),
         // An external reader with the all scope must never export volume. The export also follows
         // the response itself: a group without coverage means the server withheld it.
         hideCounts: external && scope === 'all',

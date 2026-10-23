@@ -558,6 +558,8 @@ describe('ForecastRecordPage export', () => {
     expect(header.join(',')).not.toMatch(/coverage/)
     expect(header).toContain('publication_gate')
     expect(text).toContain('n >= 30')
+    // The sentence that explains the flag is the reader's language, not a literal.
+    expect(text).toContain('# publication_gate=forecast.csv.header.publication_gate\n')
   })
 
   it('exports the sample size and coverage for an external reader of their own unit', async () => {

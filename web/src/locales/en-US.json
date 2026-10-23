@@ -900,6 +900,7 @@
   "forecast.metric.hit": "Directional hit",
   "forecast.metric.hit.help": "Among names with |upside| ≥ 5%, the share whose excess has the predicted sign; flat counts as a miss. Missing excess is untested and excluded from this denominator.",
   "forecast.disclaimer": "For research verification only. Not investment advice.",
+  "forecast.csv.header.publication_gate": "Publication gate: the n >= 30 flag belongs to the whole cell; an individual metric may rest on a smaller subset.",
   "forecast.signal.positive": "Positive significant result",
   "forecast.signal.negative": "Negative significant result",
   "forecast.legend.title": "Significance legend",

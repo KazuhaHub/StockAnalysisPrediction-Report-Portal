@@ -900,6 +900,7 @@
   "forecast.metric.hit": "方向命中",
   "forecast.metric.hit.help": "預測漲跌空間絕對值 ≥ 5% 的標的中，超額收益方向與預測一致的佔比；持平計為未命中。缺少超額收益的標的不參與檢驗，也不計入分母。",
   "forecast.disclaimer": "研究驗證用途，不構成投資建議",
+  "forecast.csv.header.publication_gate": "釋出門檻：n >= 30 標記屬於整個單元格；其中單項指標所依據的樣本可能是更小的子集。",
   "forecast.signal.positive": "顯著正向結果",
   "forecast.signal.negative": "顯著負向結果",
   "forecast.legend.title": "顯著性圖例",
