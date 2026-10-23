@@ -46,6 +46,7 @@ const StoragePage = lazyRetry(() => import('./pages/manage/StoragePage'))
 const AuditPage = lazyRetry(() => import('./pages/manage/AuditPage'))
 const QuoteSourcesPage = lazyRetry(() => import('./pages/manage/QuoteSourcesPage'))
 const ForecastPage = lazyRetry(() => import('./pages/manage/ForecastPage'))
+const ForecastRecordPage = lazyRetry(() => import('./pages/ForecastRecordPage'))
 const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
@@ -117,6 +118,10 @@ function AppRoutes() {
         <Route path="/stock/:symbol" element={<StockPage />} />
         <Route path="/run/:key" element={<RunPage />} />
         <Route path="/review" element={<ReviewPage />} />
+        {/* The forecast record is for readers the access model admits, not only administrators. The
+            page asks the reader routes and shows the server's refusal itself, so a stale hint ends in
+            a message rather than a redirect loop. */}
+        <Route path="/forecast" element={<ForecastRecordPage />} />
         {/* Writing a report by hand (ADR 0026). Both entrances land on one page: /report/new
             optionally carries ?from=<id> to seed the text from a report the author was reading,
             which still CREATES rather than modifies — a machine report is not editable at all. */}

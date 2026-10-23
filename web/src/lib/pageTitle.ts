@@ -49,6 +49,7 @@ const EXACT: Record<string, string> = {
   '/apps/quotes': 'nav.quotes',
   '/queue': 'nav.queue',
   '/chat': 'nav.chat',
+  '/forecast': 'nav.forecast_record',
   '/report/new': 'reportEditor.titleNew',
 }
 
