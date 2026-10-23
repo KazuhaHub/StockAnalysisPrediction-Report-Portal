@@ -58,6 +58,50 @@ describe('cellDisplay', () => {
   })
 })
 
+describe('cellDisplay for a reader who may not see counts', () => {
+  // An external reader with the all scope gets the gate's assurance instead of any count: a mature
+  // cell is "n >= 30", never "n=0" and never a number that would reveal the ledger's volume.
+  const gated: ForecastCell = {
+    state: 'mature',
+    min_n_met: true,
+    spread_bp: 310,
+    spread_p: 0.012,
+    spread_q: 0.041,
+    ic: 0.21,
+    ic_p: 0.02,
+    ic_q: 0.047,
+    hit: 0.61,
+    hit_null: 0.55,
+    hit_p: 0.18,
+    hit_q: 0.3,
+    fill: 0.33,
+    fill_ret_bp: -120,
+  }
+
+  it.each(['spread', 'ic', 'hit', 'fill'] as const)('shows the n >= 30 flag, not a count, on a %s metric', (metric) => {
+    const d = cellDisplay(gated, metric, 'month', t)
+    expect(d?.sub).toContain('forecast.cell.min_n_met')
+    expect(d?.sub).not.toContain('forecast.cell.n')
+    expect(d?.sub).not.toContain('"n":0')
+  })
+
+  it('shows the flag when the metric itself is absent and no count is available', () => {
+    const d = cellDisplay({ ...gated, hit: undefined }, 'hit', 'month', t)
+    expect(d?.value).toBe('—')
+    expect(d?.sub).toBe('forecast.cell.min_n_met')
+  })
+
+  it('states nothing about the sample rather than inventing a zero when neither a count nor the flag is present', () => {
+    const d = cellDisplay({ ...gated, min_n_met: undefined }, 'spread', 'month', t)
+    expect(d?.sub).toBe('q=0.041')
+  })
+
+  it('still prefers a real count when the reader is allowed one', () => {
+    const d = cellDisplay({ ...gated, n: 42, min_n_met: undefined }, 'spread', 'month', t)
+    expect(d?.sub).toContain('forecast.cell.n:{"n":42}')
+  })
+})
+
 describe('forecastCsv', () => {
   const resp: ForecastGroupsResponse = {
     ok: true,
@@ -115,21 +159,47 @@ describe('forecastCsv', () => {
     expect(csv).toContain('# population=Own unit forged header')
     expect(csv).toContain('# disclaimer=Research only')
     expect(csv).not.toContain('# unrecorded=')
-    expect(csv).toContain('n,mode,official,bench')
+    expect(csv).toContain('n,coverage_reports,coverage_member,mode,official,bench')
     const rows = csv.split('\n').filter((line) => line && !line.startsWith('#')).slice(1)
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) expect(row.endsWith(',custom,false,sh000852')).toBe(true)
-    expect(csv).toContain('0.041,42,custom,false,sh000852')
+    // An internal or own-scope reader keeps the sample size and the coverage of the population.
+    expect(csv).toContain('0.041,42,10,8,custom,false,sh000852')
+  })
+
+  it('carries the benchmark of every group in the header and on every row', () => {
+    const two = structuredClone(resp)
+    two.groups.push({ ...structuredClone(resp.groups[0]), label: '2026-01-12 – 2026-01-18', bench: 'sh000906' })
+    const csv = forecastCsv(two, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', hideCounts: false })
+    expect(csv).toContain('# benchmark=2026-01-05 – 2026-01-11:sh000852')
+    expect(csv).toContain('# benchmark=2026-01-12 – 2026-01-18:sh000906')
+    const rows = csv.split('\n').filter((line) => line && !line.startsWith('#')).slice(1)
+    expect(rows.some((row) => row.endsWith(',custom,false,sh000906'))).toBe(true)
+    for (const row of rows) expect(/,custom,false,sh000(852|906)$/.test(row)).toBe(true)
   })
 
   it('removes count columns even if a malformed external-all response contains them', () => {
     const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', hideCounts: true })
     const header = csv.split('\n').find((line) => line.startsWith('group,'))!
     expect(header.split(',')).not.toContain('n')
+    expect(header).not.toMatch(/coverage/)
     expect(header).toContain('publication_gate,mode,official,bench')
     expect(csv).not.toContain('0.041,42')
     expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
     expect(csv).not.toContain('# unrecorded=')
+  })
+
+  it('exports no volume at all for an external all reader even when the response lacks the coverage field', () => {
+    const hidden = structuredClone(resp)
+    for (const g of hidden.groups) delete g.coverage
+    delete hidden.unrecorded
+    // hideCounts false would be a caller bug; the missing coverage is the server's own statement
+    // that volume is withheld, and the export has to follow it.
+    const csv = forecastCsv(hidden, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', hideCounts: false })
+    const header = csv.split('\n').find((line) => line.startsWith('group,'))!
+    expect(header.split(',')).not.toContain('n')
+    expect(header).not.toMatch(/coverage/)
+    expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
   })
 
   it('never exports non-mature sample sizes for any reader population', () => {
