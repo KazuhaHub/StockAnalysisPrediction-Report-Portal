@@ -94,23 +94,37 @@ uncommitted snapshot and is insufficient.
 
 Existing global markers without ownership evidence remain visible to all but are hidden from own;
 there is no guessed historical backfill. This new table requires an explicit operator upgrade for
-existing supported databases, not automatic DDL at server startup. Fresh initialization, startup
-shape verification, dump/restore handling and rollback instructions must be delivered together
-before business routes adopt it. No released migration is edited and the frozen baseline stays
-unchanged. Approval of the schema is not authorization to change a production database.
+existing supported databases, not automatic DDL at server startup. The upgrade step must deliver,
+together with the table, fresh initialization, startup shape verification, membership in the
+dump/restore table set (so a restore replaces the evidence with the dump's rows instead of leaving
+rows keyed by OU ids the restored tree may reuse) and rollback instructions. The reader routes read
+the table only where it exists and fail closed where it does not, so they can be merged ahead of
+that step; no database has the table until the step ships, and the hold below stands until it
+does. No released migration is edited and the frozen baseline stays unchanged. Approval of the
+schema is not authorization to change a production database.
 
 The two reader routes read purge history through one view. The global markers still remove sets
 from every computation and decide cache identity, so no partial data from a month that retention
 has emptied is ever shown to anyone. What a population is *told* comes from the evidence: for an
 own reader, the range extension, the custom exclusion list, the purged groups and cells and the
 drawer's purged state use only the months whose evidence names the current subtree. All readers,
-the administrator aliases and external-all readers keep the global history unchanged. A month
-purged globally but not disclosed to an own reader has no group, and its drawer answers
-`label_not_found`. If the evidence table cannot be read, including before the explicit upgrade has
-created it, an own read answers `503 forecast_purge_history_unavailable` and never falls back to
-the global markers; reads that do not need evidence never touch the table. Retention and OU
-deletion do not yet write or transfer evidence, so the hold on releasing own-scoped reads stands
-until they do.
+the administrator aliases and external-all readers keep the global history unchanged.
+
+A month purged globally but not disclosed to an own reader must be indistinguishable from a month
+in which that reader simply holds no sets. The monthly record lists it as an ordinary group
+computed over the sets the site-wide filter left, which is none, and its drawer answers as any
+empty month in range does. Leaving the month out, or answering `label_not_found` for it, would
+turn a gap in an otherwise complete calendar into the very disclosure the owner refused. Two things
+keep the month honest. Its cells carry a cache identity derived from the marker, so a cell
+memoised before the purge (by another process this one has not heard from) never answers; and sets
+inside an undisclosed purged month do not count when the first month of an own calendar is chosen,
+so a set written after the purge cannot start the calendar and leave an empty leading month.
+Months before the reader's own first month are not found, exactly as any month before it.
+
+If the evidence table cannot be read, including before the explicit upgrade has created it, an own
+read answers `503 forecast_purge_history_unavailable` and never falls back to the global markers;
+reads that do not need evidence never touch the table. Retention and OU deletion do not yet write
+or transfer evidence, so the hold on releasing own-scoped reads stands until they do.
 
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
