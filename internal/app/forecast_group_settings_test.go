@@ -217,3 +217,37 @@ func TestForecastScopeInputRejectsNonStringsAndNormalizesDefault(t *testing.T) {
 		}
 	}
 }
+
+// The users list carries the OU editor, and it used to be unable to fail. It reads the tree and the
+// group list in two statements, so an OU created between them is in the list and not in the index.
+// That is a race to survive, not corruption to refuse: the OU is listed without forecast access, and
+// the editor hides a field the server did not resolve, so nothing is ever shown that was not read.
+func TestAdminGroupsListSurvivesAnOUCreatedBetweenTheReads(t *testing.T) {
+	s := routeTableServer(t)
+	parent := seedOU(t, s.st, 0, scopeAll)
+	ix, err := s.st.loadOUIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := seedOU(t, s.st, parent, nil)
+
+	groups := adminGroupsWithAccess(s.st.ListUserGroups(), ix)
+	seen := map[int64]map[string]any{}
+	for _, g := range groups {
+		seen[g["id"].(int64)] = g
+	}
+	if seen[late] == nil || seen[parent] == nil {
+		t.Fatalf("the list dropped an OU: %v", seen)
+	}
+	for _, field := range []string{"forecast_scope", "forecast_scope_effective", "forecast_scope_source"} {
+		if _, ok := seen[late][field]; ok {
+			t.Errorf("an OU the index never read carries %s: %v", field, seen[late])
+		}
+		if _, ok := seen[parent][field]; !ok {
+			t.Errorf("an indexed OU lost %s: %v", field, seen[parent])
+		}
+	}
+	if seen[parent]["forecast_scope_effective"] != scopeAll {
+		t.Errorf("indexed OU resolved to %v", seen[parent]["forecast_scope_effective"])
+	}
+}
