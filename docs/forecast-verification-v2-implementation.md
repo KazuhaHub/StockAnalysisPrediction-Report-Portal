@@ -503,7 +503,7 @@ adds its rows) asserts every row of this table on both drivers. FC.
 | meta | `forecast_alert_email_to`, `forecast_alert_slack_url` | From the dump. |
 | meta | `forecast_reader` | The lower of dump and live (`off` < `card` < `full`). |
 | meta | compute limits, `forecast_fallback`, shadow and call statistics, weekly viewer counts, `forecast_signals_<date>` counters | From the dump. |
-| column | `user_groups.forecast_scope` | From the dump; an older dump lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`. So a restore can only narrow access, never widen it. |
+| column | `user_groups.forecast_scope` | From the dump, verbatim. An older dump (before step `0006`) lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`, so that restore can only narrow access. A dump taken after step `0006` can be wider than the live database, so after any restore the operator compares `GET /api/admin/forecast/access` with the values saved beforehand (§12.3). `TestRestoreBringsOUScopesBackAsDumped` pins this. |
 | column | `prediction_sets.attributed_ou` | From the dump; an older dump lacks it and every set reads as unattributed (true for that dump). |
 | enum value | `prediction_sets.state = 'test'` | An older binary drops it from coverage (`forecastMembership`, `forecast_groups.go:115-157`); a display gap only. |
 | enum value | `prediction_sets.base_check = 'refused_final'` | An older binary reads a member with final refusals: the same meaning. |
@@ -2716,8 +2716,8 @@ Dify rejected undeclared inputs, revert P39b first.
 | Switching the evaluator on | — | §1.4 readiness list, all six items (item 6 `ledger_chain`) | Record the hand-checked closes in the dry-run gate; repair the source order if `ledger_chain` is red; then `1`. |
 | Scheduling a benchmark | — | the response's `effective_cohort` | CSI 800: must read `2026-11`. If the deploy slipped past 2026-10-31, use §1.2's contingency. |
 | An OU's members report "forecast missing" | — | `GET /api/admin/forecast/access` for that OU; then the day's `refused.<code>` counters | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
-| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20; for a release containing step `0009`, the explicit offline upgrade in [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md) first. |
-| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test, `GET /api/admin/forecast/access` | A restore never raises the mode or the stage (each becomes the lower of the dump and the live value; an unreadable stage counts as `off`; the stage change is audited `forecast.reader`), resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. |
+| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20; for a release containing step `0009`, the explicit offline upgrade first (the procedure document `forecast-purge-ownership-upgrade.md` ships with step `0009`). |
+| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test, `GET /api/admin/forecast/access` | A restore never raises the mode or the stage (each becomes the lower of the dump and the live value; an unreadable stage counts as `off`; the stage change is audited `forecast.reader`), resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. **OU scopes and attribution come back exactly as dumped and can widen access** (the audit log with them): save `GET /api/admin/forecast/access` before restoring, compare after, and set incident OUs back to `none` before readers return. |
 | December | — | the exchanges' closure notice | Update the projection table (P37). |
 | Reading-page incident | — | — | `forecast_reader=off` (immediate, audited). |
 | Record incident | — | — | Set the affected OUs to `none` (immediate, audited). |
@@ -2727,13 +2727,17 @@ Dify rejected undeclared inputs, revert P39b first.
 
 ## 13. Rollout and rollback per release
 
+The "Readiness list" of the Evaluator on row is all six items of §1.4 on the status card, including item 6,
+`ledger_chain` (`forecastReadiness` in `forecast_ops.go`): an enabled settlement chain whose primary carries both
+evidence capabilities. While it is red, mode `1` is refused (409 `forecast_not_ready`).
+
 | Release | Before deploy | Deploy and verify | Owner actions after deploy | Rollback |
 |---|---|---|---|---|
 | R1a-β1 | ADR 0027 backup; Q1 | Boot log shows the benchmark reconciliation result (expected: no-op) | Save the ledger start `2026-10-18T16:00:00Z`; schedule `sh000906` (response `effective_cohort: 2026-11`); confirm the unrecorded line reads 0 since 2026-10-19 | Code revert is safe for the database. A scheduled `next` is ignored by the older build: if reverted before November, apply §1.2's contingency. |
 | R1a-β2 | Backup; Q3 = 20 | Boot log and `forecast.repair` audit row show 20 healed marks | None (evaluator stays off) | Code revert (evaluator off). Healed rows stay `pending`, which the old build handles. |
 | R1b | Backup (step `0006` makes later binary rollback restore-only) | `TestMigration0006` green in CI; boot shows step `0006` recorded; Default OU reads `none` | Set mode `dry`; configure Email recipients and the Slack URL; send the test alert; record the dry-run check for `sh000852`; then mode `1` | Revert individual PRs (forward fix). Binary rollback below `0006` = restore the backup. |
 | P39b (its own Beta after R1b) | Preconditions §11.1 (P38, P39a, P30 deployed; Dify batch published) | §11.5 step 5 | — | Revert P39b (attributed sets stay). |
-| Evaluator on | Readiness list, all six items green on the status card, including item 6 `ledger_chain` (an enabled settlement chain with a primary carrying both evidence capabilities; `forecast_ops.go`) | Status card healthy; first d5 settles from history; `/healthz/forecast` 200 | Watch freshness for a week | Mode `dry` or `0` (immediate, audited). |
+| Evaluator on | Readiness list | Status card healthy; first d5 settles from history; `/healthz/forecast` 200 | Watch freshness for a week | Mode `dry` or `0` (immediate, audited). |
 | R2a | Backup; Q4 | All OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); or binary revert (no schema in R2a). |
 | R2b | Backup | P18 benchmark recorded | Seeded-preview review; flip `forecast_reader` to `full` per P20's rollout | `forecast_reader=card`/`off`; binary revert (no schema). |
 | R3 | Backup | `/api/admin/forecast/groups` → JSON 404 | — | Revert. |

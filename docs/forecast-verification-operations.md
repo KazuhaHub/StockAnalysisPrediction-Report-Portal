@@ -109,20 +109,17 @@ S0 close. Preview the candidate list on the page, then save once. It survives re
 
 ### Before a release
 
+A release that contains step `0009` (the owner-approved `prediction_purge_owners` table, which lets
+an `own` reader be shown only the purged months of their own OU subtree) is upgraded explicitly and
+offline before it starts. Read [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md)
+first. The document, the `schema-upgrade` command and the startup refusal belong to step `0009`: a
+checkout without that step has none of them. That document is the source of truth for the sequence,
+for which other steps (`0007`, `0008`) are pending in the same release, and for rolling back across
+the step, which is restore-only.
+
 Take the ADR 0027 backup. For R1a-β2 also record the heal predicate's count (Q3 = 20). A binary older
 than step `0006` refuses a database that records it: rolling back across the access schema is
 restore-only.
-
-A release that contains step `0009` (the owner-approved `prediction_purge_owners` table, which lets
-an `own` reader be shown only the purged months of their own OU subtree) needs the explicit offline
-upgrade in [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md) first. Normal
-startup refuses a database that lacks the step and never applies it: stop every portal instance and
-other writer, take the backup with the previous release, run `report-portal schema-upgrade`, then
-`report-portal schema-upgrade --apply`, then `schema-upgrade` again until nothing is pending. Steps
-`0007` and `0008` belong to other work and ship with their own releases. A binary that does not know
-`0009` refuses its ledger row, so rolling back across it is restore-only: restore the verified
-pre-upgrade backup, never delete the row or drop the table. That document is the source of truth for
-the sequence; this paragraph is only the reminder that it exists.
 
 ### After a restore
 
@@ -131,7 +128,9 @@ becomes the lower of the dump and live values, and a restored `1` is capped at `
 (`restore_gates_empty`, audited). Re-check deliberately: run a dry pass, record the gates, send the
 test alert, then switch on if that is intended.
 
-The reader surfaces follow the same rule: a restore never raises anything.
+The evaluator mode and the reading stage follow one rule: a restore never raises them. **The OU
+access settings do not.** They come back exactly as dumped and can open access that the live database
+had closed, so a restore needs the extra check below.
 
 - **Reading stage.** `forecast_reader` becomes the lower of the dump and the live value
   (`off` < `card` < `full`). Both sides are read the way readers read them: an unset value is the
@@ -139,10 +138,20 @@ The reader surfaces follow the same rule: a restore never raises anything.
   differs from the dumped value is audited as `forecast.reader` with actor `system`. After a restore
   from a dump taken at `full`, the stage is therefore whatever the live database had if that was
   lower; raise it again deliberately, one step at a time.
-- **OU scopes and attribution** come back from the dump. A dump from before step `0006` has neither:
-  every OU inherits, the Default OU is set to `none` and every set reads as unattributed, so a
-  restore can only narrow access. Read `GET /api/admin/forecast/access` before telling anyone
-  access is as it was.
+- **OU scopes and attribution come back exactly as dumped, and that can widen access.**
+  `user_groups.forecast_scope` and `prediction_sets.attributed_ou` are restored verbatim; the only
+  adjustment is that the Default OU is set to `none` when it comes back unset. The audit log is part
+  of the dump too. A restore from a backup taken before a record incident therefore re-opens every OU
+  that was `all` or `own` when the backup was taken, with no audit row for it, and the incident's own
+  `group.change` rows are gone with the restore. Only a dump from before step `0006` can narrow
+  instead: it has no scopes, so every OU inherits and the Default OU reads `none`.
+  1. Before restoring, save `GET /api/admin/forecast/access` (the live values), because the restore
+     replaces them.
+  2. After the restore, and before readers return, read it again and compare the two. After a
+     record incident, or any OU scope change since the backup was taken, assume widening until
+     proven otherwise.
+  3. Set every OU that should be closed back to `none` in the OU editor (see "Record incident"), then
+     confirm with the endpoint. Do not tell anyone access is as it was until this comparison is done.
 - **Counters.** The `forecast_signals_<date>` rows and the weekly viewer counts come back from the
   dump. They are observations, not settings; a gap in them after a restore is the restore, not an
   outage.
@@ -375,6 +384,11 @@ computed for. Confirm with `GET /api/admin/forecast/access` (every affected OU r
 and with `refused.ou_none` rising, then follow "Recording an incident". Access is given back by the
 same edit, as a decision and not before the cause is understood. If only the reading page is
 involved, `forecast_reader=off` is the smaller step.
+
+A restore during or after the incident undoes this step. OU scopes come back as the backup recorded
+them, so every OU that was `all` or `own` at backup time is open again, without an audit row and with
+the incident's edits gone from the log. Save `GET /api/admin/forecast/access` before restoring, compare
+it afterwards, and set the incident OUs back to `none` before readers return (see "After a restore").
 
 ## Recording an incident
 
