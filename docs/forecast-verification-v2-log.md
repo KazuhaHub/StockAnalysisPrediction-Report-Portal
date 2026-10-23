@@ -237,7 +237,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
   `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
   implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
-  Runtime selection, persisted diagnostics and shadow admission/execution remain outstanding.
+  Persisted diagnostic storage is implemented and reviewed; runtime selection, source-call tracking
+  and shadow admission/execution remain outstanding.
 - **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
@@ -1136,7 +1137,48 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   names now include the new Sina, budget and fallback guards. Full frontend/PR CI and final
   branch-wide review will be repeated for complete P25 before submission.
 - P25 is not complete: selection of accepted primary bodies, post-ledger comparisons through the
-  shared comparator, persistent shadow/call diagnostics, public admin controls/status and final
+  shared comparator, persistent shadow/call diagnostics, administrator UI controls/status and final
   admission tests remain. No production call, deployment, Apps branch change, fallback ledger
   write or runtime shadow grant occurred. Back out by reverting these controls/helpers; any saved
   local fallback key is inert/off in the previous build, and no ledger repair is needed.
+
+### P25 durable diagnostic storage (2026-10-22, in progress)
+
+- Added versioned storage in the two planned existing-meta keys, `forecast_state_shadow` and
+  `forecast_state_calls`. One transaction reserves/locks the pair in stable order, loads both,
+  aggregates per-source logical reads, failures, typed refusal counts and explicitly shadow-only
+  HTTP counts, then writes both. A single-statement reader sees one snapshot; bounded,
+  context-cancellable retries handle transient SQLite contention without mixing snapshots.
+  This adds no table, column, migration or database acceptance-contract change.
+- Keeps fourteen UTC-day summaries, the chronologically latest twenty results, and at most
+  thirty-two differences per detailed result. The full difference count and a truncation flag
+  remain explicit; truncated mismatches cannot become agreement. Persistence copies the comparison
+  rather than mutating a live result. No raw quote body or vendor error text enters these counters.
+- Missing state is distinguishable from damaged state: defaults apply only when both rows were
+  genuinely absent. Persisted objects must explicitly carry the supported version, timestamps,
+  arrays and consistent day/counter/evidence shapes. Existing empty/SQL-NULL rows, JSON null,
+  missing/unsupported versions, partial pairs, invalid counters, duplicate days, missing agreement
+  evidence and integer wrap are refused without overwriting the retained evidence. Consumers must
+  show an error as unavailable telemetry, not as a healthy zero; runtime/UI integration remains.
+- Independent review found a real retention-watermark defect: a delayed old run could discard
+  newer observations and regress `updated_at`. The failing regression reproduced it. Retention
+  now uses the maximum of the previous and incoming timestamps; in-window late results merge,
+  expired late results are ignored, and latest-result trimming sorts by timestamp rather than
+  commit order. Follow-up review closed it. Two further findings were fixed: persisted objects
+  could inherit a missing version from defaults, and concurrent SQLite readers could return
+  `SQLITE_BUSY`. Explicit zero-value decoding and bounded whole-read retries closed both without
+  weakening the failing assertions. Remaining optional controls were added.
+- Tests failed before implementation and before hardening. Coverage includes close/reopen
+  durability, fourteen-day retention, out-of-order and expired writes, concurrent serial writers
+  plus snapshot readers on SQLite/Postgres and independent SQLite connections, corrupted JSON and
+  structurally invalid valid JSON, overflow, detail bounds/no input mutation and cancellation.
+  An abort trigger in an isolated SQLite test database fails the second update and proves that
+  neither half of the pair survives. No production schema or database was used for injection.
+- Final full Go/SQLite/Postgres passed (app 36.356 s); build, vet and staticcheck passed. Three
+  final targeted diagnostic race repetitions passed (16.068 s). Independent follow-up review
+  closed every finding. Frontend files are unchanged by this checkpoint. No live vendor,
+  production, Apps branch, evaluator enablement or ledger write occurred.
+- These are storage helpers, not P25 completion. Post-ledger sample selection/execution, primary
+  and candidate call observation, shared runtime comparison, diagnostics/status UI, shadow grants
+  and final full-branch review/CI remain. Back out by reverting the helpers; existing diagnostic
+  meta values are ignored by an older build, and no ledger repair is needed.
