@@ -192,22 +192,62 @@ describe('ForecastRecordPage states', () => {
     expect(await screen.findByText('3.1 pt')).toBeTruthy()
   })
 
-  it('says when the first result is due, from the metadata', async () => {
-    apiMock.get.mockResolvedValue(record({
-      groups: [],
-      summary: { since: '2026-10-19', sets: 3, accepted: 3, stocks: 3, marks_by_phase: {}, next_result_not_before: '2026-10-26' },
-    }))
+  // The record a young portal really has: the open month is a group, so the list is not empty, and
+  // every cell in it is still waiting. These are the shapes the server produces; an empty list with
+  // a due date is not one of them.
+  const summary = { since: '2026-10-19', sets: 3, accepted: 3, stocks: 3, marks_by_phase: {}, next_result_not_before: '2026-10-26' }
+  const waiting = (extra: Partial<ForecastGroupsResponse> = {}) => record(extra, open)
+
+  it('says when the first result is due while the matrix still shows the open month', async () => {
+    apiMock.get.mockResolvedValue(waiting({ summary }))
     show()
     expect(await screen.findByText('forecast.record.empty_dated:{"date":"2026-10-26"}')).toBeTruthy()
+    expect(screen.getAllByText('forecast.cell.open_month').length).toBeGreaterThan(0)
+    expect(screen.getByRole('table')).toBeTruthy()
   })
 
   it('words a projected date as expected', async () => {
-    apiMock.get.mockResolvedValue(record({
-      groups: [],
-      summary: { since: '2026-10-19', sets: 3, accepted: 3, stocks: 3, marks_by_phase: {}, next_result_not_before: '2026-10-26', expected: true },
-    }))
+    apiMock.get.mockResolvedValue(waiting({ summary: { ...summary, expected: true } }))
     show()
     expect(await screen.findByText('forecast.record.empty_expected:{"date":"2026-10-26"}')).toBeTruthy()
+  })
+
+  it('says there is no result yet, without a date, when the open month carries no metadata', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
+    const withheldOpen = withheld({ state: 'open' } as ForecastCell)
+    apiMock.get.mockResolvedValue(withheldOpen)
+    show()
+    expect(await screen.findByText('forecast.record.empty')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('forecast.record.empty_dated')
+    expect(document.body.textContent).not.toContain('forecast.record.empty_expected')
+    expect(screen.getAllByText('forecast.cell.open_month').length).toBeGreaterThan(0)
+  })
+
+  it.each([
+    ['pending', { state: 'pending', total: 50, resolved: 20 } as ForecastCell],
+    ['small', { state: 'small', n: 12 } as ForecastCell],
+    ['purged', { state: 'purged' } as ForecastCell],
+  ])('treats a %s cell as no result yet', async (_name, cell) => {
+    apiMock.get.mockResolvedValue(record({ summary }, cell))
+    show()
+    // Every other checkpoint is open, so no cell in the matrix has a result.
+    expect(await screen.findByText('forecast.record.empty_dated:{"date":"2026-10-26"}')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_empty')
+  })
+
+  it('does not call the record empty once any cell has a result', async () => {
+    apiMock.get.mockResolvedValue(record({ summary }))
+    show()
+    await screen.findByText('3.1 pt')
+    expect(document.body.textContent).not.toContain('forecast.record.empty')
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_ready')
+  })
+
+  it('gives an empty group list the message without a date, and no matrix', async () => {
+    apiMock.get.mockResolvedValue(record({ groups: [], summary }))
+    show()
+    expect(await screen.findByText('forecast.record.empty_dated:{"date":"2026-10-26"}')).toBeTruthy()
+    expect(screen.queryByRole('table')).toBeNull()
   })
 
   it('gives the empty state no date when the server withheld its metadata', async () => {
@@ -361,6 +401,17 @@ describe('ForecastRecordPage live region', () => {
     show()
     await screen.findByText('forecast.record.empty')
     expect(screen.getByRole('status').textContent).toBe('forecast.record.status_empty')
+  })
+
+  it('announces a record with no result yet as empty although the matrix shows its open months', async () => {
+    apiMock.get.mockResolvedValue(record({}, open))
+    const { container } = show()
+    await screen.findByText('forecast.record.empty')
+    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status').textContent).toBe('forecast.record.status_empty')
+    // The notice is a note, not a second live region: the status line is the one announcement.
+    expect(container.querySelector('[role="alert"]')).toBeNull()
   })
 
   it('leaves a failure to its own alert instead of announcing it twice', async () => {

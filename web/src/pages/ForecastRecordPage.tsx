@@ -75,6 +75,9 @@ export default function ForecastRecordPage() {
 
   const data: ForecastGroupsResponse | undefined = record.kind === 'ready' ? record.data : undefined
   const groups = data?.groups ?? []
+  // A cell with a result is a mature one. Open, pending, small and purged cells carry state and no
+  // numbers, so a record made only of them has nothing to show yet however many groups it lists.
+  const hasResult = groups.some((g) => Object.values(g.cells ?? {}).some((c) => c?.state === 'mature'))
 
   // The population is the one the answer states, because the hint was read when the session started
   // and the scope may have changed since. The hint speaks only until an answer arrives (and for a
@@ -145,30 +148,31 @@ export default function ForecastRecordPage() {
             action={<Button size="small" onClick={record.retry}>{t('common.retry')}</Button>}
           />
         )
-      case 'ready':
-        if (groups.length === 0) {
-          // Without metadata (an external reader with the all scope) there is no date to give, and
-          // the page does not make one up.
-          const next = record.data.summary?.next_result_not_before
-          return (
-            <Empty
-              description={
-                next
-                  ? t(record.data.summary?.expected ? 'forecast.record.empty_expected' : 'forecast.record.empty_dated', { date: next })
-                  : t('forecast.record.empty')
-              }
-            />
-          )
-        }
+      case 'ready': {
+        // "No result yet" is a property of the cells, not of the group list: a young ledger has its
+        // open month as a group, and every cell in it is waiting. Without metadata (an external
+        // reader with the all scope) there is no date to give, and the page does not make one up.
+        const next = record.data.summary?.next_result_not_before
+        const emptyText = next
+          ? t(record.data.summary?.expected ? 'forecast.record.empty_expected' : 'forecast.record.empty_dated', { date: next })
+          : t('forecast.record.empty')
+        if (groups.length === 0) return <Empty description={emptyText} />
         return (
-          <ForecastMatrix
-            resp={record.data}
-            metric={view.metric}
-            mode={mode}
-            auditLink={admin}
-            onOpen={(g, cp) => setDrawer({ g, cp, cell: g.cells[cp] })}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {!hasResult && (
+              // A note, not an alert: the status line is the page's one announcement.
+              <Alert type="info" showIcon role="note" title={emptyText} />
+            )}
+            <ForecastMatrix
+              resp={record.data}
+              metric={view.metric}
+              mode={mode}
+              auditLink={admin}
+              onOpen={(g, cp) => setDrawer({ g, cp, cell: g.cells[cp] })}
+            />
+          </div>
         )
+      }
     }
   }
 
@@ -192,7 +196,7 @@ export default function ForecastRecordPage() {
     record.kind === 'loading'
       ? t('common.loading')
       : record.kind === 'ready'
-        ? t(groups.length === 0 ? 'forecast.record.status_empty' : 'forecast.record.status_ready')
+        ? t(hasResult ? 'forecast.record.status_ready' : 'forecast.record.status_empty')
         : ''
 
   return (
