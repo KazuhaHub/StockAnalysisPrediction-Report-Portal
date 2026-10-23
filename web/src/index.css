@@ -1616,3 +1616,13 @@ body {
   outline: 2px solid var(--ant-color-primary);
   outline-offset: 1px;
 }
+
+/* The record page's one card: roomy on a desktop, tight enough on a phone that the matrix keeps its width. */
+.rp-fc-card > .ant-card-body {
+  padding: 16px;
+}
+@media (min-width: 576px) {
+  .rp-fc-card > .ant-card-body {
+    padding: 24px;
+  }
+}

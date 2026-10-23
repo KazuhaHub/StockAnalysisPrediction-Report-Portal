@@ -64,6 +64,7 @@ function withheld(d5: ForecastCell = { state: 'mature', min_n_met: true, spread_
 const members = { ok: true, label: '2026-09', start: '2026-09-01', end: '2026-09-30', checkpoint: 'd5', state: 'mature', members: [] }
 
 const urls = () => apiMock.get.mock.calls.map(([u]) => String(u))
+const lastUrl = () => urls()[urls().length - 1]
 
 function show(initial = '/forecast') {
   return render(
@@ -127,7 +128,9 @@ describe('ForecastRecordPage requests', () => {
     auth.value = { user: 'root', admin: true, forecast: undefined }
     show()
     await screen.findByText('+3.1 pt')
-    expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
+    // The record itself comes from the reader route. The only other route is the evaluator pill's.
+    expect(urls().filter((u) => !u.startsWith('/api/admin/forecast'))).toEqual(['/api/forecast/groups?mode=month'])
+    expect(urls().filter((u) => u.startsWith('/api/admin/'))).toEqual(['/api/admin/forecast'])
   })
 })
 
@@ -424,13 +427,20 @@ describe('ForecastRecordPage live region', () => {
 })
 
 describe('ForecastRecordPage tabs', () => {
-  it('offers the exploratory tab to an internal reader and loads it only once a range is chosen', async () => {
+  it('offers the exploratory tab to an internal reader and opens it on a prefilled range', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2027-06-20T07:00:00Z') })
     show('/forecast?mode=custom')
     await screen.findByRole('tab', { name: 'forecast.tab.custom' })
     expect(screen.getByRole('tab', { name: 'forecast.tab.month' })).toBeTruthy()
-    // No range yet: nothing is asked, and the page says what it is waiting for.
     expect(screen.getByText('forecast.custom.banner')).toBeTruthy()
-    expect(screen.getByText('forecast.record.pick_range')).toBeTruthy()
+    // A blank form is not a view: the tab opens on a range (the last six months when the ledger
+    // start is not known yet) and asks for it.
+    await waitFor(() => expect(urls()).toEqual(['/api/forecast/groups?mode=custom&from=2026-12-20&to=2027-06-20&group=month']))
+  })
+
+  it('says what it is waiting for when only one end of the range is chosen, and asks nothing', async () => {
+    show('/forecast?mode=custom&from=2026-09-01')
+    expect(await screen.findByText('forecast.record.pick_range')).toBeTruthy()
     expect(apiMock.get).not.toHaveBeenCalled()
   })
 
@@ -624,3 +634,385 @@ describe('ForecastRecordPage accessibility', () => {
     expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 })
+
+// ── P19: the cohort page matches the demo ────────────────────────────────────────────────────────
+
+const limits = { max_range_months: 36, max_week_groups: 26, official_slots: 2, explore_slots: 2, wait_sec: 10, custom_per_min: 20, members_per_min: 60 }
+const metadata = (extra: Partial<ForecastGroupsResponse> = {}): Partial<ForecastGroupsResponse> => ({
+  summary: {
+    since: '2026-10-19', sets: 1234, accepted: 1100, stocks: 400,
+    marks_by_phase: { resolved: 10, waiting: 30, retrying: 2, overdue: 0 },
+    next_result_not_before: '2026-10-26',
+  },
+  rtypes: ['Decision memo'],
+  min_n: 30,
+  limits,
+  generated_at: '2027-06-20T07:00:00Z',
+  ledger_start: '2026-10-19T00:00:00+08:00',
+  capabilities: { monthly: true, custom: true, members: true },
+  evaluator: { mode: '1' },
+  ...extra,
+})
+
+const monthsOf = (n: number, bench = (_i: number) => 'sh000852') =>
+  Array.from({ length: n }, (_, i) => {
+    const month = `${2026 + Math.floor((9 + i) / 12)}-${String(((9 + i) % 12) + 1).padStart(2, '0')}`
+    return { label: month, start: `${month}-01`, end: `${month}-28`, official: true, bench: bench(i), coverage, cells: cells(mature) }
+  })
+
+const settings = (over: Record<string, unknown> = {}) => ({
+  enabled: true, mode: '1', bench: 'sh000852', bench_codes: [], gate_codes: [], population: { set: true, candidates: [] },
+  due_sets: 0, pending: 0, refused: 0, unsettled_baseline: 0, readiness: [{ key: 'ledger_chain', ok: true }],
+  dry_gate: {}, alerts: { email_to: '', has_slack: false },
+  heartbeat: {
+    mode: '1', last_tick_at: new Date().toISOString(), bench: {},
+    pass: { kind: 'tick', started_at: '', finished_at: '', sets: 1, fetches: {}, resolved: 0, halted: 0, refused: {}, refused_by_class: {},
+      finalised: 0, healed: 0, baselines: {}, awaiting_session: 0, due_unsettled: 0, oldest_due_unsettled_minutes: 0,
+      stale_valve_tripped: false, errors: 0, panics: 0 },
+  },
+  ...over,
+})
+
+describe('ForecastRecordPage shell', () => {
+  it('puts the header, the tabs, the toolbar and the matrix in one card, and the methodology in another', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    const card = screen.getByRole('table').closest('.ant-card') as HTMLElement
+    expect(within(card).getByRole('heading', { name: 'forecast.record.title' })).toBeTruthy()
+    expect(within(card).getByRole('tablist')).toBeTruthy()
+    expect(within(card).getByRole('button', { name: /forecast.export.button/ })).toBeTruthy()
+    expect(within(card).getByText('forecast.record.population_all')).toBeTruthy()
+    expect(within(card).getByText('forecast.metric.spread')).toBeTruthy()
+    expect(within(card).queryByText('forecast.methodology.title')).toBeNull()
+    expect(screen.getByText('forecast.methodology.title').closest('.ant-card')).not.toBe(card)
+  })
+
+  it('lets the header, the toolbar and the filters wrap instead of overflowing a narrow screen', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    const card = screen.getByRole('table').closest('.ant-card') as HTMLElement
+    for (const part of ['header', 'toolbar']) {
+      const el = card.querySelector(`[data-part="${part}"]`) as HTMLElement
+      expect(el, part).not.toBeNull()
+      expect(el.style.flexWrap).toBe('wrap')
+    }
+    // The matrix scrolls inside the card, never the page.
+    expect((screen.getByRole('table').parentElement as HTMLElement).style.overflowX).toBe('auto')
+  })
+})
+
+describe('ForecastRecordPage summary strip', () => {
+  it('states the span, the volume and what the checkpoints are doing, and when the next result is due', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    const strip = document.querySelector('[data-part="summary"]') as HTMLElement
+    const text = strip.textContent!
+    expect(text).toContain('forecast.summary.since:{"date":"2026-10-19"}')
+    expect(text).toContain('forecast.summary.sets:{"n":"1,234"}')
+    expect(text).toContain('forecast.summary.accepted:{"n":"1,100"}')
+    expect(text).toContain('forecast.summary.stocks:{"n":"400"}')
+    expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.resolved","n":"10"}')
+    expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.waiting","n":"30"}')
+    expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.retrying","n":"2"}')
+    expect(text).toContain('forecast.summary.next:{"date":"2026-10-26"}')
+    // Phases with nothing in them are not listed.
+    expect(text).not.toContain('forecast.phase.overdue')
+  })
+
+  it('words a calendar-backed next date as expected', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ summary: { ...metadata().summary!, expected: true } })))
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(document.querySelector('[data-part="summary"]')!.textContent).toContain('forecast.summary.next_expected:{"date":"2026-10-26"}')
+  })
+
+  it('has no strip for a reader whose response carries none', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
+    apiMock.get.mockResolvedValue(withheld())
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(document.querySelector('[data-part="summary"]')).toBeNull()
+    expect(document.body.textContent).not.toContain('forecast.summary.')
+  })
+})
+
+describe('ForecastRecordPage evaluator pill', () => {
+  beforeEach(() => {
+    apiMock.get.mockImplementation((url: string) => {
+      if (url.startsWith('/api/admin/forecast')) return Promise.resolve(settings())
+      return Promise.resolve(url.startsWith('/api/forecast/groups/members') ? members : record())
+    })
+  })
+
+  it('shows an administrator the evaluator state beside the export button', async () => {
+    auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
+    show()
+    expect(await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })).toBeTruthy()
+  })
+
+  it('shows a reader nothing about the evaluator and never asks for it', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByRole('button', { name: /forecast\.eval\.pill/ })).toBeNull()
+    expect(urls().some((u) => u.startsWith('/api/admin/'))).toBe(false)
+  })
+
+  it('still draws the matrix when the settings cannot be read', async () => {
+    auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
+    apiMock.get.mockImplementation((url: string) =>
+      url.startsWith('/api/admin/forecast') ? Promise.reject(new Error('settings down')) : Promise.resolve(record()))
+    show()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('forecast.eval.pill.unavailable')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('still draws the matrix when the settings are slow', async () => {
+    auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
+    apiMock.get.mockImplementation((url: string) =>
+      url.startsWith('/api/admin/forecast') ? new Promise(() => undefined) : Promise.resolve(record()))
+    show()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
+  })
+
+  it('does not fall over a settings payload it cannot read', async () => {
+    auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
+    apiMock.get.mockImplementation((url: string) => Promise.resolve(url.startsWith('/api/admin/forecast') ? { surprise: true } : record()))
+    show()
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
+    expect(await screen.findByText('forecast.eval.pill.unavailable')).toBeTruthy()
+  })
+})
+
+describe('ForecastRecordPage report type', () => {
+  const open = async (types: string[]) => {
+    apiMock.get.mockResolvedValue(record(metadata({ rtypes: types })))
+    show()
+    await screen.findByText('+3.1 pt')
+  }
+
+  it('names the one covered type as a tag, not a control', async () => {
+    await open(['Decision memo'])
+    expect(screen.getByText('Decision memo')).toBeTruthy()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
+  })
+
+  it('offers a select when more than one type is covered, and asks for the one chosen', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ rtypes: ['Decision memo', 'Sector note'] })))
+    show('/forecast?rtype=Decision+memo')
+    await screen.findByText('+3.1 pt')
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.toolbar.rtype' }))
+    fireEvent.click(await screen.findByTitle('Sector note'))
+    await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=month&rtype=Sector+note'))
+  })
+
+  it('names a type of its own when several are covered and the link names none, instead of guessing which the server drew', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ rtypes: ['Decision memo', 'Sector note'] })))
+    show()
+    await screen.findByText('+3.1 pt')
+    await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=month&rtype=Decision+memo'))
+  })
+
+  it('sends the type from the link with the drawer\'s request too', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members') ? members : record(metadata({ rtypes: ['Decision memo', 'Sector note'] }))))
+    show('/forecast?rtype=Sector+note')
+    fireEvent.click(await screen.findByText('+3.1 pt'))
+    await waitFor(() => expect(urls().some((u) => u.startsWith('/api/forecast/groups/members?'))).toBe(true))
+    const request = urls().find((u) => u.startsWith('/api/forecast/groups/members?'))!
+    expect(new URLSearchParams(request.split('?')[1]).get('rtype')).toBe('Sector note')
+  })
+
+  it('offers no type control to a reader whose response names none', async () => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
+    apiMock.get.mockResolvedValue(withheld())
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(document.querySelector('[data-part="rtype"]')).toBeNull()
+  })
+
+  it('gives a way back from a type the ledger does not cover', async () => {
+    apiMock.get.mockRejectedValueOnce(new ApiError(400, 'bad type', 'bad_rtype'))
+    show('/forecast?rtype=Nonsense')
+    expect(await screen.findByText('bad type')).toBeTruthy()
+    apiMock.get.mockResolvedValueOnce(record(metadata()))
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.record.default_rtype' }))
+    expect(await screen.findByText('+3.1 pt')).toBeTruthy()
+    expect(lastUrl()).toBe('/api/forecast/groups?mode=month')
+  })
+
+  it('names the type in the export header', async () => {
+    await open(['Decision memo'])
+    fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
+    expect((csvMock.downloadCSV.mock.calls[0] as [string, string])[1]).toContain('# rtype=Decision memo')
+  })
+})
+
+describe('ForecastRecordPage benchmark', () => {
+  it('shows that the benchmark is frozen per cohort and where it changed', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(4, (i) => (i < 2 ? 'sh000852' : 'sh000906')) }))
+    show()
+    await screen.findAllByText('+3.1 pt')
+    const bench = document.querySelector('[data-part="bench"]') as HTMLElement
+    expect(bench.textContent).toContain('forecast.toolbar.bench_frozen')
+    expect(bench.textContent).toContain('forecast.toolbar.bench_run:{"span":"2026-10 – 2026-11","bench":"forecast.bench.sh000852"}')
+    expect(bench.textContent).toContain('forecast.toolbar.bench_run:{"span":"2026-12 – 2027-01","bench":"forecast.bench.sh000906"}')
+  })
+
+  it('draws a single benchmark as one run', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    const bench = document.querySelector('[data-part="bench"]') as HTMLElement
+    expect(bench.textContent).toContain('forecast.toolbar.bench_run:{"span":"2026-09","bench":"forecast.bench.sh000852"}')
+  })
+})
+
+describe('ForecastRecordPage monthly range', () => {
+  const rowsDrawn = () => screen.getAllByRole('row').length - 1
+
+  it('opens on the newest twelve months and offers the older ones', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(15) }))
+    show()
+    await screen.findAllByText('+3.1 pt')
+    expect(rowsDrawn()).toBe(12)
+    expect(screen.getByText('2027-12')).toBeTruthy()
+    expect(screen.queryByText('2026-10')).toBeNull()
+    expect(screen.getByText('forecast.range.last_n:{"n":12}')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.range.show_older:{"n":3}' }))
+    expect(rowsDrawn()).toBe(15)
+    expect(screen.getByText('2026-10')).toBeTruthy()
+    expect(screen.getByText('forecast.range.all')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.range.show_recent' }))
+    expect(rowsDrawn()).toBe(12)
+  })
+
+  it('offers nothing to fold for a short record', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(5) }))
+    show()
+    await screen.findAllByText('+3.1 pt')
+    expect(rowsDrawn()).toBe(5)
+    expect(screen.queryByRole('button', { name: /forecast.range.show_older/ })).toBeNull()
+    expect(screen.getByText('forecast.range.all')).toBeTruthy()
+  })
+
+  it('exports the whole record, not just the months on screen', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), groups: monthsOf(15) }))
+    show()
+    await screen.findAllByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
+    const text = (csvMock.downloadCSV.mock.calls[0] as [string, string])[1]
+    expect(text).toContain('# benchmark=2026-10:')
+    expect(text).toContain('# benchmark=2027-12:')
+  })
+})
+
+describe('ForecastRecordPage custom range', () => {
+  const inputs = () => screen.getAllByRole('textbox').filter((el) => /^\d{4}-\d{2}-\d{2}$/.test((el as HTMLInputElement).value)) as HTMLInputElement[]
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2027-06-20T07:00:00Z') })
+  })
+
+  it('opens the tab on the record since the ledger began, using the server\'s clock and limits', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=custom&from=2026-10-19&to=2027-06-20&group=month'))
+    expect(inputs().map((el) => el.value)).toEqual(['2026-10-19', '2027-06-20'])
+  })
+
+  it('clamps that default to what the server allows', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ limits: { ...limits, max_range_months: 3 } })))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    await waitFor(() => expect(lastUrl()).toBe('/api/forecast/groups?mode=custom&from=2027-03-20&to=2027-06-20&group=month'))
+  })
+
+  it('states the limits beside the picker', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    expect(await screen.findByText('forecast.range.limits:{"months":36,"weeks":26}')).toBeTruthy()
+  })
+
+  it('refuses a week grouping the range is too long for, naming the limit, and asks nothing', async () => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    show()
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('tab', { name: 'forecast.tab.custom' }))
+    await waitFor(() => expect(lastUrl()).toContain('mode=custom'))
+    const before = apiMock.get.mock.calls.length
+    fireEvent.click(screen.getByText('forecast.group.week'))
+    expect(await screen.findByText('forecast.err.week_range_too_long:{"weeks":26}')).toBeTruthy()
+    expect(apiMock.get.mock.calls.length).toBe(before)
+  })
+
+  it('keeps the exploratory banner and p* on the custom view', async () => {
+    apiMock.get.mockResolvedValue(record({ ...metadata(), mode: 'custom', official: false, range: { from: '2026-10-19', to: '2027-06-20', group: 'month' } }))
+    show('/forecast?mode=custom&from=2026-10-19&to=2027-06-20&group=month')
+    await screen.findByText('+3.1 pt')
+    expect(screen.getByText('forecast.custom.banner')).toBeTruthy()
+  })
+})
+
+describe('ForecastRecordPage notices', () => {
+  it.each(['0', 'dry'] as const)('tells every reader that settlement is paused while the evaluator is %s', async (mode) => {
+    apiMock.get.mockResolvedValue(record(metadata({ evaluator: { mode } })))
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.getByText('forecast.phase.settlement_paused')).toBeTruthy()
+  })
+
+  it('says nothing while the evaluator is on, or when the response does not say', async () => {
+    apiMock.get.mockResolvedValue(record(metadata({ evaluator: { mode: '1' } })))
+    const view = show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByText('forecast.phase.settlement_paused')).toBeNull()
+    view.unmount()
+    apiMock.get.mockResolvedValue(record())
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByText('forecast.phase.settlement_paused')).toBeNull()
+  })
+
+  it('explains that a record held back by the 30-name gate is the gate and not a fault', async () => {
+    apiMock.get.mockResolvedValue(record({}, { state: 'small', n: 12 } as ForecastCell))
+    show()
+    expect(await screen.findByText('forecast.record.not_enough')).toBeTruthy()
+  })
+
+  it('does not call a finished record held back when it has results', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByText('forecast.record.not_enough')).toBeNull()
+  })
+})
+
+describe('ForecastRecordPage drawer modes', () => {
+  it('opens the cohort\'s members, not a metrics view, for a cell that is still waiting', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members') ? { ...members, population: 'all', state: 'pending' } : record({}, { state: 'pending', resolved: 3, total: 5 } as ForecastCell)))
+    show()
+    fireEvent.click(await screen.findByText('forecast.cell.pending:{"done":3,"total":5}'))
+    const drawer = await screen.findByRole('dialog')
+    expect(await within(drawer).findByText('forecast.drawer.membership_note')).toBeTruthy()
+    const request = urls().find((u) => u.startsWith('/api/forecast/groups/members?'))!
+    expect(new URLSearchParams(request.split('?')[1]).get('population')).toBe('all')
+  })
+
+  it('keeps the drawer open across a metric switch, because the cell it states is the same one', async () => {
+    show()
+    fireEvent.click(await screen.findByText('+3.1 pt'))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    fireEvent.click(screen.getByText('forecast.metric.ic'))
+    // A metric switch redraws the same cells: the drawer, which states the cell, stays.
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+})
+

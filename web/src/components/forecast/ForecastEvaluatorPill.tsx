@@ -30,7 +30,8 @@ export default function ForecastEvaluatorPill() {
     setFailed(false)
     api
       .get<ForecastSettings>('/api/admin/forecast')
-      .then((value) => setSettings(value))
+      // A reply that is not a settings object is a failed read, not something to render.
+      .then((value) => (Array.isArray(value?.readiness) ? setSettings(value) : setFailed(true)))
       .catch(() => setFailed(true))
   }, [])
   useEffect(() => {
