@@ -53,12 +53,21 @@ function resp(cells: Record<string, ForecastCell>): ForecastGroupsResponse {
 
 const empty = { d5: { state: 'open' }, d20: { state: 'open' }, d60: { state: 'open' }, d120: { state: 'open' }, h12: { state: 'open' } } as Record<string, ForecastCell>
 
-function show(r: ForecastGroupsResponse, mode: 'month' | 'custom' = 'month') {
+function show(r: ForecastGroupsResponse, mode: 'month' | 'custom' = 'month', extra: { auditLink?: boolean } = {}) {
   return render(
     <MemoryRouter>
-      <ForecastMatrix resp={r} metric="spread" mode={mode} onOpen={() => undefined} />
+      <ForecastMatrix resp={r} metric="spread" mode={mode} onOpen={() => undefined} {...extra} />
     </MemoryRouter>,
   )
+}
+
+// What an external reader with the all scope receives: no coverage, no unrecorded, no metadata, and
+// cells that carry a state, or the metrics plus the n >= 30 flag, but never a count.
+function withheld(cells: Record<string, ForecastCell>): ForecastGroupsResponse {
+  const r = resp(cells)
+  delete r.unrecorded
+  for (const g of r.groups) delete g.coverage
+  return r
 }
 
 describe('ForecastMatrix', () => {
@@ -140,5 +149,56 @@ describe('ForecastMatrix', () => {
     show(resp({ ...empty, d5: { ...mature, spread_q: 0.05 } }))
     expect(screen.getByRole('button').textContent).not.toContain('q<0.05')
     expect(screen.getByRole('button').textContent).not.toContain('▲')
+  })
+
+  describe('for a reader who may not see the ledger volume', () => {
+    const gated: ForecastCell = { state: 'mature', min_n_met: true, spread_bp: 310, spread_p: 0.012, spread_q: 0.041 }
+
+    it('renders without coverage, without crashing, and says n >= 30 instead of a count', () => {
+      show(withheld({
+        d5: gated,
+        d20: { state: 'pending' },
+        d60: { state: 'small' },
+        d120: { state: 'open' },
+        h12: { state: 'purged' },
+      }))
+      expect(screen.getByText('3.1 pt')).toBeTruthy()
+      expect(document.body.textContent).toContain('forecast.cell.min_n_met')
+      // No coverage column, no coverage cell, no count of any kind.
+      expect(screen.queryByText('forecast.col.coverage')).toBeNull()
+      expect(document.body.textContent).not.toContain('forecast.cov.')
+      expect(document.body.textContent).not.toMatch(/forecast\.cell\.n:/)
+      expect(document.body.textContent).not.toContain('"n":0')
+      expect(document.body.textContent).not.toContain('"done":0')
+      expect(document.body.textContent).not.toContain('"total":0')
+    })
+
+    it('shows a pending cell with no progress bar when the server sent no counts', () => {
+      const { container } = show(withheld({ ...empty, d5: { state: 'pending' } }))
+      expect(screen.getByText('forecast.cell.pending_plain')).toBeTruthy()
+      expect(container.querySelector('[style*="height: 4px"]')).toBeNull()
+    })
+
+    it('says a small cell is below the gate without stating how many names it has', () => {
+      show(withheld({ ...empty, d5: { state: 'small' } }))
+      expect(screen.getByText('forecast.cell.small_nocount')).toBeTruthy()
+      expect(screen.getByText('forecast.cell.small_hint')).toBeTruthy()
+    })
+
+    it('names a purged cell instead of leaving it blank', () => {
+      show(resp({ ...empty, d5: { state: 'purged' } }))
+      expect(screen.getByText('forecast.cell.purged')).toBeTruthy()
+    })
+
+    it('keeps the coverage column for a reader who is allowed volume', () => {
+      show(resp({ ...empty, d5: mature }))
+      expect(screen.getByText('forecast.col.coverage')).toBeTruthy()
+    })
+
+    it('leaves the audit link to administrators', () => {
+      show(resp({ ...empty, d5: mature }), 'month', { auditLink: false })
+      expect(screen.queryByRole('link', { name: /forecast.cov.rejected/ })).toBeNull()
+      expect(document.body.textContent).toContain('forecast.cov.rejected')
+    })
   })
 })
