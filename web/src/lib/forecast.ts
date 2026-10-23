@@ -375,6 +375,20 @@ export function civilDate(instant: string | undefined): string {
   return `${get('year')}-${get('month')}-${get('day')}`
 }
 
+/**
+ * The date the page may print as "next result": the server's lower bound, unless that bound is before
+ * the response's own civil date. An overdue, settling or retrying checkpoint carries a bound that has
+ * already passed, and printing it reads as a promise already broken ("expected 2026-06-09" on a page
+ * generated a year later); how late those checkpoints are is said by the phase counts. When the
+ * response does not say what day it is there is nothing to compare against, and the date is printed
+ * as given.
+ */
+export function upcomingDate(date: string | undefined, generatedAt: string | undefined): string | undefined {
+  if (!date) return undefined
+  const today = civilDate(generatedAt)
+  return today && date < today ? undefined : date
+}
+
 const isoOf = (d: Date) => d.toISOString().slice(0, 10)
 const utc = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number)

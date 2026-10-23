@@ -642,7 +642,7 @@ const metadata = (extra: Partial<ForecastGroupsResponse> = {}): Partial<Forecast
   summary: {
     since: '2026-10-19', sets: 1234, accepted: 1100, stocks: 400,
     marks_by_phase: { resolved: 10, waiting: 30, retrying: 2, overdue: 0 },
-    next_result_not_before: '2026-10-26',
+    next_result_not_before: '2027-06-26',
   },
   rtypes: ['Decision memo'],
   min_n: 30,
@@ -715,7 +715,7 @@ describe('ForecastRecordPage summary strip', () => {
     expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.resolved","n":"10"}')
     expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.waiting","n":"30"}')
     expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.retrying","n":"2"}')
-    expect(text).toContain('forecast.summary.next:{"date":"2026-10-26"}')
+    expect(text).toContain('forecast.summary.next:{"date":"2027-06-26"}')
     // Phases with nothing in them are not listed.
     expect(text).not.toContain('forecast.phase.overdue')
   })
@@ -724,7 +724,7 @@ describe('ForecastRecordPage summary strip', () => {
     apiMock.get.mockResolvedValue(record(metadata({ summary: { ...metadata().summary!, expected: true } })))
     show()
     await screen.findByText('+3.1 pt')
-    expect(document.querySelector('[data-part="summary"]')!.textContent).toContain('forecast.summary.next_expected:{"date":"2026-10-26"}')
+    expect(document.querySelector('[data-part="summary"]')!.textContent).toContain('forecast.summary.next_expected:{"date":"2027-06-26"}')
   })
 
   it('has no strip for a reader whose response carries none', async () => {
@@ -734,6 +734,32 @@ describe('ForecastRecordPage summary strip', () => {
     await screen.findByText('+3.1 pt')
     expect(document.querySelector('[data-part="summary"]')).toBeNull()
     expect(document.body.textContent).not.toContain('forecast.summary.')
+  })
+
+  it('does not announce a next result that was due before today: that is a checkpoint running late, not news', async () => {
+    const lapsed = { next_result_not_before: '2026-06-09', expected: true }
+    apiMock.get.mockResolvedValue(record(metadata({ summary: { ...metadata().summary!, ...lapsed } })))
+    show()
+    await screen.findByText('+3.1 pt')
+    const text = document.querySelector('[data-part="summary"]')!.textContent!
+    expect(text).not.toContain('forecast.summary.next')
+    // What is late is still said, by the phase counts beside it.
+    expect(text).toContain('forecast.summary.phase:{"phase":"forecast.phase.retrying","n":"2"}')
+  })
+
+  it('gives the empty-state note no date either when the only date it has has passed', async () => {
+    const lapsed = { ...metadata().summary!, next_result_not_before: '2026-06-09' }
+    apiMock.get.mockResolvedValue(record(metadata({ summary: lapsed }), open))
+    show()
+    expect(await screen.findByText('forecast.record.empty')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('forecast.record.empty_dated')
+    expect(document.body.textContent).not.toContain('forecast.record.empty_expected')
+  })
+
+  it('still dates the empty-state note when the date is ahead', async () => {
+    apiMock.get.mockResolvedValue(record(metadata(), open))
+    show()
+    expect(await screen.findByText('forecast.record.empty_dated:{"date":"2027-06-26"}')).toBeTruthy()
   })
 })
 

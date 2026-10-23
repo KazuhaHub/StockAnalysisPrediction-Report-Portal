@@ -21,6 +21,7 @@ import {
   groupsQuery,
   rangeProblem,
   readView,
+  upcomingDate,
   visibleGroups,
   type RangeLimits,
 } from '../lib/forecast'
@@ -242,7 +243,7 @@ export default function ForecastRecordPage() {
         // "No result yet" is a property of the cells, not of the group list: a young ledger has its
         // open month as a group, and every cell in it is waiting. Without metadata (an external
         // reader with the all scope) there is no date to give, and the page does not make one up.
-        const next = record.data.summary?.next_result_not_before
+        const next = upcomingDate(record.data.summary?.next_result_not_before, record.data.generated_at)
         const emptyText = next
           ? t(record.data.summary?.expected ? 'forecast.record.empty_expected' : 'forecast.record.empty_dated', { date: next })
           : t('forecast.record.empty')
@@ -319,7 +320,9 @@ export default function ForecastRecordPage() {
 
         {data?.summary && (
           <div style={{ marginTop: 12 }}>
-            <ForecastSummary summary={data.summary} />
+            <ForecastSummary
+              summary={{ ...data.summary, next_result_not_before: upcomingDate(data.summary.next_result_not_before, data.generated_at) }}
+            />
           </div>
         )}
 

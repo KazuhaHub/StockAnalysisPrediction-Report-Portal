@@ -13,6 +13,7 @@ import {
   rangePresets,
   rangeProblem,
   readView,
+  upcomingDate,
   visibleGroups,
 } from './forecast'
 
@@ -436,5 +437,38 @@ describe('custom range helpers', () => {
   it('opens on the record since the ledger began, and on six months when it does not know', () => {
     expect(defaultRange('2027-06-20', '2026-10-19', limits)).toEqual({ from: '2026-10-19', to: '2027-06-20' })
     expect(defaultRange('2027-06-20', undefined, limits)).toEqual({ from: '2026-12-20', to: '2027-06-20' })
+  })
+})
+
+// The server's "not before" is the earliest lower bound over every checkpoint still in flight, and an
+// overdue, settling or retrying one carries a bound that has already passed. Printed as "next result
+// expected 2026-06-09" on a page generated in 2027, it is a promise already broken.
+describe('upcomingDate', () => {
+  const generated = '2027-06-20T07:00:00Z'
+
+  it('keeps a date that is still ahead, and today', () => {
+    expect(upcomingDate('2027-06-26', generated)).toBe('2027-06-26')
+    expect(upcomingDate('2027-06-20', generated)).toBe('2027-06-20')
+  })
+
+  it('drops a date that is before the response\'s own civil date', () => {
+    expect(upcomingDate('2026-06-09', generated)).toBeUndefined()
+    expect(upcomingDate('2027-06-19', generated)).toBeUndefined()
+  })
+
+  it('judges by the panel\'s date, not the instant\'s UTC date', () => {
+    // 17:00 UTC on the 20th is already the 21st in the panel timezone.
+    expect(upcomingDate('2027-06-20', '2027-06-20T17:00:00Z')).toBeUndefined()
+    expect(upcomingDate('2027-06-21', '2027-06-20T17:00:00Z')).toBe('2027-06-21')
+  })
+
+  it('prints the date as given when the response does not say what day it is', () => {
+    expect(upcomingDate('2026-06-09', undefined)).toBe('2026-06-09')
+    expect(upcomingDate('2026-06-09', 'not a date')).toBe('2026-06-09')
+  })
+
+  it('has nothing to print when there is no date', () => {
+    expect(upcomingDate(undefined, generated)).toBeUndefined()
+    expect(upcomingDate('', generated)).toBeUndefined()
   })
 })
