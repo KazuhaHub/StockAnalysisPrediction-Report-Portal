@@ -261,6 +261,22 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.meJSON(u))
 }
 
+// forecastHint is the navigation hint /api/me carries. An own reader also gets the display name of the
+// OU their population is rooted at (the leaf, not the ancestor that decided the scope), so the record
+// page can say whose reports it covers. Nothing is added for the other scopes, and a failed name read
+// omits the field: the page then falls back to an unnamed line instead of guessing.
+func (s *Server) forecastHint(d forecastDecision) map[string]any {
+	hint := map[string]any{"scope": d.Scope, "external": d.External}
+	if d.Scope != scopeOwn || d.Leaf == 0 {
+		return hint
+	}
+	var name string
+	if err := s.st.queryRow("SELECT name FROM user_groups WHERE id=?", d.Leaf).Scan(&name); err == nil && name != "" {
+		hint["ou"] = name
+	}
+	return hint
+}
+
 // mustEnrollForPage is the wall's state as a payload field. A policy that could not be read reads as
 // "not held": /api/me is answering, so the page has to render something, and the gate — not this
 // field — is what refuses the routes that matter.
@@ -283,7 +299,7 @@ func (s *Server) meJSON(user string) map[string]any {
 		"user": user, "name": name, "admin": s.isAdmin(user), "role": role, "perms": permsOf(role),
 		"email": email, "mail_enabled": s.emailEnabled(),
 		// Navigation only; every forecast read resolves current policy independently.
-		"forecast":        map[string]any{"scope": forecast.Scope, "external": forecast.External},
+		"forecast":        s.forecastHint(forecast),
 		"forecast_reader": s.forecastReaderStage(forecast),
 		// Security state, so the account page can branch before the user submits: offering a
 		// password change to a federated account, or enrolment to someone already enrolled, is a
