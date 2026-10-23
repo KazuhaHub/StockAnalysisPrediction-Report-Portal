@@ -107,9 +107,9 @@ func TestQuoteProbeRecordRejectsManifestReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteProbeManifest(t, dir, func(m *quoteProbeManifest) { m.CreatedAt = "2026-10-22T00:00:00Z" })
-	if err := recordQuoteProbeReport(dir, report); err == nil {
-		t.Fatal("record accepted a replaced manifest")
+	rewriteProbeManifest(t, dir, func(m *quoteProbeManifest) { m.CreatedAt = "2000-01-01T00:00:00Z" })
+	if err := recordQuoteProbeReport(dir, report); err == nil || err.Error() != "capture manifest changed before recording" {
+		t.Fatalf("record did not reject the replaced manifest specifically: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "comparison.json")); !os.IsNotExist(err) {
 		t.Fatal("changed capture wrote report")

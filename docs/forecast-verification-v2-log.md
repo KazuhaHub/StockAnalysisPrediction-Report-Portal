@@ -1063,3 +1063,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   (41.70 s) and production SPA build (688 ms) passed. The linked-binary dispatch guard also passed.
   Exact-head PR CI remains the merge gate. No live vendor measurement, production, schema,
   evaluator enablement, Apps branch mutation or fallback write occurred.
+- Final guard review found the initial manifest-replacement test accepted any recording error, so
+  the unrelated partial-panel refusal could mask removal of the intended hash gate. Tightened it
+  to require the exact manifest-change failure. Temporarily removing that gate now fails with the
+  unrelated panel error, and restoring it passes. This was a regression-assertion defect, not a
+  missing runtime guard; no production code changed after the full implementation review.
+  Follow-up independent review closed it, and three final targeted race repetitions passed (5.764 s).
