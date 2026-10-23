@@ -214,49 +214,35 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
 
-## Current progress (2026-10-22)
+## Current progress (2026-10-23)
 
-- **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
-  P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
-  #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
-  PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
-  P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
-  `c4f0c93c` after independent review and full exact-head CI/CodeQL.
-  P25 #155 is merged at `402a0fa0` after exact-head CI/CodeQL and independent review.
-  P37 #151 is merged at `5359857e` after receipt-consistency hardening and fresh exact-head gates.
-- **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
-  local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
-  previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The locally validated
-  P16/P26/P37 integration checkpoint is `10190278`. P17 cell explanations, response metadata and
-  retention-range guards are implemented and independently reviewed, stacked locally on that
-  checkpoint without an open PR. P18 server pieces and their review repairs are locally validated
-  and independently reviewed at `228a9f0a` on `feat/forecast-reader-server`; no P17/P18 PR is open.
-  Own-scoped purge-history isolation still awaits approval of organization-evidence storage.
-  Current-main integration of P23/P24/P25/P37 is locally validated and pushed at `6b92e611` on
-  that same independent branch. P27's request/export foundations are in progress on this held stack.
-  P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
-  exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
-  offline replay, fixed-panel CLI and no-database dispatch guards are merged. P25's bounded Sina
-  comparison-only runtime, audited controls, durable counters and administrator diagnostics are
-  merged without alternate writers. No production enablement is implied.
-- **Next step.** Continue P27 record-page/navigation/OU-editor wiring and acceptance tests. Resolve the
-  purge-evidence decision and P26 integration order before P27/P28.
-  P13 still requires authorized production baseline screenshots and owner
-  review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
-  the R1b deployment and subsequent Portal target refresh remain outstanding. No production
-  action has been performed here.
-- **Known limitations.** Beijing 30%/listing-day and rights-issue captures remain missing. The
-  follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
-  controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
-  forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive parity and the reading UI still require owner review. Re-check ADR numbers before P23: Apps reserves
-  0038/0040 and P22 uses 0039.
-  P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
-- **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
+- **Released and deployed.** v2026.43 (Beta, main `5359857e`) carries R1a-β1, R1a-β2 and R1b. It was
+  deployed after a full backup taken with the previous release and verified by a throwaway restore.
+  Steps `0005` and `0006` applied, and the 20 premature refusals were repaired at boot. The owner set the
+  ledger start to `2026-10-18T16:00:00Z` (sets 1-6 excluded) and scheduled CSI 800 (`sh000906`) from
+  cohort 2026-11 through the administrator page; both writes are audited. The pre-release read-only
+  checks found Q3 = 20, Q5 = 0, and no console or debug run of the covered workflow since the ledger start.
+- **Merged since.** P26 #145 (`dd24e285`), P16-P18 #160 (`a383f107`), P28 #161 (`38569ef5`), reader
+  signals and runbook #162 (`d9db4d9f`), P27 #163 (`02c7c4bc`), and the migration-order guard #159.
+  R2a is complete except the `own` scope.
+- **Held.**
+  - Purge ownership evidence, step `0009`, on `feat/forecast-purge-evidence`. It merges only after
+    PR 141 (`0007`) and PR 142 (`0008`). Until then every own-scoped record, drawer and custom read
+    answers 503 `forecast_purge_history_unavailable` by design.
+  - P39b, draft #157. Waiting only for the run-target refresh after the v2026.43 deploy.
+  - P19 and P20 on `feat/forecast-cohort-parity` / `feat/forecast-reading-integration`. Waiting for
+    the owner's review of the P13 demo revision (`docs/forecast-demo-v2`).
+- **Next step.**
+  - The owner reviews the revised demo. Appendix A's "Today" column still needs production baseline
+    screenshots.
+  - An administrator refreshes the run targets, then P39b merges as its own Beta.
+  - After PR 141/142 land, rebase step `0009`. Append it after `0010`, turn the e2e own checks back into
+    subtree counts, and merge.
+  - After PR 141 lands, re-enable scoped bridge reads on its shared token binding.
+- **Known limitations.** Unchanged from 2026-10-22, plus: zh-TW strings added by P27 are OpenCC output
+  pending human review.
+- **Evaluator state.** `forecast_auto` is off. Before mode `1` the readiness list still needs a dry pass,
+  dry-run checks for `sh000852` and `sh000906`, and a test alert delivered to both channels.
 
 ### P9 — operating the evaluator
 
@@ -2208,3 +2194,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   prediction sets. Existing sanctioned writers remain unchanged. Independent follow-up reviewed
   this guard extension and reran its SQLite controls three times (0.518 s). No frontend source was
   changed at this checkpoint, and frontend acceptance is not claimed.
+
+### 2026-10-23 — takeover, release and the R2a merges
+
+- The previous implementer stopped mid-checkpoint with the explicit step for purge ownership evidence
+  uncommitted. The work was carried to a new branch unchanged and validated: full Go suite on SQLite and
+  Postgres. It was then committed.
+- **Step id.** The step was first registered as `0007`, which PR 141 also uses (PR 142 uses `0008`). It is
+  now `0009`, and the unapproved Tier 2 provenance proposal takes the next free id. Announcements then
+  merged `0010` (#158) ahead of all three. Because a backup's header must be a prefix of `migrations()`,
+  the list is ordered by merge, not by id. #159 pins that order in `TestMigrationListKeepsItsMergeOrder`.
+- **P26 and the Apps branches.** P26's only textual conflicts with PR 141/142 came from its copy of their
+  app-token identity binding. P26 now fails closed instead. A bridge Bearer gets 403 `forecast_unavailable`
+  on both v1 prediction reads and reads nothing from the ledger. That is stricter than main before it,
+  where a bridge query token received the unscoped machine shape. `apps_token.go` and `apps_api.go` are
+  unchanged from main. A follow-up restores scoped bridge reads on the shared binding once PR 141 lands.
+  ADR 0029, ADR 0039, the design doc and this plan were amended to match.
+- **Own-scoped purge reads (P16-P18).** Disclosure uses the subtree's evidence, set exclusion uses the
+  site-wide history, and an undisclosed purged month is indistinguishable from an empty one. A
+  `forecast_reader` restore keeps the lower stage.
+- **Review and integration.** Each unit was implemented test-first and passed at least two rounds of
+  independent adversarial review with distinct lenses before its PR. Squashed predecessors were merged
+  into stacked branches as `-s ours` merges, only after their trees were checked to be identical to the
+  branch's own copy.
+- **P28.** The e2e run against current main passed 152/152 on a throwaway portal. P27 was checked in the
+  browser on the isolated seeded preview: the record page, the operations page and the OU editor field.
+
