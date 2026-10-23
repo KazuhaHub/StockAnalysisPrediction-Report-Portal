@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"reflect"
@@ -71,6 +72,28 @@ func TestQuoteOrderTransactionAcrossSQLiteConnections(t *testing.T) {
 	}
 	t.Cleanup(func() { second.Close() })
 	assertQuoteOrderTransaction(t, first, second)
+	before := first.GetSetting(setQuoteSourceOrder, "")
+	audits := scalar[int](t, first, `SELECT COUNT(*) FROM audit_log WHERE action='quote.order'`)
+	tx, err := first.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE meta SET v=v WHERE k='quote_source_order'`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err = second.saveQuoteOrder(ctx, "yahoo", AuditEntry{Actor: "admin"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended writer did not respect cancellation: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if first.GetSetting(setQuoteSourceOrder, "") != before || scalar[int](t, first, `SELECT COUNT(*) FROM audit_log WHERE action='quote.order'`) != audits {
+		t.Fatal("cancelled retry changed order or audit history")
+	}
 }
 
 func TestQuoteOrderNullValueMeansShippedDefault(t *testing.T) {
