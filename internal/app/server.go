@@ -628,7 +628,8 @@ func (s *Server) verify(cookie string) (string, int64) {
 const ownerTokenPrefix = "ot1"
 
 // ownerTokenTTL is how long an attribution token stays valid. It bounds how late a workflow may echo
-// the token to the ingest, and the token's issue instant is read back as its expiry minus this.
+// the token to the ingest, and the token's issue instant is read back as its expiry minus this, so a
+// change to it shifts that derived instant for tokens already in flight.
 const ownerTokenTTL = 7 * 24 * time.Hour
 
 // hasSigningKey reports whether the portal has a secret to sign with. An HMAC over an empty key is
