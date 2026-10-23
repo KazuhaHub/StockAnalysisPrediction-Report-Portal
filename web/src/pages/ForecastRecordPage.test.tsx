@@ -102,7 +102,6 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
-
 describe('ForecastRecordPage requests', () => {
   it('asks only the reader routes, for every view and for the drawer, and never an admin route', async () => {
     show()
@@ -649,7 +648,6 @@ describe('ForecastRecordPage accessibility', () => {
     expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 })
-
 // ── P19: the cohort page matches the demo ────────────────────────────────────────────────────────
 
 const limits = { max_range_months: 36, max_week_groups: 26, official_slots: 2, explore_slots: 2, wait_sec: 10, custom_per_min: 20, members_per_min: 60 }
@@ -1504,4 +1502,3 @@ describe('ForecastRecordPage accessibility of the full page', () => {
     expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 })
-
