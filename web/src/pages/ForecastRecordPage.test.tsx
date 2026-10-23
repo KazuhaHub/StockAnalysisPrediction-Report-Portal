@@ -4,7 +4,7 @@ import { ConfigProvider, theme } from 'antd'
 import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
 import { ApiError } from '../api/client'
-import type { ForecastCell, ForecastGroupsResponse, Me } from '../api/types'
+import type { ForecastCell, ForecastCheckpoint, ForecastGroupsResponse, Me } from '../api/types'
 import ForecastRecordPage from './ForecastRecordPage'
 
 // The reader's record page. Its contract is mostly about what it must NOT do: ask an admin route,
@@ -1013,6 +1013,116 @@ describe('ForecastRecordPage drawer modes', () => {
     fireEvent.click(screen.getByText('forecast.metric.ic'))
     // A metric switch redraws the same cells: the drawer, which states the cell, stays.
     expect(screen.getByRole('dialog')).toBeTruthy()
+  })
+})
+
+// An external reader with the all scope gets states and flags and nothing countable. Every state the
+// matrix can hold has to survive that shape without a crash, a zero or a count.
+describe('ForecastRecordPage for an external reader with the all scope', () => {
+  const everyState = () => {
+    const r = withheld()
+    r.groups = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10'].map((label, i) => ({
+      label, start: `${label}-01`, end: `${label}-28`, official: true, bench: 'sh000852',
+      cells: {
+        d5: { state: 'mature', min_n_met: true, spread_bp: 310, spread_p: 0.01, spread_q: 0.04 },
+        d20: { state: 'pending' },
+        d60: { state: 'small' },
+        d120: { state: i === 4 ? 'open' : 'purged' },
+        h12: { state: 'pending' },
+      } as Record<ForecastCheckpoint, ForecastCell>,
+    }))
+    return r
+  }
+
+  beforeEach(() => {
+    auth.value = { user: 'reader', admin: false, forecast: { scope: 'all', external: true } }
+  })
+
+  it('draws every state with no coverage, no strip, no count and no pending detail', async () => {
+    apiMock.get.mockResolvedValue(everyState())
+    show()
+    await screen.findAllByText('+3.1 pt')
+    expect(document.querySelector('[data-part="summary"]')).toBeNull()
+    expect(document.querySelector('[data-seg]')).toBeNull()
+    expect(document.querySelector('[data-part="progress"]')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/forecast\.cell\.(n|pending|reason|cap|not_before|expected|from_month|small):|forecast\.cov\.|forecast\.summary\./)
+    expect(screen.getAllByText('forecast.cell.pending_plain').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('forecast.cell.small_nocount').length).toBeGreaterThan(0)
+  })
+
+  it('lists readable members of a waiting cell without a total, a count or an outcome', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members')
+        ? { ...members, state: 'pending', population: 'all', members: [{ set_id: 1, symbol: '600001', report_date: '2026-09-10', made_at: '', made_on: '2026-09-10', stance: 'long', status: 'pending', excluded_reason: 'pending' }] }
+        : everyState()))
+    show()
+    fireEvent.click((await screen.findAllByText('forecast.cell.pending_plain'))[0])
+    const drawer = await screen.findByRole('dialog')
+    expect(await within(drawer).findByText('600001')).toBeTruthy()
+    expect(drawer.textContent).not.toMatch(/forecast\.drawer\.headline|"done"|"total"|"members"/)
+    expect(within(drawer).getByText('forecast.drawer.reason.pending')).toBeTruthy()
+  })
+
+  it('opens a mature cell\'s drawer with the flag and no headline count', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members') ? members : everyState()))
+    show()
+    fireEvent.click((await screen.findAllByText('+3.1 pt'))[0])
+    const drawer = await screen.findByRole('dialog')
+    await within(drawer).findAllByText('forecast.cell.min_n_met')
+    expect(drawer.textContent).not.toContain('forecast.drawer.headline')
+  })
+})
+
+
+describe('ForecastRecordPage accessibility of the full page', () => {
+  const fullRecord = () =>
+    record({
+      ...metadata({ evaluator: { mode: '0' } }),
+      groups: [
+        { label: '2026-08', start: '2026-08-01', end: '2026-08-28', official: true, bench: 'sh000852', coverage: { ...coverage, pre_live: 3, test: 2, off_benchmark: 1, pending_baseline: 1 },
+          cells: { d5: mature, d20: { state: 'pending', resolved: 3, total: 9, not_before: '2026-10-26', pending_reasons: { waiting: 6 } }, d60: { state: 'small', n: 12 }, d120: { state: 'purged' }, h12: open } },
+        { label: '2026-09', start: '2026-09-01', end: '2026-09-28', official: true, bench: 'sh000906', coverage, cells: cells(mature) },
+      ],
+    })
+
+  it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('has no axe violations for an administrator\'s full page in each theme', async (algorithm) => {
+    auth.value = { user: 'root', admin: true, forecast: { scope: 'all', external: false } }
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/admin/forecast') ? settings() : url.startsWith('/api/forecast/groups/members') ? members : fullRecord()))
+    const { container } = render(
+      <ConfigProvider theme={{ algorithm }}>
+        <MemoryRouter initialEntries={['/forecast']}>
+          <ForecastRecordPage />
+        </MemoryRouter>
+      </ConfigProvider>,
+    )
+    await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+    await screen.findAllByText('+3.1 pt')
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+  })
+
+  it('has no axe violations on the exploratory tab', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2027-06-20T07:00:00Z') })
+    apiMock.get.mockResolvedValue({ ...fullRecord(), mode: 'custom', official: false })
+    const { container } = show('/forecast?mode=custom&from=2026-08-01&to=2026-09-30&group=month')
+    await screen.findAllByText('+3.1 pt')
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+  })
+
+  it('has no axe violations with the membership drawer open', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members') ? { ...members, state: 'pending', population: 'all' } : fullRecord()))
+    show()
+    fireEvent.click(await screen.findByText('forecast.cell.pending:{"done":3,"total":9}'))
+    const drawer = await screen.findByRole('dialog')
+    await within(drawer).findByText('forecast.drawer.membership_note')
+    // The drawer is portalled out of the page, so it is audited where it stands; the landmark rule is
+    // about whole documents and has nothing to say about a fragment.
+    const result = await axe.run(drawer, { rules: { 'color-contrast': { enabled: false }, region: { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 })
 
