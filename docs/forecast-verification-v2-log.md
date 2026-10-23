@@ -226,18 +226,23 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   signals and runbook #162 (`d9db4d9f`), P27 #163 (`02c7c4bc`), and the migration-order guard #159.
   R2a is complete except the `own` scope.
 - **Held.**
-  - Purge ownership evidence, step `0009`, on `feat/forecast-purge-evidence`. It merges only after
+  - Purge ownership evidence, step `0009`, draft #165 on `feat/forecast-purge-evidence-r2a`. It merges only after
     PR 141 (`0007`) and PR 142 (`0008`). Until then every own-scoped record, drawer and custom read
     answers 503 `forecast_purge_history_unavailable` by design.
   - P39b, draft #157. Waiting only for the run-target refresh after the v2026.43 deploy.
-  - P19 and P20 on `feat/forecast-cohort-parity` / `feat/forecast-reading-integration`. Waiting for
-    the owner's review of the P13 demo revision (`docs/forecast-demo-v2`).
+  - P19, draft #166 on `feat/forecast-cohort-parity-r2a`, is replayed onto current main and validated.
+  - P20, draft #168 on `feat/forecast-reading-integration`, is stacked on #166. The original background
+    task had stopped before starting P20; the reading-card integration is now implemented and tested.
+  - P13 demo revision, draft #167 on `docs/forecast-demo-v2-review`. The owner's review and production
+    baseline screenshots remain visual acceptance gates for P19/P20.
 - **Next step.**
   - The owner reviews the revised demo. Appendix A's "Today" column still needs production baseline
     screenshots.
   - An administrator refreshes the run targets, then P39b merges as its own Beta.
-  - After PR 141/142 land, rebase step `0009`. Append it after `0010`, turn the e2e own checks back into
-    subtree counts, and merge.
+  - After PR 141/142 land, rebase #165 while preserving the shipped migration-list prefix. The current
+    draft appends `0009` after `0010` and the container e2e now checks exact own-subtree populations.
+  - Review #167, #166 and #168 as drafts. Full reader rollout still requires the P18 performance gate
+    and one week of administrator observation; creating the drafts changes no production setting.
   - After PR 141 lands, re-enable scoped bridge reads on its shared token binding.
 - **Known limitations.** Unchanged from 2026-10-22, plus: zh-TW strings added by P27 are OpenCC output
   pending human review.
@@ -2219,4 +2224,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   branch's own copy.
 - **P28.** The e2e run against current main passed 152/152 on a throwaway portal. P27 was checked in the
   browser on the isolated seeded preview: the record page, the operations page and the OU editor field.
+
+### 2026-10-23 — draft review handoff
+
+- **Purge ownership (#165).** Replayed only the own-evidence commits onto the current main. Startup
+  refuses an unrecorded explicit step before automatic DDL, and the offline command verifies the
+  accepted baseline. Backup/restore retains the merge-order prefix. Retention and OU deletion acquire
+  the same ownership lock before inspecting rows. The final review found stale migration-order test
+  assumptions and destructive tests that left the shared Postgres evidence table missing; both are
+  corrected. SQLite and Postgres full suites passed, and the release-image smoke now verifies the
+  exact 3/1/1/0 subtree populations rather than the pre-upgrade 503 hold.
+- **Cohort record (#166).** The recovered P19 branch is replayed without predecessor commits. Web
+  typecheck, all 127 test files (1417 tests), production build and backend checks passed. CI exposed a
+  drawer entrance/retry focus race; focus now goes to stable content after the animation, and the
+  follow-up CI is green.
+- **Reading integration (#168).** Stock and run cards use the display selection independently of
+  monthly membership, clear prior access/revision data, and isolate forecast errors from the body.
+  The summary slot is reserved on warmed responses. Shared Go/vitest fixtures pin completed bars and
+  the open-left/closed-right low window. The read API adds the linked report category for exact
+  date/category/ID navigation, without a schema change. The full web suite passes 130 files and 1437
+  tests; Go build/vet and SQLite/Postgres suites pass. Synthetic browser checks cover 375/768/1280 px,
+  stock/run mounting, pending/settled cards, contrast/axe and scope-none suppression.
+- **Demo (#167).** Browser sweep covers seven scopes, three views, two widths and light/dark themes,
+  with no page overflow or script errors. This proves the draft demo's behavior, not production
+  baseline fidelity or owner visual acceptance. Traditional Chinese remains generated pending human
+  review. No release, production database, workflow or evaluator mode changed during this handoff.
 
