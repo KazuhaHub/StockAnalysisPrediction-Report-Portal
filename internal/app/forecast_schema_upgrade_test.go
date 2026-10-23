@@ -347,6 +347,12 @@ func TestRunMigrationsHoldsBackAnUnrecordedExplicitStep(t *testing.T) {
 // merge first, so on a branch that does not have them yet the list reads 0001..0006 then 0009. After
 // they land it must read 0001..0008 then 0009: nothing else may take a number, and 0009 stays the
 // only step that startup will not apply by itself.
+//
+// The six-step form below exists only so this branch can be prepared before those steps land. It must
+// never reach main or a release: a dump written by a build whose list is 0001..0006, 0009 is refused
+// by a build whose list is 0001..0008, 0009, because the header is compared to the list by position.
+// The rebase onto main conflicts on the list in migrate_steps.go, and resolving it is the moment to
+// delete the six-step allowance, leaving only the eight-step form.
 func TestPurgeEvidenceIsTheLastStepAndTheOnlyExplicitOne(t *testing.T) {
 	steps := newTestStore(t).migrations()
 	ids := make([]string, len(steps))
