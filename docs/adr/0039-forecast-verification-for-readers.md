@@ -153,8 +153,16 @@ External viewers cannot use custom ranges on either reader route: the response i
 For external all, every group omits coverage and every reader response omits unrecorded. A
 non-mature cell contains state only. A mature cell retains its metrics and `min_n_met: true`, not
 n, total, resolved, refusal/corporate-action counts or metric/slice denominators. The UI renders
-the threshold assurance without the sample size. Explain/summary fields added later must not
-reintroduce that volume. CSV has no n, coverage or count columns for these readers.
+the threshold assurance without the sample size: once per cell, as its own badge, because it is a
+fact about the cell's member count. A metric's own denominator (hit, IC, band, calibration) is a
+smaller subset with no minimum of its own, so the badge is never drawn in a metric's sample slot.
+Explain/summary fields added later must not reintroduce that volume. CSV has no n, coverage or
+count columns for these readers; its header says the flag belongs to the cell.
+
+Every groups response also states the population it covers (`scope`, and for `own` the name of the
+unit the population is rooted at as `scope_ou`), taken from the same decision that selected the
+cohort. The record page and its export label results from that statement, not from the `/api/me`
+hint, which is read once per session and can be stale.
 
 The external drawer omits site-wide totals and per-status counts, filters out unreadable reports
 and purged sets **before cursor pagination**, and uses no global total. Readable rows may still be
