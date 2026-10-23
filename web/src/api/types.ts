@@ -607,7 +607,7 @@ export interface ForecastHeartbeat {
 }
 
 export interface ForecastReadinessItem {
-  key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts'
+  key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts' | 'ledger_chain'
   ok: boolean
   detail?: string
 }

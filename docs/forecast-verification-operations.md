@@ -117,3 +117,44 @@ test alert, then switch on if that is intended.
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and
 the action taken. A settlement that was waited out (a vendor lag) is not an incident against the
 portal; a `store_failed` or a forced manual edit is.
+
+## Ledger-source diagnostics (P23 local implementation)
+
+The administrator-only `/api/admin/quote` response includes each source's explicit `settled` and
+`settledShadow` market arrays plus `cashDividends` and `reportsKind` evidence flags. Empty grants
+are empty arrays, not null. A display-only wildcard never becomes a ledger grant.
+
+Top-level `ledgerChain`, `ledgerPrimary` and `ledgerShadowPeer` summarize enabled declarations in
+operator order, with cash-dividend writers first. These are configuration diagnostics across the
+declared markets, not proof that every benchmark or stock is eligible: runtime additionally checks
+the actual market/code and the source's symbol predicate. An absent primary or shadow peer is an
+empty string. No shadow peer is advertised until it has an explicit enabled shadow grant.
+
+`ledgerHealth` is a separate array of source health records, with UTC RFC3339 timestamps and an
+empty string for an event that has not happened. It never overwrites the display health fields
+on `sources`. Clearing the display cache clears neither health history. Ledger refusals and caller
+cancellation do not count as vendor failures; three delivery/parser failures stop calls to that
+source for the current evaluator pass, preserving the actual failure rather than misreporting an
+absent configuration. A new pass resets its breaker, not the recorded diagnostic history.
+
+The quote-source management page shows these declarations and the separate settlement history.
+Unavailable telemetry is distinct from an empty process-local history; neither claims readiness.
+A save removing the configured primary requires confirmation. Cancelling or leaving that
+confirmation writes nothing, and repeated save clicks cannot create concurrent requests.
+
+Readiness item 6 (`ledger_chain`) now requires an explicitly enabled settlement chain with a
+primary carrying both evidence capabilities. Removing it prevents switching from dry to mode 1.
+If removed while running, the evaluator card warns instead of claiming health, and the watchdog
+emits `no_source` at most daily through the existing webhook/email/Slack path. The watchdog checks
+this even before a first heartbeat exists; off mode remains silent with only its mode read.
+
+This contract describes local P23 work, not a production rollout. Per-instrument runtime checks,
+the other readiness gates and deployment approval still apply. Do not enable the evaluator on
+the strength of configuration diagnostics alone.
+
+Source-order saves additionally write `quote.order` with the effective `from` and `to` source
+arrays, actor, organizational unit and request address. Equivalent spellings, repeated saves and
+an explicit shipped order versus its reset form do not create duplicate transitions. Because the
+order now controls durable settlement, this dedicated transition and its audit commit together;
+an audit failure rolls the order back and returns an error before other submitted settings are
+written. The existing general policy audit remains separate. This adds no database shape.

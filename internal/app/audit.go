@@ -92,6 +92,7 @@ const (
 	AuditUserChange   = "user.change"
 	AuditGroupChange  = "group.change"
 	AuditPolicyChange = "policy.change"
+	AuditQuoteOrder   = "quote.order"
 
 	// Authentication — the principal acting on its own credentials.
 	AuditLogin                 = "auth.login"
@@ -422,7 +423,7 @@ var auditVocabulary = []string{
 	AuditIdentityLink, AuditIdentityUnlink, AuditStepUp,
 	AuditUserCreate, AuditUserChange, AuditUserDelete,
 	AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
-	AuditGrantChange, AuditPolicyChange,
+	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
 	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
 	AuditTokenCreate, AuditTokenDelete,
 	AuditAppInstall, AuditAppDelete,

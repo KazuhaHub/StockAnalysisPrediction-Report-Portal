@@ -26,6 +26,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -74,6 +75,7 @@ type forecastEvaluator struct {
 	bench        map[string]benchStat
 	drySample    []drySample
 	awaitingGate map[string]bool
+	ledgerPass   *ledgerTick
 }
 
 // loop is the ticker. Every minute it asks whether it should run at all, then whether anything is
@@ -117,6 +119,8 @@ func (e *forecastEvaluator) clock() time.Time {
 // deferred rather than scored against whatever the setting happens to be — the current setting is
 // never read here.
 func (e *forecastEvaluator) tick(s *Server) error {
+	e.ledgerPass = &ledgerTick{}
+	defer func() { e.ledgerPass = nil }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -317,7 +321,7 @@ func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec b
 	if err != nil {
 		// Do NOT overwrite the last known bar with an empty series: the stale-calendar check must
 		// keep seeing the age of the last body that arrived, not the moment a fetch failed.
-		return series, &benchFault{code: "fetch_failed", err: err}
+		return series, &benchFault{code: ledgerFetchRefusal(err), err: err}
 	}
 	e.noteBench(spec.Code, series)
 	if len(series.Bars) == 0 {
@@ -421,7 +425,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				plan.wakes[m.ID] = wake
 				continue
 			}
-			plan.deferMark(m, "fetch_failed", "")
+			plan.deferMark(m, ledgerFetchRefusal(stockErr), "")
 		}
 		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
@@ -500,7 +504,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			if werr != nil {
 				// The look-back is a delivery fault, not this set's data: never charge the attempt.
 				for _, m := range set.Marks {
-					plan.deferMark(m, "fetch_failed", "")
+					plan.deferMark(m, ledgerFetchRefusal(werr), "")
 				}
 				return e.applyPlan(s, set, stockSeries, plan, now)
 			}
@@ -710,16 +714,25 @@ func containsDate(dates []string, date string) bool {
 // and the charts are using. The congestion control is kept — the upstream ceiling is shared with the
 // readers, so this loop cannot crowd them out.
 func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, code, from string, now time.Time) (forecastSeries, error) {
-	release, err := s.quotes.acquire(ctx)
-	if err != nil {
-		return forecastSeries{}, err
+	var resp *QuoteResp
+	var err error
+	if e.fetch != nil {
+		// Preserve the isolated arithmetic-test seam. Runtime calls always use the configured
+		// ledger chain below; a seam cannot silently replace that path in production.
+		release, acquireErr := s.quotes.acquire(ctx)
+		if acquireErr != nil {
+			return forecastSeries{}, acquireErr
+		}
+		defer release()
+		resp, err = e.fetch(ctx, market, code, from, now.In(chinaZone).Format("2006-01-02"))
+	} else {
+		pass := e.ledgerPass
+		if pass == nil {
+			pass = &ledgerTick{}
+		}
+		resp, err = s.quotes.walkLedger(ctx, s.quoteConfigLoad(), market, code, from,
+			now.In(chinaZone).Format("2006-01-02"), pass)
 	}
-	defer release()
-	fetch := e.fetch
-	if fetch == nil {
-		fetch = fetchTencentRange
-	}
-	resp, err := fetch(ctx, market, code, from, now.In(chinaZone).Format("2006-01-02"))
 	if err != nil {
 		return forecastSeries{}, err
 	}
@@ -746,6 +759,18 @@ func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, co
 		}
 	}
 	return out, nil
+}
+
+// Preserve typed delivery/configuration refusals through the planner instead of obscuring an
+// absent ledger primary as a vendor outage. Unknown transport/parser errors remain fetch_failed.
+func ledgerFetchRefusal(err error) string {
+	var refusal *ledgerRefusal
+	if errors.As(err, &refusal) {
+		if _, known := predRefusalClass[refusal.Code]; known {
+			return refusal.Code
+		}
+	}
+	return "fetch_failed"
 }
 
 // forecastSeries is one fetched series with the extra facts the evaluator needs from the same call.

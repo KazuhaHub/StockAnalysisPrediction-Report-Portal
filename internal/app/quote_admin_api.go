@@ -36,10 +36,14 @@ type quoteSourceStatus struct {
 	// Source, not Name: QuoteSourceHealth already calls this field `source` on the wire, and one
 	// vendor answering to two key names across two payloads is how a panel ends up joining them
 	// wrongly.
-	Source   string   `json:"source"`
-	Enabled  bool     `json:"enabled"`
-	Position int      `json:"position"` // 1-based place in the failover order; 0 when disabled
-	Markets  []string `json:"markets"`
+	Source        string   `json:"source"`
+	Enabled       bool     `json:"enabled"`
+	Position      int      `json:"position"` // 1-based place in the failover order; 0 when disabled
+	Markets       []string `json:"markets"`
+	Settled       []string `json:"settled"`
+	SettledShadow []string `json:"settledShadow"`
+	CashDividends bool     `json:"cashDividends"`
+	ReportsKind   bool     `json:"reportsKind"`
 	// What the source DECLARES it can serve, split by interval. Markets above is the union over all
 	// of them and is therefore a wider claim than either of these: Tencent names the US there for a
 	// price it serves correctly, and must not appear in Daily for a series it answers with two rows
@@ -93,17 +97,21 @@ func (s *Server) quoteSourceStatuses(cfg quoteConfig) []quoteSourceStatus {
 	for _, src := range srcs {
 		h := health[src.Name]
 		out = append(out, quoteSourceStatus{
-			Source:      src.Name,
-			Enabled:     position[src.Name] > 0,
-			Position:    position[src.Name],
-			Markets:     src.Markets,
-			Daily:       src.Daily,
-			Intraday:    src.Intraday,
-			Intraday5D:  src.Intraday5D,
-			LastSuccess: quoteAdminTime(h.LastSuccess),
-			LastError:   h.LastError,
-			LastErrorAt: quoteAdminTime(h.LastErrorAt),
-			Failures:    h.Failures,
+			Source:        src.Name,
+			Enabled:       position[src.Name] > 0,
+			Position:      position[src.Name],
+			Markets:       src.Markets,
+			Settled:       src.Settled,
+			SettledShadow: src.SettledShadow,
+			CashDividends: src.CashDividends,
+			ReportsKind:   src.ReportsKind,
+			Daily:         src.Daily,
+			Intraday:      src.Intraday,
+			Intraday5D:    src.Intraday5D,
+			LastSuccess:   quoteAdminTime(h.LastSuccess),
+			LastError:     h.LastError,
+			LastErrorAt:   quoteAdminTime(h.LastErrorAt),
+			Failures:      h.Failures,
 		})
 	}
 	// Failover order first, disabled sources after it, so the list reads as the chain a request
@@ -130,7 +138,7 @@ func (s *Server) quoteSourceStatuses(cfg quoteConfig) []quoteSourceStatus {
 func (s *Server) quoteAdminState() map[string]any {
 	cfg := s.quoteConfigLoad()
 	stats := s.quotes.stats()
-	return map[string]any{
+	out := map[string]any{
 		"sources":      s.quoteSourceStatuses(cfg),
 		"cacheEntries": stats.Entries,
 		"cacheBytes":   stats.Bytes,
@@ -148,6 +156,10 @@ func (s *Server) quoteAdminState() map[string]any {
 		"homeCards":   s.quoteHomeCards(),
 		"autoRefresh": s.quoteAutoRefresh(),
 	}
+	for key, value := range s.quoteLedgerAdminState(cfg) {
+		out[key] = value
+	}
+	return out
 }
 
 // apiAdminQuotes is the panel's read. GET /api/admin/quote
@@ -197,7 +209,11 @@ func (s *Server) apiAdminQuotesSave(w http.ResponseWriter, r *http.Request, user
 	}
 
 	if in.Order != nil {
-		s.st.SetSetting(setQuoteSourceOrder, order)
+		entry := AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user), IP: s.auditIP(r)}
+		if err := s.st.saveQuoteOrder(r.Context(), order, entry); err != nil {
+			jsonError(w, http.StatusInternalServerError, "could not save quote source order")
+			return
+		}
 	}
 	if in.TTLOpenSecs != nil {
 		s.st.SetSetting(setQuoteTTLOpenSecs, strconv.Itoa(quoteClampSecs(*in.TTLOpenSecs, quoteTTLOpenFloor)))
