@@ -369,7 +369,7 @@ func TestMigration0004AddsCleanupRunsColumn(t *testing.T) {
 	// backToTheBaseline already winds back this step's tables and its cleanup_runs column.
 	backToTheBaseline(t, path)
 
-	st, err := OpenStore("sqlite", path)
+	st, err := openStoreForMode("sqlite", path, true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}

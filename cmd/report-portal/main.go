@@ -20,6 +20,13 @@ import (
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "schema-upgrade":
+			out, err := app.SchemaUpgradeCommand(configPath(), os.Args[2:])
+			if err != nil {
+				log.Fatalf("schema-upgrade: %v", err)
+			}
+			fmt.Print(out)
+			return
 		case "quote-probe":
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()

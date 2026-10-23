@@ -93,7 +93,8 @@ func TestMigration0004AppliesOnBaseline(t *testing.T) {
 	path := fileStore(t, "pre-forecast.db")
 	backToTheBaseline(t, path)
 
-	st, err := OpenStore("sqlite", path)
+	// Existing baseline databases now enter through the explicit offline upgrade boundary.
+	st, err := openStoreForMode("sqlite", path, true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}

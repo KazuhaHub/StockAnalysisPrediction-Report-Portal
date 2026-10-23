@@ -2208,3 +2208,38 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   prediction sets. Existing sanctioned writers remain unchanged. Independent follow-up reviewed
   this guard extension and reran its SQLite controls three times (0.518 s). No frontend source was
   changed at this checkpoint, and frontend acceptance is not claimed.
+
+### Explicit purge-evidence schema upgrade (2026-10-22, in progress)
+
+- Registered the owner-approved evidence table as step `0007`, an explicit operator step. Fresh
+  initialization creates it; existing supported databases without its ledger row refuse normal
+  startup before any earlier automatic migration runs. Existing baseline and released steps remain
+  unchanged. The separate offline `schema-upgrade` command reads existing infrastructure config:
+  no arguments inspect only, `--apply` is required for mutation. SQLite inspection opens read-only
+  and cannot create an absent database/config. Initialization failure closes its pool rather than
+  leaking connections. Applying uses existing initialization serialization and transactional steps.
+- Startup and upgrade verify actual key columns, exact primary-key order, types, nullability and
+  positive-owner checks, not just the migration record. Independent review found PostgreSQL
+  `NOT VALID` checks could masquerade as enforced historic constraints; a red regression now
+  requires `convalidated`, with a validated positive control. SQLite's metadata exposes raw DDL:
+  comment-only and quoted-expression counterfeit checks failed red, then the verifier was tightened
+  to the exact emitted declaration modulo case, whitespace and `IF NOT EXISTS`, retaining quotes.
+  No generic quoted-expression normalization is treated as proof of a real comparison.
+- Portable dumps declare and carry evidence rows. A dump claiming a step but omitting its declared
+  table is refused before deletion; a missing/repeated section is refused, with forced restore
+  rolling back. Tests cover both a missing evidence table in the header and a header that names it
+  without its body section, in inspection and forced modes. Legitimate old backups restore with
+  empty evidence, never a guessed backfill. Evidence round trips SQLite/Postgres in both directions.
+- Updated legacy baseline-upgrade tests to enter through the now-required explicit path; ordinary
+  reopen remains ordinary startup. Older step-0006 dump fixtures remove both later ledger claims
+  rather than claiming a noncontiguous prefix. The new refusal test also removes an earlier
+  automatic ledger entry and verifies that startup/inspection leave the complete database unchanged.
+- Added the offline upgrade/rollback runbook, amended ADR 0035/0039, and moved the unapproved Tier 2
+  provenance proposal to `0008` (recheck at its future go). R2a is no longer described as schema-free
+  or safe for binary rollback across `0007`; the supported route restores the pre-upgrade backup.
+  Review identified and closed stale rollback/doc-map references. No deployment is implied.
+- This checkpoint delivers the explicit schema and backup boundary, not the business-path fix.
+  Retention capture, early ownership locking in retention/OU deletion, reattribution and scoped
+  reader marker integration remain next, with route-level access/concurrency acceptance required.
+  The own-history release hold and separate Apps integration ordering remain. No production
+  database, workflow, evaluator setting, release, or Apps checkout was changed.

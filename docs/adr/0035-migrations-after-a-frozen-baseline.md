@@ -108,6 +108,17 @@ backup — the kind of loss nobody notices until a restore.
 
 ## Consequences
 
+### Explicit operator steps (amended 2026-10-22)
+
+The owner-approved purge ownership evidence in ADR 0039 adds an `explicit` step (`0007`). Existing
+database startup refuses an unrecorded explicit step before applying any earlier automatic step;
+operators inspect with `schema-upgrade` and apply offline with `schema-upgrade --apply` after a
+pre-upgrade backup. Fresh initialization may create the step. Already-recorded products are still
+verified on every start, with this step additionally verifying key types/nullability/constraints.
+Released automatic steps are unchanged. The ledger, transactional runner, dump declarations and
+restore compatibility rules remain shared; this is a boundary on who initiates an existing
+database's schema change, not a second migration ledger.
+
 - **The acceptance contract is unchanged in shape.** A database that does not satisfy the baseline is
   still refused before any statement runs. What changed is the *startup behaviour* for a database
   that does: it is verified, and then the steps it lacks are applied. That is a real change and is

@@ -155,18 +155,35 @@ type restoreRule struct {
 
 // migration is one schema step.
 type migration struct {
-	id      string
-	columns []colRef
-	tables  []string
-	indices []string
-	restore restoreRule
-	up      func(migExec) error
+	id string
+	// explicit forbids implicit upgrade of an existing database at server startup.
+	explicit bool
+	columns  []colRef
+	tables   []string
+	indices  []string
+	restore  restoreRule
+	up       func(migExec) error
+	verify   func(migExec) error
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step.
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006()}
+		migration0006(), migration0007()}
+}
+
+// The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
+// not prove OU membership, so this step never backfills them. Tier 2 provenance has not shipped;
+// its previously proposed 0007 id must move to the next free id if that work is later approved.
+func migration0007() migration {
+	return migration{
+		id: "0007", explicit: true,
+		tables:  []string{"prediction_purge_owners"},
+		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
+		restore: restoreRule{olderDumpOK: true},
+		up:      createPredictionPurgeOwners,
+		verify:  verifyPredictionPurgeOwners,
+	}
 }
 
 // The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).
@@ -502,7 +519,7 @@ func migration0006() migration {
 // judgement about the database as a whole, made once at startup against the full list this build
 // knows. The runner is also driven directly by tests with steps of their own, and a subset list is
 // not a statement that the other steps do not exist.
-func (s *Store) runMigrations() error {
+func (s *Store) runMigrationsWithExplicit(allowExplicit bool) error {
 	steps := s.migrations()
 	known := map[string]bool{}
 	for _, m := range steps {
@@ -510,6 +527,22 @@ func (s *Store) runMigrations() error {
 	}
 	if err := s.refuseUnknownLedgerRows(known); err != nil {
 		return err
+	}
+	// Preflight before applying even an earlier automatic step: a refused startup writes no DDL.
+	for _, m := range steps {
+		if m.explicit && !allowExplicit {
+			var recorded string
+			err := s.queryRow(`SELECT v FROM meta WHERE k=?`, migrationLedgerKey(m.id)).Scan(&recorded)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if recorded == "" {
+				return fmt.Errorf("migration %s requires an explicit offline upgrade: stop the portal, take a pre-upgrade backup with the previous release, then run report-portal schema-upgrade --apply; server startup does not alter this schema", m.id)
+			}
+			if err := s.verifyMigrationProducts(s.poolExec(), []migration{m}); err != nil {
+				return err
+			}
+		}
 	}
 	return s.runMigrationSteps(steps)
 }
@@ -738,6 +771,11 @@ func (s *Store) verifyMigrationProducts(e migExec, steps []migration) error {
 		for _, idx := range m.indices {
 			if !e.indexExists(idx) {
 				return fmt.Errorf("migration %s declares index %s, which is missing", m.id, idx)
+			}
+		}
+		if m.verify != nil {
+			if err := m.verify(e); err != nil {
+				return fmt.Errorf("migration %s: %w", m.id, err)
 			}
 		}
 	}

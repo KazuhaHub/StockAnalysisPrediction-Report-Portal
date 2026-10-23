@@ -135,7 +135,7 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 			t.Fatalf("cannot wind back: %v", err)
 		}
 	}
-	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
+	if _, err := src.exec(`DELETE FROM meta WHERE k IN (?,?)`, migrationLedgerKey("0006"), migrationLedgerKey("0007")); err != nil {
 		t.Fatal(err)
 	}
 	dump := dumpOf(t, src)
