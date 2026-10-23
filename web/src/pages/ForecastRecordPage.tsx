@@ -25,6 +25,7 @@ import {
   type RangeLimits,
 } from '../lib/forecast'
 import { useForecastRecord } from '../lib/useForecastRecord'
+import Quiet from '../components/forecast/Quiet'
 
 // Forecast verification for readers: the record of what each report predicted against what
 // the market did (ADR 0029, ADR 0039).
@@ -297,13 +298,13 @@ export default function ForecastRecordPage() {
             <Typography.Title level={4} style={{ margin: 0 }}>
               {t('forecast.record.title')}
             </Typography.Title>
-            <Typography.Text type="secondary">{t('forecast.record.subtitle')}</Typography.Text>
+            <Quiet>{t('forecast.record.subtitle')}</Quiet>
             <div style={{ marginTop: 6 }}>
               <Typography.Text strong>{population}</Typography.Text>
               <br />
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              <Quiet style={{ fontSize: 12 }}>
                 {t('forecast.disclaimer')}
-              </Typography.Text>
+              </Quiet>
             </div>
           </div>
           <Space wrap>

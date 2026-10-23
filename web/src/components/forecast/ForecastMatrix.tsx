@@ -12,6 +12,7 @@ import { gateText } from '../../lib/forecast'
 import ForecastCellView from './ForecastCellView'
 import ForecastCoverage from './ForecastCoverage'
 import ForecastLegend from './ForecastLegend'
+import Quiet from './Quiet'
 
 // The verification matrix (plan §8.1).
 //
@@ -70,16 +71,16 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+      <Quiet style={{ fontSize: 12 }}>
         {t(`forecast.metric.${metric}.help`)}
         {' · '}
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
-      </Typography.Text>
+      </Quiet>
       <ForecastLegend coverage={showCoverage} />
       {showsGate && (
-        <Typography.Text id={gateHintId} type="secondary" style={{ fontSize: 12 }}>
+        <Quiet id={gateHintId} style={{ fontSize: 12 }}>
           {t('forecast.cell.min_n_met_hint')}
-        </Typography.Text>
+        </Quiet>
       )}
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
         <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + (showCoverage ? 224 : 0) }}>
@@ -107,9 +108,9 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                         </Tag>
                       )}
                       {g.bench && (
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        <Quiet style={{ fontSize: 12 }}>
                           {t(`forecast.bench.${g.bench}`)}
-                        </Typography.Text>
+                        </Quiet>
                       )}
                     </div>
                   </div>

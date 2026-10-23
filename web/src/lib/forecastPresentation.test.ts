@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { theme } from 'antd'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { coveragePalette, forecastPalette, formatProbability, formatSigned } from './forecastPresentation'
+import { coveragePalette, forecastLinkColor, forecastPalette, forecastWarningText, formatProbability, formatSigned } from './forecastPresentation'
 
 function luminance(hex: string) {
   const channels = hex.replace('#', '').match(/../g)!.map((v) => parseInt(v, 16) / 255)
@@ -20,6 +20,27 @@ describe('forecast presentation', () => {
       const b = luminance(tone.background)
       expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
     }
+  })
+
+  it.each([
+    [theme.defaultAlgorithm, '#ffffff'],
+    [theme.darkAlgorithm, '#141414'],
+  ])('keeps the page\'s own links above AA contrast on the surface of each theme', (algorithm, surface) => {
+    const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
+    const a = luminance(forecastLinkColor(token))
+    const b = luminance(surface)
+    expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // The warning chip and the cap hint sit on a warning tint (light) or the dark surface's tint.
+  it.each([
+    [theme.defaultAlgorithm, '#fffbe6'],
+    [theme.darkAlgorithm, '#2b2111'],
+  ])('keeps warning text above AA contrast on the warning tint of each theme', (algorithm, tint) => {
+    const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
+    const a = luminance(forecastWarningText(token))
+    const b = luminance(tint)
+    expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
   })
 
   // In the default theme antd's info colour IS the primary colour, so a bar that drew "counted" in the

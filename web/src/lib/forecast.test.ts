@@ -373,6 +373,10 @@ describe('pending cell explanation', () => {
     expect(capExceeded({ state: 'pending', total: 50, pending_reasons: { final: 9 } })).toBeNull()
   })
 
+  it('does not read a missing refusal count as zero refusals', () => {
+    expect(capExceeded({ state: 'pending', failed_cap_exceeded: true, total: 50 })).toEqual({ refused: undefined, total: 50, pct: undefined })
+  })
+
   it('does not invent a ratio when the member count is missing', () => {
     expect(capExceeded({ state: 'pending', failed_cap_exceeded: true, pending_reasons: { final: 3 } })).toEqual({ refused: 3, total: undefined, pct: undefined })
   })

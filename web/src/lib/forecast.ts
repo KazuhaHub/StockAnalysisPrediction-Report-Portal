@@ -332,14 +332,18 @@ export function pendingReasonParts(cell: ForecastCell): { phase: string; n: numb
 
 /**
  * The final-refusal cap (more than 5% of a cohort refused for good) is what holds a finished cell
- * back from publishing, and only the server's flag says so. The ratio is a convenience for the
- * sentence: with no member count there is no ratio to state.
+ * back from publishing, and only the server's flag says so. The counts are a convenience for the
+ * sentence and are never guessed: a refusal count the server did not send is not zero, and with no
+ * member count there is no ratio to state.
  */
-export function capExceeded(cell: ForecastCell): { refused: number; total: number | undefined; pct: number | undefined } | null {
+export function capExceeded(
+  cell: ForecastCell,
+): { refused: number | undefined; total: number | undefined; pct: number | undefined } | null {
   if (cell.failed_cap_exceeded !== true) return null
-  const refused = cell.pending_reasons?.final ?? 0
+  const refused = cell.pending_reasons?.final
   const total = cell.total
-  return { refused, total, pct: total !== undefined && total > 0 ? Math.round((refused / total) * 100) : undefined }
+  const known = refused !== undefined && total !== undefined && total > 0
+  return { refused, total, pct: known ? Math.round((refused / total) * 100) : undefined }
 }
 
 /**

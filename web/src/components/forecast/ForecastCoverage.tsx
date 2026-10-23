@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react'
-import { Typography, theme } from 'antd'
+import { theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { ForecastGroup } from '../../api/types'
-import { coveragePalette } from '../../lib/forecastPresentation'
+import { coveragePalette, forecastWarningText } from '../../lib/forecastPresentation'
+import Quiet from './Quiet'
 
 // Where a group's reports went. The bar's segments add up to the group's reports and each has its
 // own colour (counted, repeat run, missing or rejected, everything else, before the ledger began),
@@ -27,8 +28,9 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
   if (!c) return null
 
   // A purged group has no reports left to account for: a bar at 0 of 0 would say the group was empty.
-  if (g.purged_at || Object.values(g.cells ?? {}).every((cell) => cell?.state === 'purged')) {
-    return <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('forecast.cell.purged')}</Typography.Text>
+  const cells = Object.values(g.cells ?? {})
+  if (g.purged_at || (cells.length > 0 && cells.every((cell) => cell?.state === 'purged'))) {
+    return <Quiet style={{ fontSize: 12 }}>{t('forecast.cell.purged')}</Quiet>
   }
 
   const total = Math.max(1, c.reports)
@@ -50,13 +52,13 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
           borderRadius: 4,
           border: `1px solid ${warn ? token.colorWarningBorder : token.colorBorderSecondary}`,
           background: warn ? token.colorWarningBg : token.colorFillQuaternary,
-          color: warn ? token.colorWarningText : token.colorTextSecondary,
+          color: warn ? forecastWarningText(token) : token.colorTextSecondary,
         }}
       >
         {t(`forecast.cov.${name}`, { n })}
       </span>
     ) : null
-  const rejected: CSSProperties = { fontSize: 12 }
+  const rejected: CSSProperties = { fontSize: 12, color: forecastWarningText(token) }
 
   return (
     <div style={{ minWidth: 132, maxWidth: 260 }}>
@@ -74,14 +76,10 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
             {' · '}
             {auditLink ? (
               <Link to="/manage/audit?action=predictions.reject">
-                <Typography.Text type="warning" style={rejected}>
-                  {t('forecast.cov.rejected', { n: c.rejected })}
-                </Typography.Text>
+                <span style={rejected}>{t('forecast.cov.rejected', { n: c.rejected })}</span>
               </Link>
             ) : (
-              <Typography.Text type="warning" style={rejected}>
-                {t('forecast.cov.rejected', { n: c.rejected })}
-              </Typography.Text>
+              <span style={rejected}>{t('forecast.cov.rejected', { n: c.rejected })}</span>
             )}
           </>
         )}

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Drawer, Space, Table, Tag, Typography, theme } from 'antd'
 import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
-import { formatSigned } from '../../lib/forecastPresentation'
+import { forecastLinkColor, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import type {
   ForecastCell,
@@ -14,6 +14,7 @@ import type {
   ForecastMembersResponse,
   ForecastMode,
 } from '../../api/types'
+import Quiet from './Quiet'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
@@ -62,6 +63,7 @@ const REASONS = ['pending_baseline', 'non_standard_horizon', 'missing_mark', 'pe
 
 export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '' }: Props) {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   // No cell (a caller that opens the list on its own) is the scored view, as it always was.
   const membership = !!cell && cell.state !== 'mature'
   const key = JSON.stringify([mode, from, to, group, label, checkpoint, rtype, membership])
@@ -144,7 +146,10 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     render: (_, m) => (
       <Space size={4} wrap>
         {m.report_id ? (
-          <Link to={`/stock/${encodeURIComponent(m.symbol)}${qs({ date: m.report_date, kind: m.kind ?? '', r: m.report_id })}`}>
+          <Link
+            to={`/stock/${encodeURIComponent(m.symbol)}${qs({ date: m.report_date, kind: m.kind ?? '', r: m.report_id })}`}
+            style={{ color: forecastLinkColor(token) }}
+          >
             {m.name || m.symbol}
           </Link>
         ) : (
@@ -159,7 +164,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     title: t('forecast.drawer.received'),
     dataIndex: 'made_on',
     key: 'made_on',
-    render: (_, m) => <Typography.Text type="secondary">{m.made_on}</Typography.Text>,
+    render: (_, m) => <Quiet>{m.made_on}</Quiet>,
   }
   const stance: ColumnType<ForecastMember> = {
     title: t('forecast.drawer.stance'),
@@ -224,28 +229,28 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
       destroyOnHidden
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {mode === 'custom' && !membership && <Typography.Text type="secondary">{t('forecast.custom.banner')}</Typography.Text>}
+        {mode === 'custom' && !membership && <Quiet>{t('forecast.custom.banner')}</Quiet>}
         {membership && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Typography.Text type="secondary">{t('forecast.drawer.membership_note')}</Typography.Text>
+            <Quiet>{t('forecast.drawer.membership_note')}</Quiet>
             {stateLine && <Typography.Text>{stateLine}</Typography.Text>}
           </div>
         )}
         {!membership && cell && cell.n !== undefined && (
-          <Typography.Text type="secondary">
+          <Quiet>
             {t('forecast.drawer.headline', {
               members: cell.n,
               refused: cell.refused ?? 0,
               corp: cell.corp_action ?? 0,
             })}
-          </Typography.Text>
+          </Quiet>
         )}
         {!membership && cell && cell.n === undefined && cell.min_n_met && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Typography.Text type="secondary">{t('forecast.cell.min_n_met')}</Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <Quiet>{t('forecast.cell.min_n_met')}</Quiet>
+            <Quiet style={{ fontSize: 12 }}>
               {t('forecast.cell.min_n_met_hint')}
-            </Typography.Text>
+            </Quiet>
           </div>
         )}
 

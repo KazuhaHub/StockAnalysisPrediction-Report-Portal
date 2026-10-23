@@ -1,8 +1,10 @@
-import { Button, DatePicker, Segmented, Select, Tag, Typography } from 'antd'
+import { Button, DatePicker, Segmented, Select, Tag, Typography, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ForecastGrouping, ForecastMetric, ForecastMode } from '../../api/types'
-import { rangePresets, type BenchRun, type RangeLimits } from '../../lib/forecast'
+import { MONTH_WINDOW, rangePresets, type BenchRun, type RangeLimits } from '../../lib/forecast'
+import { forecastLinkColor } from '../../lib/forecastPresentation'
+import Quiet from './Quiet'
 
 // The controls under the tabs: which report type, which benchmark the cohorts were scored against,
 // which months or dates, which metric. Each one says what it is without being opened, and they wrap
@@ -40,6 +42,8 @@ const item = { display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', g
 
 export default function ForecastToolbar(p: Props) {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const link = { padding: 0, height: 'auto', color: forecastLinkColor(token) } as const
   const types = p.rtypes ?? []
   // A type named by the link is shown even when the server did not list it (it is the one asked for).
   const shownType = p.rtype || (types.length === 1 ? types[0] : '')
@@ -54,7 +58,7 @@ export default function ForecastToolbar(p: Props) {
     <div data-part="toolbar" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px 20px', margin: '12px 0' }}>
       {(types.length > 1 || shownType) && (
         <span data-part="rtype" style={item}>
-          <Typography.Text type="secondary" style={label}>{t('forecast.toolbar.rtype')}</Typography.Text>
+          <Quiet style={label}>{t('forecast.toolbar.rtype')}</Quiet>
           {types.length > 1 ? (
             <Select
               size="small"
@@ -72,9 +76,9 @@ export default function ForecastToolbar(p: Props) {
 
       {p.runs.length > 0 && (
         <span data-part="bench" style={item}>
-          <Typography.Text type="secondary" style={label}>{t('forecast.toolbar.bench')}</Typography.Text>
+          <Quiet style={label}>{t('forecast.toolbar.bench')}</Quiet>
           <Tag style={{ margin: 0 }}>{t('forecast.toolbar.bench_frozen')}</Tag>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          <Quiet style={{ fontSize: 12 }}>
             {p.runs
               .map((run) =>
                 t('forecast.toolbar.bench_run', {
@@ -83,23 +87,23 @@ export default function ForecastToolbar(p: Props) {
                 }),
               )
               .join(' · ')}
-          </Typography.Text>
+          </Quiet>
         </span>
       )}
 
       {p.mode === 'month' && p.total > 0 && (
         <span data-part="range" style={item}>
-          <Typography.Text type="secondary" style={label}>{t('forecast.range.label')}</Typography.Text>
+          <Quiet style={label}>{t('forecast.range.label')}</Quiet>
           <Tag style={{ margin: 0 }}>
-            {p.hidden > 0 ? t('forecast.range.last_n', { n: 12 }) : t('forecast.range.all')}
+            {p.hidden > 0 ? t('forecast.range.last_n', { n: MONTH_WINDOW }) : t('forecast.range.all')}
           </Tag>
           {p.hidden > 0 && (
-            <Button type="link" size="small" onClick={() => p.onChange({ older: '1' })} style={{ padding: 0, height: 'auto' }}>
+            <Button type="link" size="small" onClick={() => p.onChange({ older: '1' })} style={link}>
               {t('forecast.range.show_older', { n: p.hidden })}
             </Button>
           )}
-          {p.hidden === 0 && p.total > 12 && (
-            <Button type="link" size="small" onClick={() => p.onChange({ older: '' })} style={{ padding: 0, height: 'auto' }}>
+          {p.showOlder && p.total > MONTH_WINDOW && (
+            <Button type="link" size="small" onClick={() => p.onChange({ older: '' })} style={link}>
               {t('forecast.range.show_recent')}
             </Button>
           )}
@@ -109,7 +113,7 @@ export default function ForecastToolbar(p: Props) {
       {p.mode === 'custom' && (
         <>
           <span data-part="range" style={item}>
-            <Typography.Text type="secondary" style={label}>{t('forecast.range.custom')}</Typography.Text>
+            <Quiet style={label}>{t('forecast.range.custom')}</Quiet>
             <DatePicker.RangePicker
               size="small"
               value={rangeValue}
@@ -120,7 +124,7 @@ export default function ForecastToolbar(p: Props) {
             />
           </span>
           <span style={item}>
-            <Typography.Text type="secondary" style={label}>{t('forecast.range.group')}</Typography.Text>
+            <Quiet style={label}>{t('forecast.range.group')}</Quiet>
             <Segmented
               size="small"
               value={p.group}
@@ -129,16 +133,16 @@ export default function ForecastToolbar(p: Props) {
             />
           </span>
           {p.limits && (
-            <Typography.Text type="secondary" style={{ fontSize: 12, flexBasis: '100%' }}>
+            <Quiet style={{ fontSize: 12, flexBasis: '100%' }}>
               {t('forecast.range.limits', { months: p.limits.maxMonths, weeks: p.limits.maxWeekGroups })}
-            </Typography.Text>
+            </Quiet>
           )}
         </>
       )}
 
       {/* Four long labels do not fit a phone: scroll inside the card instead of hanging out of it. */}
       <span style={{ ...item, maxWidth: '100%' }}>
-        <Typography.Text type="secondary" style={label}>{t('forecast.toolbar.metric')}</Typography.Text>
+        <Quiet style={label}>{t('forecast.toolbar.metric')}</Quiet>
         <span style={{ maxWidth: '100%', overflowX: 'auto' }}>
           <Segmented
             size="small"

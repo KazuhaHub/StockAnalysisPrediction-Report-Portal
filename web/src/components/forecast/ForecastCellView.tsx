@@ -3,7 +3,7 @@ import { theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ForecastCell, ForecastCheckpoint, ForecastMetric, ForecastMode } from '../../api/types'
 import { capExceeded, cellDisplay, notBeforeInfo, pendingReasonParts } from '../../lib/forecast'
-import { forecastPalette } from '../../lib/forecastPresentation'
+import { forecastPalette, forecastWarningText } from '../../lib/forecastPresentation'
 
 // One cell of the verification matrix: what a group has to say about one checkpoint.
 //
@@ -93,8 +93,10 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
     if (cap) {
       return (
         <button type="button" data-state="pending" className="rp-fc-cell" onClick={onOpen} style={{ ...box, ...quiet, ...press }}>
-          <span>{t('forecast.cell.cap', { refused: cap.refused, total: cap.total, pct: cap.pct })}</span>
-          <span style={{ ...small, color: token.colorWarningText }}>{t('forecast.cell.cap_hint')}</span>
+          {cap.refused !== undefined && cap.total !== undefined && cap.pct !== undefined && (
+            <span>{t('forecast.cell.cap', { refused: cap.refused, total: cap.total, pct: cap.pct })}</span>
+          )}
+          <span style={{ ...small, color: forecastWarningText(token) }}>{t('forecast.cell.cap_hint')}</span>
         </button>
       )
     }

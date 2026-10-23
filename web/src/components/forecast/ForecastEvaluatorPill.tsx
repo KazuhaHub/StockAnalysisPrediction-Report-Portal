@@ -6,6 +6,8 @@ import dayjs from 'dayjs'
 import { api } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
 import { evaluatorStatus, LAGGING_MINUTES, STALLED_MS, type EvaluatorStatus } from '../../lib/forecastEvaluator'
+import { forecastLinkColor } from '../../lib/forecastPresentation'
+import Quiet from './Quiet'
 
 // The administrator's evaluator status on the record page: a pill in the header, a drawer behind it,
 // and the full console on the operations page. Readers never see it; the record is theirs and the
@@ -45,7 +47,7 @@ export default function ForecastEvaluatorPill() {
   if (failed) {
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('forecast.eval.pill.unavailable')}</Typography.Text>
+        <Quiet style={{ fontSize: 12 }}>{t('forecast.eval.pill.unavailable')}</Quiet>
         <Button size="small" type="link" onClick={load}>{t('common.retry')}</Button>
       </span>
     )
@@ -120,7 +122,7 @@ export default function ForecastEvaluatorPill() {
             </Descriptions.Item>
           </Descriptions>
           {explanation()}
-          <Link to="/manage/forecast">{t('forecast.eval.pill.operations')}</Link>
+          <Link to="/manage/forecast" style={{ color: forecastLinkColor(token) }}>{t('forecast.eval.pill.operations')}</Link>
         </div>
       </Drawer>
     </>

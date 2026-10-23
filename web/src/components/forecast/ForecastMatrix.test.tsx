@@ -331,6 +331,13 @@ describe('ForecastMatrix cell states', () => {
     expect(text).toContain('forecast.cell.cap_hint')
   })
 
+  it('names the cap without a ratio when the server flagged it but did not count the refusals', () => {
+    show(resp({ ...empty, d5: { state: 'pending', resolved: 47, total: 50, failed_cap_exceeded: true } }))
+    const text = cellOf('pending').textContent!
+    expect(text).toContain('forecast.cell.cap_hint')
+    expect(text).not.toContain('forecast.cell.cap:')
+  })
+
   it('shows an external reader\'s pending cell as its state alone, even if a malformed payload carries reasons', () => {
     show(withheld({ ...empty, d5: { state: 'pending', pending_reasons: { waiting: 5 }, not_before: '2026-10-26', failed_cap_exceeded: true } }))
     const text = cellOf('pending').textContent!
@@ -451,6 +458,14 @@ describe('ForecastMatrix coverage', () => {
     show(r)
     expect(segs()).toHaveLength(0)
     expect(document.body.textContent).not.toContain('forecast.cov.summary')
+  })
+
+  it('does not mistake a group with no cells for a purged one', () => {
+    const r = resp({})
+    r.groups[0].coverage = { ...full }
+    show(r)
+    expect(segs()).toHaveLength(5)
+    expect(document.body.textContent).toContain('forecast.cov.summary')
   })
 
   it('has no bar, no chip and no count anywhere for a reader whose response carries no coverage', () => {
