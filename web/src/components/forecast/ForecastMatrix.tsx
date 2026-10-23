@@ -1,5 +1,5 @@
 import { useId, type CSSProperties } from 'react'
-import { Tag, Typography, theme } from 'antd'
+import { theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type {
   ForecastCheckpoint,
@@ -9,6 +9,7 @@ import type {
   ForecastMode,
 } from '../../api/types'
 import { gateText } from '../../lib/forecast'
+import ExploratoryTag from './ExploratoryTag'
 import ForecastCellView from './ForecastCellView'
 import ForecastCoverage from './ForecastCoverage'
 import ForecastLegend from './ForecastLegend'
@@ -103,9 +104,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                     <span>{g.label}</span>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                       {!g.official && (
-                        <Tag style={{ margin: 0, whiteSpace: 'normal' }} color="warning">
-                          {t('forecast.tag.exploratory')}
-                        </Tag>
+                        <ExploratoryTag />
                       )}
                       {g.bench && (
                         <Quiet style={{ fontSize: 12 }}>

@@ -1,4 +1,4 @@
-import { Button, DatePicker, Segmented, Select, Tag, Typography, theme } from 'antd'
+import { Button, DatePicker, Segmented, Select, Tag, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ForecastGrouping, ForecastMetric, ForecastMode } from '../../api/types'

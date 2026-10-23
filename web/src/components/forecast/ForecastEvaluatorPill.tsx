@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Descriptions, Drawer, Typography, theme } from 'antd'
+import { Alert, Button, Descriptions, Drawer, theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'

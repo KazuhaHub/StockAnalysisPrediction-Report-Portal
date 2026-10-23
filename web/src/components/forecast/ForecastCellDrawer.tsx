@@ -14,6 +14,7 @@ import type {
   ForecastMembersResponse,
   ForecastMode,
 } from '../../api/types'
+import ExploratoryTag from './ExploratoryTag'
 import Quiet from './Quiet'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
@@ -222,7 +223,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
       title={
         <Space wrap size={8}>
           <span>{`${label} · ${t(`forecast.cp.${checkpoint}`)}`}</span>
-          {mode === 'custom' && <Tag color="warning" style={{ margin: 0 }}>{t('forecast.tag.exploratory')}</Tag>}
+          {mode === 'custom' && <ExploratoryTag />}
           {membership && <Tag style={{ margin: 0 }}>{t('forecast.drawer.mode_membership')}</Tag>}
         </Space>
       }
