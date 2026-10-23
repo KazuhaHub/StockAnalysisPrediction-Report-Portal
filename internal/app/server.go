@@ -627,16 +627,26 @@ func (s *Server) verify(cookie string) (string, int64) {
 // cookie ("v1|") signed by the same secret.
 const ownerTokenPrefix = "ot1"
 
+// hasSigningKey reports whether the portal has a secret to sign with. An HMAC over an empty key is
+// well formed and verifiable by anyone who holds the same empty key, so a token minted or accepted
+// without a key would attribute nothing and prove nothing. The startup check (validateSessionSecret)
+// makes the empty key unreachable in production; attribution now rides on a token for every run, so
+// the token paths state the condition themselves instead of assuming it. A server with no
+// configuration object at all (most test servers) has no key either.
+func (s *Server) hasSigningKey() bool { return s.cfg != nil && s.cfg.SecretKey != "" }
+
 // mintOwnerToken produces a signed, opaque attribution token naming WHO asked for a run: the person
-// and, when they have one, their OU. It is injected into a scoped user's Dify run inputs and echoed
-// back at ingest, so a report's attribution is decided by the portal's secret_key and never by a
-// client-supplied field (ADR 0022 R1).
+// and, when they have one, their OU. It is injected into the Dify run inputs of every run that has a
+// submitter and echoed back at ingest, so a report's attribution is decided by the portal's
+// secret_key and never by a client-supplied field (ADR 0022 R1, amended by P39b). It returns "" when
+// there is nothing to name or no key to sign with; the run then simply carries no token and its
+// report stays unattributed.
 //
 // It carries the person, not only the OU, because under per-person visibility (ADR 0024) the OU
 // alone cannot identify a reader — and without the person, the requester could not read the very
 // report their own run produced.
 func (s *Server) mintOwnerToken(ou int64, user string) string {
-	if ou == 0 && user == "" {
+	if !s.hasSigningKey() || (ou == 0 && user == "") {
 		return ""
 	}
 	exp := time.Now().Add(7 * 24 * time.Hour).Unix()
@@ -645,9 +655,13 @@ func (s *Server) mintOwnerToken(ou int64, user string) string {
 }
 
 // ownerFromToken verifies an attribution token and returns the OU and person it carries. ok=false
-// for an empty, malformed, tampered, expired, or foreign (wrong-prefix) token — the caller then
-// leaves the report unattributed, which fails closed for scoped viewers.
+// for an empty, malformed, tampered, expired, or foreign (wrong-prefix) token, and for any token at
+// all when the portal has no signing key (see hasSigningKey) — the caller then leaves the report
+// unattributed, which fails closed for scoped viewers.
 func (s *Server) ownerFromToken(tok string) (ou int64, user string, ok bool) {
+	if !s.hasSigningKey() {
+		return 0, "", false
+	}
 	parts := strings.SplitN(tok, ".", 2)
 	if len(parts) != 2 {
 		return 0, "", false

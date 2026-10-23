@@ -1,12 +1,17 @@
 package app
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
@@ -90,6 +95,50 @@ func TestOwnerTokenRoundTrip(t *testing.T) {
 	// ou 0 mints nothing.
 	if s.mintOwnerToken(0, "") != "" {
 		t.Fatal("ou 0 should mint no token")
+	}
+}
+
+// TestMintOwnerTokenRefusesAnEmptySecret pins the guard that attribution now depends on: a token
+// signed with an empty key is well formed and verifiable by anyone holding the same empty key, so
+// neither side may mint or accept one. A server with no configuration at all (the shape of many
+// test servers) must refuse rather than panic.
+func TestMintOwnerTokenRefusesAnEmptySecret(t *testing.T) {
+	st := newTestStore(t)
+	root := st.EnsureDefaultGroup()
+
+	empty := &Server{st: st, cfg: &config.Config{SecretKey: ""}}
+	if tok := empty.mintOwnerToken(root, "asker"); tok != "" {
+		t.Errorf("an empty secret minted a token: %q", tok)
+	}
+
+	// A token the pre-change code path would have produced: signed with the empty key.
+	exp := time.Now().Add(time.Hour).Unix()
+	msg := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, root, "asker", exp)
+	m := hmac.New(sha256.New, nil)
+	m.Write([]byte(msg))
+	legacy := encodeSessionMessage(msg) + "." + hex.EncodeToString(m.Sum(nil))
+	if ou, who, ok := empty.ownerFromToken(legacy); ok {
+		t.Errorf("an empty-key token was accepted by an empty-key server: ou %d user %q", ou, who)
+	}
+
+	// The same token is also refused where a real key is configured.
+	keyed := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
+	if _, _, ok := keyed.ownerFromToken(legacy); ok {
+		t.Error("an empty-key token was accepted by a keyed server")
+	}
+
+	// No configuration object at all: both directions refuse without panicking.
+	bare := &Server{st: st}
+	if tok := bare.mintOwnerToken(root, "asker"); tok != "" {
+		t.Errorf("a server with no config minted a token: %q", tok)
+	}
+	if _, _, ok := bare.ownerFromToken(legacy); ok {
+		t.Error("a server with no config accepted a token")
+	}
+
+	// The guard does not break the keyed path.
+	if tok := keyed.mintOwnerToken(root, "asker"); tok == "" {
+		t.Error("a keyed server refused to mint")
 	}
 }
 
