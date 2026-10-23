@@ -5,6 +5,7 @@ import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
 import { ApiError } from '../api/client'
 import type { ForecastCell, ForecastCheckpoint, ForecastGroupsResponse, Me } from '../api/types'
+import { forecastLinkColor } from '../lib/forecastPresentation'
 import ForecastRecordPage from './ForecastRecordPage'
 
 // The reader's record page. Its contract is mostly about what it must NOT do: ask an admin route,
@@ -685,6 +686,18 @@ describe('ForecastRecordPage shell', () => {
     expect(within(card).getByText('forecast.metric.spread')).toBeTruthy()
     expect(within(card).queryByText('forecast.methodology.title')).toBeNull()
     expect(screen.getByText('forecast.methodology.title').closest('.ant-card')).not.toBe(card)
+  })
+
+  // antd draws the selected tab's label in its primary colour, 4.1:1 on white and 3.55:1 on the dark
+  // surface; the page's own link colour is the step that clears 4.5:1 in each theme.
+  it('draws the selected tab\'s label in the page\'s own link colour, and the others in the text colour', async () => {
+    show()
+    await screen.findByText('+3.1 pt')
+    const probe = document.createElement('span')
+    probe.style.color = forecastLinkColor(theme.getDesignToken())
+    const label = (name: string) => screen.getByRole('tab', { name }).querySelector('span') as HTMLElement
+    expect(label('forecast.tab.month').style.color).toBe(probe.style.color)
+    expect(label('forecast.tab.custom').style.color).toBe('')
   })
 
   it('lets the header, the toolbar and the filters wrap instead of overflowing a narrow screen', async () => {

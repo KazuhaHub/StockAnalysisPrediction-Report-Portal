@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Empty, Result, Skeleton, Space, Tabs, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Result, Skeleton, Space, Tabs, Typography, theme } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +25,7 @@ import {
   visibleGroups,
   type RangeLimits,
 } from '../lib/forecast'
+import { forecastLinkColor } from '../lib/forecastPresentation'
 import { useForecastRecord } from '../lib/useForecastRecord'
 import Quiet from '../components/forecast/Quiet'
 
@@ -61,6 +62,7 @@ export default function ForecastRecordPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user, admin, forecast } = useAuth()
+  const { token } = theme.useToken()
   const [sp, setSp] = useSearchParams()
   const view = useMemo(() => readView(sp), [sp])
 
@@ -164,6 +166,12 @@ export default function ForecastRecordPage() {
       ? t('forecast.record.population_own', { ou: populationOu })
       : t('forecast.record.population_own_unnamed')
     : t('forecast.record.population_all')
+
+  // antd draws the selected tab's label in its primary colour, which is under AA on both surfaces; the
+  // link colour used elsewhere on this page is the step that clears it in each theme.
+  const tabLabel = (key: string, text: string) => (
+    <span style={key === mode ? { color: forecastLinkColor(token) } : undefined}>{text}</span>
+  )
 
   const exportCsv = () => {
     if (!data) return
@@ -331,8 +339,8 @@ export default function ForecastRecordPage() {
           activeKey={mode}
           onChange={changeMode}
           items={[
-            { key: 'month', label: t('forecast.tab.month') },
-            ...(external ? [] : [{ key: 'custom', label: t('forecast.tab.custom') }]),
+            { key: 'month', label: tabLabel('month', t('forecast.tab.month')) },
+            ...(external ? [] : [{ key: 'custom', label: tabLabel('custom', t('forecast.tab.custom')) }]),
           ]}
         />
 
