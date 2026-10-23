@@ -102,7 +102,11 @@ interface Props {
    * a checkpoint in the future has no bar to sit on, and drawing it at the right edge would claim
    * the window covers it.
    */
-  markers?: { date: string; label: string }[]
+  markers?: { date: string; label: string; price?: number; snap?: string }[]
+  /** First report-related session; omitted callers retain their full range. */
+  windowFrom?: string
+  /** Plain-language key for the optional report overlay. */
+  overlayLegend?: string
 }
 
 const CURRENCY_KEYS = new Set(['CNY', 'HKD', 'USD'])
@@ -383,7 +387,7 @@ const SR_ONLY: CSSProperties = {
   border: 0,
 }
 
-export default function PriceChart({ bars, loading, unavailable, height, currency, interval, levels, markers }: Props) {
+export default function PriceChart({ bars, loading, unavailable, height, currency, interval, levels, markers, windowFrom, overlayLegend }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const readoutID = useId()
@@ -424,12 +428,13 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
     return () => ro.disconnect()
   }, [box])
 
-  const n = bars.length
+  const chartBars = useMemo(() => windowFrom ? bars.filter((bar) => dayOf(bar.d) >= windowFrom) : bars, [bars, windowFrom])
+  const n = chartBars.length
   // The default is `daily`, so a caller written before intervals existed keeps the chart it had.
   const intraday = interval === 'intraday'
   const scale = useMemo(
-    () => (n > 0 && width > 0 ? buildScale(bars, width, h, intraday) : null),
-    [bars, n, width, h, intraday],
+    () => (n > 0 && width > 0 ? buildScale(chartBars, width, h, intraday) : null),
+    [chartBars, n, width, h, intraday],
   )
 
   /**
@@ -508,7 +513,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
   // The readout always names something — the newest bar when nothing is being pointed at. A live
   // region that is empty until hovered tells a screen-reader user nothing about where they are.
   const shownIdx = cur ?? n - 1
-  const shown = bars[shownIdx]
+  const shown = chartBars[shownIdx]
   // THE CHANGE AND THE PERCENTAGE OF A HISTORICAL BAR ARE OURS, AND THAT IS NOT A VIOLATION OF THE
   // SNAPSHOT RULE. ADR 0028 §4 forbids recomputing the LIVE snapshot's percentage from last and
   // prevClose: on an ex-rights morning the exchange restates 昨收 to the adjusted reference price
@@ -521,7 +526,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
   // It is NOT the exchange's official 涨跌幅 across a dividend or a split — that number is not
   // obtainable here — and printing nothing for every bar is the worse answer.
   // Do not "fix" this into the snapshot rule. On this path there is nothing to pass through.
-  const prevClose = shownIdx > 0 ? bars[shownIdx - 1].c : null
+  const prevClose = shownIdx > 0 ? chartBars[shownIdx - 1].c : null
   const change = prevClose === null ? null : shown.c - prevClose
   const changePct = prevClose !== null && prevClose !== 0 ? ((shown.c - prevClose) / prevClose) * 100 : null
   // The oldest bar in the window has no previous close IN THIS WINDOW. Its real one exists in the
@@ -648,7 +653,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
   const axisRight = width - PAD_R
   // One narrowed handle for the selection, so that nothing below has to re-assert that an index and
   // a bar belong to each other.
-  const sel = cur === null ? null : { i: cur, bar: bars[cur] }
+  const sel = cur === null ? null : { i: cur, bar: chartBars[cur] }
   // 分 x shares / 100 -> whole currency units. See the long note at the render site: this product
   // is the one value here that can leave the exact-integer range, and it is checked there rather
   // than clamped, because a clamped turnover would be a made-up number wearing an ≈.
@@ -697,7 +702,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
    * a date produces a label that looks like one and is not.
    */
   const tickText = (i: number): string => {
-    const d = bars[i].d
+    const d = chartBars[i].d
     if (!intraday) return d
     const s = splitStamp(d)
     if (s === null) return d
@@ -796,14 +801,14 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
           // so the line states no direction and the volume panel below, which can, states one.
           <polyline
             data-testid="price-line"
-            points={bars.map((b, i) => `${scale.cx(i)},${scale.py(b.c)}`).join(' ')}
+            points={chartBars.map((b, i) => `${scale.cx(i)},${scale.py(b.c)}`).join(' ')}
             fill="none"
             stroke={token.colorPrimary}
             strokeWidth={1.5}
             strokeLinejoin="round"
           />
         ) : (
-          bars.map((b, i) => {
+          chartBars.map((b, i) => {
             // 阳线 / 阴线: the body's colour is the close against the OPEN of the same session,
             // which is what 阳/阴 means. The change against 昨收 belongs to the quote bar above the
             // chart, not to the candle.
@@ -824,17 +829,17 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
 
         {((levels?.length ?? 0) > 0 || (markers?.length ?? 0) > 0) && (
           <g data-testid="price-overlay">
-            {(markers ?? []).map((m) => {
+            {(markers ?? []).map((m, markerIndex) => {
               // Snap WITHIN the series only. A checkpoint can fall on a weekend or a holiday, and
               // dropping it silently lost the mark; but a marker older than the window's first bar
               // must still be dropped rather than pinned to the left edge (the contract above), or
               // every old report would draw its date on today's first candle.
-              if (bars.length === 0 || m.date < dayOf(bars[0].d)) return null
-              const i = bars.findIndex((b) => dayOf(b.d) >= m.date)
+              if (chartBars.length === 0 || m.date < dayOf(chartBars[0].d)) return null
+              const i = chartBars.findIndex((b) => dayOf(b.d) >= m.date)
               if (i < 0) return null
               const x = scale.cx(i)
               return (
-                <g key={`m:${m.date}`} data-testid="price-marker">
+                <g key={`m:${m.date}:${m.label}`} data-testid="price-marker">
                   <line
                     x1={x}
                     x2={x}
@@ -846,13 +851,20 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
                   />
                   <text
                     x={x}
-                    y={PAD_T - 8}
-                    textAnchor="middle"
+                    y={PAD_T - 8 + (markerIndex % 3) * 14}
+                    textAnchor={x < 60 ? 'start' : x > width - 100 ? 'end' : 'middle'}
                     fontSize={AXIS_FONT - 1}
                     fill={token.colorTextTertiary}
                   >
-                    {m.label}
+                    {m.label}{m.snap ? ` · ${m.snap}` : ''}
                   </text>
+                  {m.price !== undefined && Number.isFinite(m.price) && (
+                    scale.py(m.price) < PAD_T || scale.py(m.price) > PAD_T + scale.priceH ? (
+                      <text data-testid="price-settled-edge" x={x} y={scale.py(m.price) < PAD_T ? PAD_T + AXIS_FONT : PAD_T + scale.priceH - 2} textAnchor="middle" fontSize={AXIS_FONT} fill={token.colorText}>
+                        {scale.py(m.price) < PAD_T ? '↑' : '↓'} {fenToYuan(m.price)}
+                      </text>
+                    ) : <circle cx={x} cy={scale.py(m.price)} r={4} fill={token.colorPrimary} stroke={token.colorBgContainer} strokeWidth={2}><title>{m.label}: {fenToYuan(m.price)}</title></circle>
+                  )}
                 </g>
               )
             })}
@@ -909,7 +921,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
           </g>
         )}
 
-        {bars.map((b, i) => {
+        {chartBars.map((b, i) => {
           const vhh = scale.vh(b.v)
           // The volume panel survives the switch to a line — a 分时 without it is half a chart —
           // but its colour rule changes with the shape above it. A DAILY bar is coloured 阳/阴, the
@@ -919,7 +931,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
           // ever went up. Against the PREVIOUS sample's close it is the tick direction a 分时 panel
           // is supposed to show. The first bar has no previous one in this window and falls back to
           // its own open rather than inventing a reference price.
-          const ref = intraday && i > 0 ? bars[i - 1].c : b.o
+          const ref = intraday && i > 0 ? chartBars[i - 1].c : b.o
           return (
             <rect
               key={b.d}
@@ -936,7 +948,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
 
         {scale.ticks.map((i) => (
           <text
-            key={bars[i].d}
+            key={chartBars[i].d}
             data-testid="price-xtick"
             x={scale.cx(i)}
             y={h - 8}
@@ -996,7 +1008,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
             the rect the pointer is actually over, rather than from clientX against the element's
             box, means a zero-width box costs the reader the price chip and nothing else: the bar
             under the pointer is still identified, and no arithmetic divides by that zero. */}
-        {bars.map((b, i) => (
+        {chartBars.map((b, i) => (
           <rect
             key={b.d}
             data-testid="price-hit"
@@ -1107,6 +1119,7 @@ export default function PriceChart({ bars, loading, unavailable, height, currenc
       )}
 
       {readout}
+      {overlayLegend && <div data-testid="price-overlay-legend" style={{ marginTop: 6, fontSize: 12, color: token.colorTextSecondary }}>{overlayLegend}</div>}
     </div>
   )
 }

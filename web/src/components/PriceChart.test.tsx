@@ -1035,4 +1035,24 @@ describe('forecast overlay', () => {
     const stray = [...outer.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent === '0')
     expect(stray).toHaveLength(0)
   })
+
+  it('starts a report overlay at S0 and labels settled-close dots', () => {
+    renderChart(
+      <PriceChart
+        bars={BARS}
+        windowFrom={BARS[1].d}
+        markers={[{ date: BARS[1].d, label: 'd5', price: BARS[1].c, snap: 'Sunday → Monday' }]}
+        overlayLegend="overlay legend"
+      />,
+    )
+    expect(screen.getAllByTestId('price-candle')).toHaveLength(BARS.length - 1)
+    expect(screen.getByText(/Sunday → Monday/)).toBeTruthy()
+    expect(screen.getByTestId('price-overlay-legend').textContent).toBe('overlay legend')
+  })
+
+  it('labels a settled price beyond the candle domain instead of drawing a false edge dot', () => {
+    renderChart(<PriceChart bars={BARS} markers={[{ date: BARS[1].d, label: 'd5', price: 999999 }]} />)
+    expect(screen.getByTestId('price-settled-edge').textContent).toContain('9,999.99')
+    expect(screen.getByTestId('price-marker').querySelector('circle')).toBeNull()
+  })
 })

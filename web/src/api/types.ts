@@ -1543,6 +1543,7 @@ export interface PredictionSet {
   version: string
   /** Optional during mixed-version rollout; newer servers always return the stored report date. */
   report_date?: string
+  report_kind?: string
   /** Global monthly membership, omitted for protected readers and when classification fails. */
   membership?: ForecastMembership
   /** Integer basis points, truncated toward zero; absent without a usable base and target. */

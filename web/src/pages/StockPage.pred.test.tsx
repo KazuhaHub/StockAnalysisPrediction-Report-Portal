@@ -5,7 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import StockPage from './StockPage'
 import { ApiError } from '../api/client'
 
-const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false, legacy: false }))
+const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false, legacy: false, admin: true, stage: 'full' as 'off' | 'card' | 'full' }))
 
 // The reading page's prediction request (P10).
 //
@@ -14,7 +14,7 @@ const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', exter
 // report body always renders.
 
 vi.mock('../auth', () => ({
-  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, forecast: access.legacy ? undefined : { scope: access.scope, external: access.external }, can: () => true, logout: vi.fn() }),
+  useAuth: () => ({ user: 'alice', name: 'Alice', admin: access.admin, forecastReader: access.stage, forecast: access.legacy ? undefined : { scope: access.scope, external: access.external }, can: () => true, logout: vi.fn() }),
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ fontSize: 15, fontWeight: 400, wide: false }) }))
 vi.mock('../lib/datetime', () => ({ isInstant: () => false, formatReportDateTime: (s: string) => s }))
@@ -51,6 +51,7 @@ const report = (id: number, date: string) => ({
   symbol: '001238', market: 'sz', name: 'Test Co', selDate: date, selKind: 'Research', selId: id,
   kinds: ['Research'], subtabs: [], timeline: [],
   rep: { id, name: 'Test Co', title: 'T', displayTitle: 'Report', date, source: 'x', html: '', md: '# hi', time: '' },
+  ...(withSummary ? { prediction: { has_prediction: true, display_set_id: id, stance: 'long', weight_bp: 6500, upside_bp: 1234, body_changed: false } } : {}),
 })
 
 const setFor = (reportId: number, terminal: number) => ({
@@ -66,6 +67,7 @@ let rejectPred: boolean
 let denyForecast: boolean
 let aDeferred: { resolve: (v: unknown) => void } | null
 let pendingB: boolean
+let withSummary: boolean
 
 vi.mock('../api/client', () => ({
   api: {
@@ -124,8 +126,11 @@ beforeEach(() => {
   access.scope = 'all'
   access.external = false
   access.legacy = false
+  access.admin = true
+  access.stage = 'full'
   aDeferred = null
   pendingB = true
+  withSummary = false
   try {
     window.localStorage.clear()
   } catch {
@@ -181,6 +186,16 @@ describe('StockPage predictions', () => {
     expect(screen.queryByText('forecast.chart.overlay')).toBeNull()
   })
 
+  it('renders no forecast DOM or requests at stage off for a non-admin reader', async () => {
+    access.admin = false
+    access.stage = 'off'
+    show()
+    expect(await screen.findByText('report-body')).toBeTruthy()
+    expect(predCalls).toEqual([])
+    expect(document.querySelector('#forecast')).toBeNull()
+    expect(screen.queryByText('forecast.chart.overlay')).toBeNull()
+  })
+
   it('renders no forecast error or retry when current server scope was revoked', async () => {
     denyForecast = true
     show()
@@ -229,5 +244,20 @@ describe('StockPage predictions', () => {
     await waitFor(() => expect(predCalls.length).toBeGreaterThan(before))
     // The body never depended on the predictions request.
     expect(screen.getByText('report-body')).toBeTruthy()
+  })
+
+  it('keeps the reader overlay preference while the toggle stays available on a collapsed chart', async () => {
+    window.localStorage.setItem('rp_read_forecast_overlay', '0')
+    show()
+    const toggle = await screen.findByRole('checkbox')
+    expect((toggle as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText('forecast.chart.overlay')).toBeTruthy()
+  })
+
+  it('paints the full-stage summary chip with the report body', async () => {
+    withSummary = true
+    show()
+    expect(await screen.findByText('report-body')).toBeTruthy()
+    expect(screen.getByTestId('forecast-summary-chip').textContent).toContain('+12.3%')
   })
 })

@@ -34,4 +34,9 @@ describe('TimelinePanel (horizontal / mobile)', () => {
     fireEvent.click(screen.getByText('2026-01-17'))
     expect(onSelect).toHaveBeenCalledWith('2026-01-17')
   })
+
+  it('gives a forecast dot an accessible label', () => {
+    render(<TimelinePanel nodes={[{ date: '2026-05-09', n: 3, predicted: true }]} selected="2026-05-09" onSelect={() => {}} horizontal />)
+    expect(screen.getByRole('button').getAttribute('aria-label')).toContain('forecast.timeline.predicted')
+  })
 })

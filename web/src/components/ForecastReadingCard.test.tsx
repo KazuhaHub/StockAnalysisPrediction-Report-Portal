@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import type { PredictionSet } from '../api/types'
-import PredictionPanel from './PredictionPanel'
+import ForecastReadingCard from './ForecastReadingCard'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string, values?: { date?: string }) => values?.date && k.startsWith('forecast.phase.') ? `${k}: ${values.date}` : k }) }))
 
 const accepted: PredictionSet = {
   id: 7,
@@ -35,15 +35,15 @@ const accepted: PredictionSet = {
   marks: [{ checkpoint: 'd5', status: 'resolved', bar_date: '2026-09-28', close_fen: 21128, ret_bp: 1117, bench_ret_bp: -511 }],
 }
 
-function show(sets: PredictionSet[], extra: Partial<React.ComponentProps<typeof PredictionPanel>> = {}) {
+function show(sets: PredictionSet[], extra: Partial<React.ComponentProps<typeof ForecastReadingCard>> = {}) {
   return render(
     <MemoryRouter>
-      <PredictionPanel sets={sets} otherSets={[]} symbol="600519" {...extra} />
+      <ForecastReadingCard sets={sets} otherSets={[]} symbol="600519" {...extra} />
     </MemoryRouter>,
   )
 }
 
-describe('PredictionPanel', () => {
+describe('ForecastReadingCard', () => {
   it('shows settlement paused separately from a mark phase', () => {
     show([{ ...accepted, marks: [{ checkpoint: 'd5', status: 'pending', phase: 'settling' }] }], { settlementPaused: true })
     expect(screen.getByText('forecast.phase.settlement_paused')).toBeTruthy()
@@ -55,12 +55,13 @@ describe('PredictionPanel', () => {
       { checkpoint: 'd20', status: 'pending', phase: 'waiting', not_before: '2026-10-26', expected: true },
       { checkpoint: 'd120', status: 'pending', phase: 'waiting', not_before: '2027-03-15' },
     ] }])
-    expect(screen.getAllByText('forecast.phase.expected')).toHaveLength(1)
-    expect(screen.getAllByText('forecast.phase.on_or_after')).toHaveLength(1)
+    expect(screen.getAllByText(/forecast.phase.expected/)).toHaveLength(1)
+    expect(screen.getAllByText(/forecast.phase.on_or_after/)).toHaveLength(1)
+    expect(screen.getByText('forecast.phase.expected: 2026-10-26')).toBeTruthy()
   })
-  it('renders nothing when the report has no accepted set', () => {
-    const { container } = show([{ ...accepted, state: 'absent' }])
-    expect(container.firstChild).toBeNull()
+  it('distinguishes a report without a set from unavailable forecast access', () => {
+    show([{ ...accepted, state: 'absent' }])
+    expect(screen.getByText('forecast.reading.no_forecast')).toBeTruthy()
   })
 
   it('shows the claims that were written, with the entry labelled derived', () => {
@@ -132,6 +133,35 @@ describe('PredictionPanel', () => {
       ],
     })
     expect(screen.getByText('forecast.panel.others')).toBeTruthy()
-    expect(screen.getAllByRole('link').some((a) => a.getAttribute('href')?.includes('date=2026-09-17'))).toBe(true)
+    expect(screen.getAllByRole('link').some((a) => a.getAttribute('href') === '/stock/600519?date=2026-09-17&kind=&r=14001#forecast')).toBe(true)
+  })
+
+  it('shows membership, baseline detail and the disclaimer', () => {
+    show([{ ...accepted, membership: 'member', baseline_emitted_fen: 19004, baseline_as_of: '2026-09-18' }])
+    expect(screen.getByText('forecast.reading.counted')).toBeTruthy()
+    expect(screen.getByText('forecast.reading.reported_close')).toBeTruthy()
+    expect(screen.getByText('forecast.disclaimer')).toBeTruthy()
+  })
+
+  it('shows the display revision even when another revision counted', () => {
+    show([accepted, { ...accepted, id: 8, claims: [{ key: 'expected_terminal', kind: 'terminal_value', price_fen: 222200 }], made_at: '2026-10-19T13:00:00Z' }], { displaySetID: 8, countedSetID: 7 })
+    expect(screen.getByText(/2,222\.00/)).toBeTruthy()
+    expect(screen.queryByText(/1,497\.75/)).toBeNull()
+  })
+
+  it('hides membership, orphaned rows and payload for a protected reader', () => {
+    show([{ ...accepted, membership: 'member', payload: 'private-payload' }], {
+      allowMembership: false, allowPayload: false, allowOrphans: false,
+      otherSets: [{ ...accepted, id: 9, report_id: undefined, report_date: '2025-01-01' }],
+    })
+    expect(screen.queryByText('forecast.reading.counted')).toBeNull()
+    expect(screen.queryByText('private-payload')).toBeNull()
+    expect(screen.queryByText('2025-01-01')).toBeNull()
+  })
+
+  it('does not expose outcome numbers on a pending mark carrying stale metric fields', () => {
+    show([{ ...accepted, marks: [{ checkpoint: 'd5', status: 'pending', phase: 'waiting', ret_bp: 1234, close_fen: 888888 }] }])
+    expect(screen.queryByText('+12.34%')).toBeNull()
+    expect(screen.queryByText('8,888.88')).toBeNull()
   })
 })

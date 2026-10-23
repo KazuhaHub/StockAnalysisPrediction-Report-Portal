@@ -1,10 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Card, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, qs, ApiError } from '../api/client'
-import type { RunResp, SubTab } from '../api/types'
+import { api, qs, ApiError, errText } from '../api/client'
+import type { ReportPredictions, RunResp, SubTab } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
 import ReaderControls from '../components/ReaderControls'
@@ -12,9 +12,18 @@ import VersionSwitcher from '../components/VersionSwitcher'
 import { ExportPdfButton } from '../components/ExportButtons'
 import { useReaderPrefs } from '../reader'
 import { NO_ITEM_TOOLTIP } from '../lib/segmented'
+import ForecastReadingCard from '../components/ForecastReadingCard'
+import ForecastSummaryChip from '../components/ForecastSummaryChip'
+import { useAuth } from '../auth'
+import { formatReportDateTime, isInstant } from '../lib/datetime'
 
 export default function RunPage() {
   const { t } = useTranslation()
+  const { user, admin, forecast, forecastReader } = useAuth()
+  const forecastEnabled = forecast === undefined || forecast.scope !== 'none'
+  const forecastCardEnabled = forecastEnabled && (admin || forecastReader === undefined || forecastReader === 'card' || forecastReader === 'full')
+  const forecastFullEnabled = forecastEnabled && (admin || forecastReader === 'full')
+  const accessKey = `${user ?? ''}\0${admin}\0${forecast?.scope ?? 'legacy'}\0${forecast?.external ?? false}\0${forecastReader ?? 'legacy'}`
   const { key = '' } = useParams()
   const [sp, setSp] = useSearchParams()
   const navigate = useNavigate()
@@ -23,22 +32,46 @@ export default function RunPage() {
   // Same optimal reading width as the stock page: fill up to the cap, then center.
   const docMax = wide ? 1440 : 1080
   const [data, setData] = useState<RunResp | null>(null)
+  const [dataAccess, setDataAccess] = useState('')
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [prediction, setPrediction] = useState<{ reportId?: number; accessKey?: string; data?: ReportPredictions; unavailable?: boolean; error: string }>({ error: '' })
+  const [predictionNonce, setPredictionNonce] = useState(0)
 
   const r = sp.get('r') || ''
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     setNotFound(false)
     api
       .get<RunResp>(`/api/run/${encodeURIComponent(key)}${qs({ r })}`)
-      .then(setData)
+      .then((next) => { if (!cancelled) { setData(next); setDataAccess(accessKey) } })
       .catch((e) => {
+        if (cancelled) return
         if (e instanceof ApiError && e.status === 404) setNotFound(true)
       })
-      .finally(() => setLoading(false))
-  }, [key, r])
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [key, r, accessKey])
+
+  const reportId = data?.rep?.id
+  useEffect(() => {
+    setPrediction({ reportId, accessKey, error: '' })
+    if (!reportId || !forecastCardEnabled) return
+    let cancelled = false
+    api.get<ReportPredictions>(`/api/report/${reportId}/predictions?include=payload`)
+      .then((next) => { if (!cancelled) setPrediction({ reportId, accessKey, data: next, error: '' }) })
+      .catch((error) => {
+        if (cancelled) return
+        const unavailable = error instanceof ApiError && error.status === 403 && error.code === 'forecast_unavailable'
+        setPrediction({ reportId, accessKey, unavailable, error: unavailable ? '' : errText(error, t) })
+      })
+    return () => { cancelled = true }
+    // `t` is intentionally not a dependency: language changes remount the translated shell, while
+    // this request is keyed only by the report, access stage and an explicit retry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId, forecastCardEnabled, predictionNonce, accessKey])
 
   if (notFound) {
     return (
@@ -62,6 +95,8 @@ export default function RunPage() {
   }
   if (!data) return null
   const rep = data.rep
+  const currentPrediction = prediction.reportId === rep?.id && prediction.accessKey === accessKey ? prediction : { reportId: undefined, data: undefined, error: '', unavailable: false }
+  const selectedEdition = data.tabs.find((tab) => tab.id === data.selId)?.version
   // One entry per REPORT, showing the written form currently selected for it. The version axis is
   // the switcher's job; collapsing here is what stops two forms of one analysis from looking like
   // two identical tabs.
@@ -146,8 +181,38 @@ export default function RunPage() {
         )}
           {rep && <VersionSwitcher reportId={rep.id} onPick={(id) => setSp({ r: String(id) })} />}
           <Card className="rp-doc-card" title={rep?.displayTitle} extra={rep ? <ReaderControls /> : undefined} style={readerVars}>
+            {rep && <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>{t('forecast.reading.meta', { date: rep.date, received: isInstant(rep.time) ? formatReportDateTime(rep.time) : '—', edition: selectedEdition || '—' })}</Typography.Text>}
+            {rep && forecastFullEnabled && !currentPrediction.unavailable && <ForecastSummaryChip prediction={dataAccess === accessKey ? data.prediction : undefined} loading={dataAccess !== accessKey && loading} />}
             {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
           </Card>
+          {rep && forecastCardEnabled && currentPrediction.error && (
+            <Alert
+              type="error"
+              showIcon
+              title={currentPrediction.error}
+              action={<Button size="small" onClick={() => setPredictionNonce((n) => n + 1)}>{t('common.retry')}</Button>}
+            />
+          )}
+          {rep && forecastCardEnabled && !currentPrediction.error && !currentPrediction.unavailable && (
+            <ForecastReadingCard
+              sets={currentPrediction.data?.sets ?? []}
+              countedSetID={currentPrediction.data?.counted_set_id}
+              displaySetID={currentPrediction.data?.display_set_id}
+              settlementPaused={currentPrediction.data?.settlement_paused}
+              otherSets={[]}
+              symbol={data.symbol}
+              reportDate={rep.date}
+              receivedAt={rep.time}
+              edition={selectedEdition}
+              sibling={currentPrediction.data?.sibling}
+              countedEdition={currentPrediction.data?.counted_edition}
+              loading={!currentPrediction.data && !currentPrediction.error}
+              allowPayload={!forecast?.external}
+              allowMembership={admin || forecast?.scope === 'all' && !forecast.external}
+              allowOrphans={!forecast?.external}
+              reportKind={rep.kind}
+            />
+          )}
         </Space>
       </div>
     </div>

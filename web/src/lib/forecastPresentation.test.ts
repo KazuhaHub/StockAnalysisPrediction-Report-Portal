@@ -132,7 +132,7 @@ describe('forecast presentation', () => {
     const files = dirs.flatMap((dir) => readdirSync(resolve(dir))
       .filter((name) => name.endsWith('.tsx') && !name.endsWith('.test.tsx') && (dir.includes('components') || name.startsWith('Forecast')))
       .map((name) => resolve(dir, name)))
-    files.push(resolve('src/components/PredictionPanel.tsx'), resolve('src/pages/ForecastRecordPage.tsx'))
+    files.push(resolve('src/components/ForecastReadingCard.tsx'), resolve('src/pages/ForecastRecordPage.tsx'))
     expect(files.length).toBeGreaterThan(0)
     for (const file of files) expect(readFileSync(file, 'utf8'), file).not.toMatch(/#[\da-f]{3,8}\b|rgba?\s*\(/i)
   })
