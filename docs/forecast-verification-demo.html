@@ -1,124 +1,191 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>预测验证界面演示</title>
 <style>
-:root{--bg:#f5f5f5;--card:#fff;--fg:rgba(0,0,0,.88);--fg2:rgba(0,0,0,.65);--fg3:rgba(0,0,0,.45);--line:#f0f0f0;--line2:#d9d9d9;--pri:#1677ff;--pri-bg:#e6f4ff;--ok:#389e0d;--ok-bg:#f6ffed;--bad:#cf1322;--bad-bg:#fff1f0;--warn:#d46b08;--warn-bg:#fff7e6;--mut-bg:#fafafa;--up:#cf1322;--dn:#389e0d;--ev:#d46b08;--hl:rgba(22,119,255,.06)}
-@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#000;--card:#141414;--fg:rgba(255,255,255,.85);--fg2:rgba(255,255,255,.65);--fg3:rgba(255,255,255,.45);--line:#303030;--line2:#424242;--pri:#1668dc;--pri-bg:#111a2c;--ok:#49aa19;--ok-bg:#162312;--bad:#dc4446;--bad-bg:#2a1215;--warn:#d89614;--warn-bg:#2b2111;--mut-bg:#1f1f1f;--up:#dc4446;--dn:#49aa19;--ev:#d89614;--hl:rgba(22,104,220,.12)}}
+:root{color-scheme:light;--bg:#f5f5f5;--card:#fff;--fg:rgba(0,0,0,.88);--fg2:rgba(0,0,0,.65);--fg3:rgba(0,0,0,.45);--line:#f0f0f0;--line2:#d9d9d9;--pri:#1677ff;--pri-bg:#e6f4ff;--ok:#389e0d;--ok-bg:#f6ffed;--bad:#cf1322;--bad-bg:#fff1f0;--warn:#d46b08;--warn-bg:#fff7e6;--mut-bg:#fafafa;--up:#cf1322;--dn:#389e0d;--ev:#d46b08;--hl:rgba(22,119,255,.06);--cov-dup:#91caff;--cov-miss:#ffd591;--cov-oth:#d9d9d9;--cov-pre:#bfbfbf}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--bg:#000;--card:#141414;--fg:rgba(255,255,255,.85);--fg2:rgba(255,255,255,.65);--fg3:rgba(255,255,255,.45);--line:#303030;--line2:#424242;--pri:#1668dc;--pri-bg:#111a2c;--ok:#49aa19;--ok-bg:#162312;--bad:#dc4446;--bad-bg:#2a1215;--warn:#d89614;--warn-bg:#2b2111;--mut-bg:#1f1f1f;--up:#dc4446;--dn:#49aa19;--ev:#d89614;--hl:rgba(22,104,220,.12);--cov-dup:#1765ad;--cov-miss:#aa7714;--cov-oth:#595959;--cov-pre:#8c8c8c}}
+:root[data-theme=dark]{color-scheme:dark;--bg:#000;--card:#141414;--fg:rgba(255,255,255,.85);--fg2:rgba(255,255,255,.65);--fg3:rgba(255,255,255,.45);--line:#303030;--line2:#424242;--pri:#1668dc;--pri-bg:#111a2c;--ok:#49aa19;--ok-bg:#162312;--bad:#dc4446;--bad-bg:#2a1215;--warn:#d89614;--warn-bg:#2b2111;--mut-bg:#1f1f1f;--up:#dc4446;--dn:#49aa19;--ev:#d89614;--hl:rgba(22,104,220,.12);--cov-dup:#1765ad;--cov-miss:#aa7714;--cov-oth:#595959;--cov-pre:#8c8c8c}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5715 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI","Noto Sans SC",sans-serif}
+[hidden]{display:none!important}
 a{color:var(--pri);text-decoration:none;cursor:pointer}
-.demo{background:repeating-linear-gradient(45deg,var(--warn-bg),var(--warn-bg) 10px,var(--card) 10px,var(--card) 20px);border-bottom:1px solid var(--line2);padding:8px 20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:13px}
-.demo b{color:var(--warn)}.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:var(--card)}.seg button{font:inherit;border:0;background:none;color:var(--fg);padding:4px 14px;cursor:pointer}.seg button+button{border-left:1px solid var(--line2)}.seg button.on{background:var(--pri);color:#fff}
+select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line2);border-radius:8px;padding:3px 8px;max-width:100%}
+.demo{background:repeating-linear-gradient(45deg,var(--warn-bg),var(--warn-bg) 10px,var(--card) 10px,var(--card) 20px);border-bottom:1px solid var(--line2);padding:8px 20px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.demo .row{display:flex;gap:6px 18px;align-items:center;flex-wrap:wrap}.ctl{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.demo b{color:var(--warn)}.seg{display:inline-flex;max-width:100%;overflow-x:auto;border:1px solid var(--line2);border-radius:8px;background:var(--card)}.seg button{font:inherit;border:0;background:none;color:var(--fg);padding:4px 14px;cursor:pointer;white-space:nowrap}.seg button+button{border-left:1px solid var(--line2)}.seg button.on{background:var(--pri);color:#fff}.seg button:disabled{cursor:default}
 header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 20px;min-height:64px;flex-wrap:wrap}
 .logo{font-size:18px;font-weight:700;display:flex;gap:8px;align-items:center}.logo i{width:22px;height:22px;border-radius:6px;background:var(--pri);display:inline-block}
-.search{flex:1;max-width:420px;border:1px solid var(--line2);border-radius:8px;padding:4px 11px;color:var(--fg3)}
-.hdr-r{margin-left:auto;display:flex;gap:10px;align-items:center}.btn{font:inherit;border:1px solid var(--line2);background:var(--card);color:var(--fg);border-radius:8px;padding:4px 15px;cursor:pointer}.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.nav{display:flex;gap:2px;flex-wrap:wrap}.nav a{padding:6px 12px;border-radius:6px;color:var(--fg2)}.nav a.on{color:var(--pri);background:var(--pri-bg);font-weight:500}
+.search{flex:1;min-width:160px;max-width:420px;border:1px solid var(--line2);border-radius:8px;padding:4px 11px;color:var(--fg3)}
+.hdr-r{margin-left:auto;display:flex;gap:10px;align-items:center}.btn{font:inherit;border:1px solid var(--line2);background:var(--card);color:var(--fg);border-radius:8px;padding:4px 15px;cursor:pointer;display:inline-block}.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}.btn:disabled{opacity:.5;cursor:default}
 .avatar{width:32px;height:32px;border-radius:50%;background:#87d068;color:#fff;display:grid;place-items:center;font-weight:600}
 main{max-width:1240px;margin:0 auto;padding:16px 20px 60px}.crumb{color:var(--fg3);margin:4px 0 12px}.crumb a{color:var(--fg3)}.crumb span{color:var(--fg)}
-h1{font-size:20px;margin:0}h3{font-size:16px;margin:0 0 12px}.sub{color:var(--fg3);font-size:13px}
-.card{background:var(--card);border-radius:8px;border:1px solid var(--line);padding:20px 24px;margin-bottom:16px}
+h1{font-size:20px;margin:0}h3{font-size:16px;margin:0 0 12px}.sub{color:var(--fg3);font-size:13px}.disc{color:var(--fg3);font-size:12.5px}
+.card{background:var(--card);border-radius:8px;border:1px solid var(--line);padding:20px 24px;margin-bottom:16px}.card.inner{margin:16px 0 0;padding:14px 16px}
+.rowh{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}.acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.annot{border:1px dashed var(--line2);border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--fg2);margin:0 0 12px;background:var(--mut-bg)}.annot b{color:var(--warn)}.annot code,.kv code{font-size:12px;background:var(--line);border-radius:4px;padding:0 4px}
 .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:14px 0 4px}.sel{border:1px solid var(--line2);border-radius:8px;padding:4px 11px;background:var(--card);min-width:120px;display:inline-flex;justify-content:space-between;gap:8px}.sel::after{content:"⌄";color:var(--fg3)}
 .lbl{color:var(--fg3);font-size:13px}
-.alert{background:var(--pri-bg);border:1px solid color-mix(in srgb,var(--pri) 30%,transparent);border-radius:8px;padding:9px 14px;font-size:13px;color:var(--fg2);margin:12px 0}
+.alert{background:var(--pri-bg);border:1px solid color-mix(in srgb,var(--pri) 30%,transparent);border-radius:8px;padding:9px 14px;font-size:13px;color:var(--fg2);margin:12px 0}.alert.warn{background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}.alert.bad{background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.summary{background:var(--mut-bg);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--fg2);margin:12px 0 0}
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th{font-weight:600;color:var(--fg);background:var(--mut-bg);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap}td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
-.mx td.cell{padding:6px;min-width:128px}.cbox{border-radius:6px;padding:8px 10px;height:68px;display:flex;flex-direction:column;justify-content:center;cursor:default}
-.cbox.m{cursor:pointer;border:1px solid transparent}.cbox.m:hover{border-color:var(--pri)}.cbox .v{font-size:18px;font-weight:650}.cbox .s{font-size:11.5px;color:var(--fg3)}
-.cbox.p{background:var(--mut-bg);color:var(--fg3);font-size:12px}.prog{height:4px;background:var(--line2);border-radius:2px;margin-top:6px}.prog i{display:block;height:100%;background:var(--pri);border-radius:2px;opacity:.6}
+.mx td.cell{padding:6px;min-width:150px}.cbox{border-radius:6px;padding:8px 10px;min-height:68px;display:flex;flex-direction:column;justify-content:center;cursor:default}
+.cbox.m{cursor:pointer;border:1px solid transparent}.cbox.m:hover,.cbox.m:focus-visible{border-color:var(--pri);outline:0}.cbox .v{font-size:18px;font-weight:650}.cbox .s{font-size:11.5px;color:var(--fg3)}.gl{font-size:11px;margin-left:5px;vertical-align:2px}
+.cbox.p{background:var(--mut-bg);color:var(--fg3);font-size:12px}.cbox.p .why,.cbox.p .nb{font-size:11.5px;line-height:1.4;margin-top:3px}.cbox.p .nb{color:var(--fg2)}.prog{height:4px;background:var(--line2);border-radius:2px;margin-top:6px}.prog i{display:block;height:100%;background:var(--pri);border-radius:2px;opacity:.6}
+.cbox.cap{border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
 .cbox.o{background:var(--mut-bg);color:var(--fg3);font-size:12px;border:1px dashed var(--line2)}
-.cov{display:flex;height:8px;border-radius:4px;overflow:hidden;width:150px;background:var(--line)}.cov i{display:block;height:100%}
+.cov{display:flex;height:8px;border-radius:4px;overflow:hidden;width:150px;background:var(--line)}.cov i{display:block;height:100%}.c1{background:var(--pri)}.c2{background:var(--cov-dup)}.c3{background:var(--cov-miss)}.c4{background:var(--cov-oth)}.c5{background:repeating-linear-gradient(135deg,var(--cov-pre),var(--cov-pre) 3px,transparent 3px,transparent 6px)}
+.covt{font-size:12px;margin-top:3px}.chips{margin-top:3px;max-width:230px}.chips .tag{margin:0 4px 3px 0;font-size:11.5px;line-height:18px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg3);margin-top:10px}.legend span{display:inline-flex;gap:5px;align-items:center}.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
 .tag{display:inline-block;font-size:12px;line-height:20px;padding:0 7px;border-radius:4px;border:1px solid var(--line2);background:var(--mut-bg);color:var(--fg2);margin-right:6px}
 .tag.ok{color:var(--ok);background:var(--ok-bg);border-color:color-mix(in srgb,var(--ok) 35%,transparent)}.tag.bad{color:var(--bad);background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 35%,transparent)}.tag.blue{color:var(--pri);background:var(--pri-bg);border-color:color-mix(in srgb,var(--pri) 35%,transparent)}.tag.warn{color:var(--warn);background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
+.pill{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;line-height:22px;padding:0 10px;border-radius:999px;border:1px solid var(--line2);background:var(--mut-bg);color:var(--fg2);cursor:pointer}.pill i{width:8px;height:8px;border-radius:50%;background:var(--fg3)}.pill.ok i{background:var(--ok)}.pill.warn i{background:var(--warn)}.pill.bad i{background:var(--bad)}.pill.blue i{background:var(--pri)}
+.chiplink{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;line-height:22px;padding:0 10px;border-radius:999px;border:1px solid color-mix(in srgb,var(--pri) 35%,transparent);background:var(--pri-bg);color:var(--pri);margin-right:6px}
 .drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:none}.drawer{position:fixed;top:0;right:0;bottom:0;width:min(640px,100%);background:var(--card);z-index:21;transform:translateX(100%);transition:transform .25s;display:flex;flex-direction:column}
 .drawer.open{transform:none}.drawer-mask.open{display:block}.dh{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.db{padding:16px 24px;overflow:auto}
 .x{border:0;background:none;font-size:20px;color:var(--fg3);cursor:pointer}
-.pos{color:var(--up)}.neg{color:var(--dn)}.muted{color:var(--fg3)}
+.pos{color:var(--up)}.neg{color:var(--dn)}.fail{color:var(--bad)}.muted{color:var(--fg3)}
 .tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:4px 0 16px}.tabs div{padding:10px 0;color:var(--fg2);cursor:pointer}.tabs .on{color:var(--pri);border-bottom:2px solid var(--pri);font-weight:500}
 .grid2{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}@media (max-width:900px){.grid2{grid-template-columns:1fr}}
+.grid3{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}.grid3 .card{margin:0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13.5px}.kv .k{color:var(--fg3)}
+.res{text-align:center;padding:48px 24px}.res .code{font-size:44px;font-weight:700;color:var(--fg3);line-height:1.1}.res h3{margin:8px 0 6px}
 svg text{font-family:inherit}.chart text{fill:var(--fg3);font-size:11px;paint-order:stroke;stroke:var(--card);stroke-width:3px;stroke-linejoin:round}
 .band{position:relative;height:46px;margin:6px 0 2px}.band .bar{position:absolute;top:18px;height:10px;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--dn) 45%,transparent),color-mix(in srgb,var(--pri) 35%,transparent),color-mix(in srgb,var(--up) 45%,transparent))}
 .band .pt{position:absolute;top:0;transform:translateX(-50%);font-size:11px;color:var(--fg2);white-space:nowrap;text-align:center}.band .pt::after{content:"";display:block;width:1px;height:20px;background:var(--fg3);margin:2px auto 0}
 .band .cur{position:absolute;top:14px;width:3px;height:18px;background:var(--fg);border-radius:2px;transform:translateX(-50%)}
 .steps{display:flex;gap:0;margin:4px 0 4px;flex-wrap:wrap}.step{flex:1;min-width:120px;position:relative;padding-top:18px;font-size:12.5px}.step::before{content:"";position:absolute;top:6px;left:0;right:0;height:2px;background:var(--line2)}.step.done::before{background:var(--pri)}.step i{position:absolute;top:1px;left:0;width:12px;height:12px;border-radius:50%;background:var(--card);border:2px solid var(--line2)}.step.done i{border-color:var(--pri);background:var(--pri)}
+#marks td{white-space:nowrap}#marks td[colspan]{white-space:normal;min-width:300px}
 pre{background:var(--mut-bg);border-radius:6px;padding:12px;font-size:12px;overflow:auto;margin:8px 0 0}
 details summary{cursor:pointer;color:var(--pri)}
 .view{display:none}.view.on{display:block}
+@media (max-width:640px){.path{display:none}.demo,header{padding-left:16px;padding-right:16px}main{padding:12px 16px 48px}.card{padding:16px}.hdr-r{margin-left:0}.tabs{gap:20px}.dh,.db{padding-left:16px;padding-right:16px}.db td,.db th{padding:8px 6px}}
 </style></head><body>
-<div class="demo"><b>界面演示（不是真实功能）</b><span>月度页为模拟数据，假设功能已上线 8 个月（今天 = 2027-06-20）；单份报告页使用瑞芯微 2026-09-17 报告的真实行情。</span>
-<span class="seg"><button data-v="cohort" class="on">预测验证（管理）</button><button data-v="report">单份报告 · 预测验证</button></span></div>
-<header><div class="logo"><i></i>研报门户</div><div class="search">搜索股票代码 / 名称 / 报告</div>
-<div class="hdr-r"><button class="btn pri">▶ 运行分析</button><button class="btn">队列</button><button class="btn">管理</button><div class="avatar">K</div></div></header>
-
-<main>
-<!-- ======================= cohort view ======================= -->
-<section class="view on" id="v-cohort">
-<div class="crumb"><a>管理</a> / <a>内容</a> / <span>预测验证</span></div>
-<div class="card">
- <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start">
-  <div><h1>预测验证</h1><div class="sub">报告当时的结构化预测 vs 之后的真实走势。每组只在检查点全部到期后才出数字。</div></div>
-  <div style="display:flex;gap:8px"><button class="btn">导出 CSV</button><button class="btn">评估设置</button></div>
+<div class="demo">
+ <div class="row"><b>界面演示（不是真实功能）</b><span>月度页为模拟数据，假设功能已上线 8 个月（今天 = 2027-06-20，日期按仅排除周末的模拟日历推算）；单份报告页使用瑞芯微 2026-09-17 报告的真实行情（截至 2026-10-16），检查点日期按 ADR 0029 §4 与已核实的 2026 年休市日历推算。</span></div>
+ <div class="row">
+  <span class="ctl"><span class="lbl">页面</span><span class="seg" id="viewSeg"><button data-v="record" class="on">预测验证<span class="path"> /forecast</span></button><button data-v="ops">运维<span class="path"> /manage/forecast</span></button><button data-v="report">单份报告</button></span></span>
+  <span class="ctl"><span class="lbl">身份范围</span><select id="scopeSel">
+   <option value="admin">管理员（全部报告，运维）</option><option value="all">内部成员 · 范围「全部」</option><option value="own">内部成员 · 范围「本单位」</option><option value="ownsmall">内部成员 · 「本单位」· 样本不足</option><option value="extall">外部成员 · 范围「全部」</option><option value="extown">外部成员 · 范围「本单位」</option><option value="none">范围「无」（无权限）</option></select></span>
+  <span class="ctl"><span class="lbl">主题</span><span class="seg" id="themeSeg"><button data-t="auto" class="on">系统</button><button data-t="light">浅色</button><button data-t="dark">深色</button></span></span>
  </div>
- <div class="tabs" style="margin-top:14px" id="modeTabs"><div class="on" data-mode="month">按月</div><div data-mode="custom">自定义区间</div></div>
- <div class="toolbar">
-  <span class="lbl">报告类型</span><span class="sel">投资决策建议</span>
-  <span class="lbl">基准</span><span class="sel">中证1000</span>
-  <span id="monthRange"><span class="lbl">区间</span> <span class="sel">2026-11 ～ 2027-06（全部）</span></span>
-  <span id="customRange" style="display:none"><span class="lbl">收到日期</span> <input type="date" id="from" value="2026-12-10" class="sel" style="min-width:0"> ～ <input type="date" id="to" value="2027-04-25" class="sel" style="min-width:0">
-   <span class="lbl" style="margin-left:8px">分组</span> <span class="seg" id="groupSeg"><button data-g="week">周</button><button data-g="month" class="on">月</button><button data-g="quarter">季</button><button data-g="all">整段</button></span></span>
-  <span class="lbl" style="margin-left:8px">指标</span>
-  <span class="seg" id="metricSeg"><button data-m="spread" class="on">多空价差</button><button data-m="ic">排序 IC</button><button data-m="hit">方向命中</button><button data-m="fill">买入价成交</button></span>
- </div>
- <div class="alert" id="exploreBanner" style="display:none;background:var(--warn-bg);border-color:color-mix(in srgb,var(--warn) 40%,transparent)"><b style="color:var(--warn)">探索口径</b>：区间和分组由你自选，结果不是正式记录。p 值未对"选择区间"这件事做校正——换很多个区间总能找到好看的一段。导出的 CSV 会带上区间、分组和"探索"标记。正式结论请看「按月」。</div><div class="alert" id="rangeErr" style="display:none;background:var(--bad-bg);border-color:color-mix(in srgb,var(--bad) 40%,transparent)"></div>
- <div class="alert" id="metricHelp"></div>
- <div style="overflow-x:auto"><table class="mx" id="matrix"></table></div>
- <div class="legend">
-  <span><i class="sw" style="background:color-mix(in srgb,var(--up) 40%,transparent)"></i>显著为正（各格独立 BH 校正后 q&lt;0.05）</span>
-  <span><i class="sw" style="background:color-mix(in srgb,var(--dn) 40%,transparent)"></i>显著为负</span>
-  <span><i class="sw" style="background:var(--mut-bg);border:1px solid var(--line2)"></i>不显著 / 未到期</span>
-  <span>·　覆盖：</span>
-  <span><i class="sw" style="background:var(--pri)"></i>计入</span><span><i class="sw" style="background:#91caff"></i>重复运行</span><span><i class="sw" style="background:#ffd591"></i>缺少/被拒</span><span><i class="sw" style="background:#d9d9d9"></i>回测/降级/基准不符</span>
+ <div class="row">
+  <span class="ctl" data-for="record"><span class="lbl">记录状态</span><select id="recSel"><option value="normal">有数据（上线 8 个月后）</option><option value="empty">空记录（上线首周）</option></select></span>
+  <span class="ctl" data-for="record ops"><span class="lbl">评估器</span><select id="evSel"><option value="healthy">正常</option><option value="off">关闭（线上现状）</option><option value="dry">试运行</option><option value="stale">心跳过期</option><option value="lagging">滞后</option><option value="error">错误</option></select></span>
+  <span class="ctl" data-for="ops"><span class="lbl">行情源</span><select id="srcSel"><option value="ok">正常</option><option value="tencent_down">腾讯不可用</option><option value="no_source">没有账本主源</option><option value="unavailable">统计不可用</option></select></span>
+  <span class="ctl" data-for="report"><span class="lbl">检查点阶段</span><select id="phSel"><option value="waiting">等待中（真实情况）</option><option value="waiting_s0">等待首个交易日</option><option value="settling">结算中</option><option value="retrying">重试中</option><option value="overdue">逾期</option><option value="final">终局拒绝</option></select></span>
+  <span class="ctl" data-for="report"><span class="lbl">统计归属</span><select id="memSel"><option value="pre_live">早于账本起点（真实情况）</option><option value="member">计入批次（假设）</option><option value="duplicate">同批重复</option><option value="off_benchmark">基准不符</option><option value="test">测试运行</option></select></span>
  </div>
 </div>
-<div class="card"><h3>口径说明</h3>
+<header><div class="logo"><i></i>研报门户</div>
+ <nav class="nav" id="nav"><a>助手</a><a>复盘</a><a>应用</a><a id="navForecast" data-nav="forecast" data-path="/forecast">预测验证</a></nav>
+ <div class="search">搜索股票代码 / 名称 / 报告</div>
+<div class="hdr-r"><button class="btn pri">▶ 运行分析</button><button class="btn">队列</button><button class="btn" id="mgBtn">管理</button><div class="avatar">K</div></div></header>
+
+<main>
+<!-- ======================= record view: /forecast ======================= -->
+<section class="view on" id="v-record">
+<div class="annot" id="recAnnot"></div>
+<div class="crumb"><a>首页</a> / <span>预测验证</span></div>
+<div class="card res" id="recDenied" hidden>
+ <div class="code">403</div><h3>你所在的组织单元没有开通预测验证</h3>
+ <div class="sub">这是权限设置，不是故障，刷新或重试不会改变结果。需要的话，请联系管理员在组织单元里为你的单位设置「预测验证」范围。</div>
+ <div style="margin-top:16px"><a class="btn">返回首页</a></div>
+</div>
+<div class="card" id="recMain">
+ <div class="rowh" id="recHead">
+  <div><h1>预测验证</h1><div class="sub">报告当时的结构化预测 vs 之后的真实走势。每组只在检查点全部到期后才出数字。</div>
+   <div class="sub" style="margin-top:6px"><span id="popLine"></span> · <span class="disc">研究验证用途，不构成投资建议</span></div></div>
+  <div class="acts"><button class="pill" id="evPill" hidden></button><button class="btn" id="exportBtn">导出 CSV</button></div>
+ </div>
+ <div class="summary" id="summary" hidden></div>
+ <div id="recEmpty" hidden style="text-align:center;padding:40px 12px">
+  <div style="font-size:16px;font-weight:600">还没有批次出结果</div>
+  <div class="sub" style="margin-top:6px">每个批次要等所有检查点到期后才出数字。第一个 5 个交易日检查点最早在 2026-10-26 或之后。</div>
+ </div>
+ <div id="recData">
+  <div class="tabs" style="margin-top:14px" id="modeTabs"><div class="on" data-mode="month">按月</div><div data-mode="custom">自定义区间</div></div>
+  <div class="toolbar">
+   <span class="lbl">报告类型</span><span class="tag" style="margin:0">投资决策建议</span>
+   <span class="lbl">基准</span><span class="tag" style="margin:0" title="每个批次使用写入时冻结的基准，之后改设置不会重新评分">按批次冻结</span><span class="sub">2026-10 中证1000 · 2026-11 起 中证800</span>
+   <span id="monthRange"><span class="lbl">区间</span> <span class="tag" style="margin:0">最近 12 个月</span> <a>显示更早</a></span>
+   <span id="customRange" hidden><span class="lbl">收到日期</span> <input type="date" id="from" value="2026-12-10" class="sel" style="min-width:0"> ～ <input type="date" id="to" value="2027-04-25" class="sel" style="min-width:0">
+    <span class="lbl" style="margin-left:8px">分组</span> <span class="seg" id="groupSeg"><button data-g="week">周</button><button data-g="month" class="on">月</button><button data-g="quarter">季</button><button data-g="all">整段</button></span></span>
+   <span class="lbl" style="margin-left:8px">指标</span>
+   <span class="seg" id="metricSeg"><button data-m="spread" class="on">多空价差</button><button data-m="ic">排序 IC</button><button data-m="hit">方向命中</button><button data-m="fill">买入价成交</button></span>
+  </div>
+  <div class="alert warn" id="exploreBanner" hidden><b style="color:var(--warn)">探索口径</b>：区间和分组由你自选，结果不是正式记录。p 值未对"选择区间"这件事做校正——换很多个区间总能找到好看的一段。导出的 CSV 会带上区间、分组和"探索"标记。正式结论请看「按月」。</div><div class="alert bad" id="rangeErr" hidden></div>
+  <div class="alert warn" id="notEnough" hidden><b style="color:var(--warn)">数据不足</b>：本单位的报告数量还不够出统计数字——每个格子至少需要 30 只股票。这是发布门槛在起作用，不是故障；报告积累起来、检查点到期后，格子会自动出数。</div>
+  <div class="alert" id="metricHelp"></div>
+  <div style="overflow-x:auto"><table class="mx" id="matrix"></table></div>
+  <div class="legend" id="legend"></div>
+ </div>
+</div>
+<div class="card" id="recMore"><h3>口径说明</h3>
  <div class="kv">
   <span class="k">分组</span><span>按报告被门户<b>收到</b>的日期（上海时间）分组。「按月」是正式口径，数字到期后不再变；「自定义区间」可按周/月/季/整段分组，属于探索口径。报告自带的日期不影响分组。</span>
-  <span class="k">成员</span><span>每只股票每批只算最早的一份；仲裁降级、基准价不符、回测运行不计入，但都列在覆盖里。</span>
-  <span class="k">起算点</span><span>收到报告后的第一个收盘价。之前的行情一律不算，避免"事后知道"。</span>
-  <span class="k">超额</span><span>个股涨跌 − 同期中证1000 涨跌；送转、除权的样本剔除并计数，停牌按最后成交价计。</span>
+  <span class="k">成员</span><span>每只股票每批只算最早的一份；仲裁降级、基准价不符、测试运行、回测运行、基准不符不计入，但都列在覆盖里。</span>
+  <span class="k">账本起点</span><span>2026-10-19 00:00（上海时间）之前入账的预测集只用于校验，不计入统计，在覆盖里标为「账本起点前」。</span>
+  <span class="k">起算点</span><span>S0 = 首个收盘晚于入账时刻的交易日：15:00 前收到算当天，15:00 起或非交易日算下一个交易日。之前的行情一律不算，避免"事后知道"。dN = S0 之后第 N 个交易日。</span>
+  <span class="k">超额</span><span>个股涨跌 − 同期冻结基准的涨跌（2026-10 批次为中证1000，2026-11 起为中证800）；送转、除权的样本剔除并计数，停牌按最后成交价计。</span>
+  <span class="k">发布门槛</span><span>批次结束、检查点全部终结、有效样本不少于 30、终局拒绝占比不超过 5%，数字才会出现；否则显示「n = x · 低于 30 · 不发布」或拒绝占比超限。</span>
   <span class="k">显著性</span><span>把预测在同批成员间随机打乱 10,000 次作为零假设，每格内的 p 值做 Benjamini–Hochberg 校正（各格独立）；样本少于 30 不出数字。</span>
+  <span class="k">声明</span><span>研究验证用途，不构成投资建议</span>
+ </div>
+</div>
+</section>
+
+<!-- ======================= operations view: /manage/forecast ======================= -->
+<section class="view" id="v-ops">
+<div class="annot" id="opsAnnot"></div>
+<div class="crumb"><a>管理</a> / <a>内容</a> / <span>预测验证（运维）</span></div>
+<div class="card res" id="opsDenied" hidden>
+ <div class="code">403</div><h3>只有管理员可以打开运维页</h3>
+ <div class="sub">评估器、行情源和账本设置只对管理员开放。统计矩阵在「预测验证」。</div>
+</div>
+<div id="opsMain">
+ <div class="card">
+  <div class="rowh"><div><h1>预测验证 · 运维</h1><div class="sub">评估器、行情源、基准排期、账本起点、告警与未入账。统计矩阵和成员抽屉在「预测验证」，所有读者可见。</div></div>
+   <div class="acts"><a class="btn">打开预测验证 /forecast</a><button class="btn">评估设置</button></div></div>
+ </div>
+ <div class="card" id="evCard"></div>
+ <div class="card" id="srcCard"></div>
+ <div class="grid3">
+  <div class="card"><h3>基准与排期</h3><div class="kv"><span class="k">当前批次</span><span>中证800（sh000906），自 2026-11 批次</span><span class="k">上一批次</span><span>中证1000（sh000852），2026-10</span><span class="k">已排期</span><span class="muted">无</span></div><div class="sub" style="margin-top:10px">新的选择从下一个批次生效；账本上已有的预测集保留写入时的基准，不会重新评分。</div></div>
+  <div class="card"><h3>账本起点</h3><div class="kv"><span class="k">起点</span><span>2026-10-19 00:00（上海时间）</span><span class="k">设置者</span><span>admin</span></div><div class="sub" style="margin-top:10px">设置后不可更改。起点之前入账的预测集只用于校验，不计入统计。</div></div>
+  <div class="card"><h3>告警</h3><div class="kv"><span class="k">邮件</span><span>已配置 2 个收件人</span><span class="k">Slack</span><span>已设置 Webhook</span><span class="k">验证</span><span>最近 30 天内测试告警已送达两个渠道</span></div></div>
+  <div class="card"><h3>未入账</h3><div class="sub" style="color:var(--fg2)">2026-10-19 以来有 3 份覆盖类型的报告没有预测记录 · 近 30 天写入失败：0　<a>查看审计日志</a></div></div>
+  <div class="card"><h3>访问概览</h3><div class="kv"><span class="k">范围「全部」</span><span>1 个单位</span><span class="k">范围「本单位」</span><span>3 个单位</span><span class="k">范围「无」</span><span>9 个单位</span></div><div style="margin-top:10px"><a>在组织单元编辑器中设置</a></div></div>
  </div>
 </div>
 </section>
 
 <!-- ======================= report view ======================= -->
 <section class="view" id="v-report">
+<div class="annot" id="repAnnot"></div>
 <div class="crumb"><a>首页</a> / <span>603893 瑞芯微</span></div>
 <div class="card" style="padding:14px 16px">
- <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><b>行情</b>
-  <span><span class="seg"><button>1月</button><button class="on">3月</button><button>1年</button></span>　<label class="sub"><input type="checkbox" checked disabled> 叠加所选报告的预测价位</label></span></div>
+ <div class="rowh" style="align-items:center"><b>行情</b>
+  <span><span class="seg"><button>1月</button><button class="on">3月</button><button>1年</button></span>　<label class="sub" id="overlayToggle"><input type="checkbox" id="ovChk" checked> 叠加所选报告的预测价位</label></span></div>
  <div class="sub" style="margin:6px 0 4px">瑞芯微 603893　<b style="color:var(--fg);font-size:16px">171.01</b>　<span class="neg">−2.85%</span>　（演示）</div>
  <div id="chart"></div>
- <div class="legend"><span><i class="sw" style="background:var(--fg3)"></i>起算价 S0</span><span><i class="sw" style="background:var(--ev)"></i>概率加权终值</span><span><i class="sw" style="background:var(--pri)"></i>建议买入价</span><span><i class="sw" style="background:var(--hl);border:1px solid var(--line2)"></i>观察窗口</span><span>· 叠加层是对现有 PriceChart 的新增可选属性</span></div>
+ <div class="legend" id="chartLegend"><span><i class="sw" style="background:var(--fg3)"></i>起算价 S0</span><span><i class="sw" style="background:var(--ev)"></i>概率加权终值</span><span><i class="sw" style="background:var(--pri)"></i>建议买入价</span><span><i class="sw" style="background:var(--hl);border:1px solid var(--line2)"></i>观察窗口</span><span><i class="sw" style="background:var(--pri);border-radius:50%"></i>已结算收盘（来源：腾讯日线）</span><span>· 叠加层是对现有 PriceChart 的新增可选属性</span></div>
 </div>
 <div class="card" style="padding:12px 16px"><b>时间线</b>　<span class="tag blue">2026-09-17</span><span class="tag">2026-10-16</span><span class="sub">（现有组件，选中日期决定下面显示哪份报告）</span></div>
-<div style="margin:0 0 12px"><span class="seg"><button class="on">投资决策建议</button><button>行业分析</button><button>估值分析</button><button>财务分析</button><button>舆情分析</button></span></div>
+<div style="margin:0 0 12px"><span class="seg" style="max-width:100%;overflow-x:auto"><button class="on">投资决策建议</button><button>行业分析</button><button>估值分析</button><button>财务分析</button><button>舆情分析</button></span></div>
+<div style="margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="lbl">版本</span><span class="seg" id="edSeg"><button data-e="full" class="on">完整版</button><button data-e="lite">精简版</button></span><span class="sub">同一篇报告可以有多个版本；每个版本带着自己那次运行的预测，没有就是没有。</span></div>
 <div class="card" style="padding-bottom:14px">
- <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+ <div class="rowh">
   <div><h1 id="rTitle"></h1><div class="sub" id="rMeta"></div></div>
-  <div><span class="tag">V3.16.2</span><button class="btn">导出</button></div>
+  <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 0"><span class="tag" id="edTag"></span><span class="tag">V3.16.2</span><a class="chiplink" id="fcChip"></a><button class="btn">导出</button></div>
  </div>
  <div style="margin-top:12px;display:grid;gap:8px">
   <div style="height:10px;background:var(--line);border-radius:4px;width:92%"></div><div style="height:10px;background:var(--line);border-radius:4px;width:85%"></div><div style="height:10px;background:var(--line);border-radius:4px;width:60%"></div>
   <div class="sub">（报告正文，现有内容，此处略）</div></div>
 </div>
-<div class="card">
- <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h3 style="margin:0">预测验证</h3><button class="btn" style="padding:2px 10px">收起</button></div>
- <div class="sub" style="margin:4px 0 12px">这份报告入账时的结构化预测，以及之后各检查点的真实结果。只有选中的报告带预测时才显示本区块。</div>
- <div id="badges" style="margin-bottom:14px"></div>
- <div class="card" style="margin:0;padding:14px 16px"><b>报告当时说</b><div id="said" style="margin-top:10px"></div></div>
- <div class="card" style="margin:16px 0 0;padding:14px 16px"><b>检查点</b><div class="steps" id="steps" style="margin:12px 0 8px"></div><div style="overflow-x:auto"><table id="marks"></table></div>
- <div class="sub" id="latestNote" style="margin-top:8px"></div></div>
- <div class="card" style="margin:16px 0 0;padding:14px 16px"><b>这只股票的其他预测</b><table id="others" style="margin-top:8px"></table></div>
- <div style="margin:16px 0 0"><details><summary>查看入账原文（predictions JSON）</summary><pre id="payload"></pre></details></div>
+<div class="card" id="fcCard">
+ <div class="rowh" style="align-items:center"><h3 style="margin:0">预测验证</h3><button class="btn" style="padding:2px 10px">收起</button></div>
+ <div class="sub" style="margin:4px 0 4px">这份报告入账时的结构化预测，以及之后各检查点的真实结果。只有选中的报告带预测时才显示本区块。</div>
+ <div class="disc" id="fcDisc" style="margin-bottom:12px">研究验证用途，不构成投资建议</div>
+ <div id="fcBody"></div>
 </div>
 </section>
 </main>
@@ -127,24 +194,97 @@ details summary{cursor:pointer;color:var(--pri)}
 <div class="drawer" id="drawer"><div class="dh"><b id="dTitle"></b><button class="x" id="dClose">×</button></div><div class="db" id="dBody"></div></div>
 
 <script>
-const DATA={"months": ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06"], "cps": [["d5", "5 个交易日"], ["d20", "20 个交易日"], ["d60", "60 个交易日"], ["d120", "120 个交易日"], ["h12", "12 个月"]], "cohorts": [{"month": "2026-11", "reports": 108, "members": 79, "cov": {"计入": 79, "重复运行": 22, "缺少预测": 1, "预测被拒": 3, "回测运行": 2, "仲裁降级": 1, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 78, "refused": 0, "corp": 1, "spread": -2.7, "p_spread": 0.321, "ic": 0.04, "p_ic": 0.354, "hit": 0.59, "hit_null": 0.54, "fill": 0.2, "fillret": 2.3, "n_long": 43}, "d20": {"state": "mature", "n": 79, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.325, "ic": 0.08, "p_ic": 0.362, "hit": 0.65, "hit_null": 0.5, "fill": 0.22, "fillret": 3.7, "n_long": 38}, "d60": {"state": "mature", "n": 74, "refused": 1, "corp": 4, "spread": 6.0, "p_spread": 0.011, "ic": 0.25, "p_ic": 0.001, "hit": 0.6, "hit_null": 0.56, "fill": 0.33, "fillret": -0.9, "n_long": 27}, "d120": {"state": "mature", "n": 75, "refused": 0, "corp": 4, "spread": 6.6, "p_spread": 0.059, "ic": 0.36, "p_ic": 0.01, "hit": 0.53, "hit_null": 0.56, "fill": 0.4, "fillret": 3.4, "n_long": 32}, "h12": {"state": "pending", "done": 0, "total": 79, "until": "2027-11 起"}}}, {"month": "2026-12", "reports": 93, "members": 55, "cov": {"计入": 55, "重复运行": 25, "缺少预测": 4, "预测被拒": 2, "回测运行": 2, "仲裁降级": 4, "基准价不符": 1}, "cells": {"d5": {"state": "mature", "n": 51, "refused": 3, "corp": 1, "spread": 1.4, "p_spread": 0.298, "ic": 0.12, "p_ic": 0.398, "hit": 0.54, "hit_null": 0.53, "fill": 0.45, "fillret": -2.8, "n_long": 27}, "d20": {"state": "mature", "n": 52, "refused": 2, "corp": 1, "spread": 2.1, "p_spread": 0.013, "ic": 0.06, "p_ic": 0.403, "hit": 0.52, "hit_null": 0.58, "fill": 0.37, "fillret": -1.3, "n_long": 26}, "d60": {"state": "mature", "n": 49, "refused": 2, "corp": 4, "spread": 9.2, "p_spread": 0.088, "ic": 0.19, "p_ic": 0.085, "hit": 0.57, "hit_null": 0.57, "fill": 0.23, "fillret": 1.8, "n_long": 28}, "d120": {"state": "pending", "done": 25, "total": 55, "until": null}, "h12": {"state": "pending", "done": 0, "total": 55, "until": "2027-12 起"}}}, {"month": "2027-01", "reports": 101, "members": 67, "cov": {"计入": 67, "重复运行": 20, "缺少预测": 2, "预测被拒": 9, "回测运行": 0, "仲裁降级": 2, "基准价不符": 1}, "cells": {"d5": {"state": "mature", "n": 64, "refused": 3, "corp": 0, "spread": 3.5, "p_spread": 0.067, "ic": 0.22, "p_ic": 0.044, "hit": 0.57, "hit_null": 0.54, "fill": 0.46, "fillret": -3.0, "n_long": 37}, "d20": {"state": "mature", "n": 66, "refused": 1, "corp": 0, "spread": 4.6, "p_spread": 0.033, "ic": 0.2, "p_ic": 0.047, "hit": 0.57, "hit_null": 0.58, "fill": 0.22, "fillret": 2.1, "n_long": 42}, "d60": {"state": "mature", "n": 61, "refused": 2, "corp": 4, "spread": -1.5, "p_spread": 0.244, "ic": 0.11, "p_ic": 0.343, "hit": 0.55, "hit_null": 0.56, "fill": 0.43, "fillret": 0.4, "n_long": 42}, "d120": {"state": "pending", "done": 26, "total": 67, "until": null}, "h12": {"state": "pending", "done": 0, "total": 67, "until": "2028-01 起"}}}, {"month": "2027-02", "reports": 113, "members": 88, "cov": {"计入": 88, "重复运行": 17, "缺少预测": 3, "预测被拒": 0, "回测运行": 1, "仲裁降级": 4, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 88, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.286, "ic": 0.16, "p_ic": 0.089, "hit": 0.56, "hit_null": 0.56, "fill": 0.35, "fillret": -3.2, "n_long": 27}, "d20": {"state": "mature", "n": 86, "refused": 1, "corp": 1, "spread": 4.5, "p_spread": 0.079, "ic": 0.23, "p_ic": 0.122, "hit": 0.55, "hit_null": 0.51, "fill": 0.31, "fillret": -7.8, "n_long": 40}, "d60": {"state": "mature", "n": 86, "refused": 2, "corp": 0, "spread": 7.1, "p_spread": 0.017, "ic": 0.32, "p_ic": 0.004, "hit": 0.58, "hit_null": 0.57, "fill": 0.45, "fillret": 1.1, "n_long": 36}, "d120": {"state": "pending", "done": 18, "total": 88, "until": null}, "h12": {"state": "pending", "done": 0, "total": 88, "until": "2028-02 起"}}}, {"month": "2027-03", "reports": 122, "members": 97, "cov": {"计入": 97, "重复运行": 18, "缺少预测": 0, "预测被拒": 2, "回测运行": 2, "仲裁降级": 1, "基准价不符": 2}, "cells": {"d5": {"state": "mature", "n": 95, "refused": 2, "corp": 0, "spread": 1.1, "p_spread": 0.285, "ic": 0.19, "p_ic": 0.037, "hit": 0.51, "hit_null": 0.56, "fill": 0.39, "fillret": -5.0, "n_long": 31}, "d20": {"state": "mature", "n": 95, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.035, "ic": 0.11, "p_ic": 0.39, "hit": 0.52, "hit_null": 0.5, "fill": 0.25, "fillret": 0.3, "n_long": 44}, "d60": {"state": "pending", "done": 79, "total": 97, "until": null}, "d120": {"state": "pending", "done": 42, "total": 97, "until": null}, "h12": {"state": "pending", "done": 0, "total": 97, "until": "2028-03 起"}}}, {"month": "2027-04", "reports": 110, "members": 86, "cov": {"计入": 86, "重复运行": 21, "缺少预测": 2, "预测被拒": 0, "回测运行": 0, "仲裁降级": 1, "基准价不符": 0}, "cells": {"d5": {"state": "mature", "n": 84, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.016, "ic": 0.26, "p_ic": 0.021, "hit": 0.67, "hit_null": 0.55, "fill": 0.2, "fillret": -5.9, "n_long": 28}, "d20": {"state": "mature", "n": 83, "refused": 3, "corp": 0, "spread": 1.7, "p_spread": 0.256, "ic": 0.18, "p_ic": 0.079, "hit": 0.59, "hit_null": 0.58, "fill": 0.29, "fillret": -0.6, "n_long": 27}, "d60": {"state": "pending", "done": 55, "total": 86, "until": null}, "d120": {"state": "pending", "done": 19, "total": 86, "until": null}, "h12": {"state": "pending", "done": 0, "total": 86, "until": "2028-04 起"}}}, {"month": "2027-05", "reports": 96, "members": 71, "cov": {"计入": 71, "重复运行": 16, "缺少预测": 0, "预测被拒": 1, "回测运行": 2, "仲裁降级": 4, "基准价不符": 2}, "cells": {"d5": {"state": "mature", "n": 67, "refused": 3, "corp": 1, "spread": 4.0, "p_spread": 0.052, "ic": 0.23, "p_ic": 0.096, "hit": 0.69, "hit_null": 0.57, "fill": 0.22, "fillret": 1.5, "n_long": 31}, "d20": {"state": "pending", "done": 51, "total": 71, "until": null}, "d60": {"state": "pending", "done": 18, "total": 71, "until": null}, "d120": {"state": "pending", "done": 20, "total": 71, "until": null}, "h12": {"state": "pending", "done": 0, "total": 71, "until": "2028-05 起"}}}, {"month": "2027-06", "reports": 106, "members": 73, "cov": {"计入": 73, "重复运行": 22, "缺少预测": 4, "预测被拒": 1, "回测运行": 2, "仲裁降级": 3, "基准价不符": 1}, "cells": {"d5": {"state": "open"}, "d20": {"state": "open"}, "d60": {"state": "open"}, "d120": {"state": "open"}, "h12": {"state": "open"}}}], "members": [{"code": "603893", "name": "瑞芯微", "stance": "no_position", "up": -6.2, "ex": 1.1, "halted": false, "date": "2027-03-12"}, {"code": "300772", "name": "运达股份", "stance": "no_position", "up": 30.0, "ex": -2.9, "halted": false, "date": "2027-03-27"}, {"code": "002415", "name": "海康威视", "stance": "long", "up": 26.6, "ex": -1.4, "halted": false, "date": "2027-03-01"}, {"code": "688036", "name": "传音控股", "stance": "long", "up": 30.6, "ex": -5.0, "halted": false, "date": "2027-03-05"}, {"code": "300394", "name": "天孚通信", "stance": "long", "up": 15.7, "ex": 7.3, "halted": false, "date": "2027-03-11"}, {"code": "603661", "name": "恒林股份", "stance": "no_position", "up": -7.2, "ex": -7.3, "halted": false, "date": "2027-03-25"}, {"code": "688692", "name": "达梦数据", "stance": "long", "up": 26.2, "ex": 6.9, "halted": false, "date": "2027-03-25"}, {"code": "002273", "name": "水晶光电", "stance": "long", "up": 23.7, "ex": 5.7, "halted": false, "date": "2027-03-03"}, {"code": "300820", "name": "英杰电气", "stance": "no_position", "up": -24.4, "ex": 0.9, "halted": false, "date": "2027-03-17"}, {"code": "300124", "name": "汇川技术", "stance": "long", "up": 9.5, "ex": 5.4, "halted": false, "date": "2027-03-17"}, {"code": "300693", "name": "盛弘股份", "stance": "no_position", "up": 35.8, "ex": -0.5, "halted": false, "date": "2027-03-09"}, {"code": "688676", "name": "金盘科技", "stance": "long", "up": 45.1, "ex": -2.3, "halted": false, "date": "2027-03-14"}, {"code": "300001", "name": "特锐德", "stance": "long", "up": 21.2, "ex": 6.2, "halted": false, "date": "2027-03-03"}, {"code": "603063", "name": "禾望电气", "stance": "long", "up": 8.3, "ex": 5.6, "halted": false, "date": "2027-03-23"}, {"code": "605305", "name": "中际联合", "stance": "no_position", "up": -9.0, "ex": -5.2, "halted": false, "date": "2027-03-05"}, {"code": "688117", "name": "圣诺生物", "stance": "no_position", "up": 19.2, "ex": 0.7, "halted": false, "date": "2027-03-16"}, {"code": "000893", "name": "亚钾国际", "stance": "long", "up": 21.0, "ex": 9.3, "halted": false, "date": "2027-03-17"}, {"code": "300750", "name": "宁德时代", "stance": "no_position", "up": -14.9, "ex": 2.4, "halted": false, "date": "2027-03-03"}], "panel": {"report": {"code": "603893", "name": "瑞芯微", "date": "2026-09-17", "title": "603893 投资研究与决策报告 V3.16.2", "made_at": "2026-09-17 21:14", "made_on": "2026-09-17"}, "claims": {"stance": "long", "weight": 10.0, "terminal": 207.55, "p_profit": 75, "entry": 180.47, "bull": 294.0, "base": 209.3, "bear": 117.6, "pb": 25, "pbase": 50, "pbear": 25, "emitted": 181.21, "emitted_asof": "2026-09-17", "horizon": "2027-09-17", "prob_method": "approved_policy_default", "quality": "normal", "status": "eligible"}, "s0": {"date": "2026-09-18", "close": 190.04}, "marks": [{"cp": "d5", "label": "5 个交易日", "session": "2026-09-28", "status": "resolved", "close": 211.28, "ret": 0.11176594401178708, "bench": -0.05117598623235631, "low": 190.04, "high": 228.74, "halted": false, "corp": false}, {"cp": "d20", "label": "20 个交易日", "session": "2026-10-23（预计）", "status": "pending"}, {"cp": "d60", "label": "60 个交易日", "session": "2026-12-18（预计）", "status": "pending"}, {"cp": "d120", "label": "120 个交易日", "session": "2027-03-26（预计）", "status": "pending"}, {"cp": "h12", "label": "12 个月", "session": "2027-09-17（预计）", "status": "pending"}], "latest": {"date": "2026-10-16", "close": 171.01}, "bars": [["2026-09-01", 205.0, 203.6, 210.94, 201.0], ["2026-09-02", 201.04, 197.49, 207.8, 197.3], ["2026-09-03", 200.0, 193.9, 200.57, 191.88], ["2026-09-04", 196.5, 189.0, 196.92, 186.89], ["2026-09-07", 191.5, 192.68, 194.2, 189.02], ["2026-09-08", 195.0, 188.59, 195.28, 186.99], ["2026-09-09", 189.0, 187.36, 193.26, 186.5], ["2026-09-10", 185.01, 182.66, 186.2, 182.0], ["2026-09-11", 180.0, 180.3, 181.3, 175.6], ["2026-09-14", 177.9, 178.75, 181.71, 176.86], ["2026-09-15", 180.0, 177.2, 180.53, 176.99], ["2026-09-16", 177.1, 180.33, 181.0, 176.0], ["2026-09-17", 178.52, 181.21, 183.0, 178.52], ["2026-09-18", 183.6, 190.04, 192.22, 183.6], ["2026-09-21", 190.04, 198.0, 198.31, 190.04], ["2026-09-22", 203.9, 217.8, 217.8, 203.9], ["2026-09-23", 218.79, 223.01, 227.3, 215.81], ["2026-09-24", 223.0, 219.05, 228.74, 218.51], ["2026-09-28", 219.02, 211.28, 221.5, 209.58], ["2026-09-29", 211.0, 212.94, 213.8, 207.53], ["2026-09-30", 214.39, 215.57, 218.51, 212.0], ["2026-10-08", 211.99, 199.56, 215.39, 198.13], ["2026-10-09", 198.1, 202.72, 207.28, 193.85], ["2026-10-12", 204.0, 199.5, 205.22, 197.0], ["2026-10-13", 193.99, 196.58, 199.3, 188.06], ["2026-10-14", 198.88, 195.5, 203.15, 195.26], ["2026-10-15", 188.0, 190.0, 194.4, 186.5], ["2026-10-16", 191.0, 171.01, 192.0, 171.0]], "other_sets": [{"date": "2026-10-16", "made": "2026-10-16 22:40", "stance": "long", "terminal": 218.9, "entry": 190.34, "state": "accepted", "counted": true, "cohort": "2026-10"}, {"date": "2026-09-17", "made": "2026-09-17 21:14", "stance": "long", "terminal": 207.55, "entry": 180.47, "state": "accepted", "counted": true, "cohort": "2026-09"}]}};
-const $=s=>document.querySelector(s), fmt=(v,d=1)=>(v>0?'+':'')+v.toFixed(d), pct=v=>fmt(v*100,1)+'%';
-document.querySelectorAll('.demo .seg button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.demo .seg button').forEach(x=>x.classList.toggle('on',x===b));document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+b.dataset.v));scrollTo(0,0)});
-// ---------------- cohort matrix ----------------
-const HELP={spread:'<b>多空价差</b>：报告看多（有目标仓位）的股票，平均超额收益比不建议持仓的高出多少个百分点。零假设 = 0。',
- ic:'<b>排序 IC</b>：报告给的上涨空间（概率加权终值 ÷ 起算价 − 1）排序，与实际超额收益排序的相关系数。0 = 没有排序能力；12 个月前的检查点只算"早期信号"。',
- hit:'<b>方向命中</b>：上涨空间 ≥5% 或 ≤−5% 的股票里，超额收益方向与报告一致的比例。旁边的"基准率"是同一批全猜同一方向能拿到的命中率，超过它才有意义。',
- fill:'<b>买入价成交</b>：观察窗口内股价碰到报告建议买入价的比例，以及按买入价成交后到检查点的平均涨跌。买入价由终值按策略推算（÷1.15），不是独立判断。'};
-let metric='spread', mode='month', group='month';
-const TODAY=new Date('2027-06-20'), CPDAYS={d5:7,d20:28,d60:86,d120:172,h12:366};
+const DATA={"cps": [["d5", "5 个交易日"], ["d20", "20 个交易日"], ["d60", "60 个交易日"], ["d120", "120 个交易日"], ["h12", "12 个月"]], "cohorts": [{"month": "2026-10", "from": "2026-10-19", "members": 14, "bench": "sh000852", "m": {}, "cov": {"计入": 14, "重复运行": 3, "缺少预测": 1, "预测被拒": 0, "回测运行": 1, "仲裁降级": 1, "基准价不符": 0, "账本起点前": 62, "测试运行": 4, "基准不符": 0}}, {"month": "2026-11", "members": 79, "bench": "sh000906", "cov": {"计入": 79, "重复运行": 22, "缺少预测": 1, "预测被拒": 3, "回测运行": 2, "仲裁降级": 1, "基准价不符": 0}, "m": {"d5": {"n": 78, "refused": 0, "corp": 1, "spread": -2.7, "p_spread": 0.321, "ic": 0.04, "p_ic": 0.354, "hit": 0.59, "hit_null": 0.54, "fill": 0.2, "fillret": 2.3, "n_long": 43}, "d20": {"n": 79, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.325, "ic": 0.08, "p_ic": 0.362, "hit": 0.65, "hit_null": 0.5, "fill": 0.22, "fillret": 3.7, "n_long": 38}, "d60": {"n": 74, "refused": 1, "corp": 4, "spread": 6.0, "p_spread": 0.011, "ic": 0.25, "p_ic": 0.001, "hit": 0.6, "hit_null": 0.56, "fill": 0.33, "fillret": -0.9, "n_long": 27}, "d120": {"n": 75, "refused": 0, "corp": 4, "spread": 6.6, "p_spread": 0.059, "ic": 0.36, "p_ic": 0.01, "hit": 0.53, "hit_null": 0.56, "fill": 0.4, "fillret": 3.4, "n_long": 32}}}, {"month": "2026-12", "members": 55, "bench": "sh000906", "cov": {"计入": 55, "重复运行": 25, "缺少预测": 4, "预测被拒": 2, "回测运行": 2, "仲裁降级": 4, "基准价不符": 1}, "m": {"d5": {"n": 51, "refused": 3, "corp": 1, "spread": 1.4, "p_spread": 0.298, "ic": 0.12, "p_ic": 0.398, "hit": 0.54, "hit_null": 0.53, "fill": 0.45, "fillret": -2.8, "n_long": 27}, "d20": {"n": 52, "refused": 2, "corp": 1, "spread": 2.1, "p_spread": 0.013, "ic": 0.06, "p_ic": 0.403, "hit": 0.52, "hit_null": 0.58, "fill": 0.37, "fillret": -1.3, "n_long": 26}, "d60": {"n": 49, "refused": 2, "corp": 4, "spread": 9.2, "p_spread": 0.088, "ic": 0.19, "p_ic": 0.085, "hit": 0.57, "hit_null": 0.57, "fill": 0.23, "fillret": 1.8, "n_long": 28}}}, {"month": "2027-01", "members": 67, "bench": "sh000906", "cov": {"计入": 67, "重复运行": 20, "缺少预测": 2, "预测被拒": 9, "回测运行": 0, "仲裁降级": 2, "基准价不符": 1}, "m": {"d5": {"n": 64, "refused": 3, "corp": 0, "spread": 3.5, "p_spread": 0.067, "ic": 0.22, "p_ic": 0.044, "hit": 0.57, "hit_null": 0.54, "fill": 0.46, "fillret": -3.0, "n_long": 37}, "d20": {"n": 66, "refused": 1, "corp": 0, "spread": 4.6, "p_spread": 0.033, "ic": 0.2, "p_ic": 0.047, "hit": 0.57, "hit_null": 0.58, "fill": 0.22, "fillret": 2.1, "n_long": 42}, "d60": {"n": 61, "refused": 2, "corp": 4, "spread": -1.5, "p_spread": 0.244, "ic": 0.11, "p_ic": 0.343, "hit": 0.55, "hit_null": 0.56, "fill": 0.43, "fillret": 0.4, "n_long": 42}}}, {"month": "2027-02", "members": 88, "bench": "sh000906", "cov": {"计入": 88, "重复运行": 17, "缺少预测": 3, "预测被拒": 0, "回测运行": 1, "仲裁降级": 4, "基准价不符": 0}, "m": {"d5": {"n": 88, "refused": 0, "corp": 0, "spread": 1.0, "p_spread": 0.286, "ic": 0.16, "p_ic": 0.089, "hit": 0.56, "hit_null": 0.56, "fill": 0.35, "fillret": -3.2, "n_long": 27}, "d20": {"n": 86, "refused": 1, "corp": 1, "spread": 4.5, "p_spread": 0.079, "ic": 0.23, "p_ic": 0.122, "hit": 0.55, "hit_null": 0.51, "fill": 0.31, "fillret": -7.8, "n_long": 40}, "d60": {"n": 86, "refused": 2, "corp": 0, "spread": 7.1, "p_spread": 0.017, "ic": 0.32, "p_ic": 0.004, "hit": 0.58, "hit_null": 0.57, "fill": 0.45, "fillret": 1.1, "n_long": 36}}}, {"month": "2027-03", "members": 97, "bench": "sh000906", "cov": {"计入": 97, "重复运行": 18, "缺少预测": 0, "预测被拒": 2, "回测运行": 2, "仲裁降级": 1, "基准价不符": 2}, "m": {"d5": {"n": 95, "refused": 2, "corp": 0, "spread": 1.1, "p_spread": 0.285, "ic": 0.19, "p_ic": 0.037, "hit": 0.51, "hit_null": 0.56, "fill": 0.39, "fillret": -5.0, "n_long": 31}, "d20": {"n": 95, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.035, "ic": 0.11, "p_ic": 0.39, "hit": 0.52, "hit_null": 0.5, "fill": 0.25, "fillret": 0.3, "n_long": 44}}}, {"month": "2027-04", "members": 86, "bench": "sh000906", "cov": {"计入": 86, "重复运行": 21, "缺少预测": 2, "预测被拒": 0, "回测运行": 0, "仲裁降级": 1, "基准价不符": 0}, "m": {"d5": {"n": 84, "refused": 1, "corp": 1, "spread": 3.2, "p_spread": 0.016, "ic": 0.26, "p_ic": 0.021, "hit": 0.67, "hit_null": 0.55, "fill": 0.2, "fillret": -5.9, "n_long": 28}, "d20": {"n": 83, "refused": 3, "corp": 0, "spread": 1.7, "p_spread": 0.256, "ic": 0.18, "p_ic": 0.079, "hit": 0.59, "hit_null": 0.58, "fill": 0.29, "fillret": -0.6, "n_long": 27}}}, {"month": "2027-05", "members": 71, "bench": "sh000906", "cov": {"计入": 71, "重复运行": 16, "缺少预测": 0, "预测被拒": 1, "回测运行": 2, "仲裁降级": 4, "基准价不符": 2}, "m": {"d5": {"n": 67, "refused": 3, "corp": 1, "spread": 4.0, "p_spread": 0.052, "ic": 0.23, "p_ic": 0.096, "hit": 0.69, "hit_null": 0.57, "fill": 0.22, "fillret": 1.5, "n_long": 31}}}, {"month": "2027-06", "members": 73, "bench": "sh000906", "cov": {"计入": 73, "重复运行": 22, "缺少预测": 4, "预测被拒": 1, "回测运行": 2, "仲裁降级": 3, "基准价不符": 1}, "m": {}, "open": true}], "members": [{"code": "603893", "name": "瑞芯微", "stance": "no_position", "up": -6.2, "ex": 1.1, "halted": false, "date": "2027-03-12"}, {"code": "300772", "name": "运达股份", "stance": "no_position", "up": 30.0, "ex": -2.9, "halted": false, "date": "2027-03-27"}, {"code": "002415", "name": "海康威视", "stance": "long", "up": 26.6, "ex": -1.4, "halted": false, "date": "2027-03-01"}, {"code": "688036", "name": "传音控股", "stance": "long", "up": 30.6, "ex": -5.0, "halted": false, "date": "2027-03-05"}, {"code": "300394", "name": "天孚通信", "stance": "long", "up": 15.7, "ex": 7.3, "halted": false, "date": "2027-03-11"}, {"code": "603661", "name": "恒林股份", "stance": "no_position", "up": -7.2, "ex": -7.3, "halted": false, "date": "2027-03-25"}, {"code": "688692", "name": "达梦数据", "stance": "long", "up": 26.2, "ex": 6.9, "halted": false, "date": "2027-03-25"}, {"code": "002273", "name": "水晶光电", "stance": "long", "up": 23.7, "ex": 5.7, "halted": false, "date": "2027-03-03"}, {"code": "300820", "name": "英杰电气", "stance": "no_position", "up": -24.4, "ex": 0.9, "halted": false, "date": "2027-03-17"}, {"code": "300124", "name": "汇川技术", "stance": "long", "up": 9.5, "ex": 5.4, "halted": false, "date": "2027-03-17"}, {"code": "300693", "name": "盛弘股份", "stance": "no_position", "up": 35.8, "ex": -0.5, "halted": false, "date": "2027-03-09"}, {"code": "688676", "name": "金盘科技", "stance": "long", "up": 45.1, "ex": -2.3, "halted": false, "date": "2027-03-14"}, {"code": "300001", "name": "特锐德", "stance": "long", "up": 21.2, "ex": 6.2, "halted": false, "date": "2027-03-03"}, {"code": "603063", "name": "禾望电气", "stance": "long", "up": 8.3, "ex": 5.6, "halted": false, "date": "2027-03-23"}, {"code": "605305", "name": "中际联合", "stance": "no_position", "up": -9.0, "ex": -5.2, "halted": false, "date": "2027-03-05"}, {"code": "688117", "name": "圣诺生物", "stance": "no_position", "up": 19.2, "ex": 0.7, "halted": false, "date": "2027-03-16"}, {"code": "000893", "name": "亚钾国际", "stance": "long", "up": 21.0, "ex": 9.3, "halted": false, "date": "2027-03-17"}, {"code": "300750", "name": "宁德时代", "stance": "no_position", "up": -14.9, "ex": 2.4, "halted": false, "date": "2027-03-03"}], "panel": {"report": {"code": "603893", "name": "瑞芯微", "date": "2026-09-17", "title": "603893 投资研究与决策报告 V3.16.2", "made_at": "2026-09-17 21:14", "made_on": "2026-09-17"}, "claims": {"stance": "long", "weight": 10.0, "terminal": 207.55, "p_profit": 75, "entry": 180.47, "bull": 294.0, "base": 209.3, "bear": 117.6, "pb": 25, "pbase": 50, "pbear": 25, "emitted": 181.21, "emitted_asof": "2026-09-17", "horizon": "2027-09-17", "prob_method": "approved_policy_default", "quality": "normal", "status": "eligible"}, "s0": {"date": "2026-09-18", "close": 190.04}, "latest": {"date": "2026-10-16", "close": 171.01}, "bars": [["2026-09-01", 205.0, 203.6, 210.94, 201.0], ["2026-09-02", 201.04, 197.49, 207.8, 197.3], ["2026-09-03", 200.0, 193.9, 200.57, 191.88], ["2026-09-04", 196.5, 189.0, 196.92, 186.89], ["2026-09-07", 191.5, 192.68, 194.2, 189.02], ["2026-09-08", 195.0, 188.59, 195.28, 186.99], ["2026-09-09", 189.0, 187.36, 193.26, 186.5], ["2026-09-10", 185.01, 182.66, 186.2, 182.0], ["2026-09-11", 180.0, 180.3, 181.3, 175.6], ["2026-09-14", 177.9, 178.75, 181.71, 176.86], ["2026-09-15", 180.0, 177.2, 180.53, 176.99], ["2026-09-16", 177.1, 180.33, 181.0, 176.0], ["2026-09-17", 178.52, 181.21, 183.0, 178.52], ["2026-09-18", 183.6, 190.04, 192.22, 183.6], ["2026-09-21", 190.04, 198.0, 198.31, 190.04], ["2026-09-22", 203.9, 217.8, 217.8, 203.9], ["2026-09-23", 218.79, 223.01, 227.3, 215.81], ["2026-09-24", 223.0, 219.05, 228.74, 218.51], ["2026-09-28", 219.02, 211.28, 221.5, 209.58], ["2026-09-29", 211.0, 212.94, 213.8, 207.53], ["2026-09-30", 214.39, 215.57, 218.51, 212.0], ["2026-10-08", 211.99, 199.56, 215.39, 198.13], ["2026-10-09", 198.1, 202.72, 207.28, 193.85], ["2026-10-12", 204.0, 199.5, 205.22, 197.0], ["2026-10-13", 193.99, 196.58, 199.3, 188.06], ["2026-10-14", 198.88, 195.5, 203.15, 195.26], ["2026-10-15", 188.0, 190.0, 194.4, 186.5], ["2026-10-16", 191.0, 171.01, 192.0, 171.0]], "other_sets": [{"date": "2026-10-16", "made": "2026-10-16 22:40", "stance": "long", "terminal": 218.9, "entry": 190.34, "state": "accepted", "counted": true, "cohort": "2026-10"}, {"date": "2026-09-17", "made": "2026-09-17 21:14", "stance": "long", "terminal": 207.55, "entry": 180.47, "state": "accepted", "counted": true, "cohort": "2026-09"}], "d5": {"cp": "d5", "label": "5 个交易日", "session": "2026-09-28", "status": "resolved", "close": 211.28, "ret": 0.11176594401178708, "bench": -0.05117598623235631, "low": 190.04, "high": 228.74, "halted": false, "corp": false}}};
+const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s)), fmt=(v,d=1)=>(v>0?'+':'')+v.toFixed(d), pct=v=>fmt(v*100,1)+'%', sum=o=>Object.values(o).reduce((a,b)=>a+b,0);
+const DISC='研究验证用途，不构成投资建议', OU='研究二组', LEDGER_START='2026-10-19', BENCH={sh000852:'中证1000',sh000906:'中证800'};
+// ---------------- exchange calendar (projection only, never used for settlement) ----------------
+// Mirrors internal/app/forecast_calendar.go. The closures come from the SSE annual notice of 2025-12-22.
+// A year that is not in the table is absent on purpose: a projection that reaches it degrades to a weekday lower bound.
+const CLOSURES={2026:[['2026-01-01','2026-01-03'],['2026-02-15','2026-02-23'],['2026-04-04','2026-04-06'],['2026-05-01','2026-05-05'],['2026-06-19','2026-06-21'],['2026-09-25','2026-09-27'],['2026-10-01','2026-10-07']]};
+const CPN={d5:5,d20:20,d60:60,d120:120};
+const isoAdd=(d,n)=>{const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)};
+const isWeekend=d=>{const w=new Date(d+'T00:00:00Z').getUTCDay();return w===0||w===6};
+const isClosed=(d,cal)=>isWeekend(d)||(cal&&(CLOSURES[+d.slice(0,4)]||[]).some(s=>d>=s[0]&&d<=s[1]));
+function sessionList(from,n,cal){const out=[];for(let d=from;out.length<n;d=isoAdd(d,1))if(!isClosed(d,cal))out.push(d);return out}
+function addMonths(d,n){const [y,m,dd]=d.split('-').map(Number),t=new Date(Date.UTC(y,m-1+n,1)),last=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate();return t.toISOString().slice(0,8)+String(Math.min(dd,last)).padStart(2,'0')}
+// S0 is the first session whose 15:00 close is after made_at; dN is the Nth session after S0; h12 is the first session on or after made_on + 12 months.
+function runProjection(cp,madeOn,afterClose,cal){
+ const ss=sessionList(isoAdd(madeOn,-1),400,cal), s0=ss.find(s=>s>madeOn||(s===madeOn&&!afterClose)), i0=ss.indexOf(s0);
+ if(cp==='h12'){const target=addMonths(madeOn,12);return {s0,due:ss.slice(i0).find(s=>s>=target)||target}}
+ return {s0,due:ss[i0+CPN[cp]]}}
+// "expected" only when every year from receipt to the due date is in the table; otherwise an unqualified weekday lower bound.
+function project(cp,madeAt){
+ const [madeOn,hm]=madeAt.split(' '), after=hm>='15:00', y0=+madeOn.slice(0,4);
+ if(CLOSURES[y0]){const r=runProjection(cp,madeOn,after,true);let ok=true;for(let y=y0;y<=+r.due.slice(0,4);y++)if(!CLOSURES[y])ok=false;if(ok)return Object.assign(r,{expected:true})}
+ return Object.assign(runProjection(cp,madeOn,after,false),{expected:false})}
+// ---------------- cohort model (simulated, weekend-only calendar) ----------------
+const TODAY_ISO='2027-06-20', LAST_SESSION='2027-06-18', TODAY=new Date(TODAY_ISO);
+const nthSession=(d,n)=>{let x=d,c=0;while(c<n){x=isoAdd(x,1);if(!isWeekend(x))c++}return x};
+function monthEnd(m){return isoAdd(addMonths(m+'-01',1),-1)}
+// Members are spread evenly over the weekdays of the group and received after the close, so S0 is the next weekday.
+function simCell(from,to,members,cp){
+ const W=[];for(let d=from;d<=to&&d<=LAST_SESSION;d=isoAdd(d,1))if(!isWeekend(d))W.push(d);
+ let resolved=0,waiting=0,s0wait=0,nb='';
+ for(let i=0;i<members&&W.length;i++){const s0=nthSession(W[Math.floor(i*W.length/members)],1),due=nthSession(s0,CPN[cp]);
+  if(due<=LAST_SESSION){resolved++;continue}
+  if(s0>LAST_SESSION)s0wait++;else waiting++;
+  if(!nb||due<nb)nb=due}
+ return {resolved,waiting,s0wait,nb}}
+// Marks moved out of the resolved count to show cells held back by a few marks, and a cell above the 5 % final-refusal cap.
+const ADJ={'2026-12|d120':{retrying:1,overdue:1},'2027-03|d60':{retrying:1,overdue:1}}, CAPPED={'2027-05|d5':5};
+const EXTRA_COV={'2026-11':{'测试运行':1,'基准不符':2},'2026-12':{'测试运行':2},'2027-02':{'测试运行':1,'基准不符':1},'2027-04':{'测试运行':1}};
+const ZERO_COV={'账本起点前':0,'测试运行':0,'基准不符':0};
 function rng(seed){let x=0;for(const c of seed)x=(x*31+c.charCodeAt(0))>>>0;return()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296}}
 function ds(d){const z=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())}
 function pd(v){const [y,m,d]=v.split('-').map(Number);return new Date(y,m-1,d)}
-function customGroups(){const f=pd($('#from').value),t=pd($('#to').value);const err=$('#rangeErr');err.style.display='none';
- if(!(f<=t)){err.style.display='';err.textContent='起始日期必须早于或等于结束日期（range_inverted）';return []}
+const GEN=[];
+function genMetrics(r,ci,m){const sp=+((r()-.35)*9+ci).toFixed(1),ic=+((r()-.3)*.4).toFixed(2);
+ return {n:m-1,refused:Math.round(r()*2),corp:Math.round(r()*2),spread:sp,p_spread:+(sp>3?r()*.05:.1+r()*.6).toFixed(3),ic,p_ic:+(ic>.12?r()*.05:.1+r()*.6).toFixed(3),hit:+(.5+r()*.15).toFixed(2),hit_null:+(.5+r()*.08).toFixed(2),fill:+(.15+r()*.3).toFixed(2),fillret:+((r()-.5)*8).toFixed(1)}}
+// Builds a row's cells and, per checkpoint, its marks by phase. `metrics` are the stored numbers of a mature cell, when the row has them.
+function buildCells(key,from,to,members,metrics,o){
+ const r=rng(key),cells={},marks={};
+ DATA.cps.forEach(([cp],ci)=>{
+  if(cp==='h12'){marks[cp]={resolved:0,waiting:members};cells[cp]=o.open?{state:'open'}:{state:'pending',h12:true,until:addMonths(from,12).slice(0,7)+' 起'};return}
+  const s=simCell(from,to,members,cp),k=key+'|'+cp,adj=o.fixed&&ADJ[k]||null,moved=adj?sum(adj):0;
+  const ph=Object.assign({resolved:s.resolved-moved,waiting:s.waiting,s0wait:s.s0wait},adj||{});
+  marks[cp]=ph;
+  if(o.open){cells[cp]={state:'open'};return}
+  if(o.fixed&&CAPPED[k]){cells[cp]={state:'capped',final:CAPPED[k],total:members};marks[cp]={resolved:members-CAPPED[k],final:CAPPED[k]};return}
+  if(ph.waiting+ph.s0wait+(ph.retrying||0)+(ph.overdue||0)>0){cells[cp]={state:'pending',ph,nb:s.nb,done:ph.resolved,total:members};return}
+  if(members<30){cells[cp]={state:'small',n:members};return}
+  const stored=metrics&&metrics[cp];if(metrics&&!stored)GEN.push(k);
+  cells[cp]=Object.assign({state:'mature'},stored||genMetrics(r,ci,members))});
+ return {cells,marks}}
+function monthRows(){return DATA.cohorts.map(c=>{
+ const from=c.from||c.month+'-01',to=monthEnd(c.month),cov=Object.assign({},ZERO_COV,c.cov,EXTRA_COV[c.month]||{}),b=buildCells(c.month,from,to,c.members,c.m,{open:c.open,fixed:true});
+ return {label:c.month,from,to,open:!!c.open,bench:c.bench,reports:sum(cov),members:c.members,cov,cells:b.cells,marks:b.marks}})}
+function scaleRows(rows,f,tag){return rows.map(r=>{const members=Math.max(4,Math.round(r.members*f)),cov={};
+ for(const k in r.cov)cov[k]=k==='计入'?members:Math.round(r.cov[k]*f);
+ const b=buildCells(r.label+tag,r.from,r.to,members,null,{open:r.open});
+ return Object.assign({},r,{members,reports:sum(cov),cov,cells:b.cells,marks:b.marks})})}
+// ---------------- state ----------------
+const SC={
+ admin:{admin:true,pop:'all',note:'管理员始终看到「全部报告」，月度与自定义区间都可用，带覆盖；评估器状态以药丸形式放在标题旁，点开是抽屉，完整状态在运维页。'},
+ all:{pop:'all',note:'内部成员，所在组织单元的范围是「全部」：统计范围同管理员，带覆盖和自定义区间；没有评估器状态，也没有未入账。'},
+ own:{pop:'own',note:'内部成员，范围是「本单位」：只统计归属于本单位及其下级单位的报告，门槛同样是每格 30 只。归属在入账时固定，之后挪动人员不会改变历史。'},
+ ownsmall:{pop:'own',small:true,note:'内部成员，范围是「本单位」，但单位很小：每格都不足 30 只，所以没有数字，页面解释这是门槛而不是故障。'},
+ extall:{pop:'all',ext:true,note:'外部成员，范围是「全部」：只有月度正式口径，没有自定义区间；整页不显示任何数量——没有覆盖、n、总数，成熟格子只标「n ≥ 30」，未成熟格子只有状态。'},
+ extown:{pop:'own',ext:true,note:'外部成员，范围是「本单位」：只有月度；因为是自己单位的量，保留 n 和覆盖。'},
+ none:{none:true,pop:'none',note:'范围是「无」：导航栏没有入口，直接访问得到 403，不是重试循环；报告页上没有卡片、徽标或叠加层，也没有占位。'}};
+const S={view:'record',scope:'admin',rec:'normal',ev:'healthy',src:'ok',ph:'waiting',mem:'pre_live',ed:'full',theme:'auto'};
+const sc=()=>SC[S.scope], isAll=()=>{const s=sc();return !!(s.ext&&s.pop==='all')}, canMember=()=>{const s=sc();return !!(s.admin||(!s.ext&&s.pop==='all'&&!s.none))};
+let metric='spread', mode='month', group='month', CUR=[];
+// ---------------- cohort page ----------------
+const HELP={spread:'<b>多空价差</b>：报告看多（有目标仓位）的股票，平均超额收益比不建议持仓的高出多少个百分点。零假设 = 0。',
+ ic:'<b>排序 IC</b>：报告给的上涨空间（概率加权终值 ÷ 起算价 − 1）排序，与实际超额收益排序的相关系数。0 = 没有排序能力；12 个月前的检查点只算"早期信号"。',
+ hit:'<b>方向命中</b>：上涨空间绝对值 ≥ 5% 的股票里，超额收益方向与报告一致的比例，持平计为未命中。旁边的"基准率"是同一批全猜同一方向能拿到的命中率，超过它才有意义。',
+ fill:'<b>买入价成交</b>：观察窗口内股价碰到报告建议买入价的比例，以及按买入价成交后到检查点的平均涨跌。买入价由终值按策略推算（÷1.15），不是独立判断。'};
+const PHASE_TIP='等待：尚未到期；结算中：已到期，收盘后结算；重试中：行情源暂时不可用，稍后重试（不计入失败次数）；逾期：超过预计结算日仍未结算；终局拒绝：无法核实，不再重试';
+function customGroups(){const f=pd($('#from').value),t=pd($('#to').value);const err=$('#rangeErr');err.hidden=true;
+ if(!(f<=t)){err.hidden=false;err.textContent='起始日期必须早于或等于结束日期（range_inverted）';return []}
  const months=(t.getFullYear()-f.getFullYear())*12+t.getMonth()-f.getMonth();
- if(months>36){err.style.display='';err.textContent='区间最长 36 个月（range_too_long）';return []}
- if(group==='week'&&(t-f)/864e5>182){err.style.display='';err.textContent='按周分组时区间最长 26 周（week_range_too_long）';return []}
+ if(months>36){err.hidden=false;err.textContent='区间最长 36 个月（range_too_long）';return []}
+ if(group==='week'&&(t-f)/864e5>182){err.hidden=false;err.textContent='按周分组时区间最长 26 周（week_range_too_long）';return []}
  const out=[];let cur=new Date(f);
  while(cur<=t){let end;
   if(group==='all')end=new Date(t);
@@ -157,88 +297,180 @@ function customGroups(){const f=pd($('#from').value),t=pd($('#to').value);const 
   out.push({label,start:new Date(cur),end:new Date(end)});cur=new Date(end);cur.setDate(cur.getDate()+1)}
  return out}
 function customCohort(g){const r=rng(g.label+group),days=(g.end-g.start)/864e5+1,reports=Math.max(6,Math.round(days*3.6*(0.85+r()*0.3))),dup=Math.round(reports*0.18),ab=Math.round(r()*3),rej=Math.round(r()*2),bt=Math.round(r()*1.5),dg=Math.round(r()*4),mm=Math.round(r()*1.5);
- const members=reports-dup-ab-rej-bt-dg-mm;const row={month:g.label,start:g.start,reports,members,cov:{计入:members,重复运行:dup,缺少预测:ab,预测被拒:rej,回测运行:bt,仲裁降级:dg,基准价不符:mm},cells:{}};
- DATA.cps.forEach(([c],ci)=>{const due=new Date(g.end);due.setDate(due.getDate()+CPDAYS[c]);
-  if(g.end>=TODAY){row.cells[c]={state:'open'};return}
-  if(due>TODAY){row.cells[c]=c==='h12'?{state:'pending',until:ds(due).slice(0,7)+' 起'}:{state:'pending',done:Math.round(members*Math.min(.95,Math.max(.05,1-(due-TODAY)/(CPDAYS[c]*864e5)))),total:members};return}
-  if(members<30){row.cells[c]={state:'small',n:members};return}
-  const sp=+((r()-.35)*9+ci).toFixed(1),ic=+((r()-.3)*.4).toFixed(2);
-  row.cells[c]={state:'mature',n:members-1,refused:Math.round(r()*2),corp:Math.round(r()*2),spread:sp,p_spread:+(sp>3?r()*.05:.1+r()*.6).toFixed(3),ic,p_ic:+(ic>.12?r()*.05:.1+r()*.6).toFixed(3),hit:+(.5+r()*.15).toFixed(2),hit_null:+(.5+r()*.08).toFixed(2),fill:+(.15+r()*.3).toFixed(2),fillret:+((r()-.5)*8).toFixed(1)}});
- return row}
-function cellHTML(c,cp,mi){
+ const members=reports-dup-ab-rej-bt-dg-mm,from=ds(g.start),to=ds(g.end),open=g.end>=TODAY;
+ const cov=Object.assign({},ZERO_COV,{'计入':members,'重复运行':dup,'缺少预测':ab,'预测被拒':rej,'回测运行':bt,'仲裁降级':dg,'基准价不符':mm});
+ const b=buildCells(g.label+group,from,to,members,null,{open});
+ return {label:g.label,from,to,open,bench:from<'2026-11-01'?'sh000852':'sh000906',reports,members,cov,cells:b.cells,marks:b.marks}}
+function rows(){const s=sc(),base=mode==='month'?monthRows():customGroups().map(customCohort);
+ return s.pop==='own'?scaleRows(base,s.small?0.16:0.6,s.small?'s':'o'):base}
+function cellHTML(c,cp,mi){const X=isAll();
  if(c.state==='open')return '<div class="cbox o">'+(mode==='month'?'本月未结束':'本组未结束')+'</div>';
- if(c.state==='small')return '<div class="cbox p">样本 '+c.n+' 只 &lt; 30<br>不出数字</div>';
- if(c.state==='pending'){ if(cp==='h12')return '<div class="cbox p">'+c.until+'</div>';
-   return `<div class="cbox p">已到期 ${c.done}/${c.total}<div class="prog"><i style="width:${c.done/c.total*100}%"></i></div></div>`;}
- let v,s,p,sig;
- if(metric==='spread'){v=fmt(c.spread)+' pt';p=c.p_spread;s=`p=${p} · n=${c.n}`;sig=p<0.05?(c.spread>0?1:-1):0}
- if(metric==='ic'){v=fmt(c.ic,2);p=c.p_ic;s=`p=${p} · n=${c.n}`;sig=p<0.05?(c.ic>0?1:-1):0}
- if(metric==='hit'){v=(c.hit*100).toFixed(0)+'%';s=`基准率 ${(c.hit_null*100).toFixed(0)}% · n=${c.n}`;sig=c.hit-c.hit_null>0.06?1:(c.hit-c.hit_null<-0.06?-1:0)}
- if(metric==='fill'){v=(c.fill*100).toFixed(0)+'%';s=`成交后 ${fmt(c.fillret)}% · n=${c.n}`;sig=0}
+ if(c.state==='small')return X?'<div class="cbox p sm">未达 30<br>不发布</div>':`<div class="cbox p sm">n = ${c.n}<br>低于 30 · 不发布</div>`;
+ if(c.state==='capped')return X?'<div class="cbox p sm cap">未达发布条件<br>不发布</div>':`<div class="cbox p sm cap">终局拒绝 ${c.final}/${c.total}（${(c.final/c.total*100).toFixed(0)}%）<br>超过 5% 上限 · 不发布</div>`;
+ if(c.state==='pending'){
+  if(X)return '<div class="cbox p pd">待到期</div>';
+  if(c.h12)return `<div class="cbox p pd">${c.until}</div>`;
+  const ph=c.ph,why=[['waiting','等待'],['s0wait','等待首个交易日'],['retrying','重试中'],['overdue','逾期'],['final','终局拒绝']].filter(k=>ph[k[0]]).map(k=>k[1]+' '+ph[k[0]]).join(' · ');
+  return `<div class="cbox p pd" title="${PHASE_TIP}">已结算 ${c.done}/${c.total}<div class="prog"><i style="width:${c.done/c.total*100}%"></i></div><div class="why">${why}</div>${c.nb?`<div class="nb">不早于 ${c.nb}</div>`:''}</div>`}
+ const nt=X?'n ≥ 30':'n='+c.n;let v,s,p,sig;
+ if(metric==='spread'){v=fmt(c.spread)+' pt';p=c.p_spread;s=`p=${p} · ${nt}`;sig=p<0.05?(c.spread>0?1:-1):0}
+ if(metric==='ic'){v=fmt(c.ic,2);p=c.p_ic;s=`p=${p} · ${nt}`;sig=p<0.05?(c.ic>0?1:-1):0}
+ if(metric==='hit'){v=(c.hit*100).toFixed(0)+'%';s=`基准率 ${(c.hit_null*100).toFixed(0)}% · ${nt}`;sig=c.hit-c.hit_null>0.06?1:(c.hit-c.hit_null<-0.06?-1:0)}
+ if(metric==='fill'){v=(c.fill*100).toFixed(0)+'%';s=`成交后 ${fmt(c.fillret)}% · ${nt}`;sig=0}
  if(mode==='custom'&&s.startsWith('p='))s=s.replace('p=','p*=');
  const bg=sig>0?'color-mix(in srgb,var(--up) 18%,transparent)':sig<0?'color-mix(in srgb,var(--dn) 18%,transparent)':'var(--mut-bg)';
- const warn=(c.refused||c.corp)?` · 剔除 ${c.refused+c.corp}`:'';
- return `<div class="cbox m" style="background:${bg}" data-mi="${mi}" data-cp="${cp}"><div class="v ${sig>0?'pos':sig<0?'neg':''}">${v}</div><div class="s">${s}${warn}</div></div>`;
-}
-function covBar(r){const c=r.cov,t=r.reports,w=k=>(k/t*100)+'%';
- return `<div class="cov"><i style="width:${w(c['计入'])};background:var(--pri)"></i><i style="width:${w(c['重复运行'])};background:#91caff"></i><i style="width:${w(c['缺少预测']+c['预测被拒'])};background:#ffd591"></i><i style="width:${w(c['回测运行']+c['仲裁降级']+c['基准价不符'])};background:#d9d9d9"></i></div>
- <div class="s muted" style="font-size:12px;margin-top:3px">计入 ${c['计入']} / 报告 ${t}${c['预测被拒']>5?` · <span style="color:var(--warn)">被拒 ${c['预测被拒']}</span>`:''}</div>`}
-function rows(){return mode==='month'?DATA.cohorts:customGroups().map(customCohort)}
-let CUR=[];
-function renderMatrix(){
- $('#metricHelp').innerHTML=HELP[metric]+(mode==='custom'?'　<span style="color:var(--warn)">p* = 未对区间选择做校正</span>':'');
+ const warn=(!X&&(c.refused||c.corp))?` · 剔除 ${c.refused+c.corp}`:'';
+ return `<div class="cbox m" tabindex="0" role="button" style="background:${bg}" data-mi="${mi}" data-cp="${cp}"><div class="v ${sig>0?'pos':sig<0?'neg':''}">${v}${sig?`<span class="gl">${sig>0?'▲':'▼'}</span>`:''}</div><div class="s">${s}${warn}</div></div>`}
+function covBar(r){const c=r.cov,t=r.reports,w=k=>(k/t*100)+'%',oth=c['回测运行']+c['仲裁降级']+c['基准价不符']+c['测试运行']+c['基准不符'];
+ const chip=(k,cls,tip)=>c[k]?`<span class="tag ${cls}" title="${tip}">${k} ${c[k]}</span>`:'';
+ return `<div class="cov"><i class="c1" style="width:${w(c['计入'])}"></i><i class="c2" style="width:${w(c['重复运行'])}"></i><i class="c3" style="width:${w(c['缺少预测']+c['预测被拒'])}"></i><i class="c4" style="width:${w(oth)}"></i><i class="c5" style="width:${w(c['账本起点前'])}"></i></div>
+ <div class="covt muted">计入 ${c['计入']} / 报告 ${t}${c['预测被拒']>5?` · <span style="color:var(--warn)">被拒 ${c['预测被拒']}</span>`:''}</div>
+ <div class="chips">${chip('账本起点前','',`早于账本起点（${LEDGER_START}），只用于校验，不计入统计`)}${chip('测试运行','',`测试运行单独存放，不参与结算`)}${chip('基准不符','warn','冻结的基准指数与本批次不同，不计入该批次统计')}</div>`}
+function summarize(rs){const t={resolved:0,waiting:0,s0wait:0,retrying:0,overdue:0,final:0};let sets=0,acc=0,nb='';
+ rs.forEach(r=>{sets+=r.reports;acc+=r.reports-r.cov['缺少预测']-r.cov['预测被拒'];
+  DATA.cps.forEach(c=>{const m=r.marks[c[0]];for(const k in t)t[k]+=m[k]||0;const cell=r.cells[c[0]];if(cell&&cell.nb&&(!nb||cell.nb<nb))nb=cell.nb})});
+ const n=v=>v.toLocaleString('en-US'),p=(k,l)=>t[k]?` · ${l} ${n(t[k])}`:'';
+ return `统计自 ${LEDGER_START} · 预测集 ${n(sets)} · 已接受 ${n(acc)} · 股票 ${n(Math.round(acc*0.45))} · 检查点：已结算 ${n(t.resolved)} · 等待 ${n(t.waiting)}${p('s0wait','等待首个交易日')}${p('retrying','重试中')}${p('overdue','逾期')}${p('final','终局拒绝')}${nb?` · 下一个结果 ${nb} 或之后`:''}`}
+function benchNote(){const out=[];CUR.forEach(r=>{const l=out[out.length-1];if(l&&l.b===r.bench)l.to=r.label;else out.push({b:r.bench,from:r.label,to:r.label})});return out.map(o=>(o.from===o.to?o.from:o.from+'..'+o.to)+'='+o.b).join('; ')}
+function renderLegend(){const X=isAll();
+ let h=`<span><i class="sw" style="background:color-mix(in srgb,var(--up) 40%,transparent)"></i>▲ 显著为正（各格独立 BH 校正后 q&lt;0.05）</span><span><i class="sw" style="background:color-mix(in srgb,var(--dn) 40%,transparent)"></i>▼ 显著为负</span><span><i class="sw" style="background:var(--mut-bg);border:1px solid var(--line2)"></i>不显著 / 未到期</span><span><i class="sw" style="background:var(--mut-bg);border:1px dashed var(--line2)"></i>批次未结束</span>`;
+ if(X)h+='<span>·　「n ≥ 30」= 样本已达发布门槛，不显示具体数量；待到期的格子只显示状态。</span>';
+ else h+=`<span>·　覆盖：</span><span><i class="sw c1"></i>计入</span><span><i class="sw c2"></i>重复运行</span><span><i class="sw c3"></i>缺少/被拒</span><span><i class="sw c4"></i>回测/降级/基准价不符/测试/基准不符</span><span><i class="sw c5"></i>账本起点前</span><span>·　待到期格子：已结算 / 成员数，下方是各阶段数量和最早可能的日期（只是下界）。</span>`;
+ $('#legend').innerHTML=h}
+function renderRecord(){const s=sc(),X=isAll(),denied=!!s.none;
+ $('#recDenied').hidden=!denied;$('#recMain').hidden=denied;$('#recMore').hidden=denied;
+ $('#recAnnot').innerHTML=`<b>演示说明</b>　位置（V12）：顶层页面 <code>/forecast</code>，在导航栏里单独一项，所有「预测验证」范围不是「无」的读者可见，管理员始终可见；<code>/manage/forecast</code> 只保留运维。<br>${s.note}`;
+ if(denied)return;
+ const empty=S.rec==='empty';
+ $('#recEmpty').hidden=!empty;$('#recData').hidden=empty;
+ $('#popLine').textContent='统计范围：'+(s.pop==='all'?'全部报告':`「${OU}」及其下级单位的报告`);
+ const ev=EV[S.ev],pill=$('#evPill');pill.hidden=!s.admin;pill.className='pill '+ev.tone;pill.innerHTML='<i></i>评估器：'+ev.label;
+ if(s.ext&&mode==='custom'){mode='month';syncMode()}
+ $('#modeTabs [data-mode="custom"]').hidden=!!s.ext;
  CUR=rows();
- let h='<tr><th>'+(mode==='month'?'批次（收到月份）':'分组（收到日期）')+'</th>'+DATA.cps.map(c=>`<th>${c[1]}</th>`).join('')+'<th>覆盖</th></tr>';
- CUR.slice().reverse().forEach((r)=>{const mi=CUR.indexOf(r);
-  h+=`<tr><td style="white-space:nowrap"><b>${r.month}</b></td>`+DATA.cps.map(c=>`<td class="cell">${cellHTML(r.cells[c[0]],c[0],mi)}</td>`).join('')+`<td>${covBar(r)}</td></tr>`});
+ const sm=$('#summary');sm.hidden=empty?true:X;if(!sm.hidden)sm.textContent=summarize(CUR);
+ if(empty){sm.hidden=false;sm.textContent=`统计自 ${LEDGER_START} · 预测集 6 · 全部是上线前的集成运行，尚无检查点到期`;return}
+ $('#notEnough').hidden=!s.small;
+ $('#metricHelp').innerHTML=HELP[metric]+(mode==='custom'?'　<span style="color:var(--warn)">p* = 未对区间选择做校正</span>':'');
+ let h='<tr><th>'+(mode==='month'?'批次（收到月份）':'分组（收到日期）')+'</th>'+DATA.cps.map(c=>`<th>${c[1]}</th>`).join('')+(X?'':'<th>覆盖</th>')+'</tr>';
+ CUR.slice().reverse().forEach(r=>{const mi=CUR.indexOf(r);
+  h+=`<tr><td style="white-space:nowrap"><b>${r.label}</b><div class="s muted" style="font-size:12px">${BENCH[r.bench]}</div></td>`+DATA.cps.map(c=>`<td class="cell">${cellHTML(r.cells[c[0]],c[0],mi)}</td>`).join('')+(X?'':`<td>${covBar(r)}</td>`)+'</tr>'});
  $('#matrix').innerHTML=h;
- document.querySelectorAll('.cbox.m').forEach(e=>e.onclick=()=>openCell(+e.dataset.mi,e.dataset.cp));
-}
-document.querySelectorAll('#metricSeg button').forEach(b=>b.onclick=()=>{metric=b.dataset.m;document.querySelectorAll('#metricSeg button').forEach(x=>x.classList.toggle('on',x===b));renderMatrix()});
-function openCell(mi,cp){const r=CUR[mi],c=r.cells[cp],lab=DATA.cps.find(x=>x[0]===cp)[1];
- $('#dTitle').textContent=`${r.month} ${mode==='month'?'批次':'（探索）'} · ${lab}`;
+ $$('.cbox.m').forEach(e=>{e.onclick=()=>openCell(+e.dataset.mi,e.dataset.cp);e.onkeydown=k=>{if(k.key==='Enter'||k.key===' '){k.preventDefault();openCell(+e.dataset.mi,e.dataset.cp)}}});
+ renderLegend()}
+function showDrawer(title,html){$('#dTitle').textContent=title;$('#dBody').innerHTML=html;$('#drawer').classList.add('open');$('#mask').classList.add('open')}
+function closeD(){$('#drawer').classList.remove('open');$('#mask').classList.remove('open')}
+function openCell(mi,cp){const r=CUR[mi],c=r.cells[cp],lab=DATA.cps.find(x=>x[0]===cp)[1],X=isAll();
  const row=(n,v,nl,p)=>`<tr><td>${n}</td><td><b>${v}</b></td><td class="muted">${nl}</td><td>${p}</td></tr>`;
- let h=`<div class="sub" style="margin-bottom:10px">成员 ${r.members} · 参与计算 ${c.n} · 数据拒绝 ${c.refused} · 送转/除权剔除 ${c.corp}</div>
+ const mem=X?DATA.members.filter((_,i)=>i%4!==3):DATA.members;
+ let h=`<div class="sub" style="margin-bottom:6px">${X?'仅列出你有权阅读的报告；不显示总数。':`成员 ${r.members} · 参与计算 ${c.n} · 数据拒绝 ${c.refused} · 送转/除权剔除 ${c.corp}`}</div>
+ <div class="sub" style="margin-bottom:10px">基准 ${BENCH[r.bench]}（批次内冻结）</div>
  <table><tr><th>指标</th><th>数值</th><th>零假设</th><th>p（BH 校正）</th></tr>
  ${row('多空价差',fmt(c.spread)+' pt','0',c.p_spread)}${row('排序 IC',fmt(c.ic,2),'0',c.p_ic)}${row('方向命中',(c.hit*100).toFixed(0)+'%','基准率 '+(c.hit_null*100).toFixed(0)+'%','—')}${row('买入价成交',(c.fill*100).toFixed(0)+'%，成交后 '+fmt(c.fillret)+'%','—','—')}</table>
- <h3 style="margin-top:22px">成员（示意，前 ${DATA.members.length} 只）</h3>
- <table><tr><th>股票</th><th>收到</th><th>观点</th><th>上涨空间</th><th>超额</th><th>判定</th></tr>`;
- DATA.members.forEach(m=>{const view=m.stance==='long'?'看多':'不持仓';const ok=m.stance==='long'?m.ex>0:m.ex<0;
-  h+=`<tr><td>${m.code==='603893'?'<a data-open="1">':''}${m.name}${m.code==='603893'?'</a>':''} <span class="muted">${m.code}</span>${m.halted?' <span class="tag warn">停牌</span>':''}</td><td class="muted">${mode==="month"?r.month+m.date.slice(7):ds(r.start)}</td><td>${view}</td><td>${fmt(m.up)}%</td><td class="${m.ex>0?'pos':'neg'}">${fmt(m.ex)}%</td><td>${ok?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td></tr>`});
- h+='</table><div class="sub" style="margin-top:8px">点股票名进入该报告的"预测 vs 实际"。</div>';
- $('#dBody').innerHTML=h;$('#drawer').classList.add('open');$('#mask').classList.add('open');
- document.querySelectorAll('[data-open]').forEach(a=>a.onclick=()=>{closeD();document.querySelector('.demo .seg button[data-v=report]').click()});
-}
-function closeD(){$('#drawer').classList.remove('open');$('#mask').classList.remove('open')}
-$('#dClose').onclick=closeD;$('#mask').onclick=closeD;
-document.querySelectorAll('#modeTabs div').forEach(t=>t.onclick=()=>{mode=t.dataset.mode;document.querySelectorAll('#modeTabs div').forEach(x=>x.classList.toggle('on',x===t));
- $('#monthRange').style.display=mode==='month'?'':'none';$('#customRange').style.display=mode==='custom'?'':'none';$('#exploreBanner').style.display=mode==='custom'?'':'none';$('#rangeErr').style.display='none';renderMatrix()});
-document.querySelectorAll('#groupSeg button').forEach(b=>b.onclick=()=>{group=b.dataset.g;document.querySelectorAll('#groupSeg button').forEach(x=>x.classList.toggle('on',x===b));renderMatrix()});
-['#from','#to'].forEach(k=>$(k).onchange=renderMatrix);
-renderMatrix();
-// ---------------- report panel ----------------
-const P=DATA.panel, C=P.claims;
-$('#rTitle').textContent=P.report.title;
-$('#rMeta').textContent=`报告日期 ${P.report.date} · 门户收到 ${P.report.made_at}（上海时间）`;
-$('#badges').innerHTML=`<span class="tag ok">✓ 计入 2026-09 批次统计</span><span class="tag ok">基准价核对一致：报告 ${C.emitted.toFixed(2)} = ${C.emitted_asof} 收盘</span><span class="tag">仲裁质量：正常</span><span class="tag warn">情景概率为策略默认值，不参与概率校准</span>`;
-function chart(){const W=720,H=300,L=46,R=12,T=14,B=26,bars=P.bars;
- const prices=bars.flatMap(b=>[b[3],b[4]]).concat([C.entry,C.terminal,P.s0.close]);let lo=Math.min(...prices),hi=Math.max(...prices);const pad=(hi-lo)*0.08;lo-=pad;hi+=pad;
+ <h3 style="margin-top:22px">${X?'成员（示意，仅你有权阅读的报告）':`成员（示意，前 ${mem.length} 只）`}</h3>
+ <div style="overflow-x:auto"><table><tr><th>股票</th><th>收到</th><th>观点</th><th>上涨空间</th><th>超额</th><th>判定</th></tr>`;
+ mem.forEach(m=>{const view=m.stance==='long'?'看多':'不持仓';const ok=m.stance==='long'?m.ex>0:m.ex<0;
+  h+=`<tr><td>${m.code==='603893'?'<a data-open="1">':''}${m.name}${m.code==='603893'?'</a>':''} <span class="muted">${m.code}</span>${m.halted?' <span class="tag warn">停牌</span>':''}</td><td class="muted">${mode==="month"?r.label+m.date.slice(7):r.from}</td><td>${view}</td><td>${fmt(m.up)}%</td><td class="${m.ex>0?'pos':'neg'}">${fmt(m.ex)}%</td><td>${ok?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td></tr>`});
+ h+='</table></div><div class="sub" style="margin-top:8px">点股票名进入该报告的"预测 vs 实际"（演示里打开的是 2026-09-17 那份真实行情的报告）。</div>';
+ showDrawer(`${r.label} ${mode==='month'?'批次':'（探索）'} · ${lab}`,h);
+ $$('[data-open]').forEach(a=>a.onclick=()=>{closeD();S.view='report';renderAll();scrollTo(0,0)})}
+function openCsv(){const s=sc(),X=isAll(),mt=metric,lines=[];
+ const val=c=>mt==='spread'?[c.spread,c.p_spread]:mt==='ic'?[c.ic,c.p_ic]:mt==='hit'?[c.hit,'']:[c.fill,''];
+ CUR.forEach(r=>DATA.cps.forEach(k=>{const c=r.cells[k[0]];if(c.state!=='mature'||lines.length>=5)return;const v=val(c);
+  lines.push([r.label,k[0],mode,mode==='month',mt,v[0],v[1]].concat(X?['true']:[c.n,r.reports,r.members,r.cov['计入'],r.reports-r.cov['计入']]).join(','))}));
+ const head=['# '+DISC,'# population: '+(s.pop==='all'?'all':'own (ou='+OU+' plus sub-units)'),'# benchmark: '+benchNote(),'# range: '+(mode==='month'?'monthly (official)':'custom (exploratory)')];
+ const cols='batch,checkpoint,mode,official,metric,value,p,'+(X?'n_ge_30':'n,reports,members,coverage_member,coverage_other');
+ showDrawer('导出 CSV（预览）',`<div class="sub" style="margin-bottom:8px">${X?'外部「全部」的导出没有覆盖、n 和计数列，用 n_ge_30 标记代替。':'每行带 mode 和 official；开头几行写明声明、统计范围和每个批次的基准。'}</div><pre>${head.concat([cols],lines).join('\n')}</pre>`)}
+$('#dClose').onclick=closeD;$('#mask').onclick=closeD;$('#exportBtn').onclick=openCsv;
+function syncMode(){$$('#modeTabs div').forEach(x=>x.classList.toggle('on',x.dataset.mode===mode));$('#monthRange').hidden=mode!=='month';$('#customRange').hidden=mode!=='custom';$('#exploreBanner').hidden=mode!=='custom';$('#rangeErr').hidden=true}
+$$('#modeTabs div').forEach(t=>t.onclick=()=>{mode=t.dataset.mode;syncMode();renderAll()});
+$$('#groupSeg button').forEach(b=>b.onclick=()=>{group=b.dataset.g;$$('#groupSeg button').forEach(x=>x.classList.toggle('on',x===b));renderAll()});
+$$('#metricSeg button').forEach(b=>b.onclick=()=>{metric=b.dataset.m;$$('#metricSeg button').forEach(x=>x.classList.toggle('on',x===b));renderAll()});
+['#from','#to'].forEach(k=>$(k).onchange=renderAll);
+// ---------------- operations page: evaluator and data sources ----------------
+const EV={
+ off:{label:'关闭',tone:'',mode:'off',last:'尚未运行过',hb:'—',lines:['自动结算默认关闭。开启前不会结算任何检查点，待结算计数只随报告入账增长。']},
+ dry:{label:'试运行',tone:'blue',mode:'dry',last:'2027-06-20 14:58',hb:'2 分钟前',lines:['试运行会规划每一次到期结算，但不写入。本轮规划了 38 次写入，一次也没有写入账本。','为每个基准记录一次试运行核对后，才能开启。']},
+ healthy:{label:'正常',tone:'ok',mode:'on',last:'2027-06-20 14:58',hb:'2 分钟前',lines:['本轮扫描 412 个预测集，写入 6 个检查点；没有拒绝。']},
+ stale:{label:'心跳过期',tone:'bad',mode:'on',last:'2027-06-20 14:31',hb:'29 分钟前（超过 10 分钟）',lines:['评估器可能已经停止。看门狗已发出提醒（邮件 + Slack，最多每小时一次）。']},
+ lagging:{label:'滞后',tone:'warn',mode:'on',last:'2027-06-20 14:58',hb:'2 分钟前',lines:['最早到期的检查点已超过 6 小时未结算。读者看到的是「结算中」或「重试中」，不是失败。']},
+ error:{label:'错误',tone:'bad',mode:'on',last:'2027-06-20 14:58',hb:'2 分钟前',lines:['上一轮出错：账本写入超时。已记录，下一轮自动重试；已有的结算结果不受影响。']}};
+function readiness(){const e=S.ev,onOrDry=e!=='off';
+ return [['当前版本包含完整评估器',true],['已设置账本起点',true],['最近一次试运行无错误完成',onOrDry],['正在使用的每个基准都有试运行核对',e!=='off'&&e!=='dry'],['最近 30 天内验证过告警渠道',true],['已启用具备结算资格的主行情源',S.src!=='no_source']]}
+function renderEval(){const e=EV[S.ev],rd=readiness(),bad=rd.filter(x=>!x[1]);
+ $('#evCard').innerHTML=`<div class="rowh" style="align-items:center"><h3 style="margin:0">评估器状态</h3><span class="pill ${e.tone}"><i></i>${e.label}</span></div>
+ <div class="kv" style="margin-top:12px"><span class="k">模式</span><span><span class="seg"><button disabled class="${e.mode==='off'?'on':''}">关闭</button><button disabled class="${e.mode==='dry'?'on':''}">试运行</button><button disabled class="${e.mode==='on'?'on':''}">开启</button></span>　<span class="sub">开启受下方就绪项约束</span></span>
+ <span class="k">上次运行</span><span>${e.last}</span><span class="k">心跳</span><span>${e.hb}</span></div>
+ <div class="alert ${e.tone==='bad'?'bad':e.tone==='warn'?'warn':''}">${e.lines.join('<br>')}</div>
+ <div style="margin-top:6px"><b>就绪状态</b>　${bad.length?`<span class="tag warn">未就绪：${bad.length} 项</span>`:'<span class="tag ok">全部就绪</span>'}</div>
+ <div class="kv" style="margin-top:8px">${rd.map(x=>`<span class="k">${x[1]?'✓':'✗'}</span><span class="${x[1]?'':'fail'}">${x[0]}</span>`).join('')}</div>
+ <div style="margin-top:12px"><button class="btn" ${S.ev==='off'?'disabled':''}>立即评估</button></div>`}
+function renderSrc(){const t=S.src;
+ const tc={ok:['正常','ok'],tencent_down:['不可用：最近 3 次请求失败','bad'],no_source:['已从行情源顺序中移除','bad'],unavailable:['统计不可用','warn']}[t];
+ const sn={ok:['已比对 12 次：一致 12 · 不一致 0','ok'],tencent_down:['主源不可用时不比对','warn'],no_source:['没有主源，不比对','warn'],unavailable:['统计不可用','warn']}[t];
+ const banner={
+  ok:['','计分收盘价只来自腾讯不复权日线，腾讯是唯一的写入源。新浪只做影子比较：评估有待处理任务时，在账本处理完成后最多读取 2 份候选数据、发出 4 次 HTTP 请求（含重定向）；比对一致也不赋予它写入资格。'],
+  tencent_down:['warn','腾讯暂时不可用：到期的检查点推迟结算，读者看到「重试中」。源故障不消耗尝试次数，也不会变成终局拒绝；新浪只做比对，不会代替写入。恢复后自动继续。'],
+  no_source:['bad','没有可用的账本主源，结算暂停（no_source）。评估器不会改用比对源写账本。已发出提醒（邮件 + Slack，最多每日一次）；在行情源顺序里恢复一个具备写入资格的源即可继续。'],
+  unavailable:['warn','统计不可用。缺失或无法读取的统计不能证明行情源健康，也不会推定为零；已有证据保持原样，不会被覆盖。']}[t];
+ $('#srcCard').innerHTML=`<div class="rowh" style="align-items:center"><h3 style="margin:0">行情源</h3><span class="sub">账本主源：${t==='no_source'?'无':'腾讯'}　·　比对对象：${t==='no_source'?'—':'新浪'}</span></div>
+ <div class="alert ${banner[0]}">${banner[1]}</div>
+ <div style="overflow-x:auto"><table><tr><th>行情源</th><th>角色</th><th>授权范围</th><th>状态</th></tr>
+ <tr><td><b>腾讯财经</b></td><td><span class="tag ${t==='no_source'?'':'ok'}">写入源 · 账本主源</span></td><td>沪深京 · 指数 · 不复权日线</td><td><span class="tag ${tc[1]}">${tc[0]}</span></td></tr>
+ <tr><td><b>新浪财经</b></td><td><span class="tag blue">影子比较（不写账本）</span></td><td>仅沪深 · 只比对</td><td><span class="tag ${sn[1]}">${sn[0]}</span></td></tr>
+ <tr><td><b>Yahoo</b></td><td><span class="tag">未授予</span></td><td>不用于账本</td><td class="muted">—</td></tr></table></div>`}
+function openEval(){const e=EV[S.ev];
+ showDrawer('评估器状态',`<div class="kv"><span class="k">状态</span><span><span class="pill ${e.tone}"><i></i>${e.label}</span></span><span class="k">模式</span><span>${{off:'关闭',dry:'试运行',on:'开启'}[e.mode]}</span><span class="k">上次运行</span><span>${e.last}</span><span class="k">心跳</span><span>${e.hb}</span></div><div class="alert ${e.tone==='bad'?'bad':e.tone==='warn'?'warn':''}" style="margin-top:14px">${e.lines.join('<br>')}</div><div><a>在运维页查看完整状态与就绪项 → /manage/forecast</a></div>`)}
+$('#evPill').onclick=openEval;
+function renderOps(){const adm=sc().admin;$('#opsDenied').hidden=adm;$('#opsMain').hidden=!adm;
+ $('#opsAnnot').innerHTML='<b>演示说明</b>　<code>/manage/forecast</code> 现在只做运维：评估器、行情源、基准排期、账本起点、告警、未入账和访问概览。统计矩阵与成员抽屉移到了「预测验证」（<code>/forecast</code>，导航栏单独一项）。线上的评估器目前是「关闭」，用上方的选择查看其他状态。';
+ if(adm){renderEval();renderSrc()}}
+// ---------------- report page ----------------
+const P=DATA.panel, C=P.claims, PROJ=Object.fromEntries(DATA.cps.map(c=>[c[0],project(c[0],P.report.made_at)]));
+function chart(ov){const W=720,H=300,L=46,R=12,T=14,B=26,bars=P.bars,m5=P.d5;
+ const prices=bars.flatMap(b=>[b[3],b[4]]).concat(ov?[C.entry,C.terminal,P.s0.close]:[]);let lo=Math.min(...prices),hi=Math.max(...prices);const pad=(hi-lo)*0.08;lo-=pad;hi+=pad;
  const bw=(W-L-R)/bars.length,X=i=>L+bw*(i+0.5),Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
- const i0=bars.findIndex(b=>b[0]===P.s0.date),i5=bars.findIndex(b=>b[0]===P.marks[0].session),ir=bars.findIndex(b=>b[0]>=P.report.date);
+ const i0=bars.findIndex(b=>b[0]===P.s0.date),i5=bars.findIndex(b=>b[0]===m5.session),ir=bars.findIndex(b=>b[0]>=P.report.date);
  let s=`<svg viewBox="0 0 ${W} ${H}" class="chart" style="width:100%;height:auto">`;
- s+=`<rect x="${X(i0)}" y="${T}" width="${X(bars.length-1)-X(i0)+bw/2}" height="${H-T-B}" fill="var(--hl)"/>`;
+ if(ov)s+=`<rect x="${X(i0)}" y="${T}" width="${X(bars.length-1)-X(i0)+bw/2}" height="${H-T-B}" fill="var(--hl)"/>`;
  for(let k=0;k<=4;k++){const v=lo+(hi-lo)*k/4;s+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v.toFixed(0)}</text>`}
  bars.forEach((b,i)=>{const up=b[2]>=b[1],col=up?'var(--up)':'var(--dn)';s+=`<line x1="${X(i)}" x2="${X(i)}" y1="${Y(b[3])}" y2="${Y(b[4])}" stroke="${col}"/><rect x="${X(i)-bw*0.32}" y="${Y(Math.max(b[1],b[2]))}" width="${bw*0.64}" height="${Math.max(1,Math.abs(Y(b[1])-Y(b[2])))}" fill="${col}"/>`;
   if(i%5===0)s+=`<text x="${X(i)}" y="${H-8}" text-anchor="middle">${b[0].slice(5)}</text>`});
+ if(!ov)return s+'</svg>';
  const hl=(v,c,t,dash)=>`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${c}" stroke-dasharray="${dash}" stroke-width="1.4"/><text x="${W-R-2}" y="${Y(v)-4}" text-anchor="end" style="fill:${c};font-weight:600">${t}</text>`;
  s+=hl(C.terminal,'var(--ev)','概率加权终值 '+C.terminal,'6 4')+hl(C.entry,'var(--pri)','建议买入 '+C.entry,'6 4')+`<line x1="${X(i0)}" x2="${W-R}" y1="${Y(P.s0.close)}" y2="${Y(P.s0.close)}" stroke="var(--fg3)" stroke-dasharray="2 3"/><text x="${X(i0)+4}" y="${Y(P.s0.close)+14}" style="fill:var(--fg2)">S0 ${P.s0.close}</text>`;
  const vline=(i,t,c)=>`<line x1="${X(i)}" x2="${X(i)}" y1="${T}" y2="${H-B}" stroke="${c}" stroke-dasharray="3 3"/><text x="${X(i)}" y="${T+10}" text-anchor="middle" style="fill:${c};font-weight:600">${t}</text>`;
  s+=vline(ir,'报告','var(--fg2)')+vline(i5,'d5','var(--pri)');
- s+=`<circle cx="${X(i5)}" cy="${Y(P.marks[0].close)}" r="4.5" fill="var(--pri)" stroke="var(--card)" stroke-width="2"/>`;
+ s+=`<circle cx="${X(i5)}" cy="${Y(m5.close)}" r="4.5" fill="var(--pri)" stroke="var(--card)" stroke-width="2"/>`;
  return s+'</svg>'}
-$('#chart').innerHTML=chart();
-const up0=C.terminal/P.s0.close-1, pos=v=>((v-C.bear)/(C.bull-C.bear)*100)+'%';
-$('#said').innerHTML=`<div class="kv">
+const PHASE_TXT={
+ waiting_s0:['等待首个交易日','报告在收盘后收到，起算价 S0 要等下一个交易日的收盘；检查点日期随之确定。'],
+ settling:['结算中','已到期。收盘（15:30 后）取数结算，结算后不再改变。'],
+ retrying:['重试中','行情源暂时不可用，稍后自动重试。源故障不计入失败次数，也不会变成终局拒绝。'],
+ overdue:['逾期','超过预计结算日仍未结算，运维已收到提醒；其他检查点不受影响。'],
+ final:['终局拒绝','已过到期日 10 个交易日以上，针对该检查点的取数已失败 4 次以上：不再重试，该检查点不计入统计。']};
+function markModel(cp){const p=PROJ[cp],when=p.expected?`预计 ${p.due}`:`预计 ${p.due} 或之后`;
+ if(S.ph==='waiting_s0')return {phase:'waiting_s0',when,p};
+ if(cp==='d5')return {phase:'resolved',when:p.due,p};
+ if(cp==='d20'&&['settling','retrying','overdue','final'].includes(S.ph))return {phase:S.ph,when:S.ph==='settling'?p.due+'（今天）':p.due,p};
+ return {phase:'waiting',when,p}}
+function badges(){let h='';
+ if(canMember())h+={member:'<span class="tag ok">✓ 计入 2026-09 批次统计</span>',pre_live:`<span class="tag" title="早于账本起点，只用于校验，不计入统计">不计入：早于账本起点（${LEDGER_START}）</span>`,test:'<span class="tag">测试运行 · 不计入</span>',off_benchmark:'<span class="tag warn" title="冻结的基准指数与本批次不同">基准不符：本集冻结中证1000，批次基准为中证800，不计入</span>',duplicate:'<span class="tag">重复：同批次已有更早的预测集，本份不计入</span>'}[S.mem];
+ return h+`<span class="tag ok">基准价核对一致：报告 ${C.emitted.toFixed(2)} = ${C.emitted_asof} 收盘</span><span class="tag">仲裁质量：正常</span><span class="tag warn">情景概率为策略默认值，不参与概率校准</span>`}
+function checkpointsHTML(){const m5=P.d5,models=DATA.cps.map(c=>Object.assign({cp:c[0],label:c[1]},markModel(c[0])));
+ const steps=(S.ph==='waiting_s0'?`<div class="step done"><i></i><b>收到</b><div class="muted">${P.report.made_at}</div></div><div class="step"><i></i><b>S0</b> · 起算<div class="muted">预计 ${PROJ.d5.s0} 收盘</div></div>`:`<div class="step done"><i></i><b>收到</b><div class="muted">${P.report.made_at}</div></div><div class="step done"><i></i><b>S0</b> · 起算<div class="muted">${P.s0.date} 收盘 ${P.s0.close}</div></div>`)
+  +models.map(m=>`<div class="step ${m.phase==='resolved'?'done':''}"><i></i><b>${m.cp}</b> · ${m.label}<div class="muted">${m.phase==='resolved'||m.phase==='waiting'?m.when:PHASE_TXT[m.phase][0]}</div></div>`).join('');
+ let mt=`<tr><th>检查点</th><th>交易日</th><th>收盘</th><th>自 S0 涨跌</th><th>${BENCH.sh000852}</th><th>超额</th><th>建议买入价</th><th>与观点</th><th>来源</th></tr>`;
+ models.forEach(m=>{
+  if(m.phase==='resolved'){const ex=m5.ret-m5.bench;mt+=`<tr><td><b>${m.cp}</b> <span class="muted">${m.label}</span></td><td>${m5.session}</td><td>${m5.close}</td><td class="${m5.ret>0?'pos':'neg'}">${pct(m5.ret)}</td><td class="${m5.bench>0?'pos':'neg'}">${pct(m5.bench)}</td><td class="${ex>0?'pos':'neg'}"><b>${pct(ex)}</b></td><td>${m5.low<=C.entry?'已触及':'未触及（最低 '+m5.low+'）'}</td><td>${ex>0?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td><td>腾讯 · 不复权日线</td></tr>`;return}
+  const t=PHASE_TXT[m.phase];
+  const what=m.phase==='waiting'?`<span class="tag">等待中</span>${m.p.expected?'按已核实的交易所休市日历推算；该交易日收盘（15:30 后）才会结算，结算后不再改变。':`休市日历尚未覆盖 ${m.p.due.slice(0,4)} 年，这是最早可能的日期，实际可能更晚；该交易日收盘（15:30 后）才会结算。`}`:`<span class="tag ${m.phase==='final'?'bad':m.phase==='waiting_s0'?'':'warn'}">${t[0]}</span>${t[1]}`;
+  mt+=`<tr class="${m.phase==='waiting'||m.phase==='waiting_s0'?'muted':''}"><td><b>${m.cp}</b> <span class="muted">${m.label}</span></td><td>${m.when}</td><td colspan="7">${what}</td></tr>`});
+ const rule=`<div class="sub" style="margin-top:8px">S0 = 首个收盘晚于入账时刻的交易日（本报告 ${P.report.made_at} 入账 → ${PROJ.d5.s0}）；dN = S0 之后第 N 个交易日；h12 = 入账日起满 12 个月后的首个交易日。「预计」按已核实的交易所休市日历推算（目前只含 2026 年）；「预计 … 或之后」表示日历尚未覆盖，只给最早日期。两者都不是结算结果。</div>`;
+ const latest=S.ph==='waiting'?`<div class="sub" style="margin-top:8px">截至最新（${P.latest.date}，不计分）：收盘 ${P.latest.close}，自 S0 ${pct(P.latest.close/P.s0.close-1)}，已在 10 月中旬触及建议买入价 ${C.entry}。只有检查点的结果进入统计。</div>`:'';
+ return `<div class="card inner"><b>检查点</b><div class="steps" id="steps" style="margin:12px 0 8px">${steps}</div><div style="overflow-x:auto"><table id="marks">${mt}</table></div>${rule}${latest}</div>`}
+function saidHTML(){const up0=C.terminal/P.s0.close-1,pos=v=>((v-C.bear)/(C.bull-C.bear)*100)+'%';
+ return `<div class="card inner" style="margin-top:0"><b>报告当时说</b><div style="margin-top:10px"><div class="kv">
  <span class="k">观点</span><span><span class="tag ok" style="margin:0">看多</span>　目标仓位 ${C.weight}%</span>
  <span class="k">期限</span><span>至 ${C.horizon}（12 个月，标准期限）</span>
  <span class="k">概率加权终值</span><span><b>${C.terminal}</b>　<span class="muted">较 S0 ${pct(up0)}</span></span>
@@ -248,16 +480,56 @@ $('#said').innerHTML=`<div class="kv">
  <div class="band"><div class="bar" style="left:0;right:0"></div>
   <div class="pt" style="left:0;transform:none">熊 ${C.bear}<br>${C.pbear}%</div><div class="pt" style="left:${pos(C.base)}">基准 ${C.base}<br>${C.pbase}%</div><div class="pt" style="right:0;left:auto;transform:none;text-align:right">牛 ${C.bull}<br>${C.pb}%</div>
   <div class="cur" style="left:${pos(P.latest.close)}" title="最新收盘"></div></div>
- <div class="sub" style="margin-top:22px">黑色竖线 = 最新收盘 ${P.latest.close}（${P.latest.date}）。到 12 个月时看收盘是否落在熊–牛区间内。</div>`;
-const steps=P.marks.map(m=>`<div class="step ${m.status==='resolved'?'done':''}"><i></i><b>${m.cp}</b> · ${m.label}<div class="muted">${m.session}</div></div>`).join('');
-$('#steps').innerHTML=`<div class="step done"><i></i><b>收到</b><div class="muted">${P.report.made_at}</div></div><div class="step done"><i></i><b>S0</b> · 起算<div class="muted">${P.s0.date} 收盘 ${P.s0.close}</div></div>`+steps;
-let mt='<tr><th>检查点</th><th>交易日</th><th>收盘</th><th>自 S0 涨跌</th><th>中证1000</th><th>超额</th><th>建议买入价</th><th>与观点</th></tr>';
-P.marks.forEach(m=>{if(m.status==='resolved'){const ex=m.ret-m.bench;mt+=`<tr><td><b>${m.cp}</b> <span class="muted">${m.label}</span></td><td>${m.session}</td><td>${m.close}</td><td class="${m.ret>0?'pos':'neg'}">${pct(m.ret)}</td><td class="${m.bench>0?'pos':'neg'}">${pct(m.bench)}</td><td class="${ex>0?'pos':'neg'}"><b>${pct(ex)}</b></td><td>${m.low<=C.entry?'已触及':'未触及（最低 '+m.low+'）'}</td><td>${ex>0?'<span class="tag ok">✓ 一致</span>':'<span class="tag bad">✗ 相反</span>'}</td></tr>`}
- else mt+=`<tr class="muted"><td><b>${m.cp}</b> ${m.label}</td><td>${m.session}</td><td colspan="6">等待中 · 该交易日收盘（15:30 后）才会结算，结算后不再改变</td></tr>`});
-$('#marks').innerHTML=mt;
-$('#latestNote').innerHTML=`截至最新（${P.latest.date}，不计分）：收盘 ${P.latest.close}，自 S0 ${pct(P.latest.close/P.s0.close-1)}，已在 10 月中旬触及建议买入价 ${C.entry}。只有检查点的结果进入统计。`;
-let ot='<tr><th>报告日期</th><th>收到</th><th>观点</th><th>终值</th><th>建议买入</th><th>状态</th><th></th></tr>';
-P.other_sets.forEach(o=>ot+=`<tr><td>${o.date}</td><td class="muted">${o.made}</td><td>看多</td><td>${o.terminal}</td><td>${o.entry}</td><td><span class="tag ok">计入 ${o.cohort} 批次</span></td><td>${o.date===P.report.date?'<span class="muted">当前</span>':'<a>查看</a>'}</td></tr>`);
-$('#others').innerHTML=ot;
-$('#payload').textContent=JSON.stringify({schema:'predictions.v1',emitter:{app:'1-6-4',version:'V3.16.2',calculator:'scenario-calc-3.5'},probability_method:C.prob_method,decision_status:C.status,decision_quality:C.quality,baseline:{price:C.emitted.toFixed(2),as_of:C.emitted_asof,source:'company_quote'},horizon_end:C.horizon,claims:[{key:'stance',kind:'stance',stance:'long',target_weight:'0.1000'},{key:'expected_terminal',kind:'terminal_value',price:C.terminal.toFixed(2),p_profit:'0.7500'},{key:'scenario.bull',kind:'scenario',label:'bull',price:C.bull.toFixed(2),probability:'0.2500'},{key:'scenario.base',kind:'scenario',label:'base',price:C.base.toFixed(2),probability:'0.5000'},{key:'scenario.bear',kind:'scenario',label:'bear',price:C.bear.toFixed(2),probability:'0.2500'},{key:'entry_price',kind:'entry_price',price:C.entry.toFixed(2)}]},null,2);
+ <div class="sub" style="margin-top:22px">黑色竖线 = 最新收盘 ${P.latest.close}（${P.latest.date}）。到 12 个月时看收盘是否落在熊–牛区间内。</div></div></div>`}
+function othersHTML(){let ot='<tr><th>报告日期</th><th>收到</th><th>观点</th><th>终值</th><th>建议买入</th><th>状态</th><th></th></tr>';
+ P.other_sets.forEach(o=>ot+=`<tr><td>${o.date}</td><td class="muted">${o.made}</td><td>看多</td><td>${o.terminal}</td><td>${o.entry}</td><td>${!canMember()?'<span class="tag ok">已入账</span>':S.mem==='member'?`<span class="tag ok">计入 ${o.cohort} 批次</span>`:'<span class="tag">不计入：早于账本起点</span>'}</td><td>${o.date===P.report.date?'<span class="muted">当前</span>':'<a>查看</a>'}</td></tr>`);
+ return `<div class="card inner"><b>这只股票的其他预测</b><div style="overflow-x:auto"><table style="margin-top:8px">${ot}</table></div></div>`}
+function payloadHTML(){const j=JSON.stringify({schema:'predictions.v1',emitter:{app:'1-6-4',version:'V3.16.2',calculator:'scenario-calc-3.5'},probability_method:C.prob_method,decision_status:C.status,decision_quality:C.quality,baseline:{price:C.emitted.toFixed(2),as_of:C.emitted_asof,source:'company_quote'},horizon_end:C.horizon,claims:[{key:'stance',kind:'stance',stance:'long',target_weight:'0.1000'},{key:'expected_terminal',kind:'terminal_value',price:C.terminal.toFixed(2),p_profit:'0.7500'},{key:'scenario.bull',kind:'scenario',label:'bull',price:C.bull.toFixed(2),probability:'0.2500'},{key:'scenario.base',kind:'scenario',label:'base',price:C.base.toFixed(2),probability:'0.5000'},{key:'scenario.bear',kind:'scenario',label:'bear',price:C.bear.toFixed(2),probability:'0.2500'},{key:'entry_price',kind:'entry_price',price:C.entry.toFixed(2)}]},null,2);
+ return `<div style="margin:16px 0 0" id="payloadBox"><details><summary>查看入账原文（predictions JSON）</summary><pre>${j}</pre></details></div>`}
+function chipText(){const m=markModel('d20');
+ const next={waiting:`下一检查点 d20 ${m.when}`,waiting_s0:'等待首个交易日',settling:'d20 结算中',retrying:'d20 重试中',overdue:'d20 逾期',final:'d20 终局拒绝'}[m.phase];
+ return `预测验证 · 看多 ${C.weight}% · ${next}`}
+function renderReport(){const s=sc(),none=!!s.none,lite=S.ed==='lite';
+ $('#rTitle').textContent=P.report.title;
+ $('#rMeta').textContent=`报告日期 ${P.report.date} · 门户收到 ${P.report.made_at}（上海时间） · 版本 ${lite?'精简版':'完整版'}`;
+ $('#edTag').textContent=lite?'精简版':'完整版';
+ $$('#edSeg button').forEach(b=>b.classList.toggle('on',b.dataset.e===S.ed));
+ const hasSet=!lite&&!(S.mem==='test'&&!s.admin);
+ const chip=$('#fcChip');chip.hidden=none||!hasSet;chip.textContent=chipText();chip.title=DISC+'。点击跳到下方的预测验证。';
+ $('#fcCard').hidden=none;
+ const ov=!none&&$('#ovChk').checked;
+ $('#overlayToggle').hidden=none;$('#chartLegend').hidden=none||!ov;
+ $('#chart').innerHTML=chart(ov);
+ const note={waiting:'',waiting_s0:'「等待首个交易日」：报告刚在收盘后收到，S0 还没发生。',settling:'「结算中」：模拟 2026-10-26 15:10，d20 已到期、收盘后结算。',retrying:'「重试中」：模拟腾讯暂时不可用。',overdue:'「逾期」：模拟 d20 超过预计结算日仍未结算。',final:'「终局拒绝」：模拟 d20 多次取数失败且已过到期日 10 个交易日。'}[S.ph];
+ $('#repAnnot').innerHTML=`<b>演示说明</b>　瑞芯微 2026-09-17 报告，行情是截至 2026-10-16 的真实数据；这份报告在账本起点（${LEDGER_START}）之前入账，所以真实情况是「不计入」。「检查点阶段」和「统计归属」只改变文字状态，用来看各种措辞。${note?'<br>'+note:''}<br>${s.none?'范围「无」：下面的行情图只剩 K 线，没有预测叠加；报告正文之后也没有预测验证区块和标题旁的徽标，也没有占位。':s.ext?'外部成员：看不到入账原文、统计归属和未入账的集合；测试运行等未接受的集合只有管理员看得到。':s.pop==='own'?'内部成员，范围「本单位」：没有「统计归属」徽标（那是「全部」口径的信息）；测试运行等未接受的集合只有管理员看得到。':'管理员和范围「全部」的内部成员能看到统计归属；未接受的集合（测试运行等）只有管理员看得到。'}`;
+ if(none)return;
+ let body;
+ if(lite){
+  body=`<div style="text-align:center;padding:12px 4px"><div style="font-size:15px;font-weight:600">这个版本没有预测</div><div class="sub" style="margin-top:4px">预测随生成它的那次运行一起入账；这个版本的运行没有带预测，也不会借用其他版本的预测。</div>
+  <div style="margin-top:12px"><a data-sibling="1">同一篇报告的「完整版」有预测 → 查看完整版的预测</a></div>
+  ${canMember()&&S.mem==='member'?'<div style="margin-top:12px"><span class="tag ok" style="margin:0">本批次已计入统计，依据「完整版」的预测</span></div>':''}</div>
+  <div class="sub" style="text-align:center">同级版本的链接只在你有权阅读那个版本时出现。</div>`}
+ else if(!hasSet){
+  body=`<div style="text-align:center;padding:12px 4px"><div style="font-size:15px;font-weight:600">这份报告没有预测</div></div>`}
+ else body=`<div id="badges" style="margin-bottom:14px">${badges()}</div>${S.mem==='test'?'<div class="alert warn" id="testNote">测试运行——单独存放，不参与结算。</div>':''}${saidHTML()}${S.mem==='test'?'':checkpointsHTML()}${othersHTML()}${s.ext?'':payloadHTML()}`;
+ $('#fcBody').innerHTML=body;
+ $$('[data-sibling]').forEach(a=>a.onclick=()=>{S.ed='full';renderAll()})}
+$('#ovChk').onchange=renderReport;
+$$('#edSeg button').forEach(b=>b.onclick=()=>{S.ed=b.dataset.e;renderAll()});
+// ---------------- chrome, controls, wiring ----------------
+function renderChrome(){const s=sc();
+ $('#navForecast').hidden=!(s.admin||!s.none);$('#navForecast').classList.toggle('on',S.view==='record');
+ $('#mgBtn').hidden=!s.admin;
+ $$('#viewSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.view));
+ $$('#themeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.theme));
+ $$('.ctl[data-for]').forEach(c=>c.hidden=!c.dataset.for.split(' ').includes(S.view));
+ $$('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+S.view));
+ [['#scopeSel','scope'],['#recSel','rec'],['#evSel','ev'],['#srcSel','src'],['#phSel','ph'],['#memSel','mem']].forEach(x=>{$(x[0]).value=S[x[1]]})}
+function renderAll(){renderChrome();renderRecord();renderOps();renderReport()}
+$('#viewSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.view=b.dataset.v;renderAll();scrollTo(0,0)});
+$('#themeSeg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.theme=b.dataset.t;
+ if(b.dataset.t==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',b.dataset.t);renderChrome()});
+[['#scopeSel','scope'],['#recSel','rec'],['#evSel','ev'],['#srcSel','src'],['#phSel','ph'],['#memSel','mem']].forEach(x=>$(x[0]).addEventListener('change',e=>{S[x[1]]=e.target.value;renderAll()}));
+window.DEMO={project,simCell,monthRows,generated:()=>GEN.slice()};
+syncMode();renderAll();
 </script></body></html>
