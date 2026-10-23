@@ -800,3 +800,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   refusals preserve `no_source` with zero attempts. Initial controls passed (0.577 s); final full
   regression and repeat checks including these controls remain pending. Runtime code is unchanged
   from the reviewed head.
+- Final application/test head `13251660` passed full Go/Postgres regression (app package
+  34.262 s), three-repeat targeted race checks including the added evaluator controls (6.796 s),
+  vet, staticcheck and build. Test-only follow-up review confirmed the shared/reset breaker
+  fixture and actual widened-lookback path with no findings. No golden fixture or frontend source
+  changed. This closes the runtime-source checkpoint, not P23's remaining integration/CI gates.
