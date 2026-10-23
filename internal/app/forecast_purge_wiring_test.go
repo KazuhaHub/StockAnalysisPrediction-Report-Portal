@@ -593,8 +593,20 @@ func TestPurgeEvidenceWritesNeverCallThePoolInsideATransaction(t *testing.T) {
 
 // ---------- Postgres: the two business transactions serialize ----------
 
-// ownershipLockQueued reports whether some backend is waiting for the ownership advisory lock.
-const ownershipLockQueued = `SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=1380994896 AND objid=2 AND NOT granted`
+// The lock views are cluster wide and other test runs share the cluster, so every observation below
+// is restricted to this test's own database.
+const (
+	ownDatabaseLocks = `FROM pg_locks WHERE locktype='advisory' AND classid=1380994896 AND objid=2
+		AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`
+	// ownershipLockQueued: some backend is waiting for the ownership advisory lock.
+	ownershipLockQueued = `SELECT COUNT(*) ` + ownDatabaseLocks + ` AND NOT granted`
+	// ownershipLockHeld: some backend holds it.
+	ownershipLockHeld = `SELECT COUNT(*) ` + ownDatabaseLocks + ` AND granted`
+	// blockedOnPrefix counts backends of this database waiting on a row lock in a statement that
+	// matches the LIKE pattern appended to it.
+	blockedOnPrefix = `SELECT COUNT(*) FROM pg_stat_activity WHERE datname=current_database()
+		AND wait_event_type='Lock' AND query LIKE `
+)
 
 func waitUntil(t *testing.T, st *Store, what, query string) {
 	t.Helper()
@@ -691,9 +703,8 @@ func TestPostgresRetentionAndOUDeletionSerializeOnTheOwnershipLock(t *testing.T)
 			n, err := f.st.DeletePredictionsBefore(retentionCutoff)
 			retention <- retentionResult{n, err}
 		}()
-		waitUntil(t, f.st, "retention to block on the held row",
-			`SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'DELETE FROM prediction_marks%'`)
-		if got := queryCount(t, f.st, `SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND classid=1380994896 AND objid=2 AND granted`); got != 1 {
+		waitUntil(t, f.st, "retention to block on the held row", blockedOnPrefix+`'DELETE FROM prediction_marks%'`)
+		if got := queryCount(t, f.st, ownershipLockHeld); got != 1 {
 			t.Fatalf("retention holds the ownership lock %d times; want once, taken before it read a set", got)
 		}
 		deletion := make(chan deletionResult, 1)
@@ -735,8 +746,7 @@ func TestPostgresRetentionAndOUDeletionSerializeOnTheOwnershipLock(t *testing.T)
 			moved, target, err := f.st.DeleteUserGroup(f.doomed)
 			deletion <- deletionResult{moved, target, err}
 		}()
-		waitUntil(t, f.st, "the OU deletion to block on the held row",
-			`SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'UPDATE user_groups SET parent_id%'`)
+		waitUntil(t, f.st, "the OU deletion to block on the held row", blockedOnPrefix+`'UPDATE user_groups SET parent_id%'`)
 		retention := make(chan retentionResult, 1)
 		go func() {
 			n, err := f.st.DeletePredictionsBefore(retentionCutoff)

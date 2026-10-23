@@ -187,7 +187,7 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 
 	var parent sql.NullInt64
 	var isDefault int
-	// First database operation of the transaction: nothing above this line reads or writes.
+	// Taken before the first read or write of any row; nothing above this line touches data.
 	owned := migExec{s: s, ex: tx}
 	if err := lockPredictionOwnership(owned); err != nil {
 		return 0, 0, err
