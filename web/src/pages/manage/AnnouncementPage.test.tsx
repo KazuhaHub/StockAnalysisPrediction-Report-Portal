@@ -14,6 +14,7 @@ const apiMock = vi.hoisted(() => ({
 }))
 
 const forgetTagsMock = vi.hoisted(() => vi.fn())
+const refreshFeedMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../api/client', () => ({
   api: apiMock,
@@ -25,6 +26,16 @@ vi.mock('../../lib/conditionalGet', () => ({
   UNCHANGED: Symbol('unchanged'),
   getIfChanged: vi.fn(),
 }))
+
+// The shell's reader feed. The page has to make it reload after a change, not only drop its ETag:
+// a dropped tag alone waits for the next 60-second poll.
+vi.mock('../../announcements', async () => {
+  const actual = await vi.importActual<typeof import('../../announcements')>('../../announcements')
+  return {
+    ...actual,
+    useAnnouncements: () => ({ items: [], collapse: false, refresh: refreshFeedMock }),
+  }
+})
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, o?: Record<string, unknown>) => (o?.count ? `${k}:${o.count}` : k) }),
@@ -39,7 +50,8 @@ function announcement(over: Partial<AdminAnnouncement> = {}): AdminAnnouncement 
     ord: 0,
     enabled: true,
     display: 'strip',
-    dismissible: false,
+    stripDismissible: false,
+    popupDismissible: true,
     scope: 'home',
     audience: 'all',
     grants: [],
@@ -81,6 +93,8 @@ describe('AnnouncementPage', () => {
   beforeEach(() => {
     for (const fn of Object.values(apiMock)) fn.mockReset()
     forgetTagsMock.mockReset()
+    refreshFeedMock.mockReset()
+    refreshFeedMock.mockResolvedValue(undefined)
     apiMock.get.mockResolvedValue({ items: [announcement()], groups: GROUPS, users: USERS })
     apiMock.post.mockResolvedValue({ ok: true, id: 9 })
     apiMock.put.mockResolvedValue({ ok: true })
@@ -199,6 +213,106 @@ describe('AnnouncementPage', () => {
     renderPage()
     await user.click(await screen.findByRole('switch', { name: 'announcementAdmin.enabled' }))
     await waitFor(() => expect(forgetTagsMock).toHaveBeenCalledWith('/api/announcements'))
+    await waitFor(() => expect(refreshFeedMock).toHaveBeenCalled())
+  })
+
+  // The path in the production report. Without the reload, the admin's own shell kept the payload
+  // that still allowed closing for up to a minute, so the band they went back to check still had
+  // its close button — and closing it then stored a dismissal.
+  it('reloads the shell’s feed after saving "readers can close it" off', async () => {
+    apiMock.get.mockResolvedValue({ items: [announcement({ stripDismissible: true })], groups: GROUPS, users: USERS })
+    const user = userEvent.setup()
+    const { container } = renderPage()
+    await screen.findByText('维护窗口')
+
+    await user.click(container.querySelector('.anticon-edit')!.closest('button')!)
+    const sw = await screen.findByRole('switch', { name: 'announcementAdmin.stripDismissible' })
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await user.click(sw)
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1))
+    expect(apiMock.put.mock.calls[0][1]).toMatchObject({ stripDismissible: false })
+    await waitFor(() => expect(refreshFeedMock).toHaveBeenCalled())
+    expect(forgetTagsMock).toHaveBeenCalledWith('/api/announcements')
+  })
+
+  // Two switches, one per surface, and only the one that applies is shown. Asking an operator
+  // whether readers may close a band that the announcement never draws is a question with no answer.
+  describe('the "readers can close it" switches', () => {
+    const STRIP = 'announcementAdmin.stripDismissible'
+    const POPUP = 'announcementAdmin.popupDismissible'
+
+    async function openNew() {
+      apiMock.get.mockResolvedValue({ items: [] })
+      const user = userEvent.setup()
+      renderPage()
+      await user.click(await screen.findByRole('button', { name: /announcementAdmin\.add/ }))
+      await screen.findByPlaceholderText('settings.announcementTitlePlaceholder')
+      return user
+    }
+
+    it('shows only the band switch when the announcement is shown as a band', async () => {
+      await openNew()
+      expect(screen.getByRole('switch', { name: STRIP })).toBeTruthy()
+      expect(screen.queryByRole('switch', { name: POPUP })).toBeNull()
+    })
+
+    it('shows only the popup switch when the announcement is shown as a popup', async () => {
+      const user = await openNew()
+      await user.click(await screen.findByText('announcementAdmin.display.popup'))
+      expect(screen.getByRole('switch', { name: POPUP })).toBeTruthy()
+      expect(screen.queryByRole('switch', { name: STRIP })).toBeNull()
+    })
+
+    it('shows both switches when the announcement is shown as band and popup', async () => {
+      const user = await openNew()
+      await user.click(await screen.findByText('announcementAdmin.display.both'))
+      expect(screen.getByRole('switch', { name: STRIP })).toBeTruthy()
+      expect(screen.getByRole('switch', { name: POPUP })).toBeTruthy()
+    })
+
+    it('starts a new announcement with the band locked and the popup dismissible', async () => {
+      const user = await openNew()
+      await user.type(await screen.findByPlaceholderText('settings.announcementTitlePlaceholder'), '新公告')
+      await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+      expect(apiMock.post.mock.calls[0][1]).toMatchObject({ stripDismissible: false, popupDismissible: true })
+    })
+
+    // A save must never drop a value just because its switch is not on screen: the hidden one is
+    // kept in the form and goes out with the rest.
+    it('sends both values on save, including the one whose switch is hidden', async () => {
+      apiMock.get.mockResolvedValue({
+        items: [announcement({ display: 'strip', stripDismissible: true, popupDismissible: false })],
+        groups: GROUPS,
+        users: USERS,
+      })
+      const user = userEvent.setup()
+      const { container } = renderPage()
+      await screen.findByText('维护窗口')
+
+      await user.click(container.querySelector('.anticon-edit')!.closest('button')!)
+      const strip = await screen.findByRole('switch', { name: STRIP })
+      expect(strip.getAttribute('aria-checked')).toBe('true')
+      expect(screen.queryByRole('switch', { name: POPUP })).toBeNull()
+      await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+      await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1))
+      expect(apiMock.put.mock.calls[0][1]).toMatchObject({ stripDismissible: true, popupDismissible: false })
+    })
+
+    it('sends the popup switch the operator flipped', async () => {
+      const user = await openNew()
+      await user.click(await screen.findByText('announcementAdmin.display.popup'))
+      await user.click(screen.getByRole('switch', { name: POPUP }))
+      await user.type(await screen.findByPlaceholderText('settings.announcementTitlePlaceholder'), '弹窗')
+      await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
+      expect(apiMock.post.mock.calls[0][1]).toMatchObject({ popupDismissible: false, stripDismissible: false })
+    })
   })
 
   it('names the audience on a targeted row', async () => {

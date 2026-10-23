@@ -232,6 +232,22 @@ and by audience, so "absent" has four meanings and only one is "deleted". An ann
 off for a day, one whose window closed overnight, or a reader whose OU moved and moved back, would
 all have their dismissals erased and be re-interrupted the next morning.
 
+**"Readers can close it" governs the band, and is read when a dismissal is consulted.** A band
+closed while the switch was on used to stay hidden after an operator turned it off, so the readers
+who had already closed it, exactly the people the operator was trying to reach again, never saw it.
+Off now means no close button and every stored band dismissal ignored. They are ignored rather than
+erased, for the same reason garbage collection never trusts the current payload: switching it back
+on restores what each reader chose. Nothing is stored while it is off, and a band closed from a
+stale payload comes back when the next poll says it may not be closed. The admin console reloads its
+own shell's feed after every change, not only its ETag, so an operator who checks their edit sees
+the new payload.
+
+**The popup has a switch of its own** ([ADR 0042](0042-separate-strip-and-popup-dismissal.md)). The
+band switch was never extended to the popup, because rows default to off and that would have
+re-interrupted every reader on every load for every existing popup. Instead `dismissible` was renamed
+`strip_dismissible`, and `popup_dismissible` was added, NULL reading as dismissible. Off removes
+"don't show again", ignores stored popup dismissals, and keeps "got it" for the page load only.
+
 ### One popup dialog per batch, not one popup per announcement
 
 Every eligible announcement is offered in ONE dialog at a time, stacked as the same rows the strip

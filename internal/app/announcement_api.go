@@ -167,7 +167,8 @@ func (s *Server) visibleFor(readerPrincipals []string) []Announcement {
 func readerAnnouncementJSON(a Announcement) map[string]any {
 	return map[string]any{
 		"id": a.ID, "level": a.Level, "title": a.Title, "content": a.Content,
-		"display": a.Display, "dismissible": a.Dismissible, "scope": a.Scope, "endsAt": a.EndsAt,
+		"display": a.Display, "stripDismissible": a.StripDismissible, "popupDismissible": a.PopupDismissible,
+		"scope": a.Scope, "endsAt": a.EndsAt,
 	}
 }
 
@@ -201,7 +202,8 @@ func adminAnnouncementJSON(a Announcement) map[string]any {
 	}
 	return map[string]any{
 		"id": a.ID, "level": a.Level, "title": a.Title, "content": a.Content,
-		"ord": a.Ord, "enabled": a.Enabled, "display": a.Display, "dismissible": a.Dismissible,
+		"ord": a.Ord, "enabled": a.Enabled, "display": a.Display,
+		"stripDismissible": a.StripDismissible, "popupDismissible": a.PopupDismissible,
 		"scope": a.Scope, "audience": a.Audience, "grants": grants,
 		"startsAt": a.StartsAt, "endsAt": a.EndsAt,
 		"createdAt": a.CreatedAt, "createdBy": a.CreatedBy, "updatedAt": a.UpdatedAt,
@@ -320,8 +322,12 @@ func (s *Server) apiAnnouncementPreview(w http.ResponseWriter, r *http.Request, 
 // silently empty an announcement's audience.
 type announcementInput struct {
 	Level, Title, Content, Scope, Audience, StartsAt, EndsAt, UpdatedAt, Display *string
-	Enabled, Popup, Dismissible                                                  *bool
-	Grants                                                                       *[]string
+	Enabled, Popup, StripDismissible, PopupDismissible                           *bool
+	// Dismissible is the band switch's pre-0010 name, accepted for one release line so that a console
+	// tab still running the previous page does not silently lock a band on save (ADR 0042).
+	// StripDismissible wins when both are sent. Delete it with the next line.
+	Dismissible *bool
+	Grants      *[]string
 }
 
 func str(p *string) string {
@@ -444,7 +450,14 @@ func (s *Server) validateAnnouncement(w http.ResponseWriter, in announcementInpu
 		return a, false
 	}
 	a.Enabled = boolOr(in.Enabled, cur == nil || a.Enabled)
-	a.Dismissible = boolOr(in.Dismissible, cur != nil && a.Dismissible)
+	// The band stays locked unless asked; the popup can be silenced unless told otherwise, which is what
+	// every popup did before the switch existed.
+	strip := in.StripDismissible
+	if strip == nil {
+		strip = in.Dismissible
+	}
+	a.StripDismissible = boolOr(strip, cur != nil && a.StripDismissible)
+	a.PopupDismissible = boolOr(in.PopupDismissible, cur == nil || a.PopupDismissible)
 	return a, true
 }
 

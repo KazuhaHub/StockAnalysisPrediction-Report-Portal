@@ -18,8 +18,8 @@ import (
 
 // preMigrationDump is a dump written by the release before this one: the accepted baseline shape,
 // a group row, and no migration ledger. It is built from the schema declarations themselves so the
-// fixture cannot drift from the shape it is imitating.
-func preMigrationDump(t *testing.T) []byte {
+// fixture cannot drift from the shape it is imitating. extra seeds further rows in that shape.
+func preMigrationDump(t *testing.T, extra ...string) []byte {
 	t.Helper()
 	db := rawStoreDB(t)
 	st := &Store{db: db, driver: "sqlite"}
@@ -34,6 +34,7 @@ func preMigrationDump(t *testing.T) []byte {
 		`INSERT INTO user_groups(id,name,description,created_at,weight,urgent_unlimited,is_default)
 			VALUES(1,'安禅内部','', '2026-01-01T00:00:00Z',0,0,1)`,
 	)
+	execAll(t, db, extra...)
 	// A fixture for the old release must dump only the frozen baseline. The
 	// current dumper also includes tables added by later migration steps.
 	var buf bytes.Buffer
