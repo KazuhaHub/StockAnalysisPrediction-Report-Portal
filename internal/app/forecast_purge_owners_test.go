@@ -86,6 +86,15 @@ func TestPostgresPredictionPurgeOwnershipSerialization(t *testing.T) {
 
 func testPredictionPurgeOwnerStore(t *testing.T, st *Store) {
 	t.Helper()
+	t.Cleanup(func() {
+		if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := st.exec(`DELETE FROM prediction_purge_owners`); err != nil {
+			t.Error(err)
+		}
+	})
 	// Exercise the idempotent explicit creation primitive against a freshly initialized test store.
 	if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
 		t.Fatal(err)
