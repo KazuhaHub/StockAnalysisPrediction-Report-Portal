@@ -905,6 +905,23 @@ def forecast_access_checks():
     check("G", "External all: the members drawer carries no totals or per-status counts",
           sc == 200 and not any(k in ext_drawer for k in ("n", "total", "resolved", "refused", "corp_action")),
           f"{sc} {short(ext_drawer)}")
+    # The drawer lists only reports the reader can open. The default population is the scored one,
+    # which is empty while the evaluator is off, so this asks for population=all: that is the list
+    # an unfiltered drawer would leak from. The admin alias, which has no such filter, proves the
+    # same query has members to leak, so an empty answer is the filter and not an empty ledger.
+    query = urllib.parse.urlencode({"label": ext_label, "checkpoint": "d5", "population": "all"})
+    sc, ext_all = fcext.req("GET", "/api/forecast/groups/members?" + query)
+    sc_adm, adm_all = admin.req("GET", "/api/admin/forecast/groups/members?" + query)
+    ext_members = ext_all.get("members") or []
+    # A member whose report id was blanked is unreadable by definition: the id is cleared exactly
+    # when the reader cannot see the report.
+    unreadable = [m.get("set_id") for m in ext_members
+                  if m.get("report_id") is None
+                  or fcext.req("GET", f"/api/report/{m['report_id']}/predictions")[0] != 200]
+    check("G", "External all: the members drawer lists only reports the reader can open (population=all)",
+          sc == 200 and sc_adm == 200 and len(adm_all.get("members") or []) >= 1 and not unreadable
+          and not any(k in ext_all for k in ("n", "total", "resolved", "refused", "corp_action")),
+          f"{sc} external={len(ext_members)} unreadable_sets={unreadable} admin={sc_adm}/{len(adm_all.get('members') or [])}")
     sc, ext_card = fcext.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
     check("G", "External all: another OU's report is not disclosed through the reading page (404, not its sets)",
           sc == 404, f"{sc} {short(ext_card)}")
