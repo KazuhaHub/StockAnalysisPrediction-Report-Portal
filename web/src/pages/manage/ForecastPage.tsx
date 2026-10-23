@@ -18,8 +18,9 @@ import LoadGate from '../../components/LoadGate'
 import { downloadCSV } from '../../lib/csv'
 import { forecastCsv, groupsQuery, readView } from '../../lib/forecast'
 import { readPrefetched } from '../../lib/prefetch'
-import ForecastCellDrawer from './ForecastCellDrawer'
-import ForecastMatrix from './ForecastMatrix'
+import ForecastCellDrawer from '../../components/forecast/ForecastCellDrawer'
+import ForecastMatrix from '../../components/forecast/ForecastMatrix'
+import ForecastMethodology from '../../components/forecast/ForecastMethodology'
 import ForecastSettingsModal from './ForecastSettingsModal'
 import ForecastEvaluatorStatus from './ForecastEvaluatorStatus'
 import ForecastAlerts from './ForecastAlerts'
@@ -281,6 +282,7 @@ export default function ForecastPage() {
             />
           )}
         </Card>
+        <ForecastMethodology />
       </div>
 
       {settings && (

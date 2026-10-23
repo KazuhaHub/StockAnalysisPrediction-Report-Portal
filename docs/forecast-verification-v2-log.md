@@ -214,19 +214,32 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
 
-## Current progress (2026-10-20)
+## Current progress (2026-10-22)
 
-- **Merged.** R1a-β1 complete (P5 #116, P2 #117, P36 #118, P4 #119). R1a-β2 complete: P1 #120,
-  P6 #121, P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131. `main` is at
-  `e27c7ea8`.
-- **In flight.** No branch is open. Nothing is unmerged.
-- **Next step.** P31 `fix/tenancy-strict-restricted-read` (§6.9) is in this PR. After it: P11
-  (ADR 0037), the last R1b PR before P39b's own Beta.
-- **Open questions.** None blocking. The only recorded deviations are the uncaptured V20 probe
-  fixtures (P7) and the qfq fixture pair (P8); both are noted in this log with the reason and the
-  synthetic coverage that replaces them.
-- **Evaluator state.** `forecast_auto` must remain OFF until R1b ships and the readiness list is
-  green.
+- **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
+  P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
+  P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
+  1.26.10 security fix #144 and upload-test timer fix #147 are merged. The vendor-evidence
+  follow-up #148 is merged as `fa250ced`. The halt-evidence branch starts from that main.
+- **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
+  independent review; main was integrated at `840e9a9c`, whose full CI/CodeQL and combined
+  local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
+  previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
+  is pending; neither Apps branch nor the user's checkout was changed. The independent
+  `test/forecast-halt-evidence` lane adds captured suspension/delisting controls without runtime changes.
+- **Next step.** Validate/review the halt evidence, resolve the P26 integration sequence, then continue P27 and P28.
+  P13 still requires authorized production baseline screenshots and owner
+  review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
+  the R1b deployment and subsequent Portal target refresh remain outstanding. No production
+  action has been performed here.
+- **Known limitations.** Beijing 30%/listing-day and rights-issue captures remain missing. The
+  follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
+  controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
+  forecast translations are machine-generated, pending owner-arranged human review. Seeded
+  responsive preview screenshots depend on P14. Re-check ADR numbers before P23: Apps reserves
+  0038/0040 and P22 uses 0039.
+  P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
+- **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
 
 ### P9 — operating the evaluator
 
@@ -440,3 +453,214 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   account row stays unscoped (a session route has already validated the account; the window is a
   request racing a deletion), while a read failure still denies — the comment now says exactly that
   instead of calling it a machine caller.
+
+### P11 — ADR 0037 and the Release 1 amendments
+
+- **ADR 0037** records the definition repair (S0/dN, terminal baseline, not-due, finality, settlement
+  checks, the adjusted-ratio detection), governance (ledger start, test runs, benchmark schedule,
+  unrecorded), operations (modes, readiness, dry gate, heartbeat, watchdog, health, alert channels,
+  the single-connection rule), the restore rules, and the five escapes (F01, F03, F06, F10, F14)
+  with their causes.
+- **ADR 0029** gains a dated amendment block and in-place notes at §5, §6, §7, §9, §10 and §12; the
+  new settled decisions (V3, V6b, V8, V9, V18, V24, V26, the access model, the owner token) are in
+  §12's table.
+- **ADR 0017** notes that `pre_live`/`test` sets are purged by the ledger's own retention target and
+  that `attributed_ou` is not a retention key. **ADR 0022** records the restricted-only `g:` principal
+  and the reserved `_rp_*` inputs. **ADR 0024** records the P30 amendment to the "both principals"
+  paragraph.
+- **The design document** points from §7 and D6 to ADR 0039 (R2a), corrects §9.2 (the dividend element
+  is a cash signal; the ratio is primary; the exact fen limit backstop), adds the S0-halt rule to
+  §9.3, notes the phase vocabulary in §10, and extends acceptance condition 19 with the forecast
+  scope.
+- **`docs/forecast-verification-operations.md` is created** with the signals that exist today
+  (stalled, lagging, awaiting_gate, store_failed, test/off_benchmark counts, the switch-on sequence,
+  scheduling, the ledger start, deploy/restore). Later surfaces add their own rows.
+- **Review follow-ups.** The source-outage runbook now explicitly describes the evaluator's direct
+  Tencent fetch, not the quote panel's configurable source order. The adjusted-price detection
+  exception points to ADR 0028 §3 and ADR 0029 §10 rather than the integer-price section.
+
+### P15 — web foundations (2026-10-22)
+
+- Moved the matrix, drawer and their existing tests into `components/forecast`; routes, query
+  contracts, maturity gates and metric values are unchanged. The audit deep link was already
+  implemented and tested by P2, so its files were not changed.
+- Added algorithm-derived significance colours (light red7/green8; dark red8/green6), tested
+  against their actual tints at AA contrast, and a glyph plus textual significance cue. A source
+  scan rejects literal colours in shared, admin and reading-panel forecast components.
+- Added shared probability/signed-number formatting, a significance legend, methodology and the
+  approved disclaimer. Corrected the absolute-upside threshold, flat misses, missing-excess
+  exclusion, and spread/IC null explanations. Reader-page integrations remain P20.
+- Added `--prefix=forecast.` to the existing OpenCC generator. It reconverts only that family,
+  preserves unrelated reviewed translations (including keys absent from the source), and removes
+  stale keys only inside the selected family. Tests pin repeat-run byte stability, empty-prefix
+  rejection and the forecast fixed point. The family remains pending owner-arranged human review.
+- Review found and fixed prefix regeneration deleting unrelated stale keys. The generator's
+  status message now distinguishes a deliberate family reconversion from placeholder repair.
+- Validation: Go build, vet, all SQLite tests, the full app suite with Postgres, staticcheck, web
+  typecheck, 120 web test files / 1006 tests, and the production build passed. The extra prefix
+  preservation regression and updated source scan passed after the full run. Axe checks pass for
+  shared guidance under both themes; jsdom cannot validate layout or contrast, so contrast is
+  measured separately and seeded visual review remains pending P14. No golden fixture changed.
+- Independent adversarial review found no actionable issues. Browser checks of the real shared
+  components in a temporary local harness covered 375/768/1280 px in both themes, with keyboard
+  focus and no page-level horizontal overflow. The owner spotted uneven checkpoint heights;
+  boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
+  fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
+  This component preview does not replace P14's seeded full-page acceptance.
+- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
+  required CI on its final rebased head; independent review and full local checks passed.
+
+### P39b precondition audit (2026-10-22)
+
+- Read the live Dify Console API: all 16 published workflows declare the optional owner input;
+  all 18 ingest-node and 11 child-tool bindings are correct. All 12 workflow-tool providers carry
+  the input and report `synced=true`. Publication occurred on 2026-10-19, so the earlier handoff's
+  pending-publication note is stale. No workflow was modified or published during this audit.
+- With owner authorization for tests, ran the existing wait-only test workflow once with `n=0`
+  and an undeclared fake owner input. Run `57abe025-2ee3-4ee8-a282-ab788578a58e` succeeded on all
+  three nodes; the normalized workflow inputs omitted the undeclared key. The Console draft
+  runtime therefore ignores it. No LLM, HTTP, report ingest or email node exists in that graph.
+- Repeated the same authorized test through the published Service API using the test app's existing
+  key (no key created or exposed). `POST /v1/workflows/run` returned HTTP 200; run
+  `f6a85b7b-73ce-4116-8294-9b0986e84a2c` succeeded on all three steps with `waited_minutes=0`.
+  The undeclared input does not reject a run through the same API path Portal uses. This closes
+  the undeclared-input runtime question in §11.1; deployment and target refresh remain separate gates.
+- Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
+  2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
+  and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### P22 — reader access decision record (2026-10-22)
+
+- Prepared in the independent docs lane allowed by implementation section 1.3 while P26's Apps
+  integration sequence awaits coordination. ADR 0039 is accepted design, explicitly not a claim
+  that P26/P27/P28 or R2b reading-stage changes have deployed. Apps PR 141 reserves 0038 and
+  PR 142 uses 0040; neither proposes 0039. Their branches and code remain untouched.
+- Records three-way nearest-OU inheritance, actual Default/subtree distinctions, frozen
+  attribution and its transactional OU-delete exception, population-local membership/cache
+  identity, external volume protection, credential shapes, bounded computation, count-only
+  adoption, reading stages, edition/display rules, disclaimer and rollout/rollback gates.
+- Supersedes design D6, rewrites acceptance condition 19 with negative and positive boundaries,
+  amends design access and ADR 0029 section 5/access decision row. Removes their stale token-only
+  assertion: v1 cookie reads remain behind the independent enrolment wall and forecast scope.
+  Report readability is never widened by aggregate permission; settled per-report checkpoints
+  are distinguished from non-mature aggregate cells and drawer outcomes.
+- Independent adversarial review found no actionable issue or missing P22 contract. All seven
+  relative ADR links/anchors and diff whitespace checks passed. No test or runtime code is added
+  by this docs-only PR; existing guard implementations and golden fixtures are unchanged. Full
+  Go regression with Postgres enabled, vet, staticcheck, web typecheck, all 120 Vitest files /
+  1006 tests, production web build and a serialized embed rebuild passed. CI on the exact pushed
+  head remains required before merge.
+- CI integration: the first P22 run passed all assertions but failed on the upload timer's
+  unhandled teardown callback. Standalone fix #147 passed its exact-head CI and merged as
+  `40a18767`; this branch now integrates that main commit. Both append-only log sections are
+  retained. The P22 diff against main is still docs-only and its combined head needs fresh CI.
+
+### CI unblock — upload test timer lifetime (2026-10-22)
+
+- P22's docs-only CI passed all 120 files / 1006 assertions but failed on an unhandled callback
+  from `RunAnalysisModal.test.tsx`: `window is not defined` in `useDelayState`. Installed Ant
+  Design UploadList schedules its progress update after 300ms without unmount cancellation;
+  the existing shared teardown only drains the Form's short debounce through a 20ms wait.
+- Kept the fix out of the ADR PR. The upload integration test now owns its fake clock, advances
+  user interactions, explicitly unmounts and executes pending timers inside act while jsdom still
+  exists, asserts zero pending timers, and restores real time in finally. Production code and
+  global test behavior are unchanged; callback exceptions and runaway chains still fail.
+- The regression first found two timers after unmount without the drain; adding the drain passed
+  all 12 modal tests, ten repeated upload checks, the full 120-file / 1006-test suite, typecheck,
+  and full Go/Postgres regression plus vet/staticcheck. Independent review found no actionable
+  issue. Exact-head CI remains mandatory; this is a targeted repair, not a blind retry of P22.
+
+### P7/P8 follow-up — captured adjustment responses (2026-10-22)
+
+- P22 merged as #146 (`669810fd`) after independent review and green combined-head full CI and
+  CodeQL. This follow-up starts from that main, not from the held P26 or an Apps branch.
+- V20 read-only captures produced seven complete Tencent responses, documented with request
+  parameters, SHA-256, an independent issuer notice and explicit evidence limits in
+  `internal/app/testdata/quote/forecast-vendor-evidence.md`. No forecast golden output changes.
+- The real qfq bodies expose `qfqday`, whereas the P8 fetch called the day-only parser. The new
+  actual-fetch regressions first failed with 11/0 and 37/0 raw/adjusted rows. This would keep due
+  marks at source failure because the required adjusted closes are absent, rather than silently
+  resolving unchecked prices. The fix selects qfqday only inside the detection-only fetch and
+  retains the shared field-count, price, candle, snapshot and identity drift gates.
+- Missing/null/empty or malformed adjusted rows fail; they never fall back to raw `day` even
+  when raw rows are present. Tests for null/missing/empty first failed against a naive fallback.
+  Ordinary readers retain unadjusted rows when both keys exist and never consume qfq-only bars.
+- The real transfer's -7.46% raw close move is deliberately not relabelled as the plan's
+  theoretical -9.09%. It still exercises the intended under-limit miss: no cash ExDates signal,
+  no price-limit signal, a ratio-only corporate-action flag, and unchanged raw close/return.
+  Captured ordinary limit-down and 301/689/fen-rounded low-price controls are not excluded.
+- Beijing historical probes returned no daily rows; real halt/delist/Beijing evidence remains a
+  gap, not synthetic data passed off as capture. No production writes, deployment, evaluator
+  enablement, Dify publication, schema change or Apps edits are part of this follow-up.
+- Independent adversarial review found no actionable issue. Full Go regression, separate full
+  Postgres regression, vet, staticcheck, three repeated captured-fixture race runs, web typecheck,
+  all 120 Vitest files / 1006 tests, production web build and a subsequent root-level Go embed
+  build passed. All seven captures retain every response byte plus one terminal LF and match
+  their documented SHA-256. Exact-head full CI and CodeQL remain required before merge.
+
+### P7 follow-up — live suspension and delisted-response evidence (2026-10-22)
+
+- Starts from main `fa250ced`, independently of P26 and both Apps branches. P26's normal main
+  integration at `840e9a9c` passed full exact-head CI/CodeQL and local combined validation, but
+  remains a draft for shared-token integration ordering; no coordination message is authorized.
+- Six full read-only Tencent captures and independent issuer/exchange references are recorded
+  in `internal/app/testdata/quote/forecast-halt-evidence.md`, with parameters and SHA-256.
+  Existing forecast golden outputs and schema are unchanged.
+- A short live halt has fewer than three later sessions: current-stamp evidence resolves it even
+  with the lag valve set; removing evidence refuses stale/lag instead. A longer halt uses the
+  real classifier, transactional ledger writer, evaluator and qfq fetch replay to settle d5
+  during a halt that began on S0. Stock return is 0; benchmark return is -365 bp from S0, not
+  -363 bp from the earlier traded base_date. Source and flags are asserted on the stored row.
+- A delisted instrument returns empty recent history plus a current-looking snapshot, and real
+  2019 candles in a separate historical window. The pure baseline resolver rejects both arrays
+  for a 2026 receipt. A real evaluator replay of the empty recent response does not promote its
+  snapshot to a baseline: s0_fen remains NULL, no mark resolves, delivery failure spends no
+  attempts, and no qfq call occurs. This is source-availability evidence,
+  not a claim that unavailable delisted history can settle or that the parser detects delisting.
+- Tests first failed for absent capture files. Three temporary production mutations proved
+  guard effectiveness: wrong benchmark anchor, ignored stamp and snapshot-to-candle fabrication
+  each failed its captured test. All mutations were reverted. Corrected stale developer comments
+  about non-cash event text and synthetic ratio examples; no runtime semantics are changed.
+- Independent review found one documentation overclaim (pure historical-array checks versus
+  recent-response evaluator replay); the log and provenance now distinguish those layers, and
+  follow-up review confirmed closure with no further findings. Full Go/Postgres regression,
+  vet/staticcheck, three repeated captured/long-look-back race runs, web typecheck, all 120
+  Vitest files / 1006 tests, production web build and serialized embed rebuild passed. Final
+  captured/arithmetic checks passed after the comment/error-text corrections. Six bodies match
+  their original response bytes plus terminal LF and documented SHA-256. Fresh exact-head CI
+  remains required before merge; no runtime, schema or production change is included.
+### P14 — isolated seeded preview and read clock (2026-10-22)
+
+- Added a test-only writer that reserves a new SQLite database and sibling infrastructure-only
+  config, listens on loopback port 8791, generates private random preview credentials, and refuses
+  existing DB/config/WAL/SHM paths, including existing and dangling symlinks. Config writes use the
+  reserved descriptor; failure cleanup checks file identity before removing its own reservations.
+- Historical receipts enter through a private per-server test seam and the real v1 ingest. The
+  real evaluator settles deterministic synthetic market bars through its existing fetch seams.
+  No schema or golden fixture changed. The stored evaluator remains off; no ingest token remains
+  in the generated database. Normal server bootstrap can create its own default API token.
+- Seeded open/pending/small/mature states, corrected positive/negative signals, neutral and one-arm
+  output, two mature policy slices, fills, frozen benchmark changes, coverage exclusions, halted
+  and corporate-action marks, final refusal, body-change and edition-isolation cases. Included
+  small own/sub-OU populations and restricted external-all accounts for the later access UI.
+- `RP_FORECAST_DEMO_NOW` affects only statistics and read phases in dev builds. Empty/invalid
+  values fail startup; any set value fails a non-dev build before config generation or DB writes.
+  Receipt, evaluator, authentication, retention and token clocks remain independent.
+- Initial failures exposed a duplicate entry claim and the exact backtest-slack boundary; the
+  writer now asserts every ingest classification. Independent review found missing policy
+  slices, which were added and asserted. Browser inspection found a pending-baseline fault
+  blocking the positive cohort; a failing cohort-specific test pins its isolation in June.
+  Report timestamps now agree with ledger receipts through body re-ingest. Final review found
+  no further actionable issue.
+- Validation: two independent seeds produce byte-identical groups JSON; matrix/drawer states,
+  scenario inventory, edition isolation, attribution and private permissions pass. The linked
+  release executable refuses demo clocks before creating any output. Full Go/SQLite/Postgres
+  regression, build, vet, staticcheck, three targeted race passes, web typecheck, 120 test files /
+  1006 tests, and production SPA build passed. Local server smoke checks returned 200 for
+  health/login/groups/SPA and a mature January cell with q < 0.001. The real browser rendered the
+  seeded matrix. This is not the later responsive parity sign-off or production baseline review.
+- Added the preview runbook and corrected the plan command to print the generated credentials
+  with `go test -v`. The runbook explicitly separates synthetic evaluator data from captured
+  vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
+- Rollback: revert this PR and stop the local preview. No production deployment, workflow
+  publication, evaluator enablement, Apps-branch edit or database migration was performed.

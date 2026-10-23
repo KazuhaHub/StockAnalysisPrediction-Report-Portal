@@ -11,6 +11,8 @@ import type {
   ForecastMode,
 } from '../../api/types'
 import { cellDisplay } from '../../lib/forecast'
+import { forecastPalette } from '../../lib/forecastPresentation'
+import ForecastLegend from './ForecastLegend'
 
 // The verification matrix (plan §8.1).
 //
@@ -29,11 +31,14 @@ interface Props {
 export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  const palette = forecastPalette(token)
 
   const box: CSSProperties = {
     borderRadius: 6,
     padding: '8px 10px',
     minHeight: 64,
+    height: '100%',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'center',
@@ -78,21 +83,15 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     const d = cellDisplay(c, metric, mode, t)
     if (!d) return null
     const excluded = (c.refused ?? 0) + (c.corp_action ?? 0)
-    const bg =
-      d.signal > 0
-        ? token.colorErrorBg
-        : d.signal < 0
-          ? token.colorSuccessBg
-          : token.colorFillQuaternary
-    const fg = d.signal > 0 ? token.colorError : d.signal < 0 ? token.colorSuccess : token.colorText
+    const tone = d.signal > 0 ? palette.positive : d.signal < 0 ? palette.negative : palette.neutral
     return (
       <button
         type="button"
         onClick={() => onOpen(g, cp)}
         style={{
           ...box,
-          background: bg,
-          color: fg,
+          background: tone.background,
+          color: tone.foreground,
           border: `1px solid ${token.colorBorderSecondary}`,
           textAlign: 'left',
           cursor: 'pointer',
@@ -101,6 +100,13 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 15 }}>{d.value}</span>
+        {d.signal !== 0 && (
+          <span style={{ fontSize: 12 }}>
+            <span aria-hidden="true">{d.signal > 0 ? '▲' : '▼'} </span>
+            <span className="rp-sr-only">{t(d.signal > 0 ? 'forecast.signal.positive' : 'forecast.signal.negative')}: </span>
+            q&lt;0.05
+          </span>
+        )}
         <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>
         {excluded > 0 && (
           <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
@@ -167,7 +173,8 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     fontWeight: 500,
     whiteSpace: 'nowrap',
   }
-  const td: CSSProperties = { padding: 6, verticalAlign: 'top' }
+  // A definite cell height lets every inner box stretch to the tallest checkpoint in its row.
+  const td: CSSProperties = { padding: 6, verticalAlign: 'top', height: 1 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -176,6 +183,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
         {' · '}
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Typography.Text>
+      <ForecastLegend />
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
         <table style={{ borderCollapse: 'separate', borderSpacing: 4, width: '100%' }}>
           <thead>

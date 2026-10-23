@@ -3,6 +3,7 @@ import { Alert, Drawer, Table, Tag, Typography } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, qs } from '../../api/client'
+import { formatProbability } from '../../lib/forecastPresentation'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -64,7 +65,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, from, to, group, label, checkpoint])
 
-  const fmtP = (v?: number) => (v === undefined ? '—' : v < 0.001 ? '<0.001' : v.toFixed(3))
+  const fmtP = formatProbability
   const rows: { key: string; metric: string; value: string; nullText: string; p: string; q: string; n: number | string }[] = []
   if (cell) {
     if (cell.spread_bp !== undefined) {

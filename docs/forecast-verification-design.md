@@ -246,7 +246,7 @@ Units: `_fen` = integer fen; `_bp` = integer basis points.
 | `policy_version`, `probability_method`, `probability_transform`, `decision_status`, `decision_quality` | text | |
 | `information_cutoff`, `horizon_end`, `horizon_std` | text, text, int | |
 | `emitted_base_fen`, `emitted_base_as_of`, `emitted_base_source` | int, text, text | |
-| `s0_date`, `base_date`, `s0_fen` | text, text, int null | calendar S0 (counts checkpoints); the stock's first traded bar on or after S0; its unadjusted close. Returns and the fill window start at `base_date` (§4). Filled by the evaluator. |
+| `s0_date`, `base_date`, `s0_fen` | text, text, int null | calendar S0 (counts checkpoints); the stock's close on S0, or its last printed close before S0 when it was halted that day; that unadjusted close. Returns and the fill window start at `base_date`; the benchmark leg starts at `s0_date` (§4, §9.3). Filled by the evaluator. |
 | `base_check` | text enum | `pending` / `match` / `mismatch` / `refused` (§9.4) |
 | `bench_code` | text | chosen at insert (D1) |
 
@@ -335,13 +335,19 @@ backup and restore pick them up.
   - 1-6-4 sends no `owner_token`, so the column would be NULL anyway.
 - **After purge** (`report_id` NULL), a set is readable only by unrestricted users. A restricted
   user cannot prove access to a report that no longer exists. **Fail-closed.**
-- **Per-report and per-symbol routes** sit on `/api/v1` with `query` scope, for machine callers only. The v1 surface is token-only (`routes.go:33`). The SPA reads a report's sets through a **session** route, `GET /api/report/{id}/predictions`, under the same rules above.
-- **The group statistics route** is `/api/admin/forecast/groups`, registered with `PermManage`, not
-  `/api/v1`.
-  - v1 authorizes by token scope alone (`apiui.go:160`, `server.go:981`).
-  - The app bridge mints `query` tokens for any unrestricted user (`apps_api.go:121-141`), so a v1
-    route cannot be limited to managers.
-  - The monthly page is therefore a **core SPA page** (settles D6).
+- **Prediction reads distinguish credentials.** The SPA uses session routes for report and symbol
+  reads. The v1 routes admit a query token or a valid cookie held at the enrolment wall; cookie
+  forecast reads additionally require current OU scope. Persistent machine diagnostics remain
+  unscoped; bound app tokens use their minting user's decision and never machine diagnostics.
+- **R2a reader access** is specified in [ADR 0039](adr/0039-forecast-verification-for-readers.md):
+  `/forecast` is a core SPA record using session routes `/api/forecast/groups*`, authorized by
+  nearest-inherited `all`/`own`/`none`. Own membership is computed inside the live subtree's frozen
+  attributions. External all omits volume; external drawers list readable, report-backed rows
+  only. `/manage/forecast` becomes operations; admin aliases remain manager-only until P29.
+- These are accepted rollout contracts, not a claim that the reader page or R2b stage switch is
+  deployed. P30/P31's independent report predicates continue to apply: only effectively restricted
+  OUs form group principals, `owner_group` is not consulted, and unreadable restriction scopes
+  to nothing. Forecast permission never grants access to an otherwise unreadable report.
 
 ## 8. What is quantified
 
@@ -465,10 +471,15 @@ Corporate actions cannot be ignored: a 10-for-10 bonus issue reads as −50 %. T
 by a change in the vendor's adjusted/unadjusted ratio between `S0` and `session_date`, using a qfq
 fetch for **detection only**.
 
+- The dividend element the unadjusted feed carries on an ex-date names a **cash** dividend; it does
+  not mention a bonus, capitalisation or rights issue. The ratio is therefore the primary signal for
+  a bonus or rights issue, not a fallback for the element's gaps.
 - That is a narrow exception to the ADR 0028 "never qfq" rule, which is about displaying prices. The
-  ADR records it.
+  ADR records it, and the comparison is exact in integers with a one-fen bound.
 - A flagged mark is resolved and stored, but excluded from metrics and counted (§8.2).
-- The gap heuristic of draft 2 is dropped, because it fires on limit-down days.
+- The gap heuristic of draft 2 is dropped. The remaining backstop is a move beyond the board's
+  daily limit, computed from fen-rounded limit prices (10 % main board, 20 % ChiNext/STAR, 30 %
+  Beijing); an ordinary limit day is not a corporate action.
 
 ### 9.3 Sessions, halts, delisting
 
@@ -477,6 +488,12 @@ or before `session_date` is used, and `halted = 1` is set when it is earlier.
 
 This covers suspensions and delistings alike. Neither stays refused, so neither can quietly hollow
 out a cell.
+
+**Halted on S0 (V6b).** If the stock did not trade on S0, its starting price is the last close it
+printed strictly before S0, found in the reference window and then in one bounded 400-day
+look-back. The stock's return runs from that stored base (`base_date`/`s0_fen`); the benchmark leg
+runs from S0's index close, so the index's pre-report move is never added to the excess. A stock with
+no bar anywhere in that window is a mark-specific failure, not a source failure.
 
 ### 9.4 Baseline check
 
@@ -492,6 +509,11 @@ the market actually printed.
 they start at `S0`.
 
 ## 10. UI
+
+> **Amended by P10/P20.** The reading panel's mark column uses the server's phase vocabulary
+> (`waiting_s0` / `waiting` "on or after <date>" / `retrying` only with a recorded due session /
+> `resolved` / `final`), never "fetch failed" for a mark that is merely not due. The full reading-page
+> integration (card, chip, timeline dots, run-page card) is P20 in R2b.
 
 - **Report section: a 「预测验证」 card on `StockPage`** (`/stock/:symbol`; there is no separate report page and no tabs), below the selected report's body. The price levels are drawn on the existing quote chart at the top of the page, through a new optional `PriceChart` prop. The card shows:
   - the set's own payload, not the current body;
@@ -543,10 +565,26 @@ Each states its direction.
 18. **Statistics.** Every number carries n, its null and a BH-adjusted p. The label-permutation
     null is reproducible with a fixed seed.
 19. **Access.**
-    - The cohort route is refused to non-`PermManage` users, including holders of app-bridge
-      tokens.
-    - The per-report route is refused for an unreadable report.
+    - Reader record and member routes require a cookie, the independent enrolment wall and a fresh
+      all/own decision. None, unknown values, failed reads and broken chains deny; navigation is
+      never authorization. Admin aliases remain manager-only; tokens alone get 401 there and on
+      the reader routes. Both permitted and refused subjects are required by the access matrix.
+    - Own members and metrics are exactly the current subtree's attributed population, with
+      membership chosen after filtering. Unassigned Default-own and a child inheriting own have
+      distinct roots; re-parenting changes populations without moving stored attribution.
+    - External all has no coverage, sample sizes, totals or slice denominators, including mature
+      cells; mature metrics retain a threshold badge. External own retains its own counts.
+      External custom ranges refuse; unreadable and orphaned drawer rows are omitted before
+      pagination. No non-admin gets unrecorded. CSV follows the same disclosure rules.
+    - Both SPA and cookie-v1 prediction reads enforce scope and report visibility. Internal
+      readers retain accepted orphan history and optional payload, but not errors/rejected sets;
+      own and external readers get no membership. Bridges recheck their minting user and return
+      accepted report-backed sets without diagnostics; persistent machine reads stay unchanged.
+    - The per-report route answers 404 for an unreadable report. Scope none renders no card,
+      chip, timeline marker, overlay or placeholder; reading stage full cannot widen scope.
     - `owner_group` is never consulted (a test sets it to a readable group on an unreadable report).
+    - A `g:` viewer row is written only for an effectively restricted OU, and an unreadable
+      restriction or a broken OU chain scopes to nothing (P30/P31).
 20. **Rounding.** A Dify-node unit test feeds `8.655`, `8.650000000000001` and probabilities
     `[0.33333, 0.33333, 0.33334]` and checks half-even decimal output summing to `1.0000`.
 21. **Store failure.** When the set insert fails twice, the response is 200 with `store_failed`,
@@ -587,8 +625,11 @@ There is no backfill.
 - **D4. Membership.** Proposed: the earliest accepted set per `(symbol, group)` decides; if it is degraded or `mismatch`, the symbol is excluded, never replaced by a rerun.
 - **D5. Purge.** Proposed: the ledger outlives reports, has its own off-by-default retention target, and shows in
   the usage list.
-- **D6. Monthly page.** Settled by §7: a core page, manager only. The page has a monthly tab and a
-  custom-range tab (§8.5), and is named 预测验证 (§1.1). Both are settled by the owner on 2026-10-17.
+- **D6. Monthly page.** The original manager-only page decision of 2026-10-17 is superseded by
+  [ADR 0039](adr/0039-forecast-verification-for-readers.md), recording the 2026-10-18/19 reader
+  decisions. The record is a top-level core `/forecast` page for all/own OUs, with internal
+  exploratory ranges and external protections. `/manage/forecast` is operations. Reading-page
+  stages are a separate gate, not a second OU permission.
 - **D7. 3-5 重组决策.** Out of v1, or ask its owner for a deterministic value table first?
 - **D8. Corporate actions.** Proposed: detect from the dividend element that Tencent's unadjusted
   day rows carry on ex-dates (`quote.go:1121`); fall back to the qfq ratio only for the kinds that

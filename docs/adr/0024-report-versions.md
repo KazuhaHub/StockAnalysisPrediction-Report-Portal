@@ -122,6 +122,11 @@ safe because `rdate` is part of report identity and never changes after ingest.
 Both principals are recorded when a report is attributed — the person and, where there is one, their
 OU — so widening a version from `owner` to `group` later needs no backfill.
 
+**Amended 2026-10-20 (P30).** The OU principal is written only when the OU is effectively
+restricted. An unrestricted container's `g:` row is what let one tenant's report reach another;
+a version widened later still needs no backfill, because the restricted OUs write their own row.
+The Default principal remains the encoding of the "all" audience.
+
 ### Reuse looks up by content, then grants access
 
 This is the part that would have shipped broken. The old gate looked the report up *scoped to the

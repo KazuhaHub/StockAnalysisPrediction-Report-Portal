@@ -77,6 +77,9 @@ type Server struct {
 	// guard, and two test seams (the clock and the vendor fetch) so its arithmetic and its session
 	// rules are testable without a network.
 	forecastEval forecastEvaluator
+	// The test-only seed drives the real ingest classifier at historical receipt instants.
+	// Nil in production; the demo environment must never rewrite trusted receipt time.
+	forecastReceiptForTest func() time.Time
 	// forecastGroupsCache holds the official (monthly) cells that have matured. A mature cell's
 	// inputs are all terminal, so it can never change; that is what makes memoizing it correct
 	// rather than just fast. Only monthly mode writes here (plan §7.5).
@@ -157,6 +160,9 @@ func worthLogging(path, method string, status int, took time.Duration) bool {
 // RunServer loads config, opens the store, bootstraps first-run state, wires the
 // HTTP routes, and serves until it errors. The CLI (cmd/report-portal) calls this.
 func RunServer(cfgPath string) {
+	if err := validateForecastDemoClock(); err != nil {
+		log.Fatal(err)
+	}
 	cfg, err := config.EnsureConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("load config %s: %v", cfgPath, err)

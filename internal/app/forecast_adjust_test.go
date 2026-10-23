@@ -1,7 +1,7 @@
 package app
 
-// P8 (plan §5.4): detect a bonus or rights issue by the adjusted ratio. The unadjusted body names only
-// cash dividends, and a bonus stays inside the daily limit, so neither of P7's signals catches it.
+// P8 (plan §5.4): detect a bonus or rights issue by the adjusted ratio. The cash-dividend and gap
+// signals cannot detect every non-cash transfer, even when the vendor names it in free text.
 
 import (
 	"context"
@@ -12,14 +12,13 @@ import (
 	"time"
 )
 
-// TestQfqRatioFlagsBonusIssueUnderTheLimit: a 10-for-1 bonus is a -9.09% move on the unadjusted
-// close, inside the 10% limit, and the ratio between the adjusted and raw closes halves. A limit-down
-// day of -9.5% on the same raw price is NOT a corporate action: the ratio is unchanged.
+// TestQfqRatioFlagsBonusIssueUnderTheLimit isolates a changed ratio from an ordinary price move.
+// These are synthetic arithmetic pairs; TestCapturedBonusIssueAdjustmentReachesSettlement uses
+// the actual shape and fen values of a real capital-reserve transfer.
 func TestQfqRatioFlagsBonusIssueUnderTheLimit(t *testing.T) {
-	// Before the ex-date: raw 1100, adjusted 1100. On it: raw 1000, adjusted 2000 (qfq keeps the
-	// pre-event level so the historical series does not jump).
+	// Deliberately exaggerated ratio change, while the raw loss remains inside the daily limit.
 	if !adjustRatioChanged(1100, 1100, 2000, 1000) {
-		t.Error("a halved ratio was not flagged")
+		t.Error("a changed ratio was not flagged")
 	}
 	// A legal limit-down move with no adjustment: both ratios equal.
 	if adjustRatioChanged(1100, 1100, 995, 995) {

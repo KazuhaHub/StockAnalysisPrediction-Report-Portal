@@ -262,6 +262,9 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	// One instant decides both the frozen benchmark and the cohort: reading the clock twice could
 	// cross a cohort boundary (or a scheduled change) between them.
 	madeAt := time.Now().UTC()
+	if s.forecastReceiptForTest != nil {
+		madeAt = s.forecastReceiptForTest().UTC()
+	}
 	predSet, predClaims, predErrs := classifyPredictions(predInput{
 		Raw:       in.Predictions,
 		Rtype:     rtype,

@@ -883,18 +883,13 @@ func lastBarInWindow(bars []QuoteBar, floor, before string) (QuoteBar, bool) {
 
 // corporateActionBetween reports whether an ex-event fell in this window.
 //
-// Two signals, because one is not enough:
+// This helper combines cash-dividend dates and gaps beyond the board's fen-rounded daily limit.
+// The raw feed can also name a non-cash transfer in free text (the captured 001323 bonus does),
+// but an empty cash amount is not an ExDates signal and an under-limit move evades the gap test.
+// settleMark therefore adds the independent qfq/raw ratio check; ordinary limit-down days remain
+// trading outcomes, not corporate actions. Adjusted prices are never used to calculate returns.
 //
-//   - The dividend element the unadjusted feed carries on an ex-date names the event outright
-//     ({"fh_sh":"3.8","djr":…,"cqr":…}). But it is a CASH-dividend element: across every fixture in
-//     testdata/quote, no seventh element mentions 送, 转增 or 配股 — and a bonus issue is the case
-//     that matters most, because it halves the unadjusted close.
-//   - So a gap larger than the board's daily limit is the backstop, and the only signal that can
-//     catch a 送转 nobody told us about. A one-day move beyond the limit cannot be trading, so it is
-//     a corporate action. This is why the plan's original gap heuristic was rejected and this one is
-//     not: that one fired on ordinary limit-down days, which ARE a real move.
-//
-// A flagged mark is excluded from the metrics and counted (ADR 0029 §9). No qfq fetch is needed.
+// A flagged mark is excluded from the metrics and counted (ADR 0029 §9). This helper does not fetch.
 func corporateActionBetween(symbol string, stock, index []QuoteBar, exDates []string, from, to, seriesFrom string) bool {
 	for _, d := range exDates {
 		if d > from && d <= to {

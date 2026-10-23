@@ -1,4 +1,5 @@
 import { toCSV } from './csv'
+import { formatProbability } from './forecastPresentation'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -36,7 +37,7 @@ function num(v: number, digits: number): string {
  * and printing a q there would claim a correction the view does not make.
  */
 export function correctedText(p: number | undefined, q: number | undefined, mode: ForecastMode): string {
-  const fmt = (v: number) => (v < 0.001 ? '<0.001' : v.toFixed(3))
+  const fmt = formatProbability
   if (mode === 'custom') return p === undefined ? '—' : `p*=${fmt(p)}`
   const v = q ?? p
   return v === undefined ? '—' : `q=${fmt(v)}`

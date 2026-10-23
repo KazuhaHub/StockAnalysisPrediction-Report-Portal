@@ -2225,12 +2225,16 @@ either, and produces every Appendix A state, including an `own` population below
 The owner runs:
 
 ```bash
-go test ./internal/app/ -run TestWriteForecastDemoDB -forecast-demo-out="$HOME/Downloads/forecast-demo/portal.db"
+go test -v ./internal/app/ -run '^TestWriteForecastDemoDB$' -forecast-demo-out="$HOME/Downloads/forecast-demo/portal.db"
 RP_CONFIG="$HOME/Downloads/forecast-demo/config.yaml" RP_FORECAST_DEMO_NOW=2027-06-20T07:00:00Z go run ./cmd/report-portal
 ```
 
 **Tests.** `TestForecastDemoSeedIsDeterministic` (two runs → identical groups JSON at the fixed clock; every Appendix
 A state present; an existing output path refused); `TestDemoClockRefusedInReleaseBuilds` (FC).
+
+See [the local preview runbook](forecast-demo-preview.md) for generated credentials, scenario locations,
+clock boundaries and the synthetic-market limitation. P14 supplies the data; later reader and layout PRs
+remain responsible for rendering their Appendix A states.
 
 ### 8.2 P16 `feat/forecast-read-semantics` — statistics read semantics (plan §3.4, minus P16a)
 
