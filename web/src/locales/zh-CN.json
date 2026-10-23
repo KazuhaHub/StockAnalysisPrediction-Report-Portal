@@ -1076,7 +1076,7 @@
   "forecast.drawer.reason.pending_baseline": "基准价待核对",
   "forecast.drawer.reason.non_standard_horizon": "非标准期限，不进入 12 个月检查点",
   "forecast.drawer.reason.missing_mark": "尚无该检查点记录",
-  "forecast.drawer.reason.pending": "等待结算",
+  "forecast.drawer.reason.pending": "尚未结算",
   "forecast.drawer.reason.refused": "暂未能结算，将自动重试",
   "forecast.drawer.reason.refused_final": "终局拒绝",
   "forecast.drawer.reason.corp_action": "送转或除权，已剔除",

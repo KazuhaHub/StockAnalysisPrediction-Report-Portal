@@ -1076,7 +1076,7 @@
   "forecast.drawer.reason.pending_baseline": "基準價待核對",
   "forecast.drawer.reason.non_standard_horizon": "非標準期限，不進入 12 個月檢查點",
   "forecast.drawer.reason.missing_mark": "尚無該檢查點記錄",
-  "forecast.drawer.reason.pending": "等待結算",
+  "forecast.drawer.reason.pending": "尚未結算",
   "forecast.drawer.reason.refused": "暫未能結算，將自動重試",
   "forecast.drawer.reason.refused_final": "終局拒絕",
   "forecast.drawer.reason.corp_action": "送轉或除權，已剔除",

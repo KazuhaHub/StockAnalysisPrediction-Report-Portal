@@ -51,3 +51,15 @@ it('carries the record page, access field and refusal copy in all three language
   // The approved wording carries its n >= 30 gate verbatim in every language.
   for (const bundle of [cn, tw, en] as Record<string, string>[]) expect(bundle['forecast.cell.min_n_met']).toBe('n ≥ 30')
 })
+
+// The members route sends the coarse mark status, not the phase, so the drawer cannot say whether a
+// member's checkpoint date has come. Its word for an unsettled member must therefore not borrow a
+// phase name ("Awaiting settlement" means the date has passed), or the drawer would contradict a cell
+// that says "Waiting" with a date still ahead.
+it('words an unsettled member in the drawer without reusing any phase label', () => {
+  for (const [name, bundle] of Object.entries({ 'zh-CN': cn, 'zh-TW': tw, 'en-US': en })) {
+    const record = bundle as Record<string, string>
+    const phases = Object.entries(record).filter(([key]) => key.startsWith('forecast.phase.')).map(([, value]) => value)
+    expect(phases, name).not.toContain(record['forecast.drawer.reason.pending'])
+  }
+})

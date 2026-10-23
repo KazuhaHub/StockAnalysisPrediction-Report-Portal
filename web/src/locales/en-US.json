@@ -1076,7 +1076,7 @@
   "forecast.drawer.reason.pending_baseline": "Baseline not yet verified",
   "forecast.drawer.reason.non_standard_horizon": "Non-standard horizon: not in the 12-month checkpoint",
   "forecast.drawer.reason.missing_mark": "No record for this checkpoint yet",
-  "forecast.drawer.reason.pending": "Awaiting settlement",
+  "forecast.drawer.reason.pending": "Not settled yet",
   "forecast.drawer.reason.refused": "Could not settle yet; retried automatically",
   "forecast.drawer.reason.refused_final": "Final refusal",
   "forecast.drawer.reason.corp_action": "Corporate action, excluded",
