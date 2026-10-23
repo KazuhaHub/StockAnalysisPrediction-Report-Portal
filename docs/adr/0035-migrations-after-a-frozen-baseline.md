@@ -4,6 +4,10 @@
 [ADR 0034](0034-calver-baseline-and-database-compatibility-reset.md) and the restore compatibility
 rule of [ADR 0027](0027-backup-and-restore.md).
 
+> **Amended by [ADR 0042](0042-separate-strip-and-popup-dismissal.md):** a step may also rename a
+> baseline column. The baseline keeps the old name until the step is retired by the ADR 0034 §5
+> process; the shape check, the step's verification and restore all honour the rename.
+
 ## Context
 
 ADR 0034 froze the base schema as the *acceptance contract*: `baseSchemaStmts()` is what a database

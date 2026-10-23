@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { announcementSig, dismissBanner, dismissPopup, loadDismissals, migrateLegacyDismissal } from './announcementDismissal'
+import {
+  announcementSig,
+  dismissBanner,
+  dismissPopup,
+  forgetAcknowledgements,
+  loadDismissals,
+  markSeen,
+  migrateLegacyDismissal,
+} from './announcementDismissal'
 import type { Announcement } from '../api/types'
 
 const MAP_KEY = 'report-portal.announce.dismissed.v1.alice'
@@ -13,7 +21,8 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
     title: '维护通知',
     content: '今晚 22:00 开始维护。',
     display: 'both',
-    dismissible: false,
+    stripDismissible: false,
+    popupDismissible: true,
     scope: 'home',
     endsAt: '',
     ...over,
@@ -35,17 +44,21 @@ describe('announcementSig', () => {
 })
 
 describe('dismissal storage', () => {
-  beforeEach(() => window.localStorage.clear())
+  beforeEach(() => {
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+    forgetAcknowledgements()
+  })
 
   // The production report: an operator switched "readers can close it" off, and readers who had
   // closed the band while it was allowed never saw it again. The switch is read when the dismissal
   // is consulted, not only when it is made.
   it('honours a closed band only while the announcement may be closed', () => {
-    const open = announcement({ dismissible: true })
+    const open = announcement({ stripDismissible: true })
     dismissBanner('alice', open)
     expect(loadDismissals('alice', [open]).bannerDismissed(open)).toBe(true)
 
-    const locked = announcement({ dismissible: false })
+    const locked = announcement({ stripDismissible: false })
     expect(loadDismissals('alice', [locked]).bannerDismissed(locked)).toBe(false)
     // Ignored, not erased — the same rule as garbage collection: what the feed says right now is
     // never a reason to delete what the reader chose.
@@ -53,8 +66,60 @@ describe('dismissal storage', () => {
   })
 
   it('never stores a band dismissal the operator did not allow', () => {
-    dismissBanner('alice', announcement({ dismissible: false }))
+    dismissBanner('alice', announcement({ stripDismissible: false }))
     expect(window.localStorage.getItem(MAP_KEY)).toBeNull()
+  })
+
+  // The popup has its own switch, so the band's switch must not govern it and the other way round.
+  it('honours a stored popup dismissal and "got it" only while the popup may be dismissed', () => {
+    const open = announcement({ popupDismissible: true })
+    dismissPopup('alice', open)
+    markSeen('alice', open)
+    forgetAcknowledgements() // a reload: only what the browser stored survives
+
+    const locked = announcement({ popupDismissible: false })
+    const state = loadDismissals('alice', [locked])
+    expect(state.popupDismissed(locked)).toBe(false)
+    expect(state.seenThisSession(locked)).toBe(false)
+
+    // Ignored, not erased: switching it back on restores what the reader chose.
+    const reopened = loadDismissals('alice', [open])
+    expect(reopened.popupDismissed(open)).toBe(true)
+    expect(reopened.seenThisSession(open)).toBe(true)
+  })
+
+  it('keeps the two switches independent of each other', () => {
+    const bandOnly = announcement({ stripDismissible: true, popupDismissible: false })
+    dismissBanner('alice', bandOnly)
+    dismissPopup('alice', bandOnly)
+    expect(loadDismissals('alice', [bandOnly]).bannerDismissed(bandOnly)).toBe(true)
+    expect(loadDismissals('alice', [bandOnly]).popupDismissed(bandOnly)).toBe(false)
+
+    const popupOnly = announcement({ id: 2, stripDismissible: false, popupDismissible: true })
+    dismissBanner('alice', popupOnly)
+    dismissPopup('alice', popupOnly)
+    expect(loadDismissals('alice', [popupOnly]).bannerDismissed(popupOnly)).toBe(false)
+    expect(loadDismissals('alice', [popupOnly]).popupDismissed(popupOnly)).toBe(true)
+  })
+
+  it('never stores a popup dismissal the operator did not allow', () => {
+    const locked = announcement({ popupDismissible: false })
+    dismissPopup('alice', locked)
+    markSeen('alice', locked)
+    expect(window.localStorage.getItem(MAP_KEY)).toBeNull()
+    expect(window.sessionStorage.length).toBe(0)
+  })
+
+  // "Got it" on a popup readers may not dismiss still has to let them through — a dialog with no
+  // exit locks them out of the portal — so it is remembered in memory, for this page load only.
+  it('remembers "got it" on a locked popup for this page load and no longer', () => {
+    const locked = announcement({ popupDismissible: false })
+    markSeen('alice', locked)
+    expect(loadDismissals('alice', [locked]).seenThisSession(locked)).toBe(true)
+    expect(loadDismissals('bob', [locked]).seenThisSession(locked)).toBe(false)
+
+    forgetAcknowledgements() // a reload
+    expect(loadDismissals('alice', [locked]).seenThisSession(locked)).toBe(false)
   })
 
   it('keeps dismissals per announcement and per reader', () => {
@@ -74,7 +139,7 @@ describe('dismissal storage', () => {
     expect(loadDismissals('alice', [a]).popupDismissed(a)).toBe(true)
 
     // Reordered, rescheduled, retargeted, switched — same message, still silenced.
-    const untouched = announcement({ scope: 'app', endsAt: '2026-09-01T00:00:00Z', dismissible: true })
+    const untouched = announcement({ scope: 'app', endsAt: '2026-09-01T00:00:00Z', stripDismissible: true })
     expect(loadDismissals('alice', [untouched]).popupDismissed(untouched)).toBe(true)
 
     const edited = announcement({ content: '维护推迟到明晚。' })

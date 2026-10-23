@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
-import { announcementSig, migrateLegacyDismissal } from '../lib/announcementDismissal'
+import { announcementSig, forgetAcknowledgements, migrateLegacyDismissal } from '../lib/announcementDismissal'
 import type { Announcement } from '../api/types'
 
 const feed = vi.hoisted(() => ({
@@ -38,7 +38,8 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
     title: '维护通知',
     content: '今晚 22:00 开始维护。',
     display: 'strip',
-    dismissible: false,
+    stripDismissible: false,
+    popupDismissible: true,
     scope: 'home',
     endsAt: '',
     ...over,
@@ -64,6 +65,7 @@ describe('SiteAnnouncement', () => {
   beforeEach(() => {
     window.localStorage.clear()
     window.sessionStorage.clear()
+    forgetAcknowledgements()
     feed.items = []
     feed.user = 'alice'
     feed.collapse = false
@@ -184,7 +186,7 @@ describe('SiteAnnouncement', () => {
   })
 
   it('closes a dismissible site-wide strip', async () => {
-    feed.items = [announcement({ id: 1, title: '可关闭', scope: 'app', dismissible: true })]
+    feed.items = [announcement({ id: 1, title: '可关闭', scope: 'app', stripDismissible: true })]
     const user = userEvent.setup()
     const { container } = renderAt('/queue')
     await screen.findByText('可关闭')
@@ -271,7 +273,7 @@ describe('SiteAnnouncement', () => {
 
   it('closes only the banner it was asked to close', async () => {
     feed.items = [
-      announcement({ id: 1, title: '可关闭', dismissible: true }),
+      announcement({ id: 1, title: '可关闭', stripDismissible: true }),
       announcement({ id: 2, title: '不可关闭' }),
     ]
     const user = userEvent.setup()
@@ -288,14 +290,14 @@ describe('SiteAnnouncement', () => {
   // close the band and it stayed gone after a reload. Expected: no close control, any earlier
   // dismissal ignored, and the band back after a reload.
   it('brings back a band the reader closed once the operator stops allowing it', async () => {
-    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: true })]
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', stripDismissible: true })]
     const user = userEvent.setup()
     renderAt('/queue')
     await user.click(await screen.findByRole('button', { name: 'announcement.close' }))
     await waitFor(() => expect(screen.queryByText('维护通知')).toBeNull())
 
     cleanup()
-    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: false })]
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', stripDismissible: false })]
     renderAt('/queue') // a reload
     expect(await screen.findByText('维护通知')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'announcement.close' })).toBeNull()
@@ -304,16 +306,114 @@ describe('SiteAnnouncement', () => {
   // The same change arriving by the 60-second poll, in a tab where the reader closed the band from
   // the payload that still allowed it: the next payload puts it back without a reload.
   it('re-shows a closed band when the next payload no longer allows closing it', async () => {
-    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: true })]
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', stripDismissible: true })]
     const user = userEvent.setup()
     const { rerender } = renderAt('/queue')
     await user.click(await screen.findByRole('button', { name: 'announcement.close' }))
     await waitFor(() => expect(screen.queryByText('维护通知')).toBeNull())
 
-    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: false })]
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', stripDismissible: false })]
     rerender(tree('/queue'))
     expect(await screen.findByText('维护通知')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'announcement.close' })).toBeNull()
+  })
+
+  // ---------- popup "readers can close it" switched off ----------
+  //
+  // The popup has its own switch. "Don't show again" is a permanent dismissal like the band's close
+  // button, and the operator said no. "Got it" stays — a dialog with no exit would lock the reader
+  // out of the portal — but it lasts for this page load only.
+
+  // A full page reload: the DOM goes, and so does everything held in memory for this page load.
+  function reload(path = '/') {
+    cleanup()
+    forgetAcknowledgements()
+    return renderAt(path)
+  }
+
+  it('offers a locked popup only "got it", and offers it again after a reload', async () => {
+    feed.items = [announcement({ id: 1, title: '维护通知', display: 'both', popupDismissible: false })]
+    const user = userEvent.setup()
+    renderAt('/')
+    // Asserted while the dialog is open: after it closes the absence would hold vacuously.
+    const gotIt = await screen.findByText('announcement.gotIt')
+    expect(screen.queryByText('announcement.dontShowAgain')).toBeNull()
+    await user.click(gotIt)
+    expect(window.sessionStorage.length).toBe(0)
+
+    // Moving around the SPA remounts the popup without reloading the page.
+    cleanup()
+    renderAt('/queue')
+    cleanup()
+    renderAt('/')
+    await screen.findByText('维护通知') // the strip is back; the popup must not be
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    reload('/')
+    expect(await screen.findByText('announcement.gotIt')).toBeTruthy()
+  })
+
+  it('closes a locked popup from Escape too, and does not store it', async () => {
+    feed.items = [announcement({ id: 1, display: 'both', popupDismissible: false })]
+    const user = userEvent.setup()
+    renderAt('/')
+    await screen.findByText('announcement.gotIt')
+    await user.keyboard('{Escape}')
+    expect(window.sessionStorage.length).toBe(0)
+    // antd keeps a closed dialog's nodes through its exit animation, which jsdom never finishes, so
+    // the acknowledgement is observed by remounting instead of by watching the dialog leave.
+    cleanup()
+    renderAt('/')
+    await screen.findByText('维护通知')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it.each(['announcement.dontShowAgain', 'announcement.gotIt'])(
+    'ignores a popup silenced with %s once it stops being dismissible',
+    async (button) => {
+      feed.items = [announcement({ id: 1, title: '维护通知', display: 'popup', popupDismissible: true })]
+      const user = userEvent.setup()
+      renderAt('/')
+      await user.click(await screen.findByText(button))
+
+      feed.items = [announcement({ id: 1, title: '维护通知', display: 'popup', popupDismissible: false })]
+      reload('/')
+      expect(await screen.findByText('announcement.gotIt')).toBeTruthy()
+      expect(screen.queryByText('announcement.dontShowAgain')).toBeNull()
+    },
+  )
+
+  // One dialog, one answer. With a locked row in it, "don't show again" would be a promise the
+  // dialog cannot keep for that row, so it is not offered at all.
+  it('offers "don\'t show again" only when every announcement in the dialog may be dismissed', async () => {
+    feed.items = [
+      announcement({ id: 1, title: '可关闭', display: 'popup', popupDismissible: true }),
+      announcement({ id: 2, title: '不可关闭', display: 'popup', popupDismissible: false }),
+    ]
+    renderAt('/')
+    expect(await screen.findByText('announcement.gotIt')).toBeTruthy()
+    expect(screen.getByText('可关闭')).toBeTruthy()
+    expect(screen.getByText('不可关闭')).toBeTruthy()
+    expect(screen.queryByText('announcement.dontShowAgain')).toBeNull()
+  })
+
+  it('does not let the band switch decide the popup, nor the popup switch the band', async () => {
+    feed.items = [
+      announcement({ id: 1, title: '条带可关', display: 'both', stripDismissible: true, popupDismissible: false }),
+    ]
+    renderAt('/')
+    expect(await screen.findByText('announcement.gotIt')).toBeTruthy()
+    expect(screen.queryByText('announcement.dontShowAgain')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'announcement.close' }).length).toBeGreaterThan(0)
+  })
+
+  it('keeps a dismissible popup exactly as it was: "got it" lasts the session, "don\'t show again" for good', async () => {
+    feed.items = [announcement({ id: 1, display: 'popup', popupDismissible: true })]
+    const user = userEvent.setup()
+    renderAt('/')
+    await user.click(await screen.findByText('announcement.gotIt'))
+    expect(window.sessionStorage.length).toBe(1)
+    expect(window.localStorage.getItem(MAP_KEY)).toBeNull()
   })
 
   // The old key held a bare hash with no id beside it. The imported row keeps the level, title and

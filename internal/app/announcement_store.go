@@ -23,40 +23,47 @@ const announcementStamp = time.RFC3339Nano
 // Announcement is one row of the announcements table. Grants is populated only by the admin
 // read path (AnnouncementsWithGrants); the reader-facing payload never carries it.
 type Announcement struct {
-	ID          int64
-	Level       string
-	Title       string
-	Content     string
-	Ord         int
-	Enabled     bool
-	Popup       bool
-	Display     string
-	Dismissible bool
-	Scope       string
-	Audience    string
-	StartsAt    string
-	EndsAt      string
-	CreatedAt   string
-	CreatedBy   string
-	UpdatedAt   string
-	Grants      []string
+	ID      int64
+	Level   string
+	Title   string
+	Content string
+	Ord     int
+	Enabled bool
+	Popup   bool
+	Display string
+	// StripDismissible lets readers close the band; PopupDismissible lets them silence the popup
+	// for good. Two switches because they are two exits with different costs (ADR 0042).
+	StripDismissible bool
+	PopupDismissible bool
+	Scope            string
+	Audience         string
+	StartsAt         string
+	EndsAt           string
+	CreatedAt        string
+	CreatedBy        string
+	UpdatedAt        string
+	Grants           []string
 }
 
 const announcementCols = `id,COALESCE(level,''),COALESCE(title,''),COALESCE(content,''),
-	COALESCE(ord,0),COALESCE(enabled,1),COALESCE(popup,0),COALESCE(display,''),COALESCE(dismissible,0),
+	COALESCE(ord,0),COALESCE(enabled,1),COALESCE(popup,0),COALESCE(display,''),COALESCE(strip_dismissible,0),
+	popup_dismissible,
 	COALESCE(scope,''),COALESCE(audience,''),COALESCE(starts_at,''),COALESCE(ends_at,''),
 	COALESCE(created_at,''),COALESCE(created_by,''),COALESCE(updated_at,'')`
 
 func scanAnnouncement(sc interface{ Scan(...any) error }) (Announcement, error) {
 	var a Announcement
-	var enabled, popup, dismissible sql.NullInt64
-	err := sc.Scan(&a.ID, &a.Level, &a.Title, &a.Content, &a.Ord, &enabled, &popup, &a.Display, &dismissible,
+	var enabled, popup, strip, popupDismissible sql.NullInt64
+	err := sc.Scan(&a.ID, &a.Level, &a.Title, &a.Content, &a.Ord, &enabled, &popup, &a.Display, &strip, &popupDismissible,
 		&a.Scope, &a.Audience, &a.StartsAt, &a.EndsAt, &a.CreatedAt, &a.CreatedBy, &a.UpdatedAt)
 	// NULL reads as the permissive default for enabled and the restrictive one for the rest, which is
 	// what a row written before the column existed should mean.
 	a.Enabled = !enabled.Valid || enabled.Int64 != 0
 	a.Popup = popup.Valid && popup.Int64 != 0
-	a.Dismissible = dismissible.Valid && dismissible.Int64 != 0
+	a.StripDismissible = strip.Valid && strip.Int64 != 0
+	// The popup flag is the exception, and deliberately: migration 0010 added the column without a
+	// back-fill, and every popup before it could be dismissed. NULL keeps that.
+	a.PopupDismissible = !popupDismissible.Valid || popupDismissible.Int64 != 0
 	a.Level = normalizeAnnouncementLevel(a.Level)
 	a.Scope = normalizeAnnouncementScope(a.Scope)
 	a.Audience = normalizeAnnouncementAudience(a.Audience)
@@ -197,19 +204,20 @@ func (s *Store) nextAnnouncementOrd() int {
 func (s *Store) AddAnnouncement(a Announcement) (int64, error) {
 	now := time.Now().UTC().Format(announcementStamp)
 	return s.insertID(`INSERT INTO announcements(
-		level,title,content,ord,enabled,popup,display,dismissible,scope,audience,
+		level,title,content,ord,enabled,popup,display,strip_dismissible,popup_dismissible,scope,audience,
 		starts_at,ends_at,created_at,created_by,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		a.Level, a.Title, a.Content, s.nextAnnouncementOrd(),
-		boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display, boolInt(a.Dismissible), a.Scope, a.Audience,
-		a.StartsAt, a.EndsAt, now, a.CreatedBy, now)
+		boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display, boolInt(a.StripDismissible),
+		boolInt(a.PopupDismissible), a.Scope, a.Audience, a.StartsAt, a.EndsAt, now, a.CreatedBy, now)
 }
 
 // UpdateAnnouncement replaces every editable field except ord, which only the drag owns.
 func (s *Store) UpdateAnnouncement(a Announcement) error {
 	_, err := s.exec(`UPDATE announcements SET level=?,title=?,content=?,enabled=?,popup=?,display=?,
-		dismissible=?,scope=?,audience=?,starts_at=?,ends_at=?,updated_at=? WHERE id=?`,
-		a.Level, a.Title, a.Content, boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display, boolInt(a.Dismissible),
+		strip_dismissible=?,popup_dismissible=?,scope=?,audience=?,starts_at=?,ends_at=?,updated_at=? WHERE id=?`,
+		a.Level, a.Title, a.Content, boolInt(a.Enabled), boolInt(a.Display != displayStrip), a.Display,
+		boolInt(a.StripDismissible), boolInt(a.PopupDismissible),
 		a.Scope, a.Audience, a.StartsAt, a.EndsAt, time.Now().UTC().Format(announcementStamp), a.ID)
 	return err
 }

@@ -63,7 +63,8 @@ const CROWDED = 5
 
 interface FormValues {
   enabled: boolean
-  dismissible: boolean
+  stripDismissible: boolean
+  popupDismissible: boolean
   level: AnnouncementLevel
   scope: AnnouncementScope
   audience: AnnouncementAudience
@@ -163,7 +164,10 @@ export default function AnnouncementPage() {
     form.setFieldsValue({
       enabled: a ? a.enabled : true,
       display: a ? a.display : 'strip',
-      dismissible: a ? a.dismissible : false,
+      // A new announcement locks the band (an operator opts in to a close button) and leaves the
+      // popup dismissible, the two defaults the server applies as well.
+      stripDismissible: a ? a.stripDismissible : false,
+      popupDismissible: a ? a.popupDismissible : true,
       level: a?.level || 'notice',
       scope: a?.scope || 'home',
       audience: a?.audience || 'all',
@@ -181,7 +185,8 @@ export default function AnnouncementPage() {
     const payload = {
       enabled: v.enabled === true,
       display: v.display || 'strip',
-      dismissible: v.dismissible === true,
+      stripDismissible: v.stripDismissible === true,
+      popupDismissible: v.popupDismissible === true,
       level: v.level || 'notice',
       scope: v.scope || 'home',
       audience: v.audience || 'all',
@@ -371,7 +376,7 @@ export default function AnnouncementPage() {
                 level: getFieldValue('level') || 'notice',
                 title,
                 content,
-                dismissible: getFieldValue('dismissible') === true,
+                stripDismissible: getFieldValue('stripDismissible') === true,
               }}
               style={{ marginTop: 4 }}
             />
@@ -489,20 +494,9 @@ export default function AnnouncementPage() {
         }
       >
         <Form form={form} layout="vertical">
-          <Space size={20} wrap style={{ marginBottom: 12 }}>
-            <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked" noStyle={false} style={{ marginBottom: 0 }}>
-              <Switch />
-            </Form.Item>
-            <Form.Item
-              name="dismissible"
-              label={t('announcementAdmin.dismissible')}
-              extra={t('announcementAdmin.dismissibleHint')}
-              valuePropName="checked"
-              style={{ marginBottom: 0 }}
-            >
-              <Switch />
-            </Form.Item>
-          </Space>
+          <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked">
+            <Switch />
+          </Form.Item>
           <Form.Item name="display" label={t('announcementAdmin.display')} extra={t('announcementAdmin.displayHint')}>
             <Segmented
               options={[
@@ -511,6 +505,39 @@ export default function AnnouncementPage() {
                 { value: 'both', label: t('announcementAdmin.display.both') },
               ]}
             />
+          </Form.Item>
+          {/* One switch per surface, shown only for the surface this announcement is drawn on. The
+              other is hidden, not unmounted: it stays registered in the form, so a save sends every
+              value and never drops one just because its switch is off screen. */}
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.display !== next.display}>
+            {({ getFieldValue }) => {
+              const display = getFieldValue('display') || 'strip'
+              return (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ marginBottom: 8 }}>{t('announcementAdmin.dismissible')}</div>
+                  <Form.Item
+                    name="stripDismissible"
+                    label={t('announcementAdmin.stripDismissible')}
+                    extra={t('announcementAdmin.stripDismissibleHint')}
+                    valuePropName="checked"
+                    hidden={display === 'popup'}
+                    style={{ marginBottom: 12 }}
+                  >
+                    <Switch />
+                  </Form.Item>
+                  <Form.Item
+                    name="popupDismissible"
+                    label={t('announcementAdmin.popupDismissible')}
+                    extra={t('announcementAdmin.popupDismissibleHint')}
+                    valuePropName="checked"
+                    hidden={display === 'strip'}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Switch />
+                  </Form.Item>
+                </div>
+              )
+            }}
           </Form.Item>
           <Form.Item name="level" label={t('settings.announcementLevel')}>
             <Select

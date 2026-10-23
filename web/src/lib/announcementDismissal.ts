@@ -21,12 +21,12 @@
 // would have re-fired the popup for every user on upgrade day — the exact thing the migration is
 // for.
 //
-// The band's dismissal is gated by the operator's "readers can close it" switch at the moment it is
-// CONSULTED, not only when it is made: a band closed while the switch was on is shown again once it
-// is off — ignored, not erased, so switching it back on restores what the reader chose — and none is
-// stored while it is off. Checking only at write time was the bug: readers who had closed a band
-// before the operator locked it never saw it again. The popup's footer is not governed by the switch
-// (see ADR 0025).
+// Each surface has its own operator switch — stripDismissible for the band, popupDismissible for the
+// popup — and each gates its dismissals at the moment they are CONSULTED, not only when they are
+// made: a dismissal stored while the switch was on is shown again once it is off — ignored, not
+// erased, so switching it back on restores what the reader chose — and none is stored while it is
+// off. Checking only at write time was the bug: readers who had closed something before the operator
+// locked it never saw it again. The two switches never govern each other (see ADR 0025).
 
 import type { Announcement } from '../api/types'
 
@@ -181,11 +181,14 @@ export function migrateLegacyDismissal(user: string, items: Announcement[], now 
  * per payload; the callers ask it questions and hand back a new one after each write.
  */
 export interface DismissalState {
-  /** Has this reader silenced this announcement's popup for good? */
+  /** Has this reader silenced this announcement's popup for good, and may they still? */
   popupDismissed: (a: Announcement) => boolean
   /** Has this reader closed this announcement's banner, and may they still? */
   bannerDismissed: (a: Announcement) => boolean
-  /** Has this reader acknowledged this popup in THIS browser session? */
+  /**
+   * Has this reader acknowledged this popup ("Got it")? For the browser session when the popup may
+   * be dismissed; for this page load only when it may not.
+   */
   seenThisSession: (a: Announcement) => boolean
 }
 
@@ -194,14 +197,16 @@ export function loadDismissals(user: string, items: Announcement[]): DismissalSt
   const seen = new Set(readSeen(user))
   const matches = (key: string, a: Announcement) => map[key]?.sig === announcementSig(a)
   return {
-    popupDismissed: (a) => matches(popupKey(a.id), a),
-    bannerDismissed: (a) => a.dismissible && matches(bannerKey(a.id), a),
-    seenThisSession: (a) => seen.has(`${a.id}:${announcementSig(a)}`),
+    popupDismissed: (a) => a.popupDismissible && matches(popupKey(a.id), a),
+    bannerDismissed: (a) => a.stripDismissible && matches(bannerKey(a.id), a),
+    seenThisSession: (a) =>
+      a.popupDismissible ? seen.has(`${a.id}:${announcementSig(a)}`) : acknowledged.has(ackKey(user, a)),
   }
 }
 
 /** Persist "don't show this popup again" for one announcement, at its current wording. */
 export function dismissPopup(user: string, a: Announcement, now = Date.now()) {
+  if (!a.popupDismissible) return
   const map = loadMap(user)
   map[popupKey(a.id)] = { sig: announcementSig(a), at: now }
   saveMap(user, map, now)
@@ -209,10 +214,25 @@ export function dismissPopup(user: string, a: Announcement, now = Date.now()) {
 
 /** Persist "I closed this banner" for one announcement, at its current wording. */
 export function dismissBanner(user: string, a: Announcement, now = Date.now()) {
-  if (!a.dismissible) return
+  if (!a.stripDismissible) return
   const map = loadMap(user)
   map[bannerKey(a.id)] = { sig: announcementSig(a), at: now }
   saveMap(user, map, now)
+}
+
+// "Got it" on a popup readers may not dismiss still has to close the dialog — one with no exit would
+// lock them out of the portal — so it is remembered here, in memory, for this page load: moving
+// around the app (or through a surface that unmounts the popup, like the console or the mobile chat)
+// does not re-interrupt, and a reload does. Nothing about it reaches storage.
+const acknowledged = new Set<string>()
+
+function ackKey(user: string, a: Announcement) {
+  return `${user.trim().toLowerCase()}:${a.id}:${announcementSig(a)}`
+}
+
+/** Forget every in-memory acknowledgement — what a page reload does; called between tests. */
+export function forgetAcknowledgements() {
+  acknowledged.clear()
 }
 
 // "Got it" is weaker than "don't show again": it stops the popup for this browser session and
@@ -229,6 +249,10 @@ function readSeen(user: string): string[] {
 }
 
 export function markSeen(user: string, a: Announcement) {
+  if (!a.popupDismissible) {
+    acknowledged.add(ackKey(user, a))
+    return
+  }
   const key = `${a.id}:${announcementSig(a)}`
   const next = readSeen(user)
   if (!next.includes(key)) next.push(key)
