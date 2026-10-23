@@ -64,55 +64,22 @@ const on = {
   unsettled_baseline: 0,
 }
 
-const emptyGroups = {
+const access = {
   ok: true,
-  mode: 'month',
-  official: true,
-  range: { from: '', to: '' },
-  checkpoints: ['d5', 'd20', 'd60', 'd120', 'h12'],
-  unrecorded: 0,
-  groups: [],
-}
-
-const matureGroups = {
-  ok: true,
-  mode: 'custom',
-  official: false,
-  range: { from: '2026-09-01', to: '2026-09-30', group: 'month' },
-  checkpoints: ['d5', 'd20', 'd60', 'd120', 'h12'],
-  unrecorded: 0,
+  preview: false,
+  affected: 0,
+  counts: { all: 2, own: 1, none: 4 },
   groups: [
-    {
-      label: '2026-09',
-      start: '2026-09-01',
-      end: '2026-09-30',
-      official: false,
-      coverage: {
-        reports: 40,
-        member: 35,
-        duplicate: 3,
-        absent: 1,
-        rejected: 1,
-        backtest: 0,
-        degraded: 0,
-        mismatch: 0,
-        pending_baseline: 0,
-      },
-      cells: {
-        d5: { state: 'mature', n: 35, spread_bp: 120, spread_p: 0.02, spread_q: 0.04 },
-        d20: { state: 'open' },
-        d60: { state: 'open' },
-        d120: { state: 'open' },
-        h12: { state: 'open' },
-      },
-    },
+    { id: 1, forecast_scope: 'none', forecast_scope_effective: 'none', forecast_scope_source: 1, external: false, counts: { all: 0, own: 0, none: 4 } },
+    { id: 2, forecast_scope: 'all', forecast_scope_effective: 'all', forecast_scope_source: 2, external: false, counts: { all: 2, own: 1, none: 0 } },
   ],
 }
+const groupList = { groups: [{ id: 1, name: 'Default', is_default: true }, { id: 2, name: 'Internal' }] }
 
-// Two endpoints now: the settings object and the matrix. Routing by URL keeps the settings tests
-// about settings.
+// Three endpoints: the settings object, the server-resolved access, and the OU names that go with it.
+// Routing by URL keeps the settings tests about settings.
 const byUrl = (settings: unknown) => (url: string) =>
-  Promise.resolve(url.includes('/forecast/groups') ? emptyGroups : settings)
+  Promise.resolve(url === '/api/admin/forecast/access' ? access : url === '/api/admin/groups' ? groupList : settings)
 
 const show = (initial = '/') =>
   render(
@@ -133,11 +100,11 @@ describe('ForecastPage', () => {
   it('shows neither the status nor the settings button until the server has answered', async () => {
     let resolveGet: ((v: unknown) => void) | undefined
     apiMock.get.mockImplementation((url: string) =>
-      url.includes('/forecast/groups')
-        ? Promise.resolve(emptyGroups)
-        : new Promise((resolve) => {
+      url === '/api/admin/forecast'
+        ? new Promise((resolve) => {
             resolveGet = resolve
-          }),
+          })
+        : byUrl(on)(url),
     )
     show()
     await screen.findByText('common.loading')
@@ -191,7 +158,7 @@ describe('ForecastPage', () => {
       }),
     )
     // And the page reloads, so the counts shown are the ones the save left behind rather than the
-    // ones that were on screen before it. Count only the settings request: the matrix has its own.
+    // ones that were on screen before it. Count only the settings request: the access card has its own.
     const settingsCalls = () => apiMock.get.mock.calls.filter(([u]) => u === '/api/admin/forecast').length
     await waitFor(() => expect(settingsCalls()).toBe(2))
   })
@@ -211,31 +178,6 @@ describe('ForecastPage', () => {
     expect(screen.getByText('common.save')).toBeTruthy()
   })
 
-  it('shows the exploratory banner, the p* convention and the linked range in the custom tab', async () => {
-    apiMock.get.mockImplementation((url: string) =>
-      Promise.resolve(url.includes('/forecast/groups') ? matureGroups : on),
-    )
-    show('/manage/forecast?mode=custom&from=2026-09-01&to=2026-09-30&group=month')
-    await waitFor(() => expect(screen.getByText('forecast.custom.banner')).toBeTruthy())
-    // A p* is the promise that this number was not corrected for range selection.
-    expect(screen.getByText(/p\*=0\.02/)).toBeTruthy()
-    expect(screen.getByText('forecast.tag.exploratory')).toBeTruthy()
-    expect(
-      apiMock.get.mock.calls.some(
-        ([u]) => u === '/api/admin/forecast/groups?mode=custom&from=2026-09-01&to=2026-09-30&group=month',
-      ),
-    ).toBe(true)
-  })
-
-  it('surfaces a refused range instead of rendering an empty matrix as success', async () => {
-    apiMock.get.mockImplementation((url: string) =>
-      url.includes('/forecast/groups') ? Promise.reject(new Error('range_too_long')) : Promise.resolve(on),
-    )
-    show('/manage/forecast?mode=custom&from=2020-01-01&to=2026-09-30&group=month')
-    await waitFor(() => expect(screen.getByText('Request failed')).toBeTruthy())
-    expect(screen.queryByText('forecast.empty')).toBeNull()
-  })
-
   it('hides the unrecorded line when the count and the failures are both zero', async () => {
     apiMock.get.mockImplementation(
       byUrl({ ...on, unrecorded: [{ rtype: '投资决策建议', n: 0, since: '2026-10-19T00:00:00Z', ok: true, store_failed_30d: 0 }] }),
@@ -253,5 +195,47 @@ describe('ForecastPage', () => {
     await waitFor(() => expect(screen.getByText(/forecast.cov.unrecorded_since/)).toBeTruthy())
     const link = screen.getByText('forecast.cov.unrecorded_audit').closest('a') as HTMLAnchorElement
     expect(link.getAttribute('href')).toContain('action=predictions.store_failed')
+  })
+
+  // The cohort matrix moved to the reader page for everyone, administrators included. This page
+  // keeps the evaluator's operations, so it asks for none of the statistics and offers none of their
+  // controls.
+  it('is operations only: no statistics requests, no matrix controls', async () => {
+    show('/manage/forecast?mode=custom&from=2026-09-01&to=2026-09-30')
+    await waitFor(() => expect(screen.getByText('forecast.eval.title')).toBeTruthy())
+    await screen.findByText('forecast.access.title')
+    for (const [url] of apiMock.get.mock.calls) expect(String(url)).not.toContain('/forecast/groups')
+    expect(screen.queryByText('forecast.matrix.title')).toBeNull()
+    expect(screen.queryByText('forecast.tab.month')).toBeNull()
+    expect(screen.queryByText('forecast.tab.custom')).toBeNull()
+    expect(screen.queryByText('forecast.export.button')).toBeNull()
+    expect(screen.queryByText('forecast.methodology.title')).toBeNull()
+    // The statistics live on the reader page, one click away.
+    expect(screen.getByRole('link', { name: 'nav.forecast_record' }).getAttribute('href')).toBe('/forecast')
+  })
+
+  it('keeps every operation: status, settings, ledger start, alerts and the backlog', async () => {
+    show()
+    await waitFor(() => expect(screen.getByText('forecast.eval.title')).toBeTruthy())
+    expect(screen.getByText('forecast.settings.button')).toBeTruthy()
+    expect(screen.getByText('forecast.population.button')).toBeTruthy()
+    expect(screen.getByText('forecast.alert.title')).toBeTruthy()
+    expect(screen.getByText('forecast.eval.status.title')).toBeTruthy()
+  })
+
+  it('shows who has access from the server\'s own resolution, with a way to the OU editor', async () => {
+    show()
+    expect(await screen.findByText('forecast.access.summary:{"all":2,"own":1,"none":4}')).toBeTruthy()
+    expect(apiMock.get.mock.calls.some(([u]) => u === '/api/admin/forecast/access')).toBe(true)
+    expect(screen.getByRole('link', { name: 'forecast.access.edit' }).getAttribute('href')).toBe('/manage/users?tab=groups')
+  })
+
+  it('still shows the operations when the access summary cannot be read', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      url === '/api/admin/forecast/access' ? Promise.reject(new Error('offline')) : byUrl(on)(url))
+    show()
+    await waitFor(() => expect(screen.getByText('forecast.eval.title')).toBeTruthy())
+    expect(await screen.findByText('Request failed')).toBeTruthy()
+    expect(screen.getByText('forecast.settings.button')).toBeTruthy()
   })
 })
