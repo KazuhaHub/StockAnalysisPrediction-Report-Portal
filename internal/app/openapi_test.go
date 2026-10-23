@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 	"unicode"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
 
 func TestOpenAPIReadSchemasCoverWireFields(t *testing.T) {
@@ -553,4 +555,109 @@ func openapiJSONForLang(t *testing.T, lang string) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestOpenAPIDocumentsEditionLinksOnTheCookiePredictionRead ties the documented response of the
+// per-report prediction read to what a browser session is actually answered. A cookie session at
+// card or full stage gets two edition links beside the sets, and an integrator who reads the spec
+// must be told the fields exist. Every top-level field of a live response has to be documented, and
+// every field of a live link has to be a property of the documented link.
+func TestOpenAPIDocumentsEditionLinksOnTheCookiePredictionRead(t *testing.T) {
+	eachReaderServer(t, func(t *testing.T, s *Server) {
+		s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
+		fx := seedEditionFixture(t, s)
+		grantSiblingEdition(t, s)
+		path := "/api/v1/reports/" + itoa64(fx.current) + "/predictions"
+		r := sessionForPath(t, s, "edition-all", "GET /api/v1/reports/{id}/predictions", path)
+		r.SetPathValue("id", itoa64(fx.current))
+		w := httptest.NewRecorder()
+		s.v1ReportPredictions(w, r)
+		var live map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &live); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("cookie read: %d %s: %v", w.Code, w.Body.String(), err)
+		}
+		for _, field := range []string{"sibling", "counted_edition"} {
+			if _, ok := live[field].(map[string]any); !ok {
+				t.Fatalf("the fixture no longer produces %s on the cookie read: %s", field, w.Body.String())
+			}
+		}
+		for _, lang := range []string{"zh-CN", "zh-TW", "en-US"} {
+			var spec map[string]any
+			if err := json.Unmarshal(openapiJSONForLang(t, lang), &spec); err != nil {
+				t.Fatal(err)
+			}
+			schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+			documented := map[string]bool{}
+			response := schemas["ReportPredictionReadResponse"].(map[string]any)
+			for _, part := range response["allOf"].([]any) {
+				part := part.(map[string]any)
+				if ref, ok := part["$ref"].(string); ok {
+					for name := range schemas[strings.TrimPrefix(ref, "#/components/schemas/")].(map[string]any)["properties"].(map[string]any) {
+						documented[name] = true
+					}
+				}
+				if props, ok := part["properties"].(map[string]any); ok {
+					for name := range props {
+						documented[name] = true
+					}
+				}
+			}
+			for field := range live {
+				if !documented[field] {
+					t.Errorf("%s: the cookie read returns %q, which the spec does not document", lang, field)
+				}
+			}
+			edition, ok := schemas["PredictionReadEdition"].(map[string]any)
+			if !ok {
+				t.Errorf("%s: the spec has no PredictionReadEdition schema", lang)
+				continue
+			}
+			props := edition["properties"].(map[string]any)
+			for field := range live["sibling"].(map[string]any) {
+				if props[field] == nil {
+					t.Errorf("%s: an edition link returns %q, which the spec does not document", lang, field)
+				}
+			}
+			for i := 0; i < reflect.TypeOf(forecastReadingEdition{}).NumField(); i++ {
+				field := strings.Split(reflect.TypeOf(forecastReadingEdition{}).Field(i).Tag.Get("json"), ",")[0]
+				if props[field] == nil {
+					t.Errorf("%s: the edition link schema misses wire field %s", lang, field)
+				}
+				if !containsStr(toStrings(edition["required"]), field) {
+					t.Errorf("%s: the edition link schema does not require %s", lang, field)
+				}
+			}
+			for _, field := range []string{"sibling", "counted_edition"} {
+				if ref := responseProperty(schemas, field)["$ref"]; ref != "#/components/schemas/PredictionReadEdition" {
+					t.Errorf("%s: %s is documented as %v", lang, field, ref)
+				}
+			}
+			op := spec["paths"].(map[string]any)["/api/v1/reports/{id}/predictions"].(map[string]any)["get"].(map[string]any)
+			for _, field := range []string{"sibling", "counted_edition"} {
+				if !strings.Contains(op["description"].(string), field) {
+					t.Errorf("%s: the operation description does not mention %s", lang, field)
+				}
+			}
+		}
+	})
+}
+
+func toStrings(raw any) []string {
+	var out []string
+	for _, v := range raw.([]any) {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
+// responseProperty finds one property of the per-report response across its allOf parts.
+func responseProperty(schemas map[string]any, name string) map[string]any {
+	for _, part := range schemas["ReportPredictionReadResponse"].(map[string]any)["allOf"].([]any) {
+		if props, ok := part.(map[string]any)["properties"].(map[string]any); ok {
+			if prop, ok := props[name].(map[string]any); ok {
+				return prop
+			}
+		}
+	}
+	return map[string]any{}
 }

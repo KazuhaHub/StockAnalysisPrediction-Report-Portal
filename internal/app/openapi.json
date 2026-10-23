@@ -432,6 +432,17 @@
           "marks": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadMark"}}
         }
       },
+      "PredictionReadEdition": {
+        "type": "object",
+        "required": ["report_id", "set_id", "version", "cohort", "url"],
+        "properties": {
+          "report_id": {"type": "integer", "format": "int64", "description": "The sibling edition's report."},
+          "set_id": {"type": "integer", "format": "int64", "description": "The accepted set of that edition the link stands for."},
+          "version": {"type": "string", "description": "The written form (edition) of that report."},
+          "cohort": {"type": "string", "description": "The set's receipt month, YYYY-MM."},
+          "url": {"type": "string", "description": "Reading-page path that opens that edition's report at its forecast panel."}
+        }
+      },
       "PredictionReadResponse": {
         "type": "object",
         "required": ["ok", "sets", "settlement_paused"],
@@ -446,7 +457,9 @@
           {"$ref": "#/components/schemas/PredictionReadResponse"},
           {"type": "object", "properties": {
             "display_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Latest accepted set matching the current report body; otherwise latest accepted set. Zero means none. Omitted if identity selection fails. A nonzero selected set is retained within the 200-set detail cap."},
-            "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."}
+            "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."},
+            "sibling": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions only. Present when this report has no accepted set of its own and another readable edition of the same symbol, date and report type has one. Never present for a persistent query token."},
+            "counted_edition": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions that may see membership only (internal all readers and administrators). The readable edition whose accepted set is this analysis's monthly member when that is not this report's own set. Omitted for own-scoped and external readers."}
           }}
         ]
       },
