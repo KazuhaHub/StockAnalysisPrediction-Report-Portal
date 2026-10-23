@@ -238,9 +238,6 @@ func runForecastAccessMatrix(t *testing.T, st *Store, defaultScope string) {
 					case adminRoute && !who.admin:
 						// The existing permission wrapper refuses before the enrolment wall.
 						want = 403
-					case who.name == "Dangling" && p.kind != "me":
-						// A broken tree already fails closed in the independent enrolment policy.
-						want, code = 503, "enrolment_policy_unavailable"
 					case who.walled && p.kind != "me":
 						want, code = 403, "enrolment_required"
 					case who.user != "" && who.scope == scopeNone && p.kind != "me":

@@ -151,6 +151,36 @@ func (s *Server) requireForecastAccess(w http.ResponseWriter, r *http.Request, u
 	return d, true
 }
 
+// forecastReadPatterns are the routes that read forecast records for a signed-in reader. They are
+// the only routes on which a broken OU chain is answered with the forecast decision rather than the
+// enrolment wall's generic "policy unreadable" refusal (see refuseForecastReadOnBrokenTree).
+var forecastReadPatterns = map[string]bool{
+	"GET /api/forecast/groups":             true,
+	"GET /api/forecast/groups/members":     true,
+	"GET /api/report/{id}/predictions":     true,
+	"GET /api/predictions":                 true,
+	"GET /api/v1/reports/{id}/predictions": true,
+	"GET /api/v1/predictions":              true,
+}
+
+// refuseForecastReadOnBrokenTree is consulted only after the enrolment policy could not be read. An
+// account whose OU chain is dangling or cyclic makes that policy unreadable (the wall never guesses
+// past a broken chain) and also resolves to forecast scope none, a definite and non-transient
+// answer. On a forecast read the request is refused with that answer, forecast_unavailable, which is
+// what a none subject is promised; every other route keeps the wall's 503. A transient store error
+// is not a structural reason and is left to the wall's retryable 503.
+func (s *Server) refuseForecastReadOnBrokenTree(w http.ResponseWriter, r *http.Request, user string) bool {
+	if !forecastReadPatterns[r.Pattern] {
+		return false
+	}
+	switch s.forecastAccess(user).Reason {
+	case "dangling_group", "cyclic_chain":
+		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
+		return true
+	}
+	return false
+}
+
 func forecastRateError(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "60")
 	jsonErrorCode(w, http.StatusTooManyRequests, "forecast_rate_limited", "forecast request limit exceeded; retry later")
