@@ -180,6 +180,22 @@ func populationFor(d forecastDecision) forecastPopulation {
 	return forecastPopulation{Key: "ou:" + hex.EncodeToString(sum[:]), OUs: ids}
 }
 
+// forecastPopulationRoot is the display name of the OU an own reader's population is rooted at: the
+// reader's own unit (the leaf), not the ancestor that decided the scope, because the statistics cover
+// the leaf's subtree and naming a wider unit would claim a wider population than was scored. It is
+// empty for every other scope, and when the name cannot be read: callers then say nothing rather
+// than guess.
+func (s *Server) forecastPopulationRoot(d forecastDecision) string {
+	if d.Scope != scopeOwn || d.Leaf == 0 {
+		return ""
+	}
+	var name string
+	if err := s.st.queryRow("SELECT name FROM user_groups WHERE id=?", d.Leaf).Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
 func (p forecastPopulation) cellKey(rtype, start, end, bench, cp string) string {
 	key := forecastGroupCellKey(rtype, start, end, bench, cp)
 	if p.Key == "all" {

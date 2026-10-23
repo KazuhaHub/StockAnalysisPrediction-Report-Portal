@@ -92,3 +92,66 @@ func TestExternalCustomRangeRefused(t *testing.T) {
 		}
 	}
 }
+
+// The response states whose reports it covers. The navigation hint is read once per session, so a
+// page that labelled a result from it would name a population the numbers no longer describe after an
+// administrator changed a scope or moved the reader. The population is therefore the server's own
+// statement, taken from the same decision that picked the cohort.
+func TestReaderGroupsStateThePopulationTheServerUsed(t *testing.T) {
+	s := newV1Server(t)
+	s.forecastEval.now = func() time.Time { return dateAtClose("2026-10-22") }
+	parent := seedOU(t, s.st, 0, scopeOwn)
+	child := seedOU(t, s.st, parent, nil)
+	mustAddUser(t, s, "child-reader", false)
+	if _, err := s.st.exec("UPDATE users SET group_id=? WHERE username=?", child, "child-reader"); err != nil {
+		t.Fatal(err)
+	}
+	var childName, parentName string
+	if err := s.st.queryRow("SELECT name FROM user_groups WHERE id=?", child).Scan(&childName); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.queryRow("SELECT name FROM user_groups WHERE id=?", parent).Scan(&parentName); err != nil {
+		t.Fatal(err)
+	}
+
+	// An own reader is told the unit their subtree is rooted at, not the ancestor that decided the
+	// scope: naming the ancestor would claim a wider population than the one that was scored.
+	got := readerGroups(t, s, "child-reader", "")
+	if got["scope"] != scopeOwn || got["scope_ou"] != childName || got["scope_ou"] == parentName {
+		t.Fatalf("own population = %v / %v, want %q / %q", got["scope"], got["scope_ou"], scopeOwn, childName)
+	}
+
+	// The same reader after an administrator widens the parent to all: the next response says so,
+	// whatever a session-start hint said.
+	if _, err := s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeAll, parent); err != nil {
+		t.Fatal(err)
+	}
+	got = readerGroups(t, s, "child-reader", "")
+	if got["scope"] != scopeAll {
+		t.Fatalf("widened population = %v, want %q", got["scope"], scopeAll)
+	}
+	if _, named := got["scope_ou"]; named {
+		t.Fatalf("an all population names no unit: %v", got["scope_ou"])
+	}
+
+	// External readers with the all scope learn nothing more than the scope they already hold.
+	seedForecastReader(t, s, "external", scopeAll, true)
+	got = readerGroups(t, s, "external", "")
+	if got["scope"] != scopeAll {
+		t.Fatalf("external all population = %v", got["scope"])
+	}
+	if _, named := got["scope_ou"]; named {
+		t.Fatalf("external all response names a unit: %v", got["scope_ou"])
+	}
+
+	// The administrator alias states the same thing, so the reader and admin records stay identical.
+	w := httptest.NewRecorder()
+	s.apiForecastGroups(w, httptest.NewRequest("GET", "/api/admin/forecast/groups", nil), "admin")
+	var admin map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &admin); err != nil {
+		t.Fatal(err)
+	}
+	if admin["scope"] != scopeAll {
+		t.Fatalf("admin alias population = %v", admin["scope"])
+	}
+}

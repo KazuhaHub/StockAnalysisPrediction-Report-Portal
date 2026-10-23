@@ -267,11 +267,7 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 // omits the field: the page then falls back to an unnamed line instead of guessing.
 func (s *Server) forecastHint(d forecastDecision) map[string]any {
 	hint := map[string]any{"scope": d.Scope, "external": d.External}
-	if d.Scope != scopeOwn || d.Leaf == 0 {
-		return hint
-	}
-	var name string
-	if err := s.st.queryRow("SELECT name FROM user_groups WHERE id=?", d.Leaf).Scan(&name); err == nil && name != "" {
+	if name := s.forecastPopulationRoot(d); name != "" {
 		hint["ou"] = name
 	}
 	return hint

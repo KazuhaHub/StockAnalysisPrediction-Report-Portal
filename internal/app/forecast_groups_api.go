@@ -76,6 +76,8 @@ func (s *Server) serveForecastGroups(w http.ResponseWriter, r *http.Request, d f
 		OK:          true,
 		Mode:        mode,
 		Checkpoints: append([]string{}, predCheckpoints...),
+		Scope:       d.Scope,
+		ScopeOU:     s.forecastPopulationRoot(d),
 	}
 	// The admin alias keeps its bounded unrecorded integer until P29; it is 0 while the ledger start
 	// is unset (the admin GET's `unrecorded` list is where the "set the ledger start" state is shown).
