@@ -11,16 +11,46 @@ import (
 )
 
 func TestEditionWithoutASetLinksItsReadableSibling(t *testing.T) {
-	t.Run("sqlite", func(t *testing.T) { assertReadingEditions(t, newV1Server(t)) })
-	t.Run("postgres", func(t *testing.T) {
-		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
-		s := &Server{st: st, names: LoadNames(t.TempDir(), st)}
-		s.names.fetch = func(string) string { return "" }
-		assertReadingEditions(t, s)
+	eachReaderServer(t, assertReadingEditions)
+}
+
+// TestSiblingEditionMemberReadsCountedOnEdition pins the C17 membership display: when the group member
+// is a sibling edition's set, an internal all reader or an administrator reads "counted on edition X"
+// instead of a duplicate, and nobody else learns that the sibling exists through the count.
+func TestSiblingEditionMemberReadsCountedOnEdition(t *testing.T) {
+	eachReaderServer(t, func(t *testing.T, s *Server) {
+		fx := seedEditionFixture(t, s)
+		grantSiblingEdition(t, s)
+		assertSiblingEditionMemberReadsCountedOnEdition(t, s, fx.current, fx.sibling, fx.member, fx.g)
 	})
 }
 
-func assertReadingEditions(t *testing.T, s *Server) {
+// eachReaderServer runs a reading scenario on SQLite and, when configured, on Postgres. Both servers
+// carry the persistent query token "tok-all", as newV1Server does.
+func eachReaderServer(t *testing.T, run func(t *testing.T, s *Server)) {
+	t.Helper()
+	t.Run("sqlite", func(t *testing.T) { run(t, newV1Server(t)) })
+	t.Run("postgres", func(t *testing.T) {
+		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
+		if err := st.CreateToken("tok-all", "test", "all", ""); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = st.exec(`DELETE FROM api_tokens WHERE token_hash=?`, tokenDigest("tok-all")) })
+		s := &Server{st: st, names: LoadNames(t.TempDir(), st)}
+		s.names.fetch = func(string) string { return "" }
+		run(t, s)
+	})
+}
+
+type editionFixture struct {
+	current, sibling, member int64
+	g                        gsSeed
+}
+
+// seedEditionFixture builds one analysis in two editions: the internal edition holds the group
+// member, the client edition (the one read) holds no set. Only the client edition is granted to the
+// external readers, so the sibling stays unreadable to them until grantSiblingEdition.
+func seedEditionFixture(t *testing.T, s *Server) editionFixture {
 	t.Helper()
 	seedForecastReader(t, s, "edition-all", scopeAll, false)
 	seedForecastReader(t, s, "edition-own", scopeOwn, false)
@@ -60,15 +90,27 @@ func assertReadingEditions(t *testing.T, s *Server) {
 	if err := s.st.SetVersionGrants("edition-b", []string{userPrincipal("edition-external"), userPrincipal("edition-external-own")}); err != nil {
 		t.Fatal(err)
 	}
+	return editionFixture{current: current, sibling: sibling, member: member, g: g}
+}
+
+func grantSiblingEdition(t *testing.T, s *Server) {
+	t.Helper()
+	if err := s.st.SetVersionGrants("edition-a", []string{userPrincipal("edition-external"), userPrincipal("edition-external-own")}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertReadingEditions(t *testing.T, s *Server) {
+	t.Helper()
+	fx := seedEditionFixture(t, s)
+	current, sibling, member := fx.current, fx.sibling, fx.member
 	for _, route := range []string{"stock", "run"} {
 		out := readingSummaryResponse(t, s, "edition-external", route, current, false)
 		if _, exists := out["prediction"]; exists {
 			t.Fatalf("unreadable sibling disclosed a summary: %v", out["prediction"])
 		}
 	}
-	if err := s.st.SetVersionGrants("edition-a", []string{userPrincipal("edition-external"), userPrincipal("edition-external-own")}); err != nil {
-		t.Fatal(err)
-	}
+	grantSiblingEdition(t, s)
 	for _, user := range []string{"edition-all", "edition-own", "edition-external", "edition-external-own", "edition-admin"} {
 		for _, route := range []string{"stock", "run"} {
 			out := readingSummaryResponse(t, s, user, route, current, false)
@@ -152,7 +194,6 @@ func assertReadingEditions(t *testing.T, s *Server) {
 		s.appTok = newAppTokens(time.Hour)
 		assertEditionBridgeIsRefused(t, s, mintForecastBridge(t, s, "edition-all"), current)
 	}
-	assertSiblingEditionMemberReadsCountedOnEdition(t, s, current, sibling, member, g)
 }
 
 func assertEditionBearerHasNoReadingMetadata(t *testing.T, s *Server, token string, report int64) {
