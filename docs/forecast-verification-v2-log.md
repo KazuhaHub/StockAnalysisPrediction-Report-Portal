@@ -998,3 +998,33 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   safety, fixed-panel replay and candidate-source controls remain. It adds no schema, settings,
   network calls or runtime shadow execution. Independent review and full branch validation remain
   required before submitting P24.
+
+### P24 raw-capture foundation (2026-10-22, in progress)
+
+- Independent comparator review found no confirmed issue; exact-fen/date/anchor comparisons,
+  deterministic output and no I/O/input mutation were verified. It remains shared groundwork,
+  not runtime shadow admission.
+- Added capture orchestration with no Store/config dependency. It accepts only registered sources
+  and validated canonical targets/windows, reserves a new 0700 directory, writes 0600 raw/parsed
+  files exclusively, and records hashes, response status, capture time, content type and bounded-
+  body/error metadata. Count-based candidate captures are explicitly labeled rather than claimed
+  as bounded range support. Candidate measurement never changes grants or source order.
+- A private context-local client override records only probe requests. Ordinary requests still
+  use the original pooled vendor client; the process-wide pointer is never swapped. Binary bodies
+  are preserved before parser/GBK conversion. HTTP/non-2xx/read failures remain recorded evidence;
+  local file errors abort, and cancellation leaves an incomplete manifest without further calls.
+  A complete manifest means all requested attempts finished, not that vendors supplied valid data.
+- Tests failed before implementation. Additional controls cover private permissions, independent
+  SHA-256 expectations, existing directory/symlink refusal, bad input before network/output,
+  Yahoo as a display-only candidate, oversized/partial bodies, cancellation, local write collision
+  and context isolation. No test here performs a live vendor request.
+- Independent capture review found a parent-directory substitution gap: O_EXCL protected leaf
+  files but not a replaced parent path. The failing regression reproduced writes into a foreign
+  directory. All writes now use a retained os.Root; the original directory retains every file,
+  the foreign directory stays empty, and a final identity check refuses to mark replaced/moved
+  output complete. Follow-up review closed the finding without additional actionable issues.
+- Final application/test head passed full Go/Postgres regression (app 35.809 s), build, vet and
+  staticcheck. Three repeated targeted race runs including the independent hash control passed
+  (2.136 s). Frontend files are unchanged. CLI dispatch, fixed panel, offline integrity checks,
+  replay/record output and an end-to-end no-database CLI guard remain before P24 can be submitted.
+  No schema, production, Apps branch or separately owned PR changed in this checkpoint.
