@@ -72,10 +72,12 @@ func seedRetentionSet(t *testing.T, st *Store, cohort string, ou int64, tag stri
 	return id
 }
 
-// evidence is the ownership table as sorted "cohort/ou" strings, so a test states it in one line.
+// evidence is the ownership table as "cohort/ou" strings in lexical order, the order evidenceSet
+// states its expectation in, so a test compares them in one line. The order is applied here and not
+// by the query: a numeric SQL order disagrees with a lexical one when ids reach another digit.
 func evidence(t *testing.T, st *Store) []string {
 	t.Helper()
-	rows, err := st.query(`SELECT cohort, attributed_ou FROM prediction_purge_owners ORDER BY cohort, attributed_ou`)
+	rows, err := st.query(`SELECT cohort, attributed_ou FROM prediction_purge_owners`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +94,7 @@ func evidence(t *testing.T, st *Store) []string {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -104,6 +107,26 @@ func evidenceSet(entries ...string) []string {
 }
 
 func ev(cohort string, ou int64) string { return fmt.Sprintf("%s/%d", cohort, ou) }
+
+// The expectation helpers sort the "cohort/ou" strings lexically, so evidence() has to return the
+// same order. Owners whose ids straddle a decimal-digit boundary (9 and 10) are numerically ordered
+// by the database but lexically ordered by the test; the Postgres id sequence is shared across a
+// whole run, so such ids appear on their own, and a correct change must not turn the gate red.
+func TestEvidenceHelperAgreesWithItsExpectationAcrossDigitBoundaries(t *testing.T) {
+	retentionDrivers(t, func(t *testing.T, s *Server) {
+		st := s.st
+		for _, ou := range []int64{9, 10, 99, 100} {
+			if _, err := st.exec(`INSERT INTO prediction_purge_owners(rtype, cohort, attributed_ou) VALUES(?,?,?)`,
+				predTestRtype, "2025-04", ou); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := evidenceSet(ev("2025-04", 9), ev("2025-04", 10), ev("2025-04", 99), ev("2025-04", 100))
+		if got := evidence(t, st); !reflect.DeepEqual(got, want) {
+			t.Fatalf("evidence = %v; want %v", got, want)
+		}
+	})
+}
 
 // failStatements makes every INSERT (or DELETE) on table abort until the test ends, so a test can
 // prove that what ran earlier in the same transaction was rolled back with it.
