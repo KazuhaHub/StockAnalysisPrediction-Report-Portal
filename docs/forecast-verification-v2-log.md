@@ -231,17 +231,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
-  P23 `feat/quote-ledger-capability`, based directly on main, implemented explicit
-  capability isolation, operator-order selection, uncached walk with isolated health/per-pass
-  breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
-  reviewed, along with admin source diagnostics, atomic source-order auditing, primary-removal
-  confirmation, source-panel frontend integration, readiness item 6 and daily no-source alerts.
-  ADR 0041 records V9, renumbered to avoid Apps' 0038/0040. Full local Go/Postgres, frontend and
-  targeted race checks passed; the final branch-wide review and exact-head PR CI remain gates.
-  Final branch-wide review, full exact-head CI and local browser verification passed before
-  merging #152. Current local work is P24 `feat/cli-quote-probe`, started from `08b1c1a0`;
-  its pure comparison foundation is implemented, with capture/manifest/replay still outstanding.
-- **Next step.** Complete P24's database-free CLI capture/manifest/replay, then P25's bounded shadow
+  P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
+  exact-head CI and local browser verification before merging #152. Current local work is P24
+  `feat/cli-quote-probe`, started from `08b1c1a0`: capture, integrity-checked offline replay,
+  fixed-panel CLI and no-database dispatch guards are implemented and independently reviewed.
+  Full local validation is recorded below; exact-head PR CI remains required before merge.
+- **Next step.** Finish P24's exact-head validation and merge, then P25's bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -1028,3 +1023,43 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   (2.136 s). Frontend files are unchanged. CLI dispatch, fixed panel, offline integrity checks,
   replay/record output and an end-to-end no-database CLI guard remain before P24 can be submitted.
   No schema, production, Apps branch or separately owned PR changed in this checkpoint.
+
+### P24 offline replay and command integration (2026-10-22)
+
+- Added `quote-probe capture|compare` dispatch before the server/configuration path. Capture uses
+  the fixed three-index/twenty-stock panel across main, ChiNext, STAR, 689 and Beijing codes, plus
+  unique operator-supplied suspended codes. Source selection accepts every compiled-in candidate,
+  including Yahoo, without granting settlement or changing runtime source order/health.
+- The version-1 manifest now declares the source/target matrix, allowing replay to reject missing,
+  reordered or duplicate attempts rather than silently shrink the denominator. Offline replay
+  validates complete/version/window/anchors, canonical targets, identity/source, unadjusted and
+  uncached parsed evidence, all bar validity, exact generated leaf names, regular-file/inode checks,
+  byte counts and SHA-256 hashes. Reads use a retained directory root and individual/aggregate
+  limits; no manifest URL or source fetcher is executed. Hashes detect corruption, not forgery by
+  the evidence author. Raw bodies and normalized parser output are both retained and verified.
+- Count-based history is explicitly labeled and filtered by row date to the capture window before
+  the common shadow comparator. Exact-fen OHLC, date sets and explicit anchors are compared;
+  missing candidate dates remain mismatches, whereas failed/truncated/empty evidence or missing
+  primary anchors is unavailable. No agreement grants admission. Both anchors can be one session.
+- Comparison JSON is deterministic and includes the manifest hash. Without `--record`, replay is
+  read-only. `--record` requires the whole fixed panel, rechecks the manifest identity and creates
+  a private `comparison.json` exclusively; it records failures/mismatches as such, not a pass
+  certificate. Existing files/symlinks are never replaced. The operations runbook documents flags,
+  panel, limits, exit semantics, evidence trust boundary and rollback (revert the command; existing
+  evidence remains files, with no database/state repair).
+- New tests failed before replay/CLI implementation. Controls cover shared-comparator equivalence,
+  repeat determinism, exact one-fen mismatches, matches and count-window isolation, primary/candidate
+  failures, missing anchors, malformed/unknown/trailing JSON, hashes/lengths, path traversal,
+  symlinks, identity/source/adjustment/cache refusal, incomplete matrices and read budgets. Full-panel
+  capture/record uses only a local fake vendor; the database sentinel and directory contents stay
+  identical. Linked-binary help/error checks use a named-pipe `RP_CONFIG` tripwire: an accidental
+  configuration read/server start would hang and fail. Output errors, existing record/symlink and
+  a changed manifest before recording are explicit failures. These guards are positive and negative
+  controls, not source-text matching. The CI scoped race lane now includes both probe/comparator.
+- Independent comparator, capture and full CLI/replay reviews passed. The capture review's real
+  parent-directory substitution finding was fixed and regression-tested in the earlier checkpoint.
+  Final local full Go/SQLite/Postgres passed (app 34.512 s); build, vet and staticcheck passed.
+  Targeted race tests passed three repetitions (5.959 s). Web typecheck, all 121 files/1017 tests
+  (41.70 s) and production SPA build (688 ms) passed. The linked-binary dispatch guard also passed.
+  Exact-head PR CI remains the merge gate. No live vendor measurement, production, schema,
+  evaluator enablement, Apps branch mutation or fallback write occurred.

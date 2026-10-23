@@ -55,6 +55,8 @@ type quoteProbeManifest struct {
 	From      string             `json:"from"`
 	To        string             `json:"to"`
 	Complete  bool               `json:"complete"`
+	Sources   []string           `json:"sources"`
+	Targets   []quoteProbeTarget `json:"targets"`
 	Records   []quoteProbeRecord `json:"records"`
 }
 
@@ -120,7 +122,7 @@ func captureQuoteProbe(ctx context.Context, options quoteProbeCaptureOptions, re
 	}
 	defer func() { err = errors.Join(err, root.Close()) }()
 	manifest = quoteProbeManifest{Version: 1, CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		From: window.from, To: window.to, Records: []quoteProbeRecord{}}
+		From: window.from, To: window.to, Sources: append([]string{}, options.Sources...), Targets: targets, Records: []quoteProbeRecord{}}
 	defer func() {
 		body, marshalErr := json.MarshalIndent(manifest, "", "  ")
 		if marshalErr == nil {
