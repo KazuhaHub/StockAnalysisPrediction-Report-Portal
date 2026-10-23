@@ -209,7 +209,11 @@ func (s *Server) apiAdminQuotesSave(w http.ResponseWriter, r *http.Request, user
 	}
 
 	if in.Order != nil {
-		s.st.SetSetting(setQuoteSourceOrder, order)
+		entry := AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user), IP: s.auditIP(r)}
+		if err := s.st.saveQuoteOrder(r.Context(), order, entry); err != nil {
+			jsonError(w, http.StatusInternalServerError, "could not save quote source order")
+			return
+		}
 	}
 	if in.TTLOpenSecs != nil {
 		s.st.SetSetting(setQuoteTTLOpenSecs, strconv.Itoa(quoteClampSecs(*in.TTLOpenSecs, quoteTTLOpenFloor)))

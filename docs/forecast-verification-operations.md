@@ -140,3 +140,10 @@ absent configuration. A new pass resets its breaker, not the recorded diagnostic
 This contract describes the local P23 work, not a production rollout. Readiness item 6, watchdog
 integration, source-panel presentation and source-order confirmation remain separate integration
 work. Do not enable the evaluator on the strength of configuration diagnostics alone.
+
+Source-order saves additionally write `quote.order` with the effective `from` and `to` source
+arrays, actor, organizational unit and request address. Equivalent spellings, repeated saves and
+an explicit shipped order versus its reset form do not create duplicate transitions. Because the
+order now controls durable settlement, this dedicated transition and its audit commit together;
+an audit failure rolls the order back and returns an error before other submitted settings are
+written. The existing general policy audit remains separate. This adds no database shape.

@@ -189,6 +189,7 @@
   "audit.a.group.create": "创建组织单元",
   "audit.a.group.delete": "删除组织单元",
   "audit.a.policy.change": "变更策略",
+  "audit.a.quote.order": "变更行情源顺序",
   "audit.a.report.create": "撰写报告",
   "audit.a.report.delete": "删除研报",
   "audit.a.report.edit": "编辑报告",

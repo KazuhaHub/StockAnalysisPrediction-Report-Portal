@@ -189,6 +189,7 @@
   "audit.a.group.create": "created an OU",
   "audit.a.group.delete": "deleted an OU",
   "audit.a.policy.change": "changed a policy",
+  "audit.a.quote.order": "changed the quote source order",
   "audit.a.report.create": "wrote a report",
   "audit.a.report.delete": "deleted a report",
   "audit.a.report.edit": "edited a report",

@@ -833,3 +833,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   is unchanged after the reviewed head. Three race-enabled admin-test repetitions including this
   control passed (3.414 s). Frontend, readiness, alert and audit work remain unreviewed
   and outstanding; no production, schema or Apps action was performed.
+
+### P23 source-order audit checkpoint (2026-10-22, in progress)
+
+- Added the dedicated `quote.order` action and three locale labels (zh-TW generated through the
+  normal OpenCC script). It records effective source arrays, not raw spelling, and preserves the
+  actor/OU/address. Equivalent or repeated order saves do not add a transition. The existing
+  general quote-policy audit is unchanged and remains a separate record.
+- Source order now governs durable settlement, so its dedicated audit and setting update share
+  one transaction. Audit failure rolls the order back and refuses the request before other
+  submitted fields are written. The transaction acquires SQLite's writer lock before its read
+  and locks the Postgres settings row; all work uses the transaction handle. No schema changed.
+- Red controls showed the previous handler wrote no dedicated transition and reported success
+  after an audit failure. Focused audit/vocabulary/locale/legacy-policy tests passed after the
+  change (0.727 s), including both drivers. Ten concurrent order changes form a serial audit
+  chain ending at the persisted configuration under a two-second context deadline.
+- Read-only merge previews at pre-change head `24003238` were clean against Apps PR 141 head
+  `b4741355` and PR 142 head `c4402084`; inspected audit hunks are disjoint. Post-change previews,
+  full checks and independent review remain pending. No Apps branch or separately owned PR was
+  edited. UI confirmation, readiness/alerts, panel presentation and the source ADR remain open.
