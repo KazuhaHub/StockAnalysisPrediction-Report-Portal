@@ -224,25 +224,21 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
   P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
   `c4f0c93c` after independent review and full exact-head CI/CodeQL.
+  P25 #155 is merged at `402a0fa0` after exact-head CI/CodeQL and independent review.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
   previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
   is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26/P37
   integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
-  at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
-  awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
+  at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 is now
+  integrating main `402a0fa0`, including the DOMPurify #138 dependency fix, for fresh validation.
   P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
   exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
-  offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
-  `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
-  implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
-  Persisted diagnostic storage and post-ledger runtime selection/execution are implemented and
-  independently reviewed. Administrator controls/diagnostics and shipped Sina comparison-only
-  admission are implemented and reviewed, with complete local regression. Exact-head PR CI and
-  final merge remain outstanding; no production enablement is implied.
-- **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
-  comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
+  offline replay, fixed-panel CLI and no-database dispatch guards are merged. P25's bounded Sina
+  comparison-only runtime, audited controls, durable counters and administrator diagnostics are
+  merged without alternate writers. No production enablement is implied.
+- **Next step.** Complete current-base P37 review/CI. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
@@ -680,6 +676,31 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   vendor evidence and live chart quotes; later reader/layout PRs still own their UI states.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
+
+### P37 — exchange-backed reading projections (2026-10-22)
+
+- Implements build document section 8.7 and owner decision V23(a) independently from P16/P26.
+  The verified SSE 2026 annual closure notice is recorded beside the runtime table. No
+  unverified 2027 dates are included; a missing year anywhere in a checkpoint interval falls
+  back to a weekday lower bound without an expected flag. Government make-up weekends stay closed.
+- Reading marks carry optional `expected: true` only for covered projections. The panel chooses
+  expected versus on-or-after wording; all locales and the OpenAPI read descriptions document
+  the distinction. This is derived response metadata, not a database column or settlement input.
+- Tests pin the demo's d20=2026-10-26 and d60=2026-12-21, receipt-close boundaries, holiday starts,
+  unknown-year and frozen-S0 fallback, and clearing derived qualifiers on terminal marks.
+  Independent review found a frozen S0 outside the generated window could be substituted while
+  retaining the expected flag. A failing regression reproduced it; qualification now requires
+  that the frozen S0 be preserved. Follow-up review found no additional actionable issue.
+- The source guard rejects projection-table use outside the read annotation path, including
+  package initializers. Temporarily adding a table lookup to evaluator wake scheduling made
+  that guard fail; the mutation was restored. A runtime test separately pins the old wake date.
+- Validation: full Go/SQLite regression, full Go regression with Postgres (app package 35.608 s),
+  vet/staticcheck, three-repeat targeted race checks (3.544 s), web typecheck and all 120 Vitest
+  files / 1007 tests passed. The production SPA build and serialized Go embed rebuild passed.
+  December maintenance is documented in the operations runbook. No production, Apps branch,
+  schema, evaluator mode or pending P16/P26 merge was changed.
+- P16 integration must preserve the new qualification flag alongside its published-calendar
+  and overdue rules; a scheduled closure is not exact observed evidence for its 48-hour rule.
 
 ### P23 capability-boundary checkpoint (2026-10-22, in progress)
 
@@ -1286,3 +1307,44 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   current Apps merge previews and final PR review remain before merge. Revert the implementation to
   stop runtime comparisons; existing meta diagnostics are ignored by an older build. No ledger
   repair is needed and comparison agreement never authorizes Tier 2 writes.
+
+### P25 merge and P37 current-main integration (2026-10-22)
+
+- P25 #155 merged as `402a0fa04c493096130d5f26ab9dfbbf693ca14b` after independent branch-wide
+  review and exact-head validation at `f95ba872d523c89c4e4c4de4d7198e2d5ffeae32`. Full PR CI
+  `39897457304` and CodeQL `39897453146` passed. The scoped race job completed successfully;
+  main-only full-race shards and release cross-compilation were skipped by policy, not passed.
+  Read-only merge previews against Apps PR 141 head `b4741355118c28d95dcf3c096115963ce5936f01`
+  and PR 142 head `c4402084f245d957e32d758339f1053853307664` were textually clean. Neither
+  Apps branch changed, and combined runtime acceptance was not claimed. Final local embedded-SPA
+  inspection declared Tencent as the sole writer and Sina as the comparison-only peer; evaluation
+  and comparison remained off, and the isolated preview server/browser were stopped.
+- Resumed P37 #151 in its existing clean calendar worktree, preserving its prior implementation
+  and tests. Merged current main `402a0fa0`; only the execution log conflicted. Both historical
+  sections are retained, and current progress now reflects actual merges and remaining gates.
+  DOMPurify 3.4.17 is included from the owner-approved #138 merge, without a duplicate dependency
+  change or audit bypass. Complete current-base validation and independent re-review are next.
+
+- Current-base full Go/SQLite/Postgres passed (app 92.973 s); build, vet and staticcheck passed.
+  Three targeted projection/read-isolation race repetitions passed (2.746 s). Web typecheck and
+  all 122 test files / 1023 tests passed. The production dependency audit has zero moderate/high/
+  critical findings and five existing low-severity KaTeX/transitive findings; no audit bypass was
+  used. SPA build and serialized embed build are checked before committing the integration.
+  The SSE 2026 annual notice and current official closure listing were re-read: all seven table
+  spans match the notice, while no verified 2027 notice was found in that listing. Unknown years
+  therefore remain deliberately absent rather than inventing next-year closure data. Independent
+  current-base review and exact-head PR CI remain required before merge.
+
+### P37 receipt-consistent frozen baseline hardening (2026-10-22)
+
+- Current-base adversarial review found another qualifier edge: a frozen open S0 within the
+  generated session window could be preserved while contradicting receipt-derived S0. Receipt
+  `2026-09-17T16:00:00+08:00` with frozen `2026-09-16` incorrectly claimed an expected d5 date.
+  New earlier/same-day-after-close/later frozen-date controls reproduced the defect before repair.
+  Qualification now additionally requires that the exchange-schedule `predS0` reproduce frozen S0;
+  otherwise it retains the existing unqualified weekday fallback without changing stored data.
+- Every valid receipt/holiday fixture now also supplies its correct frozen S0 and requires the
+  identical qualified schedule, preventing a blanket frozen-baseline refusal. Three targeted
+  local race repetitions passed (2.683 s); independent follow-up race repetitions passed (2.602 s)
+  and explicitly closed the finding with no further actionable issue. Final full Go/Postgres
+  regression is repeated after the repair; unchanged frontend validation remains recorded above.

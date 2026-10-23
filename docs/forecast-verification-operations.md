@@ -113,6 +113,21 @@ becomes the lower of the dump and live values, and a restored `1` is capped at `
 (`restore_gates_empty`, audited). Re-check deliberately: run a dry pass, record the gates, send the
 test alert, then switch on if that is intended.
 
+## December projection-calendar maintenance
+
+After the exchanges publish their annual closure notices, verify the current and next calendar
+years in `internal/app/forecast_calendar.go` against those notices. Record the source URL beside
+each year's data and include later exchange amendments. Exchange weekends remain closed even
+when the government designates them as make-up working days. Do not substitute a public-holiday
+calendar for exchange evidence, or invent an unpublished year's dates.
+
+Run `TestProjectionMatchesKnownCalendars`, `TestMissingYearDegradesToOnOrAfter` and
+`TestSettlementNeverReadsTheTable`, plus the reading-panel tests. The last test guards the boundary:
+this table changes reading-page estimates only, never settlement or evaluator wake scheduling.
+An interval crossing a missing year must retain the weekday "on or after" wording rather than
+claim an expected exchange date. In October 2026 the verified runtime table covers 2026 only;
+2027 remains deliberately absent pending its annual notice and December review.
+
 ## Recording an incident
 
 Record the time, the mode, the signal, the affected sets or benchmark codes, what the log said, and

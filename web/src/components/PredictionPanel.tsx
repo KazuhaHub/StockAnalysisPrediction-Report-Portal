@@ -89,10 +89,10 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   )
 
   // A pending mark is not a failure. The server sends the phase and the earliest date it can settle
-  // (a weekday projection); the panel only chooses the words.
+  // (an exchange-backed estimate or weekday lower bound); the panel only chooses the words.
   const phaseText = (m: PredictionMark) => {
     const onOrAfter = (date?: string) =>
-      date ? t('forecast.phase.on_or_after', { date }) : t('forecast.phase.waiting')
+      date ? t(m.expected ? 'forecast.phase.expected' : 'forecast.phase.on_or_after', { date }) : t('forecast.phase.waiting')
     switch (m.phase) {
       case 'waiting_s0':
         return `${t('forecast.phase.waiting_s0')}${m.not_before ? ` · ${onOrAfter(m.not_before)}` : ''}`

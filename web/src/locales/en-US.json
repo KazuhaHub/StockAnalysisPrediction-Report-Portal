@@ -2242,6 +2242,7 @@
   "forecast.alert.err.slackStatus": "Slack answered HTTP {{code}}.",
   "forecast.phase.waiting_s0": "Waiting for the first session",
   "forecast.phase.waiting": "Waiting",
+  "forecast.phase.expected": "Expected {{date}}",
   "forecast.phase.on_or_after": "On or after {{date}}",
   "forecast.phase.retrying": "Retrying",
   "forecast.phase.resolved": "Settled",

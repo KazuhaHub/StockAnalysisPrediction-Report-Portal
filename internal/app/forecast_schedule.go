@@ -3,8 +3,8 @@ package app
 // Checkpoint scheduling (P1, ADR 0029 §4).
 //
 // This file is the ONE statement of the checkpoint arithmetic. The evaluator calls it with the
-// benchmark's COMPLETED sessions; the read path (P10/P16) calls it with a weekday projection, where
-// every date is a lower bound because holidays only ever delay a session. Nothing else computes a
+// benchmark's COMPLETED sessions; the read path uses a verified exchange-schedule projection or
+// a weekday lower bound when coverage is missing. Neither is observed settlement evidence. Nothing else computes a
 // checkpoint date, so "when is this mark due" cannot drift between the settlement and the display.
 //
 // S0 follows the 15:00 rule (predS0); dN is the Nth session AFTER S0.
@@ -278,30 +278,32 @@ func refusalClassOf(code string) string {
 	return refusalSource
 }
 
-// annotateReadPhases fills each mark's reading-page phase from a WEEKDAY projection, never a vendor
-// calendar. A holiday can make a projected date one or two sessions early, never late, so the page
-// can say "on or after <date>" truthfully without a fetch.
+// annotateReadPhases uses the exchange closure schedule for expected dates and weekday lower
+// bounds for intervals without verified coverage. It never fetches a vendor calendar.
 //
 // The vocabulary is deliberately small, and `retrying` is only ever reached with evidence: a mark
 // that has never recorded a failed attempt is waiting, not failing.
 func annotateReadPhases(sets []PredictionSet, now time.Time) {
 	for i := range sets {
 		set := &sets[i]
+		for j := range set.Marks {
+			set.Marks[j].Phase, set.Marks[j].NotBefore, set.Marks[j].Expected = "", "", false
+		}
 		madeAt, ok := setMadeAt(forecastWorkSet{MadeAt: set.MadeAt, MadeOn: set.MadeOn})
 		if !ok {
 			continue
 		}
-		madeOn := madeAt.In(chinaZone).Format("2006-01-02")
-		sessions := predProjectSessions(shiftDays(madeOn, -1), 220)
+		baseline, baselineExpected := predReadProjection("d5", madeAt, set.HorizonStd, set.S0Date)
 		s0 := set.S0Date
 		s0Projected := s0 == ""
 		if s0Projected {
-			s0 = projectedS0(madeAt)
+			s0 = baseline.S0
 		}
 		s0Ready := s0 != "" && readSessionCompleted(s0, now)
 		today := now.In(chinaZone).Format("2006-01-02")
 		for j := range set.Marks {
 			m := &set.Marks[j]
+			m.Expected = false
 			switch m.Status {
 			case markResolved:
 				m.Phase = "resolved"
@@ -312,15 +314,17 @@ func annotateReadPhases(sets []PredictionSet, now time.Time) {
 			}
 			if s0Projected && !s0Ready {
 				m.Phase, m.NotBefore = "waiting_s0", s0
+				m.Expected = baselineExpected
 				continue
 			}
-			sch := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, s0, sessions)
+			sch, expected := predReadProjection(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date)
 			if sch.Due == "" {
 				m.Phase = "waiting"
 				continue
 			}
 			if today < sch.Due {
 				m.Phase, m.NotBefore = "waiting", sch.Due
+				m.Expected = expected
 				continue
 			}
 			if m.SessionDate != "" {
@@ -330,6 +334,7 @@ func annotateReadPhases(sets []PredictionSet, now time.Time) {
 				continue
 			}
 			m.Phase, m.NotBefore = "waiting", sch.Due
+			m.Expected = expected
 		}
 	}
 }

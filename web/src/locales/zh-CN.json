@@ -2242,6 +2242,7 @@
   "forecast.alert.err.slackStatus": "Slack 返回 HTTP {{code}}。",
   "forecast.phase.waiting_s0": "等待首个交易日",
   "forecast.phase.waiting": "等待中",
+  "forecast.phase.expected": "预计 {{date}}",
   "forecast.phase.on_or_after": "预计 {{date}} 或之后",
   "forecast.phase.retrying": "重试中",
   "forecast.phase.resolved": "已结算",
