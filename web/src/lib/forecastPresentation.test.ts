@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { theme } from 'antd'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { coveragePalette, forecastLinkColor, forecastPalette, forecastWarningText, formatProbability, formatSigned } from './forecastPresentation'
+import { coveragePalette, forecastLinkColor, forecastPalette, forecastPressedPalette, forecastWarningText, formatProbability, formatSigned } from './forecastPresentation'
 
 function luminance(hex: string) {
   const channels = hex.replace('#', '').match(/../g)!.map((v) => parseInt(v, 16) / 255)
@@ -60,6 +60,24 @@ describe('forecast presentation', () => {
     const a = luminance(forecastLinkColor(token))
     const b = luminance(surface)
     expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // The quick range in force is drawn on antd's primary tint. The link colour clears AA on the plain
+  // surfaces, but on the dark theme's tint it measured 3.62:1, so the label takes the body text colour
+  // and the link colour is kept for the border and the check, which only have to reach 3:1 (WCAG 1.4.11).
+  it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('keeps the selected quick range legible on its own tint in each theme', (algorithm) => {
+    const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
+    const pressed = forecastPressedPalette(token)
+    const tint = over(pressed.background, token.colorBgContainer)
+    expect(contrast(over(pressed.text, pressed.background), tint)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(over(pressed.icon, pressed.background), tint)).toBeGreaterThanOrEqual(3)
+    expect(contrast(over(pressed.border, token.colorBgContainer), over(token.colorBgContainer, token.colorBgContainer))).toBeGreaterThanOrEqual(3)
+  })
+
+  it('keeps the case it replaced failing: the link colour on the dark theme\'s tint is under AA', () => {
+    const token = theme.getDesignToken({ algorithm: theme.darkAlgorithm, token: { colorPrimary: '#1677ff' } })
+    const tint = over(token.colorPrimaryBg, token.colorBgContainer)
+    expect(contrast(over(forecastLinkColor(token), token.colorPrimaryBg), tint)).toBeLessThan(4.5)
   })
 
   // The warning chip and the cap hint sit on a warning tint (light) or the dark surface's tint.

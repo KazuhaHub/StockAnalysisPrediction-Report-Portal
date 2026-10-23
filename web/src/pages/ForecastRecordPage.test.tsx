@@ -1060,8 +1060,9 @@ describe('ForecastRecordPage custom range', () => {
   })
 
   // aria-pressed tells a screen reader which range is in force; a sighted reader had four identical
-  // buttons. The selected one is drawn in the page's link colour with a border, a tint and a check, so
-  // the state is not carried by colour alone.
+  // buttons. The selected one is drawn with a link-coloured border, a tint and a check, so the state is
+  // not carried by colour alone. Its label stays in the body text colour: the link colour measured
+  // 3.62:1 on the dark theme's tint.
   it('draws the quick range in force as selected, and the others plainly', async () => {
     apiMock.get.mockResolvedValue(record(metadata()))
     show()
@@ -1070,12 +1071,17 @@ describe('ForecastRecordPage custom range', () => {
     const presets = await screen.findByRole('group', { name: 'forecast.range.presets' })
     const probe = document.createElement('span')
     probe.style.color = forecastLinkColor(theme.getDesignToken())
+    const text = document.createElement('span')
+    text.style.color = theme.getDesignToken().colorText
     const pressed = within(presets).getByRole('button', { pressed: true })
     expect(pressed.textContent).toBe('forecast.range.preset.since_ledger')
     expect(pressed.style.borderColor).toBe(probe.style.color)
-    expect(pressed.style.color).toBe(probe.style.color)
+    expect(pressed.style.color).toBe(text.style.color)
+    expect(pressed.style.color).not.toBe(probe.style.color)
     expect(pressed.style.background).not.toBe('')
-    expect(pressed.querySelector('.anticon-check')).not.toBeNull()
+    const check = pressed.querySelector<HTMLElement>('.anticon-check')
+    expect(check).not.toBeNull()
+    expect(check!.style.color).toBe(probe.style.color)
     // The check is a picture: the button's name is its label alone.
     expect(within(presets).getByRole('button', { name: 'forecast.range.preset.since_ledger' })).toBe(pressed)
     const others = within(presets).getAllByRole('button', { pressed: false })

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import type { ForecastGrouping, ForecastMetric, ForecastMode } from '../../api/types'
 import { MONTH_WINDOW, rangePresets, type BenchRun, type RangeLimits } from '../../lib/forecast'
-import { forecastLinkColor } from '../../lib/forecastPresentation'
+import { forecastLinkColor, forecastPressedPalette } from '../../lib/forecastPresentation'
 import Quiet from './Quiet'
 
 // The controls under the tabs: which report type, which benchmark the cohorts were scored against,
@@ -62,6 +62,7 @@ export default function ForecastToolbar(p: Props) {
   // A type named by the link is shown even when the server did not list it (it is the one asked for).
   const shownType = p.rtype || (types.length === 1 ? types[0] : '')
 
+  const pressedLook = forecastPressedPalette(token)
   const rangeLabel = useId()
   const presets = rangePresets(p.today, p.ledgerStart, p.limits)
   const date = (value: string) => (value ? dayjs(value) : null)
@@ -148,16 +149,18 @@ export default function ForecastToolbar(p: Props) {
           {presets.length > 0 && (
             <span data-part="presets" role="group" aria-label={t('forecast.range.presets')} style={item}>
               {presets.map((preset) => {
-                // The range in force is drawn as selected, not only exposed as pressed: border, tint and
-                // a check in the page's AA link colour, so the state is not carried by colour alone.
+                // The range in force is drawn as selected, not only exposed as pressed: a border and a
+                // check in the page's AA link colour and a tint, so the state is not carried by colour
+                // alone. The label stays in the body text colour, which is the one that clears AA on
+                // the tint in both themes.
                 const pressed = preset.from === p.from && preset.to === p.to
                 return (
                   <Button
                     key={preset.key}
                     size="small"
                     aria-pressed={pressed}
-                    icon={pressed ? <CheckOutlined aria-hidden="true" /> : undefined}
-                    style={pressed ? { borderColor: link.color, color: link.color, background: token.colorPrimaryBg } : undefined}
+                    icon={pressed ? <CheckOutlined aria-hidden="true" style={{ color: pressedLook.icon }} /> : undefined}
+                    style={pressed ? { borderColor: pressedLook.border, color: pressedLook.text, background: pressedLook.background } : undefined}
                     onClick={() => p.onChange({ from: preset.from, to: preset.to })}
                   >
                     {t(`forecast.range.preset.${preset.key}`)}

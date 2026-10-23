@@ -41,6 +41,15 @@ export function forecastLinkColor(token: GlobalToken): string {
   return token.blue7
 }
 
+// The quick range in force: a tint, a border and a check. The label stays in the body text colour
+// because the link colour, which clears AA on the plain surfaces, measures 3.62:1 on the dark theme's
+// primary tint. The border and the check are graphics and only need 3:1, which the link colour gives
+// on both tints.
+export function forecastPressedPalette(token: GlobalToken) {
+  const link = forecastLinkColor(token)
+  return { border: link, icon: link, text: token.colorText, background: token.colorPrimaryBg }
+}
+
 export function formatSigned(value: number | undefined, digits = 1): string {
   if (value === undefined || !Number.isFinite(value)) return '—'
   const text = value.toFixed(digits)
