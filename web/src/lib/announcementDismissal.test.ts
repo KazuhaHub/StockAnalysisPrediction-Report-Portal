@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { announcementSig, dismissPopup, loadDismissals, migrateLegacyDismissal } from './announcementDismissal'
+import { announcementSig, dismissBanner, dismissPopup, loadDismissals, migrateLegacyDismissal } from './announcementDismissal'
 import type { Announcement } from '../api/types'
 
 const MAP_KEY = 'report-portal.announce.dismissed.v1.alice'
@@ -36,6 +36,26 @@ describe('announcementSig', () => {
 
 describe('dismissal storage', () => {
   beforeEach(() => window.localStorage.clear())
+
+  // The production report: an operator switched "readers can close it" off, and readers who had
+  // closed the band while it was allowed never saw it again. The switch is read when the dismissal
+  // is consulted, not only when it is made.
+  it('honours a closed band only while the announcement may be closed', () => {
+    const open = announcement({ dismissible: true })
+    dismissBanner('alice', open)
+    expect(loadDismissals('alice', [open]).bannerDismissed(open)).toBe(true)
+
+    const locked = announcement({ dismissible: false })
+    expect(loadDismissals('alice', [locked]).bannerDismissed(locked)).toBe(false)
+    // Ignored, not erased — the same rule as garbage collection: what the feed says right now is
+    // never a reason to delete what the reader chose.
+    expect(loadDismissals('alice', [open]).bannerDismissed(open)).toBe(true)
+  })
+
+  it('never stores a band dismissal the operator did not allow', () => {
+    dismissBanner('alice', announcement({ dismissible: false }))
+    expect(window.localStorage.getItem(MAP_KEY)).toBeNull()
+  })
 
   it('keeps dismissals per announcement and per reader', () => {
     const a = announcement({ id: 1 })

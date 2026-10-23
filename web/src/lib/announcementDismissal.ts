@@ -20,6 +20,13 @@
 // would have had to reproduce JSON.stringify plus UTF-16 iteration byte for byte, and a near miss
 // would have re-fired the popup for every user on upgrade day — the exact thing the migration is
 // for.
+//
+// The band's dismissal is gated by the operator's "readers can close it" switch at the moment it is
+// CONSULTED, not only when it is made: a band closed while the switch was on is shown again once it
+// is off — ignored, not erased, so switching it back on restores what the reader chose — and none is
+// stored while it is off. Checking only at write time was the bug: readers who had closed a band
+// before the operator locked it never saw it again. The popup's footer is not governed by the switch
+// (see ADR 0025).
 
 import type { Announcement } from '../api/types'
 
@@ -176,7 +183,7 @@ export function migrateLegacyDismissal(user: string, items: Announcement[], now 
 export interface DismissalState {
   /** Has this reader silenced this announcement's popup for good? */
   popupDismissed: (a: Announcement) => boolean
-  /** Has this reader closed this announcement's banner for good? */
+  /** Has this reader closed this announcement's banner, and may they still? */
   bannerDismissed: (a: Announcement) => boolean
   /** Has this reader acknowledged this popup in THIS browser session? */
   seenThisSession: (a: Announcement) => boolean
@@ -188,7 +195,7 @@ export function loadDismissals(user: string, items: Announcement[]): DismissalSt
   const matches = (key: string, a: Announcement) => map[key]?.sig === announcementSig(a)
   return {
     popupDismissed: (a) => matches(popupKey(a.id), a),
-    bannerDismissed: (a) => matches(bannerKey(a.id), a),
+    bannerDismissed: (a) => a.dismissible && matches(bannerKey(a.id), a),
     seenThisSession: (a) => seen.has(`${a.id}:${announcementSig(a)}`),
   }
 }
@@ -202,6 +209,7 @@ export function dismissPopup(user: string, a: Announcement, now = Date.now()) {
 
 /** Persist "I closed this banner" for one announcement, at its current wording. */
 export function dismissBanner(user: string, a: Announcement, now = Date.now()) {
+  if (!a.dismissible) return
   const map = loadMap(user)
   map[bannerKey(a.id)] = { sig: announcementSig(a), at: now }
   saveMap(user, map, now)

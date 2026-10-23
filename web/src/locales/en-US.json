@@ -89,6 +89,7 @@
   "announcementAdmin.crowded": "{{count}} announcements are live at once. Readers will not get through that many — consider merging some, giving the older ones an end time, or switching a few off.",
   "announcementAdmin.deleteConfirm": "Delete this announcement?",
   "announcementAdmin.dismissible": "Readers can close it",
+  "announcementAdmin.dismissibleHint": "When on, the band gets a close button. When off, it has none, and a band a reader closed earlier shows again. The popup always offers \"Got it\" and \"Don't show again\".",
   "announcementAdmin.display": "How it is shown",
   "announcementAdmin.display.both": "Band and popup",
   "announcementAdmin.display.popup": "Popup only",

@@ -47,13 +47,17 @@ function announcement(over: Partial<Announcement> = {}): Announcement {
 
 // The two surfaces AppLayout mounts together: the strip (every in-scope row) and the single popup
 // over it. One list now, whatever the scope, so there is no home-only band to mount beside it.
-function renderAt(path = '/') {
-  return render(
+function tree(path: string) {
+  return (
     <MemoryRouter initialEntries={[path]}>
       <AnnouncementStrip />
       <AnnouncementPopup />
-    </MemoryRouter>,
+    </MemoryRouter>
   )
+}
+
+function renderAt(path = '/') {
+  return render(tree(path))
 }
 
 describe('SiteAnnouncement', () => {
@@ -278,6 +282,38 @@ describe('SiteAnnouncement', () => {
     await user.click(close)
     await waitFor(() => expect(screen.queryByText('可关闭')).toBeNull())
     expect(screen.getByText('不可关闭')).toBeTruthy()
+  })
+
+  // The production report: an operator turned "readers can close it" off, yet readers could still
+  // close the band and it stayed gone after a reload. Expected: no close control, any earlier
+  // dismissal ignored, and the band back after a reload.
+  it('brings back a band the reader closed once the operator stops allowing it', async () => {
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: true })]
+    const user = userEvent.setup()
+    renderAt('/queue')
+    await user.click(await screen.findByRole('button', { name: 'announcement.close' }))
+    await waitFor(() => expect(screen.queryByText('维护通知')).toBeNull())
+
+    cleanup()
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: false })]
+    renderAt('/queue') // a reload
+    expect(await screen.findByText('维护通知')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'announcement.close' })).toBeNull()
+  })
+
+  // The same change arriving by the 60-second poll, in a tab where the reader closed the band from
+  // the payload that still allowed it: the next payload puts it back without a reload.
+  it('re-shows a closed band when the next payload no longer allows closing it', async () => {
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: true })]
+    const user = userEvent.setup()
+    const { rerender } = renderAt('/queue')
+    await user.click(await screen.findByRole('button', { name: 'announcement.close' }))
+    await waitFor(() => expect(screen.queryByText('维护通知')).toBeNull())
+
+    feed.items = [announcement({ id: 1, title: '维护通知', scope: 'app', dismissible: false })]
+    rerender(tree('/queue'))
+    expect(await screen.findByText('维护通知')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'announcement.close' })).toBeNull()
   })
 
   // The old key held a bare hash with no id beside it. The imported row keeps the level, title and

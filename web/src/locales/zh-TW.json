@@ -89,6 +89,7 @@
   "announcementAdmin.crowded": "當前有 {{count}} 條公告同時生效。讀者一次看不完這麼多，考慮合併幾條、給舊的設定結束時間，或先關掉一部分。",
   "announcementAdmin.deleteConfirm": "確定刪除這條公告？",
   "announcementAdmin.dismissible": "允許讀者關閉",
+  "announcementAdmin.dismissibleHint": "開啟後條帶顯示關閉按鈕；關閉後不顯示，讀者先前關閉過的條帶也會重新顯示。彈窗始終提供「知道了」和「不再顯示」。",
   "announcementAdmin.display": "展示方式",
   "announcementAdmin.display.both": "條帶 + 彈窗",
   "announcementAdmin.display.popup": "僅彈窗",

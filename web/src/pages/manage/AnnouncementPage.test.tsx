@@ -14,6 +14,7 @@ const apiMock = vi.hoisted(() => ({
 }))
 
 const forgetTagsMock = vi.hoisted(() => vi.fn())
+const refreshFeedMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../api/client', () => ({
   api: apiMock,
@@ -25,6 +26,16 @@ vi.mock('../../lib/conditionalGet', () => ({
   UNCHANGED: Symbol('unchanged'),
   getIfChanged: vi.fn(),
 }))
+
+// The shell's reader feed. The page has to make it reload after a change, not only drop its ETag:
+// a dropped tag alone waits for the next 60-second poll.
+vi.mock('../../announcements', async () => {
+  const actual = await vi.importActual<typeof import('../../announcements')>('../../announcements')
+  return {
+    ...actual,
+    useAnnouncements: () => ({ items: [], collapse: false, refresh: refreshFeedMock }),
+  }
+})
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, o?: Record<string, unknown>) => (o?.count ? `${k}:${o.count}` : k) }),
@@ -81,6 +92,8 @@ describe('AnnouncementPage', () => {
   beforeEach(() => {
     for (const fn of Object.values(apiMock)) fn.mockReset()
     forgetTagsMock.mockReset()
+    refreshFeedMock.mockReset()
+    refreshFeedMock.mockResolvedValue(undefined)
     apiMock.get.mockResolvedValue({ items: [announcement()], groups: GROUPS, users: USERS })
     apiMock.post.mockResolvedValue({ ok: true, id: 9 })
     apiMock.put.mockResolvedValue({ ok: true })
@@ -199,6 +212,28 @@ describe('AnnouncementPage', () => {
     renderPage()
     await user.click(await screen.findByRole('switch', { name: 'announcementAdmin.enabled' }))
     await waitFor(() => expect(forgetTagsMock).toHaveBeenCalledWith('/api/announcements'))
+    await waitFor(() => expect(refreshFeedMock).toHaveBeenCalled())
+  })
+
+  // The path in the production report. Without the reload, the admin's own shell kept the payload
+  // that still allowed closing for up to a minute, so the band they went back to check still had
+  // its close button — and closing it then stored a dismissal.
+  it('reloads the shell’s feed after saving "readers can close it" off', async () => {
+    apiMock.get.mockResolvedValue({ items: [announcement({ dismissible: true })], groups: GROUPS, users: USERS })
+    const user = userEvent.setup()
+    const { container } = renderPage()
+    await screen.findByText('维护窗口')
+
+    await user.click(container.querySelector('.anticon-edit')!.closest('button')!)
+    const sw = await screen.findByRole('switch', { name: 'announcementAdmin.dismissible' })
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await user.click(sw)
+    await user.click(screen.getByRole('button', { name: /common\.save/ }))
+
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1))
+    expect(apiMock.put.mock.calls[0][1]).toMatchObject({ dismissible: false })
+    await waitFor(() => expect(refreshFeedMock).toHaveBeenCalled())
+    expect(forgetTagsMock).toHaveBeenCalledWith('/api/announcements')
   })
 
   it('names the audience on a targeted row', async () => {
