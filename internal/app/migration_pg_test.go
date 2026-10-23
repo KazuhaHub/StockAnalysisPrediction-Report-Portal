@@ -47,7 +47,7 @@ func TestPostgresMigrationsCatchUpAndStayPut(t *testing.T) {
 	windBackToThePreviousRelease(t, st)
 	st.Close()
 
-	migrated, err := OpenStore("postgres", dsn)
+	migrated, err := openStoreForMode("postgres", dsn, true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}

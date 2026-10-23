@@ -124,7 +124,8 @@ The pairing must be recorded, not inferred from an enabled display source.
 
 Each benchmark return must use two closes from one series; S0 comes only from the primary, and a
 stock alternative must reproduce the frozen S0 anchor to the fen. No new exclusion class may hide
-disagreement. The plan calls the future provenance step `0007`, subject to rechecking identifiers
+disagreement. The future provenance step is now proposed as `0008` (`0007` was assigned to the
+owner-approved purge ownership evidence), subject to rechecking identifiers
 and owner approval of its shape and upgrade path. No such step is authorized or implemented here.
 Tier 2 remains outside this build's scope and no earlier than the implementation plan's 2027-01
 boundary; elapsed time alone never grants admission.

@@ -386,6 +386,13 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if err := checkDumpMigrations(rep.Header.Migrations, steps); err != nil {
 		return nil, err
 	}
+	for _, m := range steps[:len(rep.Header.Migrations)] {
+		for _, table := range m.tables {
+			if !containsString(rep.Header.Tables, table) {
+				return nil, fmt.Errorf("backup claims migration %s but omits its table %s", m.id, table)
+			}
+		}
+	}
 	optional := optionalColumns(rep.Header.Migrations, steps)
 	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
@@ -671,6 +678,7 @@ func auditRestoreChange(e migExec, action, key string, detail map[string]any) er
 // is the dry run; the parsing and the column checks are identical either way, so a dry run that
 // passes is real evidence about the file.
 func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map[string]map[string]bool, renamed map[string]map[string]string, identity map[string]string, rep *RestoreReport) error {
+	seenTables := map[string]bool{}
 	var (
 		table  string
 		cols   []string
@@ -722,6 +730,10 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 					cols[i] = to
 				}
 			}
+			if seenTables[table] {
+				return fmt.Errorf("backup repeats table %s", table)
+			}
+			seenTables[table] = true
 			cset, ok := known[table]
 			if !ok {
 				return fmt.Errorf("the backup contains table %q, which this build has no schema for: "+
@@ -780,6 +792,11 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 		}
 		rep.Rows[table]++
 		rep.Total++
+	}
+	for _, table := range rep.Header.Tables {
+		if !seenTables[table] {
+			return fmt.Errorf("backup header declares table %s but its section is missing", table)
+		}
 	}
 	return closeStmt()
 }

@@ -23,7 +23,7 @@ func TestPostgresForecastStepApplies(t *testing.T) {
 	windBackToBeforeTheForecastStep(t, st)
 	st.Close()
 
-	migrated, err := OpenStore("postgres", pgDSN(t))
+	migrated, err := openStoreForMode("postgres", pgDSN(t), true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}
@@ -396,13 +396,13 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 			t.Fatalf("winding back 0006: %v", err)
 		}
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k IN (?,?)`, migrationLedgerKey("0006"), migrationLedgerKey("0010")); err != nil {
+	if _, err := st.exec(`DELETE FROM meta WHERE k IN (?,?,?)`, migrationLedgerKey("0006"), migrationLedgerKey("0007"), migrationLedgerKey("0010")); err != nil {
 		t.Fatal(err)
 	}
 	dump := dumpOf(t, st)
 	st.Close()
 
-	fresh, err := OpenStore("postgres", pgDSN(t))
+	fresh, err := openStoreForMode("postgres", pgDSN(t), true)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
