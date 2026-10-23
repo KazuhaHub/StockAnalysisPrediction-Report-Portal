@@ -382,3 +382,91 @@ describe('ForecastMatrix cell states', () => {
   })
 })
 
+// The coverage cell answers "where did this group's reports go?": a bar whose segments add up to the
+// group's reports, each with its own colour and a name, plus a chip for the buckets a reader should
+// not have to decode from colour alone.
+describe('ForecastMatrix coverage', () => {
+  const segs = () => Array.from(document.querySelectorAll('[data-seg]')) as HTMLElement[]
+  const seg = (name: string) => document.querySelector(`[data-seg="${name}"]`) as HTMLElement | null
+  const widthOf = (el: HTMLElement | null) => (el ? parseFloat(el.style.width) : 0)
+  const full = {
+    reports: 100, member: 50, duplicate: 20, absent: 4, rejected: 6, backtest: 3, degraded: 2, mismatch: 1,
+    pending_baseline: 4, pre_live: 5, test: 3, off_benchmark: 2, unknown: 0,
+  }
+  const withCoverage = (coverage: Partial<typeof full>) => {
+    const r = resp({ ...empty, d5: mature })
+    r.groups[0].coverage = { ...full, ...coverage }
+    return r
+  }
+
+  it('draws a segment per bucket family, in distinct colours, that together fill the group\'s reports', () => {
+    show(withCoverage({}))
+    expect(segs().map((el) => el.dataset.seg)).toEqual(['member', 'duplicate', 'missing', 'other', 'pre_live'])
+    expect(widthOf(seg('member'))).toBeCloseTo(50)
+    expect(widthOf(seg('duplicate'))).toBeCloseTo(20)
+    expect(widthOf(seg('missing'))).toBeCloseTo(10)
+    // Backtest, degraded, mismatch, unverified baseline, test and off-benchmark are one family.
+    expect(widthOf(seg('other'))).toBeCloseTo(15)
+    expect(widthOf(seg('pre_live'))).toBeCloseTo(5)
+    expect(segs().reduce((sum, el) => sum + widthOf(el), 0)).toBeCloseTo(100)
+    const backgrounds = segs().map((el) => el.style.background)
+    expect(new Set(backgrounds).size).toBe(backgrounds.length)
+  })
+
+  it('keeps an unknown state in the bar so coverage always adds up', () => {
+    show(withCoverage({ unknown: 5, member: 45 }))
+    expect(widthOf(seg('other'))).toBeCloseTo(20)
+  })
+
+  it('states the counted share as text, never by colour alone', () => {
+    show(withCoverage({}))
+    expect(document.body.textContent).toContain('forecast.cov.summary:{"member":50,"reports":100}')
+  })
+
+  it('names the ledger-start, test and off-benchmark buckets as chips, only when they are not empty', () => {
+    show(withCoverage({}))
+    const chips = Array.from(document.querySelectorAll('[data-chip]')).map((el) => `${(el as HTMLElement).dataset.chip}=${el.textContent}`)
+    expect(chips).toEqual([
+      'pre_live=forecast.cov.pre_live:{"n":5}',
+      'test=forecast.cov.test:{"n":3}',
+      'off_benchmark=forecast.cov.off_benchmark:{"n":2}',
+      'pending_baseline=forecast.cov.pending_baseline:{"n":4}',
+    ])
+  })
+
+  it('draws no chip for a bucket that is empty', () => {
+    show(withCoverage({ pre_live: 0, test: 0, off_benchmark: 0, pending_baseline: 0 }))
+    expect(document.querySelectorAll('[data-chip]')).toHaveLength(0)
+  })
+
+  it('does not divide by zero for a group with no reports', () => {
+    show(withCoverage({ reports: 0, member: 0, duplicate: 0, absent: 0, rejected: 0, backtest: 0, degraded: 0, mismatch: 0, pending_baseline: 0, pre_live: 0, test: 0, off_benchmark: 0 }))
+    for (const el of segs()) expect(el.style.width).not.toMatch(/NaN|Infinity/)
+  })
+
+  it('shows a purged group\'s coverage as purged, not as a zero-report bar', () => {
+    const r = resp({ d5: { state: 'purged' }, d20: { state: 'purged' }, d60: { state: 'purged' }, d120: { state: 'purged' }, h12: { state: 'purged' } } as Record<string, ForecastCell>)
+    r.groups[0].purged_at = '2026-12-01T00:00:00Z'
+    r.groups[0].coverage = { ...full, reports: 0, member: 0, duplicate: 0, absent: 0, rejected: 0, backtest: 0, degraded: 0, mismatch: 0, pending_baseline: 0, pre_live: 0, test: 0, off_benchmark: 0 }
+    show(r)
+    expect(segs()).toHaveLength(0)
+    expect(document.body.textContent).not.toContain('forecast.cov.summary')
+  })
+
+  it('has no bar, no chip and no count anywhere for a reader whose response carries no coverage', () => {
+    show(withheld({ ...empty, d5: { state: 'mature', min_n_met: true, spread_bp: 310, spread_p: 0.012, spread_q: 0.041 } }))
+    expect(segs()).toHaveLength(0)
+    expect(document.querySelectorAll('[data-chip]')).toHaveLength(0)
+  })
+
+  it('explains the buckets in a legend only when coverage is drawn', () => {
+    show(withCoverage({}))
+    expect(screen.getByRole('list', { name: 'forecast.legend.coverage_title' })).toBeTruthy()
+  })
+
+  it('does not draw the coverage legend where there is no coverage', () => {
+    show(withheld({ ...empty, d5: { state: 'mature', min_n_met: true, spread_bp: 310, spread_p: 0.012, spread_q: 0.041 } }))
+    expect(screen.queryByRole('list', { name: 'forecast.legend.coverage_title' })).toBeNull()
+  })
+})
+

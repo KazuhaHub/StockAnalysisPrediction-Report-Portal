@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { theme } from 'antd'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { forecastPalette, formatProbability, formatSigned } from './forecastPresentation'
+import { coveragePalette, forecastPalette, formatProbability, formatSigned } from './forecastPresentation'
 
 function luminance(hex: string) {
   const channels = hex.replace('#', '').match(/../g)!.map((v) => parseInt(v, 16) / 255)
@@ -20,6 +20,20 @@ describe('forecast presentation', () => {
       const b = luminance(tone.background)
       expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(4.5)
     }
+  })
+
+  // In the default theme antd's info colour IS the primary colour, so a bar that drew "counted" in the
+  // primary and "repeat run" in the info colour drew them identically. The segments must differ in
+  // both themes, including for a custom seed where info and primary coincide.
+  it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('gives every coverage segment its own colour in each theme', (algorithm) => {
+    const token = theme.getDesignToken({ algorithm, token: { colorPrimary: '#1677ff' } })
+    expect(token.colorInfo).toBe(token.colorPrimary)
+    const palette = coveragePalette(token)
+    const colours = [palette.member, palette.duplicate, palette.missing, palette.other]
+    expect(new Set(colours).size).toBe(colours.length)
+    // The ledger-start segment is told apart by pattern as well as colour.
+    expect(palette.preLive).toContain('repeating-linear-gradient')
+    expect(palette.preLive).not.toContain(palette.other)
   })
 
   it('preserves zero and missing values while formatting signed figures and probabilities', () => {

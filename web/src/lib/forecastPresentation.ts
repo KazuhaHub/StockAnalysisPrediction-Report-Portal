@@ -10,6 +10,22 @@ export function forecastPalette(token: GlobalToken) {
   }
 }
 
+// The coverage bar's segments. In the default theme antd's info colour is the primary colour, so a
+// bar that drew "counted" in the primary and "repeat run" in the info colour drew them identically;
+// the duplicate segment takes a lighter step of the same blue instead (a lighter one in dark mode,
+// where the generated light steps are near-black), and the ledger-start segment is hatched so it is
+// told apart by pattern as well as by shade.
+export function coveragePalette(token: GlobalToken) {
+  const dark = token.colorBgBase !== '#fff' && token.colorBgBase !== '#ffffff'
+  return {
+    member: token.colorPrimary,
+    duplicate: dark ? token.blue7 : token.blue3,
+    missing: token.colorWarning,
+    other: token.colorTextQuaternary,
+    preLive: `repeating-linear-gradient(135deg, ${token.colorTextTertiary} 0 3px, transparent 3px 6px)`,
+  }
+}
+
 export function formatSigned(value: number | undefined, digits = 1): string {
   if (value === undefined || !Number.isFinite(value)) return '—'
   const text = value.toFixed(digits)

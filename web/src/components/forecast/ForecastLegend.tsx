@@ -1,19 +1,45 @@
 import { theme } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { forecastPalette } from '../../lib/forecastPresentation'
+import { coveragePalette, forecastPalette } from '../../lib/forecastPresentation'
 
-export default function ForecastLegend() {
+// What the matrix's shades and patterns mean. Two lists, because they answer two questions: the
+// first says what a cell's colour claims (a significant result, or no claim, or not a result yet),
+// the second, drawn only where the response carries coverage, says where a group's reports went.
+
+export default function ForecastLegend({ coverage = false }: { coverage?: boolean }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const palette = forecastPalette(token)
+  const cov = coveragePalette(token)
+  const list = { display: 'flex', flexWrap: 'wrap', gap: 12, listStyle: 'none', padding: 0, margin: 0, alignItems: 'center' } as const
+  const swatch = { display: 'inline-block', width: 12, height: 12, borderRadius: 3, verticalAlign: -1, marginRight: 5 } as const
+  const entries = [
+    ['member', cov.member], ['duplicate', cov.duplicate], ['missing', cov.missing], ['other', cov.other], ['pre_live', cov.preLive],
+  ] as const
   return (
-    <ul aria-label={t('forecast.legend.title')} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, listStyle: 'none', padding: 0, margin: 0 }}>
-      {(['positive', 'negative', 'neutral'] as const).map((name) => (
-        <li key={name} style={{ background: palette[name].background, color: palette[name].foreground, padding: '4px 8px', borderRadius: 4 }}>
-          <span aria-hidden="true">{name === 'positive' ? '▲' : name === 'negative' ? '▼' : '○'} </span>
-          {t(`forecast.legend.${name}`)}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <ul aria-label={t('forecast.legend.title')} style={list}>
+        {(['positive', 'negative', 'neutral'] as const).map((name) => (
+          <li key={name} style={{ background: palette[name].background, color: palette[name].foreground, padding: '4px 8px', borderRadius: 4 }}>
+            <span aria-hidden="true">{name === 'positive' ? '▲' : name === 'negative' ? '▼' : '○'} </span>
+            {t(`forecast.legend.${name}`)}
+          </li>
+        ))}
+        <li style={{ fontSize: 12, color: token.colorTextSecondary }}>
+          <span aria-hidden="true" style={{ ...swatch, border: `1px dashed ${token.colorBorder}`, background: token.colorFillQuaternary }} />
+          {t('forecast.legend.open')}
         </li>
-      ))}
-    </ul>
+      </ul>
+      {coverage && (
+        <ul aria-label={t('forecast.legend.coverage_title')} style={{ ...list, fontSize: 12, color: token.colorTextSecondary }}>
+          {entries.map(([name, background]) => (
+            <li key={name}>
+              <span aria-hidden="true" style={{ ...swatch, background }} />
+              {t(`forecast.legend.cov.${name}`)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

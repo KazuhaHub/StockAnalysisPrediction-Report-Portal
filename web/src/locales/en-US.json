@@ -2337,5 +2337,13 @@
   "forecast.cell.from_month": "From {{month}}",
   "forecast.cell.cap": "Final refusals {{refused}}/{{total}} ({{pct}}%)",
   "forecast.cell.cap_hint": "Above the 5% cap · not published",
-  "forecast.phase.unknown": "Unknown"
+  "forecast.phase.unknown": "Unknown",
+  "forecast.cov.pre_live": "Before ledger start {{n}}",
+  "forecast.legend.open": "Not ended yet",
+  "forecast.legend.coverage_title": "Coverage",
+  "forecast.legend.cov.member": "Counted",
+  "forecast.legend.cov.duplicate": "Repeat run",
+  "forecast.legend.cov.missing": "Missing or rejected",
+  "forecast.legend.cov.other": "Backtest, degraded, baseline mismatch or unverified, test, off-benchmark",
+  "forecast.legend.cov.pre_live": "Before the ledger start"
 }

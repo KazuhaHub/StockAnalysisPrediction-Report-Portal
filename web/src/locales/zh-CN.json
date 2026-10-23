@@ -2337,5 +2337,13 @@
   "forecast.cell.from_month": "{{month}} 起",
   "forecast.cell.cap": "终局拒绝 {{refused}}/{{total}}（{{pct}}%）",
   "forecast.cell.cap_hint": "超过 5% 上限 · 不发布",
-  "forecast.phase.unknown": "未知"
+  "forecast.phase.unknown": "未知",
+  "forecast.cov.pre_live": "账本起点前 {{n}}",
+  "forecast.legend.open": "批次未结束",
+  "forecast.legend.coverage_title": "覆盖",
+  "forecast.legend.cov.member": "计入",
+  "forecast.legend.cov.duplicate": "重复运行",
+  "forecast.legend.cov.missing": "缺少预测或被拒",
+  "forecast.legend.cov.other": "回测、降级、基准价不符、基准未核对、测试、基准不符",
+  "forecast.legend.cov.pre_live": "账本起点前"
 }

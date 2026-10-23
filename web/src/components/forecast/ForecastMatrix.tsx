@@ -1,6 +1,5 @@
 import { useId, type CSSProperties } from 'react'
 import { Tag, Typography, theme } from 'antd'
-import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type {
   ForecastCheckpoint,
@@ -11,6 +10,7 @@ import type {
 } from '../../api/types'
 import { gateText } from '../../lib/forecast'
 import ForecastCellView from './ForecastCellView'
+import ForecastCoverage from './ForecastCoverage'
 import ForecastLegend from './ForecastLegend'
 
 // The verification matrix (plan §8.1).
@@ -40,60 +40,6 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
   const { token } = theme.useToken()
   // The gate flag's explanation is drawn once, as text, and each flagged cell points at it.
   const gateHintId = useId()
-
-  const coverageBar = (g: ForecastGroup) => {
-    const c = g.coverage
-    if (!c) return null
-    const total = Math.max(1, c.reports)
-    const seg = (n: number, colour: string) => (
-      <i style={{ display: 'block', height: 6, width: `${(n / total) * 100}%`, background: colour }} />
-    )
-    const rejected = c.rejected
-    return (
-      <div style={{ minWidth: 132 }}>
-        <div style={{ display: 'flex', borderRadius: 3, overflow: 'hidden', background: token.colorFillQuaternary }}>
-          {seg(c.member, token.colorPrimary)}
-          {seg(c.duplicate, token.colorInfo)}
-          {seg(c.absent + c.rejected, token.colorWarning)}
-          {seg(c.backtest + c.degraded + c.mismatch + c.pre_live + c.test + c.off_benchmark, token.colorFillSecondary)}
-        </div>
-        <div style={{ fontSize: 12, color: token.colorTextSecondary, marginTop: 3 }}>
-          {t('forecast.cov.summary', { member: c.member, reports: c.reports })}
-          {rejected > 0 && (
-            <>
-              {' · '}
-              {auditLink ? (
-                <Link to="/manage/audit?action=predictions.reject">
-                  <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                    {t('forecast.cov.rejected', { n: rejected })}
-                  </Typography.Text>
-                </Link>
-              ) : (
-                <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                  {t('forecast.cov.rejected', { n: rejected })}
-                </Typography.Text>
-              )}
-            </>
-          )}
-        </div>
-        {c.pending_baseline > 0 && (
-          <div style={{ fontSize: 12, color: token.colorWarning }}>
-            {t('forecast.cov.pending_baseline', { n: c.pending_baseline })}
-          </div>
-        )}
-        {c.test > 0 && (
-          <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
-            {t('forecast.cov.test', { n: c.test })}
-          </div>
-        )}
-        {c.off_benchmark > 0 && (
-          <div style={{ fontSize: 12, color: token.colorTextSecondary }}>
-            {t('forecast.cov.off_benchmark', { n: c.off_benchmark })}
-          </div>
-        )}
-      </div>
-    )
-  }
 
   // A flag stands where a count would have been, so it needs its meaning on the page: the badge
   // alone says "n >= 30" and nothing about which sample that is, and a hover title is not reachable
@@ -129,7 +75,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
         {' · '}
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Typography.Text>
-      <ForecastLegend />
+      <ForecastLegend coverage={showCoverage} />
       {showsGate && (
         <Typography.Text id={gateHintId} type="secondary" style={{ fontSize: 12 }}>
           {t('forecast.cell.min_n_met_hint')}
@@ -182,7 +128,11 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                     ) : null}
                   </td>
                 ))}
-                {showCoverage && <td style={td}>{coverageBar(g)}</td>}
+                {showCoverage && (
+                  <td style={td}>
+                    <ForecastCoverage group={g} auditLink={auditLink} />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
