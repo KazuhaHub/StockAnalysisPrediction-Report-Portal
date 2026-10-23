@@ -8,6 +8,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
+	"unicode"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
 
 func TestOpenAPIReadSchemasCoverWireFields(t *testing.T) {
@@ -427,4 +431,233 @@ func TestOpenAPIPredictionEnumsMatchTheGoVocabulary(t *testing.T) {
 	if probPat != reProb.String() {
 		t.Errorf("PredictionProbability.pattern = %q, Go pattern = %q", probPat, reProb.String())
 	}
+}
+
+// TestOpenAPIDocumentsForecastUnavailableOnPredictionReads ties the documented 403 on the two v1
+// prediction reads to what the handlers answer. The 403 has two bodies: forecast_unavailable in the
+// flat {error, code} envelope (an app-bridge token, a session at scope none) and enrolment_required
+// in the v1 Error envelope (a cookie session held at the enrolment wall). The spec documents both as
+// alternatives and every live body must match one of them.
+func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
+	var spec map[string]any
+	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
+		t.Fatalf("openapi.json is not valid JSON: %v", err)
+	}
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	bridge := s.appTok.mint([]string{"query"}, time.Now())
+	seedForecastReader(t, s, "doc-none", scopeNone, false)
+	walled := seedForecastReader(t, s, "doc-walled", scopeAll, false)
+	if err := s.st.SetGroupRequire2FA(walled, true); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	en := map[string]any{}
+	if err := json.Unmarshal(openapiJSONForLang(t, "en-US"), &en); err != nil {
+		t.Fatal(err)
+	}
+	for path, concrete := range map[string]string{
+		"/api/v1/reports/{id}/predictions": "/api/v1/reports/1/predictions",
+		"/api/v1/predictions":              "/api/v1/predictions?symbol=600160",
+	} {
+		get := spec["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)
+		resp, ok := get["responses"].(map[string]any)["403"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s documents no 403 response", path)
+		}
+		alternatives, _ := resp["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["oneOf"].([]any)
+		if len(alternatives) != 2 {
+			t.Fatalf("%s: the 403 schema must list both bodies as oneOf, got %v", path, resp["content"])
+		}
+		var flatCode, nestedCode string
+		for _, alt := range alternatives {
+			props := alt.(map[string]any)["properties"].(map[string]any)
+			if code, ok := props["code"].(map[string]any); ok {
+				if props["error"].(map[string]any)["type"] != "string" {
+					t.Errorf("%s: the flat 403 body must declare error as a string", path)
+				}
+				flatCode, _ = code["const"].(string)
+			} else if e, ok := props["error"].(map[string]any); ok {
+				if e["type"] != "object" || props["ok"].(map[string]any)["const"] != false {
+					t.Errorf("%s: the v1 403 body must declare ok=false and an error object", path)
+				}
+				nestedCode, _ = e["properties"].(map[string]any)["code"].(map[string]any)["const"].(string)
+			}
+		}
+		if flatCode != "forecast_unavailable" || nestedCode != "enrolment_required" {
+			t.Fatalf("%s documents the wrong 403 codes: flat %q, v1 %q", path, flatCode, nestedCode)
+		}
+		base := resp["description"].(string)
+		enGet := en["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)
+		enDesc := enGet["responses"].(map[string]any)["403"].(map[string]any)["description"].(string)
+		for _, desc := range []string{base, enDesc} {
+			if !strings.Contains(desc, flatCode) || !strings.Contains(desc, nestedCode) {
+				t.Errorf("%s: the 403 description must name both codes: %q", path, desc)
+			}
+		}
+		if !strings.ContainsFunc(base, func(r rune) bool { return unicode.Is(unicode.Han, r) }) {
+			t.Errorf("%s: the base (zh-CN) 403 description is not Chinese: %q", path, base)
+		}
+		if enDesc == base {
+			t.Errorf("%s: the en-US 403 description was not localized", path)
+		}
+		if !strings.Contains(get["description"].(string), "forecast_unavailable") {
+			t.Errorf("%s: the operation description does not mention the bridge refusal", path)
+		}
+		// Every v1 change carries en-US and zh-TW blocks; the zh-TW text is OpenCC output, so it differs
+		// from the zh-CN base but is never empty.
+		for _, holder := range []map[string]any{get, resp} {
+			twBlock, _ := holder["x-i18n"].(map[string]any)["zh-TW"].(map[string]any)
+			if desc, _ := twBlock["description"].(string); desc == "" {
+				t.Errorf("%s: a zh-TW description is missing", path)
+			}
+		}
+
+		for _, tc := range []struct {
+			who  string
+			req  func() *http.Request
+			flat bool
+			code string
+		}{
+			{"bridge token", func() *http.Request {
+				r := httptest.NewRequest("GET", concrete, nil)
+				r.Header.Set("Authorization", "Bearer "+bridge)
+				return r
+			}, true, flatCode},
+			{"session at none", func() *http.Request { return sessionForPath(t, s, "doc-none", "", concrete) }, true, flatCode},
+			{"session held at the wall", func() *http.Request { return sessionForPath(t, s, "doc-walled", "", concrete) }, false, nestedCode},
+		} {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, tc.req())
+			var body map[string]any
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s as %s: %v", path, tc.who, err)
+			}
+			if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != tc.code {
+				t.Fatalf("%s as %s answered %d %s; the spec documents 403 %s", path, tc.who, w.Code, w.Body.String(), tc.code)
+			}
+			_, errIsString := body["error"].(string)
+			if errIsString != tc.flat {
+				t.Errorf("%s as %s: body %s is in the wrong envelope (flat=%v)", path, tc.who, w.Body.String(), tc.flat)
+			}
+			if !tc.flat && body["ok"] != false {
+				t.Errorf("%s as %s: the v1 envelope must carry ok=false: %s", path, tc.who, w.Body.String())
+			}
+		}
+	}
+}
+
+func openapiJSONForLang(t *testing.T, lang string) []byte {
+	t.Helper()
+	out, err := localizedOpenAPIJSON(lang)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestOpenAPIDocumentsEditionLinksOnTheCookiePredictionRead ties the documented response of the
+// per-report prediction read to what a browser session is actually answered. A cookie session at
+// card or full stage gets two edition links beside the sets, and an integrator who reads the spec
+// must be told the fields exist. Every top-level field of a live response has to be documented, and
+// every field of a live link has to be a property of the documented link.
+func TestOpenAPIDocumentsEditionLinksOnTheCookiePredictionRead(t *testing.T) {
+	eachReaderServer(t, func(t *testing.T, s *Server) {
+		s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
+		fx := seedEditionFixture(t, s)
+		grantSiblingEdition(t, s)
+		path := "/api/v1/reports/" + itoa64(fx.current) + "/predictions"
+		r := sessionForPath(t, s, "edition-all", "GET /api/v1/reports/{id}/predictions", path)
+		r.SetPathValue("id", itoa64(fx.current))
+		w := httptest.NewRecorder()
+		s.v1ReportPredictions(w, r)
+		var live map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &live); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("cookie read: %d %s: %v", w.Code, w.Body.String(), err)
+		}
+		for _, field := range []string{"sibling", "counted_edition"} {
+			if _, ok := live[field].(map[string]any); !ok {
+				t.Fatalf("the fixture no longer produces %s on the cookie read: %s", field, w.Body.String())
+			}
+		}
+		for _, lang := range []string{"zh-CN", "zh-TW", "en-US"} {
+			var spec map[string]any
+			if err := json.Unmarshal(openapiJSONForLang(t, lang), &spec); err != nil {
+				t.Fatal(err)
+			}
+			schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+			documented := map[string]bool{}
+			response := schemas["ReportPredictionReadResponse"].(map[string]any)
+			for _, part := range response["allOf"].([]any) {
+				part := part.(map[string]any)
+				if ref, ok := part["$ref"].(string); ok {
+					for name := range schemas[strings.TrimPrefix(ref, "#/components/schemas/")].(map[string]any)["properties"].(map[string]any) {
+						documented[name] = true
+					}
+				}
+				if props, ok := part["properties"].(map[string]any); ok {
+					for name := range props {
+						documented[name] = true
+					}
+				}
+			}
+			for field := range live {
+				if !documented[field] {
+					t.Errorf("%s: the cookie read returns %q, which the spec does not document", lang, field)
+				}
+			}
+			edition, ok := schemas["PredictionReadEdition"].(map[string]any)
+			if !ok {
+				t.Errorf("%s: the spec has no PredictionReadEdition schema", lang)
+				continue
+			}
+			props := edition["properties"].(map[string]any)
+			for field := range live["sibling"].(map[string]any) {
+				if props[field] == nil {
+					t.Errorf("%s: an edition link returns %q, which the spec does not document", lang, field)
+				}
+			}
+			for i := 0; i < reflect.TypeOf(forecastReadingEdition{}).NumField(); i++ {
+				field := strings.Split(reflect.TypeOf(forecastReadingEdition{}).Field(i).Tag.Get("json"), ",")[0]
+				if props[field] == nil {
+					t.Errorf("%s: the edition link schema misses wire field %s", lang, field)
+				}
+				if !containsStr(toStrings(edition["required"]), field) {
+					t.Errorf("%s: the edition link schema does not require %s", lang, field)
+				}
+			}
+			for _, field := range []string{"sibling", "counted_edition"} {
+				if ref := responseProperty(schemas, field)["$ref"]; ref != "#/components/schemas/PredictionReadEdition" {
+					t.Errorf("%s: %s is documented as %v", lang, field, ref)
+				}
+			}
+			op := spec["paths"].(map[string]any)["/api/v1/reports/{id}/predictions"].(map[string]any)["get"].(map[string]any)
+			for _, field := range []string{"sibling", "counted_edition"} {
+				if !strings.Contains(op["description"].(string), field) {
+					t.Errorf("%s: the operation description does not mention %s", lang, field)
+				}
+			}
+		}
+	})
+}
+
+func toStrings(raw any) []string {
+	var out []string
+	for _, v := range raw.([]any) {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
+// responseProperty finds one property of the per-report response across its allOf parts.
+func responseProperty(schemas map[string]any, name string) map[string]any {
+	for _, part := range schemas["ReportPredictionReadResponse"].(map[string]any)["allOf"].([]any) {
+		if props, ok := part.(map[string]any)["properties"].(map[string]any); ok {
+			if prop, ok := props[name].(map[string]any); ok {
+				return prop
+			}
+		}
+	}
+	return map[string]any{}
 }

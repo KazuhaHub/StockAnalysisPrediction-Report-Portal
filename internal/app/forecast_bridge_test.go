@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// App-bridge tokens get no forecast reads. The in-memory app-token registry carries no user, so the
+// portal cannot tell which account's scope a bridge token would stand for; until the shared token
+// binding lands, the only safe answer is a refusal. These tests pin that refusal and the two
+// credentials that must keep working around it.
+
+// mintForecastBridge mints a bridge token through the real mint path (apiAppToken), exactly as the
+// host page does when a user opens an installed app.
 func mintForecastBridge(t *testing.T, s *Server, user string) string {
 	t.Helper()
 	if err := s.st.InstallApp(App{ID: "forecast-reader", Name: "Forecast reader", Entry: "index.html", Scopes: []string{"query"}},
@@ -33,7 +40,9 @@ func mintForecastBridge(t *testing.T, s *Server, user string) string {
 
 func bridgePredictionRequest(s *Server, token, path string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("GET", path, nil)
-	r.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		r.Header.Set("Authorization", "Bearer "+token)
+	}
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -41,14 +50,11 @@ func bridgePredictionRequest(s *Server, token, path string) *httptest.ResponseRe
 	return w
 }
 
-func TestBridgeTokenCarriesItsUser(t *testing.T) {
-	s := tokenServer(t)
-	s.appTok = newAppTokens(time.Hour)
-	for _, scope := range []string{scopeAll, scopeOwn, scopeNone} {
-		seedForecastReader(t, s, scope, scope, false)
-	}
-	mustAddUser(t, s, "bridge-admin", true)
-	report, accepted := seedLedgerFor(t, s, "600160", "2026-10-17", "# accepted")
+// bridgeLedger seeds one accepted report-backed set, one rejected set and one orphaned set for the
+// same symbol, and returns the paths of both v1 prediction reads.
+func bridgeLedger(t *testing.T, s *Server) (report, accepted int64, paths []string) {
+	t.Helper()
+	report, accepted = seedLedgerFor(t, s, "600160", "2026-10-17", "# accepted")
 	_, rejected := seedLedgerFor(t, s, "600160", "2026-10-18", "# rejected")
 	if _, err := s.st.exec(`UPDATE prediction_sets SET state='rejected',errors='[{"reason":"fixture"}]' WHERE id=?`, rejected); err != nil {
 		t.Fatal(err)
@@ -57,188 +63,208 @@ func TestBridgeTokenCarriesItsUser(t *testing.T) {
 	if _, err := s.st.DeleteReport(orphan); err != nil {
 		t.Fatal(err)
 	}
-	paths := []string{"/api/v1/reports/" + itoa64(report) + "/predictions?include=payload", "/api/v1/predictions?symbol=600160&include=payload"}
-	for _, user := range []string{scopeNone, scopeAll, scopeOwn, "bridge-admin"} {
-		token := mintForecastBridge(t, s, user)
+	return report, accepted, []string{"/api/v1/reports/" + itoa64(report) + "/predictions?include=payload", "/api/v1/predictions?symbol=600160&include=payload"}
+}
+
+// TestBridgeTokenGetsNoForecastReads: whatever account minted it, a bridge token holding the query
+// scope is refused on both v1 prediction reads, and the refusal carries nothing but the error.
+func TestBridgeTokenGetsNoForecastReads(t *testing.T) {
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	for _, scope := range []string{scopeAll, scopeOwn, scopeNone} {
+		seedForecastReader(t, s, scope, scope, false)
+	}
+	mustAddUser(t, s, "bridge-admin", true)
+	_, _, paths := bridgeLedger(t, s)
+	tokens := map[string]string{"direct-mint": s.appTok.mint([]string{"query"}, time.Now())}
+	for _, user := range []string{scopeAll, scopeOwn, scopeNone, "bridge-admin"} {
+		tokens["minted-by-"+user] = mintForecastBridge(t, s, user)
+	}
+	for name, token := range tokens {
 		for _, path := range paths {
-			t.Run(user+path, func(t *testing.T) {
+			t.Run(name+path, func(t *testing.T) {
 				w := bridgePredictionRequest(s, token, path)
-				if user == scopeNone {
-					if w.Code != 403 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
-						t.Fatalf("none bridge: %d %s", w.Code, w.Body.String())
-					}
-					return
+				if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
+					t.Fatalf("bridge read: %d %s", w.Code, w.Body.String())
 				}
 				var out map[string]any
 				if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 					t.Fatal(err)
 				}
-				if w.Code != 200 {
-					t.Fatalf("allowed bridge: %d %s", w.Code, w.Body.String())
-				}
-				forecastMatrixForbid(t, out, "$", []string{"payload", "errors", "membership", "counted_set_id", "counted_in_group", "attributed_ou"})
-				sets := out["sets"].([]any)
-				if len(sets) != 1 || sets[0].(map[string]any)["id"] != float64(accepted) {
-					t.Fatalf("bridge accepted/report-backed filter: %v", sets)
+				if _, leaked := out["sets"]; leaked || len(out) != 2 {
+					t.Fatalf("refusal carries more than the error: %v", out)
 				}
 			})
 		}
 	}
-	// A legacy/unbound app token must not be mistaken for a persistent machine credential.
+}
+
+// TestBridgeDenialReadsNothingFromTheLedger: with the ledger table gone, a persistent token fails
+// on the read it attempts (500), while a bridge token is still refused at the credential (403). A
+// refusal that happened after a ledger query would surface the same 500.
+func TestBridgeDenialReadsNothingFromTheLedger(t *testing.T) {
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	seedForecastReader(t, s, scopeAll, scopeAll, false)
+	_, _, paths := bridgeLedger(t, s)
+	bridge := mintForecastBridge(t, s, scopeAll)
+	if _, err := s.st.exec("DROP TABLE prediction_sets"); err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range paths {
-		w := bridgePredictionRequest(s, s.appTok.mint([]string{"query"}, time.Now()), path)
-		if w.Code != 403 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
-			t.Fatalf("unbound bridge: %d %s", w.Code, w.Body.String())
+		if w := bridgePredictionRequest(s, "tok-all", path); w.Code != http.StatusInternalServerError {
+			t.Fatalf("control: the persistent token should have reached the missing table: %d %s", w.Code, w.Body.String())
+		}
+		w := bridgePredictionRequest(s, bridge, path)
+		if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
+			t.Fatalf("bridge read touched the ledger: %d %s", w.Code, w.Body.String())
 		}
 	}
 }
 
-func TestBridgePredictionRechecksCurrentAccount(t *testing.T) {
-	for _, change := range []string{"none", "inactive", "deleted", "revision", "recreated", "expired", "mandated"} {
-		t.Run(change, func(t *testing.T) {
-			s := tokenServer(t)
-			s.appTok = newAppTokens(time.Hour)
-			ou := seedForecastReader(t, s, "reader", scopeAll, false)
-			token := mintForecastBridge(t, s, "reader")
-			report, _ := seedLedgerFor(t, s, "600160", "2026-10-17", "# accepted")
-			want, code := 403, "forecast_unavailable"
-			var err error
-			switch change {
-			case "none":
-				_, err = s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeNone, ou)
-			case "inactive":
-				err = s.st.SetUserActive("reader", false)
-			case "deleted":
-				_, err = s.st.exec("DELETE FROM users WHERE username=?", "reader")
-			case "revision":
-				_, err = s.st.exec("UPDATE users SET session_rev=session_rev+1 WHERE username=?", "reader")
-			case "recreated":
-				// Same name, active and all, but a distinct account incarnation.
-				_, err = s.st.exec("UPDATE users SET created_at=? WHERE username=?", "2099-01-01T00:00:00Z", "reader")
-			case "expired":
-				err = s.st.SetUserExpiry("reader", "2000-01-01")
-			case "mandated":
-				err = s.st.SetGroupRequire2FA(ou, true)
-				code = "enrolment_required"
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, path := range []string{"/api/v1/reports/" + itoa64(report) + "/predictions", "/api/v1/predictions?symbol=600160"} {
-				w := bridgePredictionRequest(s, token, path)
-				if w.Code != want || forecastMatrixErrorCode(t, w.Body.Bytes()) != code {
-					t.Fatalf("old bridge after %s: %d %s", change, w.Code, w.Body.String())
-				}
-			}
-		})
-	}
-}
-
-func TestBridgePredictionBecomesRestricted(t *testing.T) {
+// TestBridgeDenialSurvivesStoreError: a closed store neither admits nor crashes a bridge request.
+func TestBridgeDenialSurvivesStoreError(t *testing.T) {
 	s := tokenServer(t)
 	s.appTok = newAppTokens(time.Hour)
-	ou := seedForecastReader(t, s, "reader", scopeAll, false)
-	token := mintForecastBridge(t, s, "reader")
-	if err := s.st.SaveVersion(ReportVersion{Name: "default", Visibility: VisibilityOwner}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.st.SetVersionGrants("default", []string{userPrincipal("reader")}); err != nil {
-		t.Fatal(err)
-	}
-	readable, set := seedLedgerFor(t, s, "600160", "2026-10-17", "# readable")
-	hidden, _ := seedLedgerFor(t, s, "600160", "2026-10-18", "# hidden")
-	if err := s.st.AddReportViewer(readable, "2026-10-17", "reader", 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.st.SetGroupRestricted(ou, true); err != nil {
-		t.Fatal(err)
-	}
-	w := bridgePredictionRequest(s, token, "/api/v1/predictions?symbol=600160&include=payload&limit=1")
-	var out map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if w.Code != 200 {
-		t.Fatalf("restricted bridge: %d %s", w.Code, w.Body.String())
-	}
-	sets := out["sets"].([]any)
-	if len(sets) != 1 || sets[0].(map[string]any)["id"] != float64(set) {
-		t.Fatalf("new restriction ignored or filtering followed LIMIT: %v", sets)
-	}
-	forecastMatrixForbid(t, out, "$", []string{"payload", "errors", "counted_set_id", "counted_in_group"})
-	w = bridgePredictionRequest(s, token, "/api/v1/reports/"+itoa64(hidden)+"/predictions")
-	if w.Code != 404 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "not_found" {
-		t.Fatalf("old token bypassed new report scope: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestBridgePredictionUsesLiveScopeAndCookiePrecedence(t *testing.T) {
-	s := tokenServer(t)
-	s.appTok = newAppTokens(time.Hour)
-	ou := seedForecastReader(t, s, "reader", scopeNone, false)
-	seedForecastReader(t, s, "denied-cookie", scopeNone, false)
-	token := mintForecastBridge(t, s, "reader")
-	seedLedgerFor(t, s, "600160", "2026-10-17", "# accepted")
-	path := "/api/v1/predictions?symbol=600160"
-	w := bridgePredictionRequest(s, token, path)
-	if w.Code != 403 {
-		t.Fatalf("none at mint was allowed: %d", w.Code)
-	}
-	if _, err := s.st.exec("UPDATE user_groups SET forecast_scope=? WHERE id=?", scopeAll, ou); err != nil {
-		t.Fatal(err)
-	}
-	w = bridgePredictionRequest(s, token, path)
-	if w.Code != 200 {
-		t.Fatalf("scope was frozen at mint: %d %s", w.Code, w.Body.String())
-	}
-	// As on the other v1 reads, a valid cookie wins over an accompanying Bearer token.
-	r := sessionForPath(t, s, "denied-cookie", "GET /api/v1/predictions", path)
-	r.Header.Set("Authorization", "Bearer "+token)
-	w = httptest.NewRecorder()
-	s.v1QueryPredictions(w, r)
-	if w.Code != 403 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
-		t.Fatalf("Bearer token overrode denied cookie: %d %s", w.Code, w.Body.String())
-	}
-}
-
-func TestBridgePredictionLookupBoundaries(t *testing.T) {
-	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
-	at := newAppTokens(time.Minute)
-	user := &User{Username: "reader", SessionRev: 7, CreatedAt: "2026-01-01T00:00:00Z"}
-	token := at.mintForApp([]string{"query"}, now, "reader-app", user)
-	entry, ok := at.lookup(token, now)
-	if !ok || entry.username != user.Username || entry.sessionRev != user.SessionRev || entry.accountCreated != user.CreatedAt || entry.appID != "reader-app" {
-		t.Fatalf("binding lost: %+v %v", entry, ok)
-	}
-	if _, ok := at.lookup(token, now.Add(time.Minute-time.Nanosecond)); !ok {
-		t.Fatal("token expired before its deadline")
-	}
-	for _, offset := range []time.Duration{time.Minute, time.Minute + time.Nanosecond} {
-		if _, ok := at.lookup(token, now.Add(offset)); ok {
-			t.Fatal("lookup accepted token at or after expiry")
-		}
-	}
-	for _, token := range []string{"", "unknown", at.mint([]string{"query"}, now), at.mintForApp([]string{"ingest"}, now, "reader-app", user), at.mintForApp([]string{"query"}, now, "reader-app", nil)} {
-		if _, ok := at.lookup(token, now); ok {
-			t.Fatal("unknown, unbound or non-query token acquired prediction identity")
-		}
-	}
-	var absent *appTokens
-	if _, ok := absent.lookup(token, now); ok {
-		t.Fatal("absent registry granted access")
-	}
-}
-
-func TestBridgePredictionDeniesStoreError(t *testing.T) {
-	s := tokenServer(t)
-	s.appTok = newAppTokens(time.Hour)
-	seedForecastReader(t, s, "reader", scopeAll, false)
-	token := mintForecastBridge(t, s, "reader")
+	seedForecastReader(t, s, scopeAll, scopeAll, false)
+	token := mintForecastBridge(t, s, scopeAll)
 	s.st.Close()
 	for _, path := range []string{"/api/v1/reports/1/predictions", "/api/v1/predictions?symbol=600160"} {
 		w := bridgePredictionRequest(s, token, path)
-		if w.Code != 403 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
-			t.Fatalf("store error granted bridge access: %d %s", w.Code, w.Body.String())
+		if w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
+			t.Fatalf("store error changed the bridge answer: %d %s", w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestBridgeCredentialsThatAreNotQueryTokensStayUnauthorized: the 403 is for a live query-scoped
+// bridge token only. A token that is expired, unknown or lacks the query scope is still a 401, so a
+// caller can tell a dead credential from one the portal declines to honour.
+func TestBridgeCredentialsThatAreNotQueryTokensStayUnauthorized(t *testing.T) {
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	_, _, paths := bridgeLedger(t, s)
+	for name, token := range map[string]string{
+		"ingest-only": s.appTok.mint([]string{"ingest"}, time.Now()),
+		"expired":     s.appTok.mint([]string{"query"}, time.Now().Add(-2*time.Hour)),
+		"unknown":     "not-a-token",
+		"none":        "",
+	} {
+		for _, path := range paths {
+			if w := bridgePredictionRequest(s, token, path); w.Code != http.StatusUnauthorized {
+				t.Fatalf("%s %s: %d %s", name, path, w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
+// TestPersistentQueryTokenKeepsTheMachineView: the order is cookie, then persistent token, then
+// every other Bearer. A persistent query token (or an all-scope one) is the documented machine
+// credential and keeps its unscoped diagnostic contract.
+func TestPersistentQueryTokenKeepsTheMachineView(t *testing.T) {
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	if err := s.st.CreateToken("forecast-machine", "test", "query", ""); err != nil {
+		t.Fatal(err)
+	}
+	report, accepted, paths := bridgeLedger(t, s)
+	for _, token := range []string{"forecast-machine", "tok-all"} {
+		for _, path := range paths {
+			w := bridgePredictionRequest(s, token, path)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s %s: %d %s", token, path, w.Code, w.Body.String())
+			}
+			var out struct {
+				Sets []map[string]any `json:"sets"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			states, payloads, errs := map[any]int{}, 0, 0
+			for _, set := range out.Sets {
+				states[set["state"]]++
+				if p, _ := set["payload"].(string); p != "" {
+					payloads++
+				}
+				if e, ok := set["errors"].([]any); ok && len(e) > 0 {
+					errs++
+				}
+				if set["id"] == float64(accepted) && set["report_id"] != float64(report) {
+					t.Fatalf("machine shape lost the report link: %v", set)
+				}
+			}
+			if path == paths[1] && (states[predStateAccepted] != 2 || states[predStateRejected] != 1) {
+				t.Fatalf("machine list is not the unscoped ledger view: %v", states)
+			}
+			if payloads == 0 {
+				t.Fatalf("machine view lost include=payload: %s", w.Body.String())
+			}
+			if path == paths[1] && errs == 0 {
+				t.Fatalf("machine view lost the rejected set's errors: %s", w.Body.String())
+			}
+		}
+	}
+}
+
+// TestCookieReaderStaysScopedOnV1Reads: a cookie user's own decision applies, and a cookie wins over
+// an accompanying Bearer token, whichever way that decision goes.
+func TestCookieReaderStaysScopedOnV1Reads(t *testing.T) {
+	s := tokenServer(t)
+	s.appTok = newAppTokens(time.Hour)
+	seedForecastReader(t, s, "reader", scopeAll, false)
+	seedForecastReader(t, s, "denied", scopeNone, false)
+	seedForecastReader(t, s, "external", scopeAll, true)
+	report, accepted, paths := bridgeLedger(t, s)
+	// The external account reads only what it has been granted: the accepted report.
+	if err := s.st.SaveVersion(ReportVersion{Name: "default", Visibility: VisibilityOwner}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetVersionGrants("default", []string{userPrincipal("external")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.AddReportViewer(report, "2026-10-17", "external", 0); err != nil {
+		t.Fatal(err)
+	}
+	bridge := mintForecastBridge(t, s, "reader")
+	for _, path := range paths {
+		for _, header := range []string{"", "Bearer " + bridge, "Bearer tok-all"} {
+			get := func(user string) *httptest.ResponseRecorder {
+				r := sessionForPath(t, s, user, "", path)
+				if header != "" {
+					r.Header.Set("Authorization", header)
+				}
+				w := httptest.NewRecorder()
+				mux := http.NewServeMux()
+				s.wireRoutes(mux)
+				mux.ServeHTTP(w, r)
+				return w
+			}
+			if w := get("denied"); w.Code != http.StatusForbidden || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
+				t.Fatalf("%q let a Bearer override the denied cookie: %d %s", header, w.Code, w.Body.String())
+			}
+			for _, user := range []string{"reader", "external"} {
+				w := get(user)
+				if w.Code != http.StatusOK {
+					t.Fatalf("%s %q: %d %s", user, header, w.Code, w.Body.String())
+				}
+				var out map[string]any
+				if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				forecastMatrixForbid(t, out, "$", []string{"errors", "attributed_ou"})
+				if user == "external" {
+					forecastMatrixForbid(t, out, "$", []string{"payload", "counted_set_id", "counted_in_group"})
+				}
+				sets := out["sets"].([]any)
+				if user == "external" && (len(sets) != 1 || sets[0].(map[string]any)["id"] != float64(accepted)) {
+					t.Fatalf("external cookie reader is not scoped to accepted report-backed sets: %v", sets)
+				}
+				for _, raw := range sets {
+					if raw.(map[string]any)["state"] != predStateAccepted {
+						t.Fatalf("cookie reader saw a non-accepted set: %v", raw)
+					}
+				}
+			}
 		}
 	}
 }

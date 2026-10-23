@@ -93,48 +93,54 @@ func TestReaderStageAndShadowControlsValidateBeforeEitherWrite(t *testing.T) {
 	}
 }
 
-func TestReaderStageSeparatesCookieReadsFromMachineAndRecord(t *testing.T) {
-	s := newV1Server(t)
-	s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
-	seedForecastReader(t, s, "stage-reader", scopeAll, false)
-	report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2025-06-10", S0Fen: ip(10000)}, "stage fixture")
-	for _, stage := range []string{"off", "broken", "card", "full"} {
-		if err := s.st.SetSetting(setForecastReader, stage); err != nil {
-			t.Fatal(err)
+// TestReaderStageEverywhere pins the stage switch on every session read surface: off, and a value
+// the readers do not recognise, refuse the cookie reads (session routes and the cookie form of both
+// v1 reads) with forecast_unavailable, while a persistent query token is unchanged and the record
+// does not depend on the stage at all.
+func TestReaderStageEverywhere(t *testing.T) {
+	eachReaderServer(t, func(t *testing.T, s *Server) {
+		s.cfg = &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}
+		seedForecastReader(t, s, "stage-reader", scopeAll, false)
+		t.Cleanup(func() { _ = s.st.DeleteSetting(setForecastReader) })
+		report, _ := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2025-06-10", S0Fen: ip(10000)}, "stage fixture")
+		for _, stage := range []string{"off", "broken", "card", "full"} {
+			if err := s.st.SetSetting(setForecastReader, stage); err != nil {
+				t.Fatal(err)
+			}
+			want := 200
+			if stage == "off" || stage == "broken" {
+				want = 403
+			}
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "/api/report/x/predictions", nil)
+			r.SetPathValue("id", itoa64(report))
+			s.apiReportPredictions(w, r, "stage-reader")
+			if w.Code != want || want == 403 && !hasCode(w.Body.Bytes(), "forecast_unavailable") {
+				t.Fatalf("stage %s session report status=%d %s", stage, w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			s.apiQueryPredictions(w, httptest.NewRequest("GET", "/api/predictions?symbol=600001", nil), "stage-reader")
+			if w.Code != want {
+				t.Fatalf("stage %s session query status=%d", stage, w.Code)
+			}
+			w = httptest.NewRecorder()
+			r = sessionForPath(t, s, "stage-reader", "GET /api/v1/reports/{id}/predictions", "/api/v1/reports/"+itoa64(report)+"/predictions")
+			r.SetPathValue("id", itoa64(report))
+			s.v1ReportPredictions(w, r)
+			if w.Code != want {
+				t.Fatalf("stage %s v1 cookie status=%d", stage, w.Code)
+			}
+			w = httptest.NewRecorder()
+			r = httptest.NewRequest("GET", "/api/v1/reports/x/predictions", nil)
+			r.SetPathValue("id", itoa64(report))
+			r.Header.Set("Authorization", "Bearer tok-all")
+			s.v1ReportPredictions(w, r)
+			if w.Code != 200 {
+				t.Fatalf("stage %s changed persistent token: %d %s", stage, w.Code, w.Body.String())
+			}
+			_ = readerGroups(t, s, "stage-reader", "")
 		}
-		want := 200
-		if stage == "off" || stage == "broken" {
-			want = 403
-		}
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/api/report/x/predictions", nil)
-		r.SetPathValue("id", itoa64(report))
-		s.apiReportPredictions(w, r, "stage-reader")
-		if w.Code != want {
-			t.Fatalf("stage %s session report status=%d", stage, w.Code)
-		}
-		w = httptest.NewRecorder()
-		s.apiQueryPredictions(w, httptest.NewRequest("GET", "/api/predictions?symbol=600001", nil), "stage-reader")
-		if w.Code != want {
-			t.Fatalf("stage %s session query status=%d", stage, w.Code)
-		}
-		w = httptest.NewRecorder()
-		r = sessionForPath(t, s, "stage-reader", "GET /api/v1/reports/{id}/predictions", "/api/v1/reports/"+itoa64(report)+"/predictions")
-		r.SetPathValue("id", itoa64(report))
-		s.v1ReportPredictions(w, r)
-		if w.Code != want {
-			t.Fatalf("stage %s v1 cookie status=%d", stage, w.Code)
-		}
-		w = httptest.NewRecorder()
-		r = httptest.NewRequest("GET", "/api/v1/reports/x/predictions", nil)
-		r.SetPathValue("id", itoa64(report))
-		r.Header.Set("Authorization", "Bearer tok-all")
-		s.v1ReportPredictions(w, r)
-		if w.Code != 200 {
-			t.Fatalf("stage %s changed persistent token: %d %s", stage, w.Code, w.Body.String())
-		}
-		_ = readerGroups(t, s, "stage-reader", "")
-	}
+	})
 }
 
 func TestMeForecastReaderStageTracksCurrentPolicy(t *testing.T) {

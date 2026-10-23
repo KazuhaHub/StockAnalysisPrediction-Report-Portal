@@ -143,6 +143,10 @@ type forecastPeriod struct {
 	Start string
 	End   string
 	Label string
+	// cacheTag keeps this period's cells apart from any cell memoised before a purge this reader is
+	// not told about. It is empty for every period whose cells carry no such risk, and it never
+	// reaches a response.
+	cacheTag string
 }
 
 // forecastMembership decides, per symbol, which accepted set is the group's member (D4).
