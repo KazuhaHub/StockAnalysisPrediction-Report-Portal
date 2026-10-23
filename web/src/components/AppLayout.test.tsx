@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
+import ForecastRecordPage from '../pages/ForecastRecordPage'
 
 const updateState = vi.hoisted(() => ({ value: {} as unknown }))
 // The header's queue badge polls through the conditional-GET helper; `queue` decides whether it has
@@ -46,7 +47,13 @@ vi.mock('../prefs', () => ({
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ wide: false }) }))
 vi.mock('../auth', () => ({ useAuth: () => authState.value }))
-vi.mock('../api/client', () => ({ api: { get: apiGet } }))
+vi.mock('../api/client', () => ({
+  api: { get: apiGet },
+  // The record page is mounted for real in one test below; it needs the client's other exports.
+  ApiError: class ApiError extends Error {},
+  errText: () => 'failed',
+  qs: () => '',
+}))
 vi.mock('../lib/updateState', async (orig) => {
   const actual = await orig<typeof import('../lib/updateState')>()
   return { ...actual, useUpdateState: () => updateState.value }
@@ -407,6 +414,24 @@ describe('AppLayout forecast record navigation', () => {
     reader({ scope: 'none', external: false })
     renderAt('/forecast')
     await screen.findByText('forecast-body')
+    await new Promise((r) => setTimeout(r, 30))
+    for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
+  })
+
+  // The shell and the real page together: a reader at none opens /forecast by hand. Nothing in
+  // either asks a forecast or prediction route, and the page says why instead.
+  it('issues no forecast or prediction request when a none reader opens the record page itself', async () => {
+    reader({ scope: 'none', external: false })
+    render(
+      <MemoryRouter initialEntries={['/forecast']}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="forecast" element={<ForecastRecordPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('forecast.record.unavailable')).toBeTruthy()
     await new Promise((r) => setTimeout(r, 30))
     for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
   })
