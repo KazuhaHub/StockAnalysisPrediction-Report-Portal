@@ -450,6 +450,14 @@ func TestOpenAPIDocumentsForecastUnavailableOnPredictionReads(t *testing.T) {
 		if !strings.Contains(get["description"].(string), "forecast_unavailable") {
 			t.Errorf("%s: the operation description does not mention the bridge refusal", path)
 		}
+		// Every v1 change carries en-US and zh-TW blocks; the zh-TW text is OpenCC output, so it differs
+		// from the zh-CN base but is never empty.
+		for _, holder := range []map[string]any{get, resp} {
+			twBlock, _ := holder["x-i18n"].(map[string]any)["zh-TW"].(map[string]any)
+			if desc, _ := twBlock["description"].(string); desc == "" {
+				t.Errorf("%s: a zh-TW description is missing", path)
+			}
+		}
 
 		for _, tc := range []struct {
 			who  string

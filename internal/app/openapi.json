@@ -2029,6 +2029,10 @@
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
             "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "一份報告的結構化預測及其結算結果",
+            "description": "返回該報告歷次入庫寫入的預測集（含被拒、缺席、回測），按寫入時間從早到晚。每集帶其預測項與各檢查點的結算結果。可見性跟隨報告本身的閱讀許可權：讀不到的報告返回 404，而不是空列表。counted_set_id 是參與分組統計的那一集（每個「股票×月份」取最早被接受的一集），0 表示該報告沒有參與統計的集。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
@@ -2152,6 +2156,10 @@
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
             "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "按股票與日期範圍查詢結構化預測",
+            "description": "按 made_on（門戶收到報告的上海日期）過濾，從新到舊返回。symbol 必填。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
