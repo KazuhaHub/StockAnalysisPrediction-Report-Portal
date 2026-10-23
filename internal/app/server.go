@@ -627,6 +627,10 @@ func (s *Server) verify(cookie string) (string, int64) {
 // cookie ("v1|") signed by the same secret.
 const ownerTokenPrefix = "ot1"
 
+// ownerTokenTTL is how long an attribution token stays valid. It bounds how late a workflow may echo
+// the token to the ingest, and the token's issue instant is read back as its expiry minus this.
+const ownerTokenTTL = 7 * 24 * time.Hour
+
 // hasSigningKey reports whether the portal has a secret to sign with. An HMAC over an empty key is
 // well formed and verifiable by anyone who holds the same empty key, so a token minted or accepted
 // without a key would attribute nothing and prove nothing. The startup check (validateSessionSecret)
@@ -649,9 +653,19 @@ func (s *Server) mintOwnerToken(ou int64, user string) string {
 	if !s.hasSigningKey() || (ou == 0 && user == "") {
 		return ""
 	}
-	exp := time.Now().Add(7 * 24 * time.Hour).Unix()
+	exp := time.Now().Add(ownerTokenTTL).Unix()
 	msg := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, ou, user, exp)
 	return encodeSessionMessage(msg) + "." + s.hmac(msg)
+}
+
+// ownerClaims is what a verified attribution token says: the OU and the person the run belonged to,
+// and when the token was minted.
+type ownerClaims struct {
+	OU   int64
+	User string
+	// IssuedAt is the expiry less ownerTokenTTL. A person is named by the account that existed at
+	// this instant, which lets the ingest tell that account from a later one that reused the name.
+	IssuedAt time.Time
 }
 
 // ownerFromToken verifies an attribution token and returns the OU and person it carries. ok=false
@@ -659,20 +673,27 @@ func (s *Server) mintOwnerToken(ou int64, user string) string {
 // all when the portal has no signing key (see hasSigningKey) — the caller then leaves the report
 // unattributed, which fails closed for scoped viewers.
 func (s *Server) ownerFromToken(tok string) (ou int64, user string, ok bool) {
+	c, ok := s.parseOwnerToken(tok)
+	return c.OU, c.User, ok
+}
+
+// parseOwnerToken is ownerFromToken with everything the token says, for the one caller (ingest)
+// that also needs to know when it was minted.
+func (s *Server) parseOwnerToken(tok string) (ownerClaims, bool) {
 	if !s.hasSigningKey() {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	parts := strings.SplitN(tok, ".", 2)
 	if len(parts) != 2 {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	msg := string(raw)
 	if !hmac.Equal([]byte(s.hmac(msg)), []byte(parts[1])) {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	// The message is "ot1|<ou>|<person>|<expiry>". The person is free text (a local account may be
 	// named with the separator itself), so the fixed fields are read from both ends and the person is
@@ -680,25 +701,25 @@ func (s *Server) ownerFromToken(tok string) (ou int64, user string, ok bool) {
 	// leave every such person's runs unattributed, with no error anywhere.
 	rest, found := strings.CutPrefix(msg, ownerTokenPrefix+"|")
 	if !found {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	ouEnd, expSep := strings.Index(rest, "|"), strings.LastIndex(rest, "|")
 	if ouEnd < 0 || expSep <= ouEnd {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
 	exp, err := strconv.ParseInt(rest[expSep+1:], 10, 64)
 	if err != nil || time.Now().Unix() > exp {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
-	ou, err = strconv.ParseInt(rest[:ouEnd], 10, 64)
+	ou, err := strconv.ParseInt(rest[:ouEnd], 10, 64)
 	if err != nil || ou < 0 {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
-	user = rest[ouEnd+1 : expSep]
+	user := rest[ouEnd+1 : expSep]
 	if ou == 0 && user == "" {
-		return 0, "", false
+		return ownerClaims{}, false
 	}
-	return ou, user, true
+	return ownerClaims{OU: ou, User: user, IssuedAt: time.Unix(exp, 0).Add(-ownerTokenTTL)}, true
 }
 
 // currentActiveUser returns the logged-in user only if the account still exists and

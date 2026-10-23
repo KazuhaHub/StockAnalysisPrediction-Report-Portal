@@ -330,13 +330,14 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	// the OU alone would leave them unable to open their own result.
 	// Decoded ONCE, before both users: the report's owner stamp and the set's frozen attribution
 	// come from the same signed token (P38).
-	ou, who, ownerOK := s.ownerFromToken(in.OwnerToken)
+	claims, ownerOK := s.parseOwnerToken(in.OwnerToken)
+	ou := claims.OU
 	if ownerOK {
 		if _, err := s.st.StampReportOwner(id, ou); err != nil {
 			log.Printf("v1 ingest stamp owner id=%d ou=%d: %v", id, ou, err)
 		}
-		if err := s.st.AddReportViewer(id, in.Date, who, ou); err != nil {
-			log.Printf("v1 ingest record viewer id=%d user=%q: %v", id, who, err)
+		if err := s.recordRunRequester(id, in.Date, claims); err != nil {
+			log.Printf("v1 ingest record viewer id=%d user=%q: %v", id, claims.User, err)
 		}
 	}
 	if len(in.Tracking) > 0 {

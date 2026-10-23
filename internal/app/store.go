@@ -342,9 +342,10 @@ func (s *Store) baseSchemaStmts() []string {
 		// revision supersedes is the one currently on the report.
 		//
 		// owner_group (ADR 0022): the OU that generated this report, stamped once at ingest
-		// (first-writer-wins). NULL = internal/legacy/unattributed. NOT part of report identity
-		// (idx_reports_ident below), so two OUs requesting the same symbol|date|subtype|title still
-		// share one upserted row. Nullable, declared here ONCE; the shape check requires it.
+		// (first-writer-wins). NULL = unattributed (legacy, no token, or generated before every run
+		// carried one). NOT part of report identity (idx_reports_ident below), so two OUs requesting
+		// the same symbol|date|subtype|title still share one upserted row. Nullable, declared here
+		// ONCE; the shape check requires it.
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS reports(
 			id %s,
 			title TEXT, symbol TEXT, name TEXT, rtype TEXT, rdate TEXT,

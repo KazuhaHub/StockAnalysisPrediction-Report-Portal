@@ -133,6 +133,12 @@ func TestIngestWritesGroupPrincipalOnlyForRestrictedOUs(t *testing.T) {
 	if err := s.st.SetGroupRestricted(external, true); err != nil {
 		t.Fatal(err)
 	}
+	// The token names a person, and the ingest only records a person who is an account (a deleted
+	// submitter's late ingest writes nothing), so the submitters exist and sit in their OUs.
+	for user, ou := range map[string]int64{"staff": internal, "ext": external} {
+		s.st.UpsertUser(User{Username: user, PasswordHash: "h", Role: "user"})
+		s.st.SetPrimaryGroup(user, ou)
+	}
 	principals := func(reportID int64) []string {
 		t.Helper()
 		rows, err := s.st.query(`SELECT principal FROM report_viewers WHERE report_id=? ORDER BY principal`, reportID)

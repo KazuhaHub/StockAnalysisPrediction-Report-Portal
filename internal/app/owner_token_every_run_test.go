@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // runRecorder remembers the inputs a backend received, one map per run.
@@ -422,5 +423,221 @@ func TestInjectionLeavesTheRunFormAndTemplateAlone(t *testing.T) {
 	}
 	if strings.Contains(dumpAllTables(t, s.st), inputs[ownerTokenInput]) {
 		t.Error("the injected token was written back to the database")
+	}
+}
+
+// A workflow that runs on the Dify-native provider, the path production uses, receives the token as
+// an ordinary run input and echoes it back to an ingest that attributes the set. Every other test
+// here goes through a manifest plugin; this one pins the real provider, so a change in how the
+// native provider assembles its request cannot quietly drop the token.
+func TestRunThroughTheDifyNativeProviderCarriesTheToken(t *testing.T) {
+	s := tokenServer(t)
+	f := newTenancyFixture(t, s)
+
+	rec := &runRecorder{}
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/workflows/run" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		inputs, _ := body["inputs"].(map[string]any)
+		rec.add(inputs)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, `data: {"event":"workflow_started","task_id":"t","workflow_run_id":"run-n","data":{}}`+"\n\n")
+		io.WriteString(w, `data: {"event":"workflow_finished","task_id":"t","workflow_run_id":"run-n","data":{"status":"succeeded","outputs":{}}}`+"\n\n")
+	}))
+	t.Cleanup(stub.Close)
+
+	added := post(t, s.apiBatchDifyTargetAdd, fmt.Sprintf(
+		`{"name":"T","base_url":%q,"api_key":"k","inputs":[{"variable":"symbol","type":"text-input","required":true}],"reserved_inputs":["%s"]}`,
+		stub.URL, ownerTokenInput))
+	targetID := int64(added["id"].(float64))
+	if tgt, ok := s.st.GetTarget(targetID); !ok || tgt.PluginSlug != difyPluginSlug {
+		t.Fatalf("target %d is not a Dify-native target: %+v", targetID, tgt)
+	}
+	// A restricted tenant runs only what its allow-list names.
+	if err := s.st.SetGroupTargets(f.tenant, []GroupTarget{{TargetID: targetID}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		user   string
+		wantOU int64
+	}{
+		{"staff", f.root},
+		{"insider", f.internal},
+		{"alice", f.tenant},
+	} {
+		before := len(rec.runs())
+		jobID := createJobAs(t, s, tc.user, targetID, `[{"symbol":"600519"}]`)
+		if j := waitForJobDone(t, s.st, jobID); j.Status != "finished" || j.Succeeded != 1 {
+			t.Fatalf("%s: job = %+v, want one succeeded run", tc.user, j)
+		}
+		runs := rec.runs()
+		if len(runs) != before+1 {
+			t.Fatalf("%s: the workflow saw %d new runs, want 1", tc.user, len(runs)-before)
+		}
+		in := runs[len(runs)-1]
+		if in["symbol"] != "600519" {
+			t.Errorf("%s: the run lost its own input: %v", tc.user, in)
+		}
+		tok, _ := in[ownerTokenInput].(string)
+		ou, who, ok := s.ownerFromToken(tok)
+		if tok == "" || !ok || ou != tc.wantOU || who != tc.user {
+			t.Fatalf("%s: token = (ou %d, user %q, ok %v), want (%d, %q, true)", tc.user, ou, who, ok, tc.wantOU, tc.user)
+		}
+
+		// The workflow echoes it to the ingest, which attributes the set to the submitter's OU.
+		_, setID := ingestVersioned(t, s, fmt.Sprintf("6005%02d", before), tok, "external-edition")
+		if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != tc.wantOU {
+			t.Errorf("%s: attributed_ou = %v, want %d", tc.user, got, tc.wantOU)
+		}
+	}
+}
+
+// Attribution is not sharing, and it is not sharing for an unrestricted account either. An admin
+// can be placed in a restricted tenant's OU, and the OU alone would then have written the tenant's
+// group principal for the admin's runs, handing every tenant member reports the admin never chose to
+// share. The report is still attributed to the OU the admin belongs to; only the sharing is withheld.
+func TestUnrestrictedSubmitterInARestrictedOUSharesNothingWithTheTenant(t *testing.T) {
+	s := tokenServer(t)
+	f := newTenancyFixture(t, s)
+	s.st.UpsertUser(User{Username: "boss", PasswordHash: "h", Role: "admin"})
+	s.st.SetPrimaryGroup("boss", f.tenant)
+	if s.isRestricted("boss") {
+		t.Fatal("fixture: an admin must not be restricted")
+	}
+
+	tok := s.runInputs(BatchJob{CreatedBy: "boss"}, map[string]string{"code": "600519"})[ownerTokenInput]
+	reportID, setID := ingestVersioned(t, s, "600460", tok, "external-edition")
+
+	if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != f.tenant {
+		t.Errorf("attributed_ou = %v, want the admin's OU %d", got, f.tenant)
+	}
+	if ou, ok := reportOwner(t, s.st, reportID); !ok || ou != f.tenant {
+		t.Errorf("owner_group = %d (set %v), want %d", ou, ok, f.tenant)
+	}
+	got := viewerPrincipals(t, s.st, reportID)
+	if len(got) != 1 || got[0] != userPrincipal("boss") {
+		t.Errorf("viewer principals = %v, want only %s", got, userPrincipal("boss"))
+	}
+	for _, reader := range []string{"alice", "bob", "carol"} {
+		if rep, _ := s.st.GetNew(reportID, s.viewerScope(reader)); rep != nil {
+			t.Errorf("tenant member %s can read the admin's report", reader)
+		}
+	}
+}
+
+// issuedTokenFor mints a token the way mintOwnerToken does, but as if it had been issued at the given
+// instant, so a test can describe a run that started before something else happened.
+func issuedTokenFor(s *Server, ou int64, user string, issued time.Time) string {
+	msg := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, ou, user, issued.Add(ownerTokenTTL).Unix())
+	return encodeSessionMessage(msg) + "." + s.hmac(msg)
+}
+
+// A run outlives its submitter's account: the token stays valid for days, and deleting the account
+// cannot stop a workflow that is already executing. The late ingest still attributes the report, but
+// it must not put the deleted name back on the viewer list, because the next holder of that name
+// would then read a report that was never theirs.
+func TestLateIngestAfterTheSubmitterWasDeletedWritesNoViewerRow(t *testing.T) {
+	s := tokenServer(t)
+	f := newTenancyFixture(t, s)
+
+	for i, tc := range []struct {
+		user   string
+		wantOU int64
+	}{
+		{"staff", f.root},
+		{"alice", f.tenant},
+	} {
+		tok := s.runInputs(BatchJob{CreatedBy: tc.user}, map[string]string{"code": "600519"})[ownerTokenInput]
+		if err := s.st.DeleteUser(tc.user); err != nil {
+			t.Fatal(err)
+		}
+		reportID, setID := ingestVersioned(t, s, fmt.Sprintf("60047%d", i), tok, "external-edition")
+
+		if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != tc.wantOU {
+			t.Errorf("%s: attributed_ou = %v, want %d (attribution is kept)", tc.user, got, tc.wantOU)
+		}
+		if ou, ok := reportOwner(t, s.st, reportID); !ok || ou != tc.wantOU {
+			t.Errorf("%s: owner_group = %d (set %v), want %d", tc.user, ou, ok, tc.wantOU)
+		}
+		if got := viewerPrincipals(t, s.st, reportID); len(got) != 0 {
+			t.Errorf("%s: a deleted account's late ingest wrote viewer rows %v", tc.user, got)
+		}
+
+		// Somebody else takes the name in the other tenant, which holds the version grant.
+		s.st.UpsertUser(User{Username: tc.user, PasswordHash: "h", Role: "user"})
+		s.st.SetPrimaryGroup(tc.user, f.otherTenant)
+		if rep, _ := s.st.GetNew(reportID, s.viewerScope(tc.user)); rep != nil {
+			t.Errorf("the new holder of %q can read the previous holder's report", tc.user)
+		}
+		if rep, _ := s.st.GetNew(reportID, s.viewerScope("bob")); rep != nil {
+			t.Errorf("a tenant member can read a deleted account's report (%s)", tc.user)
+		}
+	}
+}
+
+// The same holds when the name was already taken again by the time the run finished: a token names
+// a person, and an account created after the token was issued is not that person.
+func TestLateIngestIntoARecreatedAccountWritesNoViewerRow(t *testing.T) {
+	s := tokenServer(t)
+	f := newTenancyFixture(t, s)
+	stamp := func(at time.Time) {
+		t.Helper()
+		if _, err := s.st.exec("UPDATE users SET created_at=? WHERE username=?", at.Format("2006-01-02 15:04:05"), "staff"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	issued := time.Now().Add(-time.Hour)
+	tok := issuedTokenFor(s, f.root, "staff", issued)
+	if err := s.st.DeleteUser("staff"); err != nil {
+		t.Fatal(err)
+	}
+	s.st.UpsertUser(User{Username: "staff", PasswordHash: "h", Role: "user"}) // a different person, created now
+	reportID, setID := ingestVersioned(t, s, "600480", tok, "external-edition")
+	if got := viewerPrincipals(t, s.st, reportID); len(got) != 0 {
+		t.Errorf("a token issued before the account existed wrote viewer rows %v", got)
+	}
+	if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != f.root {
+		t.Errorf("attributed_ou = %v, want %d (attribution is kept)", got, f.root)
+	}
+
+	// Control: an account that existed before the token was issued is the person it names.
+	stamp(issued.Add(-time.Hour))
+	reportID, _ = ingestVersioned(t, s, "600481", tok, "external-edition")
+	if got := viewerPrincipals(t, s.st, reportID); len(got) != 1 || got[0] != userPrincipal("staff") {
+		t.Errorf("viewer principals = %v, want only %s", got, userPrincipal("staff"))
+	}
+	// An account whose creation time is unknown (a row written before it was stamped) is trusted
+	// as it always was.
+	if _, err := s.st.exec("UPDATE users SET created_at=NULL WHERE username=?", "staff"); err != nil {
+		t.Fatal(err)
+	}
+	reportID, _ = ingestVersioned(t, s, "600482", tok, "external-edition")
+	if got := viewerPrincipals(t, s.st, reportID); len(got) != 1 || got[0] != userPrincipal("staff") {
+		t.Errorf("an unstamped account: viewer principals = %v, want only %s", got, userPrincipal("staff"))
+	}
+}
+
+// A token that names an OU but nobody attributes the report and its set, and puts nobody on the
+// viewer list: there is no "u:" principal for no one.
+func TestTokenNamingNobodyAttributesButWritesNoViewerRow(t *testing.T) {
+	s := tokenServer(t)
+	f := newTenancyFixture(t, s)
+
+	tok := s.mintOwnerToken(f.internal, "")
+	if tok == "" {
+		t.Fatal("fixture: no token minted for an OU with no person")
+	}
+	reportID, setID := ingestVersioned(t, s, "600490", tok, "external-edition")
+	if got := attributedOU(t, s.st, setID); !got.Valid || got.Int64 != f.internal {
+		t.Errorf("attributed_ou = %v, want %d", got, f.internal)
+	}
+	if got := viewerPrincipals(t, s.st, reportID); len(got) != 0 {
+		t.Errorf("viewer principals = %v, want none", got)
 	}
 }
