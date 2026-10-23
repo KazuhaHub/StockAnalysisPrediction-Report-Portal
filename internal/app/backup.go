@@ -389,6 +389,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 		return nil, err
 	}
 	optional := optionalColumns(rep.Header.Migrations, steps)
+	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
 	var tx *sql.Tx
 	if force {
@@ -405,7 +406,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 			}
 		}
 	}
-	if err := s.restoreStream(dec, tx, known, optional, identity, rep); err != nil {
+	if err := s.restoreStream(dec, tx, known, optional, renamed, identity, rep); err != nil {
 		return nil, err
 	}
 	if !force {
@@ -602,7 +603,7 @@ func auditRestoreChange(e migExec, detail map[string]any) error {
 // restoreStream reads the dump body. With tx == nil it validates and counts without writing, which
 // is the dry run; the parsing and the column checks are identical either way, so a dry run that
 // passes is real evidence about the file.
-func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map[string]map[string]bool, identity map[string]string, rep *RestoreReport) error {
+func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map[string]map[string]bool, renamed map[string]map[string]string, identity map[string]string, rep *RestoreReport) error {
 	var (
 		table  string
 		cols   []string
@@ -635,6 +636,25 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 				return err
 			}
 			table, cols = line.Table, line.Columns
+			// A dump from before a step that renamed a baseline column carries the old name. The
+			// rename moves no data, so the value is loaded under the new one; a dump that claims the
+			// step gets no translation, and an old name in it is refused below as unknown.
+			//
+			// The dump must carry the old name and only the old name: its header says it predates the
+			// step, so a new name in it — alone or beside the old one — is a header and content that
+			// disagree. Beside the old one it would also put the column in the insert twice, which
+			// SQLite accepts by silently keeping the first value.
+			for from, to := range renamed[table] {
+				if containsString(cols, to) {
+					return fmt.Errorf("the backup's %s carries %s, but its header says it predates the step "+
+						"that renamed %s to it: the backup is damaged or was edited by hand", table, to, from)
+				}
+			}
+			for i, c := range cols {
+				if to, ok := renamed[table][c]; ok {
+					cols[i] = to
+				}
+			}
 			cset, ok := known[table]
 			if !ok {
 				return fmt.Errorf("the backup contains table %q, which this build has no schema for: "+

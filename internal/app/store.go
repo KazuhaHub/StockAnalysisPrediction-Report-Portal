@@ -394,6 +394,9 @@ func (s *Store) baseSchemaStmts() []string {
 		// scope/audience/starts_at/ends_at are declared from the first release that has this table even
 		// though the release line that ships it only writes the defaults: a column costs nothing here and
 		// is required of every database by the shape check anyway.
+		// `dismissible` is the frozen v0.4.72 name. Migration 0010 renames it to strip_dismissible and
+		// adds popup_dismissible (ADR 0042); the name here changes only when that step is folded into
+		// the baseline, by the ADR 0034 §5 process — not by editing this line.
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS announcements(
 			id %s, level TEXT DEFAULT 'notice', title TEXT DEFAULT '', content TEXT DEFAULT '',
 			ord INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1, popup INTEGER DEFAULT 0,

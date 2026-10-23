@@ -927,7 +927,10 @@ export interface Announcement {
   title: string
   content: string
   display: AnnouncementDisplay
-  dismissible: boolean
+  // Two switches, one per surface: may readers close the band, and may they dismiss the popup for
+  // good. The popup always keeps "Got it" regardless — a dialog with no exit locks the reader out.
+  stripDismissible: boolean
+  popupDismissible: boolean
   scope: AnnouncementScope
   endsAt: string
 }

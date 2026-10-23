@@ -52,7 +52,7 @@ export function AnnouncementRow({
   onClose,
   style,
 }: {
-  announcement: Pick<Announcement, 'level' | 'title' | 'content' | 'dismissible'>
+  announcement: Pick<Announcement, 'level' | 'title' | 'content' | 'stripDismissible'>
   onClose?: () => void
   style?: CSSProperties
 }) {
@@ -89,7 +89,7 @@ export function AnnouncementRow({
           </Typography.Text>
         )}
       </div>
-      {announcement.dismissible && onClose && (
+      {announcement.stripDismissible && onClose && (
         <Button
           type="text"
           size="small"
@@ -124,9 +124,11 @@ function useReaderState(items: Announcement[]) {
   const { user } = useAuth()
   const [closed, setClosed] = useState<Record<number, boolean>>({})
   // The payload's identity: what is on offer, what each one says, and whether readers may dismiss
-  // it. It is what the memos depend on, so a navigation alone never rebuilds them — while the
-  // operator switching "readers can close it" off does, on the next poll, and the band re-checks.
-  const identity = items.map((a) => `${a.id}:${announcementSig(a)}:${a.dismissible ? 1 : 0}`).join(',')
+  // it on either surface. It is what the memos depend on, so a navigation alone never rebuilds
+  // them — while the operator switching "readers can close it" off does, on the next poll.
+  const identity = items
+    .map((a) => `${a.id}:${announcementSig(a)}:${a.stripDismissible ? 1 : 0}${a.popupDismissible ? 1 : 0}`)
+    .join(',')
   const dismissals = useMemo<DismissalState>(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- identity IS the dependency on `items`
     () => loadDismissals(user || '', items),
@@ -134,7 +136,7 @@ function useReaderState(items: Announcement[]) {
   )
   // A row closed in this render comes back if the payload stops allowing it to be closed: the
   // reader may have closed it from the previous payload in the minute before the poll caught up.
-  const open = items.filter((a) => !(a.dismissible && closed[a.id]) && !dismissals.bannerDismissed(a))
+  const open = items.filter((a) => !(a.stripDismissible && closed[a.id]) && !dismissals.bannerDismissed(a))
   const close = (a: Announcement) => {
     dismissBanner(user || '', a)
     setClosed((prev) => ({ ...prev, [a.id]: true }))
@@ -242,6 +244,9 @@ export function AnnouncementStrip({ compact = false, maxWidth }: { compact?: boo
  * session, "don't show again" silences all for good. A reader who wants one to keep interrupting can
  * still find it in the strip.
  *
+ * "Don't show again" is offered only when every announcement in the dialog may be dismissed. "Got it"
+ * is always there — the dialog needs an exit — and on a locked row it lasts for this page load only.
+ *
  * It offers the popup-eligible set the strip does not, so nothing is shown twice.
  */
 export function AnnouncementPopup() {
@@ -261,6 +266,9 @@ export function AnnouncementPopup() {
     [identity, dismissals],
   )
   const [open, setOpen] = useState(false)
+  // "Don't show again" is offered only when every row may be dismissed: with a locked row in the
+  // dialog it would be a promise the dialog cannot keep for that row.
+  const canDismiss = eligible.every((a) => a.popupDismissible)
 
   useEffect(() => {
     if (!eligible.length) return
@@ -301,7 +309,7 @@ export function AnnouncementPopup() {
       onCancel={() => closePopup(false)}
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }} wrap>
-          <Button onClick={() => closePopup(true)}>{t('announcement.dontShowAgain')}</Button>
+          {canDismiss && <Button onClick={() => closePopup(true)}>{t('announcement.dontShowAgain')}</Button>}
           <Button type="primary" onClick={() => closePopup(false)}>
             {t('announcement.gotIt')}
           </Button>

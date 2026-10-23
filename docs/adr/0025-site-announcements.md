@@ -240,10 +240,13 @@ erased, for the same reason garbage collection never trusts the current payload:
 on restores what each reader chose. Nothing is stored while it is off, and a band closed from a
 stale payload comes back when the next poll says it may not be closed. The admin console reloads its
 own shell's feed after every change, not only its ETag, so an operator who checks their edit sees
-the new payload. The popup footer is deliberately not governed by the switch: rows default to
-off, so gating it would re-interrupt every reader on every load for every existing popup and void
-the pre-upgrade dismissal migration. Whether the popup should get a gate of its own is an open
-product question.
+the new payload.
+
+**The popup has a switch of its own** ([ADR 0042](0042-separate-strip-and-popup-dismissal.md)). The
+band switch was never extended to the popup, because rows default to off and that would have
+re-interrupted every reader on every load for every existing popup. Instead `dismissible` was renamed
+`strip_dismissible`, and `popup_dismissible` was added, NULL reading as dismissible. Off removes
+"don't show again", ignores stored popup dismissals, and keeps "got it" for the page load only.
 
 ### One popup dialog per batch, not one popup per announcement
 

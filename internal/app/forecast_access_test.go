@@ -130,13 +130,18 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
 		`ALTER TABLE prediction_sets DROP COLUMN attributed_ou`,
 		`ALTER TABLE user_groups DROP COLUMN forecast_scope`,
+		// Every step after 0006 goes too: a dump's migration list has to be a contiguous prefix.
+		`ALTER TABLE announcements DROP COLUMN popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
 	} {
 		if _, err := src.exec(q); err != nil {
 			t.Fatalf("cannot wind back: %v", err)
 		}
 	}
-	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"0006", "0010"} {
+		if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(id)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	dump := dumpOf(t, src)
 
