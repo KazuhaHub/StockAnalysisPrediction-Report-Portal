@@ -222,7 +222,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
   #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
   PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
-  P23 #152 is merged at `08b1c1a0` after full exact-head validation.
+  P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
+  `c4f0c93c` after independent review and full exact-head CI/CodeQL.
 - **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
   independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
   local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
@@ -232,11 +233,11 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 remains
   awaiting integration/revalidation of the now-merged DOMPurify #138 dependency fix.
   P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
-  exact-head CI and local browser verification before merging #152. Current local work is P24
-  `feat/cli-quote-probe`, started from `08b1c1a0`: capture, integrity-checked offline replay,
-  fixed-panel CLI and no-database dispatch guards are implemented and independently reviewed.
-  Full local validation is recorded below; exact-head PR CI remains required before merge.
-- **Next step.** Finish P24's exact-head validation and merge, then P25's bounded shadow
+  exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
+  offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
+  `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
+  implemented and reviewed, with no shadow grant or runtime execution yet.
+- **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -1069,3 +1070,34 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   unrelated panel error, and restoring it passes. This was a regression-assertion defect, not a
   missing runtime guard; no production code changed after the full implementation review.
   Follow-up independent review closed it, and three final targeted race repetitions passed (5.764 s).
+
+### P24 merge and P25 bounded history foundation (2026-10-22)
+
+- P24 exact head `6a33df58` passed full CI run `39889303053` (Go/SQLite/Postgres, scoped race
+  4m9s, frontend, workflow lint and Docker/font/smoke gates) and CodeQL run `39889301435`.
+  Main-only full-race/cross-compile lanes were skipped by design on the pull request, not called
+  passing. Reconfirmed Apps #141/#142 heads unchanged and clean read-only merge previews before
+  squash-merging #154 to `c4f0c93c`. PR evidence records both review findings, fixes and guards.
+  No release, deployment, production measurement or Apps mutation followed.
+- Started P25 from that main. `fetchSinaRange` validates the window before HTTP, requests the full
+  800-bar count tail through the existing snapshot/history fetcher, and treats display-path
+  `BarsUnavailable` degradation as an error rather than shadow evidence. Ordinary display behavior
+  is unchanged. No source is advertised as a shadow peer at this foundation stage.
+- The range helper validates source/adjustment/cache flags, all dates/prices and duplicate dates,
+  sorts a copy, and checks the newest untrimmed kline date and exact-fen close against the snapshot
+  in the instrument's timezone. Checking before trimming also catches a bad newest row outside the
+  requested historical window. A full 800-row tail beginning after the requested start returns
+  typed `window_not_covered`; a shorter series does not invent pre-listing or suspended sessions.
+  The returned copy contains only row dates inside the requested window; empty history is refused.
+- Tests failed before implementation. Captured stock fixtures are served by a context-local fake
+  transport with actual GBK conversion and assertions for the 800-row request. Controls cover
+  one-fen disagreement with otherwise valid OHLC, snapshot-date/stamp mismatch, reversed rows and
+  no input mutation, unavailable/empty/nil/duplicate/malformed/over-cap histories, source and cache/
+  adjustment mismatches, exact cap coverage, cancellation and unsupported/invalid requests before
+  HTTP. No test or command here makes a live vendor request.
+- Independent review found no actionable issue; optional coverage was added. Full local
+  Go/SQLite/Postgres passed (app 35.372 s), build/vet/staticcheck passed, and three targeted race
+  repetitions across range/probe/comparator passed (5.507 s). Frontend files are unchanged.
+  Runtime selection/limits, shared comparisons, fallback controls, persisted diagnostics and final
+  full-branch review/CI remain P25 work. This adds no schema, settings, runtime writes or admission.
+  Back out by reverting this helper; no database/state repair is needed.
