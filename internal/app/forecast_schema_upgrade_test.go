@@ -19,7 +19,7 @@ func TestPostgresPurgeOwnershipExplicitUpgrade(t *testing.T) {
 	if err := st.verifyMigrationProducts(st.poolExec(), st.migrations()); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`DROP TABLE prediction_purge_owners`, `DELETE FROM meta WHERE k='mig:0007'`} {
+	for _, q := range []string{`DROP TABLE prediction_purge_owners`, `DELETE FROM meta WHERE k='mig:0009'`} {
 		if _, err := st.exec(q); err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +48,7 @@ func TestPostgresPurgeOwnershipExplicitUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.tableExists("prediction_purge_owners") || recorded(raw, "0007") {
+	if raw.tableExists("prediction_purge_owners") || recorded(raw, "0009") {
 		t.Fatal("Postgres dry run wrote the schema or ledger")
 	}
 	raw.Close()
@@ -144,13 +144,13 @@ func TestPurgeOwnershipExplicitUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !recorded(st, "0007") || !st.tableExists("prediction_purge_owners") {
+	if !recorded(st, "0009") || !st.tableExists("prediction_purge_owners") {
 		t.Fatal("fresh initialization did not create and record ownership evidence")
 	}
 	if _, err := st.exec(`DROP TABLE prediction_purge_owners`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k IN ('mig:0005','mig:0007')`); err != nil {
+	if _, err := st.exec(`DELETE FROM meta WHERE k IN ('mig:0005','mig:0009')`); err != nil {
 		t.Fatal(err)
 	}
 	before := describe(t, st.db)
@@ -228,7 +228,7 @@ func TestPurgeOwnershipExplicitUpgrade(t *testing.T) {
 		for _, force := range []bool{false, true} {
 			before := describe(t, dst.db)
 			if _, err := dst.restoreFrom(bytes.NewReader(malformed), force); err == nil {
-				t.Fatal("backup claiming 0007 without evidence table was accepted")
+				t.Fatal("backup claiming 0009 without evidence table was accepted")
 			}
 			if after := describe(t, dst.db); after != before {
 				t.Fatal("refused evidence-less backup changed the target")
@@ -236,7 +236,7 @@ func TestPurgeOwnershipExplicitUpgrade(t *testing.T) {
 		}
 	}
 	if _, err := dst.restoreFrom(bytes.NewReader(withoutPurgeEvidence(t, dump, false)), true); err != nil {
-		t.Fatalf("legitimate pre-0007 backup: %v", err)
+		t.Fatalf("legitimate pre-0009 backup: %v", err)
 	}
 	if n := scalar[int](t, dst, `SELECT COUNT(*) FROM prediction_purge_owners`); n != 0 {
 		t.Fatal("old backup retained or guessed ownership evidence")
@@ -296,7 +296,7 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 			continue
 		}
 		if !claim && table == "meta" {
-			if row, ok := value["row"].([]any); ok && len(row) > 0 && row[0] == "mig:0007" {
+			if row, ok := value["row"].([]any); ok && len(row) > 0 && row[0] == "mig:0009" {
 				continue
 			}
 		}

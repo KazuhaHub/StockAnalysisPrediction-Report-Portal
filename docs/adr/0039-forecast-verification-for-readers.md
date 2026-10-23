@@ -99,8 +99,9 @@ shape verification, dump/restore handling and rollback instructions must be deli
 before business routes adopt it. No released migration is edited and the frozen baseline stays
 unchanged. Approval of the schema is not authorization to change a production database.
 
-The implementation assigns this evidence to step `0007`; the unapproved Tier 2 provenance proposal
-moves to `0008`, subject to a fresh identifier check. Existing supported databases use the offline
+The implementation assigns this evidence to step `0009`, after the notification (`0007`) and
+extension (`0008`) steps, which merge first; the unapproved Tier 2 provenance proposal moves to
+`0010`, subject to a fresh identifier check. Existing supported databases use the offline
 `schema-upgrade` command (inspection by default, mutation only with `--apply`). Startup refuses an
 unrecorded explicit step before applying even earlier automatic steps. A fresh database creates the
 step with the rest of its schema. Every startup checks the evidence columns, exact primary key,
