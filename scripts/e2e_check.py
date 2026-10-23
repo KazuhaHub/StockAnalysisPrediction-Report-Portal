@@ -849,37 +849,35 @@ def forecast_access_checks():
           and sc3 == 403, f"{sc} stored={row.get('forecast_scope')} effective={row.get('forecast_scope_effective')} member={sc3}")
 
     # ---- own: the subtree population, by frozen attribution
+    # Own reads are held closed until the purge ownership evidence ships (explicit step 0009, ADR 0039):
+    # without it an own reader could not be told which purged months are its own, so every own read of
+    # the record, the drawer and a custom range answers 503 forecast_purge_history_unavailable and never
+    # falls back to the site-wide history. The attribution the own population will use is already
+    # frozen at ingest, so it is checked here; step 0009 turns the 503 checks into subtree-count checks.
     own_sets = set_ids(OWN, SUB)
     expect = {"fcown": len(own_sets), "fcsub": len(set_ids(SUB)), "fcother": len(set_ids(OTHER)), "fcempty": 0}
-    got = {}
-    bodies = {}
+    check("G", "Own: ingest froze each set's attribution to its OU subtree (3 / 1 / 1 / 0)",
+          expect == {"fcown": 3, "fcsub": 1, "fcother": 1, "fcempty": 0}, f"attributed={expect} ledger={total_rows}")
+    held = {}
     for name, session in (("fcown", fcown), ("fcsub", fcsub), ("fcother", fcother), ("fcempty", fcempty)):
         sc, body = session.req("GET", "/api/forecast/groups")
-        bodies[name] = body
-        got[name] = reports_in(body) if sc == 200 else f"HTTP {sc}"
-    check("G", "Own: each reader's record is exactly its OU subtree's sets (3 / 1 / 1 / 0), not the ledger",
-          got == expect and expect == {"fcown": 3, "fcsub": 1, "fcother": 1, "fcempty": 0},
-          f"got={got} expected={expect} ledger={total_rows}")
-    check("G", "Own: an OU with no attributed sets reads an empty record, never the whole ledger",
-          not (bodies["fcempty"].get("groups") or []), short(bodies["fcempty"].get("groups")))
-    check("G", "Own: the reader still has coverage and no `unrecorded`",
-          all("coverage" in g for g in bodies["fcown"].get("groups", [])) and bodies["fcown"].get("groups")
-          and "unrecorded" not in bodies["fcown"], short(bodies["fcown"].get("groups"), 160))
-    label = ((bodies["fcown"].get("groups") or [{}])[0]).get("label", "")
+        held[name] = (sc, code_of(body), reports_in(body) if sc == 200 else None)
+    check("G", "Own: until the purge evidence ships, every own record read fails closed (503), never the ledger",
+          all(v[0] == 503 and v[1] == "forecast_purge_history_unavailable" for v in held.values()), short(held, 200))
+    label = ((adm.get("groups") or [{}])[0]).get("label", "")
     query = urllib.parse.urlencode({"label": label, "checkpoint": "d5", "population": "all"})
     sc, drawer = fcown.req("GET", "/api/forecast/groups/members?" + query)
-    drawer_ids = sorted(m.get("set_id") for m in drawer.get("members", []))
-    check("G", "Own: the members drawer lists exactly the subtree's attributed sets, with its totals",
-          sc == 200 and drawer_ids == own_sets and len(own_sets) == 3 and "total" in drawer and "n" in drawer,
-          f"{sc} drawer={drawer_ids} subtree={own_sets} keys={sorted(drawer)}")
+    check("G", "Own: the members drawer fails closed the same way",
+          sc == 503 and code_of(drawer) == "forecast_purge_history_unavailable" and not drawer.get("members"),
+          f"{sc} label={label} {short(drawer)}")
     sc, card = fcown.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
     check("G", "Own: the reading page's predictions answer 200 for any readable report, with no membership badge "
                "(the badge refers to the all record)",
           sc == 200 and len(card.get("sets") or []) >= 1 and all(not s.get("membership") for s in card["sets"]),
           f"{sc} {short(card)}")
     sc, cust = fcown.req("GET", custom)
-    check("G", "Own: an internal reader may use a custom range, and it stays inside the subtree",
-          sc == 200 and reports_in(cust) == len(own_sets), f"{sc} rows={reports_in(cust)} subtree={len(own_sets)}")
+    check("G", "Own: a custom range fails closed the same way",
+          sc == 503 and code_of(cust) == "forecast_purge_history_unavailable", f"{sc} {short(cust)}")
 
     # ---- an external member at all: the whole ledger, without its volumes, monthly only
     # Per-cell volumes (n, totals) exist only on a mature cell, and a mature cell needs a settled
