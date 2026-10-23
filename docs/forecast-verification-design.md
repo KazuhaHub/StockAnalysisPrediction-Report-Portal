@@ -578,8 +578,11 @@ Each states its direction.
       pagination. No non-admin gets unrecorded. CSV follows the same disclosure rules.
     - Both SPA and cookie-v1 prediction reads enforce scope and report visibility. Internal
       readers retain accepted orphan history and optional payload, but not errors/rejected sets;
-      own and external readers get no membership. Bridges recheck their minting user and return
-      accepted report-backed sets without diagnostics; persistent machine reads stay unchanged.
+      own and external readers get no membership. App-bridge tokens get no forecast reads: both
+      v1 reads answer them `403 forecast_unavailable` without touching the ledger (fail closed;
+      stricter than before, when a bridge query token received the unscoped machine shape) until
+      the shared token binding lands, and a follow-up then re-enables scoped bridge reads on it.
+      Persistent machine reads stay unchanged.
     - The per-report route answers 404 for an unreadable report. Scope none renders no card,
       chip, timeline marker, overlay or placeholder; reading stage full cannot widen scope.
     - `owner_group` is never consulted (a test sets it to a readable group on an unreadable report).
