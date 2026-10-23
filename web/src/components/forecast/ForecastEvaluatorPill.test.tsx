@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { theme } from 'antd'
+import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
 import type { ForecastSettings } from '../../api/types'
 import { forecastLinkColor } from '../../lib/forecastPresentation'
@@ -111,6 +112,15 @@ describe('ForecastEvaluatorPill', () => {
     const probe = document.createElement('span')
     probe.style.color = theme.getDesignToken().colorTextSecondary
     for (const label of labels) expect(label.style.color).toBe(probe.style.color)
+  })
+
+  it('has no axe violations with the drawer open', async () => {
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: /forecast\.eval\.pill:/ }))
+    const drawer = await screen.findByRole('dialog')
+    // jsdom cannot measure contrast; the field-name colour is pinned by its own test.
+    const result = await axe.run(drawer, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 
   it('draws the retry link in the page\'s own link colour, not antd\'s primary', async () => {

@@ -674,6 +674,23 @@ const settings = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+describe('ForecastRecordPage custom range accessibility', () => {
+  it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('has no axe violations on the custom range with its dates, quick ranges and groups', async (algorithm) => {
+    apiMock.get.mockResolvedValue(record(metadata()))
+    const { container } = render(
+      <ConfigProvider theme={{ algorithm }}>
+        <MemoryRouter initialEntries={['/forecast?mode=custom&from=2026-10-19&to=2027-06-20&group=month']}>
+          <ForecastRecordPage />
+        </MemoryRouter>
+      </ConfigProvider>,
+    )
+    await screen.findByRole('group', { name: 'forecast.range.presets' })
+    // jsdom cannot measure contrast; it is checked in a browser and by the palette suite.
+    const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+  })
+})
+
 describe('ForecastRecordPage shell', () => {
   it('puts the header, the tabs, the toolbar and the matrix in one card, and the methodology in another', async () => {
     show()
