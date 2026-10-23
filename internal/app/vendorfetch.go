@@ -71,7 +71,7 @@ func vendorGet(ctx context.Context, rawURL, referer string, limit int64) ([]byte
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}
-	resp, err := vendorClient.Do(req)
+	resp, err := vendorHTTPClient(ctx).Do(req)
 	if err != nil {
 		return nil, err
 	}

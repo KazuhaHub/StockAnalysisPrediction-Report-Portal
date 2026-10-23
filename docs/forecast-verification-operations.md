@@ -158,3 +158,63 @@ an explicit shipped order versus its reset form do not create duplicate transiti
 order now controls durable settlement, this dedicated transition and its audit commit together;
 an audit failure rolls the order back and returns an error before other submitted settings are
 written. The existing general policy audit remains separate. This adds no database shape.
+
+## Offline source measurement (P24)
+
+`quote-probe` is a standalone command. It never loads `config.yaml` or `RP_CONFIG`, opens a
+database, changes source grants/order, or writes evaluator health, shadow state or ledger rows.
+Only `capture` makes vendor GET requests. `compare` reads local evidence without a network client.
+Do not use agreement here as a settlement grant or as approval for Tier 2.
+
+Capture a bounded window into a **new** directory (its parent must already exist):
+
+```sh
+report-portal quote-probe capture --out ./probe-2026-10-19 \
+  --from 2026-10-19 --to 2026-10-20 --sources tencent,sina,yahoo
+```
+
+The fixed panel is three indices (`sh:000852`, `sh:000906`, `sh:000300`) and twenty stocks:
+`sh:600000,sh:600519,sh:600036,sh:601318,sh:601899,sh:688001,sh:688981,sh:689009,sz:000001,sz:000333,sz:000651,sz:002594,sz:002415,sz:300750,sz:300059,sz:301308,sz:301269,bj:830799,bj:835185,bj:920002`.
+It is a measurement set, not an investment recommendation. Append operator-supplied suspended
+codes with `--suspended sz:000004,bj:430047`; these are examples of syntax, **not claims that those
+securities are currently suspended**. Each extra must be unique and not already in the fixed panel.
+Suspension is not inferred from missing data. Any compiled-in source can be listed in `--sources`,
+including Yahoo despite its lack of settlement admission. Unknown or duplicate sources are errors.
+
+The output directory is private (0700), and files are private (0600), exclusively created, never
+overwritten. The manifest declares the requested source/target matrix and window, fetch mode,
+response URLs/status/timestamps, raw byte counts/hashes, parsed-response hashes and errors.
+Raw files preserve the HTTP response body before GBK/parser conversion; they are not a packet
+capture of compressed wire traffic. Each body is capped at 512 KiB; oversize and partial reads
+remain failed evidence. A `count` fetch means the source was asked for up to 800 daily bars,
+**not** that it supports a bounded range. Cancellation or local storage failure leaves partial
+evidence for inspection. `complete` means all requested attempts finished, not that all succeeded.
+
+Replay with two explicit anchor dates inside the captured window:
+
+```sh
+report-portal quote-probe compare --in ./probe-2026-10-19 \
+  --primary tencent --anchor-start 2026-10-19 --anchor-end 2026-10-20 --record
+```
+
+Choose dates for which the reference is expected to supply bars. Both primary anchors must exist;
+otherwise that instrument is unavailable. The same date may be used for both anchors to inspect
+one session. The replay trims count/range series to the manifest window, then calls the shared
+shadow comparator: exact integer-fen OHLC and date-set differences, including both anchors, with
+deterministic date/field ordering. Volume is not part of the price comparison. Candidate missing
+dates/anchors are mismatches; failed/truncated/empty evidence is unavailable, never agreement.
+Identity/source, adjustment/cache flags and all supplied bars are validated before comparison.
+
+JSON goes to stdout. `--record` additionally requires the entire fixed panel and creates
+`comparison.json` in the capture directory exclusively. It can record unavailable/mismatching
+results; it is not a success certificate. An existing report is never replaced. Without
+`--record`, replay writes nothing and may inspect a smaller valid capture. Missing/tampered files,
+incomplete matrices, unsupported versions, non-regular/symlink evidence, hash/byte-count failures
+and invalid JSON fail the command. Reads have individual and aggregate bounds (8 MiB manifest,
+2 MiB parsed response, 512 MiB total). The report includes the manifest SHA-256; hashes protect
+against accidental corruption, not a malicious capture author. Preserve the entire directory
+when sharing evidence. Neither replay nor recording follows URLs in the manifest.
+
+Exit zero means the command produced a report/capture; inspect every result's `match`, `mismatch`
+or `unavailable` status. A nonzero exit means command/input/storage/integrity failure. No live
+measurement or production rollout is implied by the synthetic regression tests.
