@@ -137,9 +137,14 @@ cancellation do not count as vendor failures; three delivery/parser failures sto
 source for the current evaluator pass, preserving the actual failure rather than misreporting an
 absent configuration. A new pass resets its breaker, not the recorded diagnostic history.
 
-This contract describes the local P23 work, not a production rollout. Readiness item 6, watchdog
-integration, source-panel presentation and source-order confirmation remain separate integration
-work. Do not enable the evaluator on the strength of configuration diagnostics alone.
+The quote-source management page shows these declarations and the separate settlement history.
+Unavailable telemetry is distinct from an empty process-local history; neither claims readiness.
+A save removing the configured primary requires confirmation. Cancelling or leaving that
+confirmation writes nothing, and repeated save clicks cannot create concurrent requests.
+
+This contract describes the local P23 work, not a production rollout. Readiness item 6 and watchdog
+integration remain separate work. Do not enable the evaluator on the strength of configuration
+diagnostics alone.
 
 Source-order saves additionally write `quote.order` with the effective `from` and `to` source
 arrays, actor, organizational unit and request address. Equivalent spellings, repeated saves and

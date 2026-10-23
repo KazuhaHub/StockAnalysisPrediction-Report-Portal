@@ -876,3 +876,24 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - This closes the source-order auditing checkpoint only. No source was deployed, no schema or
   Apps branch changed, and no separately owned PR was edited or merged. Source-order confirmation,
   frontend diagnostics, readiness/alerts and the source ADR still need implementation/integration.
+
+### P23 quote-source management UI checkpoint (2026-10-22, in progress)
+
+- Added optional settlement grants/evidence and a separate configuration/health card. Missing
+  server fields retain the old display; unavailable health is not rendered as an empty or healthy
+  history. The card states that configured declarations are not runtime readiness approval.
+- Saving an order that removes the configured settlement primary requires confirmation. Cancel
+  and unmount before confirmation write nothing. A pending-save guard suppresses duplicate
+  requests and resets after rejection so the operator can retry. Loading feedback starts only
+  when the request is sent, not while waiting for the confirmation.
+- Initial failing tests pinned missing confirmation and no-primary diagnostics. Page tests use
+  disabled theme motion so jsdom does not retain a closing modal over the next interaction.
+  Component tests cover unavailable/empty and source-specific telemetry, plus axe markup checks
+  in both themes (not visual contrast/layout, which jsdom cannot measure).
+- Typecheck, all 121 Vitest files / 1014 tests (40.98 s), production SPA build (1.13 s), and the
+  subsequent serialized Go embed build passed. One additional test-only duplicate-click/failure
+  retry control then passed with both focused files: 27 tests (4.94 s). Independent read-only
+  review found no actionable issue in confirmation, cleanup, compatibility or diagnostics.
+- This is local work only: no deploy, schema edit, Apps branch mutation or separately owned PR
+  change. Readiness item 6, watchdog integration and the source ADR remain outstanding. The
+  own-scoped purge-history evidence proposal still requires owner approval before any DDL.
