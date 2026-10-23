@@ -236,7 +236,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
   offline replay, fixed-panel CLI and no-database dispatch guards are merged. Current work is P25
   `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
-  implemented and reviewed, with no shadow grant or runtime execution yet.
+  implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
+  Runtime selection, persisted diagnostics and shadow admission/execution remain outstanding.
 - **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
@@ -1101,3 +1102,41 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Runtime selection/limits, shared comparisons, fallback controls, persisted diagnostics and final
   full-branch review/CI remain P25 work. This adds no schema, settings, runtime writes or admission.
   Back out by reverting this helper; no database/state repair is needed.
+
+### P25 fallback controls and explicit network budget (2026-10-22, in progress)
+
+- The owner delegated the ambiguous call-counting choice. Preserved at most two full candidate
+  observations and added an independent ceiling of four HTTP RoundTrip attempts per working
+  pass: Sina normally needs snapshot plus kline for each observation. Redirects consume the same
+  budget, rather than obtaining extra requests. Both units are documented in the decisions/plan.
+  These limits are comparison-only; they grant no alternate writer. Post-ledger scheduling and an
+  independent bounded deadline remain required when integrating execution.
+- Added a context-local cloned-client transport with a mutex-protected shared HTTP budget. It
+  rejects an exhausted budget before the underlying transport; cancelled requests are not sent.
+  Tests exercise actual redirects, two complete fixture-based Sina reads consuming four requests,
+  concurrent attempted overrun, isolation across passes, cancellation and the unchanged global
+  client. This is the network-limit foundation, not runtime enforcement of two selected bodies.
+- The admin settings reader/writer exposes `fallback` as off/shadow only. Invalid strings,
+  non-string values and null return `forecast_bad_fallback` before any submitted field is written;
+  omitted fallback preserves its value. Unsupported stored values, including on, read as off.
+  Each effective transition and `forecast.fallback` audit commit together using the existing meta
+  table, with SQLite/Postgres serialization, whole-transaction contention retries and attributed
+  from/to values. Repeated saves do not create no-op audits. Audit failure rolls the transition
+  back. No database table, column or acceptance contract changed.
+- Tests failed before implementation. New controls cover invalid mixed-field writes, reader/writer
+  round trips, no-op suppression, rollback on an unavailable test audit table, concurrent serial
+  audit chains on SQLite/Postgres and independent SQLite Stores, NULL persisted values, omitted
+  fields and cancellation. Full regression caught missing translations for the new error code;
+  those are fixed in all three locales, with audit-action labels and regenerated Traditional
+  Chinese. An initial test fixture used a string instead of the numeric OU identifier; corrected
+  it to assert the real stored type. Neither issue changed runtime policy.
+- Independent control/budget reviews found no actionable issue; optional coverage was added.
+  Final full Go/SQLite/Postgres passed (app 35.745 s), build/vet/staticcheck passed, three targeted
+  race repetitions passed (6.827 s), web typecheck and 25 locale tests passed. CI's scoped race
+  names now include the new Sina, budget and fallback guards. Full frontend/PR CI and final
+  branch-wide review will be repeated for complete P25 before submission.
+- P25 is not complete: selection of accepted primary bodies, post-ledger comparisons through the
+  shared comparator, persistent shadow/call diagnostics, public admin controls/status and final
+  admission tests remain. No production call, deployment, Apps branch change, fallback ledger
+  write or runtime shadow grant occurred. Back out by reverting these controls/helpers; any saved
+  local fallback key is inert/off in the previous build, and no ledger repair is needed.

@@ -80,6 +80,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
 		// bundle keeps working.
 		"mode":      forecastMode(s.st.GetSetting(setForecastAuto, "0")),
+		"fallback":  forecastFallbackMode(s.st.GetSetting(setForecastFallback, "off")),
 		"heartbeat": heartbeatOrNil(s.st.ForecastHeartbeat()),
 		"readiness": s.forecastReadiness(time.Now()),
 		"dry_gate":  s.st.ForecastDryGate(),
@@ -120,6 +121,7 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	var in struct {
 		Enabled        *bool            `json:"enabled"`
 		Mode           *json.RawMessage `json:"mode"`
+		Fallback       json.RawMessage  `json:"fallback"`
 		Bench          *string          `json:"bench"` // legacy spelling of bench_schedule, through R1b
 		BenchSchedule  *string          `json:"bench_schedule"`
 		BenchCancel    *bool            `json:"bench_cancel"`
@@ -138,6 +140,14 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// Validate EVERY field before writing any: a request that changes the benchmark and is then
 	// refused for its ledger start must not have persisted the benchmark. "A refusal writes nothing"
 	// is about the request, not about the one field that happened to be checked last.
+	var fallback string
+	if len(in.Fallback) > 0 {
+		if err := json.Unmarshal(in.Fallback, &fallback); err != nil || (strings.TrimSpace(fallback) != "off" && strings.TrimSpace(fallback) != "shadow") {
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_fallback", "fallback must be off or shadow; alternate writers are not admitted")
+			return
+		}
+		fallback = strings.TrimSpace(fallback)
+	}
 	var bench string
 	benchSet := false
 	cancel := in.BenchCancel != nil && *in.BenchCancel
@@ -341,6 +351,13 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 		s.recordChange(r, user, AuditForecastDryGate, "forecast", gateCode,
 			map[string]any{"code": gateCode, "note": gateNote})
+	}
+
+	if len(in.Fallback) > 0 {
+		if err := s.st.saveForecastFallback(r.Context(), fallback, AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user), IP: s.auditIP(r)}); err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
 	}
 
 	// The evaluator switch. Only a real change is audited: a form that posts the values it read must
