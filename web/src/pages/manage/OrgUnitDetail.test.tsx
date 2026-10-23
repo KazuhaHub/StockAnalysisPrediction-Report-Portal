@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
+import axe from 'axe-core'
 import OrgUnitDetail from './OrgUnitDetail'
 import type { UserGroupRow } from '../../api/types'
 
@@ -304,6 +305,19 @@ describe('OrgUnitDetail — forecast verification access', () => {
     await save()
     // Picking "set here" without choosing a value pins what is in effect, as the other fields do.
     expect(body().forecast_scope).toBe('all')
+  })
+
+  // The Default unit shows the control without a radio around it, so nothing but its own name
+  // connects the visible label to the select. An unnamed combobox is unusable with a screen reader.
+  it.each([
+    ['the Default unit', DEFAULT, [DEFAULT]],
+    ['a unit that sets it here', INTERNAL, [DEFAULT, INTERNAL]],
+  ])('gives the access control an accessible name on %s', async (_name, target, groups) => {
+    mount(target, groups)
+    const card = field().closest('.ant-card') as HTMLElement
+    expect(within(card).getByRole('combobox', { name: 'forecast.scope.label' })).toBeTruthy()
+    const result = await axe.run(card, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
   })
 
   it('does not show the field, and sends nothing, when the server did not resolve access', async () => {

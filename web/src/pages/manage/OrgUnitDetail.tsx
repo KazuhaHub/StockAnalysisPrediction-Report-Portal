@@ -414,6 +414,9 @@ export default function OrgUnitDetail({
             <Select
               size="small"
               style={{ width: 150 }}
+              // On the Default unit there is no radio around the control, so this is the only thing
+              // that names it for a screen reader.
+              aria-label={t('forecast.scope.label')}
               value={d.forecastScope ?? undefined}
               onChange={(v) => set('forecastScope', v)}
               options={FORECAST_SCOPES.map((v) => ({ value: v, label: t(`forecast.scope.${v}`) }))}
