@@ -2157,6 +2157,7 @@
   "forecast.eval.readiness.dry_gate": "A dry-run check is recorded for every benchmark in use",
   "forecast.eval.readiness.dry_pass": "The last dry pass finished without errors",
   "forecast.eval.readiness.failed": "Not ready: {{items}}",
+  "forecast.eval.readiness.ledger_chain": "A qualified settlement primary is enabled",
   "forecast.eval.readiness.population": "The ledger start is set",
   "forecast.eval.readiness.title": "Readiness",
   "forecast.eval.run_now": "Evaluate now",

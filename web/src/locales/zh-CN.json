@@ -2157,6 +2157,7 @@
   "forecast.eval.readiness.dry_gate": "正在使用的每个基准都有试运行核对",
   "forecast.eval.readiness.dry_pass": "最近一次试运行无错误完成",
   "forecast.eval.readiness.failed": "未就绪：{{items}}",
+  "forecast.eval.readiness.ledger_chain": "已启用具备结算资格的主行情源",
   "forecast.eval.readiness.population": "已设置账本起点",
   "forecast.eval.readiness.title": "就绪状态",
   "forecast.eval.run_now": "立即评估",

@@ -142,9 +142,15 @@ Unavailable telemetry is distinct from an empty process-local history; neither c
 A save removing the configured primary requires confirmation. Cancelling or leaving that
 confirmation writes nothing, and repeated save clicks cannot create concurrent requests.
 
-This contract describes the local P23 work, not a production rollout. Readiness item 6 and watchdog
-integration remain separate work. Do not enable the evaluator on the strength of configuration
-diagnostics alone.
+Readiness item 6 (`ledger_chain`) now requires an explicitly enabled settlement chain with a
+primary carrying both evidence capabilities. Removing it prevents switching from dry to mode 1.
+If removed while running, the evaluator card warns instead of claiming health, and the watchdog
+emits `no_source` at most daily through the existing webhook/email/Slack path. The watchdog checks
+this even before a first heartbeat exists; off mode remains silent with only its mode read.
+
+This contract describes local P23 work, not a production rollout. Per-instrument runtime checks,
+the other readiness gates and deployment approval still apply. Do not enable the evaluator on
+the strength of configuration diagnostics alone.
 
 Source-order saves additionally write `quote.order` with the effective `from` and `to` source
 arrays, actor, organizational unit and request address. Equivalent spellings, repeated saves and

@@ -897,3 +897,27 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - This is local work only: no deploy, schema edit, Apps branch mutation or separately owned PR
   change. Readiness item 6, watchdog integration and the source ADR remain outstanding. The
   own-scoped purge-history evidence proposal still requires owner approval before any DDL.
+
+### P23 readiness and no-source watchdog checkpoint (2026-10-22, in progress)
+
+- Appended readiness item 6, `ledger_chain`, preserving the first five keys. It uses the same
+  explicit configured grants as the source panel and additionally requires both evidence flags
+  on a primary. Display wildcards and display-only sources cannot satisfy it. Runtime still
+  checks eligibility for each actual instrument, independently of these configuration gates.
+- Switching from dry to mode 1 now fails with `forecast_not_ready` naming `ledger_chain` when
+  that primary is absent, and succeeds after restoration when the other gates hold. Removing
+  a primary while already running does not rewrite the mode: settlement refuses via the ledger
+  walker, the evaluator card warns and does not claim health, and the watchdog sends `no_source`
+  through the existing webhook/email/Slack path at most daily. Its check precedes the missing-
+  heartbeat early return. Off mode still performs only the mode read and writes nothing.
+- Initial red controls exposed all three missing boundaries: the sixth item, the mode gate and
+  the no-source emission. Tests cover display-only orders, missing grants/evidence, restoration,
+  daily repeat/suppression and both delivery channels. The frontend tests reproduce removal in
+  both dry and running modes. Independent read-only review found no actionable issue and
+  suggested an explicit absent-heartbeat control; added it together with an off single-read
+  assertion and reran targeted race checks three times (8.559 s).
+- Full Go/Postgres tests passed (app package 49.775 s), as did vet/staticcheck, typecheck, all
+  121 Vitest files / 1017 tests (50.54 s), the production SPA build (761 ms), and the subsequent
+  serialized Go embed build. The absent-heartbeat addition after the full run is test-only.
+- No database shape, production setting, Apps branch or separately owned PR changed. This
+  checkpoint does not complete P23: the source ADR and exact-head CI/integration remain open.
