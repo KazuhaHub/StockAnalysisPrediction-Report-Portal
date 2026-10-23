@@ -232,11 +232,14 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
   capability isolation, operator-order selection, uncached walk with isolated health/per-pass
   breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
-  reviewed, along with admin source diagnostics and atomic source-order auditing. Readiness/
-  alerts, order-change confirmation and source-panel frontend integration remain outstanding.
-  No P23 PR is open.
-- **Next step.** Complete P23's readiness and alert integration at the shared-file coordination gate,
-  panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
+  reviewed, along with admin source diagnostics, atomic source-order auditing, primary-removal
+  confirmation, source-panel frontend integration, readiness item 6 and daily no-source alerts.
+  ADR 0041 records V9, renumbered to avoid Apps' 0038/0040. Full local Go/Postgres, frontend and
+  targeted race checks passed; the final branch-wide review and exact-head PR CI remain gates.
+  No P23 PR is open yet.
+- **Next step.** Submit P23 after final branch-wide review, verify exact-head SQLite/Postgres CI
+  and dependency audits, then proceed to P24/P25 without admitting fallback writes. Resolve the
+  purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
   review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
   the R1b deployment and subsequent Portal target refresh remain outstanding. No production
@@ -921,3 +924,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   serialized Go embed build. The absent-heartbeat addition after the full run is test-only.
 - No database shape, production setting, Apps branch or separately owned PR changed. This
   checkpoint does not complete P23: the source ADR and exact-head CI/integration remain open.
+
+### P23 source ADR and integration preparation (2026-10-22)
+
+- Added ADR 0041 for the approved V9 Tier 1 policy. Live PR-head checks confirmed Apps 141/142
+  still reserve 0038/0040; the source decision was renumbered rather than changing their files.
+  Updated ADR 0028's durability promise, ADR 0029's direct-call/D9 text and ADR 0032's stored-price
+  boundary, with current implementation-plan pointers and a historical-plan identifier note.
+- The ADR distinguishes integrity from corroboration, compiled grants from operator ordering,
+  and local P23 control/observability from pending P24/P25 measurements. It records candidate
+  evidence gaps and the later separate evidence chain/Tier 2 decision without authorizing any
+  schema change or fallback writer. Document review found one wording issue conflating compiled
+  grants with operator authority; corrected it. Relative links resolve and diff checks pass.
+- Expanded the PR race selector with `Ledger|QuoteOrder|Readiness`; these new concurrent paths
+  otherwise did not all match the existing forecast selector. The added selection passed locally
+  under race (9.437 s). No application source changed after the prior full local validation.
+- Read-only merge previews at runtime head `5ff9465b` were clean against the verified Apps heads
+  `b4741355` and `c4402084` (trees `92bf3b6d` and `8bfe71d4`). This establishes textual compatibility
+  only, not combined behavior or permission to merge those branches. Final docs/workflow-head
+  previews, branch-wide review and exact-head CI remain required before merging P23.
