@@ -135,10 +135,12 @@ func (s *Server) requireForecastAccess(w http.ResponseWriter, r *http.Request, u
 	d := s.forecastAccess(user)
 	caps := forecastCapabilitiesFor(d)
 	if !caps.Monthly {
+		s.noteForecastRefusal(forecastRefusalReason(d))
 		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 		return d, false
 	}
 	if !caps.Custom && r.URL.Query().Get("mode") == "custom" {
+		s.noteForecastRefusal("custom_not_allowed")
 		jsonErrorCode(w, http.StatusForbidden, "forecast_custom_not_allowed", "custom ranges are unavailable to external readers")
 		return d, false
 	}
@@ -170,8 +172,9 @@ func (s *Server) refuseForecastReadOnBrokenTree(w http.ResponseWriter, r *http.R
 	if !forecastReadPatterns[r.Pattern] {
 		return false
 	}
-	switch s.forecastAccess(user).Reason {
+	switch reason := s.forecastAccess(user).Reason; reason {
 	case "dangling_group", "cyclic_chain":
+		s.noteForecastRefusal(reason)
 		jsonErrorCode(w, http.StatusForbidden, "forecast_unavailable", "forecast access is unavailable")
 		return true
 	}
