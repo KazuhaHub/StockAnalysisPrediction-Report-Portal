@@ -1,10 +1,17 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
+
+// The stylesheet as text. Vite stubs CSS for ?raw in tests, so this reads the file itself.
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.css'), 'utf8')
 
 const updateState = vi.hoisted(() => ({ value: {} as unknown }))
 // The header's queue badge polls through the conditional-GET helper; `queue` decides whether it has
@@ -383,6 +390,27 @@ describe('AppLayout forecast record navigation', () => {
     await user.click(await screen.findByRole('button', { name: 'nav.workbench' }))
     await user.click(screen.getByRole('menuitem', { name: 'nav.forecast_record' }))
     expect(await screen.findByText('forecast-body')).toBeTruthy()
+  })
+
+  // The card used to be a fixed 276px, which holds three tiles; the record made it four. The card
+  // grows with its tiles, and a label too long for a tile can be read in full from its title.
+  it('sizes the launcher to its tiles so a fourth tile cannot overhang the card', async () => {
+    authState.value = { user: 'bob', name: 'Bob', admin: false, forecast: { scope: 'all', external: false }, can: () => true, logout: () => undefined }
+    await workbench()
+    const menu = screen.getByRole('menu', { name: 'nav.workbench' })
+    const items = within(menu).getAllByRole('menuitem')
+    expect(items).toHaveLength(4)
+    expect(menu.style.getPropertyValue('--rp-workbench-cols')).toBe('4')
+    expect((menu.querySelector('.rp-workbench-menu__grid') as HTMLElement).style.gridTemplateColumns).toContain('repeat(4,')
+    for (const item of items) expect(item.getAttribute('title')).toBe(item.getAttribute('aria-label'))
+  })
+
+  it('lets the card width follow the tile count and a tile label wrap to two lines', () => {
+    const rule = (selector: string) => css.match(new RegExp(`${selector.replace(/[.]/g, '\\.')}\\s*(?:\\.ant-btn\\s*)?\\{([^}]*)\\}`))?.[1] ?? ''
+    expect(rule('.rp-workbench-menu')).toMatch(/width:\s*max\(276px,\s*calc\(var\(--rp-workbench-cols,\s*3\)\s*\*\s*92px\s*-\s*4px\)\)/)
+    const label = rule('.rp-workbench-menu__item-label')
+    expect(label).toMatch(/-webkit-line-clamp:\s*2/)
+    expect(label).not.toMatch(/white-space:\s*nowrap/)
   })
 
   it('shows the record in the compact account menu on the same condition', async () => {

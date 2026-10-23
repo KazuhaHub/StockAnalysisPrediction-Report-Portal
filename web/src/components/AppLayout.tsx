@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Badge, Breadcrumb, Button, Divider, Dropdown, FloatButton, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
 import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
@@ -389,11 +389,17 @@ function AppShell() {
               destroyOnHidden
               styles={{ container: { padding: 12, borderRadius: 18 } }}
               content={
-                <div className="rp-workbench-menu" role="menu" aria-label={t('nav.workbench')}>
+                // The card grows with its tiles (see .rp-workbench-menu): a fixed width held three.
+                <div
+                  className="rp-workbench-menu"
+                  role="menu"
+                  aria-label={t('nav.workbench')}
+                  style={{ '--rp-workbench-cols': workbenchItems.length } as CSSProperties}
+                >
                   <div className="rp-workbench-menu__title">{t('nav.workbench')}</div>
                   <div
                     className="rp-workbench-menu__grid"
-                    style={{ gridTemplateColumns: `repeat(${workbenchItems.length}, minmax(76px, 1fr))` }}
+                    style={{ gridTemplateColumns: `repeat(${workbenchItems.length}, minmax(88px, 1fr))` }}
                   >
                     {workbenchItems.map((item) => (
                       <Button
@@ -401,6 +407,9 @@ function AppShell() {
                         type="text"
                         role="menuitem"
                         aria-label={item.label}
+                        // A label too long for its tile wraps to two lines and then clips; this keeps
+                        // the whole of it readable.
+                        title={item.label}
                         className="rp-workbench-menu__item"
                         onClick={(event) => {
                           event.stopPropagation()
