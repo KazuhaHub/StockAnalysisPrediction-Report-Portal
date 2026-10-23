@@ -2173,3 +2173,38 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Independent follow-up reviewed the final unavailable-state retry and malformed non-mature count
   guards, reran all eighteen focused tests and reported no new finding. Page-level integration and
   the held release/security decisions remain separate acceptance work.
+
+### Own purge-evidence store foundation (2026-10-22, in progress)
+
+- The owner approved the `(rtype, cohort, attributed_ou)` evidence table and explicit upgrade path.
+  Recorded the decision in ADR 0039 and the decision register. Added isolated store primitives for
+  idempotent table creation, pre-delete distinct attribution capture, parent transfer/deduplication,
+  and population-filtered marker loading. Nil population retains global history; an empty subtree
+  returns none; historic global-only markers never grant own visibility. Missing evidence storage
+  returns an error for an own read rather than falling back to global history.
+- Tests failed before implementation, then passed on SQLite and Postgres. They cover positive own
+  and unrelated populations, legacy-only history, duplicate owners and destination collisions,
+  transaction rollback, no-destination removal, invalid/null ownership and unavailable evidence.
+  Test-owned tables are removed on cleanup, including assertion failure. A source fixture with a
+  literal placeholder report type is explicitly normalized in this new test rather than silently
+  changing unrelated existing fixtures.
+- Independent review identified a PostgreSQL purge/OU-delete race: evidence inserted but not yet
+  committed could be missed by deletion, leaving a reused OU id. Added a transaction-only ownership
+  lock, requiring both future callers to acquire it before their first read or set mutation. The
+  primitives reacquire it defensively; Postgres uses a transaction-scoped advisory lock and SQLite
+  reserves its writer before reading. A deterministic PostgreSQL interleaving uses lock timeout to
+  prove exclusion, then verifies transfer after the first commit. Three dual-driver repetitions
+  passed (1.534 s). Independent follow-up closed the foundation finding and reran SQLite three times
+  (0.523 s); closure is conditional on correct early-lock wiring in both business transactions.
+- These primitives are deliberately not registered in automatic startup migrations or wired into
+  business routes yet. Explicit upgrade, fresh initialization, startup verification, backup/restore,
+  retention/OU-delete/read integration and their route-level access/concurrency acceptance remain.
+  Therefore the known own-history release hold is not resolved by this foundation. No production
+  database, Apps checkout, evaluator setting, workflow or release was changed.
+- Full Go/SQLite/Postgres regression passed (app 61.328 s), as did build, vet, staticcheck and
+  three SQLite race repetitions (2.213 s). The initial full run correctly rejected the evidence
+  file under the existing attribution-source allowlist; the exact allowlist now includes this
+  approved snapshot path and separately forbids it from inserting/updating/deleting/replacing
+  prediction sets. Existing sanctioned writers remain unchanged. Independent follow-up reviewed
+  this guard extension and reran its SQLite controls three times (0.518 s). No frontend source was
+  changed at this checkpoint, and frontend acceptance is not claimed.

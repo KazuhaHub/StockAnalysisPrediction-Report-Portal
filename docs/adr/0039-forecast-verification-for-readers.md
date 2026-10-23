@@ -75,6 +75,30 @@ one transaction re-attributes its sets to its parent, or Default for a deleted r
 children to the same parent, deletes the OU and records the counts in the audit. A root's children
 remain roots. No set may retain a reference to the deleted OU.
 
+### Purge ownership evidence (owner-approved 2026-10-22; implementation incomplete)
+
+`own` must not disclose the site's global purge-month history. The owner approved a separate
+`prediction_purge_owners` table, keyed by `(rtype, cohort, attributed_ou)`, with non-null report
+type/month and a positive, non-null OU id. Before deleting a month's sets, retention snapshots
+their distinct proven OU attributions in the same transaction as the global purge marker and
+set deletion. Scoped marker reads join this evidence to the current allowed subtree. Multiple
+descendant owners do not multiply a month. All readers keep the global history contract.
+
+OU deletion transfers this evidence to the same parent/Default destination as sets, deduplicating
+before removing the old id, in the same transaction as OU removal. If no valid destination exists,
+unprovable evidence is removed rather than left attached to an id that might be reused. Purge and
+OU-delete transactions must take the shared ownership lock **before their first database read or
+set mutation**. Postgres uses a transaction-scoped advisory lock; SQLite reserves the single writer
+before reading. Locking only the final evidence write permits a concurrent OU deletion to miss an
+uncommitted snapshot and is insufficient.
+
+Existing global markers without ownership evidence remain visible to all but are hidden from own;
+there is no guessed historical backfill. This new table requires an explicit operator upgrade for
+existing supported databases, not automatic DDL at server startup. Fresh initialization, startup
+shape verification, dump/restore handling and rollback instructions must be delivered together
+before business routes adopt it. No released migration is edited and the frozen baseline stays
+unchanged. Approval of the schema is not authorization to change a production database.
+
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
 member or change its numbers. The cohort benchmark remains ledger-wide. Every population keeps
