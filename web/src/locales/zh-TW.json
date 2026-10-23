@@ -2345,5 +2345,21 @@
   "forecast.legend.cov.duplicate": "重複執行",
   "forecast.legend.cov.missing": "缺少預測或被拒",
   "forecast.legend.cov.other": "回測、降級、基準價不符、基準未核對、測試、基準不符",
-  "forecast.legend.cov.pre_live": "賬本起點前"
+  "forecast.legend.cov.pre_live": "賬本起點前",
+  "forecast.drawer.p_star": "p*",
+  "forecast.drawer.after_fill": "成交後平均漲跌",
+  "forecast.drawer.slices": "按策略版本",
+  "forecast.drawer.policy": "策略版本",
+  "forecast.drawer.status": "檢查點狀態",
+  "forecast.drawer.mode_membership": "成員名單",
+  "forecast.drawer.membership_note": "這是該批次的成員名單，以及每份報告在等什麼。格子通過釋出門檻之前，不顯示任何結果指標，也不顯示單隻股票的收益、超額和判定。",
+  "forecast.drawer.reason.pending_baseline": "基準價待核對",
+  "forecast.drawer.reason.non_standard_horizon": "非標準期限，不進入 12 個月檢查點",
+  "forecast.drawer.reason.missing_mark": "尚無該檢查點記錄",
+  "forecast.drawer.reason.pending": "等待結算",
+  "forecast.drawer.reason.refused": "暫未能結算，將自動重試",
+  "forecast.drawer.reason.refused_final": "終局拒絕",
+  "forecast.drawer.reason.corp_action": "送轉或除權，已剔除",
+  "forecast.drawer.reason.unknown_mark_status": "狀態未知",
+  "forecast.drawer.reason.settled": "已結算"
 }

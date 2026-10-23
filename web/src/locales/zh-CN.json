@@ -2345,5 +2345,21 @@
   "forecast.legend.cov.duplicate": "重复运行",
   "forecast.legend.cov.missing": "缺少预测或被拒",
   "forecast.legend.cov.other": "回测、降级、基准价不符、基准未核对、测试、基准不符",
-  "forecast.legend.cov.pre_live": "账本起点前"
+  "forecast.legend.cov.pre_live": "账本起点前",
+  "forecast.drawer.p_star": "p*",
+  "forecast.drawer.after_fill": "成交后平均涨跌",
+  "forecast.drawer.slices": "按策略版本",
+  "forecast.drawer.policy": "策略版本",
+  "forecast.drawer.status": "检查点状态",
+  "forecast.drawer.mode_membership": "成员名单",
+  "forecast.drawer.membership_note": "这是该批次的成员名单，以及每份报告在等什么。格子通过发布门槛之前，不显示任何结果指标，也不显示单只股票的收益、超额和判定。",
+  "forecast.drawer.reason.pending_baseline": "基准价待核对",
+  "forecast.drawer.reason.non_standard_horizon": "非标准期限，不进入 12 个月检查点",
+  "forecast.drawer.reason.missing_mark": "尚无该检查点记录",
+  "forecast.drawer.reason.pending": "等待结算",
+  "forecast.drawer.reason.refused": "暂未能结算，将自动重试",
+  "forecast.drawer.reason.refused_final": "终局拒绝",
+  "forecast.drawer.reason.corp_action": "送转或除权，已剔除",
+  "forecast.drawer.reason.unknown_mark_status": "状态未知",
+  "forecast.drawer.reason.settled": "已结算"
 }

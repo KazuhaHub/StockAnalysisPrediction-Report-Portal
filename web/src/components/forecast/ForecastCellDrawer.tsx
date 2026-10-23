@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Drawer, Space, Table, Tag, Typography } from 'antd'
+import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
-import { formatProbability } from '../../lib/forecastPresentation'
+import { formatSigned } from '../../lib/forecastPresentation'
+import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -13,9 +15,15 @@ import type {
   ForecastMode,
 } from '../../api/types'
 
-// The drawer over a mature cell (plan §8.1). The numbers come from the cell that was clicked — the
+// The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
 // states and what the matrix showed cannot disagree.
+//
+// It has two modes, chosen by the cell. A MATURE cell opens the scored view: every metric, the
+// policy slices, and each member's outcome. Any other cell opens the MEMBERSHIP view: who is in the
+// cohort and what each is waiting on, with no metric and no outcome column, because a cell that has
+// not passed its gates publishes no result and a half-settled cohort invites a reader to average
+// what the matrix refuses to. An exploratory range is marked in the title and reports p* alone.
 //
 // It reads the reader members route and nothing else. That route pages by cursor and, for a reader
 // who may not know the ledger's volume, sends no totals or counts, so the drawer never states a
@@ -33,6 +41,8 @@ interface Props {
   label: string
   checkpoint: ForecastCheckpoint
   cell: ForecastCell | null
+  /** The report type the matrix was drawn for, when the reader chose one; absent is the default. */
+  rtype?: string
 }
 
 // One loaded list, tagged with the cell it belongs to. Anything tagged for another cell is never
@@ -46,9 +56,15 @@ interface Loaded {
   errorAt: 'first' | 'more' | ''
 }
 
-export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell }: Props) {
+// The reasons a member of a not-yet-mature cell is not a scored result yet. A closed list written by
+// the server; anything else is read as an unknown status, never echoed.
+const REASONS = ['pending_baseline', 'non_standard_horizon', 'missing_mark', 'pending', 'refused', 'refused_final', 'corp_action', 'unknown_mark_status']
+
+export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '' }: Props) {
   const { t } = useTranslation()
-  const key = JSON.stringify([mode, from, to, group, label, checkpoint])
+  // No cell (a caller that opens the list on its own) is the scored view, as it always was.
+  const membership = !!cell && cell.state !== 'mature'
+  const key = JSON.stringify([mode, from, to, group, label, checkpoint, rtype, membership])
   const [stored, setStored] = useState<Loaded>()
   const [revision, setRevision] = useState(0)
   // The live request scope: replaced whenever the cell changes or the drawer closes, which retires
@@ -62,6 +78,8 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
       query.set('to', to)
       query.set('group', group)
     }
+    if (rtype) query.set('rtype', rtype)
+    if (membership) query.set('population', 'all')
     query.set('label', label)
     query.set('checkpoint', checkpoint)
     query.set('limit', String(PAGE))
@@ -108,91 +126,87 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
 
   const retry = () => (current.errorAt === 'more' ? more() : setRevision((n) => n + 1))
 
-  const fmtP = formatProbability
-  // A count the reader may not know is a dash, never a zero. Only the spread's denominator is the
-  // cell's own n, so only there may the cell's publication gate stand in for a withheld count; the
-  // IC, hit, fill, band and calibration denominators are smaller subsets that carry no n >= 30
-  // minimum, and the gate says nothing about them.
-  const sample = (n: number | undefined): number | string => (n !== undefined ? n : '—')
-  const cellSample = (n: number | undefined): number | string =>
-    n !== undefined ? n : cell?.min_n_met ? t('forecast.cell.min_n_met') : '—'
-  const rows: { key: string; metric: string; value: string; nullText: string; p: string; q: string; n: number | string }[] = []
-  if (cell) {
-    if (cell.spread_bp !== undefined) {
-      rows.push({
-        key: 'spread',
-        metric: t('forecast.metric.spread'),
-        value: `${(cell.spread_bp / 100).toFixed(1)} pt`,
-        nullText: '0',
-        p: fmtP(cell.spread_p),
-        q: fmtP(cell.spread_q),
-        n: cellSample(cell.n),
-      })
-    }
-    if (cell.ic !== undefined) {
-      rows.push({
-        key: 'ic',
-        metric: t('forecast.metric.ic'),
-        value: cell.ic.toFixed(2),
-        nullText: '0',
-        p: fmtP(cell.ic_p),
-        q: fmtP(cell.ic_q),
-        n: sample(cell.ic_n ?? cell.n),
-      })
-    }
-    if (cell.hit !== undefined) {
-      rows.push({
-        key: 'hit',
-        metric: t('forecast.metric.hit'),
-        value: `${((cell.hit ?? 0) * 100).toFixed(0)}%`,
-        nullText: `${((cell.hit_null ?? 0) * 100).toFixed(0)}%`,
-        p: fmtP(cell.hit_p),
-        q: fmtP(cell.hit_q),
-        n: sample(cell.hit_n ?? cell.n),
-      })
-    }
-    if (cell.fill !== undefined) {
-      rows.push({
-        key: 'fill',
-        metric: t('forecast.metric.fill'),
-        value: `${((cell.fill ?? 0) * 100).toFixed(0)}%`,
-        nullText: '—',
-        p: '—',
-        q: '—',
-        n: sample(cell.n),
-      })
-    }
-    if (cell.band !== undefined) {
-      rows.push({
-        key: 'band',
-        metric: t('forecast.metric.band'),
-        value: `${((cell.band ?? 0) * 100).toFixed(0)}%`,
-        nullText: '—',
-        p: '—',
-        q: '—',
-        n: sample(cell.band_n),
-      })
-    }
-    if (cell.calib !== undefined) {
-      rows.push({
-        key: 'calib',
-        metric: t('forecast.metric.calib'),
-        value: ((cell.calib ?? 0) * 100).toFixed(0) + '%',
-        nullText: '—',
-        p: '—',
-        q: '—',
-        n: sample(cell.calib_n),
-      })
-    }
-  }
+  const reasonText = (code: string | undefined) =>
+    t(`forecast.drawer.reason.${!code ? 'settled' : REASONS.includes(code) ? code : 'unknown_mark_status'}`)
+  // Where the membership view comes from, said once: how far the cohort has got, if the reader may
+  // know. A reader who may not know the ledger's volume gets the note alone.
+  const stateLine =
+    cell?.state === 'pending' && cell.total !== undefined
+      ? t('forecast.cell.pending', { done: cell.resolved ?? 0, total: cell.total })
+      : cell?.state === 'small' && cell.n !== undefined
+        ? t('forecast.cell.small', { n: cell.n })
+        : ''
 
-  const columns = [
-    { title: t('forecast.drawer.stock'), dataIndex: 'symbol', key: 'symbol' },
-    { title: t('forecast.drawer.received'), dataIndex: 'made_on', key: 'made_on' },
-    { title: t('forecast.drawer.stance'), dataIndex: 'stance', key: 'stance' },
-    { title: t('forecast.drawer.upside'), dataIndex: 'upside', key: 'upside' },
-    { title: t('forecast.drawer.excess'), dataIndex: 'excess_bp', key: 'excess_bp' },
-    { title: t('forecast.drawer.agreement'), dataIndex: 'direction', key: 'direction' },
+  const stock: ColumnType<ForecastMember> = {
+    title: t('forecast.drawer.stock'),
+    dataIndex: 'symbol',
+    key: 'symbol',
+    render: (_, m) => (
+      <Space size={4} wrap>
+        {m.report_id ? (
+          <Link to={`/stock/${encodeURIComponent(m.symbol)}${qs({ date: m.report_date, kind: m.kind ?? '', r: m.report_id })}`}>
+            {m.name || m.symbol}
+          </Link>
+        ) : (
+          <span>{m.name || m.symbol}</span>
+        )}
+        {/* A halted stock settles on its last traded close: its flat return is not a quiet stock. */}
+        {!membership && m.halted && <Tag color="warning" style={{ margin: 0 }}>{t('forecast.mark.halted')}</Tag>}
+      </Space>
+    ),
+  }
+  const received: ColumnType<ForecastMember> = {
+    title: t('forecast.drawer.received'),
+    dataIndex: 'made_on',
+    key: 'made_on',
+    render: (_, m) => <Typography.Text type="secondary">{m.made_on}</Typography.Text>,
+  }
+  const stance: ColumnType<ForecastMember> = {
+    title: t('forecast.drawer.stance'),
+    dataIndex: 'stance',
+    key: 'stance',
+    render: (_, m) => (m.stance === 'long' ? <Tag color="red">{t('forecast.stance.long')}</Tag> : <Tag>{t('forecast.stance.no_position')}</Tag>),
+  }
+  const scoredColumns: ColumnType<ForecastMember>[] = [
+    stock,
+    received,
+    stance,
+    {
+      title: t('forecast.drawer.upside'),
+      dataIndex: 'upside',
+      key: 'upside',
+      render: (_, m) => (m.upside === undefined ? '—' : `${formatSigned(m.upside * 100, 1)}%`),
+    },
+    {
+      title: t('forecast.drawer.excess'),
+      dataIndex: 'excess_bp',
+      key: 'excess_bp',
+      render: (_, m) => (m.excess_bp === undefined ? '—' : `${formatSigned(m.excess_bp / 100, 1)}%`),
+    },
+    {
+      title: t('forecast.drawer.agreement'),
+      dataIndex: 'direction',
+      key: 'direction',
+      render: (_, m) => {
+        // Text, not colour alone: the four states have to be readable in print and to a reader who
+        // cannot tell the tags apart.
+        const d = m.direction
+        if (d === undefined) return '—'
+        return <Tag color={d === 'agree' ? 'green' : d === 'disagree' ? 'red' : 'default'}>{t(`forecast.direction.${d}`)}</Tag>
+      },
+    },
+  ]
+  // No outcome column of any kind: not upside, not excess, not agreement, whatever the payload says.
+  const membershipColumns: ColumnType<ForecastMember>[] = [
+    stock,
+    received,
+    stance,
+    {
+      title: t('forecast.drawer.status'),
+      dataIndex: 'excluded_reason',
+      key: 'excluded_reason',
+      render: (_, m) => reasonText(m.excluded_reason),
+    },
   ]
 
   return (
@@ -200,11 +214,24 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
       open={open}
       onClose={onClose}
       size={760}
-      title={`${label} · ${t(`forecast.cp.${checkpoint}`)}${mode === 'custom' ? ` · ${t('forecast.tag.exploratory')}` : ''}`}
+      title={
+        <Space wrap size={8}>
+          <span>{`${label} · ${t(`forecast.cp.${checkpoint}`)}`}</span>
+          {mode === 'custom' && <Tag color="warning" style={{ margin: 0 }}>{t('forecast.tag.exploratory')}</Tag>}
+          {membership && <Tag style={{ margin: 0 }}>{t('forecast.drawer.mode_membership')}</Tag>}
+        </Space>
+      }
       destroyOnHidden
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {cell && cell.n !== undefined && (
+        {mode === 'custom' && !membership && <Typography.Text type="secondary">{t('forecast.custom.banner')}</Typography.Text>}
+        {membership && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography.Text type="secondary">{t('forecast.drawer.membership_note')}</Typography.Text>
+            {stateLine && <Typography.Text>{stateLine}</Typography.Text>}
+          </div>
+        )}
+        {!membership && cell && cell.n !== undefined && (
           <Typography.Text type="secondary">
             {t('forecast.drawer.headline', {
               members: cell.n,
@@ -213,7 +240,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
             })}
           </Typography.Text>
         )}
-        {cell && cell.n === undefined && cell.min_n_met && (
+        {!membership && cell && cell.n === undefined && cell.min_n_met && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Typography.Text type="secondary">{t('forecast.cell.min_n_met')}</Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -222,20 +249,8 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           </div>
         )}
 
-        <Table
-          size="small"
-          rowKey="key"
-          pagination={false}
-          dataSource={rows}
-          columns={[
-            { title: t('forecast.drawer.metric'), dataIndex: 'metric', key: 'metric' },
-            { title: t('forecast.drawer.value'), dataIndex: 'value', key: 'value' },
-            { title: t('forecast.drawer.null'), dataIndex: 'nullText', key: 'nullText' },
-            { title: t('forecast.drawer.p'), dataIndex: 'p', key: 'p' },
-            { title: t('forecast.drawer.q'), dataIndex: 'q', key: 'q' },
-            { title: t('forecast.drawer.n'), dataIndex: 'n', key: 'n' },
-          ]}
-        />
+        {!membership && <MetricsTable cell={cell ?? { state: 'mature' }} mode={mode} />}
+        {!membership && cell && <SlicesTable cell={cell} mode={mode} />}
 
         <div>
           <Typography.Title level={5} style={{ marginTop: 0 }}>
@@ -256,48 +271,8 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
             loading={current.loading}
             pagination={false}
             dataSource={current.members}
-            columns={[
-              {
-                ...columns[0],
-                render: (_, m) =>
-                  m.report_id ? (
-                    <Link to={`/stock/${encodeURIComponent(m.symbol)}${qs({ date: m.report_date, kind: m.kind ?? '' })}`}>
-                      {m.name || m.symbol}
-                    </Link>
-                  ) : (
-                    <span>{m.name || m.symbol}</span>
-                  ),
-              },
-              {
-                ...columns[1],
-                render: (_, m) => <Typography.Text type="secondary">{m.made_on}</Typography.Text>,
-              },
-              {
-                ...columns[2],
-                render: (_, m) =>
-                  m.stance === 'long' ? <Tag color="red">{t('forecast.stance.long')}</Tag> : <Tag>{t('forecast.stance.no_position')}</Tag>,
-              },
-              {
-                ...columns[3],
-                render: (_, m) => (m.upside === undefined ? '—' : `${(m.upside * 100).toFixed(1)}%`),
-              },
-              {
-                ...columns[4],
-                render: (_, m) => (m.excess_bp === undefined ? '—' : `${(m.excess_bp / 100).toFixed(1)}%`),
-              },
-              {
-                ...columns[5],
-                render: (_, m) => {
-                  // Text, not colour alone: the four states have to be readable in print and to a
-                  // reader who cannot tell the tags apart.
-                  const d = m.direction
-                  if (d === undefined) return '—'
-                  const label = t(`forecast.direction.${d}`)
-                  const color = d === 'agree' ? 'green' : d === 'disagree' ? 'red' : d === 'flat' ? 'default' : 'default'
-                  return <Tag color={color}>{label}</Tag>
-                },
-              },
-            ]}
+            scroll={{ x: 'max-content' }}
+            columns={membership ? membershipColumns : scoredColumns}
           />
           {current.next && (
             <div style={{ textAlign: 'center', marginTop: 12 }}>

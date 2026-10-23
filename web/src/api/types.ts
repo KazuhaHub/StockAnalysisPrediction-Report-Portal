@@ -1736,6 +1736,8 @@ export interface ForecastMember {
   terminal_fen?: number
   upside?: number
   direction?: 'agree' | 'disagree' | 'flat' | 'untested'
+  /** The close is a suspended stock's last traded close. Sent only on a scored row of a mature cell. */
+  halted?: boolean
 }
 
 export interface ForecastMembersResponse {

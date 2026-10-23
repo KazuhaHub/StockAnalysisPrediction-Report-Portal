@@ -2345,5 +2345,21 @@
   "forecast.legend.cov.duplicate": "Repeat run",
   "forecast.legend.cov.missing": "Missing or rejected",
   "forecast.legend.cov.other": "Backtest, degraded, baseline mismatch or unverified, test, off-benchmark",
-  "forecast.legend.cov.pre_live": "Before the ledger start"
+  "forecast.legend.cov.pre_live": "Before the ledger start",
+  "forecast.drawer.p_star": "p*",
+  "forecast.drawer.after_fill": "Return after fill",
+  "forecast.drawer.slices": "By policy version",
+  "forecast.drawer.policy": "Policy version",
+  "forecast.drawer.status": "Checkpoint status",
+  "forecast.drawer.mode_membership": "Membership",
+  "forecast.drawer.membership_note": "This is who is in the cohort and what each report is waiting on. Until the cell passes its gates no result is shown, and neither are individual returns, excess or verdicts.",
+  "forecast.drawer.reason.pending_baseline": "Baseline not yet verified",
+  "forecast.drawer.reason.non_standard_horizon": "Non-standard horizon: not in the 12-month checkpoint",
+  "forecast.drawer.reason.missing_mark": "No record for this checkpoint yet",
+  "forecast.drawer.reason.pending": "Awaiting settlement",
+  "forecast.drawer.reason.refused": "Could not settle yet; retried automatically",
+  "forecast.drawer.reason.refused_final": "Final refusal",
+  "forecast.drawer.reason.corp_action": "Corporate action, excluded",
+  "forecast.drawer.reason.unknown_mark_status": "Unknown status",
+  "forecast.drawer.reason.settled": "Settled"
 }
