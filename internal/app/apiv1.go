@@ -322,8 +322,8 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordChange(r, "", AuditReportIngest, "report", strconv.FormatInt(id, 10), ingestAudit)
 	// Stamp the generating OU first-writer-wins from the signed owner_token (ADR 0022 R1). A missing
-	// or invalid token leaves owner_group NULL (internal/unattributed), which fails closed for
-	// restricted viewers. Ownership is never taken from a plain client-supplied field.
+	// or invalid token leaves owner_group NULL (unattributed). Ownership is never taken from a plain
+	// client-supplied field.
 	// Attribution (ADR 0022 R1) and the requester's place on the report's viewer list (ADR 0024) are
 	// both decided by the signed token, never by a client-supplied field. The viewer row is what
 	// makes the report readable by the person who paid for it under per-person visibility; stamping

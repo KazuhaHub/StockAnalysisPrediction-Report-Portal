@@ -7,9 +7,10 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/dify"
 )
 
-// Report ownership (ADR 0022 R1). A report is stamped with the OU that generated it so a restricted
-// external viewer sees only its own OU's reports (plus the same-day internal pool). Ownership is
-// stamped server-side from a signed token (mint/verify live on Server), never from a client field.
+// Report ownership (ADR 0022 R1). A report is stamped with the OU that generated it, and its
+// prediction set is attributed to that OU (ADR 0039). The stamp is attribution and audit only; who
+// may READ a report is decided by version grants and report_viewers (ADR 0024). Ownership is stamped
+// server-side from a signed token (mint/verify live on Server), never from a client field.
 
 // OwnerGroupOf resolves the OU that owns a user's output: their primary group, or the Default group
 // when unassigned. Returns 0 only if there is no Default group (which EnsureDefaultGroup prevents).
@@ -58,15 +59,16 @@ func (s *Store) FindSameDayReport(symbol, subtype, version, panelToday string) (
 }
 
 // ownerTokenInput is the reserved Dify input key that carries the owner-attribution token into a
-// restricted OU's run. The instrumented workflow passes it straight through into its
-// /api/v1/reports payload as owner_token. Injected ONLY for restricted OUs, so internal runs and
-// their (possibly undeclared-variable-strict) workflows never see it.
+// run. The instrumented workflow passes it straight through into its /api/v1/reports payload as
+// owner_token. It is injected into every run that has a submitter, internal or external (P39b).
 const ownerTokenInput = "_rp_owner_token"
 
-// runInputs returns the Dify inputs to send for a job's item. For a restricted OU's run it adds the
-// signed owner-attribution token (mintOwnerToken) under ownerTokenInput, so the produced report is
-// stamped to that OU at ingest (ADR 0022 R1). For every internal run it returns the caller's inputs
-// unchanged — the money-path stays byte-for-byte identical — and it never mutates the caller's map.
+// runInputs returns the Dify inputs to send for a job's item. Every run with a submitter carries a
+// signed owner-attribution token (mintOwnerToken) under ownerTokenInput (ADR 0022 R1, amended):
+// internal and external alike, so the produced report is stamped to the submitter's OU at ingest and
+// every prediction set can be attributed to the OU its run belonged to (ADR 0039). A run with no
+// submitter is unattributed and carries no token. It never forwards a caller-supplied reserved
+// input, and it never mutates the caller's map.
 func (s *Server) runInputs(job BatchJob, inputs map[string]string) map[string]string {
 	// Reserved inputs are the portal's, never the caller's: a value submitted under _rp_* does not
 	// survive into the run, whoever submits it (P39a).
@@ -76,14 +78,14 @@ func (s *Server) runInputs(job BatchJob, inputs map[string]string) map[string]st
 			out[k] = v
 		}
 	}
-	if !s.isRestricted(job.CreatedBy) {
-		return out
+	if job.CreatedBy == "" {
+		return out // no submitter: nobody to attribute the run to
 	}
-	tok := s.mintOwnerToken(s.st.OwnerGroupOf(job.CreatedBy), job.CreatedBy)
-	if tok == "" {
-		return out
+	// A refused mint (no signing key) leaves the run without a token: it still starts, and its
+	// report is simply unattributed.
+	if tok := s.mintOwnerToken(s.st.OwnerGroupOf(job.CreatedBy), job.CreatedBy); tok != "" {
+		out[ownerTokenInput] = tok
 	}
-	out[ownerTokenInput] = tok
 	return out
 }
 
