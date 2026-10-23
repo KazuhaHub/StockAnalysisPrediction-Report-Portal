@@ -2096,7 +2096,7 @@
         "operationId": "reportPredictions",
         "summary": "一份报告的结构化预测及其结算结果",
         "x-scope": "query",
-        "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice.",
+        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚，最多 200 集，被选为展示和计入统计的两集一定保留。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。display_set_id 跟随报告当前正文；counted_set_id 是该报告在统一的全体月度分类中的计入集，对受保护的读者或分类出错时省略。membership 与结算阶段是读取时才算出的元数据，settlement_paused 是独立的评估器提示。某个检查点的 expected 为 true 时，not_before 是由核实过的交易所休市安排推出的预计日期，不是已观察到的交易日；没有该标记时，显示的日期仍只是不早于该日的下限。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回，并可附带指向同一分析另一写成形式的 sibling 与 counted_edition 链接；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "id",
@@ -2121,7 +2121,11 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Returns up to 200 prediction sets, oldest first, retaining the selected display and counted revisions. Unreadable reports return 404. display_set_id follows the current body; counted_set_id uses the shared monthly population classifier and is omitted for protected readers or classification errors. Membership and settlement phases are read-time metadata; settlement_paused is a separate evaluator notice. A mark's optional expected flag qualifies an exchange-schedule estimate, never observed settlement evidence."
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, up to 200; the sets selected for display and for the group statistics are always retained. Each carries its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `display_set_id` follows the report's current body. `counted_set_id` is this report's monthly member from the shared complete-population classifier, and is omitted for protected readers and on classification errors. Membership and settlement phases are read-time metadata; `settlement_paused` is a separate evaluator notice. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access and may also carry `sibling` and `counted_edition` links to another written form of the same analysis; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "一份報告的結構化預測及其結算結果",
+            "description": "返回該報告歷次入庫寫入的預測集（含被拒、缺席、回測），按寫入時間從早到晚，最多 200 集，被選為展示和計入統計的兩集一定保留。每集帶其預測項與各檢查點的結算結果。可見性跟隨報告本身的閱讀許可權：讀不到的報告返回 404，而不是空列表。display_set_id 跟隨報告當前正文；counted_set_id 是該報告在統一的全體月度分類中的計入集，對受保護的讀者或分類出錯時省略。membership 與結算階段是讀取時才算出的後設資料，settlement_paused 是獨立的評估器提示。某個檢查點的 expected 為 true 時，not_before 是由核實過的交易所休市安排推出的預計日期，不是已觀察到的交易日；沒有該標記時，顯示的日期仍只是不早於該日的下限。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回，並可附帶指向同一分析另一寫成形式的 sibling 與 counted_edition 連結；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
@@ -2131,6 +2135,58 @@
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "No such report, or one this caller may not read"
@@ -2146,7 +2202,7 @@
         "operationId": "queryPredictions",
         "summary": "按股票与日期范围查询结构化预测",
         "x-scope": "query",
-        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。",
+        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "symbol",
@@ -2193,7 +2249,11 @@
         "x-i18n": {
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
-            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound."
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "按股票與日期範圍查詢結構化預測",
+            "description": "按 made_on（門戶收到報告的上海日期）過濾，從新到舊返回。symbol 必填。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
@@ -2203,6 +2263,58 @@
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         }
       }

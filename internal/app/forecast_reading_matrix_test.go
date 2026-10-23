@@ -53,9 +53,13 @@ func runForecastReadingStageMatrix(t *testing.T, s *Server, mux http.Handler, su
 							v1 := strings.HasPrefix(p.path, "/api/v1/")
 							card := p.kind == "card" || p.kind == "list"
 							switch {
-							case who.user == "" && !((who.name == "machine" || who.bridge) && v1):
+							case who.bridge && v1:
+								// An app-bridge token gets no forecast reads whichever account minted it.
+								want, code = 403, "forecast_unavailable"
+							case who.user == "" && !(who.name == "machine" && v1):
 								want = 401
-							case who.name == "Dangling" && p.kind != "me":
+							case who.name == "Dangling" && p.kind == "":
+								// The enrolment wall keeps its generic refusal on the report-body routes.
 								want, code = 503, "enrolment_policy_unavailable"
 							case who.walled && p.kind != "me":
 								want, code = 403, "enrolment_required"

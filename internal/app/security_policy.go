@@ -374,6 +374,9 @@ func (s *Server) enrolmentHolds(r *http.Request, username string) (holds bool, p
 func (s *Server) gateEnrolment(w http.ResponseWriter, r *http.Request, username string) bool {
 	holds, err := s.enrolmentHolds(r, username)
 	if err != nil {
+		if s.refuseForecastReadOnBrokenTree(w, r, username) {
+			return false
+		}
 		jsonErrorCode(w, http.StatusServiceUnavailable, "enrolment_policy_unavailable",
 			"the sign-in policy could not be read, so this request was refused rather than allowed")
 		return false

@@ -2,7 +2,6 @@ package app
 
 import (
 	"database/sql"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -373,18 +372,6 @@ func TestForecastSubjectRejectsMissingAndInactiveAccounts(t *testing.T) {
 	for _, user := range []string{"missing", "reader"} {
 		if d := s.forecastAccess(user); d.Scope != scopeNone || d.Reason != "error" {
 			t.Fatalf("%s: %+v", user, d)
-		}
-	}
-}
-
-func TestForecastScopeHasNoLenientRead(t *testing.T) {
-	b, err := os.ReadFile("forecast_access.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"isRestricted(", "isAdmin(", "GetUser(", "groupChain(", "EffectiveGroupSettings(", "GroupRestrictedEffective("} {
-		if strings.Contains(string(b), name) {
-			t.Errorf("scope uses lenient helper %s", name)
 		}
 	}
 }

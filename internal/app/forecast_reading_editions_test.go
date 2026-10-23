@@ -150,7 +150,7 @@ func assertReadingEditions(t *testing.T, s *Server) {
 	assertEditionBearerHasNoReadingMetadata(t, s, token, current)
 	if s.st.driver == "sqlite" {
 		s.appTok = newAppTokens(time.Hour)
-		assertEditionBearerHasNoReadingMetadata(t, s, mintForecastBridge(t, s, "edition-all"), current)
+		assertEditionBridgeIsRefused(t, s, mintForecastBridge(t, s, "edition-all"), current)
 	}
 	assertSiblingEditionMemberReadsCountedOnEdition(t, s, current, sibling, member, g)
 }
@@ -170,6 +170,20 @@ func assertEditionBearerHasNoReadingMetadata(t *testing.T, s *Server, token stri
 		if _, exists := out[field]; exists {
 			t.Fatalf("bearer contract acquired reading metadata: %s", w.Body.String())
 		}
+	}
+}
+
+// An app-bridge token is refused on the v1 prediction read before any record is loaded, so it can
+// never carry edition metadata either.
+func assertEditionBridgeIsRefused(t *testing.T, s *Server, token string, report int64) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/api/v1/reports/x/predictions", nil)
+	r.SetPathValue("id", itoa64(report))
+	r.Header.Set("Authorization", "Bearer "+token)
+	s.v1ReportPredictions(w, r)
+	if w.Code != 403 || forecastMatrixErrorCode(t, w.Body.Bytes()) != "forecast_unavailable" {
+		t.Fatalf("bridge response %d %s; want 403 forecast_unavailable", w.Code, w.Body.String())
 	}
 }
 
