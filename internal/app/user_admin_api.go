@@ -70,24 +70,43 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 	return out
 }
 
-func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user string) {
+// adminGroupsJSON is the OU list the admin console renders, with forecast access resolved by the
+// server from one strict read of the tree. Every admin surface that lists OUs (the groups list and
+// the users list the OU editor lives on) goes through it, so none can describe access differently.
+// The tree is read first, so a failed read is the only way this errors.
+func (s *Server) adminGroupsJSON() ([]map[string]any, error) {
 	ix, err := s.st.loadOUIndex()
 	if err != nil {
-		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-		return
+		return nil, err
 	}
-	groups := userGroupsJSON(s.st.ListUserGroups())
+	return adminGroupsWithAccess(s.st.ListUserGroups(), ix), nil
+}
+
+// adminGroupsWithAccess adds the three forecast fields to each OU the index holds. An OU the index
+// does not hold was created after the tree was read: it is listed without them rather than failing
+// the whole list, and the editor hides a field the server did not resolve. Nothing is guessed, so
+// nothing can be shown that the server did not read.
+func adminGroupsWithAccess(list []UserGroup, ix ouIndex) []map[string]any {
+	groups := userGroupsJSON(list)
 	for _, group := range groups {
 		id := group["id"].(int64)
 		row, ok := ix.ous[id]
 		if !ok {
-			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-			return
+			continue
 		}
 		d := resolveForecastScope(forecastSubject{User: "preview", GroupID: id}, ix)
 		group["forecast_scope"] = row.scope
 		group["forecast_scope_effective"] = d.Scope
 		group["forecast_scope_source"] = d.Source
+	}
+	return groups
+}
+
+func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user string) {
+	groups, err := s.adminGroupsJSON()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
 	}
 	writeJSON(w, map[string]any{"groups": groups})
 }

@@ -168,3 +168,50 @@ func TestGroupSummaryExcludesPurgedMonthsAndRespectsCustomRange(t *testing.T) {
 		}
 	}
 }
+
+// The record page's "no result yet" message names the first due date, so the date has to be in the
+// answer for the ledger a young portal really has: one month, still open, every cell waiting. The
+// groups list is not empty there (the open month is a group), so the date cannot depend on a mature
+// or even a closed cell existing.
+func TestSummaryNamesTheFirstResultDateForAnOpenMonthOnlyLedger(t *testing.T) {
+	s := newV1Server(t)
+	s.forecastEval.now = func() time.Time { return time.Date(2026, 10, 22, 4, 0, 0, 0, time.UTC) }
+	if err := s.st.SetSetting(setForecastPopulationFrom, "2026-10-19T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	seedGroupSet(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-10-20", S0Fen: ip(10000), HorizonStd: true})
+	seedGroupSet(t, s, gsSeed{Symbol: "600002", MadeOn: "2026-10-21", S0Fen: ip(10000), HorizonStd: true})
+
+	got := doGroups(t, s, "/?mode=month")
+	if len(got.Groups) != 1 || got.Groups[0].Label != "2026-10" {
+		t.Fatalf("groups = %+v, want the open month only", got.Groups)
+	}
+	for cp, cell := range got.Groups[0].Cells {
+		if cell.State != "open" {
+			t.Fatalf("%s is %q, want open: the month has not ended", cp, cell.State)
+		}
+	}
+	if got.ForecastGroupsMetadata == nil {
+		t.Fatal("no metadata for an internal reader")
+	}
+	next := got.Summary.NextResultNotBefore
+	if !got.Summary.Expected {
+		t.Fatalf("a projected date must be worded as expected, not as a fact: %+v", got.Summary)
+	}
+	if next == "" {
+		t.Fatalf("an open-month-only ledger carries no first result date: %+v", got.Summary)
+	}
+	if _, err := time.Parse("2006-01-02", next); err != nil || next < "2026-10-20" {
+		t.Fatalf("first result date %q is not a civil date on or after the first set", next)
+	}
+
+	// No sets at all: the answer has no month to describe, and no date to invent.
+	empty := newV1Server(t)
+	if err := empty.st.SetSetting(setForecastPopulationFrom, "2026-10-19T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	none := doGroups(t, empty, "/?mode=month")
+	if len(none.Groups) != 0 || none.ForecastGroupsMetadata == nil || none.Summary.NextResultNotBefore != "" {
+		t.Fatalf("an empty ledger invented a date or a group: %+v", none)
+	}
+}

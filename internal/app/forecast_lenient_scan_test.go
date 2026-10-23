@@ -144,7 +144,7 @@ func f() { s.st.GetUser(u); isAdmin(u); s.groupChain(1) }`, 0)
 		"forecast_access.go:forecastAccess", "forecast_access.go:requireForecastAccess",
 		"forecast_groups_api.go:apiReaderForecastGroups", "forecast_groups_members.go:apiReaderForecastGroupMembers",
 		"forecast_read_api.go:forecastCookiePredictionView", "forecast_access_preview.go:apiForecastAccess",
-		"apiui.go:meJSON", "user_admin_api.go:apiAdminGroups",
+		"apiui.go:meJSON", "user_admin_api.go:adminGroupsWithAccess",
 	} {
 		if !callSites[want] {
 			var have []string

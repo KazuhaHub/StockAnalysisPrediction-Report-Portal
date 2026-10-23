@@ -58,6 +58,67 @@ describe('cellDisplay', () => {
   })
 })
 
+describe('cellDisplay for a reader who may not see counts', () => {
+  // An external reader with the all scope gets the gate's assurance instead of any count. The
+  // assurance belongs to the CELL: its member count cleared n >= 30. A metric's own denominator is a
+  // smaller subset with no such minimum (a hit rate over twelve tested reports, an IC over two
+  // pairs), so the flag must never sit in a metric's sample slot, where it would read as that
+  // metric's own n.
+  const gated: ForecastCell = {
+    state: 'mature',
+    min_n_met: true,
+    spread_bp: 310,
+    spread_p: 0.012,
+    spread_q: 0.041,
+    ic: 0.21,
+    ic_p: 0.02,
+    ic_q: 0.047,
+    hit: 0.61,
+    hit_null: 0.55,
+    hit_p: 0.18,
+    hit_q: 0.3,
+    fill: 0.33,
+    fill_ret_bp: -120,
+  }
+
+  it.each(['spread', 'ic', 'hit', 'fill'] as const)('states the gate once on the cell and never inside the %s sample slot', (metric) => {
+    const d = cellDisplay(gated, metric, 'month', t)
+    expect(d?.gate).toBe('forecast.cell.min_n_met')
+    expect(d?.sub).not.toContain('forecast.cell.min_n_met')
+    expect(d?.sub).not.toContain('forecast.cell.n')
+    expect(d?.sub).not.toContain('"n":0')
+  })
+
+  it('leaves a metric\'s sample slot empty rather than borrowing the cell\'s gate for it', () => {
+    // The shape of a 40-member cell whose hit rate rests on 12 tested reports: the reader is told
+    // nothing about the 12, and in particular is not told "n >= 30" beside the hit rate.
+    expect(cellDisplay(gated, 'hit', 'month', t)?.sub).toBe(['q=0.300', 'forecast.cell.base_rate:{"pct":"55%"}'].join(' · '))
+    expect(cellDisplay(gated, 'ic', 'month', t)?.sub).toBe('q=0.047')
+    expect(cellDisplay(gated, 'fill', 'month', t)?.sub).toBe('forecast.cell.after_fill:{"pct":"-1.2"}')
+  })
+
+  it('still carries the cell gate when the metric itself is absent', () => {
+    const d = cellDisplay({ ...gated, hit: undefined }, 'hit', 'month', t)
+    expect(d?.value).toBe('—')
+    expect(d?.sub).toBe('')
+    expect(d?.gate).toBe('forecast.cell.min_n_met')
+  })
+
+  it('states nothing about the sample rather than inventing a zero when neither a count nor the flag is present', () => {
+    const d = cellDisplay({ ...gated, min_n_met: undefined }, 'spread', 'month', t)
+    expect(d?.sub).toBe('q=0.041')
+    expect(d?.gate).toBe('')
+  })
+
+  it('prefers a real count, and then has no gate to add', () => {
+    const d = cellDisplay({ ...gated, n: 42, min_n_met: undefined }, 'spread', 'month', t)
+    expect(d?.sub).toContain('forecast.cell.n:{"n":42}')
+    expect(d?.gate).toBe('')
+    // Even with the flag present beside a real count, the count is what is said.
+    expect(cellDisplay({ ...gated, n: 42 }, 'spread', 'month', t)?.gate).toBe('')
+  })
+})
+
 describe('forecastCsv', () => {
   const resp: ForecastGroupsResponse = {
     ok: true,
@@ -111,31 +172,72 @@ describe('forecastCsv', () => {
   })
 
   it('labels every reader export row and omits site-wide counts from its header', () => {
-    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'Own unit\nforged header', disclaimer: 'Research only', hideCounts: false })
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'Own unit\nforged header', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: false })
     expect(csv).toContain('# population=Own unit forged header')
     expect(csv).toContain('# disclaimer=Research only')
     expect(csv).not.toContain('# unrecorded=')
-    expect(csv).toContain('n,mode,official,bench')
+    expect(csv).toContain('n,coverage_reports,coverage_member,mode,official,bench')
     const rows = csv.split('\n').filter((line) => line && !line.startsWith('#')).slice(1)
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) expect(row.endsWith(',custom,false,sh000852')).toBe(true)
-    expect(csv).toContain('0.041,42,custom,false,sh000852')
+    // An internal or own-scope reader keeps the sample size and the coverage of the population.
+    expect(csv).toContain('0.041,42,10,8,custom,false,sh000852')
+  })
+
+  it('carries the benchmark of every group in the header and on every row', () => {
+    const two = structuredClone(resp)
+    two.groups.push({ ...structuredClone(resp.groups[0]), label: '2026-01-12 – 2026-01-18', bench: 'sh000906' })
+    const csv = forecastCsv(two, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: false })
+    expect(csv).toContain('# benchmark=2026-01-05 – 2026-01-11:sh000852')
+    expect(csv).toContain('# benchmark=2026-01-12 – 2026-01-18:sh000906')
+    const rows = csv.split('\n').filter((line) => line && !line.startsWith('#')).slice(1)
+    expect(rows.some((row) => row.endsWith(',custom,false,sh000906'))).toBe(true)
+    for (const row of rows) expect(/,custom,false,sh000(852|906)$/.test(row)).toBe(true)
   })
 
   it('removes count columns even if a malformed external-all response contains them', () => {
-    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', hideCounts: true })
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: true })
     const header = csv.split('\n').find((line) => line.startsWith('group,'))!
     expect(header.split(',')).not.toContain('n')
+    expect(header).not.toMatch(/coverage/)
     expect(header).toContain('publication_gate,mode,official,bench')
     expect(csv).not.toContain('0.041,42')
     expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
     expect(csv).not.toContain('# unrecorded=')
+    // The flag is the cell's, repeated on each metric row; the file says so, because a hit rate or an
+    // IC rests on a smaller subset that has no minimum of its own.
+    expect(csv).toContain('# publication_gate=The flag belongs to the cell')
+    expect(csv).not.toContain('a metric may rest on a smaller subset')
+  })
+
+  it('keeps a multi-line gate note on its own comment line', () => {
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', publicationGate: 'First\nsecond\r\nthird', hideCounts: true })
+    expect(csv).toContain('# publication_gate=First second  third\n')
+    expect(csv.split('\n').filter((line) => line.startsWith('second') || line.startsWith('third'))).toEqual([])
+  })
+
+  it('does not explain a gate flag in an export that has none', () => {
+    const csv = forecastCsv(resp, '2026-10-18T00:00:00Z', { population: 'Own unit', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: false })
+    expect(csv).not.toContain('# publication_gate=')
+  })
+
+  it('exports no volume at all for an external all reader even when the response lacks the coverage field', () => {
+    const hidden = structuredClone(resp)
+    for (const g of hidden.groups) delete g.coverage
+    delete hidden.unrecorded
+    // hideCounts false would be a caller bug; the missing coverage is the server's own statement
+    // that volume is withheld, and the export has to follow it.
+    const csv = forecastCsv(hidden, '2026-10-18T00:00:00Z', { population: 'All reports', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: false })
+    const header = csv.split('\n').find((line) => line.startsWith('group,'))!
+    expect(header.split(',')).not.toContain('n')
+    expect(header).not.toMatch(/coverage/)
+    expect(csv).toContain('0.041,n >= 30,custom,false,sh000852')
   })
 
   it('never exports non-mature sample sizes for any reader population', () => {
     const malformed = structuredClone(resp)
     malformed.groups[0].cells.d20 = { state: 'pending', n: 987654, total: 987654 }
-    const csv = forecastCsv(malformed, '2026-10-18T00:00:00Z', { population: 'Own unit', disclaimer: 'Research only', hideCounts: false })
+    const csv = forecastCsv(malformed, '2026-10-18T00:00:00Z', { population: 'Own unit', disclaimer: 'Research only', publicationGate: 'The flag belongs to the cell', hideCounts: false })
     expect(csv).not.toContain('987654')
     expect(malformed.groups[0].cells.d20.n).toBe(987654)
   })

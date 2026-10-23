@@ -261,6 +261,18 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.meJSON(u))
 }
 
+// forecastHint is the navigation hint /api/me carries. An own reader also gets the display name of the
+// OU their population is rooted at (the leaf, not the ancestor that decided the scope), so the record
+// page can say whose reports it covers. Nothing is added for the other scopes, and a failed name read
+// omits the field: the page then falls back to an unnamed line instead of guessing.
+func (s *Server) forecastHint(d forecastDecision) map[string]any {
+	hint := map[string]any{"scope": d.Scope, "external": d.External}
+	if name := s.forecastPopulationRoot(d); name != "" {
+		hint["ou"] = name
+	}
+	return hint
+}
+
 // mustEnrollForPage is the wall's state as a payload field. A policy that could not be read reads as
 // "not held": /api/me is answering, so the page has to render something, and the gate — not this
 // field — is what refuses the routes that matter.
@@ -283,7 +295,7 @@ func (s *Server) meJSON(user string) map[string]any {
 		"user": user, "name": name, "admin": s.isAdmin(user), "role": role, "perms": permsOf(role),
 		"email": email, "mail_enabled": s.emailEnabled(),
 		// Navigation only; every forecast read resolves current policy independently.
-		"forecast":        map[string]any{"scope": forecast.Scope, "external": forecast.External},
+		"forecast":        s.forecastHint(forecast),
 		"forecast_reader": s.forecastReaderStage(forecast),
 		// Security state, so the account page can branch before the user submits: offering a
 		// password change to a federated account, or enrolment to someone already enrolled, is a
@@ -1145,7 +1157,12 @@ func (s *Server) apiAdminUsers(w http.ResponseWriter, r *http.Request, user stri
 	for _, ro := range roleRegistry {
 		roles = append(roles, map[string]any{"code": ro.Code, "name": ro.Name})
 	}
-	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": userGroupsJSON(s.st.ListUserGroups())})
+	groups, err := s.adminGroupsJSON()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": groups})
 }
 
 // parseExpiry validates an account-validity date from the admin UI: "" clears it (never expires),

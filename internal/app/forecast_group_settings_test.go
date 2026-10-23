@@ -134,6 +134,42 @@ func TestAdminGroupForecastScopeIsServerResolved(t *testing.T) {
 	t.Fatal("child missing")
 }
 
+// The OU editor lives on the users page, whose groups come from the users list rather than the
+// groups list. Both must describe forecast access identically, or the editor would show (and save
+// over) a value the server never resolved.
+func TestAdminUsersGroupsCarryResolvedForecastScope(t *testing.T) {
+	s := routeTableServer(t)
+	parent := seedOU(t, s.st, 0, scopeAll)
+	child := seedOU(t, s.st, parent, nil)
+	w := httptest.NewRecorder()
+	s.apiAdminUsers(w, httptest.NewRequest("GET", "/api/admin/users", nil), "admin")
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var out struct {
+		Groups []map[string]any `json:"groups"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[float64]bool{}
+	for _, g := range out.Groups {
+		id, _ := g["id"].(float64)
+		seen[id] = true
+		for _, field := range []string{"forecast_scope", "forecast_scope_effective", "forecast_scope_source"} {
+			if _, ok := g[field]; !ok {
+				t.Fatalf("group %v lacks %s: %v", g["id"], field, g)
+			}
+		}
+		if id == float64(child) && (g["forecast_scope"] != nil || g["forecast_scope_effective"] != scopeAll || g["forecast_scope_source"] != float64(parent)) {
+			t.Fatalf("inherited scope not resolved in the users list: %v", g)
+		}
+	}
+	if !seen[float64(parent)] || !seen[float64(child)] {
+		t.Fatalf("seeded OUs missing from the users list: %v", seen)
+	}
+}
+
 func TestBadForecastScopeDoesNotPartiallySaveGroup(t *testing.T) {
 	s := routeTableServer(t)
 	id := seedOU(t, s.st, 0, scopeOwn)
@@ -179,5 +215,39 @@ func TestForecastScopeInputRejectsNonStringsAndNormalizesDefault(t *testing.T) {
 		if err != nil || def && (v == nil || *v != scopeNone) || !def && v != nil {
 			t.Errorf("null default=%v: %v %v", def, v, err)
 		}
+	}
+}
+
+// The users list carries the OU editor, and it used to be unable to fail. It reads the tree and the
+// group list in two statements, so an OU created between them is in the list and not in the index.
+// That is a race to survive, not corruption to refuse: the OU is listed without forecast access, and
+// the editor hides a field the server did not resolve, so nothing is ever shown that was not read.
+func TestAdminGroupsListSurvivesAnOUCreatedBetweenTheReads(t *testing.T) {
+	s := routeTableServer(t)
+	parent := seedOU(t, s.st, 0, scopeAll)
+	ix, err := s.st.loadOUIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	late := seedOU(t, s.st, parent, nil)
+
+	groups := adminGroupsWithAccess(s.st.ListUserGroups(), ix)
+	seen := map[int64]map[string]any{}
+	for _, g := range groups {
+		seen[g["id"].(int64)] = g
+	}
+	if seen[late] == nil || seen[parent] == nil {
+		t.Fatalf("the list dropped an OU: %v", seen)
+	}
+	for _, field := range []string{"forecast_scope", "forecast_scope_effective", "forecast_scope_source"} {
+		if _, ok := seen[late][field]; ok {
+			t.Errorf("an OU the index never read carries %s: %v", field, seen[late])
+		}
+		if _, ok := seen[parent][field]; !ok {
+			t.Errorf("an indexed OU lost %s: %v", field, seen[parent])
+		}
+	}
+	if seen[parent]["forecast_scope_effective"] != scopeAll {
+		t.Errorf("indexed OU resolved to %v", seen[parent]["forecast_scope_effective"])
 	}
 }

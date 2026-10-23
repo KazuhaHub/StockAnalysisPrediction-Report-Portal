@@ -24,6 +24,11 @@ type forecastGroupsResponse struct {
 	Unrecorded     int                   `json:"unrecorded"`
 	Groups         []forecastGroup       `json:"groups"`
 	ExcludedMonths []forecastPurgedMonth `json:"excluded_months,omitempty"`
+	// The population these numbers describe, taken from the decision that selected the cohort. A
+	// page that labels a result from its session-start navigation hint can name a population the
+	// numbers no longer cover; this is the label that cannot drift from them.
+	Scope   string `json:"scope"`
+	ScopeOU string `json:"scope_ou,omitempty"`
 }
 
 type forecastPurgedMonth struct {

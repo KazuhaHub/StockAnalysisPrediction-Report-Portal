@@ -2024,7 +2024,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 | Protection | Mechanism | Refusal / omission |
 |---|---|---|
 | Official monthly view only | `mode=custom` on the groups or members route | 403 `forecast_custom_not_allowed` |
-| No site-wide volume | For `External && Scope == all`, **conservative default** (owner question 8, §16): the response omits `coverage` on every group and `unrecorded`; a non-mature cell carries only `state` (no `n`, `resolved`, `total`, `refused`, pending reasons); **a mature cell carries its metrics and a boolean `min_n_met: true` (rendered as an "n ≥ 30" badge) but no `n`, no `total`, no `resolved`**, because a mature cell's `n` is a count of ledger members and would reveal the ledger's volume. The members route omits `total`, per-status member counts and any `n` for these viewers (the readable rows themselves are still listed, paginated by cursor with no total), and the CSV has no `n`, coverage or count column. For `External && Scope == own` the coverage and `n` of the viewer's own population are shown (it is their own volume); `unrecorded` is never shown to non-admins. | fields absent (not zero) |
+| No site-wide volume | For `External && Scope == all`, **conservative default** (owner question 8, §16): the response omits `coverage` on every group and `unrecorded`; a non-mature cell carries only `state` (no `n`, `resolved`, `total`, `refused`, pending reasons); **a mature cell carries its metrics and a boolean `min_n_met: true` (rendered as an "n ≥ 30" badge, once per cell and never as a metric's own sample size, whose denominator is a smaller subset; one visible line under the legend and the drawer say what the badge means) but no `n`, no `total`, no `resolved`**, because a mature cell's `n` is a count of ledger members and would reveal the ledger's volume. The members route omits `total`, per-status member counts and any `n` for these viewers (the readable rows themselves are still listed, paginated by cursor with no total), and the CSV has no `n`, coverage or count column. For `External && Scope == own` the coverage and `n` of the viewer's own population are shown (it is their own volume); `unrecorded` is never shown to non-admins. | fields absent (not zero) |
 | Drawer lists only readable reports | Members are filtered by `canReadReport(report_id, viewerScope(user))` (`forecast_read_api.go:117-131`); purged sets (`report_id` NULL) are omitted for external viewers (ADR 0029 §5 fail-closed-after-purge) | rows absent |
 | n ≥ 30 | unchanged gate | — |
 | No membership badge, no payload, no non-accepted sets, no orphaned rows on the reading page | P10/P18 shaping keyed on `External` | fields absent |
@@ -2033,13 +2033,13 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 
 | Route | Class (helper) | Scope gate | Contract | Errors |
 |---|---|---|---|---|
-| `GET /api/forecast/groups` | session (`s.session`) | `all`/`own` (admin: `all`) | **New.** The groups response over `populationFor(d)`, shaped by §7.3.3. Never `unrecorded`. Compute governance applies. Registered with `gate = "forecast_scope"` (below). | 401 anonymous; 403 `enrolment_required` (wall); 403 `forecast_unavailable` (`none`); 403 `forecast_custom_not_allowed`; 503 `forecast_busy` + `Retry-After`; 429 `forecast_rate_limited` |
+| `GET /api/forecast/groups` | session (`s.session`) | `all`/`own` (admin: `all`) | **New.** The groups response over `populationFor(d)`, shaped by §7.3.3, stating the population it covers (`scope`, plus `scope_ou` for an `own` reader; the admin alias states `scope: "all"` too). Never `unrecorded`. Compute governance applies. Registered with `gate = "forecast_scope"` (below). | 401 anonymous; 403 `enrolment_required` (wall); 403 `forecast_unavailable` (`none`); 403 `forecast_custom_not_allowed`; 503 `forecast_busy` + `Retry-After`; 429 `forecast_rate_limited` |
 | `GET /api/forecast/groups/members` | session (`s.session`) | as above | **New.** Members of one cell in the same population; scores nothing (P16a); outcomes only when mature; rows filtered by §7.3.3. | as above |
 | `GET /api/admin/forecast/groups`, `/members` | perm `PermManage` (`routes.go:314-315`) | admin | Unchanged aliases (population `all`, with `unrecorded`) until P29. | — |
 | `GET /api/admin/forecast/access` | admin | — | **New.** Per OU: own value, effective scope, source OU, external flag, account counts per effective scope; plus a hypothetical `?ou=<id>&scope=<v>` preview. Resolves every account that can sign in (unassigned and root-OU members included). | 400 `forecast_bad_scope` |
 | `GET /api/admin/groups` | admin (`routes.go:290`) | — | Adds `forecast_scope` (own value or null), `forecast_scope_effective`, `forecast_scope_source`, all server-resolved. | — |
 | `PUT /api/admin/groups/{id}` | admin (`routes.go:292`) | — | Adds `forecast_scope`, **presence-aware** (decoded through `json.RawMessage`): omitted → unchanged; `null` → inherit (on the Default OU coerced to `"none"`); `"all"`/`"own"`/`"none"` → stored; anything else → 400 `forecast_bad_scope`. Audited in the `group.change` row as `forecast_scope: {from, to}` only when it changes. | 400 `forecast_bad_scope` |
-| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route). | — |
+| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route), plus `ou` for an `own` reader: the display name of the OU their population is rooted at. | — |
 | `GET /api/report/{id}/predictions`, `GET /api/predictions` | session (`routes.go:203,206`) | `all`/`own` for non-admins | Unchanged shape (P10 already withholds payload from scoped callers); `none` → 403. | 403 `forecast_unavailable` |
 | `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; persistent machine token: unscoped; any other Bearer (an app-bridge token): refused | Cookie: the session-route shape. Bridge: no forecast read, 403 `forecast_unavailable`, ledger not read. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
 
@@ -2174,10 +2174,13 @@ and the reading page's handling of `forecast_unavailable` shipped in P26 (`Stock
 
 - **`/forecast`** mounts the shared matrix and drawer from `components/forecast` against `/api/forecast/groups*`
   (never `/api/admin/forecast*`). States: loading skeleton; empty ("no cohort has a result yet; the first d5 is due
-  on or after <date>"); `none`/403 → antd `Result` (not a retry loop); `forecast_busy` → at most 3 retries with
+  on or after <date>", shown whenever no cell is mature, above the matrix when the open month is listed as a group, and
+  without a date when the answer carries no metadata); `none`/403 → antd `Result` (not a retry loop); `forecast_busy` → at most 3 retries with
   jitter, then an error with a retry button; 429 → not retried; error → `Alert` with retry. The exploratory tab is
   shown to internal readers (V14) and hidden for `me.forecast.external`. A header line shows the population ("All
-  reports" / "Reports from <OU> and its sub-units") and the disclaimer.
+  reports" / "Reports from <OU> and its sub-units") and the disclaimer. The population is the one the response states
+  (`scope`, `scope_ou`); the `/api/me` hint speaks only until an answer arrives. A refused reader sees only the title
+  and the `Result`. The matrix is not inside a live region: one small status region announces loading, ready and empty.
 - **`/manage/forecast`** keeps operations only: status card (P9), settings and benchmark schedule (P4), ledger start
   (P5), alerts (P41), unrecorded (P2), access summary from `/api/admin/forecast/access` with a link to the OU editor.
 - **OU editor.** `OrgUnitDetail` gains a "Forecast verification" field rendered with `InheritField`
@@ -2185,8 +2188,8 @@ and the reading page's handling of `forecast_unavailable` shipped in P26 (`Stock
   the inherited value and its source OU from the server, and for an effectively restricted OU a note listing the
   external protections. The form sends the field only when changed.
 - **CSV.** Every row carries `mode` and `official`; header lines carry the disclaimer, the population and the
-  benchmark per group. External `all` exports have no coverage, `n` or count columns (an "n ≥ 30" flag instead); external
-`own` exports keep them.
+  benchmark per group. External `all` exports have no coverage, `n` or count columns (an "n ≥ 30" flag instead, which a
+header line states is the cell's); external `own` exports keep them.
 
 i18n: `nav.forecast_record`, `forecast.record.*` (title, population_all, population_own, empty, unavailable, busy),
 `forecast.scope.{all,own,none,inherit}`, `forecast.scope.help`, `forecast.scope.external_note`,
@@ -2485,7 +2488,7 @@ means the surface does not exist for that credential.
 | **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | 403 `forecast_unavailable` whoever minted it (fail closed until the shared token binding lands) |
 | **Anonymous** | 401 | 401 | — | 401 | 401 | — | — | — | — | 401 | 401 |
 
-`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only). `/healthz/forecast` is
+`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only; an `own` reader also gets `ou`, their unit's name). `/healthz/forecast` is
 public and status-only for everyone.
 
 ### 10.2 `TestForecastAccessMatrix`

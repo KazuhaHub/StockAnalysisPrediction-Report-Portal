@@ -10,6 +10,8 @@ type forecastReaderGroupsResponse struct {
 	Checkpoints    []string              `json:"checkpoints"`
 	Groups         []forecastReaderGroup `json:"groups"`
 	ExcludedMonths []forecastPurgedMonth `json:"excluded_months,omitempty"`
+	Scope          string                `json:"scope"`
+	ScopeOU        string                `json:"scope_ou,omitempty"`
 }
 
 type forecastReaderGroup struct {
@@ -55,7 +57,8 @@ func forecastReaderMembers(out forecastMembersResponse, d forecastDecision, curs
 
 func forecastReaderGroups(resp forecastGroupsResponse, d forecastDecision) forecastReaderGroupsResponse {
 	out := forecastReaderGroupsResponse{OK: resp.OK, Mode: resp.Mode, Official: resp.Official,
-		Range: resp.Range, Checkpoints: resp.Checkpoints, Groups: make([]forecastReaderGroup, 0, len(resp.Groups)), ExcludedMonths: resp.ExcludedMonths}
+		Range: resp.Range, Checkpoints: resp.Checkpoints, Groups: make([]forecastReaderGroup, 0, len(resp.Groups)), ExcludedMonths: resp.ExcludedMonths,
+		Scope: resp.Scope, ScopeOU: resp.ScopeOU}
 	hideVolume := d.External && d.Scope == scopeAll
 	if !hideVolume {
 		out.ForecastGroupsMetadata = resp.ForecastGroupsMetadata

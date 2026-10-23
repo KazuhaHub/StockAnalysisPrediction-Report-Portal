@@ -1,9 +1,17 @@
+/// <reference types="node" />
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
+import ForecastRecordPage from '../pages/ForecastRecordPage'
+
+// The stylesheet as text. Vite stubs CSS for ?raw in tests, so this reads the file itself.
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.css'), 'utf8')
 
 const updateState = vi.hoisted(() => ({ value: {} as unknown }))
 // The header's queue badge polls through the conditional-GET helper; `queue` decides whether it has
@@ -11,6 +19,17 @@ const updateState = vi.hoisted(() => ({ value: {} as unknown }))
 const queueState = vi.hoisted(() => ({ answer: null as unknown }))
 const UNCHANGED = vi.hoisted(() => Symbol('unchanged'))
 const forgetTags = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({
+  value: { user: 'alice', name: 'Alice', admin: true, forecast: undefined, can: () => true, logout: () => undefined } as {
+    user: string
+    name: string
+    admin: boolean
+    forecast: { scope: 'all' | 'own' | 'none'; external: boolean } | undefined
+    can: (perm: string) => boolean
+    logout: () => void
+  },
+}))
+const apiGet = vi.hoisted(() => vi.fn())
 const siteState = vi.hoisted(() => ({
   settings: { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' },
 }))
@@ -34,11 +53,13 @@ vi.mock('../prefs', () => ({
   usePrefs: () => ({ mode: 'light', setMode: vi.fn(), lang: 'en', setLang: vi.fn(), langs: [{ code: 'en', label: 'English' }] }),
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ wide: false }) }))
-vi.mock('../auth', () => ({
-  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, can: () => true, logout: vi.fn() }),
-}))
+vi.mock('../auth', () => ({ useAuth: () => authState.value }))
 vi.mock('../api/client', () => ({
-  api: { get: () => Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' }) },
+  api: { get: apiGet },
+  // The record page is mounted for real in one test below; it needs the client's other exports.
+  ApiError: class ApiError extends Error {},
+  errText: () => 'failed',
+  qs: () => '',
 }))
 vi.mock('../lib/updateState', async (orig) => {
   const actual = await orig<typeof import('../lib/updateState')>()
@@ -68,6 +89,7 @@ function renderAt(path: string) {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="chat" element={<div>chat-body</div>} />
+          <Route path="forecast" element={<div>forecast-body</div>} />
           <Route path="queue" element={<div>queue-body</div>} />
           <Route path="review" element={<div>review-body</div>} />
           <Route path="apps" element={<div>apps-body</div>} />
@@ -82,6 +104,8 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   updateState.value = noUpdate
+  authState.value = { user: 'alice', name: 'Alice', admin: true, forecast: undefined, can: () => true, logout: () => undefined }
+  apiGet.mockReset().mockImplementation(() => Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' }))
   vi.stubEnv('VITE_BUILD_VERSION', page.version)
   vi.stubEnv('VITE_BUILD_COMMIT', page.commit)
   vi.stubEnv('VITE_BUILD_DATE', page.buildDate)
@@ -326,5 +350,117 @@ describe('AppLayout header centring', () => {
     expect(banner).not.toBeNull()
     expect(banner?.style.borderBottom).toBe('')
     expect(screen.queryByLabelText('common.cancel')).toBeNull()
+  })
+})
+
+// The record page is a destination for people the model gives access to. The server decides on every
+// request; the navigation only has to avoid offering a door that is certain to be refused, and must
+// never knock on the forecast routes itself.
+describe('AppLayout forecast record navigation', () => {
+  const reader = (forecast: { scope: 'all' | 'own' | 'none'; external: boolean } | undefined, admin = false) => {
+    authState.value = { user: 'bob', name: 'Bob', admin, forecast, can: () => false, logout: () => undefined }
+  }
+  const workbench = async () => {
+    const user = userEvent.setup()
+    renderAt('/queue')
+    await screen.findByText('queue-body')
+    await user.click(screen.getByRole('button', { name: 'nav.workbench' }))
+  }
+
+  beforeEach(() => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+  })
+
+  it.each([
+    ['an administrator without a hint', undefined, true, true],
+    ['an all reader', { scope: 'all' as const, external: false }, false, true],
+    ['an own reader', { scope: 'own' as const, external: true }, false, true],
+    ['a none reader', { scope: 'none' as const, external: false }, false, false],
+    ['a reader with no hint from an older server', undefined, false, false],
+  ])('offers the record to %s only when they may read it', async (_who, forecast, admin, shown) => {
+    reader(forecast, admin)
+    await workbench()
+    expect(!!screen.queryByRole('menuitem', { name: 'nav.forecast_record' })).toBe(shown)
+  })
+
+  it('opens the record from the launcher', async () => {
+    reader({ scope: 'all', external: false })
+    const user = userEvent.setup()
+    renderAt('/queue')
+    await user.click(await screen.findByRole('button', { name: 'nav.workbench' }))
+    await user.click(screen.getByRole('menuitem', { name: 'nav.forecast_record' }))
+    expect(await screen.findByText('forecast-body')).toBeTruthy()
+  })
+
+  // The card used to be a fixed 276px, which holds three tiles; the record made it four. The card
+  // grows with its tiles, and a label too long for a tile can be read in full from its title.
+  it('sizes the launcher to its tiles so a fourth tile cannot overhang the card', async () => {
+    authState.value = { user: 'bob', name: 'Bob', admin: false, forecast: { scope: 'all', external: false }, can: () => true, logout: () => undefined }
+    await workbench()
+    const menu = screen.getByRole('menu', { name: 'nav.workbench' })
+    const items = within(menu).getAllByRole('menuitem')
+    expect(items).toHaveLength(4)
+    expect(menu.style.getPropertyValue('--rp-workbench-cols')).toBe('4')
+    expect((menu.querySelector('.rp-workbench-menu__grid') as HTMLElement).style.gridTemplateColumns).toContain('repeat(4,')
+    for (const item of items) expect(item.getAttribute('title')).toBe(item.getAttribute('aria-label'))
+  })
+
+  it('lets the card width follow the tile count and a tile label wrap to two lines', () => {
+    const rule = (selector: string) => css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:\\.ant-btn\\s*)?\\{([^}]*)\\}`))?.[1] ?? ''
+    expect(rule('.rp-workbench-menu')).toMatch(/width:\s*max\(276px,\s*calc\(var\(--rp-workbench-cols,\s*3\)\s*\*\s*92px\s*-\s*4px\)\)/)
+    const label = rule('.rp-workbench-menu__item-label')
+    expect(label).toMatch(/-webkit-line-clamp:\s*2/)
+    expect(label).not.toMatch(/white-space:\s*nowrap/)
+  })
+
+  it('shows the record in the compact account menu on the same condition', async () => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    const user = userEvent.setup()
+    reader({ scope: 'own', external: false })
+    const first = renderAt('/queue')
+    await screen.findByText('queue-body')
+    await user.click(screen.getByRole('button', { name: 'Bob' }))
+    expect(screen.getByRole('button', { name: /nav\.forecast_record/ })).toBeTruthy()
+    first.unmount()
+
+    reader({ scope: 'none', external: false })
+    renderAt('/queue')
+    await screen.findByText('queue-body')
+    await user.click(screen.getByRole('button', { name: 'Bob' }))
+    expect(screen.queryByRole('button', { name: /nav\.forecast_record/ })).toBeNull()
+  })
+
+  it('gives the record page a breadcrumb back home', async () => {
+    reader({ scope: 'all', external: false })
+    renderAt('/forecast')
+    expect(await screen.findByText('forecast-body')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'nav.home' }).getAttribute('href')).toBe('/')
+    expect(screen.getByText('nav.forecast_record').closest('a')).toBeNull()
+  })
+
+  it('never asks a forecast or prediction route from the shell, whatever the scope', async () => {
+    reader({ scope: 'none', external: false })
+    renderAt('/forecast')
+    await screen.findByText('forecast-body')
+    await new Promise((r) => setTimeout(r, 30))
+    for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
+  })
+
+  // The shell and the real page together: a reader at none opens /forecast by hand. Nothing in
+  // either asks a forecast or prediction route, and the page says why instead.
+  it('issues no forecast or prediction request when a none reader opens the record page itself', async () => {
+    reader({ scope: 'none', external: false })
+    render(
+      <MemoryRouter initialEntries={['/forecast']}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="forecast" element={<ForecastRecordPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('forecast.record.unavailable')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 30))
+    for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
   })
 })

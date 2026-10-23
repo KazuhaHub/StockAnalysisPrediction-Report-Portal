@@ -21,7 +21,7 @@ listener, reuse its credentials elsewhere, or point the command at a production 
 
 The verbose test output prints a fresh random password shared by `admin`, `internal`, `own`,
 `external-all`, `external-own` and `none`. Keep that output private. Log in as `admin` at
-`http://127.0.0.1:8791` and open `/manage/forecast`. Normal server startup may bootstrap a new API token;
+`http://127.0.0.1:8791`: `/forecast` is the cohort record every reader sees (log in as each seeded account to see its scope), and `/manage/forecast` holds the evaluator's operations and the access summary. Normal server startup may bootstrap a new API token;
 the generated database itself retains no ingest token. The evaluator stays **off**. Do not enable it:
 the synthetic fetch implementation exists only in the test writer, not in the running server.
 
@@ -47,8 +47,8 @@ the synthetic fetch implementation exists only in the test writer, not in the ru
 
 The `own` account inherits ten attributed sets through its child OU. `external-own` has eight;
 `external-all` is restricted for report access but explicitly has forecast scope `all`. `none` uses
-the default `none` scope. Those accounts prepare P26/P27's access checks; they do not grant access to
-the admin-only management route before those PRs land.
+the default `none` scope. Those accounts exercise the reader routes and the `/forecast` record page
+(each sees its own scope); none of them can open the admin-only management route.
 
 ## Clock and fidelity boundaries
 

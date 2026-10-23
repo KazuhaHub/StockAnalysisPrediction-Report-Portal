@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useId, type CSSProperties } from 'react'
 import { Tag, Typography, theme } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -10,7 +10,7 @@ import type {
   ForecastMetric,
   ForecastMode,
 } from '../../api/types'
-import { cellDisplay } from '../../lib/forecast'
+import { cellDisplay, gateText } from '../../lib/forecast'
 import { forecastPalette } from '../../lib/forecastPresentation'
 import ForecastLegend from './ForecastLegend'
 
@@ -26,12 +26,22 @@ interface Props {
   metric: ForecastMetric
   mode: ForecastMode
   onOpen: (g: ForecastGroup, cp: ForecastCheckpoint) => void
+  /**
+   * Whether a rejected-sets count links to the audit log. The log is an administrator page, so a
+   * reader's matrix states the count without a link that would only bounce them home.
+   */
+  auditLink?: boolean
 }
 
-export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
+// A reader response is not an admin response with fields missing by accident. An external reader
+// with the all scope gets no coverage and no counts on purpose (a count would reveal the ledger's
+// volume), so every count here is read as possibly absent and an absent one is never drawn as zero.
+export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink = true }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const palette = forecastPalette(token)
+  // The gate flag's explanation is drawn once, as text, and each flagged cell points at it.
+  const gateHintId = useId()
 
   const box: CSSProperties = {
     borderRadius: 6,
@@ -57,8 +67,24 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     if (c.state === 'small') {
       return (
         <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
-          <span>{t('forecast.cell.small', { n: c.n ?? 0 })}</span>
+          <span>{c.n === undefined ? t('forecast.cell.small_nocount') : t('forecast.cell.small', { n: c.n })}</span>
           <span style={{ fontSize: 12 }}>{t('forecast.cell.small_hint')}</span>
+        </div>
+      )
+    }
+    if (c.state === 'purged') {
+      return (
+        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
+          {t('forecast.cell.purged')}
+        </div>
+      )
+    }
+    if (c.state === 'pending' && c.total === undefined) {
+      // The server sent no denominator, so there is no progress to draw: a bar at 0 of 0 would say
+      // nothing has matured, which nobody knows.
+      return (
+        <div style={{ ...box, background: token.colorFillQuaternary, color: token.colorTextTertiary }}>
+          {t('forecast.cell.pending_plain')}
         </div>
       )
     }
@@ -88,6 +114,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     return (
       <button
         type="button"
+        aria-describedby={d.gate ? gateHintId : undefined}
         onClick={() => onOpen(g, cp)}
         style={{
           ...box,
@@ -108,7 +135,24 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
             q&lt;0.05
           </span>
         )}
-        <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>
+        {d.sub && <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{d.sub}</span>}
+        {d.gate && (
+          // The cell's own assurance, drawn once. It is not the metric's sample size: that
+          // denominator is a smaller subset which has no n >= 30 minimum of its own.
+          <span
+            style={{
+              alignSelf: 'flex-start',
+              fontSize: 11,
+              lineHeight: '16px',
+              padding: '0 5px',
+              borderRadius: 4,
+              border: `1px solid ${token.colorBorderSecondary}`,
+              color: token.colorTextSecondary,
+            }}
+          >
+            {d.gate}
+          </span>
+        )}
         {excluded > 0 && (
           <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
             {t('forecast.cell.excluded', { n: excluded })}
@@ -120,6 +164,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
 
   const coverageBar = (g: ForecastGroup) => {
     const c = g.coverage
+    if (!c) return null
     const total = Math.max(1, c.reports)
     const seg = (n: number, colour: string) => (
       <i style={{ display: 'block', height: 6, width: `${(n / total) * 100}%`, background: colour }} />
@@ -138,11 +183,17 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
           {rejected > 0 && (
             <>
               {' · '}
-              <Link to="/manage/audit?action=predictions.reject">
+              {auditLink ? (
+                <Link to="/manage/audit?action=predictions.reject">
+                  <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                    {t('forecast.cov.rejected', { n: rejected })}
+                  </Typography.Text>
+                </Link>
+              ) : (
                 <Typography.Text type="warning" style={{ fontSize: 12 }}>
                   {t('forecast.cov.rejected', { n: rejected })}
                 </Typography.Text>
-              </Link>
+              )}
             </>
           )}
         </div>
@@ -165,7 +216,15 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
     )
   }
 
+  // A flag stands where a count would have been, so it needs its meaning on the page: the badge
+  // alone says "n >= 30" and nothing about which sample that is, and a hover title is not reachable
+  // from a keyboard or a phone.
+  const showsGate = resp.groups.some((g) =>
+    Object.values(g.cells ?? {}).some((c) => c?.state === 'mature' && gateText(c, t) !== ''),
+  )
   const rows = [...resp.groups].reverse()
+  // The column exists only when the server sent coverage for at least one group.
+  const showCoverage = resp.groups.some((g) => g.coverage)
   const th: CSSProperties = {
     textAlign: 'left',
     padding: '6px 8px',
@@ -178,7 +237,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
   // Percentage heights inside auto-sized table cells do not reliably fill the row in browsers.
   const row: CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: `minmax(140px, 1.2fr) repeat(${resp.checkpoints.length}, minmax(112px, 1fr)) minmax(200px, 1.8fr)`,
+    gridTemplateColumns: `minmax(140px, 1.2fr) repeat(${resp.checkpoints.length}, minmax(112px, 1fr))${showCoverage ? ' minmax(200px, 1.8fr)' : ''}`,
     columnGap: 4,
     alignItems: 'stretch',
   }
@@ -192,8 +251,13 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Typography.Text>
       <ForecastLegend />
+      {showsGate && (
+        <Typography.Text id={gateHintId} type="secondary" style={{ fontSize: 12 }}>
+          {t('forecast.cell.min_n_met_hint')}
+        </Typography.Text>
+      )}
       <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
-        <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + 224 }}>
+        <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + (showCoverage ? 224 : 0) }}>
           <thead style={{ display: 'block' }}>
             <tr role="row" style={row}>
               <th role="columnheader" scope="col" style={th}>{t(mode === 'month' ? 'forecast.col.month' : 'forecast.col.group')}</th>
@@ -202,7 +266,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
                   {t(`forecast.cp.${cp}`)}
                 </th>
               ))}
-              <th role="columnheader" scope="col" style={th}>{t('forecast.col.coverage')}</th>
+              {showCoverage && <th role="columnheader" scope="col" style={th}>{t('forecast.col.coverage')}</th>}
             </tr>
           </thead>
           <tbody style={{ display: 'grid', rowGap: 4 }}>
@@ -227,10 +291,10 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen }: Props) {
                 </td>
                 {resp.checkpoints.map((cp) => (
                   <td key={cp} style={td}>
-                    {cellBox(g.cells[cp], cp, g)}
+                    {g.cells[cp] ? cellBox(g.cells[cp], cp, g) : null}
                   </td>
                 ))}
-                <td style={td}>{coverageBar(g)}</td>
+                {showCoverage && <td style={td}>{coverageBar(g)}</td>}
               </tr>
             ))}
           </tbody>
