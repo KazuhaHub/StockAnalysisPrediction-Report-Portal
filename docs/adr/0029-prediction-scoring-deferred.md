@@ -167,9 +167,10 @@ every fill starts at `S0`'s close, not at the report's own baseline.
   only for a restricted OU.
 - **Amended by [ADR 0039](0039-forecast-verification-for-readers.md) (R2a).** Reader statistics use
   session routes `/api/forecast/groups*` and per-OU all/own/none; admin aliases remain `PermManage`
-  until P29. The core record moves to `/forecast`, with `/manage/forecast` for operations. Bound
-  app tokens carry their minting user, enforce current scope and return accepted report-backed
-  predictions without payload/errors/membership; they never authorize statistics. Persistent
+  until P29. The core record moves to `/forecast`, with `/manage/forecast` for operations.
+  App-bridge tokens get no forecast reads: both v1 prediction reads answer `403 forecast_unavailable`
+  and read nothing from the ledger, until the shared token binding from the notification work lands
+  and a follow-up re-enables scoped bridge reads on it; they never authorize statistics. Persistent
   machine prediction diagnostics remain unchanged. ADR 0039 records the full access, reading-stage
   and edition contract; its rollout status is separate from this accepted decision.
 

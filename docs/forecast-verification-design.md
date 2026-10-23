@@ -338,7 +338,8 @@ backup and restore pick them up.
 - **Prediction reads distinguish credentials.** The SPA uses session routes for report and symbol
   reads. The v1 routes admit a query token or a valid cookie held at the enrolment wall; cookie
   forecast reads additionally require current OU scope. Persistent machine diagnostics remain
-  unscoped; bound app tokens use their minting user's decision and never machine diagnostics.
+  unscoped; app-bridge tokens get no forecast reads (`403 forecast_unavailable`, ledger not read)
+  until the shared token binding lands.
 - **R2a reader access** is specified in [ADR 0039](adr/0039-forecast-verification-for-readers.md):
   `/forecast` is a core SPA record using session routes `/api/forecast/groups*`, authorized by
   nearest-inherited `all`/`own`/`none`. Own membership is computed inside the live subtree's frozen

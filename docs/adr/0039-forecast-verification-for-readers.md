@@ -128,11 +128,13 @@ payload, membership, errors or orphans even for an admin-minted bridge. Until th
 forecast identity registry or broader app capability is introduced. The access decision itself is
 unchanged: it is taken only from a cookie session's strict account and tree snapshot.
 
-An account whose OU chain is broken (a dangling or cyclic parent) resolves to none. The same chain
-leaves the enrolment policy unreadable, which every other route reports as
+An account whose OU chain is broken (a dangling or cyclic parent) resolves to none. A dangling
+parent also leaves the enrolment policy unreadable, which every other route reports as
 `503 enrolment_policy_unavailable`; on the forecast reads the definite answer, `403
 forecast_unavailable`, is returned instead, so the subject sees what the table promises a none
-account. A transient store error is not a structural reason and keeps the retryable 503.
+account. A cyclic chain does not trip the wall: the policy walks past a cycle, so such an account
+reaches the forecast gate and is refused there with the same `403 forecast_unavailable`. A
+transient store error is not a structural reason and keeps the retryable 503.
 
 ## External protection is response shaping, not CSS
 
@@ -217,8 +219,9 @@ card or off through the audited setting, without hiding the report itself.
   decision. A second per-OU stage would duplicate the access model and was not selected.
 - Filtering after membership would let another tenant change own results. Hiding counts in the
   browser would leave them available on the wire. Neither is a permission boundary.
-- Treating an app query token as a machine token would bypass none and expose diagnostics. Its
-  minting user must remain part of prediction authorization.
+- Treating an app query token as a machine token would bypass none and expose diagnostics. A bridge
+  token records no minting user today, so it is refused outright; once the shared token binding
+  lands, the minting user must be part of prediction authorization when scoped bridge reads return.
 - Recomputing attribution from the current user would rewrite history. The live tree determines
   subtree inclusion, while stored attribution identifies the OU; deletion is the explicit exception.
 

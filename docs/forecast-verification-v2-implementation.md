@@ -1979,10 +1979,12 @@ found:
   at the missing row, the external flag would be read from a shortened chain, and a tenant under a restricted ancestor
   would be treated as internal.
   On the forecast read routes that `none` is what the caller is told (403 `forecast_unavailable`, the matrix's `Dangling`
-  subject) even though the same broken chain also leaves the enrolment policy unreadable; the wall defers to this
+  subject) even though a dangling parent also leaves the enrolment policy unreadable; the wall defers to this
   definite refusal only on those routes and only for a `dangling_group` or `cyclic_chain` decision, and every other
-  route keeps its 503 `enrolment_policy_unavailable`. A transient store error is not a structural reason and stays a
-  retryable 503. (`TestBrokenOUChainAnswersForecastUnavailableOnForecastReads`.)
+  route keeps its 503 `enrolment_policy_unavailable` for a dangling chain. A cyclic chain does not make the policy
+  unreadable (the wall walks past a cycle), so a cyclic account reaches the forecast gate and is refused there with the
+  same 403. A transient store error is not a structural reason and stays a retryable 503.
+  (`TestBrokenOUChainAnswersForecastUnavailableOnForecastReads`.)
 - **No lenient helper.** The gate never calls `isRestricted`, `isAdmin`, `GetUser`, `groupChain`,
   `EffectiveGroupSettings` or `GroupRestrictedEffective`. A source-scan test enforces it.
 - **No caching of the decision.** A user moved by an SSO rule gets the new decision on the next request.
