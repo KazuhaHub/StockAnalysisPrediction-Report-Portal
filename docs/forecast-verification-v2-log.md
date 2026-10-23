@@ -232,7 +232,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Current local work is P23 `feat/quote-ledger-capability`, based directly on main: explicit
   capability isolation, operator-order selection, uncached walk with isolated health/per-pass
   breakers, Tencent evidence admission and runtime evaluator wiring are locally implemented and
-  reviewed. Readiness/alerts and source-panel integration remain outstanding. No P23 PR is open.
+  reviewed, along with the admin source-diagnostics backend. Readiness/alerts, order auditing/
+  confirmation and source-panel frontend integration remain outstanding. No P23 PR is open.
 - **Next step.** Complete P23's readiness and alert integration at the shared-file coordination gate,
   panel and ADR work. Resolve the purge-evidence decision and P26 integration order before P27/P28.
   P13 still requires authorized production baseline screenshots and owner
@@ -823,3 +824,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   Frontend panel rendering, source-order audit/confirmation, readiness/alerts and the source ADR
   remain outstanding. No schema, production, Apps branch or separately owned PR changed. Full
   Go/Postgres, repeated race/static checks and independent review are pending at this checkpoint.
+- Application/test head `746c31bd` passed full Go/Postgres regression (app package 33.041 s),
+  three-repeat targeted race checks (3.537 s), vet, staticcheck and build. Independent read-only
+  review found no actionable issues in array/empty shapes, declarations, admin authorization,
+  wildcard exclusion or health separation/cache-clear behavior. Review used SQLite only.
+- Added a test-only direct-helper control for duplicate/unknown configured source names and a
+  primary declaring both writer/shadow grants: the primary is not its own peer. Runtime source
+  is unchanged after the reviewed head. Three race-enabled admin-test repetitions including this
+  control passed (3.414 s). Frontend, readiness, alert and audit work remain unreviewed
+  and outstanding; no production, schema or Apps action was performed.

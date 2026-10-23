@@ -102,4 +102,12 @@ func TestLedgerAdminConfiguredOrderAndShadowAreExplicit(t *testing.T) {
 	if out["ledgerShadowPeer"] != "" || !reflect.DeepEqual(out["ledgerChain"], []any{"sina", "tencent"}) {
 		t.Fatal("display wildcard entered ledger declarations")
 	}
+	// Direct helper callers may supply unsanitized order names. A primary with both grants
+	// must not become its own comparison peer, and a duplicate may not duplicate the chain.
+	s.quotes.sources[0].caps = append(s.quotes.sources[0].caps, quoteCapability{intervals: []quoteInterval{quoteIntervalSettledShadow}})
+	s.quotes.sources[2] = shadow
+	direct := s.quoteLedgerAdminState(quoteConfig{Order: []string{"missing", "tencent", "tencent", "yahoo"}})
+	if !reflect.DeepEqual(direct["ledgerChain"], []string{"tencent"}) || direct["ledgerPrimary"] != "tencent" || direct["ledgerShadowPeer"] != "yahoo" {
+		t.Fatalf("duplicate/unknown order or self-shadow bypassed: %+v", direct)
+	}
 }
