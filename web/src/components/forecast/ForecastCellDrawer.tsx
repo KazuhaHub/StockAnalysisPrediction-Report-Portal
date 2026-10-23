@@ -51,8 +51,9 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
   const key = JSON.stringify([mode, from, to, group, label, checkpoint])
   const [stored, setStored] = useState<Loaded>()
   const [revision, setRevision] = useState(0)
-  // Bumped whenever the cell changes or the drawer closes, which invalidates every request in flight.
-  const seq = useRef(0)
+  // The live request scope: replaced whenever the cell changes or the drawer closes, which retires
+  // every request still in flight for the old one.
+  const scope = useRef<{ live: boolean }>({ live: false })
 
   const request = (cursor?: string) => {
     const query = new URLSearchParams({ mode })
@@ -70,17 +71,18 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
 
   useEffect(() => {
     if (!open || !label) return
-    const mine = ++seq.current
+    const mine = { live: true }
+    scope.current = mine
     setStored({ key, members: [], next: '', loading: true, error: '', errorAt: '' })
     request()
       .then((r) => {
-        if (seq.current === mine) setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '' })
+        if (mine.live) setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '' })
       })
       .catch((e) => {
-        if (seq.current === mine) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first' })
+        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first' })
       })
     return () => {
-      seq.current++
+      mine.live = false
     }
     // `request` closes over exactly the values in `key`; `t` is stable in the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,16 +93,16 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
 
   const more = () => {
     if (!current.next) return
-    const mine = seq.current
+    const mine = scope.current
     setStored({ ...current, loading: true, error: '', errorAt: '' })
     request(current.next)
       .then((r) => {
-        if (seq.current === mine) {
+        if (mine.live) {
           setStored((s) => (s ? { ...s, members: [...s.members, ...(r.members ?? [])], next: r.next_cursor ?? '', loading: false } : s))
         }
       })
       .catch((e) => {
-        if (seq.current === mine) setStored((s) => (s ? { ...s, loading: false, error: errText(e, t), errorAt: 'more' } : s))
+        if (mine.live) setStored((s) => (s ? { ...s, loading: false, error: errText(e, t), errorAt: 'more' } : s))
       })
   }
 
