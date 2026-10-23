@@ -455,3 +455,55 @@ describe('ForecastCellDrawer mature content', () => {
   })
 })
 
+
+// A custom range loses the months the retention policy removed. The members route says which, and the
+// drawer says it above the list: a reader who counts the rows against a cell must know why the months
+// are not among them.
+describe('ForecastCellDrawer months removed by retention', () => {
+  const removed = [
+    { cohort: '2026-07', purged_at: '2026-10-03T02:00:00Z' },
+    { cohort: '2026-09', purged_at: '2026-09-30T18:00:00Z' },
+  ]
+  const full = { state: 'mature', n: 42, spread_bp: 310, spread_p: 0.012 } as ForecastCell
+  const waiting = { state: 'pending', resolved: 3, total: 9 } as ForecastCell
+
+  it('names each removed month and its day above the list, on the scored view', async () => {
+    show(page([member(1, 'agree')], { excluded_months: removed }), { cell: full, mode: 'custom' })
+    await screen.findByText('600001')
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('forecast.drawer.excluded_title:{"n":2}')).toBeTruthy()
+    // 18:00 UTC on the 30th is already the 1st in the panel's zone.
+    expect(dialog.textContent).toContain('forecast.custom.excluded_item:{"cohort":"2026-09","date":"2026-10-01"}')
+    expect(dialog.textContent).toContain('forecast.custom.excluded_item:{"cohort":"2026-07","date":"2026-10-03"}')
+  })
+
+  it('says it on the membership view too', async () => {
+    show(page([member(1)], { state: 'pending', population: 'all', excluded_months: removed }), { cell: waiting, mode: 'custom' })
+    await screen.findByText('600001')
+    expect(within(screen.getByRole('dialog')).getByText('forecast.drawer.excluded_title:{"n":2}')).toBeTruthy()
+  })
+
+  it('says nothing when nothing was removed or the route did not say', async () => {
+    const view = show(page([member(1, 'agree')], { excluded_months: [] }), { cell: full, mode: 'custom' })
+    await screen.findByText('600001')
+    expect(screen.queryByText(/forecast\.drawer\.excluded_title/)).toBeNull()
+    view.unmount()
+    show(page([member(1, 'agree')]), { cell: full, mode: 'custom' })
+    await screen.findByText('600001')
+    expect(screen.queryByText(/forecast\.drawer\.excluded_title/)).toBeNull()
+  })
+
+  it('keeps the note while later pages load', async () => {
+    getMock.mockResolvedValueOnce(page([member(1, 'agree')], { excluded_months: removed, next_cursor: 'c2' }))
+    getMock.mockResolvedValueOnce(page([member(2, 'agree')]))
+    render(
+      <MemoryRouter>
+        <ForecastCellDrawer open onClose={() => undefined} mode="custom" from="2026-07-01" to="2026-09-30" group="month" label="2026-09" checkpoint="d5" cell={full} />
+      </MemoryRouter>,
+    )
+    await screen.findByText('600001')
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.drawer.load_more' }))
+    await screen.findByText('600002')
+    expect(screen.getByText('forecast.drawer.excluded_title:{"n":2}')).toBeTruthy()
+  })
+})

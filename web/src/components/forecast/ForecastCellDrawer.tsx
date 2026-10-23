@@ -14,8 +14,10 @@ import type {
   ForecastMember,
   ForecastMembersResponse,
   ForecastMode,
+  ForecastPurgedMonth,
 } from '../../api/types'
 import ExploratoryTag from './ExploratoryTag'
+import ForecastRetentionNote from './ForecastRetentionNote'
 import Quiet from './Quiet'
 import WarnTag from './WarnTag'
 
@@ -31,7 +33,9 @@ import WarnTag from './WarnTag'
 //
 // It reads the reader members route and nothing else. That route pages by cursor and, for a reader
 // who may not know the ledger's volume, sends no totals or counts, so the drawer never states a
-// total and reads every count as possibly absent.
+// total and reads every count as possibly absent. A custom range may have lost months to the
+// retention policy; the route names them and the drawer says so above the list, because the rows
+// cannot include what was removed.
 
 const PAGE = 100
 
@@ -58,6 +62,8 @@ interface Loaded {
   loading: boolean
   error: string
   errorAt: 'first' | 'more' | ''
+  /** The months a custom range lost to retention, as the first page said; later pages repeat it. */
+  excluded: ForecastPurgedMonth[]
 }
 
 // The reasons a member of a not-yet-mature cell is not a scored result yet. A closed list written by
@@ -96,13 +102,15 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     if (!open || !label) return
     const mine = { live: true }
     scope.current = mine
-    setStored({ key, members: [], next: '', loading: true, error: '', errorAt: '' })
+    setStored({ key, members: [], next: '', loading: true, error: '', errorAt: '', excluded: [] })
     request()
       .then((r) => {
-        if (mine.live) setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '' })
+        if (mine.live) {
+          setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '', excluded: r.excluded_months ?? [] })
+        }
       })
       .catch((e) => {
-        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first' })
+        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first', excluded: [] })
       })
     return () => {
       mine.live = false
@@ -112,7 +120,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
   }, [open, key, revision])
 
   const current: Loaded =
-    stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '' }
+    stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '', excluded: [] }
 
   const more = () => {
     if (!current.next) return
@@ -269,6 +277,12 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           <Typography.Title level={5} style={{ marginTop: 0 }}>
             {t('forecast.drawer.members')}
           </Typography.Title>
+          {/* The list leaves out the months retention removed; the cell above it does not say so. */}
+          {mode === 'custom' && current.excluded.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <ForecastRetentionNote months={current.excluded} titleKey="forecast.drawer.excluded_title" />
+            </div>
+          )}
           {current.error && (
             <Alert
               type="error"

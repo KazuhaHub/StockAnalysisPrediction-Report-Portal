@@ -15,6 +15,7 @@ import {
   readView,
   upcomingDate,
   visibleGroups,
+  withRetention,
 } from './forecast'
 
 // These pin the two things a wrong implementation would hide: a number on a cell that is not
@@ -73,6 +74,19 @@ describe('cellDisplay', () => {
 
   it('marks p as p* in the exploratory view', () => {
     expect(cellDisplay(mature, 'ic', 'custom', t)?.sub).toContain('p*=')
+  })
+
+  // The exploratory view prints p*, so a cell that is tinted there must have a p* under 0.05 as well
+  // as a corrected q: the badge words the threshold from p*, and a tint it could not stand behind
+  // would be a claim the cell does not make.
+  it('tints an exploratory cell only when its p* is under 0.05 as well as its q', () => {
+    expect(cellDisplay(mature, 'spread', 'custom', t)?.signal).toBe(1)
+    expect(cellDisplay({ ...mature, spread_p: 0.2 }, 'spread', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, spread_p: undefined }, 'spread', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, ic_p: 0.2 }, 'ic', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, hit: 0.7, hit_q: 0.01, hit_p: 0.3 }, 'hit', 'custom', t)?.signal).toBe(0)
+    // The record is untouched: its tint follows q alone.
+    expect(cellDisplay({ ...mature, spread_p: 0.2 }, 'spread', 'month', t)?.signal).toBe(1)
   })
 
   it('reports a one-armed spread as a dash rather than a zero', () => {
@@ -470,5 +484,114 @@ describe('upcomingDate', () => {
   it('has nothing to print when there is no date', () => {
     expect(upcomingDate(undefined, generated)).toBeUndefined()
     expect(upcomingDate('', generated)).toBeUndefined()
+  })
+})
+
+
+// A purged month inside a custom range. The server removes the purged sets and keeps the period, so a
+// month with nothing left comes back as a cell with no members, which the gate calls "small". The
+// response's excluded_months is the only thing that says it was retention that emptied it.
+describe('withRetention', () => {
+  const cell = (state: ForecastCell['state'], extra: Partial<ForecastCell> = {}): ForecastCell => ({ state, ...extra })
+  const cells = (state: ForecastCell['state'], extra: Partial<ForecastCell> = {}) => ({
+    d5: cell(state, extra), d20: cell(state, extra), d60: cell(state, extra), d120: cell(state, extra), h12: cell(state, extra),
+  })
+  const group = (label: string, start: string, end: string, state: ForecastCell['state'] = 'small'): ForecastGroup => ({
+    label, start, end, official: false, bench: 'sh000852', cells: cells(state, state === 'small' ? { n: 0 } : { n: 40 }),
+  })
+  const june = { cohort: '2026-06', purged_at: '2026-10-01T02:00:00Z' }
+  const july = { cohort: '2026-07', purged_at: '2026-10-02T02:00:00Z' }
+
+  it('draws a group whose every month was removed as purged, not as below the gate', () => {
+    const out = withRetention([group('2026-06', '2026-06-01', '2026-06-30')], [june])
+    expect(Object.values(out[0].cells).map((c) => c.state)).toEqual(['purged', 'purged', 'purged', 'purged', 'purged'])
+    expect(out[0].purged_at).toBe('2026-10-01T02:00:00Z')
+    // No size survives on a cell that is gone.
+    expect(Object.values(out[0].cells).some((c) => c.n !== undefined)).toBe(false)
+  })
+
+  it('leaves a group that only touches a removed month alone, since it still has a population', () => {
+    const quarter = group('2026-Q2', '2026-04-01', '2026-06-30', 'mature')
+    expect(withRetention([quarter], [june])[0]).toBe(quarter)
+    const all = group('all', '2026-06-01', '2026-07-31', 'small')
+    expect(withRetention([all], [june])[0]).toBe(all)
+  })
+
+  it('removes a group spanning several months only when every one of them was removed', () => {
+    const span = group('2026-06 – 2026-07', '2026-06-01', '2026-07-31')
+    expect(withRetention([span], [june])[0]).toBe(span)
+    const out = withRetention([span], [june, july])
+    expect(out[0].cells.d5.state).toBe('purged')
+    // The retention is complete when its last month was removed.
+    expect(out[0].purged_at).toBe('2026-10-02T02:00:00Z')
+  })
+
+  it('handles a week that straddles two months by both of them', () => {
+    const week = group('2026-06-29 – 2026-07-05', '2026-06-29', '2026-07-05')
+    expect(withRetention([week], [june])[0]).toBe(week)
+    expect(withRetention([week], [june, july])[0].cells.d5.state).toBe('purged')
+  })
+
+  it('never turns a result, a pending cell or an open cell into a purged one', () => {
+    const mixed: ForecastGroup = { ...group('2026-06', '2026-06-01', '2026-06-30'), cells: { d5: cell('mature', { n: 40 }), d20: cell('pending', { resolved: 1, total: 2 }), d60: cell('open'), d120: cell('small', { n: 0 }), h12: cell('small', { n: 0 }) } }
+    const out = withRetention([mixed], [june])
+    expect(out[0].cells.d5.state).toBe('mature')
+    expect(out[0].cells.d20.state).toBe('pending')
+    expect(out[0].cells.d60.state).toBe('open')
+    expect(out[0].cells.d120.state).toBe('purged')
+    // Not every cell is gone, so the group is not marked as purged.
+    expect(out[0].purged_at).toBeUndefined()
+  })
+
+  it('does nothing without a disclosure, for the monthly record, or for a group it cannot place', () => {
+    const g = group('2026-06', '2026-06-01', '2026-06-30')
+    expect(withRetention([g], undefined)[0]).toBe(g)
+    expect(withRetention([g], [])[0]).toBe(g)
+    const official = { ...g, official: true }
+    expect(withRetention([official], [june])[0]).toBe(official)
+    const odd = group('?', '', '')
+    expect(withRetention([odd], [june])[0]).toBe(odd)
+  })
+
+  it('is idempotent', () => {
+    const once = withRetention([group('2026-06', '2026-06-01', '2026-06-30')], [june])
+    expect(withRetention(once, [june])[0].cells.d5).toEqual(once[0].cells.d5)
+  })
+})
+
+describe('forecastCsv for a range with removed months', () => {
+  const june = { cohort: '2026-06', purged_at: '2026-10-01T02:00:00Z' }
+  // The file states one checkpoint here, so each group carries only that cell.
+  const only = (d5: ForecastCell) => ({ d5 }) as unknown as ForecastGroup['cells']
+  const base: ForecastGroupsResponse = {
+    ok: true,
+    mode: 'custom',
+    official: false,
+    range: { from: '2026-06-01', to: '2026-07-31', group: 'month' },
+    checkpoints: ['d5'],
+    groups: [
+      { label: '2026-06', start: '2026-06-01', end: '2026-06-30', official: false, bench: 'sh000852', cells: only({ state: 'small', n: 0 }) },
+      { label: '2026-07', start: '2026-07-01', end: '2026-07-31', official: false, bench: 'sh000852', cells: only(mature) },
+    ],
+    excluded_months: [june, { cohort: '2026-08', purged_at: 'bad\nvalue' }],
+  }
+
+  it('names every removed month and when it was removed, in the file itself', () => {
+    const csv = forecastCsv(base, 'now')
+    expect(csv).toContain('# excluded_months=2026-06@2026-10-01T02:00:00Z|2026-08@bad value')
+  })
+
+  it('writes the removed month as purged rather than as a cohort under the gate', () => {
+    const csv = forecastCsv(base, 'now')
+    expect(csv).toContain('2026-06,2026-06-01,2026-06-30,d5,purged,')
+    expect(csv).not.toContain('d5,small')
+    expect(csv).toContain('2026-07,2026-07-01,2026-07-31,d5,mature,spread_bp')
+  })
+
+  it('writes the same disclosure for a reader export, and nothing when nothing was removed', () => {
+    const reader = { population: 'All', disclaimer: 'D', publicationGate: 'G', hideCounts: false }
+    expect(forecastCsv(base, 'now', reader)).toContain('# excluded_months=2026-06@')
+    expect(forecastCsv({ ...base, excluded_months: undefined }, 'now')).not.toContain('excluded_months')
+    expect(forecastCsv({ ...base, excluded_months: [] }, 'now')).not.toContain('excluded_months')
   })
 })

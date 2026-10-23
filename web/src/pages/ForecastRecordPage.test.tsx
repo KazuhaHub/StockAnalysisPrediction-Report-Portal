@@ -1138,6 +1138,98 @@ describe('ForecastRecordPage notices', () => {
   })
 })
 
+// The exploratory view drops a purged month's sets and keeps its period, so a month with nothing left
+// comes back as a cohort of zero. Without the response's excluded_months the page would call that a
+// cohort under the 30-name gate, and say that the gate is working and nothing is wrong.
+describe('ForecastRecordPage months removed by retention', () => {
+  const removed = { cohort: '2026-09', purged_at: '2026-09-30T18:00:00Z' }
+  const none = { state: 'small', n: 0 } as ForecastCell
+  const goneCells = { d5: none, d20: none, d60: none, d120: none, h12: none } as Record<ForecastCheckpoint, ForecastCell>
+  const link = '/forecast?mode=custom&from=2026-08-01&to=2026-10-31&group=month'
+  const custom = (excluded: ForecastGroupsResponse['excluded_months'], groups?: ForecastGroupsResponse['groups']) =>
+    record({
+      ...metadata(),
+      mode: 'custom',
+      official: false,
+      range: { from: '2026-08-01', to: '2026-10-31', group: 'month' },
+      excluded_months: excluded,
+      groups: groups ?? [
+        { label: '2026-08', start: '2026-08-01', end: '2026-08-28', official: false, bench: 'sh000852', coverage, cells: cells(mature) },
+        { label: '2026-09', start: '2026-09-01', end: '2026-09-28', official: false, bench: 'sh000852', cells: goneCells },
+      ],
+    })
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2027-06-20T07:00:00Z') })
+  })
+
+  it('names every removed month with the day it was removed, in the panel\'s calendar', async () => {
+    apiMock.get.mockResolvedValue(custom([removed, { cohort: '2026-07', purged_at: '2026-10-03T02:00:00Z' }]))
+    show(link)
+    await screen.findByText('+3.1 pt')
+    const note = screen.getAllByRole('note').find((el) => (el.textContent ?? '').includes('forecast.custom.excluded_title'))!
+    expect(note).toBeTruthy()
+    expect(note.textContent).toContain('forecast.custom.excluded_title:{"n":2}')
+    // 18:00 UTC on the 30th is already the 1st in the panel's zone.
+    expect(note.textContent).toContain('forecast.custom.excluded_item:{"cohort":"2026-09","date":"2026-10-01"}')
+    expect(note.textContent).toContain('forecast.custom.excluded_item:{"cohort":"2026-07","date":"2026-10-03"}')
+  })
+
+  it('draws a removed month as removed and does not call the record held back by the gate', async () => {
+    apiMock.get.mockResolvedValue(custom([removed], [
+      { label: '2026-09', start: '2026-09-01', end: '2026-09-28', official: false, bench: 'sh000852', cells: goneCells },
+    ]))
+    show(link)
+    await screen.findAllByText('forecast.cell.purged')
+    expect(document.querySelectorAll('[data-state="purged"]')).toHaveLength(5)
+    expect(document.querySelector('[data-state="small"]')).toBeNull()
+    expect(screen.queryByText('forecast.record.not_enough')).toBeNull()
+    expect(document.body.textContent).not.toContain('forecast.cell.small')
+  })
+
+  it('still explains the gate when a month that was not removed is under it', async () => {
+    const small = { state: 'small', n: 12 } as ForecastCell
+    apiMock.get.mockResolvedValue(custom([removed], [
+      { label: '2026-08', start: '2026-08-01', end: '2026-08-28', official: false, bench: 'sh000852', coverage, cells: { d5: small, d20: small, d60: small, d120: small, h12: small } as Record<ForecastCheckpoint, ForecastCell> },
+      { label: '2026-09', start: '2026-09-01', end: '2026-09-28', official: false, bench: 'sh000852', cells: goneCells },
+    ]))
+    show(link)
+    expect(await screen.findByText('forecast.record.not_enough')).toBeTruthy()
+  })
+
+  it('says nothing when nothing was removed, and nothing on the monthly record', async () => {
+    apiMock.get.mockResolvedValue(custom([]))
+    const view = show(link)
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByText(/forecast\.custom\.excluded_title/)).toBeNull()
+    view.unmount()
+    apiMock.get.mockResolvedValue(record({ excluded_months: [removed] }))
+    show('/forecast')
+    await screen.findByText('+3.1 pt')
+    expect(screen.queryByText(/forecast\.custom\.excluded_title/)).toBeNull()
+  })
+
+  it('writes the removed months into the exported file, and the removed month as purged', async () => {
+    apiMock.get.mockResolvedValue(custom([removed]))
+    show(link)
+    await screen.findByText('+3.1 pt')
+    fireEvent.click(screen.getByRole('button', { name: /forecast.export.button/ }))
+    const text = (csvMock.downloadCSV.mock.calls[0] as [string, string])[1]
+    expect(text).toContain('# excluded_months=2026-09@2026-09-30T18:00:00Z')
+    expect(text).toContain('2026-09,2026-09-01,2026-09-28,d5,purged')
+    expect(text).not.toContain('2026-09,2026-09-01,2026-09-28,d5,small')
+  })
+
+  it('passes the same disclosure to the drawer, which lists members of the surviving months only', async () => {
+    apiMock.get.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/forecast/groups/members') ? { ...members, excluded_months: [removed] } : custom([removed])))
+    show(link)
+    fireEvent.click(await screen.findByText('+3.1 pt'))
+    const drawer = await screen.findByRole('dialog')
+    expect(await within(drawer).findByText(/forecast\.drawer\.excluded_title/)).toBeTruthy()
+  })
+})
+
 describe('ForecastRecordPage drawer modes', () => {
   it('opens the cohort\'s members, not a metrics view, for a cell that is still waiting', async () => {
     apiMock.get.mockImplementation((url: string) =>

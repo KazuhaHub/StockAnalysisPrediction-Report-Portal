@@ -5,8 +5,9 @@ import { coveragePalette, forecastPalette } from '../../lib/forecastPresentation
 // What the matrix's shades and patterns mean. Two lists, because they answer two questions: the
 // first says what a cell's colour claims (a significant result, or no claim, or not a result yet),
 // the second, drawn only where the response carries coverage, says where a group's reports went.
+// The exploratory tab words the first from p*, as its cells do.
 
-export default function ForecastLegend({ coverage = false }: { coverage?: boolean }) {
+export default function ForecastLegend({ coverage = false, custom = false }: { coverage?: boolean; custom?: boolean }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const palette = forecastPalette(token)
@@ -22,7 +23,7 @@ export default function ForecastLegend({ coverage = false }: { coverage?: boolea
         {(['positive', 'negative', 'neutral'] as const).map((name) => (
           <li key={name} style={{ background: palette[name].background, color: palette[name].foreground, padding: '4px 8px', borderRadius: 4 }}>
             <span aria-hidden="true">{name === 'positive' ? '▲' : name === 'negative' ? '▼' : '○'} </span>
-            {t(`forecast.legend.${name}`)}
+            {t(`forecast.legend.${name}${custom && name !== 'neutral' ? '_custom' : ''}`)}
           </li>
         ))}
         <li style={{ fontSize: 12, color: token.colorTextSecondary }}>

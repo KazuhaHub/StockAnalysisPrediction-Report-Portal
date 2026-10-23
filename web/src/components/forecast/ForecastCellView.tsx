@@ -152,7 +152,9 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
         <span style={small}>
           <span aria-hidden="true">{d.signal > 0 ? '▲' : '▼'} </span>
           <span className="rp-sr-only">{t(d.signal > 0 ? 'forecast.signal.positive' : 'forecast.signal.negative')}: </span>
-          q&lt;0.05
+          {/* The exploratory view prints p*, so its mark is worded from p* too: a q there would claim
+              a correction for the choice of range, which the view does not make. */}
+          {t(mode === 'custom' ? 'forecast.signal.badge_custom' : 'forecast.signal.badge')}
         </span>
       )}
       {d.sub && <span style={{ ...small, color: token.colorTextSecondary }}>{d.sub}</span>}

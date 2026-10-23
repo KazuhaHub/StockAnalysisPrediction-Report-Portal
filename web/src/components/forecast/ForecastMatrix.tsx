@@ -8,7 +8,7 @@ import type {
   ForecastMetric,
   ForecastMode,
 } from '../../api/types'
-import { gateText } from '../../lib/forecast'
+import { gateText, withRetention } from '../../lib/forecast'
 import ExploratoryTag from './ExploratoryTag'
 import ForecastCellView from './ForecastCellView'
 import ForecastCoverage from './ForecastCoverage'
@@ -42,16 +42,18 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
   const { token } = theme.useToken()
   // The gate flag's explanation is drawn once, as text, and each flagged cell points at it.
   const gateHintId = useId()
+  // A custom group whose every month the retention policy removed is gone, not "below the gate".
+  const groups = withRetention(resp.groups, resp.excluded_months)
 
   // A flag stands where a count would have been, so it needs its meaning on the page: the badge
   // alone says "n >= 30" and nothing about which sample that is, and a hover title is not reachable
   // from a keyboard or a phone.
-  const showsGate = resp.groups.some((g) =>
+  const showsGate = groups.some((g) =>
     Object.values(g.cells ?? {}).some((c) => c?.state === 'mature' && gateText(c, t) !== ''),
   )
-  const rows = [...resp.groups].reverse()
+  const rows = [...groups].reverse()
   // The column exists only when the server sent coverage for at least one group.
-  const showCoverage = resp.groups.some((g) => g.coverage)
+  const showCoverage = groups.some((g) => g.coverage)
   const th: CSSProperties = {
     textAlign: 'left',
     padding: '6px 8px',
@@ -77,7 +79,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
         {' · '}
         {t(mode === 'custom' ? 'forecast.legend.custom' : 'forecast.legend.monthly')}
       </Quiet>
-      <ForecastLegend coverage={showCoverage} />
+      <ForecastLegend coverage={showCoverage} custom={mode === 'custom'} />
       {showsGate && (
         <Quiet id={gateHintId} style={{ fontSize: 12 }}>
           {t('forecast.cell.min_n_met_hint')}

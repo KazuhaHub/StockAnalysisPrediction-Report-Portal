@@ -8,6 +8,7 @@ import type {
   ForecastMetric,
   ForecastMode,
   ForecastGrouping,
+  ForecastPurgedMonth,
 } from '../api/types'
 
 // The matrix's presentation rules, kept out of the component so the CSV export and the table cannot
@@ -26,7 +27,7 @@ export interface CellDisplay {
    * slot: the metric's denominator is a smaller subset with no minimum of its own.
    */
   gate: string
-  /** -1 / 0 / +1, and nonzero only when the corrected q passes 0.05. */
+  /** -1 / 0 / +1, and nonzero only when the corrected q passes 0.05 (and, exploratory, p* does too). */
   signal: -1 | 0 | 1
 }
 
@@ -51,6 +52,19 @@ export function correctedText(p: number | undefined, q: number | undefined, mode
 }
 
 export type Translate = (key: string, opts?: Record<string, unknown>) => string
+
+const ALPHA = 0.05
+
+/**
+ * Whether a metric earns the cell's tint. The record follows the corrected q alone. The exploratory
+ * view prints p*, and its badge words the threshold from p*, so a cell is tinted there only when its
+ * p* is under the threshold as well: q is never smaller than p, so this never colours a cell the
+ * record would not, and it keeps the badge from standing behind a number the cell does not show.
+ */
+function significant(q: number | undefined, p: number | undefined, mode: ForecastMode): boolean {
+  if (q === undefined || !(q < ALPHA)) return false
+  return mode !== 'custom' || (p !== undefined && p < ALPHA)
+}
 
 /**
  * The sample size a metric states, when the server sent one. A count the reader may not know is
@@ -87,7 +101,7 @@ export function cellDisplay(
         return { value: '—', sub: t('forecast.cell.one_arm'), gate, signal: 0 }
       }
       const sig: -1 | 0 | 1 =
-        cell.spread_q !== undefined && cell.spread_q < 0.05 ? (cell.spread_bp > 0 ? 1 : cell.spread_bp < 0 ? -1 : 0) : 0
+        significant(cell.spread_q, cell.spread_p, mode) ? (cell.spread_bp > 0 ? 1 : cell.spread_bp < 0 ? -1 : 0) : 0
       return {
         value: `${formatSigned(cell.spread_bp / 100, 1)} pt`,
         sub: join(correctedText(cell.spread_p, cell.spread_q, mode), sampleText(cell.n, t)),
@@ -98,7 +112,7 @@ export function cellDisplay(
     case 'ic': {
       if (cell.ic === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       const sig: -1 | 0 | 1 =
-        cell.ic_q !== undefined && cell.ic_q < 0.05 ? (cell.ic > 0 ? 1 : cell.ic < 0 ? -1 : 0) : 0
+        significant(cell.ic_q, cell.ic_p, mode) ? (cell.ic > 0 ? 1 : cell.ic < 0 ? -1 : 0) : 0
       return {
         value: formatSigned(cell.ic, 2),
         sub: join(correctedText(cell.ic_p, cell.ic_q, mode), sampleText(cell.ic_n ?? cell.n, t)),
@@ -109,7 +123,7 @@ export function cellDisplay(
     case 'hit': {
       if (cell.hit === undefined) return { value: '—', sub: sampleText(cell.n, t), gate, signal: 0 }
       const sig: -1 | 0 | 1 =
-        cell.hit_q !== undefined && cell.hit_q < 0.05
+        significant(cell.hit_q, cell.hit_p, mode)
           ? cell.hit > (cell.hit_null ?? 0.5)
             ? 1
             : cell.hit < (cell.hit_null ?? 0.5)
@@ -137,6 +151,64 @@ export function cellDisplay(
       }
     }
   }
+}
+
+// ── Months removed by retention ──────────────────────────────────────────────────────────────────
+
+const monthOf = (day: string): string => (/^\d{4}-\d{2}/.test(day) ? day.slice(0, 7) : '')
+
+/** The calendar months (YYYY-MM) a date range touches, or none for a range that cannot be read. */
+function monthsTouched(start: string, end: string): string[] {
+  const first = monthOf(start)
+  const last = monthOf(end)
+  if (!first || !last || first > last) return []
+  const out: string[] = []
+  let [y, m] = first.split('-').map(Number)
+  // The range is bounded by the server's limit; the cap only keeps a malformed one from looping.
+  while (out.length < 1200) {
+    const key = `${y}-${String(m).padStart(2, '0')}`
+    out.push(key)
+    if (key >= last) break
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+  return out
+}
+
+/**
+ * The exploratory view's groups with retention made visible. A purged month's sets are removed from a
+ * custom range but its period stays, so a group whose every month was removed comes back as a cohort
+ * of no members, which the publication gate calls "small": drawn as such it would say the cohort is
+ * too young to publish, when it is gone. The response's excluded_months is what says so. A group that
+ * still has a month left keeps its cells, because it still has a population (the notice names what
+ * was left out of it), and a cell that is a result, pending or open is never rewritten.
+ *
+ * Safe to apply more than once, and it returns the group list itself when there is nothing to say.
+ */
+export function withRetention(groups: ForecastGroup[], excluded: ForecastPurgedMonth[] | undefined): ForecastGroup[] {
+  if (!excluded || excluded.length === 0) return groups
+  const removedAt = new Map(excluded.map((m) => [m.cohort, m.purged_at]))
+  let changed = false
+  const out = groups.map((g) => {
+    if (g.official) return g
+    const months = monthsTouched(g.start, g.end)
+    if (months.length === 0 || !months.every((month) => removedAt.has(month))) return g
+    const cells = { ...(g.cells ?? {}) } as ForecastGroup['cells']
+    const checkpoints = Object.keys(cells) as ForecastCheckpoint[]
+    for (const cp of checkpoints) {
+      if (cells[cp]?.state === 'small') cells[cp] = { state: 'purged' }
+    }
+    const complete = checkpoints.length > 0 && checkpoints.every((cp) => cells[cp]?.state === 'purged')
+    const latest = months.map((month) => removedAt.get(month) ?? '').reduce((a, b) => (b > a ? b : a), '')
+    const unchanged = checkpoints.every((cp) => cells[cp] === g.cells?.[cp]) && (!complete || g.purged_at === latest)
+    if (unchanged) return g
+    changed = true
+    return { ...g, cells, ...(complete ? { purged_at: latest } : {}) }
+  })
+  return changed ? out : groups
 }
 
 export function checkpointKey(cp: ForecastCheckpoint): string {
@@ -174,21 +246,27 @@ export interface ForecastCsvReader {
 
 export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, reader?: ForecastCsvReader): string {
   const line = (value: string) => value.replace(/[\r\n]/g, ' ')
+  // A month the retention policy removed is in no figure of the file. Say so in the file, and write a
+  // group that was removed whole as purged: the same rows would otherwise read as a cohort too small
+  // to publish.
+  const excluded = resp.excluded_months ?? []
+  const groups = withRetention(resp.groups, excluded)
   const lines = [
     `# mode=${resp.mode}`,
     `# official=${resp.official}`,
     `# range=${resp.range.from}..${resp.range.to}`,
     `# group=${resp.range.group ?? ''}`,
     `# checkpoints=${resp.checkpoints.join('|')}`,
+    ...(excluded.length > 0 ? [`# excluded_months=${excluded.map((m) => line(`${m.cohort}@${m.purged_at}`)).join('|')}`] : []),
     ...(!reader ? [`# unrecorded=${resp.unrecorded ?? ''}`] : []),
     `# generated_at=${generatedAt}`,
   ]
   // Do not trust absence alone, and do not trust the caller alone: either one withholds volume.
-  const volumeHidden = !!reader && (reader.hideCounts || resp.groups.some((g) => !g.coverage))
+  const volumeHidden = !!reader && (reader.hideCounts || groups.some((g) => !g.coverage))
   if (reader) {
     lines.push(`# disclaimer=${line(reader.disclaimer)}`, `# population=${line(reader.population)}`)
     if (reader.rtype) lines.push(`# rtype=${line(reader.rtype)}`)
-    for (const group of resp.groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
+    for (const group of groups) lines.push(`# benchmark=${line(group.label)}:${line(group.bench)}`)
     // The flag is a fact about the cell, repeated on each of its metric rows. Say so in the file:
     // a hit rate or an IC rests on a smaller subset that has no minimum of its own.
     if (volumeHidden) lines.push(`# publication_gate=${line(reader.publicationGate)}`)
@@ -199,7 +277,7 @@ export function forecastCsv(resp: ForecastGroupsResponse, generatedAt: string, r
   if (reader) header.push('mode', 'official', 'bench')
 
   const rows: (string | number)[][] = []
-  for (const g of resp.groups) {
+  for (const g of groups) {
     // What follows the ten fixed columns: the sample size (or the gate flag), the coverage of the
     // group's population, then the labels that keep a row from being mistaken for another view.
     const tail = (state: string, n: string | number): (string | number)[] => {

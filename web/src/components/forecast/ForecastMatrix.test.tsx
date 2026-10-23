@@ -143,11 +143,12 @@ describe('ForecastMatrix', () => {
   it('expresses significance in text and glyphs, and removes it when q fails the gate', () => {
     const { unmount } = show(resp({ ...empty, d5: mature }))
     expect(screen.getByRole('button').textContent).toContain('▲')
-    expect(screen.getByRole('button').textContent).toContain('q<0.05')
+    expect(screen.getByRole('button').textContent).toContain('forecast.signal.badge')
+    expect(screen.getByRole('button').textContent).not.toContain('forecast.signal.badge_custom')
     expect(screen.getByRole('button').textContent).toContain('forecast.signal.positive')
     unmount()
     show(resp({ ...empty, d5: { ...mature, spread_q: 0.05 } }))
-    expect(screen.getByRole('button').textContent).not.toContain('q<0.05')
+    expect(screen.getByRole('button').textContent).not.toContain('forecast.signal.badge')
     expect(screen.getByRole('button').textContent).not.toContain('▲')
   })
 
@@ -384,7 +385,7 @@ describe('ForecastMatrix cell states', () => {
 
   it.each(['open', 'pending', 'small', 'purged'] as const)('never reads a metric from a %s cell, whatever the payload carries', (state) => {
     show(resp({ ...empty, d5: { state, resolved: 1, total: 2, n: 3, spread_bp: 999, spread_q: 0.001, ic: 0.9, hit: 0.9, fill: 0.9 } as ForecastCell }))
-    expect(document.body.textContent).not.toMatch(/9\.99|10\.0 pt|\+9\.9|90%|q<0\.05/)
+    expect(document.body.textContent).not.toMatch(/9\.99|10\.0 pt|\+9\.9|90%|q<0\.05|forecast\.signal\.badge/)
     expect(document.querySelector('[data-state="mature"]')).toBeNull()
   })
 })
@@ -509,3 +510,83 @@ describe('ForecastMatrix coverage', () => {
   })
 })
 
+
+
+// The exploratory tab prints p* and says, in its banner, that p* is not corrected for the choice of
+// range. Two things in the matrix had to agree with that: the wording of the significance mark, and
+// what a month removed by the retention policy looks like.
+describe('ForecastMatrix in the exploratory tab', () => {
+  const june = { cohort: '2026-09', purged_at: '2026-10-01T02:00:00Z' }
+  const customResp = (groups: ForecastGroupsResponse['groups'], excluded?: ForecastGroupsResponse['excluded_months']): ForecastGroupsResponse => ({
+    ...resp({}),
+    mode: 'custom',
+    official: false,
+    range: { from: '2026-09-01', to: '2026-10-31', group: 'month' },
+    groups,
+    excluded_months: excluded,
+  })
+  const group = (label: string, start: string, end: string, cells: Record<string, ForecastCell>) => ({
+    ...resp({}).groups[0], label, start, end, official: false, cells,
+  })
+  // What the server sends for a past month whose every set was removed: no members at any checkpoint,
+  // which the publication gate reads as a cohort of zero.
+  const small0 = { state: 'small', n: 0 } as ForecastCell
+  const gone = { d5: small0, d20: small0, d60: small0, d120: small0, h12: small0 } as Record<string, ForecastCell>
+
+  it('words the significance mark from p*, not as a q the view does not make', () => {
+    show(customResp([group('2026-09', '2026-09-01', '2026-09-30', { ...empty, d5: mature })]), 'custom')
+    const cell = screen.getByRole('button')
+    expect(cell.textContent).toContain('forecast.signal.badge_custom')
+    expect(cell.textContent).not.toMatch(/forecast\.signal\.badge(?!_custom)/)
+    expect(cell.textContent).toContain('p*=0.012')
+  })
+
+  it('does not mark a cell whose p* is not under the threshold, whatever its q says', () => {
+    show(customResp([group('2026-09', '2026-09-01', '2026-09-30', { ...empty, d5: { ...mature, spread_p: 0.2 } })]), 'custom')
+    expect(screen.getByRole('button').textContent).not.toContain('forecast.signal.badge')
+    expect(screen.getByRole('button').textContent).not.toContain('▲')
+  })
+
+  it('words the legend from p* in this tab and from q on the record', () => {
+    const { unmount } = show(customResp([group('2026-09', '2026-09-01', '2026-09-30', { ...empty, d5: mature })]), 'custom')
+    const legend = screen.getByRole('list', { name: 'forecast.legend.title' })
+    expect(legend.textContent).toContain('forecast.legend.positive_custom')
+    expect(legend.textContent).toContain('forecast.legend.negative_custom')
+    expect(legend.textContent).not.toMatch(/forecast\.legend\.(positive|negative)(?!_custom)/)
+    unmount()
+    show(resp({ ...empty, d5: mature }))
+    const record = screen.getByRole('list', { name: 'forecast.legend.title' })
+    expect(record.textContent).toContain('forecast.legend.positive')
+    expect(record.textContent).not.toContain('forecast.legend.positive_custom')
+  })
+
+  it('draws a month the retention policy removed as removed, not as a cohort under the gate', () => {
+    show(customResp([group('2026-09', '2026-09-01', '2026-09-30', gone)], [june]), 'custom')
+    expect(document.querySelectorAll('[data-state="purged"]')).toHaveLength(5)
+    expect(document.querySelector('[data-state="small"]')).toBeNull()
+    expect(document.body.textContent).toContain('forecast.cell.purged')
+    expect(document.body.textContent).not.toContain('forecast.cell.small')
+  })
+
+  it('shows no coverage bar for a removed month, since it has no reports left to account for', () => {
+    const g = group('2026-09', '2026-09-01', '2026-09-30', gone)
+    g.coverage = { reports: 0, member: 0, duplicate: 0, absent: 0, rejected: 0, backtest: 0, degraded: 0, mismatch: 0, pending_baseline: 0, pre_live: 0, test: 0, off_benchmark: 0 }
+    show(customResp([g], [june]), 'custom')
+    expect(document.querySelectorAll('[data-seg]')).toHaveLength(0)
+    expect(document.body.textContent).not.toContain('forecast.cov.summary')
+  })
+
+  it('leaves a group that still has a surviving month as the server drew it', () => {
+    const quarter = group('all', '2026-09-01', '2026-10-31', { ...empty, d5: { state: 'small', n: 12 } })
+    show(customResp([quarter], [june]), 'custom')
+    expect(document.querySelector('[data-state="small"]')).not.toBeNull()
+    expect(document.querySelector('[data-state="purged"]')).toBeNull()
+  })
+
+  it('does not reach into the monthly record, where purged months already say so themselves', () => {
+    const r = resp({ ...empty, d5: { state: 'small', n: 3 } })
+    r.excluded_months = [{ cohort: '2026-09', purged_at: '2026-10-01T02:00:00Z' }]
+    show(r)
+    expect(document.querySelector('[data-state="small"]')).not.toBeNull()
+  })
+})

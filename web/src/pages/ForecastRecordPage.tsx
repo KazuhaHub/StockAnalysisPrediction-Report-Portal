@@ -10,6 +10,7 @@ import ForecastCellDrawer from '../components/forecast/ForecastCellDrawer'
 import ForecastEvaluatorPill from '../components/forecast/ForecastEvaluatorPill'
 import ForecastMatrix from '../components/forecast/ForecastMatrix'
 import ForecastMethodology from '../components/forecast/ForecastMethodology'
+import ForecastRetentionNote from '../components/forecast/ForecastRetentionNote'
 import ForecastSummary from '../components/forecast/ForecastSummary'
 import ForecastToolbar from '../components/forecast/ForecastToolbar'
 import { downloadCSV } from '../lib/csv'
@@ -23,6 +24,7 @@ import {
   readView,
   upcomingDate,
   visibleGroups,
+  withRetention,
   type RangeLimits,
 } from '../lib/forecast'
 import { forecastLinkColor } from '../lib/forecastPresentation'
@@ -146,7 +148,11 @@ export default function ForecastRecordPage() {
   const [drawer, setDrawer] = useState<{ g: ForecastGroup; cp: ForecastCheckpoint; cell: ForecastCell } | null>(null)
   useEffect(() => setDrawer(null), [query, identity])
 
-  const groups = data?.groups ?? []
+  // A month the retention policy removed from a custom range is gone, not under the gate: the groups
+  // are read through the response's own disclosure, so everything below (the "held back" note, the
+  // matrix, the toolbar's benchmark line) agrees about which cells are waiting to grow and which are
+  // not coming back.
+  const groups = useMemo(() => withRetention(data?.groups ?? [], data?.excluded_months), [data])
   const { shown, hidden } = visibleGroups(groups, mode, view.older)
   // A cell with a result is a mature one. Open, pending, small and purged cells carry state and no
   // numbers, so a record made only of them has nothing to show yet however many groups it lists.
@@ -263,6 +269,9 @@ export default function ForecastRecordPage() {
               <Alert type="info" showIcon role="note" title={emptyText} />
             )}
             {heldBack && <Alert type="info" showIcon role="note" title={t('forecast.record.not_enough')} />}
+            {/* Only the exploratory view loses months this way: the record draws a purged month as a
+                group of its own. */}
+            {mode === 'custom' && <ForecastRetentionNote months={record.data.excluded_months} titleKey="forecast.custom.excluded_title" />}
             <ForecastMatrix
               resp={{ ...record.data, groups: shown }}
               metric={view.metric}
