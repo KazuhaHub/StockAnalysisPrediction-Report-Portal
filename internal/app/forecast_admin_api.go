@@ -74,16 +74,28 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	diagnostics := map[string]any{
+		"status": "unavailable", "max_reads": forecastShadowMaxComparisons,
+		"max_http_attempts": forecastShadowMaxHTTPAttempts,
+	}
+	if shadow, calls, err := s.st.forecastDiagnosticsContext(r.Context()); err == nil {
+		diagnostics["status"] = "ready"
+		if shadow.UpdatedAt == "" {
+			diagnostics["status"] = "empty"
+		}
+		diagnostics["shadow"], diagnostics["calls"] = shadow, calls
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
 		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
 		// bundle keeps working.
-		"mode":      forecastMode(s.st.GetSetting(setForecastAuto, "0")),
-		"fallback":  forecastFallbackMode(s.st.GetSetting(setForecastFallback, "off")),
-		"heartbeat": heartbeatOrNil(s.st.ForecastHeartbeat()),
-		"readiness": s.forecastReadiness(time.Now()),
-		"dry_gate":  s.st.ForecastDryGate(),
+		"mode":        forecastMode(s.st.GetSetting(setForecastAuto, "0")),
+		"fallback":    forecastFallbackMode(s.st.GetSetting(setForecastFallback, "off")),
+		"diagnostics": diagnostics,
+		"heartbeat":   heartbeatOrNil(s.st.ForecastHeartbeat()),
+		"readiness":   s.forecastReadiness(time.Now()),
+		"dry_gate":    s.st.ForecastDryGate(),
 		// The codes the readiness item asks about, so the page can offer exactly those in the
 		// dry-run check form rather than every allowed index.
 		"gate_codes": gateCodes,

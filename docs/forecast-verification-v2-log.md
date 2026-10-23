@@ -238,7 +238,8 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   `feat/forecast-sina-shadow`, started from `c4f0c93c`; the bounded Sina history foundation is
   implemented and reviewed, along with audited fallback controls and a context-local HTTP budget.
   Persisted diagnostic storage and post-ledger runtime selection/execution are implemented and
-  independently reviewed. Administrator diagnostics/UI and shipped shadow admission remain outstanding.
+  independently reviewed. Administrator controls and diagnostics/UI are implemented and reviewed;
+  shipped shadow admission and final branch-wide verification remain outstanding.
 - **Next step.** Complete P25's controls, persisted diagnostics and bounded shadow
   comparisons without admitting fallback writes. Revalidate P37 with the dependency fix. Resolve the
   purge-evidence decision and P26 integration order before P27/P28.
@@ -1210,3 +1211,39 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - P25 remains incomplete: administrator controls/diagnostics presentation, shipped Sina shadow-only
   grants, final end-to-end admission guards and branch-wide review/full CI are next. Back out by
   reverting this integration; diagnostics are ignored by an older build and no ledger repair is needed.
+
+### P25 administrator controls and diagnostics (2026-10-22, in progress)
+
+- The administrator settings response now reads the atomic diagnostic pair using the request context.
+  Explicit empty/ready/unavailable states distinguish uninitialised telemetry from measured zero and
+  damaged evidence. A decode/read failure returns no partial state or raw error/body; the reader never
+  repairs or replaces evidence. Existing administrator authentication covers both GET and POST;
+  routed tests deny an ordinary reader and allow an administrator. No reader-scope surface changed.
+- The settings modal offers only off and shadow and posts only changed fields. Its copy explains
+  third-party reads, two logical candidate observations versus four HTTP attempts, source-order
+  membership, post-ledger execution and no evaluator enablement or alternate writing. A status tag
+  shows the current comparison mode without treating retained history as ongoing comparison work.
+- The diagnostic card shows retained daily per-source logical calls (including adjustment checks),
+  source failures, refusal-code counts and explicitly shadow-only HTTP attempts, followed by daily
+  comparison counts and the twenty bounded recent results. Evidence includes both anchors, total
+  differences and compared dates, exact integer-fen values and a truncation warning. Daily counter
+  dates are UTC; bar dates are labelled in the instrument timezone. Copy states that sampling is
+  opportunistic and agreement never grants ledger admission. Missing/damaged telemetry shows a
+  warning or no-record message, not fabricated zero tables. Locale keys cover all three languages;
+  Traditional Chinese is regenerated through the existing OpenCC workflow.
+- The new backend/UI tests failed before implementation. Controls cover no-record versus corruption,
+  preserved damaged input, genuine retained state, route permissions, shadow-only changes without
+  benchmark/evaluator changes, no-op saves, unavailable/partial telemetry, anchors, exact-fen values,
+  a recorded zero versus a missing value, and unhidden truncation. Independent review found no
+  actionable issue. Full Go/SQLite/Postgres passed (app 55.845 s), build/vet/staticcheck passed,
+  three targeted admin/fallback race repetitions passed (14.218 s), and all 122 frontend files /
+  1022 tests, typecheck and production SPA build passed. Final focused locale/UI checks were repeated
+  after clarifying the trading-date header; final complete-branch CI remains a separate gate.
+- An isolated synthetic preview exercised the actual embedded SPA and administrator save endpoint:
+  off to shadow to off, including keyboard selection. The evaluator remained off throughout, verified
+  from the preview database. Desktop dark-mode diagnostics and modal layouts were inspected; no
+  responsive breakpoint, live candidate result or production acceptance is claimed. The temporary
+  browser and server were closed. No production, live vendor, Apps, schema or source grant changed.
+- P25 is still in progress. Shipped Sina comparison-only admission, end-to-end grant guards and final
+  full-branch review/CI remain before submission. Back out by reverting these admin/UI changes;
+  diagnostic evidence stays in the existing meta keys and no ledger repair is needed.
