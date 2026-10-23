@@ -1334,3 +1334,17 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   spans match the notice, while no verified 2027 notice was found in that listing. Unknown years
   therefore remain deliberately absent rather than inventing next-year closure data. Independent
   current-base review and exact-head PR CI remain required before merge.
+
+### P37 receipt-consistent frozen baseline hardening (2026-10-22)
+
+- Current-base adversarial review found another qualifier edge: a frozen open S0 within the
+  generated session window could be preserved while contradicting receipt-derived S0. Receipt
+  `2026-09-17T16:00:00+08:00` with frozen `2026-09-16` incorrectly claimed an expected d5 date.
+  New earlier/same-day-after-close/later frozen-date controls reproduced the defect before repair.
+  Qualification now additionally requires that the exchange-schedule `predS0` reproduce frozen S0;
+  otherwise it retains the existing unqualified weekday fallback without changing stored data.
+- Every valid receipt/holiday fixture now also supplies its correct frozen S0 and requires the
+  identical qualified schedule, preventing a blanket frozen-baseline refusal. Three targeted
+  local race repetitions passed (2.683 s); independent follow-up race repetitions passed (2.602 s)
+  and explicitly closed the finding with no further actionable issue. Final full Go/Postgres
+  regression is repeated after the repair; unchanged frontend validation remains recorded above.
