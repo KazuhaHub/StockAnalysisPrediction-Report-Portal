@@ -343,35 +343,32 @@ func TestRunMigrationsHoldsBackAnUnrecordedExplicitStep(t *testing.T) {
 	}
 }
 
-// The explicit step is numbered after the notification (0007) and extension (0008) steps, which
-// merge first, so on a branch that does not have them yet the list reads 0001..0006 then 0009. After
-// they land it must read 0001..0008 then 0009: nothing else may take a number, and 0009 stays the
-// only step that startup will not apply by itself.
-//
-// The six-step form below exists only so this branch can be prepared before those steps land. It must
-// never reach main or a release: a dump written by a build whose list is 0001..0006, 0009 is refused
-// by a build whose list is 0001..0008, 0009, because the header is compared to the list by position.
-// The rebase onto main conflicts on the list in migrate_steps.go, and resolving it is the moment to
-// delete the six-step allowance, leaving only the eight-step form.
-func TestPurgeEvidenceIsTheLastStepAndTheOnlyExplicitOne(t *testing.T) {
+// The migration list is in merge order, not id order. The ids 0007-0009 were reserved by branches that
+// were still open when 0010 reached main, so each reserved step is appended after whatever has already
+// shipped. The explicit purge evidence step (0009) therefore follows 0010.
+func TestPurgeEvidenceIsAppendedLastAndIsTheOnlyExplicitStep(t *testing.T) {
 	steps := newTestStore(t).migrations()
 	ids := make([]string, len(steps))
+	seen := map[string]bool{}
 	for i, m := range steps {
 		ids[i] = m.id
+		if seen[m.id] {
+			t.Fatalf("steps %v: %s appears twice", ids[:i+1], m.id)
+		}
+		seen[m.id] = true
 		if m.explicit != (m.id == "0009") {
 			t.Errorf("step %s explicit = %v; only 0009 may be explicit", m.id, m.explicit)
 		}
 	}
 	if ids[len(ids)-1] != "0009" {
-		t.Fatalf("steps %v: 0009 must be last", ids)
+		t.Fatalf("steps %v: 0009 is appended after every step that reached main before it", ids)
 	}
-	earlier := ids[:len(ids)-1]
-	for i, id := range earlier {
-		if id != fmt.Sprintf("%04d", i+1) {
-			t.Fatalf("steps %v: expected 0001..%04d then 0009, found %s at position %d", ids, len(earlier), id, i+1)
+	for i := 0; i < 6; i++ {
+		if want := fmt.Sprintf("%04d", i+1); ids[i] != want {
+			t.Fatalf("steps %v: position %d is %s, want %s", ids, i+1, ids[i], want)
 		}
 	}
-	if n := len(earlier); n != 6 && n != 8 {
-		t.Fatalf("steps %v: the steps before 0009 are 0001..0006, plus 0007 and 0008 once the notification and extension steps have landed", ids)
+	if err := checkDumpMigrations(ids[:len(ids)-1], steps); err != nil {
+		t.Fatalf("a dump written without 0009 is not a prefix of the list %v: %v", ids, err)
 	}
 }
