@@ -674,19 +674,27 @@ func (s *Server) ownerFromToken(tok string) (ou int64, user string, ok bool) {
 	if !hmac.Equal([]byte(s.hmac(msg)), []byte(parts[1])) {
 		return 0, "", false
 	}
-	f := strings.Split(msg, "|")
-	if len(f) != 4 || f[0] != ownerTokenPrefix {
+	// The message is "ot1|<ou>|<person>|<expiry>". The person is free text (a local account may be
+	// named with the separator itself), so the fixed fields are read from both ends and the person is
+	// everything between them, as verify() does for session cookies. Reading by a plain split would
+	// leave every such person's runs unattributed, with no error anywhere.
+	rest, found := strings.CutPrefix(msg, ownerTokenPrefix+"|")
+	if !found {
 		return 0, "", false
 	}
-	exp, err := strconv.ParseInt(f[3], 10, 64)
+	ouEnd, expSep := strings.Index(rest, "|"), strings.LastIndex(rest, "|")
+	if ouEnd < 0 || expSep <= ouEnd {
+		return 0, "", false
+	}
+	exp, err := strconv.ParseInt(rest[expSep+1:], 10, 64)
 	if err != nil || time.Now().Unix() > exp {
 		return 0, "", false
 	}
-	ou, err = strconv.ParseInt(f[1], 10, 64)
+	ou, err = strconv.ParseInt(rest[:ouEnd], 10, 64)
 	if err != nil || ou < 0 {
 		return 0, "", false
 	}
-	user = f[2]
+	user = rest[ouEnd+1 : expSep]
 	if ou == 0 && user == "" {
 		return 0, "", false
 	}

@@ -98,6 +98,43 @@ func TestOwnerTokenRoundTrip(t *testing.T) {
 	}
 }
 
+// TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator pins that a token is parsed from both
+// ends: the prefix and the OU from the left, the expiry from the right, and the person as everything
+// between. A local account may be named with the separator character, and since every run now
+// carries a token, a name that could not be verified would silently leave that person's runs
+// unattributed.
+func TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator(t *testing.T) {
+	s := &Server{cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
+	for _, name := range []string{"ops|desk", "|lead", "trail|", "a||b", "|", "x|1|2", "12|34"} {
+		tok := s.mintOwnerToken(42, name)
+		if tok == "" {
+			t.Errorf("%q: no token minted", name)
+			continue
+		}
+		if ou, who, ok := s.ownerFromToken(tok); !ok || ou != 42 || who != name {
+			t.Errorf("%q: round-trip = (ou %d, user %q, ok %v), want (42, %q, true)", name, ou, who, ok, name)
+		}
+	}
+
+	// A message with too few fields is still refused, whatever its signature: "ot1|42|<exp>" has no
+	// person field at all and must not be read as an OU with an empty person.
+	exp := time.Now().Add(time.Hour).Unix()
+	short := fmt.Sprintf("%s|%d|%d", ownerTokenPrefix, 42, exp)
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(short) + "." + s.hmac(short)); ok {
+		t.Error("a three-field message was accepted")
+	}
+	// An expired token is refused however its person field is spelt.
+	old := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, 42, "ops|desk", time.Now().Add(-time.Hour).Unix())
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(old) + "." + s.hmac(old)); ok {
+		t.Error("an expired token was accepted")
+	}
+	// A non-numeric OU is refused: the separator inside the person must not let a name pose as the OU.
+	forged := fmt.Sprintf("%s|%s|%s|%d", ownerTokenPrefix, "x", "ops", exp)
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(forged) + "." + s.hmac(forged)); ok {
+		t.Error("a non-numeric OU was accepted")
+	}
+}
+
 // TestMintOwnerTokenRefusesAnEmptySecret pins the guard that attribution now depends on: a token
 // signed with an empty key is well formed and verifiable by anyone holding the same empty key, so
 // neither side may mint or accept one. A server with no configuration at all (the shape of many
