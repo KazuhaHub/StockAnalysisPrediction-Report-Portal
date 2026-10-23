@@ -22,6 +22,13 @@ import Quiet from './Quiet'
 // reads counts rows in the ledger and the reports table, so that read is made every few minutes (see
 // REFRESH_MS), not every minute, and a tab that merely becomes visible again does not repeat a read
 // that has just been made.
+//
+// A failed read replaces the pill with a small note, but the pill is also the trigger of the drawer.
+// When the failure arrives while the drawer is open (the click that opens it asks again, so this is the
+// ordinary case), the drawer stays: it says the read failed and offers the retry, and it does not show
+// the last reading, whose growing age would claim the evaluator had stopped. The focus is kept on an
+// element that exists throughout: in the drawer while it is open, on the retry note when it is closed
+// over a failure.
 
 const MODE_KEY = { '0': 'off', dry: 'dry', '1': 'on' } as const
 
@@ -31,6 +38,13 @@ export default function ForecastEvaluatorPill() {
   const [settings, setSettings] = useState<ForecastSettings | null>(null)
   const [failed, setFailed] = useState(false)
   const [open, setOpen] = useState(false)
+  const retryNote = useRef<HTMLButtonElement | HTMLAnchorElement>(null)
+  const trigger = useRef<HTMLButtonElement | HTMLAnchorElement>(null)
+  const body = useRef<HTMLDivElement>(null)
+  // Set when the reader closes the drawer over a failure, or presses a retry: the two places the focus
+  // would otherwise be dropped from.
+  const closedOverFailure = useRef(false)
+  const retried = useRef(false)
   // Re-render the age on its own clock: a page left open must go stale without a reload.
   const [nowMs, setNowMs] = useState(() => Date.now())
 
@@ -78,18 +92,32 @@ export default function ForecastEvaluatorPill() {
     return () => clearInterval(id)
   }, [])
 
-  if (failed) {
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <Quiet style={{ fontSize: 12 }}>{t('forecast.eval.pill.unavailable')}</Quiet>
-        <Button size="small" type="link" onClick={load} style={{ color: forecastLinkColor(token) }}>{t('common.retry')}</Button>
-      </span>
-    )
+  const retry = () => {
+    retried.current = true
+    load()
   }
-  if (!settings) return null
+  const close = () => {
+    closedOverFailure.current = failed
+    setOpen(false)
+  }
+  useEffect(() => {
+    // Closed over a failure: the pill that would take the focus back is gone, so the note does.
+    if (failed && !open && closedOverFailure.current) {
+      closedOverFailure.current = false
+      retryNote.current?.focus()
+    }
+  }, [failed, open])
+  useEffect(() => {
+    if (failed || !retried.current) return
+    retried.current = false
+    // A retry that worked replaces the button that was pressed. If that left the focus on nothing it
+    // goes to what took its place; a focus the reader has already moved is left alone.
+    if (document.activeElement && document.activeElement !== document.body) return
+    ;(open ? body.current : trigger.current)?.focus()
+  }, [failed, open, settings])
 
-  const status: EvaluatorStatus = evaluatorStatus(settings, nowMs)
-  const hb = settings.heartbeat
+  const status: EvaluatorStatus | null = settings ? evaluatorStatus(settings, nowMs) : null
+  const hb = settings?.heartbeat
   const dot: Record<EvaluatorStatus, string> = {
     off: token.colorTextQuaternary,
     dry: token.colorPrimary,
@@ -99,10 +127,9 @@ export default function ForecastEvaluatorPill() {
     error: token.colorError,
   }
   const minutes = hb ? Math.max(0, Math.floor((nowMs - Date.parse(hb.last_tick_at)) / 60_000)) : 0
-  const statusText = t(`forecast.eval.status.${status}`)
 
-  const explanation = () => {
-    switch (status) {
+  const explanation = (current: EvaluatorStatus) => {
+    switch (current) {
       case 'off':
         return <Alert type="info" showIcon title={t('forecast.eval.pill.off_hint')} />
       case 'dry':
@@ -127,41 +154,75 @@ export default function ForecastEvaluatorPill() {
     }
   }
 
+  const operations = <Link to="/manage/forecast" style={{ color: forecastLinkColor(token) }}>{t('forecast.eval.pill.operations')}</Link>
+
+  // The pill (or the note that stands in for it) comes first and the drawer second, in every state, so
+  // that the drawer is the same element whether or not the read is failing and keeps its place and its
+  // focus when the state changes under it.
   return (
     <>
-      <Button
-        size="small"
-        shape="round"
-        aria-haspopup="dialog"
-        onClick={() => {
-          setOpen(true)
-          // What the drawer shows should be current, not whatever the last timer tick left.
-          load()
-        }}
-        icon={<span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />}
-      >
-        {t('forecast.eval.pill', { status: statusText })}
-      </Button>
-      <Drawer open={open} onClose={() => setOpen(false)} title={t('forecast.eval.status.title')} size={420} destroyOnHidden>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* antd draws the field names in its tertiary colour, which is under AA on white (3.4:1). */}
-          <Descriptions column={1} size="small" styles={{ label: { color: token.colorTextSecondary } }}>
-            <Descriptions.Item label={t('forecast.eval.pill.state')}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />
-                {statusText}
-              </span>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('forecast.eval.pill.mode')}>{t(`forecast.eval.mode.${MODE_KEY[settings.mode]}`)}</Descriptions.Item>
-            <Descriptions.Item label={t('forecast.eval.pill.last_run')}>
-              {hb ? dayjs(hb.last_tick_at).format('YYYY-MM-DD HH:mm') : t('forecast.eval.never')}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('forecast.eval.pill.heartbeat')}>
-              {hb ? (minutes < 1 ? t('forecast.eval.pill.just_now') : t('forecast.eval.pill.minutes_ago', { n: minutes })) : '—'}
-            </Descriptions.Item>
-          </Descriptions>
-          {explanation()}
-          <Link to="/manage/forecast" style={{ color: forecastLinkColor(token) }}>{t('forecast.eval.pill.operations')}</Link>
+      {failed ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Quiet style={{ fontSize: 12 }}>{t('forecast.eval.pill.unavailable')}</Quiet>
+          <Button ref={retryNote} size="small" type="link" onClick={retry} style={{ color: forecastLinkColor(token) }}>
+            {t('common.retry')}
+          </Button>
+        </span>
+      ) : (
+        status && (
+          <Button
+            ref={trigger}
+            size="small"
+            shape="round"
+            aria-haspopup="dialog"
+            onClick={() => {
+              setOpen(true)
+              // What the drawer shows should be current, not whatever the last timer tick left.
+              load()
+            }}
+            icon={<span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />}
+          >
+            {t('forecast.eval.pill', { status: t(`forecast.eval.status.${status}`) })}
+          </Button>
+        )
+      )}
+      <Drawer open={open} onClose={close} title={t('forecast.eval.status.title')} size={420} destroyOnHidden>
+        <div ref={body} tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 16, outline: 'none' }}>
+          {failed ? (
+            <>
+              <Alert
+                type="warning"
+                showIcon
+                title={t('forecast.eval.pill.refresh_failed')}
+                action={<Button size="small" onClick={retry}>{t('common.retry')}</Button>}
+              />
+              {operations}
+            </>
+          ) : (
+            settings &&
+            status && (
+              <>
+                {/* antd draws the field names in its tertiary colour, which is under AA on white (3.4:1). */}
+                <Descriptions column={1} size="small" styles={{ label: { color: token.colorTextSecondary } }}>
+                  <Descriptions.Item label={t('forecast.eval.pill.state')}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span aria-hidden="true" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot[status] }} />
+                      {t(`forecast.eval.status.${status}`)}
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('forecast.eval.pill.mode')}>{t(`forecast.eval.mode.${MODE_KEY[settings.mode]}`)}</Descriptions.Item>
+                  <Descriptions.Item label={t('forecast.eval.pill.last_run')}>
+                    {hb ? dayjs(hb.last_tick_at).format('YYYY-MM-DD HH:mm') : t('forecast.eval.never')}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('forecast.eval.pill.heartbeat')}>
+                    {hb ? (minutes < 1 ? t('forecast.eval.pill.just_now') : t('forecast.eval.pill.minutes_ago', { n: minutes })) : '—'}
+                  </Descriptions.Item>
+                </Descriptions>
+                {explanation(status)}
+                {operations}
+              </>
+            )
+          )}
         </div>
       </Drawer>
     </>

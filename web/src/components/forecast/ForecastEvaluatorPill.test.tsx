@@ -144,6 +144,68 @@ describe('ForecastEvaluatorPill', () => {
     expect(apiMock.get).toHaveBeenCalledTimes(2)
   })
 
+  // A failed read removes the pill, which is also the drawer's trigger. A reader who has just opened the
+  // drawer (the click itself asks again) must not watch it vanish, and must not be left with the focus
+  // on nothing.
+  describe('a failed read while the drawer is open', () => {
+    const openDrawer = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: /forecast\.eval\.pill:/ }))
+      return screen.findByRole('dialog')
+    }
+
+    it('keeps the drawer, says the read failed inside it and offers a retry', async () => {
+      show()
+      await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+      // The click that opens the drawer asks again, and that is the read that fails.
+      apiMock.get.mockRejectedValueOnce(new Error('offline'))
+      const drawer = await openDrawer()
+      expect(await within(drawer).findByText('forecast.eval.pill.refresh_failed')).toBeTruthy()
+      expect(screen.getByRole('dialog')).toBe(drawer)
+      // The last reading is not shown as if it were current: its age would claim the evaluator stopped.
+      expect(within(drawer).queryByText('forecast.eval.status.healthy')).toBeNull()
+      expect(within(drawer).getByRole('link', { name: 'forecast.eval.pill.operations' })).toBeTruthy()
+      expect(within(drawer).getByRole('button', { name: /common\.retry/ })).toBeTruthy()
+    })
+
+    it('has no axe violations with the failure shown in the drawer', async () => {
+      show()
+      await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+      apiMock.get.mockRejectedValueOnce(new Error('offline'))
+      const drawer = await openDrawer()
+      await within(drawer).findByText('forecast.eval.pill.refresh_failed')
+      const result = await axe.run(drawer, { rules: { 'color-contrast': { enabled: false } } })
+      expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+    })
+
+    it('shows the status again in the same drawer when the retry succeeds, with the focus inside it', async () => {
+      show()
+      await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+      apiMock.get.mockRejectedValueOnce(new Error('offline'))
+      const drawer = await openDrawer()
+      const retry = await within(drawer).findByRole('button', { name: /common\.retry/ })
+      retry.focus()
+      apiMock.get.mockResolvedValueOnce(settings({}, 1, { errors: 1, last_error: 'ledger write timed out' }))
+      fireEvent.click(retry)
+      expect(await within(drawer).findByText('ledger write timed out')).toBeTruthy()
+      expect(screen.getByRole('dialog')).toBe(drawer)
+      expect(within(drawer).queryByText('forecast.eval.pill.refresh_failed')).toBeNull()
+      await waitFor(() => expect(drawer.contains(document.activeElement)).toBe(true))
+    })
+
+    it('hands the focus to the retry note when the drawer is closed over the failure', async () => {
+      show()
+      await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+      apiMock.get.mockRejectedValueOnce(new Error('offline'))
+      const drawer = await openDrawer()
+      await within(drawer).findByText('forecast.eval.pill.refresh_failed')
+      fireEvent.click(within(drawer).getByRole('button', { name: /close/i }))
+      const note = await screen.findByText('forecast.eval.pill.unavailable')
+      expect(note).toBeTruthy()
+      const retry = screen.getByRole('button', { name: /common\.retry/ })
+      await waitFor(() => expect(document.activeElement).toBe(retry))
+    })
+  })
+
   describe('staying current', () => {
     const tick = async (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
     const pill = () => screen.getByRole('button', { name: /forecast\.eval\.pill:/ })

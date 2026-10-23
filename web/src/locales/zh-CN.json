@@ -1037,6 +1037,7 @@
   "forecast.chart.outside": "图外",
   "forecast.eval.pill": "评估器：{{status}}",
   "forecast.eval.pill.unavailable": "评估器状态暂时读不到",
+  "forecast.eval.pill.refresh_failed": "暂时读不到评估器状态，请重试。",
   "forecast.eval.pill.operations": "在运维页查看完整状态与就绪项",
   "forecast.eval.pill.mode": "模式",
   "forecast.eval.pill.last_run": "上次运行",

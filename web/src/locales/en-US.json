@@ -1037,6 +1037,7 @@
   "forecast.chart.outside": "off-chart",
   "forecast.eval.pill": "Evaluator: {{status}}",
   "forecast.eval.pill.unavailable": "Evaluator status unavailable",
+  "forecast.eval.pill.refresh_failed": "Could not read the evaluator status just now. Try again.",
   "forecast.eval.pill.operations": "Full status and readiness on the operations page",
   "forecast.eval.pill.mode": "Mode",
   "forecast.eval.pill.last_run": "Last run",
