@@ -208,7 +208,7 @@
                 "description": "Batch/generation run label. It does not participate in the identity key."
               },
               "owner_token": {
-                "description": "Signed OU-attribution token. The portal currently injects it only into runs started by a user of a restricted OU (as the run input `_rp_owner_token`); the workflow passes it back here unchanged. When it is missing, expired or invalid, neither the report nor its prediction set is attributed to any OU; attribution is never taken from a plain client field. Attribution is decided by the first valid token and a later ingest never changes or clears it."
+                "description": "Signed OU-attribution token. The portal injects it into every run that has a submitter, internal or external (as the run input `_rp_owner_token`); the workflow passes it back here unchanged. When it is missing, expired or invalid, neither the report nor its prediction set is attributed to any OU; attribution is never taken from a plain client field. Attribution is decided by the first valid token and a later ingest never changes or clears it."
               },
               "time": {
                 "description": "Report instant, UTC RFC3339 such as 2026-07-03T06:14:22Z. If omitted or invalid, the server stamps the current UTC time; only valid RFC3339 input is honored, such as `utc` from GET /api/v1/now. It is used for same-day ordering and display, not identity."
@@ -254,7 +254,7 @@
                 "description": "批次/生成輪次標籤，不參與身份鍵。"
               },
               "owner_token": {
-                "description": "已簽名的 OU 歸屬令牌。門戶目前只在受限 OU 的使用者發起的執行裡注入它（作為執行輸入 `_rp_owner_token`），工作流原樣回傳到這裡。缺失、過期或簽名無效時，報告與預測集都不歸屬任何 OU；門戶從不根據普通客戶端欄位決定歸屬。歸屬由第一次有效的令牌決定，之後再入庫不會改變或清除它。"
+                "description": "已簽名的 OU 歸屬令牌。門戶向每一次有發起人的執行注入它（作為執行輸入 `_rp_owner_token`），工作流原樣回傳到這裡。缺失、過期或簽名無效時，報告與預測集都不歸屬任何 OU；門戶從不根據普通客戶端欄位決定歸屬。歸屬由第一次有效的令牌決定，之後再入庫不會改變或清除它。"
               },
               "time": {
                 "description": "報告時刻，UTC RFC3339（如 2026-07-03T06:14:22Z）。省略或非法時服務端蓋目前 UTC 時刻；僅當傳入為合法 RFC3339 才採用（如 GET /api/v1/now 的 utc）。不參與身份鍵，僅用於同日排序與顯示。"
@@ -319,7 +319,7 @@
           },
           "owner_token": {
             "type": "string",
-            "description": "已签名的 OU 归属令牌。门户目前只在受限 OU 的用户发起的运行里注入它（作为运行输入 `_rp_owner_token`），工作流原样回传到这里。缺失、过期或签名无效时，报告与预测集都不归属任何 OU；门户从不根据普通客户端字段决定归属。归属由第一次有效的令牌决定，之后再入库不会改变或清除它。"
+            "description": "已签名的 OU 归属令牌。门户向每一次有发起人的运行注入它（作为运行输入 `_rp_owner_token`），工作流原样回传到这里。缺失、过期或签名无效时，报告与预测集都不归属任何 OU；门户从不根据普通客户端字段决定归属。归属由第一次有效的令牌决定，之后再入库不会改变或清除它。"
           },
           "time": {
             "type": "string",
