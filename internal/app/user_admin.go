@@ -169,7 +169,12 @@ func (s *Store) UpdateGroup(id int64, name, description string, weight *int, urg
 // It is ONE transaction on the tx handle only: a failure between the set re-attribution and the row
 // delete must not leave the sets pointing at an OU that still exists under a different meaning, or at
 // one that is gone. The transaction also removes the id-reuse risk: an id the database may reassign
-// later is never referenced by a set.
+// later is never referenced by a set, and neither is it referenced by purge evidence, which moves to
+// the same destination as the sets in this transaction (ADR 0039).
+//
+// The ownership lock is the first thing the transaction does, before it reads the OU or any set. A
+// retention pass takes the same lock, so the two serialize and neither can act on a state the other
+// is about to change.
 //
 // Returns how many sets moved and the OU they moved to (the parent, or the Default OU for a root or a
 // dangling parent), for the handler's audit row.
@@ -179,6 +184,10 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
+	owned := migExec{s: s, ex: tx}
+	if err := lockPredictionOwnership(owned); err != nil {
+		return 0, 0, err
+	}
 
 	var parent sql.NullInt64
 	var isDefault int
@@ -230,6 +239,12 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		if n, e := res.RowsAffected(); e == nil {
 			reattributed = n
 		}
+	}
+	// Evidence follows the sets whether or not any set is left: retention may already have deleted
+	// them all. With no destination the evidence is dropped rather than left on an id that could be
+	// reused, the same fail-closed direction as the NULL attribution above.
+	if err := reattributePredictionPurgeOwners(owned, id, target); err != nil {
+		return 0, 0, err
 	}
 
 	if _, err := tx.Exec(s.bind(`UPDATE users SET group_id=NULL WHERE group_id=?`), id); err != nil {
