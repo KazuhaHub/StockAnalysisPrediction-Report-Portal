@@ -142,9 +142,12 @@ reads that do not need evidence never touch the table. From the moment of the up
 records and OU deletion carries the evidence, so the table is complete for everything purged after
 that point; everything purged before it stays global history.
 
-The implementation assigns this evidence to step `0009`, after the notification (`0007`) and
-extension (`0008`) steps, which merge first; the unapproved Tier 2 provenance proposal moves to
-`0010`, subject to a fresh identifier check. Existing supported databases use the offline
+The implementation assigns this evidence to step `0009`. The migration list is in merge order, not id
+order: it is appended after every step that reached main before it (the announcement step `0010` today,
+and the notification `0007` and extension `0008` steps, which merge first), so `0009` is always the last
+entry and a backup written by the release before it is a prefix of the list. The unapproved Tier 2
+provenance proposal takes an unused id when it is approved (`0011` at the time of writing), subject to a
+fresh identifier check, and is appended after this step. Existing supported databases use the offline
 `schema-upgrade` command (inspection by default, mutation only with `--apply`). Startup refuses an
 unrecorded explicit step before applying even earlier automatic steps. A fresh database creates the
 step with the rest of its schema. Every startup checks the evidence columns, exact primary key,

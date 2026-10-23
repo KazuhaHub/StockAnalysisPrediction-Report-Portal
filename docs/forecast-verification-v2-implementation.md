@@ -2,7 +2,10 @@
 
 > Current identifier/rollout amendment (2026-10-22): step `0006` is the implemented access attribution
 > shape; owner-approved purge ownership evidence now owns explicit step `0009` (`0007` and `0008` are the
-> notification and extension steps, which merge first). Tier 2 provenance is proposed as `0010`, still unapproved and requiring a fresh identifier check. R2a now requires
+> notification and extension steps, which merge first). The migration list is in merge order, not id order:
+> the announcement step `0010` reached main first, so the list reads `0001`–`0006`, `0010`, then `0007`, `0008`
+> and `0009` as they land, and `0009` is always the last entry. Tier 2 provenance is proposed as `0011`, still
+> unapproved and requiring a fresh identifier check. R2a now requires
 > the [explicit purge-evidence upgrade](forecast-purge-ownership-upgrade.md), not a schema-free
 > deployment. Historical baseline references below describe their original source snapshot.
 
@@ -11,7 +14,7 @@
 | Status | Handoff document. Nothing in it is implemented. The owner's decisions it builds on are final; the DDL in §3 is the shape the owner approved on 2026-10-19 and needs no further sign-off unless a PR deviates from it. |
 | Date | 2026-10-19 (Asia/Shanghai) |
 | Baseline commit | `origin/main` at `af1d2cf6` (`fix(auth): hold mandated-but-unenrolled cookie at the wall on /api/v1 reads (#108)`). Every `file:line`, function, route, migration step and ADR number below was read at that commit. Files untouched since the plan's baseline (`c9b2b747`) keep the plan's line numbers; the ones that moved (`apiv1.go`, `routes.go`, `migrate_steps.go`, `security_policy.go`, `forecast_read_api.go`, `user_admin_api.go`, the locale bundles, `AppLayout.tsx`) are cited at their new lines. |
-| Next free ids | **Migration step `0006`.** `(*Store).migrations()` at `migrate_steps.go:167-169` registers `0001`–`0005`; `0005` is already taken by `announcements.display` (`migrate_steps.go:426-449`). Tier 2 provenance is therefore `0010` (see the amendment above), not the plan's `0006`. **ADR `0037`.** The newest file in `docs/adr` is `0036-account-sessions-and-login-history.md`; this plan uses `0037`, `0038`, `0039`. Re-check both lists at merge time. |
+| Next free ids | **Migration step `0006`.** `(*Store).migrations()` at `migrate_steps.go:167-169` registers `0001`–`0005`; `0005` is already taken by `announcements.display` (`migrate_steps.go:426-449`). Tier 2 provenance is therefore `0011` (see the amendment above), not the plan's `0006`. **ADR `0037`.** The newest file in `docs/adr` is `0036-account-sessions-and-login-history.md`; this plan uses `0037`, `0038`, `0039`. Re-check both lists at merge time. |
 | Inputs | [forecast-verification-v2-decisions.md](forecast-verification-v2-decisions.md) (the owner's decisions), the code at the baseline, [forecast-verification-v2-plan.md](forecast-verification-v2-plan.md) (the plan: defects F01–F14, B1–B7, C1–C10, D1–D4, PRs P0–P37), ADR 0029, ADR 0022/0024/0017/0028/0035, [forecast-verification-design.md](forecast-verification-design.md), [forecast-verification-implementation.md](forecast-verification-implementation.md) (the v1 build document, whose shape this one follows), [forecast-verification-demo.html](forecast-verification-demo.html). |
 | Precedence | **Decisions > code > plan.** Where the decisions page differs from the plan, the decisions win. Where the plan describes code that is not there, the code wins and this document says so (§0.3). Where this document and the plan differ, this document wins. If this document and the decisions page ever disagree, stop and ask the owner; do not pick one. |
 
@@ -117,7 +120,7 @@ All decisions are made. This table only says which PR each one drives. The decis
 
 | # | Plan said | This document | Reason |
 |---|---|---|---|
-| 1 | Migration `0005` = `forecast_view`, `0006` = Tier 2 provenance | `0006` = the access model's two columns; `0009` = purge ownership evidence; `0010` = Tier 2 provenance | `0005` was taken by `announcements.display` after the plan was written (`migrate_steps.go:426-449`). |
+| 1 | Migration `0005` = `forecast_view`, `0006` = Tier 2 provenance | `0006` = the access model's two columns; `0009` = purge ownership evidence; `0010` = announcements (reached main first); `0011` = Tier 2 provenance | `0005` was taken by `announcements.display` after the plan was written (`migrate_steps.go:426-449`). |
 | 2 | Boolean `user_groups.forecast_view`, a global `forecast_record_published` switch, external tenants denied (Phase 2) | `user_groups.forecast_scope TEXT` (`all`/`own`/`none`/NULL) plus `prediction_sets.attributed_ou BIGINT`; **no publish switch**; external tenants in scope now, with protections | Decisions page, "the access model". With every OU at `none` by default, the OU scope itself is the publish control; a second switch would be a second spelling of the same decision. |
 | 3 | P34: `/api/v1` becomes token-only, e2e section C rewritten | Dropped. V21 is done by #108, which keeps the cookie on v1 reads but holds it at the enrolment wall (`v1CanRead`). This plan instead applies the forecast scope to any cookie caller of the two v1 prediction reads (P26). | Decisions page, V21. |
 | 4 | Plan R1a = statements + governance; R1b = settlement correctness | R1a = **all** evaluator correctness (F01–F14) plus governance (B1, ledger start, V8 with CSI 800, V24, OpenAPI). R1a is cut as two Betas so the benchmark schedule is deployed before 2026-11-01 (§1.2). R1b = operations, the reading-page hotfix, the attribution schema and owner-token work. | The owner's instruction for this document. |
@@ -176,7 +179,7 @@ An adversarial review of this document produced the 18 findings below. Each is f
 | **R2a** access | Fri 2026-11-20 | P13, P15, P26, P27, P28, P22 | `/forecast` for members of OUs set to `all`/`own` (the owner sets `安禅内部` to `all`); OU editor field; OUs at `none` lose the card | One clean week |
 | **R2b** parity, reading page, Tier 1 sources | Fri 2026-12-11 | P14, P16, P17, P18, P19, P20, P37, P23, P24, P25 | The demo look; chip, timeline dots and the run-page card once the stage is `full`; ledger chain on the quotes panel; Sina shadow | P18's `/api/stock` benchmark within budget; seeded-preview review signed off |
 | **R3** cleanup | No earlier than two weeks after R2b is in production | P29 | — | — |
-| Tier 2 | Separate go/no-go, no earlier than 2027-01 | P32 (migration `0010`), P33 | — | V19 entry criteria |
+| Tier 2 | Separate go/no-go, no earlier than 2027-01 | P32 (migration `0011`), P33 | — | V19 entry criteria |
 
 **Dropped plan PRs.** P0 (the declaration was made in Dify issue #1, decisions page V3); P21 (folded into P38);
 P34 (V21 done by #108).
@@ -519,7 +522,7 @@ adds its rows) asserts every row of this table on both drivers. FC.
 both at `1` restore to `dry` with one `forecast.auto` audit row carrying `restore_gates_empty`; dump `0` with live
 `1` restores to `0` and writes no second row; `dry` stays `dry`. FC (a restore never leaves `1` with no gate).
 
-### 3.4 Step `0010` (Tier 2 only; shape decided at the Tier 2 go, V19)
+### 3.4 Step `0011` (Tier 2 only; shape decided at the Tier 2 go, V19)
 
 The plan's §5 "0006" shape, renumbered: four `TEXT NOT NULL DEFAULT ''` columns
 (`prediction_sets.base_source`, `prediction_sets.base_logic`, `prediction_marks.bench_source`,
@@ -2447,9 +2450,9 @@ alias and the legacy `bench` field. Depends on P27 and P28 shipped and R2b in pr
 **Tests.** `TestAdminGroupsPathIsGone` (JSON 404, not the SPA); the e2e script asserts 404. **Rollback.** Revert; a
 stale tab gets the update prompt.
 
-### 9.2 P32 `feat/forecast-provenance-and-index-fallback` (Tier 2, migration `0010`)
+### 9.2 P32 `feat/forecast-provenance-and-index-fallback` (Tier 2, migration `0011`)
 
-Migration `0010` (§3.4), then admission of the benchmark leg from a second source under plan §3.3's rules (each
+Migration `0011` (§3.4), then admission of the benchmark leg from a second source under plan §3.3's rules (each
 benchmark return from two closes of one series; `s0_fen` only from the primary; no new exclusion class). **Entry
 criteria (V19):** ≥ 60 replayed and ≥ 10 live shadow sessions with zero unexplained fen disagreements on closes and
 anchors; an identity check for the index. **Tests.** `TestMigration0010` (SQLite and PG),
@@ -2731,7 +2734,7 @@ Dify rejected undeclared inputs, revert P39b first.
 | December | — | the exchanges' closure notice | Update the projection table (P37). |
 | Reading-page incident | — | — | `forecast_reader=off` (immediate, audited). |
 | Record incident | — | — | Set the affected OUs to `none` (immediate, audited). |
-| Rolling back across steps `0006`–`0009`, or proposed `0010` | — | — | Restore the pre-upgrade backup; binary rollback is refused by design. |
+| Rolling back across steps `0006`–`0010`, or proposed `0011` | — | — | Restore the pre-upgrade backup; binary rollback is refused by design. |
 
 ---
 
@@ -2751,7 +2754,7 @@ evidence capabilities. While it is red, mode `1` is refused (409 `forecast_not_r
 | R2a | Backup with previous release; Q4; explicit `schema-upgrade --apply` | Verify `0009`; all OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); binary rollback across `0009` requires restoring the pre-upgrade backup per the upgrade runbook. |
 | R2b | Backup | P18 benchmark recorded | Seeded-preview review; flip `forecast_reader` to `full` per P20's rollout | `forecast_reader=card`/`off`; binary revert (no schema). |
 | R3 | Backup | `/api/admin/forecast/groups` → JSON 404 | — | Revert. |
-| Tier 2 | Backup | `0010` recorded | Owner go/no-go per V19 | Restore-only. |
+| Tier 2 | Backup | `0011` recorded | Owner go/no-go per V19 | Restore-only. |
 
 ---
 
@@ -2769,7 +2772,7 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
 | ADR 0024 | Editions and forecast sets (C17); the restricted-only OU principal (P30). | P18, P30 |
 | ADR 0028 | Note at §1 (single-vendor stored closes) and at §3 (the detection-only qfq exception now exists). | P23, P8 |
 | ADR 0017 | Note: `pre_live` and `test` sets are purged by the ledger retention target like any other; `attributed_ou` does not affect retention. | P11 |
-| ADR 0035 | Amended for explicit operator step `0009`, startup refusal without upgrade and custom product verification; existing automatic steps and the frozen baseline stay unchanged. Proposed Tier 2 `0010` remains separately gated. | Own purge history |
+| ADR 0035 | Amended for explicit operator step `0009`, startup refusal without upgrade and custom product verification; existing automatic steps and the frozen baseline stay unchanged. Proposed Tier 2 `0011` remains separately gated. | Own purge history |
 | `docs/forecast-verification-design.md` | §7 and D6 superseded (pointer to 0039); acceptance condition 19 rewritten; §9.2 corrected (dividend element, corrected price-limit backstop, qfq ratio); §9.3 base rule for an S0 halt (V6b); §10 UI updated. | P11, P22 |
 | `docs/forecast-verification-operations.md` (new) | The runbook of §12.3. | P9 onward |
 | `docs/forecast-verification-demo.html` | P13's revision. | P13 |

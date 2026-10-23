@@ -6,11 +6,19 @@ here. The own-history release hold stays until this upgrade has run on the targe
 independent review of the wiring is recorded.
 
 Step `0009` adds the owner-approved `prediction_purge_owners` table. The frozen v0.4.72 baseline and the
-automatic steps before it are unchanged. The explicit path applies any of those that are still missing
-before `0009`: `0001` to `0006` on this branch, and also `0007` (notification) and `0008` (extension)
-when those steps ship in the same release. They are all applied by the same `--apply`; the dry run lists
-exactly what is pending, for example `[0007, 0008, 0009]`. All supported baseline databases have an
-explicit path; pre-baseline databases must first pass through the documented v0.4.72 bridge.
+automatic steps before it are unchanged. The explicit path applies every step the build knows that the
+database has not recorded, and `0009` is the last of them. Every pending step is applied by the same
+`--apply`: `0001` to `0006` for an older supported baseline, the announcement step `0010`, and `0007`
+(notification) and `0008` (extension) when those steps ship in the same release.
+
+**The list is in merge order, not id order.** The ids `0007` to `0009` were reserved by branches that were
+still open when `0010` reached main, so they come after it; an id is a label and the order is the order the
+steps reached main. The dry run lists what is pending in that order, so for a database that has recorded
+`0001` to `0006` and whose release ships all of the above it reads `[0010, 0007, 0008, 0009]`, and a
+release that ships only this step and `0010` reads `[0010, 0009]`. An id that looks out of place in that
+list is not an error. Only the final entry is fixed: after the upgrade, the dry run must report nothing
+pending. All supported baseline databases have an explicit path; pre-baseline databases must first pass
+through the documented v0.4.72 bridge.
 
 ## Before upgrading
 

@@ -115,7 +115,8 @@ backup — the kind of loss nobody notices until a restore.
 ### Explicit operator steps (amended 2026-10-22)
 
 The owner-approved purge ownership evidence in ADR 0039 adds an `explicit` step (`0009`; `0007` and `0008` are the
-automatic notification and extension steps). Existing
+automatic notification and extension steps, and `0010` the announcement step that reached main first: the list
+is in merge order, so `0009` is its last entry). Existing
 database startup refuses an unrecorded explicit step before applying any earlier automatic step;
 operators inspect with `schema-upgrade` and apply offline with `schema-upgrade --apply` after a
 pre-upgrade backup. Fresh initialization may create the step. Already-recorded products are still

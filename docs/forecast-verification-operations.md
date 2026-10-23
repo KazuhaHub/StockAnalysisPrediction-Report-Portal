@@ -146,9 +146,13 @@ miss are:
 - **Check the backup's size before upgrading.** `backup` prints its table and row counts on stderr; they
   must match the deployment, and the previous release's restore dry run must list non-zero `users` and
   `reports` rows.
-- **One `--apply` covers every pending step.** If the notification (`0007`) and extension (`0008`) steps
-  ship in the same release, the dry run lists `[0007, 0008, 0009]` and the same `--apply` performs all of
-  them. Inspect again afterwards; it must report nothing pending before the new image starts.
+- **One `--apply` covers every pending step.** The dry run lists what is pending in the build's list order,
+  which is merge order and not id order: `0007`, `0008` and `0009` were reserved by branches that were still
+  open when the announcement step `0010` reached main, so they follow it. For a database that has recorded
+  `0001` to `0006`, a release that also ships the notification (`0007`) and extension (`0008`) steps lists
+  `[0010, 0007, 0008, 0009]`, and the same `--apply` performs all of them; `0009` is always last. An id that
+  looks out of order in that list is not an error. Inspect again afterwards; it must report nothing pending
+  before the new image starts.
 - Evidence starts empty and is never back-filled. Months purged before the upgrade stay visible to `all`
   readers and the administrator views and are never disclosed to own readers.
 
