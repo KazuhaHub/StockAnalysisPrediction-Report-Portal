@@ -99,6 +99,19 @@ shape verification, dump/restore handling and rollback instructions must be deli
 before business routes adopt it. No released migration is edited and the frozen baseline stays
 unchanged. Approval of the schema is not authorization to change a production database.
 
+The two reader routes read purge history through one view. The global markers still remove sets
+from every computation and decide cache identity, so no partial data from a month that retention
+has emptied is ever shown to anyone. What a population is *told* comes from the evidence: for an
+own reader, the range extension, the custom exclusion list, the purged groups and cells and the
+drawer's purged state use only the months whose evidence names the current subtree. All readers,
+the administrator aliases and external-all readers keep the global history unchanged. A month
+purged globally but not disclosed to an own reader has no group, and its drawer answers
+`label_not_found`. If the evidence table cannot be read, including before the explicit upgrade has
+created it, an own read answers `503 forecast_purge_history_unavailable` and never falls back to
+the global markers; reads that do not need evidence never touch the table. Retention and OU
+deletion do not yet write or transfer evidence, so the hold on releasing own-scoped reads stands
+until they do.
+
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
 member or change its numbers. The cohort benchmark remains ledger-wide. Every population keeps
