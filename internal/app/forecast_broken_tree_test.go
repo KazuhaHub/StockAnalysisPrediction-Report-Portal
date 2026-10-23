@@ -8,7 +8,9 @@ import (
 )
 
 // brokenTreeReader seeds an account whose OU chain cannot be walked: either its parent names a
-// deleted row (dangling) or the chain loops (cyclic).
+// deleted row (dangling) or the chain loops (cyclic). Only the dangling chain also makes the
+// enrolment policy unreadable; the wall walks past a cycle, so a cyclic account reaches the
+// forecast gate itself.
 func brokenTreeReader(t *testing.T, s *Server, kind string) string {
 	t.Helper()
 	user := "broken-" + kind
@@ -39,12 +41,13 @@ func brokenTreeReader(t *testing.T, s *Server, kind string) string {
 
 // TestBrokenOUChainAnswersForecastUnavailableOnForecastReads: an account whose OU chain is broken
 // resolves to none (dangling_group / cyclic_chain), and every forecast read answers that decision
-// (403 forecast_unavailable) instead of the generic "sign-in policy unreadable" 503 that the same
-// broken chain also produces in the enrolment wall. Both are refusals; the forecast one is the
-// specific answer the access table promises for a none subject.
+// (403 forecast_unavailable). For a dangling chain that replaces the generic "sign-in policy
+// unreadable" 503 which the same chain produces in the enrolment wall; for a cyclic chain the wall
+// lets the request through and the forecast gate refuses it. Both are refusals; the forecast one is
+// the specific answer the access table promises for a none subject.
 //
-// The exception is narrow by design: any other route still gets the wall's 503, so a broken tree
-// keeps the portal closed everywhere the forecast decision has no say.
+// The exception is narrow by design: any other route still gets the wall's 503 for a dangling
+// chain, so a broken tree keeps the portal closed everywhere the forecast decision has no say.
 func TestBrokenOUChainAnswersForecastUnavailableOnForecastReads(t *testing.T) {
 	s := tokenServer(t)
 	mux := http.NewServeMux()
@@ -71,7 +74,8 @@ func TestBrokenOUChainAnswersForecastUnavailableOnForecastReads(t *testing.T) {
 				if strings.Contains(label, "outside") || strings.Contains(label, "not forecast") {
 					if kind == "cyclic" {
 						// The enrolment policy walks past a cycle without error, so there is no wall
-						// refusal to compare against here; the forecast routes above are what matter.
+						// refusal to compare against here; the forecast gate alone refuses a cyclic
+						// account, and the forecast routes are what this case asserts.
 						return
 					}
 					if w.Code != http.StatusServiceUnavailable || forecastMatrixErrorCode(t, w.Body.Bytes()) != "enrolment_policy_unavailable" {

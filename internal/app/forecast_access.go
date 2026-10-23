@@ -20,9 +20,6 @@ type forecastSubject struct {
 	Admin             bool
 	RestrictedAccount bool
 	GroupID           int64
-	SessionRev        int64
-	CreatedAt         string
-	ExpiresAt         string
 }
 
 type forecastDecision struct {
@@ -52,12 +49,9 @@ func (s *Server) loadForecastSubjectSnapshot(user string, afterAccountRead func(
 	var role string
 	var restricted, active int
 	var group int64
-	var revision int64
-	var created, expires string
 	err = tx.QueryRow(s.st.bind(`SELECT COALESCE(role,'user'), COALESCE(restricted,0),
-		COALESCE(group_id,0), COALESCE(active,1), COALESCE(session_rev,0),
-		COALESCE(created_at,''), COALESCE(expires_at,'') FROM users WHERE username=?`), user).
-		Scan(&role, &restricted, &group, &active, &revision, &created, &expires)
+		COALESCE(group_id,0), COALESCE(active,1) FROM users WHERE username=?`), user).
+		Scan(&role, &restricted, &group, &active)
 	if err != nil {
 		return forecastSubject{}, ouIndex{}, err
 	}
@@ -74,8 +68,7 @@ func (s *Server) loadForecastSubjectSnapshot(user string, afterAccountRead func(
 	if err := tx.Commit(); err != nil {
 		return forecastSubject{}, ouIndex{}, err
 	}
-	return forecastSubject{User: user, Admin: can(role, PermManage), RestrictedAccount: restricted != 0,
-		GroupID: group, SessionRev: revision, CreatedAt: created, ExpiresAt: expires}, ix, nil
+	return forecastSubject{User: user, Admin: can(role, PermManage), RestrictedAccount: restricted != 0, GroupID: group}, ix, nil
 }
 
 func resolveForecastScope(sub forecastSubject, ix ouIndex) forecastDecision {
@@ -164,11 +157,14 @@ var forecastReadPatterns = map[string]bool{
 }
 
 // refuseForecastReadOnBrokenTree is consulted only after the enrolment policy could not be read. An
-// account whose OU chain is dangling or cyclic makes that policy unreadable (the wall never guesses
-// past a broken chain) and also resolves to forecast scope none, a definite and non-transient
-// answer. On a forecast read the request is refused with that answer, forecast_unavailable, which is
-// what a none subject is promised; every other route keeps the wall's 503. A transient store error
-// is not a structural reason and is left to the wall's retryable 503.
+// account with a dangling parent on its OU chain makes that policy unreadable (the wall never
+// guesses past a missing parent) and also resolves to forecast scope none, a definite and
+// non-transient answer. On a forecast read the request is refused with that answer,
+// forecast_unavailable, which is what a none subject is promised; every other route keeps the wall's
+// 503. A cyclic chain also resolves to none, but the wall walks past a cycle, so such an account
+// reaches the forecast gate and is refused there; the cyclic reason is still listed so that an
+// unreadable policy on a cyclic account gets the same definite answer rather than a retryable one. A
+// transient store error is not a structural reason and is left to the wall's retryable 503.
 func (s *Server) refuseForecastReadOnBrokenTree(w http.ResponseWriter, r *http.Request, user string) bool {
 	if !forecastReadPatterns[r.Pattern] {
 		return false
