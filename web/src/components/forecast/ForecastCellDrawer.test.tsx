@@ -80,6 +80,22 @@ describe('ForecastCellDrawer direction', () => {
     await waitFor(() => expect(screen.getByText(key)).toBeTruthy())
   })
 
+  it('draws the agreeing and the halted tags in explicit, readable colours rather than antd\'s presets', async () => {
+    // antd's green preset measures 3.4:1 and its warning preset 1.8:1 in the light theme.
+    getMock.mockResolvedValue(page([{ ...member(1, 'agree'), halted: true }]))
+    render(
+      <MemoryRouter>
+        <ForecastCellDrawer open onClose={() => undefined} mode="month" from="" to="" group="month" label="2026-09" checkpoint="d5" cell={{ state: 'mature', n: 42 }} />
+      </MemoryRouter>,
+    )
+    const agree = await screen.findByText('forecast.direction.agree')
+    const halted = screen.getByText('forecast.mark.halted')
+    for (const tag of [agree, halted]) {
+      expect(tag.className).not.toMatch(/ant-tag-(green|success|warning|orange)/)
+      expect(tag.style.color).not.toBe('')
+    }
+  })
+
   it('renders no verdict when the payload carries no direction', async () => {
     show(page([member(1, undefined)]))
     await waitFor(() => expect(screen.getByText('600001')).toBeTruthy())

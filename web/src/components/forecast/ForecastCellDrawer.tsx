@@ -4,7 +4,7 @@ import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
-import { forecastLinkColor, formatSigned } from '../../lib/forecastPresentation'
+import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import type {
   ForecastCell,
@@ -16,6 +16,7 @@ import type {
 } from '../../api/types'
 import ExploratoryTag from './ExploratoryTag'
 import Quiet from './Quiet'
+import WarnTag from './WarnTag'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
@@ -157,7 +158,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           <span>{m.name || m.symbol}</span>
         )}
         {/* A halted stock settles on its last traded close: its flat return is not a quiet stock. */}
-        {!membership && m.halted && <Tag color="warning" style={{ margin: 0 }}>{t('forecast.mark.halted')}</Tag>}
+        {!membership && m.halted && <WarnTag>{t('forecast.mark.halted')}</WarnTag>}
       </Space>
     ),
   }
@@ -198,7 +199,12 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
         // cannot tell the tags apart.
         const d = m.direction
         if (d === undefined) return '—'
-        return <Tag color={d === 'agree' ? 'green' : d === 'disagree' ? 'red' : 'default'}>{t(`forecast.direction.${d}`)}</Tag>
+        if (d === 'agree') {
+          // antd's green preset measures 3.4:1 on white; the palette's green is checked at AA.
+          const agree = forecastPalette(token).negative
+          return <Tag style={{ color: agree.foreground, background: agree.background, borderColor: token.colorSuccessBorder }}>{t('forecast.direction.agree')}</Tag>
+        }
+        return <Tag color={d === 'disagree' ? 'red' : 'default'}>{t(`forecast.direction.${d}`)}</Tag>
       },
     },
   ]
