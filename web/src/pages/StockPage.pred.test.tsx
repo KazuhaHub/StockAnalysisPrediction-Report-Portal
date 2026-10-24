@@ -23,7 +23,11 @@ vi.mock('../components/FavoriteButton', () => ({ FavoriteButton: () => <span>fav
 vi.mock('../components/TimelinePanel', () => ({ default: () => <div>timeline</div> }))
 vi.mock('../components/ReaderControls', () => ({ default: () => <div>controls</div> }))
 vi.mock('../components/CompareModal', () => ({ default: () => null }))
-vi.mock('../components/PriceChart', () => ({ default: () => <div>chart</div> }))
+vi.mock('../components/PriceChart', () => ({
+  default: ({ levels, markers }: { levels?: unknown[]; markers?: unknown[] }) => (
+    <div data-testid="chart" data-levels={levels?.length ?? 0} data-markers={markers?.length ?? 0}>chart</div>
+  ),
+}))
 vi.mock('../components/ExportButtons', () => ({
   ExportPdfButton: () => null,
   ExportDayButton: () => null,
@@ -88,6 +92,8 @@ let releaseQuote: (() => void) | null
 let deferStockFor: string | null
 let releaseStock: (() => void) | null
 let quoteCalls: string[]
+// The symbol whose /api/predictions list answers with one other set (for the card's other-predictions table).
+let otherSetsFor: string | null
 
 vi.mock('../api/client', () => ({
   api: {
@@ -102,7 +108,11 @@ vi.mock('../api/client', () => ({
       if (url.includes('/predictions')) {
         predCalls.push(url)
         if (denyForecast) return Promise.reject(new ApiError(403, 'unavailable', 'forecast_unavailable'))
-        if (url.startsWith('/api/predictions?')) return Promise.resolve({ ok: true, sets: [] })
+        if (url.startsWith('/api/predictions?')) {
+          const listed = new URLSearchParams(url.split('?')[1]).get('symbol')
+          if (listed && listed === otherSetsFor) return Promise.resolve({ ok: true, sets: [{ ...setFor(99, 999900), symbol: listed }] })
+          return Promise.resolve({ ok: true, sets: [] })
+        }
         if (url.includes('/api/report/3/')) {
           return Promise.resolve({ ok: true, sets: [setFor(3, 333300)], display_set_id: 3 })
         }
@@ -148,6 +158,7 @@ function page() {
       <Link to="/stock/600519?date=2026-07-07">other-stock</Link>
       {/* A date no earlier test visited, so the prefetch cache cannot answer this one warm. */}
       <Link to="/stock/600519?date=2026-07-09">other-stock-cold</Link>
+      <Link to="/stock/600519?date=2026-07-10">other-stock-cold-overlay</Link>
       <Routes>
         <Route path="/stock/:symbol" element={<StockPage />} />
       </Routes>
@@ -181,6 +192,7 @@ beforeEach(() => {
   deferStockFor = null
   releaseStock = null
   quoteCalls = []
+  otherSetsFor = null
   try {
     window.localStorage.clear()
   } catch {
@@ -383,6 +395,30 @@ describe('StockPage predictions', () => {
       expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
       // The cursor now sits where the NEW quote's close puts it, not where the first one did.
       expect(screen.getByTestId('forecast-scenario-cursor').getAttribute('data-position')).toBe(String((4400 - 2000) / (5000 - 2000) * 100))
+    })
+
+    it("draws no forecast and lists no other predictions from the wrong stock while the next report loads", async () => {
+      window.localStorage.setItem('rp_read_quote_chart', '1')
+      deferStockFor = '600519'
+      otherSetsFor = '600519'
+      show()
+      expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
+      await waitFor(() => expect(Number(screen.getByTestId('chart').getAttribute('data-levels'))).toBeGreaterThan(0))
+      await userEvent.click(screen.getByText('other-stock-cold-overlay'))
+      // The next symbol's quote and its other-predictions list answer; its report is still on its way,
+      // so the report, card and chart overlay on screen are the previous stock's.
+      await waitFor(() => expect(quoteCalls).toContain('600519'))
+      await waitFor(() => expect(predCalls.some((u) => u.includes('symbol=600519'))).toBe(true))
+      await waitFor(() => expect(releaseStock).not.toBeNull())
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.getByText(/1,111\.00/)).toBeTruthy()
+      expect(screen.getByTestId('chart').getAttribute('data-levels')).toBe('0')
+      expect(screen.getByTestId('chart').getAttribute('data-markers')).toBe('0')
+      expect(screen.queryByText('forecast.panel.others')).toBeNull()
+      releaseStock!()
+      // Once the next stock's own report is on screen, its forecast and its other predictions return.
+      expect(await screen.findByText(/3,333\.00/)).toBeTruthy()
+      await waitFor(() => expect(Number(screen.getByTestId('chart').getAttribute('data-levels'))).toBeGreaterThan(0))
     })
 
     it("does not price the report still on screen against the next symbol's close", async () => {

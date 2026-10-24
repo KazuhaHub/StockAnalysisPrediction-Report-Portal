@@ -145,7 +145,9 @@ export default function StockPage() {
   const predForRef = useRef<number | undefined>(undefined)
   const [otherPred, setOtherPred] = useState<{ key: string; sets: PredictionSet[] }>({ key: '', sets: [] })
   const otherKey = `${symbol}\0${forecastKey}`
-  const otherSets = forecastCardEnabled && otherPred.key === otherKey ? otherPred.sets : []
+  // While the next symbol's report loads, the card on screen is still the previous stock's; the
+  // route symbol's list must not be shown under it (`reportIsRouteSymbol` is defined with the overlay).
+  const otherSetsFor = forecastCardEnabled && otherPred.key === otherKey ? otherPred.sets : []
   // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
   // the levels noise.
   const [overlay, setOverlay] = useState(readOverlay)
@@ -349,9 +351,14 @@ export default function StockPage() {
     s.claims.find((c) => c.kind === kind && (label === undefined || c.label === label))
   const terminalFen = acceptedSet ? claimOf(acceptedSet, 'terminal_value')?.price_fen : undefined
   const entryFen = acceptedSet ? claimOf(acceptedSet, 'entry_price')?.price_fen : undefined
+  // The chart draws the route symbol's bars. Until that symbol's report is the one on screen, the
+  // report's levels and markers belong to another stock and are not drawn over these bars.
+  const reportIsRouteSymbol = sameSymbol(data.symbol, symbol)
+  const otherSets = reportIsRouteSymbol ? otherSetsFor : []
+  const drawOverlay = overlay && reportIsRouteSymbol
   type Level = { price: number; label: string; tone: 'neutral' | 'primary' | 'warning' }
   const overlayLevels: Level[] =
-    acceptedSet && overlay
+    acceptedSet && drawOverlay
       ? [
           acceptedSet.s0_fen !== undefined
             ? { price: acceptedSet.s0_fen, label: t('forecast.chart.s0'), tone: 'neutral' as Level['tone'] }
@@ -365,7 +372,7 @@ export default function StockPage() {
         ].filter((v): v is Level => v !== null)
       : []
   const overlayMarkers =
-    acceptedSet && overlay && rep
+    acceptedSet && drawOverlay && rep
       ? [
           { date: acceptedSet.s0_date || rep.date, label: t('forecast.chart.report'), price: acceptedSet.s0_fen, snap: acceptedSet.s0_date && acceptedSet.s0_date !== rep.date ? `${rep.date} → ${acceptedSet.s0_date}` : undefined },
           ...acceptedSet.marks
@@ -494,8 +501,8 @@ export default function StockPage() {
                 currency={quote?.currency}
                 levels={overlayLevels}
                 markers={overlayMarkers}
-                windowFrom={overlay ? acceptedSet?.s0_date : undefined}
-                overlayLegend={overlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
+                windowFrom={drawOverlay ? acceptedSet?.s0_date : undefined}
+                overlayLegend={drawOverlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
               />
             </div>
           )}
