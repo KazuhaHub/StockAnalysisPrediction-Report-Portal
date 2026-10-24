@@ -190,6 +190,8 @@ func (s *Server) apiAppMarketInstall(w http.ResponseWriter, r *http.Request, use
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.appTok.revokeApp(app.ID)
+	s.invalidateExtension(app.ID)
 	log.Printf("app installed from market: %s (%s) by %s, %d files", app.ID, app.Version, user, len(files))
 	writeJSON(w, map[string]any{"ok": true, "app": appJSON(app)})
 }

@@ -7,10 +7,11 @@ import (
 
 // appTokenScopes is the set of API scopes the iframe bridge may grant an app.
 // Phase 2 (docs/adr/0003-downloadable-apps.md) adds the write scope `ingest`
-// alongside read-only `query`; an admin approves the app's declared scopes at
+// alongside read-only `query`; notification publication adds the bound `notify`
+// capability. An admin approves the app's declared scopes at
 // install (the install-time permission prompt). The catch-all `all` scope is
-// deliberately absent — an app can never exceed query+ingest.
-var appTokenScopes = map[string]bool{"query": true, "ingest": true}
+// deliberately absent — no app receives a catch-all permission.
+var appTokenScopes = map[string]bool{"query": true, "ingest": true, "notify": true, "extension.read": true, "extension.manage": true}
 
 // grantableScopes filters an app's requested scopes down to the ones this phase
 // permits (deduplicated). An app that declares only unsupported scopes gets none.
@@ -50,8 +51,37 @@ type appTokens struct {
 }
 
 type appTokenEntry struct {
-	scopes  map[string]bool
-	expires time.Time
+	scopes                 map[string]bool
+	expires                time.Time
+	appID                  string
+	username               string
+	sessionRev             int64
+	accountCreated         string
+	accountGeneration      int64
+	accountGenerationKnown bool
+	backendInstance        string
+}
+
+func (a *appTokens) mintForApp(scopes []string, now time.Time, appID string, user *User) string {
+	token := a.mint(scopes, now)
+	if user != nil {
+		a.mu.Lock()
+		entry := a.m[token]
+		entry.appID = appID
+		entry.username = user.Username
+		entry.sessionRev = user.SessionRev
+		entry.accountCreated = user.CreatedAt
+		a.m[token] = entry
+		a.mu.Unlock()
+	}
+	return token
+}
+
+func (a *appTokens) publisher(token string, now time.Time) (appTokenEntry, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	entry, ok := a.m[token]
+	return entry, ok && now.Before(entry.expires) && entry.scopes["notify"] && entry.appID != "" && entry.username != ""
 }
 
 func newAppTokens(ttl time.Duration) *appTokens {
@@ -94,6 +124,37 @@ func (a *appTokens) pruneLocked(now time.Time) {
 	for k, e := range a.m {
 		if now.After(e.expires) {
 			delete(a.m, k)
+		}
+	}
+}
+
+func (a *appTokens) extensionEntry(token string, now time.Time) (appTokenEntry, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e, ok := a.m[token]
+	return e, ok && now.Before(e.expires) && e.appID != "" && e.username != ""
+}
+func (a *appTokens) bindExtension(token string, generation int64, instance string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e, ok := a.m[token]
+	if !ok {
+		return
+	}
+	e.accountGeneration = generation
+	e.accountGenerationKnown = true
+	e.backendInstance = instance
+	a.m[token] = e
+}
+func (a *appTokens) revokeApp(id string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for token, e := range a.m {
+		if e.appID == id {
+			delete(a.m, token)
 		}
 	}
 }

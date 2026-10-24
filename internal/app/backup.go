@@ -386,6 +386,13 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if err := checkDumpMigrations(rep.Header.Migrations, steps); err != nil {
 		return nil, err
 	}
+	for _, m := range steps[:len(rep.Header.Migrations)] {
+		for _, table := range m.tables {
+			if !containsString(rep.Header.Tables, table) {
+				return nil, fmt.Errorf("backup claims migration %s but omits its table %s", m.id, table)
+			}
+		}
+	}
 	optional := optionalColumns(rep.Header.Migrations, steps)
 	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
@@ -460,6 +467,20 @@ func (s *Store) populationFromRow() string {
 // takes the data back with it rather than leaving a half-loaded database behind.
 func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if err := resetRestoredExtensionConnections(e); err != nil {
+		return err
+	}
+	// Restored pending work may already have reached an external destination
+	// after the backup was made. Never resume it silently on the next boot.
+	if err := e.setSetting("notification_dispatch_paused", "1"); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE notification_attempts SET finished_at=?,outcome='uncertain',error_code='restored_attempt' WHERE finished_at=0`, time.Now().UTC().UnixMilli()); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE notification_deliveries SET state='uncertain',last_error='restored_attempt',lease_token='',lease_until=0,sending=0 WHERE state='leased'`); err != nil {
+		return err
+	}
 	// The write-once keys. `meta` was just replaced by the dump's, so a key the dump lacked is now
 	// absent and one it carried is now the dump's value. Both rules run on the tx handle only.
 	if err := applyRestorePrior(e, prior); err != nil {
@@ -671,6 +692,7 @@ func auditRestoreChange(e migExec, action, key string, detail map[string]any) er
 // is the dry run; the parsing and the column checks are identical either way, so a dry run that
 // passes is real evidence about the file.
 func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map[string]map[string]bool, renamed map[string]map[string]string, identity map[string]string, rep *RestoreReport) error {
+	seenTables := map[string]bool{}
 	var (
 		table  string
 		cols   []string
@@ -722,6 +744,10 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 					cols[i] = to
 				}
 			}
+			if seenTables[table] {
+				return fmt.Errorf("backup repeats table %s", table)
+			}
+			seenTables[table] = true
 			cset, ok := known[table]
 			if !ok {
 				return fmt.Errorf("the backup contains table %q, which this build has no schema for: "+
@@ -780,6 +806,11 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 		}
 		rep.Rows[table]++
 		rep.Total++
+	}
+	for _, table := range rep.Header.Tables {
+		if !seenTables[table] {
+			return fmt.Errorf("backup header declares table %s but its section is missing", table)
+		}
 	}
 	return closeStmt()
 }

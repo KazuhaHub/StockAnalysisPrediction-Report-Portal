@@ -10,8 +10,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"io"
 	"net/http"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/notification"
 )
 
 const (
@@ -41,11 +42,6 @@ func Deliver(ctx context.Context, client *http.Client, url, secret, event string
 	if secret != "" {
 		req.Header.Set(SignatureHeader, "sha256="+Sign(secret, body))
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
-	return resp.StatusCode, nil
+	result := notification.AttemptHTTP(client, req)
+	return result.Status, result.Err
 }

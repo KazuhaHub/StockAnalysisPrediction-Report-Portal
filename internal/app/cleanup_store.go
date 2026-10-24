@@ -104,6 +104,10 @@ func (s *Store) DeleteFinishedJobsBefore(cutoff string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer tx.Rollback()
+	if err := clearJobNotificationEvidence(migExec{s: s, ex: tx}, batchTerminalPred, cutoff); err != nil {
+		return 0, err
+	}
 	// Children first: items whose parent job matches the terminal+age predicate.
 	if _, err := tx.Exec(s.bind("DELETE FROM batch_items WHERE job_id IN (SELECT id FROM batch_jobs WHERE "+batchTerminalPred+")"), cutoff); err != nil {
 		tx.Rollback()
@@ -338,6 +342,15 @@ func (s *Store) CountPredictionsBefore(cutoff time.Time) (int64, error) {
 // One transaction for the whole pass rather than the chunked shape the reports target uses: a month is
 // the atomic unit, and a pass that deleted half a month would produce exactly the state this design
 // exists to prevent.
+//
+// The transaction takes the ownership lock before it reads any set (ADR 0039). Before a month's sets
+// are deleted it snapshots which OUs owned them as purge evidence, in the same transaction as the
+// deletion and the marker, so own-scoped readers can later be told about exactly the months their
+// subtree owned. Deleting an OU takes the same lock, so the two serialize: whichever commits second
+// sees the other's result, and no evidence can name an OU that is gone.
+//
+// The candidate scan above runs outside the transaction (the single-connection rule) and only
+// nominates months; every nominated month is verified again under the lock, from fresh reads.
 func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
 	months, err := s.predictionPurgeMonths(cutoff)
 	if err != nil || len(months) == 0 {
@@ -349,6 +362,10 @@ func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
+	e := migExec{s: s, ex: tx}
+	if err := lockPredictionOwnership(e); err != nil {
+		return 0, err
+	}
 	var total int64
 	for _, m := range months {
 		rtype, cohort := m[0], m[1]
@@ -358,6 +375,10 @@ func (s *Store) DeletePredictionsBefore(cutoff time.Time) (int64, error) {
 		}
 		if !ok {
 			continue // the month changed under us — leave it whole
+		}
+		// Evidence first, while the sets still exist to be read: a set that is gone proves nothing.
+		if err := capturePredictionPurgeOwners(e, rtype, cohort); err != nil {
+			return total, err
 		}
 		// Children first, so a failure cannot leave a claim or a mark pointing at a set that is gone.
 		if _, err := tx.Exec(s.bind(`DELETE FROM prediction_claims WHERE set_id IN

@@ -115,7 +115,7 @@ export const api = {
   // PATCH for a partial update — a review records a verdict on one field of one row, and PUT would
   // claim to be replacing the whole thing.
   patch: <T = any>(url: string, body?: unknown) => request<T>('PATCH', url, body ?? {}),
-  del: <T = any>(url: string) => request<T>('DELETE', url),
+  del: <T = any>(url: string, body?: unknown) => request<T>('DELETE', url, body),
   // Step-up: a credential change re-proves a factor inside the session. The proof travels in a
   // header — never the query string, which lands in proxy logs, browser history and the Referer of
   // every subresource.

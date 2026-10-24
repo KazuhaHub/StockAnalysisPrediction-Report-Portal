@@ -171,6 +171,7 @@ export default function ManageLayout() {
       children: [
         { key: 'apps', label: t('nav.appsAdmin'), icon: <AppstoreAddOutlined /> },
         { key: 'webhooks', label: t('nav.webhooks'), icon: <ApiOutlined /> },
+        { key: 'notifications', label: t('nav.notifications'), icon: <NotificationOutlined /> },
         { key: 'apidoc', label: t('settings.apidoc'), icon: <FileTextOutlined /> },
       ],
     },

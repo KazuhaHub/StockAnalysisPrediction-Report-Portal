@@ -20,6 +20,7 @@ export default function TokensPage() {
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<number[]>([])
   const [form] = Form.useForm()
+  const selectedScope = Form.useWatch('scope', form)
 
   const load = () =>
     api
@@ -41,7 +42,7 @@ export default function TokensPage() {
     const v = await form.validateFields()
     const result = await api.post<{ token: string }>('/api/admin/tokens', {
       name: v.name || '',
-      scope: v.scope || 'all',
+      scope: v.scope === 'notify' ? `notify:${v.publisher || ''}` : v.scope || 'all',
       expires: v.expires ? v.expires.format('YYYY-MM-DD') : '',
     })
     setOpen(false)
@@ -131,7 +132,7 @@ export default function TokensPage() {
           {
             title: t('settings.tokenScope'),
             dataIndex: 'scope',
-            render: (s: string) => <Tag color={SCOPE_COLORS[s] || 'default'}>{t(`scope.${s}`, s)}</Tag>,
+            render: (s: string) => <Tag color={SCOPE_COLORS[s] || 'default'}>{s.startsWith('notify:') ? `${t('scope.notify')}: ${s.slice(7)}` : t(`scope.${s}`, s)}</Tag>,
           },
           { title: t('settings.tokenExpires'), dataIndex: 'expires', render: (e: string) => e || '∞' },
           { title: t('settings.tokenLastUsed'), dataIndex: 'lastUsed', render: (e: string) => e || '—' },
@@ -167,9 +168,11 @@ export default function TokensPage() {
                 { value: 'all', label: t('scope.all') },
                 { value: 'ingest', label: t('scope.ingest') },
                 { value: 'query', label: t('scope.query') },
+                { value: 'notify', label: t('scope.notify') },
               ]}
             />
           </Form.Item>
+          {selectedScope === 'notify' && <Form.Item name="publisher" label={t('notify.publisher')} extra={t('notify.publisherHelp')} rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{0,47}$/ }]}><Input /></Form.Item>}
           <Form.Item name="expires" label={t('settings.tokenExpires')}>
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
