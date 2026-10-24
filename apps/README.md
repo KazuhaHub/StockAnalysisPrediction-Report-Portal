@@ -18,7 +18,7 @@ sandboxed `<iframe>`.
   "icon": "🔎",             // optional emoji shown on the card
   "version": "1.0.0",
   "entry": "index.html",    // HTML entry point inside the bundle
-  "scopes": ["query"]       // API scopes: "query" (read) and/or "ingest" (write)
+  "scopes": ["query"]       // Capabilities: query (read), ingest (report writes), notify (publication)
 }
 ```
 
@@ -61,3 +61,14 @@ Rebuild the zip after editing:
 ```sh
 cd demo-symbols && zip -j -X ../demo-symbols.zip app.json index.html
 ```
+
+### Notification publication capability
+
+An app may declare `notify` to request source-owned notification publication when
+opened by an administrator. It uses the existing `rp:api` bridge with
+`POST /api/v1/notifications`; query or ingest permission does not imply this
+capability. The host token is bound to the app and issuer, and the server checks
+installation, current declaration and issuer eligibility on each publication.
+The app cannot choose recipients, destination URLs or a native event name.
+See [the publication contract](../docs/notification-publishing-api.md) for setup,
+request bounds, idempotency and background-service guidance.

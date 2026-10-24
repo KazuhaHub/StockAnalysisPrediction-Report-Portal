@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"log"
@@ -179,11 +180,11 @@ func (s *Server) apiRegister(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	go func() {
-		if err := s.sendVerifyEmail(email, token); err != nil {
+	s.submitTransactionalMail(func(ctx context.Context) {
+		if err := s.sendVerifyEmailContext(ctx, email, token); err != nil {
 			log.Printf("registration: verification email to %s failed: %v", email, err)
 		}
-	}()
+	})
 	writeJSON(w, map[string]any{"ok": true, "requires_verification": true})
 }
 
@@ -229,7 +230,7 @@ func (s *Server) apiRegisterVerify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, okJSON)
 }
 
-func (s *Server) sendVerifyEmail(email, token string) error {
+func (s *Server) sendVerifyEmailContext(ctx context.Context, email, token string) error {
 	base := s.publicBaseURL()
 	if base == "" {
 		return fmt.Errorf("no public URL configured")
@@ -239,7 +240,7 @@ func (s *Server) sendVerifyEmail(email, token string) error {
 	body := fmt.Sprintf(
 		`<p>Hi,</p><p>Confirm this address to finish creating your %s account:</p><p><a href="%s">%s</a></p><p>The link is valid for 24 hours. If you did not sign up, ignore this email — the account stays disabled and is removed automatically.</p>`,
 		html.EscapeString(brand), link, html.EscapeString(link))
-	return s.sendEmail([]string{email}, brand+" — confirm your email", body)
+	return s.sendEmailContext(ctx, []string{email}, brand+" — confirm your email", body)
 }
 
 // GET /api/register/config — what the public signup page needs to render, and nothing else. The

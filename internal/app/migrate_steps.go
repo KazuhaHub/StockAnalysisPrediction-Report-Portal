@@ -207,6 +207,10 @@ type migration struct {
 	renames []colRename
 	restore restoreRule
 	up      func(migExec) error
+	// verify is a shape check beyond what columns, tables, indices and renames can express (types,
+	// nullability, keys, constraints). It runs wherever the declared products are verified: inside the
+	// step's own transaction before the ledger row is written, and on every start for recorded steps.
+	verify func(migExec) error
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step. The order
@@ -214,7 +218,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010()}
+		migration0006(), migration0010(), migration0009(), migration0007(), migration0008()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).
@@ -252,6 +256,23 @@ func migration0010() migration {
 			}
 			return nil
 		},
+	}
+}
+
+// The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
+// not prove OU membership, so this step never backfills them. Like every step it is applied by
+// ordinary startup, in its own transaction, and a table that does not have the exact shape is
+// refused before the ledger row is written. The notification (0007) and extension (0008) steps were
+// appended after it, in merge order. Tier 2 provenance has not shipped and must take the next free
+// id if that work is later approved.
+func migration0009() migration {
+	return migration{
+		id:      "0009",
+		tables:  []string{"prediction_purge_owners"},
+		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
+		restore: restoreRule{olderDumpOK: true},
+		up:      createPredictionPurgeOwners,
+		verify:  verifyPredictionPurgeOwners,
 	}
 }
 
@@ -581,8 +602,10 @@ func migration0006() migration {
 
 // ---------- running them ----------
 
-// runMigrations applies what this build knows and this database has not recorded, then verifies every
-// step's declared products.
+// runMigrations is the startup path: it applies what this build knows and this database has not
+// recorded, then verifies every step's declared products. Every step is applied here, in list order,
+// each in its own transaction; no step waits for an operator, so a deploy is a new binary and a
+// restart (ADR 0035).
 //
 // The "written by a newer release" check belongs HERE rather than in the runner below: it is a
 // judgement about the database as a whole, made once at startup against the full list this build
@@ -833,6 +856,11 @@ func (s *Store) verifyMigrationProducts(e migExec, steps []migration) error {
 			if e.columnExists(r.table, r.from) {
 				return fmt.Errorf("migration %s renames %s.%s to %s, but %s.%s is still present", m.id,
 					r.table, r.from, r.to, r.table, r.from)
+			}
+		}
+		if m.verify != nil {
+			if err := m.verify(e); err != nil {
+				return fmt.Errorf("migration %s: %w", m.id, err)
 			}
 		}
 	}

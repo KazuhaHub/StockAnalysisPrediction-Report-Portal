@@ -167,13 +167,21 @@ const (
 	AuditRunDelete     = "run.delete"
 
 	// Credentials and egress — the things that let something out of the portal.
-	AuditTokenCreate   = "token.create"
-	AuditTokenDelete   = "token.delete"
-	AuditAppInstall    = "app.install"
-	AuditAppDelete     = "app.delete"
-	AuditWebhookCreate = "webhook.create"
-	AuditWebhookDelete = "webhook.delete"
-	AuditTargetChange  = "target.change"
+	AuditTokenCreate          = "token.create"
+	AuditTokenDelete          = "token.delete"
+	AuditAppInstall           = "app.install"
+	AuditAppDelete            = "app.delete"
+	AuditAppBackendChange     = "app_backend.change"
+	AuditAppBackendDelete     = "app_backend.delete"
+	AuditWebhookCreate        = "webhook.create"
+	AuditWebhookDelete        = "webhook.delete"
+	AuditTargetChange         = "target.change"
+	AuditNotificationChange   = "notification.change"
+	AuditNotificationTest     = "notification.test"
+	AuditNotificationReplay   = "notification.replay"
+	AuditNotificationReview   = "notification.review"
+	AuditNotificationDispatch = "notification.dispatch"
+	AuditNotificationPublish  = "notification.publish"
 )
 
 // WriteAudit records one action. Deliberately best-effort and never returns an error to its caller:
@@ -429,9 +437,11 @@ var auditVocabulary = []string{
 	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
 	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
 	AuditTokenCreate, AuditTokenDelete,
-	AuditAppInstall, AuditAppDelete,
+	AuditAppInstall, AuditAppDelete, AuditAppBackendChange, AuditAppBackendDelete,
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
+	AuditNotificationChange, AuditNotificationTest, AuditNotificationReplay, AuditNotificationReview, AuditNotificationDispatch,
+	AuditNotificationPublish,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
 	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader, AuditForecastFallback,

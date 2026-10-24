@@ -14,6 +14,7 @@ import ForecastCellView from './ForecastCellView'
 import ForecastCoverage from './ForecastCoverage'
 import ForecastLegend from './ForecastLegend'
 import Quiet from './Quiet'
+import ScrollRegion from './ScrollRegion'
 
 // The verification matrix (plan §8.1).
 //
@@ -85,7 +86,9 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
           {t('forecast.cell.min_n_met_hint')}
         </Quiet>
       )}
-      <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
+      {/* The table is wider than a phone. A cell that is not a button gives the keyboard nothing to
+          focus, so the scrolling area is itself a named region that takes focus. */}
+      <ScrollRegion label={t('forecast.matrix.region')}>
         <table role="table" style={{ display: 'block', width: '100%', minWidth: 140 + resp.checkpoints.length * 116 + (showCoverage ? 224 : 0) }}>
           <thead style={{ display: 'block' }}>
             <tr role="row" style={row}>
@@ -125,6 +128,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                         metric={metric}
                         mode={mode}
                         gateHintId={gateHintId}
+                        generatedAt={resp.generated_at}
                         onOpen={() => onOpen(g, cp)}
                       />
                     ) : null}
@@ -139,7 +143,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
     </div>
   )
 }

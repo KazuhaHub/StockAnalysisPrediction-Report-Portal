@@ -169,6 +169,7 @@ func TestStoreFailedEmitsWebhook(t *testing.T) {
 	}
 
 	// A successful ingest must deliver nothing.
+	startNotificationRuntimeForTest(t, s)
 	if code, m := ingestPost(t, s, ingestBody(string(predWire(nil)))); code != http.StatusOK || m["predictions_status"] != predStateAccepted {
 		t.Fatalf("setup ingest: %d %v", code, m)
 	}

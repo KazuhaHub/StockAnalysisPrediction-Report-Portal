@@ -38,7 +38,15 @@ func ensurePurgeEvidenceTable(t *testing.T, st *Store) {
 	if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = st.exec(`DROP TABLE IF EXISTS prediction_purge_owners`) })
+	t.Cleanup(func() {
+		if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := st.exec(`DELETE FROM prediction_purge_owners`); err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 func newPurgeHistoryEnv(t *testing.T, st *Store) *purgeHistoryEnv {

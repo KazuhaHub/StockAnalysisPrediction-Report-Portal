@@ -3,15 +3,12 @@ package app
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
-// Purge ownership is evidence, not a reconstruction from today's report grants. These primitives
-// are intentionally not registered with startup migrations: existing databases require an explicit
-// operator upgrade before the read/cleanup/delete paths can adopt this contract.
-//
-// The table is also not yet part of the backup table set, so a restore neither clears nor reloads
-// it. No database has the table until the upgrade step ships, and that step must register it with
-// backup and restore, because evidence is keyed by OU ids that a restored tree may reuse.
+// Purge ownership is evidence, not a reconstruction from today's report grants. The table is step
+// 0009: ordinary startup creates it empty on an existing database and verifies its exact shape on
+// every start.
 
 // lockPredictionOwnership must be the first database operation in both the retention and OU-delete
 // transactions, before inspecting or reassigning sets. Holding it only around the evidence writes
@@ -29,16 +26,87 @@ func lockPredictionOwnership(e migExec) error {
 	return err
 }
 
-// createPredictionPurgeOwners is shared by explicit upgrade and fresh-database initialization.
-// It must never be called as an implicit repair of an existing database at server startup.
-func createPredictionPurgeOwners(e migExec) error {
-	_, err := e.exec(`CREATE TABLE IF NOT EXISTS prediction_purge_owners (
+const predictionPurgeOwnersDDL = `CREATE TABLE IF NOT EXISTS prediction_purge_owners (
 		rtype TEXT NOT NULL,
 		cohort TEXT NOT NULL,
 		attributed_ou BIGINT NOT NULL CHECK (attributed_ou > 0),
 		PRIMARY KEY (rtype, cohort, attributed_ou)
-	)`)
+	)`
+
+// createPredictionPurgeOwners is step 0009's DDL, run by the migration runner on a fresh database
+// and on an upgraded one alike. It creates the table empty: historic markers are never backfilled.
+func createPredictionPurgeOwners(e migExec) error {
+	_, err := e.exec(predictionPurgeOwnersDDL)
 	return err
+}
+
+// A ledger row and column names alone cannot prove non-null, exact integer ownership keys.
+func verifyPredictionPurgeOwners(e migExec) error {
+	query := `SELECT name, UPPER(type), "notnull", pk FROM pragma_table_info('prediction_purge_owners')`
+	if e.s.driver == "postgres" {
+		query = `SELECT c.column_name, UPPER(c.data_type), CASE WHEN c.is_nullable='NO' THEN 1 ELSE 0 END,
+			COALESCE((SELECT k.ordinal_position FROM information_schema.table_constraints t
+			JOIN information_schema.key_column_usage k ON k.constraint_name=t.constraint_name
+			AND k.table_schema=t.table_schema AND k.table_name=t.table_name
+			WHERE t.table_schema='public' AND t.table_name=c.table_name
+			AND t.constraint_type='PRIMARY KEY' AND k.column_name=c.column_name),0)
+			FROM information_schema.columns c WHERE c.table_schema='public' AND c.table_name='prediction_purge_owners'`
+	}
+	rows, err := e.query(query)
+	if err != nil {
+		return err
+	}
+	want := map[string]string{"rtype": "TEXT:1:1", "cohort": "TEXT:1:2", "attributed_ou": "BIGINT:1:3"}
+	keys := 0
+	for rows.Next() {
+		var name, typ string
+		var required, key int
+		if err := rows.Scan(&name, &typ, &required, &key); err != nil {
+			rows.Close()
+			return err
+		}
+		if key > 0 {
+			keys++
+		}
+		if expected, ok := want[name]; ok {
+			if fmt.Sprintf("%s:%d:%d", typ, required, key) != expected {
+				rows.Close()
+				return fmt.Errorf("prediction_purge_owners has incompatible type/nullability/key for %s", name)
+			}
+			delete(want, name)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(want) != 0 || keys != 3 {
+		return fmt.Errorf("prediction_purge_owners does not have its exact three-column primary key")
+	}
+	query = `SELECT sql FROM sqlite_master WHERE type='table' AND name='prediction_purge_owners'`
+	if e.s.driver == "postgres" {
+		query = `SELECT COALESCE(string_agg(pg_get_constraintdef(oid),' '),'') FROM pg_constraint
+			WHERE conrelid='public.prediction_purge_owners'::regclass AND contype='c' AND convalidated`
+	}
+	var checks string
+	if err := e.queryRow(query).Scan(&checks); err != nil {
+		return err
+	}
+	canonical := func(text string) string {
+		clean := strings.NewReplacer(" ", "", "\n", "", "\t", "", "\r", "").Replace(strings.ToLower(text))
+		return strings.ReplaceAll(clean, "ifnotexists", "")
+	}
+	clean := canonical(checks)
+	// SQLite exposes the table declaration rather than parsed check constraints. Require our
+	// canonical declaration, so a comment or a quoted literal cannot impersonate an active CHECK.
+	if e.s.driver != "postgres" && clean != canonical(predictionPurgeOwnersDDL) {
+		return fmt.Errorf("prediction_purge_owners has a noncanonical SQLite constraint declaration")
+	}
+	if !strings.Contains(clean, "check(attributed_ou>0)") && !strings.Contains(clean, "check((attributed_ou>0))") {
+		return fmt.Errorf("prediction_purge_owners is missing its positive-owner constraint")
+	}
+	return nil
 }
 
 // capturePredictionPurgeOwners runs before deleting sets, on the caller's purge transaction.

@@ -128,25 +128,29 @@ export default function ForecastEvaluatorPill() {
   }
   const minutes = hb ? Math.max(0, Math.floor((nowMs - Date.parse(hb.last_tick_at)) / 60_000)) : 0
 
+  // The status is already told by the pill and the State row, and the counts in the healthy line change
+  // with every reading, so these are notes: an alert region would announce each refresh. The one
+  // alert in this drawer is the failed read, an event the reader has just caused.
   const explanation = (current: EvaluatorStatus) => {
     switch (current) {
       case 'off':
-        return <Alert type="info" showIcon title={t('forecast.eval.pill.off_hint')} />
+        return <Alert type="info" showIcon role="note" title={t('forecast.eval.pill.off_hint')} />
       case 'dry':
-        return <Alert type="info" showIcon title={t('forecast.eval.pill.dry_hint')} />
+        return <Alert type="info" showIcon role="note" title={t('forecast.eval.pill.dry_hint')} />
       case 'healthy':
         return hb ? (
-          <Alert type="success" showIcon title={t('forecast.eval.pill.pass', { sets: hb.pass.sets, resolved: hb.pass.resolved })} />
+          <Alert type="success" showIcon role="note" title={t('forecast.eval.pill.pass', { sets: hb.pass.sets, resolved: hb.pass.resolved })} />
         ) : null
       case 'stale':
-        return <Alert type="error" showIcon title={t('forecast.eval.pill.stale_hint', { minutes: STALLED_MS / 60_000 })} />
+        return <Alert type="error" showIcon role="note" title={t('forecast.eval.pill.stale_hint', { minutes: STALLED_MS / 60_000 })} />
       case 'lagging':
-        return <Alert type="warning" showIcon title={t('forecast.eval.pill.lagging_hint', { hours: LAGGING_MINUTES / 60 })} />
+        return <Alert type="warning" showIcon role="note" title={t('forecast.eval.pill.lagging_hint', { hours: LAGGING_MINUTES / 60 })} />
       case 'error':
         return (
           <Alert
             type="error"
             showIcon
+            role="note"
             title={hb?.pass.last_error || t('forecast.eval.pill.error_hint')}
             description={hb?.pass.last_error ? t('forecast.eval.pill.error_hint') : undefined}
           />

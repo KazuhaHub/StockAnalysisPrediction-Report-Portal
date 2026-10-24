@@ -403,6 +403,21 @@ describe('pending cell explanation', () => {
     expect(notBeforeInfo({ state: 'pending' }, 'd5')).toBeNull()
     expect(notBeforeInfo({ state: 'pending', not_before: '' }, 'd5')).toBeNull()
   })
+
+  it('drops a date earlier than the response\'s own day, by the rule the summary uses', () => {
+    const generated = '2027-06-20T07:00:00Z'
+    const late: ForecastCell = { state: 'pending', not_before: '2027-06-19', expected: true }
+    expect(notBeforeInfo(late, 'd5', generated)).toBeNull()
+    expect(notBeforeInfo(late, 'h12', generated)).toBeNull()
+    expect(notBeforeInfo({ ...late, not_before: '2027-06-20' }, 'd5', generated)).toEqual({ date: '2027-06-20', expected: true })
+    expect(notBeforeInfo({ ...late, not_before: '2027-06-21' }, 'h12', generated)).toEqual({ date: '2027-06', expected: true })
+  })
+
+  it('prints the date as given when the response does not say what day it is', () => {
+    const cell: ForecastCell = { state: 'pending', not_before: '2026-06-09' }
+    expect(notBeforeInfo(cell, 'd5', undefined)).toEqual({ date: '2026-06-09', expected: false })
+    expect(notBeforeInfo(cell, 'd5', 'not a date')).toEqual({ date: '2026-06-09', expected: false })
+  })
 })
 
 describe('custom range helpers', () => {

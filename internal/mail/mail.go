@@ -5,6 +5,7 @@
 package mail
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net"
 	netmail "net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 )
@@ -81,65 +83,100 @@ func BuildMessage(from string, to []string, subject, htmlBody string, date time.
 // Send delivers one HTML message. It negotiates TLS per Security and authenticates
 // when a user is set.
 func (c Config) Send(to []string, subject, htmlBody string) error {
+	_, err := c.Attempt(context.Background(), to, subject, htmlBody)
+	return err
+}
+
+// Result distinguishes confirmed acceptance from a lost final DATA response.
+// Accepted means the relay accepted the message, not that a user received it.
+type Result struct {
+	Accepted  bool
+	Uncertain bool
+}
+
+// Attempt sends once. Its deadline covers the entire SMTP conversation, including
+// TLS negotiation and cleanup. Callers own retry policy and must not blindly
+// retry an uncertain result.
+func (c Config) Attempt(ctx context.Context, to []string, subject, htmlBody string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	result := Result{}
 	if !c.Enabled() {
-		return errors.New("mail: not configured")
+		return result, errors.New("mail: not configured")
 	}
 	if len(to) == 0 {
-		return errors.New("mail: no recipients")
+		return result, errors.New("mail: no recipients")
 	}
 	safeTo, err := sanitizeRecipients(to)
 	if err != nil {
-		return err
+		return result, err
 	}
 	msg := BuildMessage(c.From, safeTo, subject, htmlBody, time.Now())
 	addr := net.JoinHostPort(c.Host, fmt.Sprint(c.Port))
 	dialer := &net.Dialer{Timeout: 15 * time.Second}
 
-	var conn net.Conn
-	if c.Security == "tls" {
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: c.Host})
-	} else {
-		conn, err = dialer.Dial("tcp", addr)
-	}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("mail: dial: %w", err)
+		return result, fmt.Errorf("mail: dial: %w", err)
+	}
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return result, fmt.Errorf("mail: deadline: %w", err)
+	}
+	var transport net.Conn = conn
+	if c.Security == "tls" {
+		secure := tls.Client(conn, &tls.Config{ServerName: c.Host})
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return result, fmt.Errorf("mail: tls: %w", err)
+		}
+		transport = secure
 	}
 
-	cl, err := smtp.NewClient(conn, c.Host)
+	cl, err := smtp.NewClient(transport, c.Host)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("mail: client: %w", err)
+		return result, fmt.Errorf("mail: client: %w", err)
 	}
 	defer cl.Close()
 
 	if c.Security == "starttls" {
 		if err := cl.StartTLS(&tls.Config{ServerName: c.Host}); err != nil {
-			return fmt.Errorf("mail: starttls: %w", err)
+			return result, fmt.Errorf("mail: starttls: %w", err)
 		}
 	}
 	if c.User != "" {
 		if err := cl.Auth(smtp.PlainAuth("", c.User, c.Pass, c.Host)); err != nil {
-			return fmt.Errorf("mail: auth: %w", err)
+			return result, fmt.Errorf("mail: auth: %w", err)
 		}
 	}
 	if err := cl.Mail(c.From); err != nil {
-		return fmt.Errorf("mail: from: %w", err)
+		return result, fmt.Errorf("mail: from: %w", err)
 	}
 	for _, rcpt := range safeTo {
 		if err := cl.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("mail: rcpt %s: %w", rcpt, err)
+			return result, fmt.Errorf("mail: rcpt %s: %w", rcpt, err)
 		}
 	}
 	wc, err := cl.Data()
 	if err != nil {
-		return fmt.Errorf("mail: data: %w", err)
+		return result, fmt.Errorf("mail: data: %w", err)
 	}
 	if _, err := wc.Write(msg); err != nil {
-		wc.Close()
-		return fmt.Errorf("mail: write: %w", err)
+		// Do not close the DATA writer after a failed write: that would terminate
+		// and potentially submit a truncated body. Closing the connection aborts it.
+		return result, fmt.Errorf("mail: write: %w", err)
 	}
 	if err := wc.Close(); err != nil {
-		return fmt.Errorf("mail: close: %w", err)
+		var rejection *textproto.Error
+		result.Uncertain = !errors.As(err, &rejection)
+		return result, fmt.Errorf("mail: close: %w", err)
 	}
-	return cl.Quit()
+	result.Accepted = true
+	// QUIT is cleanup after final DATA acceptance. Its failure cannot undo the
+	// accepted message and must not trigger a duplicate send.
+	_ = cl.Quit()
+	return result, nil
 }

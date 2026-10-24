@@ -28,10 +28,12 @@ interface Props {
   mode: ForecastMode
   /** The id of the line that explains the n >= 30 flag, which a flagged cell points at. */
   gateHintId: string
+  /** The response's own instant: a date earlier than its day is not printed (see notBeforeInfo). */
+  generatedAt?: string
   onOpen: () => void
 }
 
-export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId, onOpen }: Props) {
+export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId, generatedAt, onOpen }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const palette = forecastPalette(token)
@@ -103,7 +105,7 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
     const done = c.resolved ?? 0
     const total = c.total
     const reasons = pendingReasonParts(c)
-    const until = notBeforeInfo(c, cp)
+    const until = notBeforeInfo(c, cp, generatedAt)
     return (
       <button type="button" data-state="pending" className="rp-fc-cell" onClick={onOpen} style={{ ...box, ...quiet, ...press }}>
         <span>{t('forecast.cell.pending', { done, total })}</span>

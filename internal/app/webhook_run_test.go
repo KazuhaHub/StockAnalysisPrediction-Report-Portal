@@ -30,6 +30,7 @@ func TestFireEventDeliversToSubscribers(t *testing.T) {
 	// A subscriber to a different event must NOT be called.
 	st.CreateWebhook(recv.URL, []string{"other.event"}, "")
 
+	startNotificationRuntimeForTest(t, s)
 	s.fireEvent(EventReportIngested, map[string]any{"id": int64(42)})
 
 	select {
