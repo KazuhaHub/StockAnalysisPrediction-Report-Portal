@@ -2364,8 +2364,9 @@ visible when an accepted set exists; new optional `PriceChart` props `windowFrom
 props the output is identical to today's. Timeline dots carry an `aria-label`. `RunPage` mounts the chip and card
 without the chart. Removes `PredictionPanel.tsx`.
 
-States per component: loading (skeleton, slot reserved), empty (no set: "This report has no forecast"; edition
-without a set: the sibling link), error (inline retry; the body unaffected, FO), unavailable (scope `none`: nothing
+States per component: loading (skeleton, slot reserved), empty (a covered report with no set: "This report has no
+forecast"; edition without a set: the sibling link; a report type the ledger does not cover renders no card, from the
+session read's `covered` field), error (inline retry; the body unaffected, FO), unavailable (scope `none`: nothing
 rendered, no placeholder).
 
 **Tests (vitest).** The production fixture renders waiting copy "on or after 2026-10-26" (or "expected" under P37),

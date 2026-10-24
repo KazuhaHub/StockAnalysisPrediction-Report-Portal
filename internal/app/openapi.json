@@ -412,6 +412,7 @@
           "zone": {"type": "string"},
           "bench_code": {"type": "string"},
           "membership": {"type": "string", "enum": ["member", "duplicate", "degraded", "mismatch", "pending_baseline", "pre_live", "off_benchmark", "test", "backtest", "absent", "rejected", "unknown"], "description": "Monthly membership in the complete all-report population, never inferred from this response's pagination or this report's revisions. Omitted for protected readers and on classification errors."},
+          "report_kind": {"type": "string", "description": "The linked report's top-level category for exact reading-page navigation; inferred from its type if its stored category is empty."},
           "upside_bp": {"type": "integer", "format": "int64", "description": "(terminal minus S0) / S0 in basis points, truncated toward zero. Absent without usable inputs or on integer overflow."},
           "horizon_std": {"type": "boolean"},
           "horizon_end": {"type": "string", "format": "date"},
@@ -458,6 +459,7 @@
           {"type": "object", "properties": {
             "display_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Latest accepted set matching the current report body; otherwise latest accepted set. Zero means none. Omitted if identity selection fails. A nonzero selected set is retained within the 200-set detail cap."},
             "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."},
+            "covered": {"type": "boolean", "description": "Browser sessions only. True when forecast verification covers this report's type, false when it never does. A covered report with no set is a report that made no forecast; an uncovered one has nothing to show. Omitted when the report's type cannot be read for the caller, which clients treat as unknown."},
             "sibling": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions only. Present when this report has no accepted set of its own and another readable edition of the same symbol, date and report type has one. Never present for a persistent query token."},
             "counted_edition": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions that may see membership only (internal all readers and administrators). The readable edition whose accepted set is this analysis's monthly member when that is not this report's own set. Omitted for own-scoped and external readers."}
           }}

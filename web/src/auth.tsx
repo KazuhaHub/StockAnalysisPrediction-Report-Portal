@@ -10,6 +10,7 @@ interface AuthCtx {
   name: string | null // display name, falls back to username
   admin: boolean
   forecast: Me['forecast']
+  forecastReader: Me['forecast_reader']
   email: string | null // the user's email, or null
   mailEnabled: boolean // SMTP configured → email opt-ins can be offered
   federated: boolean // credentials are the IdP's: local password / 2FA controls do not apply
@@ -92,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: me?.name ?? me?.user ?? null,
       admin: me?.admin ?? false,
       forecast: me?.forecast,
+      forecastReader: me?.forecast_reader,
       email: me?.email || null,
       mailEnabled: me?.mail_enabled ?? false,
       federated: me?.federated ?? false,

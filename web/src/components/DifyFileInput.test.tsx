@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterAll } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
@@ -43,6 +43,13 @@ function Harness({ type }: { type: string }) {
 }
 
 const picker = (c: HTMLElement) => c.querySelector('input[type="file"]') as HTMLInputElement
+
+// UploadList's progress indicator schedules a 300ms useDelayState callback even for a completed
+// file, without cancelling it on unmount. Keep this file's jsdom alive until that callback has run;
+// the shared 20ms form-debounce drain cannot cover this longer timer on a loaded CI worker.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 350))
+})
 
 beforeEach(() => {
   uploads.calls = []

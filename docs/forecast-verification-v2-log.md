@@ -2222,6 +2222,36 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - **P28.** The e2e run against current main passed 152/152 on a throwaway portal. P27 was checked in the
   browser on the isolated seeded preview: the record page, the operations page and the OU editor field.
 
+### 2026-10-23 — draft review handoff
+
+- **Purge ownership (#165).** Replayed only the own-evidence commits onto the current main. Startup
+  refuses an unrecorded explicit step before automatic DDL, and the offline command verifies the
+  accepted baseline. Backup/restore retains the merge-order prefix. Retention and OU deletion acquire
+  the same ownership lock before inspecting rows. The final review found stale migration-order test
+  assumptions and destructive tests that left the shared Postgres evidence table missing; both are
+  corrected. SQLite and Postgres full suites passed, and the release-image smoke now verifies the
+  exact 3/1/1/0 subtree populations rather than the pre-upgrade 503 hold.
+- **Cohort record (#166).** The recovered P19 branch is replayed without predecessor commits. Web
+  typecheck, all 127 test files (1417 tests), production build and backend checks passed. CI exposed a
+  drawer entrance/retry focus race; focus now goes to stable content after the animation, and the
+  follow-up CI is green.
+- **Reading integration (#168).** Stock and run cards use the display selection independently of
+  monthly membership, clear prior access/revision data, and isolate forecast errors from the body.
+  The summary slot is reserved on warmed responses. Shared Go/vitest fixtures pin completed bars and
+  the open-left/closed-right low window. The read API adds the linked report category for exact
+  date/category/ID navigation, without a schema change. The full web suite passes 130 files and 1437
+  tests, plus the asynchronous deep-link regression added during final review; Go build/vet and
+  SQLite/Postgres suites pass. Synthetic browser checks cover 375/768/1280 px,
+  stock/run mounting, pending/settled cards, contrast/axe and scope-none suppression.
+- **Demo (#167).** Browser sweep covers seven scopes, three views, two widths and light/dark themes,
+  with no page overflow or script errors. This proves the draft demo's behavior, not production
+  baseline fidelity or owner visual acceptance. Traditional Chinese remains generated pending human
+  review. No release, production database, workflow or evaluator mode changed during this handoff.
+- **CI teardown.** A full P20 run passed every assertion but found UploadList's uncancelled 300ms
+  progress callback after jsdom teardown. The upload test file now drains that known timer before its
+  environment closes; it does not change the upload component or suppress unhandled errors.
+
+
 ### Explicit purge-evidence schema upgrade (2026-10-22, in progress)
 
 - Registered the owner-approved evidence table as step `0007`, an explicit operator step. Fresh

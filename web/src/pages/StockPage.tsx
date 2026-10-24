@@ -24,8 +24,10 @@ import {
   type QuoteRefreshAdvice,
 } from '../lib/quoteRefresh'
 import { startVisibleDeadline } from '../lib/visiblePoll'
+import { latestCompletedBar, readingSet } from '../lib/forecastReading'
 import { FavoriteButton } from '../components/FavoriteButton'
-import PredictionPanel from '../components/PredictionPanel'
+import ForecastReadingCard from '../components/ForecastReadingCard'
+import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
@@ -48,6 +50,7 @@ const QUOTE_CHART_H = 260
 // report is the page and the chart is a decoration on it; a reader who wants it every time pays
 // one click, once.
 const CHART_OPEN_KEY = 'rp_read_quote_chart'
+const FORECAST_OVERLAY_KEY = 'rp_read_forecast_overlay'
 
 // Both accessors swallow everything, and the try has to wrap the PROPERTY ACCESS and not just the
 // call: a private window, cleared site data or a browser configured to block storage can throw on
@@ -69,15 +72,36 @@ function writeChartOpen(open: boolean): void {
   }
 }
 
+function readOverlay(): boolean {
+  try {
+    return window.localStorage.getItem(FORECAST_OVERLAY_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function writeOverlay(open: boolean): void {
+  try {
+    window.localStorage.setItem(FORECAST_OVERLAY_KEY, open ? '1' : '0')
+  } catch {
+    /* storage blocked — the choice holds until this page is left */
+  }
+}
+
+// Quote symbols are canonical codes; the route carries whatever the reader typed or followed.
+const sameSymbol = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase()
+
 export default function StockPage() {
   const { t } = useTranslation()
-  const { forecast, user } = useAuth()
+  const { admin, forecast, forecastReader, user } = useAuth()
   // Older servers omit the navigation hint; preserve their existing reading-page requests.
   // An explicit none still suppresses both reads, and every server response remains authoritative.
   const forecastEnabled = forecast === undefined || forecast?.scope === 'all' || forecast?.scope === 'own'
+  const forecastCardEnabled = forecastEnabled && (admin || forecastReader === undefined || forecastReader === 'card' || forecastReader === 'full')
+  const forecastFullEnabled = forecastEnabled && (admin || forecastReader === 'full')
   // A still-enabled scope can become narrower. Neither loaded nor in-flight data crosses that
   // boundary; checking only the enabled boolean would keep old internal payloads on screen.
-  const forecastKey = `${user ?? ''}\0${forecast?.scope ?? 'legacy'}\0${forecast?.external ?? false}`
+  const forecastKey = `${user ?? ''}\0${forecast?.scope ?? 'legacy'}\0${forecast?.external ?? false}\0${admin}\0${forecastReader ?? 'legacy'}`
   const { symbol = '' } = useParams()
   const [sp, setSp] = useSearchParams()
   const navigate = useNavigate()
@@ -89,11 +113,13 @@ export default function StockPage() {
   // "wide" mode opts into a roomier cap for those who want to use the extra space.
   const layoutVars = { '--rp-doc-max': wide ? '1440px' : '1080px' } as CSSProperties
   const [data, setData] = useState<StockResp | null>(null)
+  const [dataAccess, setDataAccess] = useState('')
+  const [summaryLoading, setSummaryLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   // Which report the compare dialog is open for; null when closed.
   const [compareFor, setCompareFor] = useState<number | null>(null)
   const [notFound, setNotFound] = useState(false)
-  const [quote, setQuote] = useState<QuoteResp | null>(null)
+  const [loadedQuote, setLoadedQuote] = useState<QuoteResp | null>(null)
   const [quoteLoading, setQuoteLoading] = useState(true)
   const [quoteError, setQuoteError] = useState<unknown>(null)
   const [quoteRange, setQuoteRange] = useState<QuoteRange>('3m')
@@ -102,12 +128,16 @@ export default function StockPage() {
   // re-request without navigating, and a nonce is the smallest way to say "run that effect again".
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
+  // A quote for another symbol is not this page's quote. The effect below clears it when the symbol
+  // changes, and this guard covers the render before that effect runs, so the strip and the chart never
+  // show another stock's close (the card has its own, stricter guard where `completedBar` is derived).
+  const quote = loadedQuote && sameSymbol(loadedQuote.symbol, symbol) ? loadedQuote : null
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
   // The sets, the counted pointer and the error are ONE value keyed by the report they describe.
   // That key is what makes a stale response harmless and, more importantly, what stops the render
   // that already shows report B's header from painting report A's marks: the derived values below
   // are empty until the state's key matches the report on screen.
-  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; counted?: number; paused?: boolean; err: string }>({
+  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; display?: number; counted?: number; paused?: boolean; covered?: boolean; sibling?: ReportPredictions['sibling']; countedEdition?: ReportPredictions['counted_edition']; loading?: boolean; unavailable?: boolean; err: string }>({
     sets: [],
     err: '',
   })
@@ -115,10 +145,12 @@ export default function StockPage() {
   const predForRef = useRef<number | undefined>(undefined)
   const [otherPred, setOtherPred] = useState<{ key: string; sets: PredictionSet[] }>({ key: '', sets: [] })
   const otherKey = `${symbol}\0${forecastKey}`
-  const otherSets = forecastEnabled && otherPred.key === otherKey ? otherPred.sets : []
+  // While the next symbol's report loads, the card on screen is still the previous stock's; the
+  // route symbol's list must not be shown under it (`reportIsRouteSymbol` is defined with the overlay).
+  const otherSetsFor = forecastCardEnabled && otherPred.key === otherKey ? otherPred.sets : []
   // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
   // the levels noise.
-  const [overlay, setOverlay] = useState(true)
+  const [overlay, setOverlay] = useState(readOverlay)
 
   // The write is here rather than inside the setState updater on purpose: an updater must be pure,
   // and StrictMode calls it twice in development.
@@ -134,12 +166,15 @@ export default function StockPage() {
   const stockUrl = (q: { date?: string; kind?: string; r?: string }) => `/api/stock/${encodeURIComponent(symbol)}${qs(q)}`
 
   useEffect(() => {
+    let cancelled = false
+    setSummaryLoading(true)
     const url = stockUrl(query)
     // A warm answer decides only whether this render waits. The request below goes out either way
     // and replaces it, so a report re-ingested a minute ago still corrects itself on screen.
     const warm = readPrefetched<StockResp>(url, READ_WARM_MAX_AGE)
     if (warm) {
       setData(warm)
+      setDataAccess('')
       setLoading(false)
     } else {
       setLoading(true)
@@ -148,17 +183,21 @@ export default function StockPage() {
     api
       .get<StockResp>(url)
       .then((d) => {
+        if (cancelled) return
         setData(d)
+        setDataAccess(forecastKey)
         // Remember what was actually read, not only what was guessed: going back to the report you
         // just left is the most predictable navigation there is.
         rememberPrefetched(url, d)
       })
       .catch((e) => {
+        if (cancelled) return
         if (e instanceof ApiError && e.status === 404) setNotFound(true)
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (!cancelled) { setLoading(false); setSummaryLoading(false) } })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, sp])
+  }, [symbol, query.date, query.kind, query.r, forecastKey])
 
   // The quote is deliberately NOT part of the report request. It has its own cache, its own TTL and
   // its own failure mode, and a vendor being unreachable must never keep somebody from reading the
@@ -173,11 +212,12 @@ export default function StockPage() {
     setQuoteLoading(true)
     setQuoteError(null)
     setQuoteRefresh(null)
+    setLoadedQuote((prev) => (prev && sameSymbol(prev.symbol, symbol) ? prev : null))
     api
       .get<QuoteResp>(`/api/quote/${encodeURIComponent(symbol)}${qs({ range: quoteRange })}`)
       .then((d) => {
         if (cancelled) return
-        setQuote(d)
+        setLoadedQuote(d)
         setQuoteError(null)
         setQuoteRefresh(readQuoteRefreshAdvice(d))
       })
@@ -185,7 +225,7 @@ export default function StockPage() {
         if (cancelled) return
         // The stale quote is dropped rather than left on screen under an error: a price with no
         // indication of when it stopped updating is the one thing worse than no price.
-        setQuote(null)
+        setLoadedQuote(null)
         setQuoteError(e)
         setQuoteRefresh(quoteErrorRefreshAdvice(e))
       })
@@ -208,40 +248,41 @@ export default function StockPage() {
   const repId = data?.rep?.id
   useEffect(() => {
     predForRef.current = repId
-    setPred({ forId: repId, forAccess: forecastKey, sets: [], err: '' })
-    if (!repId || !forecastEnabled) return
+    setPred({ forId: repId, forAccess: forecastKey, sets: [], loading: true, err: '' })
+    if (!repId || !forecastCardEnabled) return
     let cancelled = false
     const forId = repId
     api
       .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
         if (cancelled || predForRef.current !== forId) return
-        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], counted: r.counted_set_id, paused: r.settlement_paused, err: '' })
+        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], display: r.display_set_id, counted: r.counted_set_id, paused: r.settlement_paused, covered: r.covered, sibling: r.sibling, countedEdition: r.counted_edition, loading: false, err: '' })
       })
       .catch((e) => {
         if (cancelled || predForRef.current !== forId) return
         // A failed request is not "this report made no prediction". The body still renders; the
         // panel area says what happened and offers one retry.
         const unavailable = e instanceof ApiError && e.status === 403 && e.code === 'forecast_unavailable'
-        setPred({ forId, forAccess: forecastKey, sets: [], err: unavailable ? '' : errText(e, t) })
+        setPred({ forId, forAccess: forecastKey, sets: [], loading: false, unavailable, err: unavailable ? '' : errText(e, t) })
       })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repId, predNonce, forecastEnabled, forecastKey])
+  }, [repId, predNonce, forecastCardEnabled, forecastKey])
 
   // What may be shown NOW. A state that belongs to another report is not shown at all, even for the
   // one render between the new report arriving and the effect above running.
-  const predCurrent = forecastEnabled && pred.forId === repId && pred.forAccess === forecastKey
+  const predCurrent = forecastCardEnabled && pred.forId === repId && pred.forAccess === forecastKey
   const predSets = predCurrent ? pred.sets : []
   const predCounted = predCurrent ? pred.counted : undefined
   const predErr = predCurrent ? pred.err : ''
+  const forecastDenied = predCurrent && pred.unavailable
 
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
     setOtherPred({ key: otherKey, sets: [] })
-    if (!symbol || !forecastEnabled) return
+    if (!symbol || !forecastCardEnabled) return
     let cancelled = false
     api
       .get<{ ok: boolean; sets: PredictionSet[] }>(`/api/predictions?symbol=${encodeURIComponent(symbol)}&limit=50`)
@@ -254,7 +295,7 @@ export default function StockPage() {
     return () => {
       cancelled = true
     }
-  }, [symbol, forecastEnabled, otherKey])
+  }, [symbol, forecastCardEnabled, otherKey])
 
   // Warm the neighbours on the timeline. Stepping a day forward or back is the move a reader makes
   // most, and it is the one that costs a whole report — measured at ~96% report, ~4% navigation
@@ -301,17 +342,23 @@ export default function StockPage() {
   // The report id is numeric in the JSON contract but stays a string in the `?r=` query.
   const setId = (id: number) => setSp({ date: data.selDate, kind: data.selKind, r: String(id) })
   const rep = data.rep
+  const selectedEdition = data.subtabs.find((tab) => tab.id === data.selId)?.version
 
   // The accepted set the overlay describes: the counted one when there is one, else the latest.
-  const acceptedSets = predSets.filter((s) => s.state === 'accepted')
-  const acceptedSet = acceptedSets.find((s) => s.id === predCounted) ?? acceptedSets[acceptedSets.length - 1]
+  const displaySet = readingSet(predSets, predCurrent ? pred.display : undefined)
+  const acceptedSet = displaySet?.state === 'accepted' ? displaySet : undefined
   const claimOf = (s: PredictionSet, kind: string, label?: string) =>
     s.claims.find((c) => c.kind === kind && (label === undefined || c.label === label))
   const terminalFen = acceptedSet ? claimOf(acceptedSet, 'terminal_value')?.price_fen : undefined
   const entryFen = acceptedSet ? claimOf(acceptedSet, 'entry_price')?.price_fen : undefined
+  // The chart draws the route symbol's bars. Until that symbol's report is the one on screen, the
+  // report's levels and markers belong to another stock and are not drawn over these bars.
+  const reportIsRouteSymbol = sameSymbol(data.symbol, symbol)
+  const otherSets = reportIsRouteSymbol ? otherSetsFor : []
+  const drawOverlay = overlay && reportIsRouteSymbol
   type Level = { price: number; label: string; tone: 'neutral' | 'primary' | 'warning' }
   const overlayLevels: Level[] =
-    acceptedSet && overlay
+    acceptedSet && drawOverlay
       ? [
           acceptedSet.s0_fen !== undefined
             ? { price: acceptedSet.s0_fen, label: t('forecast.chart.s0'), tone: 'neutral' as Level['tone'] }
@@ -325,14 +372,24 @@ export default function StockPage() {
         ].filter((v): v is Level => v !== null)
       : []
   const overlayMarkers =
-    acceptedSet && overlay && rep
+    acceptedSet && drawOverlay && rep
       ? [
-          { date: rep.date, label: t('forecast.chart.report') },
+          { date: acceptedSet.s0_date || rep.date, label: t('forecast.chart.report'), price: acceptedSet.s0_fen, snap: acceptedSet.s0_date && acceptedSet.s0_date !== rep.date ? `${rep.date} → ${acceptedSet.s0_date}` : undefined },
           ...acceptedSet.marks
             .filter((m) => m.status === 'resolved' && (m.bar_date || m.session_date))
-            .map((m) => ({ date: (m.bar_date || m.session_date) as string, label: t(`forecast.cp.${m.checkpoint}`) })),
+            .map((m) => ({
+              date: (m.bar_date || m.session_date) as string,
+              label: t(`forecast.cp.${m.checkpoint}`),
+              price: m.close_fen,
+              snap: m.bar_date && m.session_date && m.bar_date !== m.session_date ? `${m.session_date} → ${m.bar_date}` : undefined,
+            })),
         ]
       : []
+  const overlaySource = acceptedSet?.marks.find((m) => m.status === 'resolved' && m.source)?.source
+  // The card belongs to the report on screen, and that report can still be the previous stock's while
+  // the next one loads. The route-symbol guard above is not enough for it: the next symbol's quote
+  // may answer first, and the previous stock's card must not be priced against that close.
+  const completedBar = latestCompletedBar(quote && sameSymbol(quote.symbol, data.symbol) ? quote : null)
 
   // Back + stock name/code. This is the page's identity/nav header — it sits at the very
   // top of every layout (above the timeline), so "where am I / go back" is the first thing
@@ -393,8 +450,8 @@ export default function StockPage() {
           styles={{ body: { paddingTop: 12 } }}
           extra={
             <Space size={4} wrap>
-              {acceptedSet && chartOpen && (
-                <Checkbox checked={overlay} onChange={(e) => setOverlay(e.target.checked)}>
+              {acceptedSet && (
+                <Checkbox checked={overlay} onChange={(e) => { setOverlay(e.target.checked); writeOverlay(e.target.checked) }}>
                   {t('forecast.chart.overlay')}
                 </Checkbox>
               )}
@@ -444,6 +501,8 @@ export default function StockPage() {
                 currency={quote?.currency}
                 levels={overlayLevels}
                 markers={overlayMarkers}
+                windowFrom={drawOverlay ? acceptedSet?.s0_date : undefined}
+                overlayLegend={drawOverlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
               />
             </div>
           )}
@@ -460,7 +519,7 @@ export default function StockPage() {
             roomy screen floats it as a left rail (container query in index.css). */}
         <div className="rp-reader__strip">
           <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 12 } }}>
-            <TimelinePanel nodes={data.timeline} selected={data.selDate} onSelect={setDate} horizontal />
+            <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={data.selDate} onSelect={setDate} horizontal />
           </Card>
         </div>
 
@@ -468,7 +527,7 @@ export default function StockPage() {
           {/* Wide: the timeline is a fixed left column beside the reading column. */}
           <div className="rp-reader__rail">
             <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 16 } }}>
-              <TimelinePanel nodes={data.timeline} selected={data.selDate} onSelect={setDate} horizontal={false} />
+              <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={data.selDate} onSelect={setDate} horizontal={false} />
             </Card>
           </div>
 
@@ -540,6 +599,7 @@ export default function StockPage() {
                     <ClockCircleOutlined /> {formatReportDateTime(rep.time)}
                   </Typography.Text>
                 )}
+                {rep && forecastFullEnabled && !forecastDenied && <ForecastSummaryChip prediction={dataAccess === forecastKey ? data.prediction : undefined} loading={dataAccess !== forecastKey && summaryLoading} />}
                 {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
               </Card>
               {rep && predErr && (
@@ -555,15 +615,27 @@ export default function StockPage() {
                   }
                 />
               )}
-              {rep && (
-                <PredictionPanel
+              {rep && forecastCardEnabled && !predErr && !(predCurrent && pred.unavailable) && (
+                <ForecastReadingCard
                   sets={predSets}
                   countedSetID={predCounted}
+                  displaySetID={predCurrent ? pred.display : undefined}
                   settlementPaused={predCurrent ? pred.paused : undefined}
+                  covered={predCurrent ? pred.covered : undefined}
                   otherSets={otherSets}
-                  latestClose={quote?.snapshot.last}
-                  latestDate={quote?.snapshot.asOf?.slice(0, 10)}
+                  latestClose={completedBar?.c}
+                  latestDate={completedBar?.d}
                   symbol={data.symbol}
+                  reportDate={rep.date}
+                  receivedAt={rep.time}
+                  edition={selectedEdition}
+                  sibling={predCurrent ? pred.sibling : undefined}
+                  countedEdition={predCurrent ? pred.countedEdition : undefined}
+                  loading={!predCurrent || pred.loading}
+                  allowPayload={!forecast?.external}
+                  allowMembership={admin || forecast?.scope === 'all' && !forecast.external}
+                  allowOrphans={!forecast?.external}
+                  reportKind={rep.kind || data.selKind}
                 />
               )}
               {/* The button set this state from the day it shipped; nothing rendered the modal, so

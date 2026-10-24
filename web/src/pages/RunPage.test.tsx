@@ -65,6 +65,11 @@ vi.mock('../components/ExportButtons', () => ({ ExportPdfButton: () => <div>pdf<
 const itemTitle = (el: HTMLElement) => el.closest('.ant-segmented-item-label')?.getAttribute('title') ?? null
 
 describe('RunPage type strip', () => {
+  it('mounts the forecast card beside the run report for an administrator', async () => {
+    render(<RunPage />)
+    expect(await screen.findByText('forecast.reading.no_forecast')).toBeTruthy()
+  })
+
   // The regression this exists for: collapsing by TYPE alone drops the un-numbered sibling, leaving
   // a tab that reads "Trade 2" with no "Trade" anywhere on screen — a number pointing at nothing,
   // and the other report unreachable.

@@ -1543,6 +1543,7 @@ export interface PredictionSet {
   version: string
   /** Optional during mixed-version rollout; newer servers always return the stored report date. */
   report_date?: string
+  report_kind?: string
   /** Global monthly membership, omitted for protected readers and when classification fails. */
   membership?: ForecastMembership
   /** Integer basis points, truncated toward zero; absent without a usable base and target. */
@@ -1580,6 +1581,11 @@ export interface ReportPredictions {
   sibling?: ForecastReadingEdition
   counted_edition?: ForecastReadingEdition
   settlement_paused?: boolean
+  /**
+   * Whether forecast verification covers this report's type. A covered report without a set made no
+   * forecast; an uncovered one has nothing to show. Absent when the server could not say.
+   */
+  covered?: boolean
 }
 
 /** Who may read the forecast record from an OU (user_groups.forecast_scope). */

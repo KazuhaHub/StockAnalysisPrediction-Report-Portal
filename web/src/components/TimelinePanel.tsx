@@ -1,6 +1,7 @@
 import { Timeline, Typography, theme } from 'antd'
 import type { TimelineNode } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   nodes: TimelineNode[]
@@ -13,6 +14,7 @@ interface Props {
 
 export default function TimelinePanel({ nodes, selected, onSelect, horizontal }: Props) {
   const { token } = theme.useToken()
+  const { t } = useTranslation()
 
   if (horizontal) {
     return (
@@ -26,6 +28,7 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
             <button
               key={n.date}
               type="button"
+              aria-label={`${n.date}, ${n.n}${n.predicted ? `, ${t('forecast.timeline.predicted')}` : ''}`}
               onClick={() => onSelect(n.date)}
               style={{
                 flex: '0 0 auto',
@@ -41,6 +44,8 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
             >
               <span>{n.date}</span>
               <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.75 }}>{n.n}</span>
+              {/* The selected chip is filled with the primary colour, so its dot takes the chip's own text colour. */}
+              {n.predicted && <span aria-hidden="true" style={{ marginLeft: 6, color: active ? token.colorTextLightSolid : token.colorPrimary }}>●</span>}
             </button>
           )
         })}
@@ -60,6 +65,7 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
             content: (
               <a
                 {...clickable(() => onSelect(n.date))}
+                aria-label={`${n.date}, ${n.n}${n.predicted ? `, ${t('forecast.timeline.predicted')}` : ''}`}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'baseline',
@@ -72,6 +78,7 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {n.n}
                 </Typography.Text>
+                {n.predicted && <span aria-hidden="true" style={{ color: token.colorPrimary }}>●</span>}
               </a>
             ),
           }

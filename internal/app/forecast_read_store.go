@@ -33,6 +33,7 @@ type PredictionSet struct {
 	Title      string `json:"title"`
 	Version    string `json:"version"`
 	ReportDate string `json:"report_date"`
+	ReportKind string `json:"report_kind,omitempty"`
 	Membership string `json:"membership,omitempty"`
 	UpsideBP   *int64 `json:"upside_bp,omitempty"`
 	MadeAt     string `json:"made_at"`
@@ -182,7 +183,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 			ps.emitted_base_fen, ps.emitted_base_as_of, ps.emitted_base_source,
 			ps.base_check, ps.s0_date, ps.s0_fen,
 			COALESCE(ps.errors,''), ps.payload, ps.body_sha256,
-			`+bodyCols+`
+			`+bodyCols+`, COALESCE((SELECT kind FROM reports WHERE id=ps.report_id),'')
 		FROM prediction_sets ps%s
 		WHERE %s ORDER BY ps.made_at DESC, ps.id DESC LIMIT %d`,
 		join, strings.Join(where, " AND "), limit)
@@ -215,7 +216,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 			&ps.HorizonEnd, &horizonStd,
 			&emittedFen, &ps.BaselineAsOf, &ps.BaselineSource,
 			&ps.BaselineCheck, &ps.S0Date, &s0Fen,
-			&errorsJSON, &payload, &bodySHA, &bodyMD, &bodyHTML); err != nil {
+			&errorsJSON, &payload, &bodySHA, &bodyMD, &bodyHTML, &ps.ReportKind); err != nil {
 			return nil, err
 		}
 		if reportID.Valid {
@@ -223,6 +224,7 @@ func (s *Store) QueryPredictionSets(f PredictionFilter, sc *ownerScope) ([]Predi
 			ps.ReportID = &v
 		}
 		ps.Title, ps.Version = title.String, ver.String
+		ps.ReportKind = repKind(Rep{Kind: ps.ReportKind, RType: ps.RType})
 		ps.HorizonStd = horizonStd == 1
 		if emittedFen.Valid {
 			ps.BaselineEmittedFen = &emittedFen.Int64
