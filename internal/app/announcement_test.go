@@ -309,6 +309,99 @@ func TestReaderFeedHonoursEnabledEmptyAndWindow(t *testing.T) {
 	}
 }
 
+// The two "readers can close it" switches are enforced in the browser, so the server's whole part is
+// handing every reader the current values. Switching one off has to change the feed's bytes, and with
+// them the ETag: a polling tab that got a 304 for its old tag would keep drawing the close control.
+func TestReaderFeedCarriesBothDismissalFlagsAndAFlipChangesTheTag(t *testing.T) {
+	s := newV1Server(t)
+	id := mustAddAnnouncement(t, s, `{"title":"维护通知","stripDismissible":true,"popupDismissible":true}`)
+
+	first := httptest.NewRecorder()
+	s.apiAnnouncements(first, httptest.NewRequest("GET", "/api/announcements", nil), "admin")
+	tag := first.Header().Get("ETag")
+	if items := readerFeed(t, s, "admin"); len(items) != 1 || items[0]["stripDismissible"] != true ||
+		items[0]["popupDismissible"] != true {
+		t.Fatalf("reader feed before the edit = %v, want both flags on", items)
+	}
+
+	// The editor's PUT, which always sends both switches.
+	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
+		`{"title":"维护通知","stripDismissible":false,"popupDismissible":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("edit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	req := httptest.NewRequest("GET", "/api/announcements", nil)
+	req.Header.Set("If-None-Match", tag)
+	again := httptest.NewRecorder()
+	s.apiAnnouncements(again, req, "admin")
+	if again.Code != http.StatusOK {
+		t.Fatalf("poll with the pre-edit tag = %d, want 200 carrying the change", again.Code)
+	}
+	var out struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(again.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode reader feed: %v", err)
+	}
+	if len(out.Items) != 1 || out.Items[0]["stripDismissible"] != false || out.Items[0]["popupDismissible"] != false {
+		t.Fatalf("reader feed after the edit = %v, want both flags off", out.Items)
+	}
+
+	// A writer that omits the fields leaves them alone rather than switching them back on.
+	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
+		`{"title":"维护通知（更新）"}`); rec.Code != http.StatusOK {
+		t.Fatalf("partial edit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if a := s.st.GetAnnouncement(id); a.StripDismissible || a.PopupDismissible {
+		t.Errorf("a PUT without the flags switched one back on: %+v", a)
+	}
+}
+
+// A console tab still running the previous release's page posts the old field. For one release line it
+// is accepted as the band switch — as `popup` was for `display` — so a save from a stale tab does not
+// quietly lock a band the operator had just opened. The new field wins when both are sent.
+func TestLegacyDismissibleInputIsTheBandSwitch(t *testing.T) {
+	s := newV1Server(t)
+	id := mustAddAnnouncement(t, s, `{"title":"旧页面","dismissible":true}`)
+	if !s.st.GetAnnouncement(id).StripDismissible {
+		t.Fatal("the legacy dismissible field was dropped on create")
+	}
+	if rec := announcementReq(t, s, http.MethodPut, fmt.Sprintf("/api/admin/announcements/%d", id),
+		`{"dismissible":true,"stripDismissible":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("edit status=%d", rec.Code)
+	}
+	if s.st.GetAnnouncement(id).StripDismissible {
+		t.Error("the legacy field overrode stripDismissible")
+	}
+}
+
+// A new announcement keeps the band locked unless asked, as before, and lets readers dismiss the
+// popup — which is what every popup did before the switch existed. The old single field is gone from
+// both payloads, so nothing can read it and guess which surface it meant.
+func TestNewAnnouncementDismissalDefaultsAndNoLegacyField(t *testing.T) {
+	s := newV1Server(t)
+	id := mustAddAnnouncement(t, s, `{"title":"默认值"}`)
+	if a := s.st.GetAnnouncement(id); a.StripDismissible || !a.PopupDismissible {
+		t.Fatalf("defaults = strip %v popup %v, want false/true", a.StripDismissible, a.PopupDismissible)
+	}
+	reader := readerFeed(t, s, "admin")[0]
+	if _, ok := reader["dismissible"]; ok {
+		t.Error("the reader payload still carries the legacy dismissible field")
+	}
+	rec := announcementReq(t, s, http.MethodGet, "/api/admin/announcements", "")
+	var admin struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := admin.Items[0]["dismissible"]; ok {
+		t.Error("the admin payload still carries the legacy dismissible field")
+	}
+	if admin.Items[0]["stripDismissible"] != false || admin.Items[0]["popupDismissible"] != true {
+		t.Errorf("admin payload flags = %v / %v", admin.Items[0]["stripDismissible"], admin.Items[0]["popupDismissible"])
+	}
+}
+
 func TestWindowRejectsAnInvertedRange(t *testing.T) {
 	s := newV1Server(t)
 	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)

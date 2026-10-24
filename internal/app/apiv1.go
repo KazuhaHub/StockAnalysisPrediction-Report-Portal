@@ -382,17 +382,6 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 					"report_id": id, "symbol": in.Symbol, "rtype": rtype,
 					"made_at": predSet.MadeAt, "error": again.Error(),
 				})
-				// Email and Slack (P41). Asynchronous for two reasons: the producer is waiting on
-				// this response, and the alert's network I/O must not run inside (or outlive) the
-				// ledger's transaction. One alert per failed ingest; its own failure is recorded in
-				// forecast_alert_state and never raised to the producer.
-				go func() {
-					defer func() { _ = recover() }()
-					s.forecastAlert(EventPredictionsStoreFailed, "store_failed", map[string]any{
-						"report_id": id, "symbol": in.Symbol, "rtype": rtype,
-						"made_at": predSet.MadeAt, "error": again.Error(),
-					})
-				}()
 			}
 		}
 	}
@@ -471,6 +460,9 @@ func (s *Server) v1CanRead(w http.ResponseWriter, r *http.Request) bool {
 	}
 	holds, err := s.enrolmentHolds(r, u)
 	if err != nil {
+		if s.refuseForecastReadOnBrokenTree(w, r, u) {
+			return false
+		}
 		v1err(w, http.StatusServiceUnavailable, "enrolment_policy_unavailable",
 			"the sign-in policy could not be read, so this request was refused rather than allowed")
 		return false

@@ -56,7 +56,10 @@ hypothetical preview resolve active, non-expired accounts from a consistent snap
 unassigned/root members and admin overrides, without returning account identities or persisting
 the hypothetical setting.
 
-`/api/me` exposes only `{scope, external}` as a navigation hint, not an authorization capability.
+`/api/me` exposes `{scope, external}` as a navigation hint, not an authorization capability. An `own` reader
+also receives `ou`, the display name of the OU their population is rooted at (their own unit, not the ancestor that
+decided the scope), so the record page can say whose reports it covers; nothing is added for the other scopes, and
+a failed name read omits the field.
 An explicit none suppresses reading-page requests and DOM. An omitted hint from an older server
 preserves its legacy reading requests; the response is still authoritative. A stale hint followed
 by `403 forecast_unavailable` renders nothing, while other forecast failures retain an inline
@@ -91,6 +94,95 @@ one transaction re-attributes its sets to its parent, or Default for a deleted r
 children to the same parent, deletes the OU and records the counts in the audit. A root's children
 remain roots. No set may retain a reference to the deleted OU.
 
+### Purge ownership evidence (owner-approved 2026-10-22; wired, release held)
+
+`own` must not disclose the site's global purge-month history. The owner approved a separate
+`prediction_purge_owners` table, keyed by `(rtype, cohort, attributed_ou)`, with non-null report
+type/month and a positive, non-null OU id. Before deleting a month's sets, retention snapshots
+their distinct proven OU attributions in the same transaction as the global purge marker and
+set deletion. Scoped marker reads join this evidence to the current allowed subtree. Multiple
+descendant owners do not multiply a month. All readers keep the global history contract.
+
+OU deletion transfers this evidence to the same parent/Default destination as sets, deduplicating
+before removing the old id, in the same transaction as OU removal. If no valid destination exists,
+unprovable evidence is removed rather than left attached to an id that might be reused. Purge and
+OU-delete transactions must take the shared ownership lock **before their first database read or
+set mutation**. Postgres uses a transaction-scoped advisory lock; SQLite reserves the single writer
+before reading. Locking only the final evidence write permits a concurrent OU deletion to miss an
+uncommitted snapshot and is insufficient.
+
+Both transactions are wired this way. `DeletePredictionsBefore` nominates months from a scan that
+runs outside the transaction (the single-connection rule), then begins its transaction, takes the
+lock, and verifies each nominated month again from fresh reads before it snapshots the month's
+owners, deletes its claims, marks and sets, and writes the marker. `DeleteUserGroup` takes the lock
+before it reads the OU, moves the sets, then moves the evidence to the same destination whether or
+not any set is left, because retention may already have deleted them all. The two therefore
+serialize in either order: whichever commits second reads the other's committed result, so no
+evidence can name an OU that is gone and no OU id is free to be reused while evidence still
+mentions it. The acceptance tests hold one transaction at a blocking row while the other queues on
+the lock, in both orders, and show that each transaction reads only after it holds the lock.
+
+Existing global markers without ownership evidence remain visible to all but are hidden from own;
+there is no guessed historical backfill. The table is created by a migration step (`0009`). The
+step delivers, together with the table, fresh initialization, shape verification on every start,
+membership in the dump/restore table set (so a restore replaces the evidence with the dump's rows
+instead of leaving rows keyed by OU ids the restored tree may reuse) and rollback instructions. The
+reader routes read the table only where it exists and fail closed where it does not. Every start
+verifies the table, and a step that cannot be verified is not recorded, so that fail-closed path is
+reached only by a table damaged while the portal runs. No released migration is edited and the frozen
+baseline stays unchanged. Approval of the schema is not authorization to change a production
+database.
+
+**Amendment 2026-10-24 (owner): no explicit upgrade.** The 2026-10-22 decision made this an explicit
+offline step: existing supported databases would not start until an operator ran a command. That is
+reversed. A deploy is "pull the new image and restart", so `0009` is applied at normal startup like
+every other step (ADR 0035 carries the reasoning). Maintainers back up with the previous release
+before upgrading; the program takes no automatic backups. The `schema-upgrade` command stays as an
+optional inspection and offline-apply tool. The table, its columns, the empty start and the absence of
+any backfill are unchanged, and so is the own-history release hold.
+
+The two reader routes read purge history through one view. The global markers still remove sets
+from every computation and decide cache identity, so no partial data from a month that retention
+has emptied is ever shown to anyone. What a population is *told* comes from the evidence: for an
+own reader, the range extension, the custom exclusion list, the purged groups and cells and the
+drawer's purged state use only the months whose evidence names the current subtree. All readers,
+the administrator aliases and external-all readers keep the global history unchanged.
+
+A month purged globally but not disclosed to an own reader must be indistinguishable from a month
+in which that reader simply holds no sets. The monthly record lists it as an ordinary group
+computed over the sets the site-wide filter left, which is none, and its drawer answers as any
+empty month in range does. Leaving the month out, or answering `label_not_found` for it, would
+turn a gap in an otherwise complete calendar into the very disclosure the owner refused. Two things
+keep the month honest. Its cells carry a cache identity derived from the marker, so a cell
+memoised before the purge (by another process this one has not heard from) never answers; and sets
+inside an undisclosed purged month do not count when the first month of an own calendar is chosen,
+so a set written after the purge cannot start the calendar and leave an empty leading month.
+Months before the reader's own first month are not found, exactly as any month before it.
+
+If the evidence table cannot be read (it was damaged while the portal runs), an own
+read answers `503 forecast_purge_history_unavailable` and never falls back to the global markers;
+reads that do not need evidence never touch the table. From the moment of the upgrade retention
+records and OU deletion carries the evidence, so the table is complete for everything purged after
+that point; everything purged before it stays global history.
+
+The implementation assigns this evidence to step `0009`. The migration list is in merge order, not id
+order: it is appended after every step that reached main before it (the announcement step `0010` today,
+and the notification `0007` and extension `0008` steps, which merge first), so `0009` is always the last
+entry and a backup written by the release before it is a prefix of the list. The unapproved Tier 2
+provenance proposal takes an unused id when it is approved (`0011` at the time of writing), subject to a
+fresh identifier check, and is appended after this step. Existing supported databases receive the step at
+normal startup, in list order and in its own transaction, like every other step; the optional offline
+`schema-upgrade` command (inspection by default, `--apply` to apply with the same runner) is there for an
+operator who wants to see or apply the pending steps while the portal is stopped. A fresh database
+creates the step with the rest of its schema. Every startup checks the evidence columns, exact primary
+key, non-null types and positive-owner constraint; a recorded but damaged step is refused, not repaired,
+and a lookalike table in front of an unrecorded step is refused before its ledger row is written. The
+[upgrade notes](../forecast-purge-ownership-upgrade.md) cover the operator side: backing up with the
+previous release (the new binary's commands apply pending steps when they open the store), the moving-tag
+case under `pull_policy: always`, and rollback by restore. Retention, OU deletion and the reader routes now
+all use the evidence. The own-history release hold remains until a release carrying the step has been
+deployed to the target databases and the independent review of the wiring is recorded.
+
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
 member or change its numbers. The cohort benchmark remains ledger-wide. Every population keeps
@@ -119,7 +211,7 @@ retain admin diagnostics until the separately gated P29 removal.
 | Any non-admin at none | `403 forecast_unavailable`; no navigation item | Same refusal; no card, chip, timeline mark or overlay | No forecast data |
 | Enrolment-held session | `403 enrolment_required` before business data | Same independent wall, including v1 cookie reads | No business data; a missing admin permission may refuse earlier |
 | Persistent query token | `401` on session and admin routes | Unscoped v1 machine contract | Payload with `include=payload`; membership, non-accepted states, errors and orphan history retained |
-| App-bridge token | `401` on record, drawer and admin routes | Minting user at none is denied; otherwise accepted, report-backed v1 sets only | No payload, membership, errors or orphans, even for an admin-minted bridge |
+| App-bridge token | `401` on record, drawer and admin routes | `403 forecast_unavailable` on both v1 prediction reads, whoever minted it; the ledger is not read | No forecast data (fail closed until the shared token binding lands) |
 | Anonymous | `401` | `401` | None |
 
 The internal own row is the one that P39b changes: until internal runs carry a token its record
@@ -131,12 +223,30 @@ prediction routes also admit a valid cookie through the independent enrolment wa
 cookie shape follows the same scope rules. Route classification as bearer is not a token-only
 claim. An unreadable report answers 404, not a list that confirms its existence.
 
-Bridge identity lives in the existing in-memory app-token registry. The minting user is rechecked
-on prediction reads, including account incarnation/revision, active state, expiry, current scope
-and enrolment. This is not a persistent machine token and cannot fall through to machine shape
-when its binding is missing. Restricted users still cannot mint a query bridge under the current
-app-platform policy; a user restricted after mint is filtered by current report visibility.
-No parallel forecast identity registry or broader app capability is introduced.
+App-bridge tokens get no forecast reads. The in-memory app-token registry records scopes and
+expiry but no user, so a bridge token carries no account whose forecast scope it could stand for,
+and the portal does not invent one here. The v1 prediction reads therefore resolve their
+credential in a fixed order: a cookie session (its own decision and read scope), then a persistent
+query token (the unchanged machine contract), and then nothing else. Any other Bearer that the v1
+read gate admitted is a bridge token and is refused with `403 forecast_unavailable` before the
+ledger is touched. This is deliberately stricter than the behaviour before this ADR, where a
+bridge query token received the unscoped machine shape.
+
+The refusal holds until the shared token binding from the notification work lands, which records
+the minting identity in the existing app-token registry. A follow-up then re-enables scoped bridge
+reads on that binding: the minting user rechecked on every read (account incarnation and session
+revision, active state, expiry, current scope, enrolment), accepted report-backed sets only, and no
+payload, membership, errors or orphans even for an admin-minted bridge. Until then no parallel
+forecast identity registry or broader app capability is introduced. The access decision itself is
+unchanged: it is taken only from a cookie session's strict account and tree snapshot.
+
+An account whose OU chain is broken (a dangling or cyclic parent) resolves to none. A dangling
+parent also leaves the enrolment policy unreadable, which every other route reports as
+`503 enrolment_policy_unavailable`; on the forecast reads the definite answer, `403
+forecast_unavailable`, is returned instead, so the subject sees what the table promises a none
+account. A cyclic chain does not trip the wall: the policy walks past a cycle, so such an account
+reaches the forecast gate and is refused there with the same `403 forecast_unavailable`. A
+transient store error is not a structural reason and keeps the retryable 503.
 
 ## External protection is response shaping, not CSS
 
@@ -146,8 +256,16 @@ External viewers cannot use custom ranges on either reader route: the response i
 For external all, every group omits coverage and every reader response omits unrecorded. A
 non-mature cell contains state only. A mature cell retains its metrics and `min_n_met: true`, not
 n, total, resolved, refusal/corporate-action counts or metric/slice denominators. The UI renders
-the threshold assurance without the sample size. Explain/summary fields added later must not
-reintroduce that volume. CSV has no n, coverage or count columns for these readers.
+the threshold assurance without the sample size: once per cell, as its own badge, because it is a
+fact about the cell's member count. A metric's own denominator (hit, IC, band, calibration) is a
+smaller subset with no minimum of its own, so the badge is never drawn in a metric's sample slot.
+Explain/summary fields added later must not reintroduce that volume. CSV has no n, coverage or
+count columns for these readers; its header says the flag belongs to the cell.
+
+Every groups response also states the population it covers (`scope`, and for `own` the name of the
+unit the population is rooted at as `scope_ou`), taken from the same decision that selected the
+cohort. The record page and its export label results from that statement, not from the `/api/me`
+hint, which is read once per session and can be stale.
 
 The external drawer omits site-wide totals and per-status counts, filters out unreadable reports
 and purged sets **before cursor pagination**, and uses no global total. Readable rows may still be
@@ -187,6 +305,17 @@ are idempotent; week rollover discards private material. Restart may count the s
 abrupt termination may lose unflushed observations. There is no adoption target yet: the owner
 sets one after observing a month of R2a.
 
+The reader surfaces are observable without recording who read. Process counters (statistics
+requests, cache hits, flights joined, scored cells, busy, rate-limited, drawer opens and refusals by
+reason code) are flushed hourly into one `meta` row per UTC day, `forecast_signals_<date>`: a flat
+JSON object of integers over a closed list of names, so a name, token or hash cannot reach it. A
+flush adds only the events counted since the last successful one, so repeating it changes nothing and
+a failed one is retried without loss or double counting; an unreadable row is left untouched. Rows
+older than 14 days are deleted. A statistics request slower than three seconds logs one line with the
+scope and population kinds and its cell, cache, flight and wait figures, and a refusal logs its reason
+code at most once a minute per reason; neither line carries an account, an OU id, a path or a query.
+The operations runbook interprets them.
+
 ## Reading stages, editions and presentation
 
 R2b adds audited `forecast_reader` = off/card/full, default card; an unknown value is off. Admins
@@ -221,8 +350,9 @@ card or off through the audited setting, without hiding the report itself.
   decision. A second per-OU stage would duplicate the access model and was not selected.
 - Filtering after membership would let another tenant change own results. Hiding counts in the
   browser would leave them available on the wire. Neither is a permission boundary.
-- Treating an app query token as a machine token would bypass none and expose diagnostics. Its
-  minting user must remain part of prediction authorization.
+- Treating an app query token as a machine token would bypass none and expose diagnostics. A bridge
+  token records no minting user today, so it is refused outright; once the shared token binding
+  lands, the minting user must be part of prediction authorization when scoped bridge reads return.
 - Recomputing attribution from the current user would rewrite history. The live tree determines
   subtree inclusion, while stored attribution identifies the OU; deletion is the explicit exception.
 

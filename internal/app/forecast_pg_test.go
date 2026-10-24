@@ -388,14 +388,22 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
 		`ALTER TABLE prediction_sets DROP COLUMN IF EXISTS attributed_ou`,
 		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+		// Every step after 0006 goes too: a dump's migration list has to be a contiguous prefix.
+		`ALTER TABLE announcements DROP COLUMN IF EXISTS popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
 	} {
 		if _, err := st.exec(q); err != nil {
 			t.Fatalf("winding back 0006: %v", err)
 		}
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0006")); err != nil {
-		t.Fatal(err)
+	for _, step := range st.migrations() {
+		if step.id >= "0006" {
+			if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(step.id)); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
+
 	dump := dumpOf(t, st)
 	st.Close()
 

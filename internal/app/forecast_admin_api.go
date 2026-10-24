@@ -7,6 +7,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -88,6 +89,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
+		"reader":  s.forecastReaderStage(forecastDecision{Scope: scopeAll}),
 		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
 		// bundle keeps working.
 		"mode":        forecastMode(s.st.GetSetting(setForecastAuto, "0")),
@@ -131,6 +133,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 // cohort so the caller can show it instead of guessing.
 func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in struct {
+		Reader         json.RawMessage  `json:"reader"`
 		Enabled        *bool            `json:"enabled"`
 		Mode           *json.RawMessage `json:"mode"`
 		Fallback       json.RawMessage  `json:"fallback"`
@@ -152,6 +155,13 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// Validate EVERY field before writing any: a request that changes the benchmark and is then
 	// refused for its ledger start must not have persisted the benchmark. "A refusal writes nothing"
 	// is about the request, not about the one field that happened to be checked last.
+	var readerStage string
+	if len(in.Reader) > 0 {
+		if err := json.Unmarshal(in.Reader, &readerStage); err != nil || !validForecastReaderStage(readerStage) {
+			jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "reader must be off, card or full")
+			return
+		}
+	}
 	var fallback string
 	if len(in.Fallback) > 0 {
 		if err := json.Unmarshal(in.Fallback, &fallback); err != nil || (strings.TrimSpace(fallback) != "off" && strings.TrimSpace(fallback) != "shadow") {
@@ -322,32 +332,20 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// The alert channels. A real change also invalidates the verification stamp: the last test no
 	// longer proves the channel that is configured now.
 	if len(alertFields) > 0 {
-		changed := false
+		updates := map[string]string{}
 		if in.AlertEmailTo != nil {
-			next := strings.TrimSpace(*in.AlertEmailTo)
-			if next != s.st.GetSetting(setForecastAlertEmailTo, "") {
-				if err := s.st.SetSetting(setForecastAlertEmailTo, next); err != nil {
-					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-					return
-				}
-				changed = true
-			}
+			updates[setForecastAlertEmailTo] = strings.TrimSpace(*in.AlertEmailTo)
 		}
 		if in.AlertSlackURL != nil {
-			next := strings.TrimSpace(*in.AlertSlackURL)
-			if next != strings.TrimSpace(s.st.GetSetting(setForecastAlertSlackURL, "")) {
-				if err := s.st.SetSetting(setForecastAlertSlackURL, next); err != nil {
-					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-					return
-				}
-				changed = true
-			}
+			updates[setForecastAlertSlackURL] = strings.TrimSpace(*in.AlertSlackURL)
 		}
+		changed, err := s.st.saveNotificationSettings(updates, false)
+		if err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+
 		if changed {
-			if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
-				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-				return
-			}
 			sort.Strings(alertFields)
 			s.recordChange(r, user, AuditForecastAlert, "settings", "forecast_alerts",
 				map[string]any{"fields": alertFields})
@@ -391,6 +389,16 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	if len(in.Reader) > 0 {
+		old := s.st.GetSetting(setForecastReader, "card")
+		if old != readerStage {
+			if err := s.st.SetSetting(setForecastReader, readerStage); err != nil {
+				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+				return
+			}
+			s.recordChange(r, user, AuditForecastReader, "settings", setForecastReader, map[string]any{"from": old, "to": readerStage})
+		}
+	}
 	resp := map[string]any{"ok": true}
 	if effective != "" {
 		resp["effective_cohort"] = effective
@@ -505,7 +513,22 @@ func (s *Server) apiForecastEvaluate(w http.ResponseWriter, r *http.Request, use
 // when BOTH succeed: a stamp that covered one channel would let readiness item 5 pass on a channel
 // that has never delivered anything.
 func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, user string) {
-	results := s.forecastAlert("forecast.alert.test", "test", map[string]any{"by": user})
+	snapshot, err := s.st.notificationSettings()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	if !snapshot.forecastChannelsReady {
+		jsonErrorCode(w, http.StatusConflict, "notification_unavailable", "forecast notification channels are disabled or paused")
+		return
+	}
+	release, available := s.notificationTestSlot()
+	if !available {
+		notificationAPIError(w, errNotificationCapacity)
+		return
+	}
+	defer release()
+	results := s.forecastAlertSnapshot(r.Context(), snapshot, "forecast.alert.test", "test", map[string]any{"by": user})
 	view := make(map[string]map[string]any, len(results))
 	okAll := true
 	for channel, err := range results {
@@ -525,7 +548,11 @@ func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, us
 		})
 		return
 	}
-	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := s.st.stampForecastNotificationTest(snapshot); err != nil {
+		if errors.Is(err, errNotificationConflict) {
+			jsonErrorCode(w, http.StatusConflict, "notification_config_changed", "notification configuration changed during test")
+			return
+		}
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}

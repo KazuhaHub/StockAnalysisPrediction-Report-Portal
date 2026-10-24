@@ -357,13 +357,123 @@
           }
         }
       },
+      "PredictionReadMark": {
+        "type": "object",
+        "required": ["checkpoint", "status", "halted", "corp_action", "attempts"],
+        "properties": {
+          "checkpoint": {"type": "string", "enum": ["d5", "d20", "d60", "d120", "h12"]},
+          "status": {"type": "string", "enum": ["pending", "resolved", "refused", "refused_final"]},
+          "phase": {"type": "string", "enum": ["waiting_s0", "waiting", "settling", "retrying", "overdue", "resolved", "final"], "description": "Derived reader state, not a stored status. Retrying requires an evidenced due session. Overdue starts 48 hours after an exact due close, or 21 days after a projected lower-bound close."},
+          "not_before": {"type": "string", "format": "date", "description": "Read-time due date: observed evidence when available, an exchange-schedule estimate when expected is true, or otherwise a conservative weekday lower bound."},
+          "expected": {"type": "boolean", "description": "True only for a verified exchange-schedule estimate. It is not observed evidence and cannot shorten the overdue deadline."},
+          "source": {"type": "string", "description": "Stored source that produced this checkpoint; never inferred from the current live quote."},
+          "direction": {"type": "string", "enum": ["agree", "disagree", "flat", "untested"], "description": "Shared hit verdict, only on resolved marks. Untested includes missing inputs, corporate actions and implied upside below the absolute 5 percent threshold. Flat means a tested zero benchmark excess."},
+          "refusal": {"type": "string"},
+          "session_date": {"type": "string", "format": "date"},
+          "bar_date": {"type": "string", "format": "date"},
+          "halted": {"type": "boolean"},
+          "corp_action": {"type": "boolean"},
+          "close_fen": {"type": "integer", "format": "int64"},
+          "low_fen": {"type": "integer", "format": "int64"},
+          "high_fen": {"type": "integer", "format": "int64"},
+          "ret_bp": {"type": "integer", "format": "int32"},
+          "bench_ret_bp": {"type": "integer", "format": "int32"},
+          "attempts": {"type": "integer", "minimum": 0}
+        }
+      },
+      "PredictionReadClaim": {
+        "type": "object",
+        "required": ["key", "kind"],
+        "properties": {
+          "key": {"type": "string"},
+          "kind": {"type": "string", "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"]},
+          "stance": {"type": "string", "enum": ["long", "no_position"]},
+          "label": {"type": "string", "enum": ["bull", "base", "bear"]},
+          "price_fen": {"type": "integer", "format": "int64"},
+          "prob_bp": {"type": "integer", "minimum": 0, "maximum": 10000},
+          "weight_bp": {"type": "integer", "minimum": 0, "maximum": 10000}
+        }
+      },
+      "PredictionReadSet": {
+        "type": "object",
+        "required": ["id", "report_id", "state", "symbol", "rtype", "title", "version", "report_date", "made_at", "made_on", "cohort", "zone", "bench_code", "horizon_std", "baseline_check", "body_changed", "claims", "marks"],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "report_id": {"type": ["integer", "null"], "format": "int64", "description": "Null after report retention; the prediction ledger can outlive its report."},
+          "state": {"type": "string", "enum": ["accepted", "test", "backtest", "absent", "rejected"]},
+          "symbol": {"type": "string"},
+          "rtype": {"type": "string"},
+          "title": {"type": "string"},
+          "version": {"type": "string"},
+          "report_date": {"type": "string", "format": "date"},
+          "made_at": {"type": "string", "format": "date-time"},
+          "made_on": {"type": "string", "format": "date"},
+          "cohort": {"type": "string"},
+          "zone": {"type": "string"},
+          "bench_code": {"type": "string"},
+          "membership": {"type": "string", "enum": ["member", "duplicate", "degraded", "mismatch", "pending_baseline", "pre_live", "off_benchmark", "test", "backtest", "absent", "rejected", "unknown"], "description": "Monthly membership in the complete all-report population, never inferred from this response's pagination or this report's revisions. Omitted for protected readers and on classification errors."},
+          "upside_bp": {"type": "integer", "format": "int64", "description": "(terminal minus S0) / S0 in basis points, truncated toward zero. Absent without usable inputs or on integer overflow."},
+          "horizon_std": {"type": "boolean"},
+          "horizon_end": {"type": "string", "format": "date"},
+          "baseline_check": {"type": "string", "enum": ["pending", "match", "mismatch", "refused", "refused_final"]},
+          "baseline_emitted_fen": {"type": "integer", "format": "int64"},
+          "baseline_as_of": {"type": "string"},
+          "baseline_source": {"type": "string"},
+          "s0_date": {"type": "string", "format": "date"},
+          "s0_fen": {"type": "integer", "format": "int64"},
+          "body_changed": {"type": "boolean"},
+          "decision_status": {"type": "string"},
+          "decision_quality": {"type": "string"},
+          "probability_method": {"type": "string"},
+          "policy_version": {"type": "string"},
+          "errors": {"type": "array", "items": {"type": "object"}},
+          "payload": {"type": "string", "description": "Original JSON as text, only when explicitly requested and permitted."},
+          "claims": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadClaim"}},
+          "marks": {"type": "array", "items": {"$ref": "#/components/schemas/PredictionReadMark"}}
+        }
+      },
+      "PredictionReadEdition": {
+        "type": "object",
+        "required": ["report_id", "set_id", "version", "cohort", "url"],
+        "properties": {
+          "report_id": {"type": "integer", "format": "int64", "description": "The sibling edition's report."},
+          "set_id": {"type": "integer", "format": "int64", "description": "The accepted set of that edition the link stands for."},
+          "version": {"type": "string", "description": "The written form (edition) of that report."},
+          "cohort": {"type": "string", "description": "The set's receipt month, YYYY-MM."},
+          "url": {"type": "string", "description": "Reading-page path that opens that edition's report at its forecast panel."}
+        }
+      },
+      "PredictionReadResponse": {
+        "type": "object",
+        "required": ["ok", "sets", "settlement_paused"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "sets": {"type": "array", "maxItems": 200, "items": {"$ref": "#/components/schemas/PredictionReadSet"}},
+          "settlement_paused": {"type": "boolean", "description": "True when the evaluator is off, in dry mode, or has an unknown mode. This notice is separate from the historical phase and never changes stored outcomes."}
+        }
+      },
+      "ReportPredictionReadResponse": {
+        "allOf": [
+          {"$ref": "#/components/schemas/PredictionReadResponse"},
+          {"type": "object", "properties": {
+            "display_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Latest accepted set matching the current report body; otherwise latest accepted set. Zero means none. Omitted if identity selection fails. A nonzero selected set is retained within the 200-set detail cap."},
+            "counted_set_id": {"type": "integer", "format": "int64", "minimum": 0, "description": "Corrected contract: this report's monthly member from the shared complete-population classifier, not merely its oldest accepted revision. Zero means no member. Omitted for protected readers or classification/selection errors. It can differ from display_set_id."},
+            "sibling": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions only. Present when this report has no accepted set of its own and another readable edition of the same symbol, date and report type has one. Never present for a persistent query token."},
+            "counted_edition": {"$ref": "#/components/schemas/PredictionReadEdition", "description": "Browser sessions that may see membership only (internal all readers and administrators). The readable edition whose accepted set is this analysis's monthly member when that is not this report's own set. Omitted for own-scoped and external readers."}
+          }}
+        ]
+      },
       "PredictionPayload": {
         "type": "object",
-        "required": ["schema"],
+        "required": [
+          "schema"
+        ],
         "properties": {
           "schema": {
             "type": "string",
-            "enum": ["predictions.v1"],
+            "enum": [
+              "predictions.v1"
+            ],
             "description": "契约版本。当前只有 predictions.v1。"
           },
           "emitter": {
@@ -390,7 +500,12 @@
           },
           "probability_method": {
             "type": "string",
-            "enum": ["approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable"],
+            "enum": [
+              "approved_valuation_source",
+              "approved_policy_default",
+              "subjective_committee",
+              "unavailable"
+            ],
             "description": "情景概率的来源。approved_policy_default 表示用的是策略默认值（25/50/25），概率校准统计会排除这类样本。"
           },
           "probability_transform": {
@@ -399,7 +514,9 @@
           },
           "scenario_basis": {
             "type": "string",
-            "enum": ["estimated"],
+            "enum": [
+              "estimated"
+            ],
             "description": "情景价的来源口径，按统计含义命名，不按工具命名。estimated 表示三个情景终值由模型推算而非引用已实现的数据。统计页面按此分段与剔除样本，所以取值是封闭枚举；以后新增取值需同时修改门户。省略等同于未声明。"
           },
           "scenario_provenance": {
@@ -431,7 +548,10 @@
                 "properties": {
                   "adoption": {
                     "type": "string",
-                    "enum": ["quote", "locator"],
+                    "enum": [
+                      "quote",
+                      "locator"
+                    ],
                     "description": "quote 表示正文里引到了原句，locator 表示只有章节定位。"
                   }
                 }
@@ -440,12 +560,19 @@
           },
           "decision_status": {
             "type": "string",
-            "enum": ["eligible", "no_trade"],
+            "enum": [
+              "eligible",
+              "no_trade"
+            ],
             "description": "只有这两类状态会写入预测。研究层只给出建议买入价（当时没有现价）的运行不发预测，因为没有基准价可结算。"
           },
           "decision_quality": {
             "type": "string",
-            "enum": ["normal", "degraded", "repaired"],
+            "enum": [
+              "normal",
+              "degraded",
+              "repaired"
+            ],
             "description": "仲裁质量。只有 normal 参与统计。"
           },
           "information_cutoff": {
@@ -476,7 +603,10 @@
           },
           "run_mode": {
             "type": "string",
-            "enum": ["production", "test"],
+            "enum": [
+              "production",
+              "test"
+            ],
             "description": "运行模式。缺省视为 production；test 表示测试运行，预测集单独存放、不结算、不参与统计。用于控制台或调试运行，避免测试数据进入记录。",
             "x-i18n": {
               "en-US": {
@@ -500,17 +630,24 @@
         "type": "string",
         "pattern": "^(\\d{1,7})(?:\\.(\\d{1,2}))?$",
         "description": "价格，以字符串传输，最多两位小数（如 \"8.65\"）。不接受 JSON 数字：浮点会在传输中改变数值，也无法精确比对。负号、指数形式和三位小数一律拒绝。",
-        "examples": ["8.65"]
+        "examples": [
+          "8.65"
+        ]
       },
       "PredictionProbability": {
         "type": "string",
         "pattern": "^(?:0(?:\\.(\\d{1,4}))?|1(?:\\.(0{1,4}))?)$",
         "description": "概率或权重，以字符串传输，取值 [0,1]，最多四位小数，按万分之一整数存储。不接受 JSON 数字。",
-        "examples": ["0.2500"]
+        "examples": [
+          "0.2500"
+        ]
       },
       "PredictionClaim": {
         "type": "object",
-        "required": ["key", "kind"],
+        "required": [
+          "key",
+          "kind"
+        ],
         "properties": {
           "key": {
             "type": "string",
@@ -518,16 +655,29 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"],
+            "enum": [
+              "stance",
+              "terminal_value",
+              "scenario",
+              "entry_price",
+              "stop_loss"
+            ],
             "description": "预测项类型。stop_loss 为保留值：在代码节点能算出止损价之前一律拒绝。"
           },
           "stance": {
             "type": "string",
-            "enum": ["long", "no_position"]
+            "enum": [
+              "long",
+              "no_position"
+            ]
           },
           "label": {
             "type": "string",
-            "enum": ["bull", "base", "bear"]
+            "enum": [
+              "bull",
+              "base",
+              "bear"
+            ]
           },
           "price": {
             "$ref": "#/components/schemas/PredictionPrice"
@@ -2003,7 +2153,7 @@
         "operationId": "reportPredictions",
         "summary": "一份报告的结构化预测及其结算结果",
         "x-scope": "query",
-        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。counted_set_id 是参与分组统计的那一集（每个「股票×月份」取最早被接受的一集），0 表示该报告没有参与统计的集。",
+        "description": "返回该报告历次入库写入的预测集（含被拒、缺席、回测），按写入时间从早到晚，最多 200 集，被选为展示和计入统计的两集一定保留。每集带其预测项与各检查点的结算结果。可见性跟随报告本身的阅读权限：读不到的报告返回 404，而不是空列表。display_set_id 跟随报告当前正文；counted_set_id 是该报告在统一的全体月度分类中的计入集，对受保护的读者或分类出错时省略。membership 与结算阶段是读取时才算出的元数据，settlement_paused 是独立的评估器提示。某个检查点的 expected 为 true 时，not_before 是由核实过的交易所休市安排推出的预计日期，不是已观察到的交易日；没有该标记时，显示的日期仍只是不早于该日的下限。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回，并可附带指向同一分析另一写成形式的 sibling 与 counted_edition 链接；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "id",
@@ -2020,7 +2170,9 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["payload"]
+              "enum": [
+                "payload"
+              ]
             },
             "description": "传 payload 时返回入库时的 predictions 原文。列表接口默认不返回，因为每集约 2KB。"
           }
@@ -2028,15 +2180,72 @@
         "x-i18n": {
           "en-US": {
             "summary": "A report's structured predictions and their settled results",
-            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, each with its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `counted_set_id` is the set that participates in the group statistics (the earliest accepted set per symbol and month); 0 means none of them do. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound."
+            "description": "Every prediction set written for this report (including rejected, absent and backtest ones), oldest first, up to 200; the sets selected for display and for the group statistics are always retained. Each carries its claims and its checkpoint results. Visibility follows the report's own read permission: an unreadable report returns 404 rather than an empty list. `display_set_id` follows the report's current body. `counted_set_id` is this report's monthly member from the shared complete-population classifier, and is omitted for protected readers and on classification errors. Membership and settlement phases are read-time metadata; `settlement_paused` is a separate evaluator notice. A mark's optional `expected: true` qualifies `not_before` as an estimate backed by a verified exchange closure schedule, not an observed session. Without that flag, the displayed date remains an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access and may also carry `sibling` and `counted_edition` links to another written form of the same analysis; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "一份報告的結構化預測及其結算結果",
+            "description": "返回該報告歷次入庫寫入的預測集（含被拒、缺席、回測），按寫入時間從早到晚，最多 200 集，被選為展示和計入統計的兩集一定保留。每集帶其預測項與各檢查點的結算結果。可見性跟隨報告本身的閱讀許可權：讀不到的報告返回 404，而不是空列表。display_set_id 跟隨報告當前正文；counted_set_id 是該報告在統一的全體月度分類中的計入集，對受保護的讀者或分類出錯時省略。membership 與結算階段是讀取時才算出的後設資料，settlement_paused 是獨立的評估器提示。某個檢查點的 expected 為 true 時，not_before 是由核實過的交易所休市安排推出的預計日期，不是已觀察到的交易日；沒有該標記時，顯示的日期仍只是不早於該日的下限。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回，並可附帶指向同一分析另一寫成形式的 sibling 與 counted_edition 連結；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReportPredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
           "404": {
             "description": "No such report, or one this caller may not read"
@@ -2052,7 +2261,7 @@
         "operationId": "queryPredictions",
         "summary": "按股票与日期范围查询结构化预测",
         "x-scope": "query",
-        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。",
+        "description": "按 made_on（门户收到报告的上海日期）过滤，从新到旧返回。symbol 必填。机器的持久查询令牌得到不受视角限制的完整视图；浏览器会话按其所属组织单元的预测访问范围返回；App 桥接令牌（已安装 App 持有的短期令牌）一律返回 403 forecast_unavailable，不读取任何预测记录。",
         "parameters": [
           {
             "name": "symbol",
@@ -2099,15 +2308,72 @@
         "x-i18n": {
           "en-US": {
             "summary": "Query structured predictions by symbol and date range",
-            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound."
+            "description": "Filters on `made_on` — the Shanghai date the portal RECEIVED the report — and returns newest first. `symbol` is required. A mark's optional `expected: true` qualifies `not_before` as an exchange-schedule estimate, not an observed session; absent means an on-or-after lower bound. A persistent query token gets the unscoped machine view; a browser session is answered under its own forecast access; an app-bridge token (the short-lived token an installed app holds) is always refused with 403 `forecast_unavailable`, and no prediction record is read."
+          },
+          "zh-TW": {
+            "summary": "按股票與日期範圍查詢結構化預測",
+            "description": "按 made_on（門戶收到報告的上海日期）過濾，從新到舊返回。symbol 必填。機器的持久查詢令牌得到不受視角限制的完整檢視；瀏覽器會話按其所屬組織單元的預測訪問範圍返回；App 橋接令牌（已安裝 App 持有的短期令牌）一律返回 403 forecast_unavailable，不讀取任何預測記錄。"
           }
         },
         "responses": {
           "200": {
-            "description": "Prediction sets"
+            "description": "Prediction sets",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PredictionReadResponse"}}}
           },
           "401": {
             "description": "No valid query credentials"
+          },
+          "403": {
+            "description": "无权读取预测，响应体有两种。forecast_unavailable：该凭据没有预测读取权限（App 桥接令牌一律如此；浏览器会话仅在其组织单元的预测访问范围不是 none 时才有），响应体为扁平结构 {\"error\": 消息, \"code\": \"forecast_unavailable\"}。enrolment_required：浏览器会话必须先绑定第二因素，响应体为标准错误结构 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。机器的持久查询令牌不受影响。",
+            "x-i18n": {
+              "en-US": {
+                "description": "Access to predictions is refused, with one of two bodies. forecast_unavailable: this credential has no forecast read access (an app-bridge token never has it; a browser session has it only when its organizational unit's forecast access is not none); the body is the flat envelope {\"error\": message, \"code\": \"forecast_unavailable\"}. enrolment_required: the browser session must set up a second factor first; the body is the standard error envelope {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}. Persistent query tokens are not affected."
+              },
+              "zh-TW": {
+                "description": "無權讀取預測，響應體有兩種。forecast_unavailable：該憑據沒有預測讀取許可權（App 橋接令牌一律如此；瀏覽器會話僅在其組織單元的預測訪問範圍不是 none 時才有），響應體為扁平結構 {\"error\": 訊息, \"code\": \"forecast_unavailable\"}。enrolment_required：瀏覽器會話必須先繫結第二因素，響應體為標準錯誤結構 {\"ok\": false, \"error\": {\"code\": ..., \"message\": ...}}。機器的持久查詢令牌不受影響。"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "forecast_unavailable"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "const": "enrolment_required"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -2251,7 +2517,9 @@
     },
     "/healthz/forecast": {
       "get": {
-        "tags": ["meta"],
+        "tags": [
+          "meta"
+        ],
         "operationId": "healthzForecast",
         "summary": "预测评估器探针（公开）——只返回状态",
         "x-scope": "public",
@@ -2261,31 +2529,294 @@
             "summary": "Forecast evaluator probe, public — status only",
             "description": "200 while the evaluator is off, or while it is on and its heartbeat is under ten minutes old; 503 when it is on and the heartbeat is missing or older. The body is exactly one boolean and never carries the heartbeat, which holds counts an anonymous caller must not see.",
             "responses": {
-              "200": {"description": "evaluator off, or on and current"},
-              "503": {"description": "evaluator on, heartbeat stale or missing"}
+              "200": {
+                "description": "evaluator off, or on and current"
+              },
+              "503": {
+                "description": "evaluator on, heartbeat stale or missing"
+              }
             }
           },
           "zh-TW": {
             "summary": "預測評估器探針（公開）——只回傳狀態",
             "description": "評估器關閉時回傳 200；開啟且心跳在十分鐘內也回傳 200；開啟但心跳缺失或過舊時回傳 503。回應只有一個布林值，絕不帶心跳內容——那裡有匿名呼叫者不該看到的計數。",
             "responses": {
-              "200": {"description": "評估器關閉，或已開啟且心跳正常"},
-              "503": {"description": "評估器已開啟，但心跳過舊或缺失"}
+              "200": {
+                "description": "評估器關閉，或已開啟且心跳正常"
+              },
+              "503": {
+                "description": "評估器已開啟，但心跳過舊或缺失"
+              }
             }
           }
         },
-        "x-codeSamples": [{"lang": "cURL", "source": "curl -s $BASE/healthz/forecast"}],
+        "x-codeSamples": [
+          {
+            "lang": "cURL",
+            "source": "curl -s $BASE/healthz/forecast"
+          }
+        ],
         "responses": {
           "200": {
             "description": "评估器关闭，或已开启且心跳正常",
-            "content": {"application/json": {"example": {"ok": true}}}
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
           },
           "503": {
             "description": "评估器已开启，但心跳过旧或缺失",
-            "content": {"application/json": {"example": {"ok": false}}}
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": false
+                }
+              }
+            }
           }
         },
         "description": "评估器关闭时返回 200；开启且心跳在十分钟内也返回 200；开启但心跳缺失或过旧时返回 503。响应只有一个布尔值，绝不带心跳内容——那里有匿名调用者不该看到的计数。"
+      }
+    },
+    "/api/v1/notifications": {
+      "post": {
+        "operationId": "publishNotification",
+        "summary": "Publish a source-owned notification",
+        "description": "Requires a dedicated notify:<publisher> machine token or a bound administrator-issued app token with notify scope. all, query, ingest and cookie sessions do not authorize publication. The server derives the event namespace, recipients and destination rules. Reusing occurrence_id is idempotent for identical content; changed content conflicts. At most 120 new source events per rolling hour.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "occurrence_id",
+                  "title",
+                  "message",
+                  "severity"
+                ],
+                "properties": {
+                  "occurrence_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 8192
+                  },
+                  "severity": {
+                    "type": "string",
+                    "enum": [
+                      "info",
+                      "warning",
+                      "error",
+                      "resolved"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Captured event or identical earlier occurrence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "id",
+                    "created"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or destination-bearing input"
+          },
+          "401": {
+            "description": "Dedicated publication credential required"
+          },
+          "409": {
+            "description": "Occurrence reused with different content"
+          },
+          "429": {
+            "description": "Source publication or delivery capacity limit"
+          },
+          "500": {
+            "description": "Capture failed; retry with the same occurrence id"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/request": {
+      "post": {
+        "summary": "Proxy a viewer-bound request to an installed application backend",
+        "description": "Requires an ephemeral app-bound bridge token for the same installed app. Machine API tokens are refused. Inner GET requires extension.read; POST/PUT/DELETE require extension.manage and a current administrator. The fixed registration controls destination and route policy. No caller headers, credentials or identity claims are accepted. Private responses use Cache-Control: no-store.",
+        "tags": [
+          "Extensions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "path"
+                ],
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "DELETE"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^/v1/"
+                  },
+                  "body": {
+                    "description": "An optional JSON value for management methods. GET has no body."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded application JSON response"
+          },
+          "400": {
+            "description": "Invalid path, body or policy"
+          },
+          "403": {
+            "description": "Current app or viewer is not authorized"
+          },
+          "429": {
+            "description": "Extension capacity is full"
+          },
+          "502": {
+            "description": "Backend unavailable or invalid response"
+          },
+          "503": {
+            "description": "Connection unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/principals": {
+      "get": {
+        "summary": "List opaque grant principals for the current application",
+        "description": "Only app-bound extension.manage tokens belonging to a current administrator may read this directory. Returns opaque OU or account identities and labels, never profile or credential fields.",
+        "tags": [
+          "Extensions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ou",
+                "user"
+              ]
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 principals, with count, offset and limit"
+          },
+          "400": {
+            "description": "Invalid directory parameters"
+          },
+          "403": {
+            "description": "Current app administrator permission is required"
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/publisher": {
+      "get": {
+        "summary": "Read the authenticated notification publisher namespace without publishing",
+        "description": "Requires a dedicated notify:<name> service credential or authorized app-bound notify token. Generic all, query and ingest scopes are refused. Returns its publisher namespace and event selector only, with Cache-Control: no-store.",
+        "tags": [
+          "Notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current publisher and exact notification event selector"
+          },
+          "401": {
+            "description": "Dedicated publication credential required"
+          }
+        }
       }
     }
   }

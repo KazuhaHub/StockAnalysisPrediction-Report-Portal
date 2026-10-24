@@ -1,36 +1,15 @@
 package app
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"html"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/mail"
 )
-
-// notifyJobDone emails the submitter that their batch job finished, if they opted in
-// (jobNotify) and have an address. Best-effort — a send failure is only logged.
-func (s *Server) notifyJobDone(j BatchJob) {
-	v, ok := s.jobNotify.LoadAndDelete(j.ID)
-	if b, _ := v.(bool); !ok || !b {
-		return
-	}
-	u := s.st.GetUser(j.CreatedBy)
-	if u == nil || u.Email == "" || !s.emailEnabled() {
-		return
-	}
-	brand := s.brandName()
-	body := fmt.Sprintf(
-		`<p>Hi %s,</p><p>Your batch job #%d finished (%s): %d of %d succeeded, %d failed.</p>`,
-		html.EscapeString(u.Name()), j.ID, html.EscapeString(j.Status), j.Succeeded, j.Total, j.Failed)
-	if err := s.sendEmail([]string{u.Email}, fmt.Sprintf("%s — job #%d finished", brand, j.ID), body); err != nil {
-		log.Printf("job-done email for job %d failed: %v", j.ID, err)
-	}
-}
 
 // brandName is the site title (email subjects / bodies), falling back to a default.
 func (s *Server) brandName() string {
@@ -62,16 +41,17 @@ func (s *Server) emailEnabled() bool {
 	return s.st.GetSetting("smtp_enabled", "0") == "1" && s.mailConfig().Enabled()
 }
 
-// sendEmail delivers one message, honoring the test seam. It refuses to send when
+// sendEmailContext delivers one message, honoring the test seam. It refuses to send when
 // email is disabled/unconfigured.
-func (s *Server) sendEmail(to []string, subject, htmlBody string) error {
+func (s *Server) sendEmailContext(ctx context.Context, to []string, subject, htmlBody string) error {
 	if s.mailFn != nil {
 		return s.mailFn(to, subject, htmlBody)
 	}
 	if !s.emailEnabled() {
 		return errors.New("email is not enabled")
 	}
-	return s.mailConfig().Send(to, subject, htmlBody)
+	_, err := s.mailConfig().Attempt(ctx, to, subject, htmlBody)
+	return err
 }
 
 // ---------- admin config ----------
@@ -107,36 +87,35 @@ func (s *Server) apiEmailSave(w http.ResponseWriter, r *http.Request, user strin
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
+	updates := map[string]string{}
 	if in.Enabled != nil {
-		s.st.SetSetting("smtp_enabled", boolStr(*in.Enabled))
+		updates["smtp_enabled"] = boolStr(*in.Enabled)
 	}
 	if in.Host != nil {
-		s.st.SetSetting("smtp_host", strings.TrimSpace(*in.Host))
+		updates["smtp_host"] = strings.TrimSpace(*in.Host)
 	}
 	if in.Port != nil && *in.Port > 0 {
-		s.st.SetSetting("smtp_port", strconv.Itoa(*in.Port))
+		updates["smtp_port"] = strconv.Itoa(*in.Port)
 	}
 	if in.User != nil {
-		s.st.SetSetting("smtp_user", strings.TrimSpace(*in.User))
+		updates["smtp_user"] = strings.TrimSpace(*in.User)
 	}
 	if in.Pass != nil && *in.Pass != "" { // blank → keep stored password
-		s.st.SetSetting("smtp_pass", *in.Pass)
+		updates["smtp_pass"] = *in.Pass
 	}
 	if in.From != nil {
-		s.st.SetSetting("smtp_from", strings.TrimSpace(*in.From))
+		updates["smtp_from"] = strings.TrimSpace(*in.From)
 	}
 	if in.Security != nil {
-		s.st.SetSetting("smtp_security", strings.TrimSpace(*in.Security))
+		updates["smtp_security"] = strings.TrimSpace(*in.Security)
 	}
-	// Any change to the transport invalidates the forecast alert verification: readiness item 5 is
-	// about a real delivery through the configuration that exists now. The email form posts every
-	// field, so a save that changes nothing also clears it; the test button is one click.
-	if in.Enabled != nil || in.Host != nil || in.Port != nil || in.User != nil ||
-		in.Pass != nil || in.From != nil || in.Security != nil {
-		if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
-			log.Printf("email save: clear the forecast alert stamp: %v", err)
+	if in.Enabled != nil || in.Host != nil || in.Port != nil || in.User != nil || in.Pass != nil || in.From != nil || in.Security != nil {
+		if _, err := s.st.saveNotificationSettings(updates, true); err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
 		}
 	}
+
 	writeJSON(w, okJSON)
 }
 
@@ -157,7 +136,13 @@ func (s *Server) apiEmailTest(w http.ResponseWriter, r *http.Request, user strin
 		jsonError(w, http.StatusBadRequest, "no recipient")
 		return
 	}
-	if err := s.sendEmail([]string{to}, s.brandName()+" — SMTP test", "<p>This is a test email from "+html.EscapeString(s.brandName())+". SMTP is working.</p>"); err != nil {
+	release, ok := s.notificationTestSlot()
+	if !ok {
+		notificationAPIError(w, errNotificationCapacity)
+		return
+	}
+	defer release()
+	if err := s.sendEmailContext(r.Context(), []string{to}, s.brandName()+" — SMTP test", "<p>This is a test email from "+html.EscapeString(s.brandName())+". SMTP is working.</p>"); err != nil {
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}

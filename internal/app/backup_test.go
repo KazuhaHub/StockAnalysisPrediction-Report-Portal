@@ -57,6 +57,11 @@ func scalar[T any](t *testing.T, st *Store, q string, args ...any) T {
 func TestBackupRestoreRoundTrip(t *testing.T) {
 	src := newTestStore(t)
 	seedForBackup(t, src)
+	// Restore deliberately pauses operational dispatch. Start this losslessness
+	// fixture paused as well; separate tests cover the unpaused-to-paused change.
+	if err := src.SetSetting("notification_dispatch_paused", "1"); err != nil {
+		t.Fatal(err)
+	}
 	dump := dumpOf(t, src)
 
 	dst := newTestStore(t)

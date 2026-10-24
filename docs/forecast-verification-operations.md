@@ -1,8 +1,8 @@
 # Forecast verification — runbook
 
 **Scope.** Operating the prediction-ledger evaluator (ADR 0029, ADR 0037). Signals below describe
-this source checkout, not a claim that it is deployed. Entries for later surfaces (reader access,
-the reading-page stage switch) are added by the PR that creates them.
+this source checkout, not a claim that it is deployed. Reader access, the reading-page stage switch and
+their signals are covered under "Reader surfaces".
 
 ## First response, in order
 
@@ -79,13 +79,20 @@ A set was frozen with a code other than its cohort's active benchmark.
 
 ### Switching the evaluator on
 
-The readiness list is code. Until every item holds, `POST /api/admin/forecast {"mode":"1"}` answers
-409 `forecast_not_ready` and names the failing items.
+The readiness list is code (`forecastReadiness` in `internal/app/forecast_ops.go`). Until every item
+holds, `POST /api/admin/forecast {"mode":"1"}` answers 409 `forecast_not_ready` and names the failing
+items. There are six: `binary`, `population` (the ledger start is set), `dry_pass`, `dry_gate`,
+`alerts` and, item 6, `ledger_chain`.
 
 1. `dry`, then "Evaluate now"; read the sample and `last_error`.
 2. Record a dry-run check for every benchmark in use (the card lists the codes).
 3. Send a test alert that reaches **both** channels (the readiness stamp is written only then).
-4. Switch to `1`. The change, the actor and the readiness list are audited (`forecast.auto`).
+4. Check item 6, `ledger_chain`: the quote-source panel must show an enabled settlement chain whose
+   primary carries both evidence capabilities. Without it settlement refuses every mark and the
+   watchdog reports `no_source`, so the mode is refused rather than allowed to idle. If the item is
+   red, repair the source order on the panel (a save that removes the primary asks for
+   confirmation and is audited as `quote.order`); do not work around it.
+5. Switch to `1`. The change, the actor and the readiness list are audited (`forecast.auto`).
 
 ### Scheduling a benchmark
 
@@ -102,9 +109,41 @@ S0 close. Preview the candidate list on the page, then save once. It survives re
 
 ### Before a release
 
+A release that contains step `0009` (the owner-approved `prediction_purge_owners` table, which lets
+an `own` reader be shown only the purged months of their own OU subtree) is deployed like any other:
+pull the new image and restart. Startup applies the step. The one thing to get right is the backup,
+which must come from the **previous** release; read
+[forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md) for how to take it under a
+moving tag, and for rolling back across the step, which is restore-only.
+
 Take the ADR 0027 backup. For R1a-β2 also record the heal predicate's count (Q3 = 20). A binary older
 than step `0006` refuses a database that records it: rolling back across the access schema is
 restore-only.
+
+### Release with the purge ownership evidence step (`0009`)
+
+Step `0009` is an ordinary automatic step. The full notes are
+[forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md); the points that are easy to
+miss are:
+
+- **Take the backup with the previous release, before anything pulls.** The new binary's `backup`,
+  `restore`, `adduser`, `security`, `recompute-kinds` and `freeze-names` all open the store the way startup
+  does and apply pending steps first, so a backup taken with them already declares `0009` and the previous
+  release cannot restore it. Under `pull_policy: always` (the shipped compose file), `docker compose run`
+  pulls too: record the running container's image id first and back up from it with `docker run
+  --volumes-from <the stopped container> --env-file <an RP_* file only you can read>`, deleting the file
+  afterwards.
+- **Check the backup's size.** `backup` prints its table and row counts on stderr; they must match the
+  deployment, and the previous release's restore dry run must list non-zero `users` and `reports` rows.
+- **Optionally see what will run.** `report-portal schema-upgrade` lists the pending steps and changes
+  nothing; `--apply` applies them offline with the same runner. Neither is needed for a deploy. The list is
+  in the build's list order, which is merge order and not id order: `0007`, `0008` and `0009` were reserved
+  by branches that were still open when the announcement step `0010` reached main, so they follow it. For a
+  database that has recorded `0001` to `0006`, a release that also ships the notification (`0007`) and
+  extension (`0008`) steps lists `[0010, 0007, 0008, 0009]`; `0009` is always last. An id that looks out of
+  order in that list is not an error.
+- Evidence starts empty and is never back-filled. Months purged before the upgrade stay visible to `all`
+  readers and the administrator views and are never disclosed to own readers.
 
 ### After a restore
 
@@ -112,6 +151,34 @@ A restore resets the heartbeat, the alert state, the dry gate and the alert veri
 becomes the lower of the dump and live values, and a restored `1` is capped at `dry`
 (`restore_gates_empty`, audited). Re-check deliberately: run a dry pass, record the gates, send the
 test alert, then switch on if that is intended.
+
+The evaluator mode and the reading stage follow one rule: a restore never raises them. **The OU
+access settings do not.** They come back exactly as dumped and can open access that the live database
+had closed, so a restore needs the extra check below.
+
+- **Reading stage.** `forecast_reader` becomes the lower of the dump and the live value
+  (`off` < `card` < `full`). Both sides are read the way readers read them: an unset value is the
+  default `card`, but an empty, unrecognised or unreadable value counts as `off`. A result that
+  differs from the dumped value is audited as `forecast.reader` with actor `system`. After a restore
+  from a dump taken at `full`, the stage is therefore whatever the live database had if that was
+  lower; raise it again deliberately, one step at a time.
+- **OU scopes and attribution come back exactly as dumped, and that can widen access.**
+  `user_groups.forecast_scope` and `prediction_sets.attributed_ou` are restored verbatim; the only
+  adjustment is that the Default OU is set to `none` when it comes back unset. The audit log is part
+  of the dump too. A restore from a backup taken before a record incident therefore re-opens every OU
+  that was `all` or `own` when the backup was taken, with no audit row for it, and the incident's own
+  `group.change` rows are gone with the restore. Only a dump from before step `0006` can narrow
+  instead: it has no scopes, so every OU inherits and the Default OU reads `none`.
+  1. Before restoring, save `GET /api/admin/forecast/access` (the live values), because the restore
+     replaces them.
+  2. After the restore, and before readers return, read it again and compare the two. After a
+     record incident, or any OU scope change since the backup was taken, assume widening until
+     proven otherwise.
+  3. Set every OU that should be closed back to `none` in the OU editor (see "Record incident"), then
+     confirm with the endpoint. Do not tell anyone access is as it was until this comparison is done.
+- **Counters.** The `forecast_signals_<date>` rows and the weekly viewer counts come back from the
+  dump. They are observations, not settings; a gap in them after a restore is the restore, not an
+  outage.
 
 ## December projection-calendar maintenance
 
@@ -127,6 +194,227 @@ this table changes reading-page estimates only, never settlement or evaluator wa
 An interval crossing a missing year must retain the weekday "on or after" wording rather than
 claim an expected exchange date. In October 2026 the verified runtime table covers 2026 only;
 2027 remains deliberately absent pending its annual notice and December review.
+
+## Reader statistics explanation contract
+
+The session-only groups response and its temporary admin alias may carry the following flattened
+metadata. These fields are not a new machine API and must not be added to `/api/v1` routes merely
+to expose the reader summary. External-all readers receive none of the fields in this section;
+own readers receive only their scoped population. A missing field is not a measured zero.
+
+| Field | Meaning |
+| --- | --- |
+| `summary.since`, `sets`, `accepted`, `stocks` | Earliest retained receipt date, retained row count, accepted row count, and distinct nonempty symbols in the requested range and population. Accepted includes repeat editions; it is not the statistical member count. |
+| `summary.marks_by_phase` | Checkpoint obligations of classified members and pending-baseline candidates represented by the returned cells. Duplicate, rejected and other excluded rows do not create obligations. The h12 population includes standard horizons only. Mature cells contribute resolved and final counts; purged cells contribute nothing. |
+| `summary.next_result_not_before`, `expected` | Earliest outstanding date across the returned cells. It can already be in the past when settlement is delayed. `expected` qualifies an exchange-schedule estimate, not a promised or observed result. Tied estimates retain the flag only if every tied date is qualified. |
+| `rtypes`, `min_n` | Sorted covered report types and the minimum publishable sample size. |
+| `limits` | `max_range_months`, `max_week_groups`, `official_slots`, `explore_slots`, `wait_sec`, `custom_per_min`, and `members_per_min`; the configured ceilings, not remaining budget. |
+| `generated_at`, `ledger_start` | UTC response-generation instant and the declared ledger boundary. An empty ledger start means unset, not the beginning of retained history. |
+| `capabilities` | `monthly`, `custom`, and `members` permission hints from the same decision used by route gates. They do not bypass fresh authorization, validation, rate limits or scorer capacity. |
+| `evaluator.mode` | `0`, `dry`, or `1`; a paused evaluator is distinct from a failed checkpoint. |
+
+Non-mature cells carry `pending_reasons`, `failed_cap_exceeded`, and, when known, `not_before` with
+its optional `expected` qualifier. Phase counts include resolved and final entries to reconcile
+the selected population; unclassifiable timing is counted as `unknown`. The failure-cap flag uses
+the same final-refusal ratio and strict threshold as the existing maturity gate. Explanations are
+request-time copies, not additional scoring and not entries in the mature-cell cache.
+
+Retention exclusions apply before summary construction. A late row in a marked month cannot
+resurrect that month in summary counts. These scalars describe retained data, not all-time totals;
+the separate purge metadata must remain visible where authorized. An own reader's purge metadata
+comes from the purge ownership evidence (ADR 0039): only months its current subtree owned sets in when
+retention removed them. Every other emptied month is an ordinary empty month for that reader, and months
+purged before the evidence table existed are never disclosed to it. Release of own-scoped reads still
+waits for a release carrying step `0009` to be deployed and the review recorded in the implementation log.
+
+## Reading-page summary contract (P18 draft)
+
+The session stock/run response may carry `prediction` at stage `full`; admins resolve to full,
+but none remains an independent refusal for non-admins. `X-Prefetch: 1` omits the summary while
+retaining scoped stock timeline flags. These additions do not expand the machine API.
+
+- `display_set_id` selects the latest accepted set matching the body already chosen for this
+  response, falling back to the latest accepted set. Compact selection is not capped by the
+  200-row card response. A concurrent ingest must not pair a future body's prediction with the
+  body being returned. `body_changed` qualifies the same selected response body.
+- `stance`, optional `weight_bp` and optional `upside_bp` reuse the selected set's claims and
+  frozen-baseline arithmetic. Missing numbers are not zero. Payloads and diagnostics never
+  belong to this summary.
+- `next_checkpoint` is the first nonterminal checkpoint in the established checkpoint order.
+  It carries the existing reading `phase`, `not_before` and `expected` semantics; a resolved or
+  final-refusal checkpoint is not outstanding, even when receipt timing is unreadable. Missing
+  applicable marks remain pending obligations; nonstandard horizons have no next h12 checkpoint,
+  whether an h12 mark is absent or an old pending row exists.
+  Unknown timing omits phase/date rather than manufacturing a deadline. A not-before date
+  may already be past while settlement is delayed; an expected date is not observed evidence.
+- `membership` and `counted_set_id` are available only to internal all readers and admins.
+  Internal own and every external reader receive neither, and do not trigger global membership
+  classification. Report readability is independently rechecked when constructing a summary.
+- A ledger failure omits the summary, not the report body or its navigation. Absence can also
+  mean prefetch, disabled stage, unsupported type or no accepted prediction; it is not proof of
+  a failed evaluator.
+
+`has_prediction` distinguishes a populated summary from an empty edition with a readable
+`sibling` link. An empty edition never borrows the sibling's stance, display identity, body-change
+warning or checkpoint. The linked `report_id`, `set_id`, `version`, `cohort` and exact `url`
+identify the actual other edition. Candidates share symbol/report-date/type, not title; they
+must be another version and independently readable. Fallback uses the newest eligible report,
+then its body-matching accepted set. Older readable reports remain eligible for the link to the
+edition that actually counted, even if a later generator output replaced it in the switcher.
+
+Internal all readers and admins may receive `counted_edition`. For a populated current edition,
+it must belong to the same receipt cohort. It does not change the report's own `counted_set_id`.
+An own-report member from a later cohort cannot hide the displayed cohort's counted edition.
+The full-stage summary suppresses a duplicate badge in favor of this explicit edition identity.
+Per-set classifier results on the card route remain factual; presentation should prefer the
+counted-edition label rather than describing the other edition's member as a duplicate.
+Own and external readers never receive counted-edition metadata or cause global classification.
+
+Card/full session prediction reads carry the same optional `sibling` and `counted_edition`
+metadata, including when using a cookie on the v1 report route. Persistent machine and app-bridge
+credentials retain their existing shape. Stage off still refuses non-admin session predictions.
+These are server contracts; the P20 card presentation and stale-edition UI guards remain separate.
+
+The stage access matrix now exercises these server surfaces through the real mux on both drivers
+and both Default-scope variants. The [local performance checkpoint](forecast-reading-performance.md)
+records an actual pre-P18 source comparison and the card/full budget, including prefetch. These
+checks do not replace P20 presentation tests, independent review or production observation, and
+are not authorization to enable full in production.
+
+## Reader surfaces: signals and incidents
+
+Two switches govern what a non-administrator reads, and they are independent. Each OU has a forecast
+scope (`all`, `own` or `none`; a child inherits its parent unless it sets its own; the Default OU
+reads `none`; administrators always read `all`). The reading stage `forecast_reader` (`off`, `card`,
+`full`; administrators always read `full`) governs the per-report surfaces and never widens a scope.
+The statistics page (`/forecast`, `GET /api/forecast/groups` and `/groups/members`) follows the scope
+alone. Both changes are audited, need no restart, and apply to the next request.
+
+### Signals
+
+**Slow statistics request.** One log line for each statistics request, on the reader route and the
+temporary admin alias, that took longer than three seconds:
+
+```text
+forecast groups: scope=own pop=ou mode=month cells=85 scored=1 cached=0 flight=0 wait_ms=0 dur_ms=3412
+```
+
+| Field | Meaning |
+| --- | --- |
+| `scope`, `pop` | The effective scope (`all` or `own`) and the kind of population (`all`, or `ou` for a subtree). Never an account name and never the OU ids. |
+| `mode` | `month`, `custom`, or `other` for a value the route rejects. |
+| `cells` | Group by checkpoint cells the request needed. |
+| `scored` | Cells whose scoring this request started and saw complete. |
+| `cached` | Cells answered from the mature-cell memo. |
+| `flight` | Cells that joined a computation another request had already started. |
+| `wait_ms` | The longest any one of its cells waited for a scoring slot, or for an answer when it gave up. Zero for a cell that took a free slot or joined a running flight. |
+| `dur_ms` | The whole request. |
+
+Reading it: `scored` above zero with `wait_ms` near zero is a cold cache, not contention. A `wait_ms`
+close to the wait ceiling (`forecast_wait_sec`) means the pool was saturated and the request ended in
+a 503 `forecast_busy` (compare the `busy` counter). `flight` above zero with `scored=0` is a request
+queued behind identical work. The performance target is a monthly view at or under three seconds
+on a cold cache; cached requests never wait for a slot.
+
+**Access refusals.** `forecast access: refused reason=<code> n=<count>`, at most one line a minute
+for each reason; `n` is how many refusals of that reason the line stands for. The line never names
+an account, a path or a query. The counters below are exact; the log only says it is happening.
+
+| Code | Refused because |
+| --- | --- |
+| `ou_none` | The account's effective scope is `none` (the expected answer for an OU nobody has opened up). |
+| `default_null` | No OU on the chain sets a value and the Default OU is unset. |
+| `dangling_group`, `cyclic_chain` | The OU tree is broken (a parent that no longer exists, or a loop); the account resolves to `none` until it is repaired. |
+| `unknown_value` | A stored scope that is not `all`, `own` or `none`. |
+| `error` | The account or the tree could not be read; the portal refuses rather than guesses. |
+| `anonymous` | No signed-in user. |
+| `custom_not_allowed` | An external account asked for a custom range. By design. |
+| `stage_off` | The reading stage is `off` and the account's scope would otherwise admit it. |
+| `bridge_token` | An installed app's token asked for a forecast read; refused until the shared token binding lands. |
+| `other` | A reason outside this list (a bug if it is ever non-zero). |
+
+**Counters.** The portal counts these in memory and flushes them every hour to `meta`, one row for
+each UTC day, `forecast_signals_<YYYY-MM-DD>`, holding a flat JSON object of integers. A flush that
+has nothing new changes nothing, and rows older than 14 days are deleted. Names come from a closed
+list, so no account, token or hash can reach a row.
+
+| Counter | Counts |
+| --- | --- |
+| `requests` | Statistics requests that passed the access gate (served or failed after it). |
+| `cache_hits` | Cells answered from the memo. |
+| `flights_joined` | Cells that joined another request's computation. |
+| `scored` | Cells scored. |
+| `busy` | 503 `forecast_busy` answers. |
+| `rate_limited` | 429 `forecast_rate_limited` answers, on both reader routes. |
+| `drawer_opens` | Member lists served (the cell drawer); an invalid request is not an open. |
+| `refused.<code>` | Refusals, by the codes above. |
+
+```sql
+SELECT k, v FROM meta WHERE k LIKE 'forecast_signals_%' ORDER BY k;
+```
+
+A restart loses at most the events since the last hourly flush. An unreadable row is never
+overwritten: the flush logs `forecast signals: flush failed` every hour and keeps the counts in
+memory; deleting the damaged row lets the next flush write them. The weekly distinct-viewer figure
+(`forecast_viewers_<ISO week>`, an integer; the figure is an upper bound after a restart) is the
+adoption indicator and is separate.
+
+### An OU's members report "forecast missing"
+
+Expected for every OU at `none`, which is where each starts; nothing is broken.
+
+1. `GET /api/admin/forecast/access` lists every OU with its stored value (`forecast_scope`, null for
+   inherit), the value it resolves to (`forecast_scope_effective`), the OU that supplied it
+   (`forecast_scope_source`), whether it is external, and how many accounts resolve to each scope.
+   `?ou=<id>&scope=all|own|none|inherit` previews a change and reports how many accounts it
+   would change (`affected`) without writing anything.
+2. If the OU resolves to `none` and that is not intended, set its scope in the OU editor
+   (`PUT /api/admin/groups/{id}` with `forecast_scope`). It is audited as `group.change` with the
+   `forecast_scope` change, and applies to the next request.
+3. If it resolves to `all` or `own` and the account still reads nothing, look at that day's refusal
+   counters and log lines. `stage_off` means the reading stage is `off` (below). `dangling_group`
+   or `cyclic_chain` means the tree needs repairing in the OU editor. `unknown_value` means the scope
+   needs saving again. `error` means the database could not be read; look at the database and the
+   log. `custom_not_allowed` and `bridge_token` are by design.
+4. An `own` reader sees only the sets attributed to their OU's subtree. An OU with no attributed sets
+   yet reads an empty record, not an error.
+
+### Reading-page incident: `forecast_reader=off`
+
+The reading-page card, its summary or the timeline marks are wrong or too slow (`/api/stock` over its
+800 ms budget).
+
+Set the reading stage to `off`: `POST /api/admin/forecast {"reader":"off"}`, or the settings dialog
+on `/manage/forecast`. It is immediate, needs no restart or schema change, and is audited as
+`forecast.reader` with `{from,to}` only when the value really changes. Non-administrators are then
+refused on the per-report prediction reads (403 `forecast_unavailable`, counted as `stage_off`),
+which the reading page treats as absence: no forecast and no error. Administrators still read
+`full`, so the defect can be reproduced. The statistics page is a different surface and stays as the
+OU scopes leave it. `card` is the middle step: the per-report card without the full-stage summary and
+timeline marks.
+
+Recovery goes up one step at a time (`card`, then `full`), each a recorded change. A restore never
+raises the stage (see "After a restore").
+
+### Record incident: set the affected OUs to `none`
+
+Use this when a reader may see records they should not (a population, attribution or scoping defect),
+or when the statistics themselves are suspect and need to stop being read.
+
+Set the forecast scope of each affected OU to `none` in the OU editor. It is immediate and audited
+(`group.change`). A child that inherits stops reading too, but an OU that has its own explicit value
+does not follow its parent, so setting the Default OU to `none` is not enough on its own: set the
+explicit ones. When the extent is not yet known, set every OU. Administrators keep `all`, so the
+record can still be inspected. No cache needs purging: a cell is keyed by the population it was
+computed for. Confirm with `GET /api/admin/forecast/access` (every affected OU resolves to `none`)
+and with `refused.ou_none` rising, then follow "Recording an incident". Access is given back by the
+same edit, as a decision and not before the cause is understood. If only the reading page is
+involved, `forecast_reader=off` is the smaller step.
+
+A restore during or after the incident undoes this step. OU scopes come back as the backup recorded
+them, so every OU that was `all` or `own` at backup time is open again, without an audit row and with
+the incident's edits gone from the log. Save `GET /api/admin/forecast/access` before restoring, compare
+it afterwards, and set the incident OUs back to `none` before readers return (see "After a restore").
 
 ## Recording an incident
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/hmac"
 	"encoding/base64"
 	"fmt"
@@ -122,23 +123,23 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 		link := base + "/reset?token=" + url.QueryEscape(s.resetToken(u))
 		// Send off the request path: a synchronous SMTP round-trip only for real
 		// accounts would leak account existence via response latency.
-		go func() {
-			if err := s.sendResetEmail(u, link); err != nil {
+		s.submitTransactionalMail(func(ctx context.Context) {
+			if err := s.sendResetEmailContext(ctx, u, link); err != nil {
 				log.Printf("password reset email to %s failed: %v", u.Username, err)
 			}
-		}()
+		})
 	} else if eligible {
 		log.Printf("password reset for %q skipped: set a Public URL in Email settings to enable reset links", u.Username)
 	}
 	writeJSON(w, okJSON)
 }
 
-func (s *Server) sendResetEmail(u *User, link string) error {
+func (s *Server) sendResetEmailContext(ctx context.Context, u *User, link string) error {
 	brand := s.brandName()
 	body := fmt.Sprintf(
 		`<p>Hi %s,</p><p>A password reset was requested for your %s account. Use the link below within the hour to set a new password:</p><p><a href="%s">%s</a></p><p>If you didn't request this, you can ignore this email — your password stays unchanged.</p>`,
 		html.EscapeString(u.Name()), html.EscapeString(brand), link, html.EscapeString(link))
-	return s.sendEmail([]string{u.Email}, brand+" — password reset", body)
+	return s.sendEmailContext(ctx, []string{u.Email}, brand+" — password reset", body)
 }
 
 // apiResetPassword sets a new password given a valid reset token.

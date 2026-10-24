@@ -108,6 +108,7 @@
 // Downloadable iframe apps (ADR 0003)
 //   - apps_api.go    install / list / run HTTP surface
 //   - apps_market.go the GitHub-hosted app-index browser
+//   - extension_identity.go current viewer/OU snapshot for the external-backend contract
 //   - apps_store.go  installed-app persistence
 //   - apps_token.go  the app-bridge scoped-token minting
 //

@@ -529,7 +529,7 @@ func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
 		s := newV1Server(t)
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
 		seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-10-13", Bench: "sh000905"})
-		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -551,7 +551,7 @@ func TestOffBenchmarkSetsAreExcludedAndCounted(t *testing.T) {
 		s := newV1Server(t)
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-01", Bench: "sh000905"})
 		seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-02", Bench: "sh000852"})
-		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31")
+		sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-10-31", forecastPopulation{Key: "all"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -574,7 +574,7 @@ func TestCustomRangeSlicesByBenchmark(t *testing.T) {
 	s := newV1Server(t)
 	seedGroupSet(t, s, gsSeed{Symbol: "600160", MadeOn: "2026-10-12", Bench: "sh000852"})
 	seedGroupSet(t, s, gsSeed{Symbol: "600161", MadeOn: "2026-11-12", Bench: "sh000906"})
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-11-30")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2026-10-01", "2026-11-30", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,19 +688,19 @@ func TestMalformedScheduleIsIgnored(t *testing.T) {
 }
 
 func TestCountedSetIDJudgesEachCohortOnItsOwn(t *testing.T) {
-	sets := []PredictionSet{
-		{ID: 1, State: predStateAccepted, MadeAt: "2026-10-18T13:00:00Z", Cohort: "2026-10", BenchCode: "sh000852"},
-		{ID: 2, State: predStateAccepted, MadeAt: "2026-10-19T13:00:00Z", Cohort: "2026-11", BenchCode: "sh000906"},
+	s := newV1Server(t)
+	octReport, octSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-10-18", Bench: "sh000852"}, "October decision")
+	novReport, novSet := seedReadableMembershipReport(t, s, gsSeed{Symbol: "600001", MadeOn: "2026-11-19", Bench: "sh000906"}, "November decision")
+	_, oct := readSemanticReport(t, s, octReport, nil)
+	_, nov := readSemanticReport(t, s, novReport, nil)
+	if oct["counted_set_id"] != float64(octSet) || nov["counted_set_id"] != float64(novSet) {
+		t.Fatalf("cohort-specific benchmarks did not retain both members: %v / %v", oct, nov)
 	}
-	bench := map[string]string{"2026-10": "sh000852", "2026-11": "sh000906"}
-	forCohort := func(c string) string { return bench[c] }
-	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 1 {
-		t.Errorf("counted = %d, want 1 (the earliest on-benchmark set)", got)
-	}
-	// October's benchmark moved: its set is now off-benchmark, and the November revision is judged
-	// against November's code, not October's.
-	bench["2026-10"] = "sh000905"
-	if got := countedSetIDFor(sets, time.Time{}, forCohort); got != 2 {
-		t.Errorf("counted = %d, want 2 (the older set is off-benchmark in its own cohort)", got)
+	// An earlier October anchor changes October's intent, not the November cohort's.
+	seedReadableMembershipReport(t, s, gsSeed{Symbol: "600002", MadeOn: "2026-10-01", Bench: "sh000905"}, "October benchmark anchor")
+	_, oct = readSemanticReport(t, s, octReport, nil)
+	_, nov = readSemanticReport(t, s, novReport, nil)
+	if oct["counted_set_id"] != float64(0) || nov["counted_set_id"] != float64(novSet) {
+		t.Fatalf("October's changed intent contaminated November: %v / %v", oct, nov)
 	}
 }

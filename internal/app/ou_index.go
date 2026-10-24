@@ -41,8 +41,14 @@ type ouRow struct {
 // loadOUIndex reads every OU once. A failed read returns an error, never an empty index: an empty
 // index would make every chain dangling and every restriction false, which is the wrong direction.
 func (s *Store) loadOUIndex() (ouIndex, error) {
+	return s.loadOUIndexFrom(s.db)
+}
+
+// loadOUIndexFrom permits an access decision to read the account and tree on the same snapshot.
+// Callers holding a transaction must pass it rather than taking another pool connection.
+func (s *Store) loadOUIndexFrom(ex execer) (ouIndex, error) {
 	ix := ouIndex{ous: map[int64]ouRow{}}
-	rows, err := s.query(`SELECT id, COALESCE(parent_id,0), COALESCE(restricted,0),
+	rows, err := ex.Query(`SELECT id, COALESCE(parent_id,0), COALESCE(restricted,0),
 		COALESCE(is_default,0), forecast_scope FROM user_groups`)
 	if err != nil {
 		return ouIndex{}, err

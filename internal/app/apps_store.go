@@ -33,6 +33,16 @@ func (s *Store) InstallApp(app App, files map[string]AppFile) error {
 		return err
 	}
 	defer tx.Rollback()
+	if s.driver == "postgres" {
+		var installed string
+		err := tx.QueryRow(s.bind(`SELECT id FROM apps WHERE id=? FOR UPDATE`), app.ID).Scan(&installed)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	if err := resetExtensionConnection(migExec{s: s, ex: tx}, app.ID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(s.bind("DELETE FROM app_files WHERE app_id=?"), app.ID); err != nil {
 		return err
 	}
@@ -97,11 +107,24 @@ func (s *Store) GetApp(id string) (App, bool) {
 
 // DeleteApp uninstalls an app and removes all of its files.
 func (s *Store) DeleteApp(id string) error {
-	if _, err := s.exec("DELETE FROM app_files WHERE app_id=?", id); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
 		return err
 	}
-	_, err := s.exec("DELETE FROM apps WHERE id=?", id)
-	return err
+	defer tx.Rollback()
+	if s.driver == "postgres" {
+		var installed string
+		err := tx.QueryRow(s.bind(`SELECT id FROM apps WHERE id=? FOR UPDATE`), id).Scan(&installed)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	for _, q := range []string{`DELETE FROM app_backend_connections WHERE app_id=?`, `DELETE FROM app_files WHERE app_id=?`, `DELETE FROM apps WHERE id=?`} {
+		if _, err := tx.Exec(s.bind(q), id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // AppFile returns one file's content type and bytes, or ok=false if absent.

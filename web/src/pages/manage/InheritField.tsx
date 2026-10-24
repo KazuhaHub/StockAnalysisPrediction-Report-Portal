@@ -21,6 +21,7 @@ export default function InheritField({
   from,
   inheriting,
   onInheritingChange,
+  canInherit = true,
   children,
 }: {
   label: string
@@ -31,10 +32,30 @@ export default function InheritField({
   from: string
   inheriting: boolean
   onInheritingChange: (v: boolean) => void
+  /**
+   * False for a unit that inherits from nobody (the Default OU): there is nothing to offer, so the
+   * control stands alone instead of beside a radio whose only option is itself.
+   */
+  canInherit?: boolean
   /** The override control, rendered only while the override is in effect. */
   children: ReactNode
 }) {
   const { t } = useTranslation()
+  if (!canInherit) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>
+          {label}
+        </Typography.Text>
+        {children}
+        {hint && (
+          <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 6 }}>
+            {hint}
+          </Typography.Text>
+        )}
+      </div>
+    )
+  }
   return (
     <div style={{ marginBottom: 16 }}>
       <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>

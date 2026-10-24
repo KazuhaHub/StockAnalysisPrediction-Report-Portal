@@ -159,6 +159,29 @@ can predict.
 The reading page shows the switcher only when the reader may open more than one form, and the
 report-type strip is collapsed to one entry per type, so the two axes have one control each.
 
+### Forecast sets belong to the edition that produced them
+
+**Amended 2026-10-23 (forecast verification, P18).** The prediction ledger (ADR 0029) hangs its sets
+off the report row, so each edition carries its own sets and none is shared across editions; the
+set's `version` is frozen at ingest beside its `report_id`. Reading follows from that:
+
+- **The card shows the edition's own sets.** Switching edition swaps the card, and a client clears
+  the previous edition's data before rendering the next one, so one edition's prediction is never
+  shown under another edition's body.
+- **An edition with no accepted set says so and may link one sibling.** A sibling is another written
+  form of the same symbol, date and report type that the reader may open and that has an accepted
+  set. Readability is applied first, with the same version grants and visibility as everything else
+  in this ADR, so a private edition cannot produce even an empty link.
+- **Membership keeps the ledger's rule across editions.** The earliest accepted set per symbol,
+  report type and month is the group member, whichever edition wrote it, so ingesting an external
+  edition first does not stop an analysis counting. When the member is a sibling edition's set,
+  an internal reader or an administrator is told it was "counted on edition X" rather than shown a
+  duplicate. An own-scoped or external reader gets no membership field and no "counted on" link, so
+  an edition they cannot see is never revealed through the count.
+- **Which editions carry predictions is the producer's choice.** The portal does not require the
+  default edition to be the only one that emits them; the workflow is expected to, and nothing in
+  the read rules depends on it.
+
 ## What we deliberately do NOT do
 
 - **Store one body per version in one row.** Rejected with the marked-up-sections design: the forms

@@ -109,7 +109,7 @@ func TestSettlementNeverReadsTheTable(t *testing.T) {
 		}
 		for _, decl := range parsed.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if ok && fn.Name.Name == "annotateReadPhases" {
+			if ok && fn.Name.Name == "annotateReadPhasesWithCalendars" {
 				continue
 			}
 			location := "package declaration"

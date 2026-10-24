@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -208,19 +209,36 @@ func TestNotifyJobDone(t *testing.T) {
 	s.st.UpsertUser(User{Username: "kaz", PasswordHash: "h", Role: "user"})
 	s.st.SetUserProfile("kaz", "Kazuha", "kaz@x.io")
 	sent := enableEmail(s)
-	j := BatchJob{ID: 5, CreatedBy: "kaz", Status: "finished", Total: 3, Succeeded: 2, Failed: 1}
+	create := func(notify bool) BatchJob {
+		id, err := s.st.CreateBatchJob(seedTarget(t, s.st), 1, 0, "kaz", []map[string]string{{"code": "a"}}, "normal", notify)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.st.FinishJob(id, false); err != nil {
+			t.Fatal(err)
+		}
+		j, _ := s.st.GetBatchJob(id)
+		return j
+	}
+	j := create(false)
 
 	// Without opt-in, no email.
 	s.notifyJobDone(j)
 	wantNoEmail(t, sent)
 
 	// Opted in → the submitter is emailed.
-	s.jobNotify.Store(int64(5), true)
+	j = create(true)
 	s.notifyJobDone(j)
-	if m := wantEmail(t, sent); !strings.HasPrefix(m, "kaz@x.io\n") || !strings.Contains(m, "#5") {
+	if err := s.processNotificationOnce(context.Background(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if m := wantEmail(t, sent); !strings.HasPrefix(m, "kaz@x.io\n") || !strings.Contains(m, "#"+itoa64(j.ID)) {
 		t.Errorf("job-done email = %q", m)
 	}
 	// The opt-in is single-shot (cleared after sending).
 	s.notifyJobDone(j)
+	if err := s.processNotificationOnce(context.Background(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	wantNoEmail(t, sent)
 }

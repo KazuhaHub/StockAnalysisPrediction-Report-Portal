@@ -32,7 +32,12 @@ const (
 	// is 0 = unlimited, which puts it in the same small class as the machine API's ceiling above:
 	// zero is a real answer here, not the "unset" that every other scalar refuses. The bound below
 	// is what stops a typo expressing a history nobody meant.
-	setReportRevisionsKeep = "report_revisions_keep"
+	setReportRevisionsKeep   = "report_revisions_keep"
+	setForecastSlotsOfficial = "forecast_slots_official"
+	setForecastSlotsExplore  = "forecast_slots_explore"
+	setForecastWaitSec       = "forecast_wait_sec"
+	setForecastCustomPerMin  = "forecast_custom_per_min"
+	setForecastMembersPerMin = "forecast_members_per_min"
 )
 
 // The shipped behaviour, and the fallback whenever a stored value cannot be read.
@@ -91,6 +96,12 @@ func (s *Server) loginLimits() (int, time.Duration) {
 // which is what an unconfigured portal has.
 func (s *Server) apiV1RatePerMin() int {
 	return s.settingInt(setAPIV1RatePerMin, 0, 0, maxAPIV1RatePerMin)
+}
+
+func (s *Server) forecastComputeLimits() forecastComputeConfig {
+	return forecastComputeConfig{Official: s.settingInt(setForecastSlotsOfficial, 2, 1, 8),
+		Explore: s.settingInt(setForecastSlotsExplore, 2, 0, 8),
+		Wait:    time.Duration(s.settingInt(setForecastWaitSec, 10, 1, 60)) * time.Second}
 }
 
 // ---------- the machine API's request ceiling ----------
@@ -169,11 +180,17 @@ func (s *Server) rateLimitV1(h http.HandlerFunc) http.HandlerFunc {
 // form shows what the portal is actually doing — including on a portal that has never saved these.
 func (s *Server) limitsJSON() map[string]any {
 	max, window := s.loginLimits()
+	forecast := s.forecastComputeLimits()
 	return map[string]any{
-		"session_ttl_hours":     int(s.sessionTTL() / time.Hour),
-		"login_fail_max":        max,
-		"login_fail_window_min": int(window / time.Minute),
-		"apiv1_rate_per_min":    s.apiV1RatePerMin(),
+		"session_ttl_hours":      int(s.sessionTTL() / time.Hour),
+		"login_fail_max":         max,
+		"login_fail_window_min":  int(window / time.Minute),
+		"apiv1_rate_per_min":     s.apiV1RatePerMin(),
+		setForecastSlotsOfficial: forecast.Official,
+		setForecastSlotsExplore:  forecast.Explore,
+		setForecastWaitSec:       int(forecast.Wait / time.Second),
+		setForecastCustomPerMin:  s.settingInt(setForecastCustomPerMin, 20, 0, 600),
+		setForecastMembersPerMin: s.settingInt(setForecastMembersPerMin, 60, 0, 600),
 	}
 }
 
@@ -181,10 +198,15 @@ func (s *Server) limitsJSON() map[string]any {
 // omission, which is right for a captcha toggle and wrong for a session lifetime, so a field that
 // was not sent leaves the stored one alone.
 type limitsInput struct {
-	SessionTTLHours    *int `json:"session_ttl_hours"`
-	LoginFailMax       *int `json:"login_fail_max"`
-	LoginFailWindowMin *int `json:"login_fail_window_min"`
-	APIV1RatePerMin    *int `json:"apiv1_rate_per_min"`
+	SessionTTLHours       *int `json:"session_ttl_hours"`
+	LoginFailMax          *int `json:"login_fail_max"`
+	LoginFailWindowMin    *int `json:"login_fail_window_min"`
+	APIV1RatePerMin       *int `json:"apiv1_rate_per_min"`
+	ForecastSlotsOfficial *int `json:"forecast_slots_official"`
+	ForecastSlotsExplore  *int `json:"forecast_slots_explore"`
+	ForecastWaitSec       *int `json:"forecast_wait_sec"`
+	ForecastCustomPerMin  *int `json:"forecast_custom_per_min"`
+	ForecastMembersPerMin *int `json:"forecast_members_per_min"`
 }
 
 // applyLimits validates and stores the block, returning false once it has answered 400. Out of
@@ -204,6 +226,11 @@ func (s *Server) applyLimits(w http.ResponseWriter, in *limitsInput) bool {
 		{setLoginFailMax, in.LoginFailMax, 1, maxLoginFailMax, "login_fail_max", false},
 		{setLoginFailWindowMin, in.LoginFailWindowMin, 1, maxLoginFailWindowMin, "login_fail_window_min", false},
 		{setAPIV1RatePerMin, in.APIV1RatePerMin, 0, maxAPIV1RatePerMin, "apiv1_rate_per_min", true},
+		{setForecastSlotsOfficial, in.ForecastSlotsOfficial, 1, 8, setForecastSlotsOfficial, false},
+		{setForecastSlotsExplore, in.ForecastSlotsExplore, 0, 8, setForecastSlotsExplore, true},
+		{setForecastWaitSec, in.ForecastWaitSec, 1, 60, setForecastWaitSec, false},
+		{setForecastCustomPerMin, in.ForecastCustomPerMin, 0, 600, setForecastCustomPerMin, true},
+		{setForecastMembersPerMin, in.ForecastMembersPerMin, 0, 600, setForecastMembersPerMin, true},
 	}
 	// Validate the whole block before storing any of it, so a bad fourth field cannot leave the
 	// first three saved and the form showing a mixture of old and new.

@@ -4,6 +4,10 @@
 [ADR 0034](0034-calver-baseline-and-database-compatibility-reset.md) and the restore compatibility
 rule of [ADR 0027](0027-backup-and-restore.md).
 
+> **Amended by [ADR 0042](0042-separate-strip-and-popup-dismissal.md):** a step may also rename a
+> baseline column. The baseline keeps the old name until the step is retired by the ADR 0034 §5
+> process; the shape check, the step's verification and restore all honour the rename.
+
 ## Context
 
 ADR 0034 froze the base schema as the *acceptance contract*: `baseSchemaStmts()` is what a database
@@ -107,6 +111,48 @@ second half, a future step that adds a table would silently leave that table's d
 backup — the kind of loss nobody notices until a restore.
 
 ## Consequences
+
+### Explicit operator steps (amended 2026-10-22, superseded 2026-10-24)
+
+**Superseded 2026-10-24 (owner).** Every step is applied at startup, `0009` included. The `explicit` flag
+on a step, the startup preflight that refused an unrecorded step and the explicit open mode are removed.
+A database that lacks `0009` gets it at normal startup, in list order and in its own transaction, like any
+other step; its custom shape verification still runs inside that transaction before the ledger row is
+written, and on every later start.
+
+Operators back up with the previous release before upgrading, as before any release; the program takes no
+automatic backups. `report-portal schema-upgrade` remains as an optional tool for an operator who wants to
+see what the next start would apply or to apply it while the portal is stopped: with no arguments it lists
+the pending steps and changes nothing, and `--apply` runs the normal runner and verifies the result. No
+deploy needs it.
+
+Why. A deploy has to be "pull the new image and restart". An explicit gate turned every release that
+carried such a step into a manual maintenance window: stop the container, back up with the previous image,
+run a one-off container with the entrypoint overridden, inspect, apply, inspect, start. Left running, a
+refused container under a restart policy restarted and refused in a loop that kept opening the database.
+What the gate bought over an automatic step was little. The rollback story is the same for every step
+(restore the pre-upgrade backup with the previous release, because a build that knows the ledger refuses a
+ledger row it does not know), and `0009` is the kind of step the runner is built for: it adds one empty
+table, backfills nothing, is idempotent, and is verified before it is recorded. A person typing a command
+first does not make that safer.
+
+What the 2026-10-22 amendment said, kept for the record and no longer in effect:
+
+> The owner-approved purge ownership evidence in ADR 0039 adds an `explicit` step (`0009`; `0007` and `0008` are the
+> automatic notification and extension steps, and `0010` the announcement step that reached main first: the list
+> is in merge order, so `0009` is its last entry). Existing
+> database startup refuses an unrecorded explicit step before applying any earlier automatic step;
+> operators inspect with `schema-upgrade` and apply offline with `schema-upgrade --apply` after a
+> pre-upgrade backup. Fresh initialization may create the step. Already-recorded products are still
+> verified on every start, with this step additionally verifying key types/nullability/constraints.
+> Released automatic steps are unchanged. The ledger, transactional runner, dump declarations and
+> restore compatibility rules remain shared; this is a boundary on who initiates an existing
+> database's schema change, not a second migration ledger.
+
+What stays from that amendment: a step may declare a `verify` function for shape that columns, tables and
+indices cannot express (key types, nullability, constraints), and `0009` uses it. It runs inside the
+step's transaction and on every start, so a recorded but damaged table is refused rather than repaired and
+a lookalike table in front of an unrecorded step is refused before its ledger row exists.
 
 - **The acceptance contract is unchanged in shape.** A database that does not satisfy the baseline is
   still refused before any statement runs. What changed is the *startup behaviour* for a database

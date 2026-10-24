@@ -1,11 +1,22 @@
 # Forecast verification v2 (预测验证 v2): implementation plan
 
+> Current identifier/rollout amendment (2026-10-22, updated 2026-10-24): step `0006` is the implemented access attribution
+> shape; owner-approved purge ownership evidence now owns step `0009` (`0007` and `0008` are the
+> notification and extension steps, which merge first). The migration list is in merge order, not id order:
+> the announcement step `0010` reached main first, so the list reads `0001`–`0006`, `0010`, then `0007`, `0008`
+> and `0009` as they land, and `0009` is always the last entry. Tier 2 provenance is proposed as `0011`, still
+> unapproved and requiring a fresh identifier check. R2a is no longer schema-free: it ships step `0009`,
+> which ordinary startup applies (a deploy is pull and restart, after a backup taken with the previous
+> release; see the [upgrade notes](forecast-purge-ownership-upgrade.md)). An explicit offline upgrade was
+> required between 2026-10-22 and 2026-10-24 and is no longer. Historical baseline references below
+> describe their original source snapshot.
+
 | | |
 |---|---|
 | Status | Handoff document. Nothing in it is implemented. The owner's decisions it builds on are final; the DDL in §3 is the shape the owner approved on 2026-10-19 and needs no further sign-off unless a PR deviates from it. |
 | Date | 2026-10-19 (Asia/Shanghai) |
 | Baseline commit | `origin/main` at `af1d2cf6` (`fix(auth): hold mandated-but-unenrolled cookie at the wall on /api/v1 reads (#108)`). Every `file:line`, function, route, migration step and ADR number below was read at that commit. Files untouched since the plan's baseline (`c9b2b747`) keep the plan's line numbers; the ones that moved (`apiv1.go`, `routes.go`, `migrate_steps.go`, `security_policy.go`, `forecast_read_api.go`, `user_admin_api.go`, the locale bundles, `AppLayout.tsx`) are cited at their new lines. |
-| Next free ids | **Migration step `0006`.** `(*Store).migrations()` at `migrate_steps.go:167-169` registers `0001`–`0005`; `0005` is already taken by `announcements.display` (`migrate_steps.go:426-449`). Tier 2 provenance is therefore `0007`, not the plan's `0006`. **ADR `0037`.** The newest file in `docs/adr` is `0036-account-sessions-and-login-history.md`; this plan uses `0037`, `0038`, `0039`. Re-check both lists at merge time. |
+| Next free ids | **Migration step `0006`.** `(*Store).migrations()` at `migrate_steps.go:167-169` registers `0001`–`0005`; `0005` is already taken by `announcements.display` (`migrate_steps.go:426-449`). Tier 2 provenance is therefore `0011` (see the amendment above), not the plan's `0006`. **ADR `0037`.** The newest file in `docs/adr` is `0036-account-sessions-and-login-history.md`; this plan uses `0037`, `0038`, `0039`. Re-check both lists at merge time. |
 | Inputs | [forecast-verification-v2-decisions.md](forecast-verification-v2-decisions.md) (the owner's decisions), the code at the baseline, [forecast-verification-v2-plan.md](forecast-verification-v2-plan.md) (the plan: defects F01–F14, B1–B7, C1–C10, D1–D4, PRs P0–P37), ADR 0029, ADR 0022/0024/0017/0028/0035, [forecast-verification-design.md](forecast-verification-design.md), [forecast-verification-implementation.md](forecast-verification-implementation.md) (the v1 build document, whose shape this one follows), [forecast-verification-demo.html](forecast-verification-demo.html). |
 | Precedence | **Decisions > code > plan.** Where the decisions page differs from the plan, the decisions win. Where the plan describes code that is not there, the code wins and this document says so (§0.3). Where this document and the plan differ, this document wins. If this document and the decisions page ever disagree, stop and ask the owner; do not pick one. |
 
@@ -111,7 +122,7 @@ All decisions are made. This table only says which PR each one drives. The decis
 
 | # | Plan said | This document | Reason |
 |---|---|---|---|
-| 1 | Migration `0005` = `forecast_view`, `0006` = Tier 2 provenance | `0006` = the access model's two columns; `0007` = Tier 2 provenance | `0005` was taken by `announcements.display` after the plan was written (`migrate_steps.go:426-449`). |
+| 1 | Migration `0005` = `forecast_view`, `0006` = Tier 2 provenance | `0006` = the access model's two columns; `0009` = purge ownership evidence; `0010` = announcements (reached main first); `0011` = Tier 2 provenance | `0005` was taken by `announcements.display` after the plan was written (`migrate_steps.go:426-449`). |
 | 2 | Boolean `user_groups.forecast_view`, a global `forecast_record_published` switch, external tenants denied (Phase 2) | `user_groups.forecast_scope TEXT` (`all`/`own`/`none`/NULL) plus `prediction_sets.attributed_ou BIGINT`; **no publish switch**; external tenants in scope now, with protections | Decisions page, "the access model". With every OU at `none` by default, the OU scope itself is the publish control; a second switch would be a second spelling of the same decision. |
 | 3 | P34: `/api/v1` becomes token-only, e2e section C rewritten | Dropped. V21 is done by #108, which keeps the cookie on v1 reads but holds it at the enrolment wall (`v1CanRead`). This plan instead applies the forecast scope to any cookie caller of the two v1 prediction reads (P26). | Decisions page, V21. |
 | 4 | Plan R1a = statements + governance; R1b = settlement correctness | R1a = **all** evaluator correctness (F01–F14) plus governance (B1, ledger start, V8 with CSI 800, V24, OpenAPI). R1a is cut as two Betas so the benchmark schedule is deployed before 2026-11-01 (§1.2). R1b = operations, the reading-page hotfix, the attribution schema and owner-token work. | The owner's instruction for this document. |
@@ -119,7 +130,7 @@ All decisions are made. This table only says which PR each one drives. The decis
 | 6 | Ledger start bounded by `populationBound` = 2026-10-19T07:00:00Z, value open | Value fixed at `2026-10-18T16:00:00Z`; the bound mechanism stays as a guard | Decisions page, V3. |
 | 7 | Unrecorded floor from `meta['mig:0004']` | Floor captured from the **ledger start** instant when it is saved (same transaction) | The owner's instruction ("the B1 fix with the ledger-start mechanism"). One boundary, one meaning of "since the ledger began". |
 | 8 | Alerts as webhook events only | Webhook events **plus** a forecast alert dispatcher that sends Email (existing `sendEmail`, `email.go:67`) and Slack (incoming-webhook text format) — P41 | V18 names Email and Slack. The portal's webhooks POST signed JSON (`webhook_run.go:33-77`), which Slack cannot render, and nothing in the code speaks Slack today. |
-| 9 | App-bridge token: "accepted sets only" | The bridge token records its minting user (in memory) and prediction reads apply that user's scope; `none` gets 403 | Without it, an internal user at `none` could read every set through any installed app (`apiAppToken` mints `query` for every unrestricted user, `apps_api.go:121-141`; `appTokenEntry` carries no user, `apps_token.go:46-57`). |
+| 9 | App-bridge token: "accepted sets only" | App-bridge tokens get no forecast reads: both v1 prediction reads answer `403 forecast_unavailable` and read nothing from the ledger (fail closed). The order is cookie session, then persistent query token (the unchanged machine contract), then refusal. The refusal holds until the shared token binding from the notification work lands (it records the minting identity in the existing app-token registry); a follow-up then re-enables scoped bridge reads on that binding (minting user rechecked, accepted report-backed sets only) | Without a refusal, an internal user at `none` could read every set through any installed app (`apiAppToken` mints `query` for every unrestricted user, `apps_api.go:121-141`; `appTokenEntry` carries no user, `apps_token.go:46-57`). The notification work adds that binding itself, so P26 leaves `apps_token.go` and `apps_api.go` untouched rather than duplicate it. This is stricter than main, where a bridge query token received the unscoped machine shape. |
 | 10 | Owner token for internal runs: not covered | P30 writes the `g:<OU>` viewer principal only for an effectively restricted OU, and P39b depends on P30 instead of repeating the rule at its call site | `AddReportViewer` writes `g:<OU>` for any OU (`version.go:381-394`) and every restricted reader's principals include every OU up its chain, Default included (`report_owner.go:162-185`). Injecting tokens into internal runs without this would make internal reports readable by tenants under any `visibility=group` version — plan defect D4, amplified. |
 | 11 | `fetchTencentRange` at `quote.go:1570`; `prefetch.ts:47`; unrecorded copy at `en-US.json:811`; v1 forecast routes at `routes.go:181-182` | `quote.go:1588`; `prefetch.ts:48`; `en-US.json:815`; `routes.go:184-185` | The code moved. |
 | 12 | Owner-token injection is unconditional on the portal side | P39a first hides and strips reserved `_rp_*` inputs everywhere a target's input list is shown or accepted | Once the 16 Dify workflows declare `_rp_owner_token`, a target refresh (`dify_refresh.go:185-200`) copies it into the stored input list, which the batch form and CSV templates render as a user-facing field. Nothing filters `_rp_*` today (only `report_owner.go:61` mentions the prefix). |
@@ -170,7 +181,7 @@ An adversarial review of this document produced the 18 findings below. Each is f
 | **R2a** access | Fri 2026-11-20 | P13, P15, P26, P27, P28, P22 | `/forecast` for members of OUs set to `all`/`own` (the owner sets `安禅内部` to `all`); OU editor field; OUs at `none` lose the card | One clean week |
 | **R2b** parity, reading page, Tier 1 sources | Fri 2026-12-11 | P14, P16, P17, P18, P19, P20, P37, P23, P24, P25 | The demo look; chip, timeline dots and the run-page card once the stage is `full`; ledger chain on the quotes panel; Sina shadow | P18's `/api/stock` benchmark within budget; seeded-preview review signed off |
 | **R3** cleanup | No earlier than two weeks after R2b is in production | P29 | — | — |
-| Tier 2 | Separate go/no-go, no earlier than 2027-01 | P32 (migration `0007`), P33 | — | V19 entry criteria |
+| Tier 2 | Separate go/no-go, no earlier than 2027-01 | P32 (migration `0011`), P33 | — | V19 entry criteria |
 
 **Dropped plan PRs.** P0 (the declaration was made in Dify issue #1, decisions page V3); P21 (folded into P38);
 P34 (V21 done by #108).
@@ -240,9 +251,11 @@ response lists each item with its state (P9):
 5. Alert channels verified: a test alert delivered to **both** the configured Email recipients and the Slack
    webhook within the last 30 days (`forecast_alert_test_ok_at`, P41).
 
-Item 6, "the ledger chain is not empty", is **not** in this list until P23 (R2b) builds the chain. Before P23 the
-evaluator calls `fetchTencentRange` directly (`forecast_eval.go:211-216`), so a `quote_source_order` check would gate
-nothing. P23 appends it as item 6 (§8.8).
+6. The ledger chain is usable: `ledger_chain` (`forecastReadiness` in `forecast_ops.go`), true when an explicitly
+   enabled settlement chain exists and its primary carries both evidence capabilities (P23, §8.8). It was not in this
+   list before P23, because the evaluator then called `fetchTencentRange` directly (`forecast_eval.go:211-216`) and a
+   `quote_source_order` check would have gated nothing. It is now: with it red, mode `1` is refused (409
+   `forecast_not_ready`) and the watchdog's `no_source` reason fires.
 
 ### 1.5 Read-only checks before each deploy (owner)
 
@@ -500,8 +513,8 @@ adds its rows) asserts every row of this table on both drivers. FC.
 | meta | `forecast_dry_gate`, `forecast_alert_test_ok_at` | Reset. A restored database must be re-checked before mode `1`. |
 | meta | `forecast_alert_email_to`, `forecast_alert_slack_url` | From the dump. |
 | meta | `forecast_reader` | The lower of dump and live (`off` < `card` < `full`). |
-| meta | compute limits, `forecast_fallback`, shadow and call statistics, weekly viewer counts | From the dump. |
-| column | `user_groups.forecast_scope` | From the dump; an older dump lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`. So a restore can only narrow access, never widen it. |
+| meta | compute limits, `forecast_fallback`, shadow and call statistics, weekly viewer counts, `forecast_signals_<date>` counters | From the dump. |
+| column | `user_groups.forecast_scope` | From the dump, verbatim. An older dump (before step `0006`) lacks it (`olderDumpOK`), every OU inherits, and `EnsureDefaultForecastScope` sets Default to `none`, so that restore can only narrow access. A dump taken after step `0006` can be wider than the live database, so after any restore the operator compares `GET /api/admin/forecast/access` with the values saved beforehand (§12.3). `TestRestoreBringsOUScopesBackAsDumped` pins this. |
 | column | `prediction_sets.attributed_ou` | From the dump; an older dump lacks it and every set reads as unattributed (true for that dump). |
 | enum value | `prediction_sets.state = 'test'` | An older binary drops it from coverage (`forecastMembership`, `forecast_groups.go:115-157`); a display gap only. |
 | enum value | `prediction_sets.base_check = 'refused_final'` | An older binary reads a member with final refusals: the same meaning. |
@@ -511,7 +524,7 @@ adds its rows) asserts every row of this table on both drivers. FC.
 both at `1` restore to `dry` with one `forecast.auto` audit row carrying `restore_gates_empty`; dump `0` with live
 `1` restores to `0` and writes no second row; `dry` stays `dry`. FC (a restore never leaves `1` with no gate).
 
-### 3.4 Step `0007` (Tier 2 only; shape decided at the Tier 2 go, V19)
+### 3.4 Step `0011` (Tier 2 only; shape decided at the Tier 2 go, V19)
 
 The plan's §5 "0006" shape, renumbered: four `TEXT NOT NULL DEFAULT ''` columns
 (`prediction_sets.base_source`, `prediction_sets.base_logic`, `prediction_marks.bench_source`,
@@ -1879,7 +1892,7 @@ return nothing, not everything. FC
 
 ---
 
-## 7. Release 2a: access (schema-free; reads step `0006`)
+## 7. Release 2a: access (purge evidence step `0009`; reads step `0006`)
 
 ### 7.1 P13 `docs/forecast-demo-v2` — production baseline screenshots, then the demo revision
 
@@ -1907,13 +1920,13 @@ the `AuditPage` deep link; the existing matrix and drawer tests stay green.
 ### 7.3 P26 `feat/forecast-record-access` — the scope resolver, reader routes, external protections, compute governance
 
 **Goal.** Implement the access model: every non-admin forecast surface — the record, its routes, the reading-page
-data routes, the v1 prediction reads for cookie and bridge callers — asks one pure resolver over one consistent
-read.
+data routes, the v1 prediction reads for cookie callers — asks one pure resolver over one consistent
+read. App-bridge tokens are refused on those reads (row 9 of §0.3).
 
 **Files.** `internal/app/forecast_access.go` (new), `internal/app/forecast_groups_api.go`,
 `internal/app/forecast_groups_members.go`, `internal/app/forecast_groups_store.go`, `internal/app/forecast_read_api.go`,
-`internal/app/forecast_compute.go` (new: pools, flights, per-user limits), `internal/app/apps_token.go`,
-`internal/app/apps_api.go`, `internal/app/apiui.go` (`meJSON`), `internal/app/user_admin_api.go`,
+`internal/app/forecast_compute.go` (new: pools, flights, per-user limits),
+`internal/app/apiui.go` (`meJSON`), `internal/app/user_admin_api.go`,
 `internal/app/routes.go` (the `gate` field, §7.3.4), `internal/app/routes_test.go`, `internal/app/limits.go`,
 `internal/app/audit.go`, and the web side of the 403: `web/src/pages/StockPage.tsx`, `web/src/pages/StockPage.test.tsx`,
 `web/src/api/types.ts` (`Me.forecast`), `web/src/auth.tsx` (exposes `me.forecast`).
@@ -1978,6 +1991,13 @@ found:
   `dangling_group`; a cycle or a depth over 64 resolves to `none` with `cyclic_chain`. Without this the walk would stop
   at the missing row, the external flag would be read from a shortened chain, and a tenant under a restricted ancestor
   would be treated as internal.
+  On the forecast read routes that `none` is what the caller is told (403 `forecast_unavailable`, the matrix's `Dangling`
+  subject) even though a dangling parent also leaves the enrolment policy unreadable; the wall defers to this
+  definite refusal only on those routes and only for a `dangling_group` or `cyclic_chain` decision, and every other
+  route keeps its 503 `enrolment_policy_unavailable` for a dangling chain. A cyclic chain does not make the policy
+  unreadable (the wall walks past a cycle), so a cyclic account reaches the forecast gate and is refused there with the
+  same 403. A transient store error is not a structural reason and stays a retryable 503.
+  (`TestBrokenOUChainAnswersForecastUnavailableOnForecastReads`.)
 - **No lenient helper.** The gate never calls `isRestricted`, `isAdmin`, `GetUser`, `groupChain`,
   `EffectiveGroupSettings` or `GroupRestrictedEffective`. A source-scan test enforces it.
 - **No caching of the decision.** A user moved by an SSO rule gets the new decision on the next request.
@@ -2015,7 +2035,7 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 | Protection | Mechanism | Refusal / omission |
 |---|---|---|
 | Official monthly view only | `mode=custom` on the groups or members route | 403 `forecast_custom_not_allowed` |
-| No site-wide volume | For `External && Scope == all`, **conservative default** (owner question 8, §16): the response omits `coverage` on every group and `unrecorded`; a non-mature cell carries only `state` (no `n`, `resolved`, `total`, `refused`, pending reasons); **a mature cell carries its metrics and a boolean `min_n_met: true` (rendered as an "n ≥ 30" badge) but no `n`, no `total`, no `resolved`**, because a mature cell's `n` is a count of ledger members and would reveal the ledger's volume. The members route omits `total`, per-status member counts and any `n` for these viewers (the readable rows themselves are still listed, paginated by cursor with no total), and the CSV has no `n`, coverage or count column. For `External && Scope == own` the coverage and `n` of the viewer's own population are shown (it is their own volume); `unrecorded` is never shown to non-admins. | fields absent (not zero) |
+| No site-wide volume | For `External && Scope == all`, **conservative default** (owner question 8, §16): the response omits `coverage` on every group and `unrecorded`; a non-mature cell carries only `state` (no `n`, `resolved`, `total`, `refused`, pending reasons); **a mature cell carries its metrics and a boolean `min_n_met: true` (rendered as an "n ≥ 30" badge, once per cell and never as a metric's own sample size, whose denominator is a smaller subset; one visible line under the legend and the drawer say what the badge means) but no `n`, no `total`, no `resolved`**, because a mature cell's `n` is a count of ledger members and would reveal the ledger's volume. The members route omits `total`, per-status member counts and any `n` for these viewers (the readable rows themselves are still listed, paginated by cursor with no total), and the CSV has no `n`, coverage or count column. For `External && Scope == own` the coverage and `n` of the viewer's own population are shown (it is their own volume); `unrecorded` is never shown to non-admins. | fields absent (not zero) |
 | Drawer lists only readable reports | Members are filtered by `canReadReport(report_id, viewerScope(user))` (`forecast_read_api.go:117-131`); purged sets (`report_id` NULL) are omitted for external viewers (ADR 0029 §5 fail-closed-after-purge) | rows absent |
 | n ≥ 30 | unchanged gate | — |
 | No membership badge, no payload, no non-accepted sets, no orphaned rows on the reading page | P10/P18 shaping keyed on `External` | fields absent |
@@ -2024,15 +2044,15 @@ func (s *Store) loadForecastGroupSets(rtype, from, to string, pop forecastPopula
 
 | Route | Class (helper) | Scope gate | Contract | Errors |
 |---|---|---|---|---|
-| `GET /api/forecast/groups` | session (`s.session`) | `all`/`own` (admin: `all`) | **New.** The groups response over `populationFor(d)`, shaped by §7.3.3. Never `unrecorded`. Compute governance applies. Registered with `gate = "forecast_scope"` (below). | 401 anonymous; 403 `enrolment_required` (wall); 403 `forecast_unavailable` (`none`); 403 `forecast_custom_not_allowed`; 503 `forecast_busy` + `Retry-After`; 429 `forecast_rate_limited` |
+| `GET /api/forecast/groups` | session (`s.session`) | `all`/`own` (admin: `all`) | **New.** The groups response over `populationFor(d)`, shaped by §7.3.3, stating the population it covers (`scope`, plus `scope_ou` for an `own` reader; the admin alias states `scope: "all"` too). Never `unrecorded`. Compute governance applies. Registered with `gate = "forecast_scope"` (below). | 401 anonymous; 403 `enrolment_required` (wall); 403 `forecast_unavailable` (`none`); 403 `forecast_custom_not_allowed`; 503 `forecast_busy` + `Retry-After`; 429 `forecast_rate_limited` |
 | `GET /api/forecast/groups/members` | session (`s.session`) | as above | **New.** Members of one cell in the same population; scores nothing (P16a); outcomes only when mature; rows filtered by §7.3.3. | as above |
 | `GET /api/admin/forecast/groups`, `/members` | perm `PermManage` (`routes.go:314-315`) | admin | Unchanged aliases (population `all`, with `unrecorded`) until P29. | — |
 | `GET /api/admin/forecast/access` | admin | — | **New.** Per OU: own value, effective scope, source OU, external flag, account counts per effective scope; plus a hypothetical `?ou=<id>&scope=<v>` preview. Resolves every account that can sign in (unassigned and root-OU members included). | 400 `forecast_bad_scope` |
 | `GET /api/admin/groups` | admin (`routes.go:290`) | — | Adds `forecast_scope` (own value or null), `forecast_scope_effective`, `forecast_scope_source`, all server-resolved. | — |
 | `PUT /api/admin/groups/{id}` | admin (`routes.go:292`) | — | Adds `forecast_scope`, **presence-aware** (decoded through `json.RawMessage`): omitted → unchanged; `null` → inherit (on the Default OU coerced to `"none"`); `"all"`/`"own"`/`"none"` → stored; anything else → 400 `forecast_bad_scope`. Audited in the `group.change` row as `forecast_scope: {from, to}` only when it changes. | 400 `forecast_bad_scope` |
-| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route). | — |
+| `GET /api/me` | session (self-resolving, `routes.go:191`) | — | Adds `forecast: {scope, external}` (navigation hints only; the server decides on every route), plus `ou` for an `own` reader: the display name of the OU their population is rooted at. | — |
 | `GET /api/report/{id}/predictions`, `GET /api/predictions` | session (`routes.go:203,206`) | `all`/`own` for non-admins | Unchanged shape (P10 already withholds payload from scoped callers); `none` → 403. | 403 `forecast_unavailable` |
-| `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; bridge token: the minting user's decision; persistent machine token: unscoped | Cookie: the session-route shape. Bridge: accepted sets only, no payload, no errors, no membership. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
+| `GET /api/v1/reports/{id}/predictions`, `GET /api/v1/predictions` | bearer (`routes.go:184-185`) | cookie caller: the cookie user's decision; persistent machine token: unscoped; any other Bearer (an app-bridge token): refused | Cookie: the session-route shape. Bridge: no forecast read, 403 `forecast_unavailable`, ledger not read. Machine: the machine shape. | 401; 403 `enrolment_required` (#108); 403 `forecast_unavailable` |
 
 **The `gate` annotation does not exist yet; P26 adds it.** `routeRow` today has `pattern`, `class` and `perm`
 (`routes.go:44-48`), so a test cannot ask which routes sit behind the forecast scope. This PR adds
@@ -2054,10 +2074,12 @@ func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handle
 true (`TestForecastGatedRoutesDenyANoneUser`, below): a table row that says `forecast_scope` but whose handler skips
 `forecastAccess` fails there.
 
-**Bridge tokens carry their user.** `appTokenEntry` (`apps_token.go:52-55`) gains `user string`; `mint(scopes,
-user, now)`; a new `lookup(tok, now) (user string, ok bool)`. Tokens stay in memory only (no schema). The two v1
-prediction handlers branch on the credential: cookie (`currentActiveUser`), bridge (`appTok.lookup`), or persistent
-token (`s.st.TokenValid`).
+**Bridge tokens get no forecast reads.** The app-token registry (`apps_token.go:52-55`) records scopes and expiry
+but no user, and the notification work adds the shared binding that will; P26 therefore leaves `apps_token.go` and
+`apps_api.go` byte-identical to main. The two v1 prediction handlers resolve the credential in a fixed order: cookie
+(`currentActiveUser`), then persistent token (`s.st.TokenValid`, the unchanged machine contract), then refusal: any other
+Bearer that `v1CanRead` admitted is a bridge token and gets 403 `forecast_unavailable` before the ledger is read. A
+follow-up, after the shared binding lands, re-enables scoped bridge reads on it.
 
 **Statistics are never reachable by a token.** The reader routes are session routes; a Bearer token alone gets 401.
 
@@ -2116,8 +2138,11 @@ token (`s.st.TokenValid`).
 - `TestMeForecastMatchesTheGate`: for every matrix subject, `/api/me.forecast.scope` equals the route outcome. BI
 - `TestGroupSaveForecastScope`: omitted → unchanged; `null` → NULL (Default → `none`); bad value → 400; audit only on
   change. FC
-- `TestBridgeTokenCarriesItsUser`: a token minted by a `none` user → 403 on v1 prediction reads; by an `all` user →
-  accepted sets only, no payload. FC
+- `TestBridgeTokenGetsNoForecastReads`: a bridge token minted by `appTok.mint` with the `query` scope, whoever the
+  minting account was (`none`, `own`, `all`, admin) → 403 `forecast_unavailable` on both v1 prediction reads, with
+  nothing but the error in the body; `TestBridgeDenialReadsNothingFromTheLedger` proves no ledger read happens;
+  `TestPersistentQueryTokenKeepsTheMachineView` and `TestCookieReaderStaysScopedOnV1Reads` prove the two credentials
+  around it are unchanged. FC
 - `TestV1CookieAppliesForecastScope`: a cookie of a `none` user → 403 `forecast_unavailable` on both v1 prediction
   reads (after passing #108's wall). FC
 - `TestForecastComputeIsBounded`: cached official requests never wait; exploratory saturation → 503 with
@@ -2144,10 +2169,11 @@ token (`s.st.TokenValid`).
   failure still shows P10's inline error with retry. FC/FO
 - PG variants of the population loader.
 
-**Rollout.** Deploy (R2a is schema-free: step `0006` shipped in R1b). Every OU is `none`, so only admins see anything,
+**Rollout.** Deploying applies step `0009` at startup, after a backup taken with the previous release; step `0006` belongs to R1b. Every OU is `none`, so only admins see anything,
 and **non-admin members of OUs at `none` lose the reading-page card they have today** — that is the decided model.
 The owner then sets `安禅内部` to `all` in the OU editor (P27). **Rollback.** Fastest: set the OU values back to
-`none` (audited, no deploy). Binary: revert R2a (safe, no schema).
+`none` (audited, no deploy). Binary rollback across `0009` requires the pre-upgrade backup and the
+[upgrade notes](forecast-purge-ownership-upgrade.md); do not remove the ledger row.
 
 ### 7.4 P27 `feat/forecast-record-page` — `/forecast`, the operations page, the OU editor field
 
@@ -2160,10 +2186,13 @@ and the reading page's handling of `forecast_unavailable` shipped in P26 (`Stock
 
 - **`/forecast`** mounts the shared matrix and drawer from `components/forecast` against `/api/forecast/groups*`
   (never `/api/admin/forecast*`). States: loading skeleton; empty ("no cohort has a result yet; the first d5 is due
-  on or after <date>"); `none`/403 → antd `Result` (not a retry loop); `forecast_busy` → at most 3 retries with
+  on or after <date>", shown whenever no cell is mature, above the matrix when the open month is listed as a group, and
+  without a date when the answer carries no metadata); `none`/403 → antd `Result` (not a retry loop); `forecast_busy` → at most 3 retries with
   jitter, then an error with a retry button; 429 → not retried; error → `Alert` with retry. The exploratory tab is
   shown to internal readers (V14) and hidden for `me.forecast.external`. A header line shows the population ("All
-  reports" / "Reports from <OU> and its sub-units") and the disclaimer.
+  reports" / "Reports from <OU> and its sub-units") and the disclaimer. The population is the one the response states
+  (`scope`, `scope_ou`); the `/api/me` hint speaks only until an answer arrives. A refused reader sees only the title
+  and the `Result`. The matrix is not inside a live region: one small status region announces loading, ready and empty.
 - **`/manage/forecast`** keeps operations only: status card (P9), settings and benchmark schedule (P4), ledger start
   (P5), alerts (P41), unrecorded (P2), access summary from `/api/admin/forecast/access` with a link to the OU editor.
 - **OU editor.** `OrgUnitDetail` gains a "Forecast verification" field rendered with `InheritField`
@@ -2171,8 +2200,8 @@ and the reading page's handling of `forecast_unavailable` shipped in P26 (`Stock
   the inherited value and its source OU from the server, and for an effectively restricted OU a note listing the
   external protections. The form sends the field only when changed.
 - **CSV.** Every row carries `mode` and `official`; header lines carry the disclaimer, the population and the
-  benchmark per group. External `all` exports have no coverage, `n` or count columns (an "n ≥ 30" flag instead); external
-`own` exports keep them.
+  benchmark per group. External `all` exports have no coverage, `n` or count columns (an "n ≥ 30" flag instead, which a
+header line states is the cell's); external `own` exports keep them.
 
 i18n: `nav.forecast_record`, `forecast.record.*` (title, population_all, population_own, empty, unavailable, busy),
 `forecast.scope.{all,own,none,inherit}`, `forecast.scope.help`, `forecast.scope.external_note`,
@@ -2423,12 +2452,12 @@ alias and the legacy `bench` field. Depends on P27 and P28 shipped and R2b in pr
 **Tests.** `TestAdminGroupsPathIsGone` (JSON 404, not the SPA); the e2e script asserts 404. **Rollback.** Revert; a
 stale tab gets the update prompt.
 
-### 9.2 P32 `feat/forecast-provenance-and-index-fallback` (Tier 2, migration `0007`)
+### 9.2 P32 `feat/forecast-provenance-and-index-fallback` (Tier 2, migration `0011`)
 
-Migration `0007` (§3.4), then admission of the benchmark leg from a second source under plan §3.3's rules (each
+Migration `0011` (§3.4), then admission of the benchmark leg from a second source under plan §3.3's rules (each
 benchmark return from two closes of one series; `s0_fen` only from the primary; no new exclusion class). **Entry
 criteria (V19):** ≥ 60 replayed and ≥ 10 live shadow sessions with zero unexplained fen disagreements on closes and
-anchors; an identity check for the index. **Tests.** `TestMigration0007` (SQLite and PG),
+anchors; an identity check for the index. **Tests.** `TestMigration0010` (SQLite and PG),
 `TestRatiosNeverCrossVendors` (property-based), `TestBenchAnchorFillNeverFollowsResolvedMarks`,
 `TestNonKindIndexOnlyByAnchor`. **Rollback.** Forward-only; backup first.
 
@@ -2468,10 +2497,10 @@ means the surface does not exist for that credential.
 | **Restricted account** (account flag) in an internal OU at `all` | as external `all` (the OU's scope with the external protections) | as external `all` | as external `all` | as external `all` | as external `all` | as external `all` | no | no | no | 403 | as external `all` |
 | **Session held at the enrolment wall** | 403 `enrolment_required` | 403 `enrolment_required` | — | 403 `enrolment_required` | 403 (`/api/stock` is gated) | — | — | — | — | 403 `enrolment_required` | 403 `enrolment_required` (#108, `v1CanRead`) |
 | **Persistent machine token** (`query`) | 401 (session route) | 401 | — | — (session route: 401) | — | — | with `include=payload` | `counted_set_id` | yes (machine shape) | 401 | 200, machine shape, unscoped |
-| **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | minting user at `none` → 403 `forecast_unavailable`; otherwise accepted sets only |
+| **App-bridge token** (minted only for unrestricted users, `apps_api.go:134-139`) | 401 | 401 | — | — | — | — | no | no | no | 401 | 403 `forecast_unavailable` whoever minted it (fail closed until the shared token binding lands) |
 | **Anonymous** | 401 | 401 | — | 401 | 401 | — | — | — | — | 401 | 401 |
 
-`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only). `/healthz/forecast` is
+`/api/me` carries `forecast: {scope, external}` for every signed-in subject (navigation only; an `own` reader also gets `ou`, their unit's name). `/healthz/forecast` is
 public and status-only for everyone.
 
 ### 10.2 `TestForecastAccessMatrix`
@@ -2490,8 +2519,8 @@ card-route and v1 columns, and extended by P18 to the chip, timeline and stage c
 - Accounts: one admin in `InternalNone` (still `all`); one member per OU (including `DefChild` and `Dangling`); an
   unassigned member (Default → `none`; in variant B `own` over Default and `DefChild`); a
   restricted account in `Internal`; an account under a 2FA mandate without a factor.
-- Credentials: each account's cookie; one persistent `query` token; bridge tokens minted by the `Internal` member and
-  by the `InternalNone` member; no credential.
+- Credentials: each account's cookie; one persistent `query` token; bridge tokens minted by the `Internal` member, the
+  `InternalNone` member and the admin (all refused alike on the v1 reads); no credential.
 - Variant B reruns the table with Default stored `own` instead of `none`, to pin the Default-subtree rule.
 - Ledger: two mature months with ≥ 30 members in `all`; sets attributed to `InternalOwn`, `InternalOwnSub`, `ExtOwn`
   and unattributed sets; one purged (orphaned) set; one rejected set; a report readable by `ExtAll` and one that is
@@ -2650,13 +2679,16 @@ Dify rejected undeclared inputs, revert P39b first.
 - **Heartbeat** `meta.forecast_eval_state` (P9), written by the pass only while the mode is not off: mode,
   `last_tick_at`, pass statistics, per-benchmark calendar state, the dry sample, `awaiting_gate`.
 - **Persisted counters:** `forecast_state_calls` (14 days of calls, failures and refusals by code, per source),
-  `forecast_state_shadow` (P25), access and compute counters (requests, cache hits, flights joined, busy,
-  rate-limited, refusals by reason, drawer opens) kept in memory and flushed daily to `meta`, and the weekly distinct
-  viewer count (an integer; the salt lives in memory only, §7.3.5).
+  `forecast_state_shadow` (P25), access and compute counters (requests, cache hits, flights joined, scored cells,
+  busy, rate-limited, refusals by reason, drawer opens) kept in memory and flushed to `meta` as one row per UTC day,
+  `forecast_signals_<YYYY-MM-DD>` (a flat JSON object of integers over a closed list of names, so no identity can
+  reach it; the loop flushes hourly, a flush with nothing new changes nothing, and rows older than 14 days are
+  deleted), and the weekly distinct viewer count (an integer; the salt lives in memory only, §7.3.5).
 - **Logs** (`log/slog`, `component=forecast_eval`): one line per pass; one line per set error with `set_id`, `bench`,
   `source`, `reason`; nothing for sets that are not due. The groups routes log `forecast groups: scope= pop= mode=
-  cells= scored= cached= flight= wait_ms= dur_ms=` when over 3 s. Access refusals log their reason (never the
-  username of a refused anonymous caller).
+  cells= scored= cached= flight= wait_ms= dur_ms=` when over 3 s (`scope` and `pop` are kinds, never an account or an
+  OU id). Access refusals log `forecast access: refused reason=<code> n=<count>`, at most one line a minute per
+  reason, with the reason code only: no account, path or query.
 - **Watchdog** (its own goroutine, 60 s, `recover`): `stalled` (heartbeat > 10 min; at most hourly), `lagging` (oldest
   due mark unsettled > 6 h, or a weekday past 18:00 CST with a stale calendar, or the valve tripped; at most daily),
   `no_source` (empty ledger chain; at most daily; from P23 on, because there is no chain before it). Nothing while off.
@@ -2696,19 +2728,23 @@ Dify rejected undeclared inputs, revert P39b first.
 | An `off_benchmark` count appears | — | `forecast.bench` audit and reconciliation rows | Explain it in the release note; never re-score. |
 | A `test` count appears | — | the emitter and `run_mode` of those sets | Expected for Dify test-app runs; if a production run was marked `test`, fix the producer (the set stays a test). |
 | Setting the ledger start | — | candidate list against Dify issue #1 | Save `2026-10-18T16:00:00Z` once. Permanent; survives restores. |
-| Switching the evaluator on | — | §1.4 readiness list | Record the hand-checked closes in the dry-run gate; then `1`. |
+| Switching the evaluator on | — | §1.4 readiness list, all six items (item 6 `ledger_chain`) | Record the hand-checked closes in the dry-run gate; repair the source order if `ledger_chain` is red; then `1`. |
 | Scheduling a benchmark | — | the response's `effective_cohort` | CSI 800: must read `2026-11`. If the deploy slipped past 2026-10-31, use §1.2's contingency. |
-| An OU's members report "forecast missing" | — | `/api/admin/forecast/access` for that OU | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
-| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20. |
-| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test | A restore never raises the mode or the stage, resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. |
+| An OU's members report "forecast missing" | — | `GET /api/admin/forecast/access` for that OU; then the day's `refused.<code>` counters | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
+| Before any release deploy | — | — | ADR 0027 backup, taken with the release that is running; for R1a-β2 record Q3 = 20; a release containing step `0009` needs nothing else, because startup applies it (`forecast-purge-ownership-upgrade.md` has the moving-tag backup procedure and the rollback). |
+| After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test, `GET /api/admin/forecast/access` | A restore never raises the mode or the stage (each becomes the lower of the dump and the live value; an unreadable stage counts as `off`; the stage change is audited `forecast.reader`), resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. **OU scopes and attribution come back exactly as dumped and can widen access** (the audit log with them): save `GET /api/admin/forecast/access` before restoring, compare after, and set incident OUs back to `none` before readers return. |
 | December | — | the exchanges' closure notice | Update the projection table (P37). |
 | Reading-page incident | — | — | `forecast_reader=off` (immediate, audited). |
 | Record incident | — | — | Set the affected OUs to `none` (immediate, audited). |
-| Rolling back across step `0006` or `0007` | — | — | Restore the pre-upgrade backup; binary rollback is refused by design. |
+| Rolling back across steps `0006`–`0010`, or proposed `0011` | — | — | Restore the pre-upgrade backup; binary rollback is refused by design. |
 
 ---
 
 ## 13. Rollout and rollback per release
+
+The "Readiness list" of the Evaluator on row is all six items of §1.4 on the status card, including item 6,
+`ledger_chain` (`forecastReadiness` in `forecast_ops.go`): an enabled settlement chain whose primary carries both
+evidence capabilities. While it is red, mode `1` is refused (409 `forecast_not_ready`).
 
 | Release | Before deploy | Deploy and verify | Owner actions after deploy | Rollback |
 |---|---|---|---|---|
@@ -2717,10 +2753,10 @@ Dify rejected undeclared inputs, revert P39b first.
 | R1b | Backup (step `0006` makes later binary rollback restore-only) | `TestMigration0006` green in CI; boot shows step `0006` recorded; Default OU reads `none` | Set mode `dry`; configure Email recipients and the Slack URL; send the test alert; record the dry-run check for `sh000852`; then mode `1` | Revert individual PRs (forward fix). Binary rollback below `0006` = restore the backup. |
 | P39b (its own Beta after R1b) | Preconditions §11.1 (P38, P39a, P30 deployed; Dify batch published) | §11.5 step 5 | — | Revert P39b (attributed sets stay). |
 | Evaluator on | Readiness list | Status card healthy; first d5 settles from history; `/healthz/forecast` 200 | Watch freshness for a week | Mode `dry` or `0` (immediate, audited). |
-| R2a | Backup; Q4 | All OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); or binary revert (no schema in R2a). |
+| R2a | Backup with previous release; Q4 | Boot applies and records `0009` (ledger row, empty `prediction_purge_owners`); all OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); binary rollback across `0009` requires restoring the pre-upgrade backup per the upgrade notes. |
 | R2b | Backup | P18 benchmark recorded | Seeded-preview review; flip `forecast_reader` to `full` per P20's rollout | `forecast_reader=card`/`off`; binary revert (no schema). |
 | R3 | Backup | `/api/admin/forecast/groups` → JSON 404 | — | Revert. |
-| Tier 2 | Backup | `0007` recorded | Owner go/no-go per V19 | Restore-only. |
+| Tier 2 | Backup | `0011` recorded | Owner go/no-go per V19 | Restore-only. |
 
 ---
 
@@ -2731,14 +2767,14 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
 | Document | Change | PR |
 |---|---|---|
 | **ADR 0037 (new) — Forecast verification operations** | The definition repair (code brought to ADR 0029 §4 and design §9.4); not-due is not a refusal; finality only after mark-specific attempts (V26); the terminal baseline; the heal (and why the plan's "not due" check was dropped); the ledger start (membership only) and test runs at ingest; benchmark governance with the allowlist including `sh000906` and the CSI 800 schedule; the bounded `unrecorded`; the restore rules of §3.3; dry mode, the readiness list and the per-benchmark dry-run gate; heartbeat, watchdog, health route, alert channels (Email + Slack) and SLOs; the single-connection transaction rule; the escapes F01, F03, F06, F10, F14 with their causes. | P11 |
-| **[ADR 0041](adr/0041-ledger-grade-market-data.md) — Ledger-grade market data on the shared source policy** | Renumbered from the baseline plan's 0038. Amends ADR 0029 D9 and §6: the evaluator walks the operator's chain restricted to explicit `settled` grants; one writer in Tier 1, no fallback writes for scored marks (V9); the candidate-source table; the separate evidence chain; Tier 2 entry criteria and proposed step `0007`, still requiring owner approval. A mark's `bench_code` remains frozen intent. Records at ADR 0028 §1 that stored closes are single-vendor, from an unlicensed public endpoint, integrity-checked, not corroborated. | P23 |
+| **[ADR 0041](adr/0041-ledger-grade-market-data.md) — Ledger-grade market data on the shared source policy** | Renumbered from the baseline plan's 0038. Amends ADR 0029 D9 and §6: the evaluator walks the operator's chain restricted to explicit `settled` grants; one writer in Tier 1, no fallback writes for scored marks (V9); the candidate-source table; the separate evidence chain; Tier 2 entry criteria and proposed step `0010`, still requiring owner approval. A mark's `bench_code` remains frozen intent. Records at ADR 0028 §1 that stored closes are single-vendor, from an unlicensed public endpoint, integrity-checked, not corroborated. | P23 |
 | **ADR 0039 (new) — Forecast verification for readers** | The three-way OU scope, Google Workspace style inheritance (a child OU inherits its parent's setting and may override it), Default `none`, admins `all`; frozen attribution and the owner token for every run, with its **one sanctioned exception: deleting an OU re-attributes that OU's sets to its parent (a root's to the Default OU) in the delete transaction, audited with counts, so no set references a deleted id** (replaces the 409 guard); re-parenting follows the live tree; the external protections; the access matrix (§10); compute governance; the reading-page integration and the stage switch; edition rules; the disclaimer. Supersedes design D6; amends ADR 0029 §5's statistics bullet. | P22 |
-| **ADR 0029 (amend in place, pointing to 0037, 0039 and 0041)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; the bridge token carries its user; statistics access per 0039. §6: see 0041 for the uncached policy-governed ledger walk; refusal classes, dry mode and finality remain per V26/0037. §7: mark `bench_code` is frozen intent. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: detection-only qfq and the corrected limit backstop. §12: approved V3, V6b, V8, V9, access-model, V12–V15 and V24–V26 amendments. | P11 (R1 rows), P22 (access rows), P23 (V9) |
+| **ADR 0029 (amend in place, pointing to 0037, 0039 and 0041)** | §5: the v1 reads admit a cookie held at the enrolment wall (`v1CanRead`, #108) and scoped by `viewerScope`; the forecast reads additionally apply the forecast scope; app-bridge tokens get no forecast reads (403 `forecast_unavailable`) until the shared token binding lands; statistics access per 0039. §6: see 0041 for the uncached policy-governed ledger walk; refusal classes, dry mode and finality remain per V26/0037. §7: mark `bench_code` is frozen intent. §9: the `pre_live`, `test`, `off_benchmark` buckets; membership computed inside each population; one hit predicate. §10: detection-only qfq and the corrected limit backstop. §12: approved V3, V6b, V8, V9, access-model, V12–V15 and V24–V26 amendments. | P11 (R1 rows), P22 (access rows), P23 (V9) |
 | ADR 0022 | R1 amended for the owner token on every run and the restricted-only `g:` principal (§11.3); P30's reader-side rule. | P39b, P30 |
 | ADR 0024 | Editions and forecast sets (C17); the restricted-only OU principal (P30). | P18, P30 |
 | ADR 0028 | Note at §1 (single-vendor stored closes) and at §3 (the detection-only qfq exception now exists). | P23, P8 |
 | ADR 0017 | Note: `pre_live` and `test` sets are purged by the ledger retention target like any other; `attributed_ou` does not affect retention. | P11 |
-| ADR 0035 | No change; steps `0006` and `0007` follow it. | — |
+| ADR 0035 | Amended for step `0009` and custom product verification; the 2026-10-22 explicit-step gate was superseded on 2026-10-24, so every step applies at startup and `schema-upgrade` is optional. Existing automatic steps and the frozen baseline stay unchanged. Proposed Tier 2 `0011` remains separately gated. | Own purge history |
 | `docs/forecast-verification-design.md` | §7 and D6 superseded (pointer to 0039); acceptance condition 19 rewritten; §9.2 corrected (dividend element, corrected price-limit backstop, qfq ratio); §9.3 base rule for an S0 halt (V6b); §10 UI updated. | P11, P22 |
 | `docs/forecast-verification-operations.md` (new) | The runbook of §12.3. | P9 onward |
 | `docs/forecast-verification-demo.html` | P13's revision. | P13 |
@@ -2775,8 +2811,12 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
       `reserved_inputs` visible on the 16 targets).
 
 **Before switching the evaluator on**
-- [ ] §1.4 readiness list green on the status card; dry-run check recorded for every benchmark code the list names
-      (`sh000852` for the pre-live sets even before any in-population set exists; `sh000906` once November sets exist).
+- [ ] §1.4 readiness list green on the status card, all six items; dry-run check recorded for every benchmark code the
+      list names (`sh000852` for the pre-live sets even before any in-population set exists; `sh000906` once November
+      sets exist).
+- [ ] Readiness item 6, `ledger_chain` (`forecast_ops.go`): the quote-source panel shows an enabled settlement chain
+      whose primary carries both evidence capabilities. A red item 6 refuses mode `1` (409 `forecast_not_ready`) and,
+      if the primary is removed while running, the watchdog sends `no_source`.
 
 **Before R2a**
 - [ ] Owner: Q4 run. Disclaimer wording approved (V22, 2026-10-19). zh-TW `forecast.*` family: machine-generated,

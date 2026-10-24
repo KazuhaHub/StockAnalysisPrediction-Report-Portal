@@ -737,7 +737,7 @@ func (s *Server) apiBatchJobCreate(w http.ResponseWriter, r *http.Request, user 
 	}
 	// 加急 costs a ticket for non-admins; out of tickets → runs at its base priority.
 	priority, downgraded := s.urgentAllowed(user, stored, base)
-	jobID, err := s.st.CreateBatchJob(in.TargetID, conc, maxRetries, user, in.Rows, priority)
+	jobID, err := s.st.CreateBatchJob(in.TargetID, conc, maxRetries, user, in.Rows, priority, in.Notify)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -746,9 +746,6 @@ func (s *Server) apiBatchJobCreate(w http.ResponseWriter, r *http.Request, user 
 		s.st.SetJobWindow(jobID, runAt, runPreset) // preset window: run_at + snapshot (ADR 0014)
 	} else if runAt != "" {
 		s.st.ScheduleJob(jobID, runAt) // hidden from admission until run_at passes
-	}
-	if in.Notify {
-		s.jobNotify.Store(jobID, true) // email the submitter on finish (best-effort, in-memory)
 	}
 	s.scheduleTick() // admit now if due + budget allows, else it waits (or waits for its schedule)
 	// The human decision, not the machine outcome: batch_items already records every row's fate and

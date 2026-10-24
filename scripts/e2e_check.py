@@ -8,6 +8,12 @@ For Docker, set E2E_CONTAINER to the container name and E2E_DB to its bind-mount
 SQLite file. E2E_ADMIN_PASSWORD can supply the password without a command-line argument.
 The caller needs database write access and permission to restart that container.
 
+Layer G mints the signed OU-attribution token a produced report carries, so it needs the portal's
+secret_key. A container is asked for it (RP_SECRET_KEY, else its config file); otherwise it is read
+from the config.yaml beside the data directory (the parent of E2E_DB's directory). Set
+E2E_SECRET_KEY when the server takes its key from somewhere the harness cannot see. Without a key
+the access checks fail by name rather than being skipped.
+
 This exists because the Go and vitest suites cannot catch a whole class of defect: they call store
 methods directly, so a feature can be fully correct and still be unreachable through the API an
 admin actually uses. That is not hypothetical — it is how the OU tree shipped with SetGroupParent
@@ -16,16 +22,21 @@ implemented, tested and impossible to invoke, which silently disabled every inhe
 Run it against a portal started on a THROWAWAY database: it creates accounts, changes the admin
 password, and restarts the server.
 
-Layers under test:
+Layers under test, in the order they run (E restarts the server, so it runs last):
   A  first-run bootstrap + core portal (must not have regressed)
   B  ADR 0022 — OU tenancy and tree inheritance, account validity
   C  ADR 0024 — report versions, grants, visibility modes, the reader's switcher
   D  ADR 0023 — password change, 2FA, recovery codes, step-up, SSO gating
+  F  sign-in protection (captcha) and self-service registration
+  G  ADR 0029 and ADR 0039 — the prediction ledger, its admin surface, and who may read the record
+     (the three-way OU scope: none, own, all; external protections; the admin access preview)
   E  state survives a restart, and the schema reconcile is idempotent
 """
-from e2e_runtime import check_spa, restart_container, unused_totp_step
+from e2e_runtime import (
+    check_spa, container_secret_key, owner_token, parse_secret_key, restart_container, unused_totp_step,
+)
 
-import base64, hashlib, hmac, json, os, sqlite3, struct, subprocess, sys, time, urllib.error, urllib.request
+import base64, hashlib, hmac, json, os, sqlite3, struct, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ.get("E2E_BASE", "http://localhost:8791")
 DB = os.environ.get("E2E_DB", "/tmp/e2e/data/portal.db")
@@ -105,6 +116,23 @@ def totp_code(secret, offset=0, step=None):
     h = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
     o = h[19] & 15
     return "%06d" % ((struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % 1000000)
+
+
+def server_secret():
+    """The portal's secret_key, or "" when it cannot be found.
+
+    E2E_SECRET_KEY wins, for a server that takes its key from somewhere the harness cannot see. A
+    container is asked directly; otherwise the config.yaml beside the data directory is read.
+    """
+    if os.environ.get("E2E_SECRET_KEY"):
+        return os.environ["E2E_SECRET_KEY"]
+    if os.environ.get("E2E_CONTAINER"):
+        return container_secret_key(os.environ["E2E_CONTAINER"])
+    try:
+        with open(os.path.join(CFG, "config.yaml"), encoding="utf-8") as f:
+            return parse_secret_key(f.read())
+    except OSError:
+        return ""
 
 
 def restart():
@@ -452,11 +480,18 @@ def prediction_payload(mutate=None):
     return p
 
 
-def ingest_prediction(symbol, title, payload=None):
-    body = {"symbol": symbol, "date": TODAY, "subtype": "投资决策建议", "title": title,
+# A report type the ledger covers (a data value, not a label).
+PRED_RTYPE = "投资决策建议"
+
+
+def ingest_prediction(symbol, title, payload=None, owner=None):
+    """Ingest a covered report, optionally with predictions and a signed owner token."""
+    body = {"symbol": symbol, "date": TODAY, "subtype": PRED_RTYPE, "title": title,
             "body_md": "## e2e 预测\n正文"}
     if payload is not None:
         body["predictions"] = payload
+    if owner is not None:
+        body["owner_token"] = owner
     return machine.req("POST", "/api/v1/reports", body, token=TOKEN)
 
 
@@ -558,6 +593,338 @@ check("G", "A second ledger-start save is refused (write-once)", sc == 409, f"{s
 sc, settings2 = admin.req("GET", "/api/admin/forecast")
 check("G", "The ledger start reads back as set",
       (settings2.get("population") or {}).get("set") is True, f"{settings2.get('population')}")
+
+# ---------------------------------------------------------------- G, continued: who may read the record
+# ADR 0039. The record is a reader feature gated by the OU scope: none (no access), own (only the
+# sets the account's OU subtree produced) or all (the whole ledger), with an external account getting
+# the whole ledger minus its volumes. These checks use the cookie routes the SPA uses, against
+# attribution created through the real ingest path (a signed owner token on a produced report).
+# They run after the ledger start is set, so the record is a live one.
+print("\nG. Forecast verification — who may read the record (ADR 0039)")
+
+FC_PW = "forecast-pass-123456"
+
+
+def short(v, n=240):
+    return json.dumps(v, ensure_ascii=False)[:n]
+
+
+def code_of(body):
+    return body.get("code") if isinstance(body, dict) else None
+
+
+def make_ou(name, parent=None):
+    body = {"name": name}
+    if parent is not None:
+        body["parent_id"] = parent
+    sc, g = admin.req("POST", "/api/admin/groups", body)
+    return g.get("id") if sc == 200 else None
+
+
+def put_ou(ou, name, **fields):
+    """PUT replaces the OU's whole configuration, so a call names only what the check is about."""
+    return admin.req("PUT", f"/api/admin/groups/{ou}", {"name": name, **fields})
+
+
+def make_member(username, ou):
+    sc, _ = admin.req("POST", "/api/admin/users",
+                      {"username": username, "password": FC_PW, "role": "user", "primary_group": ou})
+    session = Session()
+    sc_login, _ = session.login(username, FC_PW)
+    return session if sc == 200 and sc_login == 200 else None
+
+
+def reports_in(resp):
+    """The record's row count: the coverage `reports` summed over the monthly groups."""
+    return sum((g.get("coverage") or {}).get("reports", 0) for g in (resp.get("groups") or []))
+
+
+def scope_counts(overview):
+    c = overview.get("counts") or {}
+    return c.get("all"), c.get("own"), c.get("none")
+
+
+def set_ids(*ous):
+    marks = ",".join("?" * len(ous))
+    return sorted(r[0] for r in sql(
+        f"SELECT id FROM prediction_sets WHERE rtype=? AND state='accepted' AND attributed_ou IN ({marks})",
+        PRED_RTYPE, *ous))
+
+
+def forecast_access_checks():
+    secret = server_secret()
+    check("G", "The OU-attribution key is available to the harness", bool(secret),
+          "set E2E_SECRET_KEY, or run beside the portal's config.yaml")
+    if not secret:
+        return
+    ous = {"internal": make_ou("fc-internal"), "own": make_ou("fc-own"), "other": make_ou("fc-other"),
+           "empty": make_ou("fc-empty"), "ext": make_ou("fc-ext")}
+    ous["sub"] = make_ou("fc-own-sub", parent=ous["own"])
+    ok = all(ous.values())
+    check("G", "Fixture: six OUs, one of them a child of fc-own", ok, short(ous))
+    if not ok:
+        return
+    INT, OWN, SUB, OTHER, EMPTY, EXT = (ous[k] for k in ("internal", "own", "sub", "other", "empty", "ext"))
+
+    # Scopes: fc-internal is left alone (NULL, so it inherits the Default OU's none); fc-own-sub is
+    # a child with no setting of its own, so it must inherit fc-own's own.
+    saved = [put_ou(OWN, "fc-own", forecast_scope="own"), put_ou(OTHER, "fc-other", forecast_scope="own"),
+             put_ou(EMPTY, "fc-empty", forecast_scope="own"),
+             put_ou(EXT, "fc-ext", restricted=True, forecast_scope="all")]
+    check("G", "Fixture: the four scope settings save", all(sc == 200 for sc, _ in saved), short(saved))
+    sc, tree = admin.req("GET", "/api/admin/groups")
+    rows = {g["id"]: g for g in tree.get("groups", [])}
+    check("G", "The admin tree reports the stored, effective and source scope",
+          rows.get(OWN, {}).get("forecast_scope") == "own"
+          and rows.get(SUB, {}).get("forecast_scope") is None
+          and rows.get(SUB, {}).get("forecast_scope_effective") == "own"
+          and rows.get(SUB, {}).get("forecast_scope_source") == OWN
+          and rows.get(INT, {}).get("forecast_scope") is None
+          and rows.get(INT, {}).get("forecast_scope_effective") == "none",
+          short({k: rows.get(k) for k in (OWN, SUB, INT)}, 600))
+
+    members = {name: make_member(name, ou) for name, ou in
+               (("fcint", INT), ("fcown", OWN), ("fcsub", SUB), ("fcother", OTHER), ("fcempty", EMPTY),
+                ("fcext", EXT))}
+    check("G", "Fixture: six members sign in", all(members.values()), short({k: bool(v) for k, v in members.items()}))
+    if not all(members.values()):
+        return
+    fcint, fcown, fcsub, fcother, fcempty, fcext = (members[k] for k in
+                                                    ("fcint", "fcown", "fcsub", "fcother", "fcempty", "fcext"))
+
+    # Attribution through the real ingest path. fc-own's subtree holds three sets (two in fc-own, one
+    # in its child) and a sibling OU holds one more, so a wrong subtree, a missing descendant and a
+    # leak across siblings all change a number the checks compare.
+    plan = [("300761", OWN, "fcown"), ("300762", SUB, "fcsub"), ("300763", OTHER, "fcother"),
+            ("300764", OWN, "fcown")]
+    ingested = []
+    for symbol, ou, who in plan:
+        sc, r = ingest_prediction(symbol, f"FC {symbol}", prediction_payload(), owner_token(secret, ou, who))
+        stored = sql("SELECT attributed_ou FROM prediction_sets WHERE report_id=?", r.get("id"))
+        ingested.append(sc == 200 and r.get("predictions_status") == "accepted" and stored == [(ou,)])
+    check("G", "Fixture: four sets are accepted, each frozen to the OU of its signed owner token",
+          all(ingested), short(ingested))
+    check("G", "A forged owner token attributes nothing",
+          ingest_prediction("300766", "FC forged", prediction_payload(),
+                            owner_token("not-the-portal-key", OWN, "fcown"))[0] == 200
+          and sql("SELECT attributed_ou FROM prediction_sets WHERE symbol='300766'") == [(None,)])
+
+    # ---- anonymous: 401 on every reader route, and on the admin preview
+    anon = Session()
+    for label, path in (("the record", "/api/forecast/groups"),
+                        ("the members drawer", "/api/forecast/groups/members?label=x&checkpoint=d5"),
+                        ("a reading page's predictions", f"/api/report/{RID_ACCEPTED}/predictions"),
+                        ("the v1 predictions read", f"/api/v1/reports/{RID_ACCEPTED}/predictions"),
+                        ("the access overview", "/api/admin/forecast/access")):
+        sc, _ = anon.req("GET", path)
+        check("G", f"Anonymous: {label} answers 401", sc == 401, f"{sc}")
+
+    # ---- an internal member of an OU at none (here inherited from the Default OU)
+    sc, me = fcint.req("GET", "/api/me")
+    check("G", "None: /api/me reports scope none for navigation",
+          sc == 200 and (me.get("forecast") or {}).get("scope") == "none", short(me.get("forecast")))
+    for label, path in (("the record", "/api/forecast/groups"),
+                        ("the members drawer", "/api/forecast/groups/members?label=x&checkpoint=d5"),
+                        ("a reading page's predictions", f"/api/report/{RID_ACCEPTED}/predictions"),
+                        ("the v1 predictions read by cookie", f"/api/v1/reports/{RID_ACCEPTED}/predictions")):
+        sc, body = fcint.req("GET", path)
+        check("G", f"None: {label} is refused with forecast_unavailable",
+              sc == 403 and code_of(body) == "forecast_unavailable", f"{sc} {short(body)}")
+    for label, path in (("the group statistics", "/api/admin/forecast/groups"),
+                        ("the settings", "/api/admin/forecast"),
+                        ("the access overview", "/api/admin/forecast/access")):
+        sc, _ = fcint.req("GET", path)
+        check("G", f"A reader never reaches the admin routes: {label}", sc == 403, f"{sc}")
+
+    # ---- the access preview: read-only, and equal to what the save then does
+    active = sql("SELECT COUNT(*) FROM users WHERE COALESCE(active,1)=1 AND "
+                 "(COALESCE(expires_at,'')='' OR expires_at>=date('now','localtime'))")[0][0]
+    group_changes = lambda: sql("SELECT COUNT(*) FROM audit_log WHERE action='group.change'")[0][0]
+    sc, before = admin.req("GET", "/api/admin/forecast/access")
+    check("G", "The access overview counts every active account exactly once",
+          sc == 200 and sum(c or 0 for c in scope_counts(before)) == active,
+          f"{sc} {scope_counts(before)} accounts={active}")
+    audit_rows = group_changes()
+    sc, prev_int = admin.req("GET", f"/api/admin/forecast/access?ou={INT}&scope=all")
+    b_all, b_own, b_none = scope_counts(before)
+    p_all, p_own, p_none = scope_counts(prev_int)
+    check("G", "Preview: raising fc-internal to all moves exactly its one member from none to all",
+          sc == 200 and prev_int.get("preview") is True and prev_int.get("affected") == 1
+          and (p_all, p_own, p_none) == (b_all + 1, b_own, b_none - 1),
+          f"{sc} affected={prev_int.get('affected')} before={scope_counts(before)} after={scope_counts(prev_int)}")
+    sc, prev_own = admin.req("GET", f"/api/admin/forecast/access?ou={OWN}&scope=all")
+    o_all, o_own, o_none = scope_counts(prev_own)
+    check("G", "Preview: raising fc-own to all carries the inheriting child with it (two own readers become all)",
+          sc == 200 and prev_own.get("affected") == 2 and (o_all, o_own, o_none) == (b_all + 2, b_own - 2, b_none),
+          f"{sc} affected={prev_own.get('affected')} before={scope_counts(before)} after={scope_counts(prev_own)}")
+    sc, bad_prev = admin.req("GET", f"/api/admin/forecast/access?ou={INT}&scope=everyone")
+    check("G", "Preview: an unknown scope is refused with forecast_bad_scope",
+          sc == 400 and code_of(bad_prev) == "forecast_bad_scope", f"{sc} {short(bad_prev)}")
+    sc, tree = admin.req("GET", "/api/admin/groups")
+    stored_after_previews = {g["id"]: g.get("forecast_scope") for g in tree.get("groups", [])}
+    sc_int, _ = fcint.req("GET", "/api/forecast/groups")
+    check("G", "Previews write nothing: no scope moved, no audit row, access unchanged",
+          stored_after_previews.get(INT) is None and stored_after_previews.get(OWN) == "own"
+          and group_changes() == audit_rows and sc_int == 403,
+          f"{short(stored_after_previews)} audit {audit_rows}->{group_changes()} member={sc_int}")
+
+    # ---- raising the member's OU to all (the spec's flip from 403 to 200)
+    sc, _ = put_ou(INT, "fc-internal", forecast_scope="all")
+    check("G", "Raising the OU to all saves", sc == 200, f"{sc}")
+    sc, after = admin.req("GET", "/api/admin/forecast/access")
+    check("G", "The access preview's counts are exactly the counts after the save",
+          sc == 200 and scope_counts(after) == scope_counts(prev_int), f"{scope_counts(prev_int)} vs {scope_counts(after)}")
+    ou_row = next((g for g in after.get("groups", []) if g.get("id") == INT), {})
+    check("G", "The overview's per-OU row names the effective scope, its source and the member",
+          ou_row.get("forecast_scope") == "all" and ou_row.get("forecast_scope_effective") == "all"
+          and ou_row.get("forecast_scope_source") == INT and (ou_row.get("counts") or {}).get("all") == 1,
+          short(ou_row))
+    audit = sql("SELECT detail FROM audit_log WHERE action='group.change' AND target_id=? ORDER BY id DESC LIMIT 1",
+                str(INT))
+    detail = json.loads(audit[0][0]) if audit and audit[0][0] else {}
+    check("G", "The save is audited with the scope it moved from and to",
+          detail.get("forecast_scope") == {"from": None, "to": "all"}, short(detail))
+
+    sc, me = fcint.req("GET", "/api/me")
+    check("G", "All: /api/me reports scope all for navigation",
+          sc == 200 and (me.get("forecast") or {}).get("scope") == "all", short(me.get("forecast")))
+    sc, rec = fcint.req("GET", "/api/forecast/groups")
+    total_rows = sql("SELECT COUNT(*) FROM prediction_sets WHERE rtype=?", PRED_RTYPE)[0][0]
+    check("G", "All: the same member now reads the record, and the record is the whole ledger",
+          sc == 200 and rec.get("ok") is True and len(rec.get("groups") or []) >= 1
+          and reports_in(rec) == total_rows and total_rows >= 8,
+          f"{sc} rows={reports_in(rec)} ledger={total_rows}")
+    check("G", "All: an internal reader's groups carry coverage and capabilities, but never `unrecorded`",
+          all("coverage" in g for g in rec.get("groups", [])) and "unrecorded" not in rec
+          and (rec.get("capabilities") or {}).get("custom") is True, short(rec.get("capabilities")))
+    sc, adm = admin.req("GET", "/api/admin/forecast/groups")
+    check("G", "The admin alias still carries `unrecorded` (until the management page is split)",
+          sc == 200 and "unrecorded" in adm and reports_in(adm) == reports_in(rec), f"{sc} {short(list(adm))}")
+    sc, preds = fcint.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
+    pred_sets = preds.get("sets") or []
+    check("G", "All: the reading page's predictions answer 200 with the accepted set, its membership and no payload",
+          sc == 200 and len(pred_sets) >= 1 and all(s.get("state") == "accepted" for s in pred_sets)
+          and all(s.get("membership") for s in pred_sets) and all(not s.get("payload") for s in pred_sets),
+          f"{sc} {short(preds)}")
+    sc, rejected = fcint.req("GET", f"/api/report/{RID_REJECTED}/predictions")
+    check("G", "All: a reader never sees a rejected set",
+          sc == 200 and (rejected.get("sets") or []) == [], f"{sc} {short(rejected)}")
+    sc, v1 = fcint.req("GET", f"/api/v1/reports/{RID_ACCEPTED}/predictions")
+    check("G", "All: the v1 predictions read by cookie answers 200", sc == 200, f"{sc} {short(v1)}")
+    # The range is derived from the ledger's own dates: made_on is a Shanghai civil date, which can
+    # be a day ahead of this machine's TODAY.
+    last_day = sql("SELECT MAX(made_on) FROM prediction_sets WHERE rtype=?", PRED_RTYPE)[0][0]
+    custom = "/api/forecast/groups?" + urllib.parse.urlencode(
+        {"mode": "custom", "from": sql("SELECT date(?, '-30 day')", last_day)[0][0], "to": last_day})
+    sc, cust = fcint.req("GET", custom)
+    check("G", "All: an internal reader may use a custom range, over the whole ledger",
+          sc == 200 and cust.get("mode") == "custom" and cust.get("official") is False
+          and reports_in(cust) == total_rows, f"{sc} rows={reports_in(cust)} ledger={total_rows} {short(cust, 120)}")
+
+    # ---- a PUT without the field leaves the stored scope alone
+    sc, _ = put_ou(INT, "fc-internal", description="renamed by the e2e check")
+    sc2, tree = admin.req("GET", "/api/admin/groups")
+    row = next((g for g in tree.get("groups", []) if g["id"] == INT), {})
+    audit = sql("SELECT detail FROM audit_log WHERE action='group.change' AND target_id=? ORDER BY id DESC LIMIT 1",
+                str(INT))
+    detail = json.loads(audit[0][0]) if audit and audit[0][0] else {}
+    sc3, _ = fcint.req("GET", "/api/forecast/groups")
+    check("G", "A PUT without forecast_scope leaves it unchanged, writes no scope audit and keeps access",
+          sc == 200 and row.get("forecast_scope") == "all" and "forecast_scope" not in detail and sc3 == 200,
+          f"{sc} stored={row.get('forecast_scope')} detail={short(detail)} member={sc3}")
+    sc, bad = put_ou(INT, "fc-internal", forecast_scope="everyone")
+    sc2, tree = admin.req("GET", "/api/admin/groups")
+    row = next((g for g in tree.get("groups", []) if g["id"] == INT), {})
+    check("G", "An unknown scope is refused with forecast_bad_scope and changes nothing",
+          sc == 400 and code_of(bad) == "forecast_bad_scope" and row.get("forecast_scope") == "all",
+          f"{sc} {short(bad)} stored={row.get('forecast_scope')}")
+    # An explicit null is a different statement from an absent field: it chooses inheritance, and
+    # fc-internal's parent is the Default OU, which stores none.
+    sc, _ = put_ou(INT, "fc-internal", forecast_scope=None)
+    sc2, tree = admin.req("GET", "/api/admin/groups")
+    row = next((g for g in tree.get("groups", []) if g["id"] == INT), {})
+    sc3, _ = fcint.req("GET", "/api/forecast/groups")
+    check("G", "An explicit null chooses inheritance: the OU inherits none and the member is refused again",
+          sc == 200 and row.get("forecast_scope") is None and row.get("forecast_scope_effective") == "none"
+          and sc3 == 403, f"{sc} stored={row.get('forecast_scope')} effective={row.get('forecast_scope_effective')} member={sc3}")
+
+    # ---- own: the subtree population, by frozen attribution
+    # Step 0009 supplies ownership evidence, so record and drawer reads now answer with exactly the
+    # attributed subtree. An empty OU must stay empty rather than borrowing the site-wide population.
+    own_sets = set_ids(OWN, SUB)
+    expect = {"fcown": len(own_sets), "fcsub": len(set_ids(SUB)), "fcother": len(set_ids(OTHER)), "fcempty": 0}
+    check("G", "Own: ingest froze each set's attribution to its OU subtree (3 / 1 / 1 / 0)",
+          expect == {"fcown": 3, "fcsub": 1, "fcother": 1, "fcempty": 0}, f"attributed={expect} ledger={total_rows}")
+    populations = {}
+    for name, session in (("fcown", fcown), ("fcsub", fcsub), ("fcother", fcother), ("fcempty", fcempty)):
+        sc, body = session.req("GET", "/api/forecast/groups")
+        populations[name] = (sc, reports_in(body) if sc == 200 else None)
+    check("G", "Own: every record contains exactly its attributed subtree, including an empty OU",
+          all(populations[name] == (200, count) for name, count in expect.items()), short(populations, 200))
+    label = ((adm.get("groups") or [{}])[0]).get("label", "")
+    query = urllib.parse.urlencode({"label": label, "checkpoint": "d5", "population": "all"})
+    sc, drawer = fcown.req("GET", "/api/forecast/groups/members?" + query)
+    check("G", "Own: the members drawer contains exactly the attributed subtree",
+          sc == 200 and {m.get("set_id") for m in drawer.get("members", [])} == set(own_sets),
+          f"{sc} label={label} {short(drawer)}")
+    sc, card = fcown.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
+    check("G", "Own: the reading page's predictions answer 200 for any readable report, with no membership badge "
+               "(the badge refers to the all record)",
+          sc == 200 and len(card.get("sets") or []) >= 1 and all(not s.get("membership") for s in card["sets"]),
+          f"{sc} {short(card)}")
+    sc, cust = fcown.req("GET", custom)
+    check("G", "Own: a custom range contains exactly the attributed subtree",
+          sc == 200 and reports_in(cust) == len(own_sets), f"{sc} {short(cust)}")
+
+    # ---- an external member at all: the whole ledger, without its volumes, monthly only
+    # Per-cell volumes (n, totals) exist only on a mature cell, and a mature cell needs a settled
+    # outcome the e2e cannot produce (the evaluator is off); TestForecastAccessMatrix pins that path.
+    sc, ext_rec = fcext.req("GET", "/api/forecast/groups")
+    groups = ext_rec.get("groups") or []
+    check("G", "External all: the record is readable and non-empty",
+          sc == 200 and ext_rec.get("ok") is True and len(groups) >= 1, f"{sc} {short(ext_rec)}")
+    check("G", "External all: no group carries coverage, and no site-wide metadata or `unrecorded` is sent",
+          all("coverage" not in g for g in groups)
+          and not any(k in ext_rec for k in ("unrecorded", "summary", "capabilities", "ledger_start", "limits")),
+          short(sorted(ext_rec)))
+    sc, ext_custom = fcext.req("GET", custom)
+    check("G", "External all: a custom range is refused with forecast_custom_not_allowed",
+          sc == 403 and code_of(ext_custom) == "forecast_custom_not_allowed", f"{sc} {short(ext_custom)}")
+    sc, me = fcext.req("GET", "/api/me")
+    check("G", "External all: /api/me marks the account external for navigation",
+          sc == 200 and (me.get("forecast") or {}).get("scope") == "all"
+          and (me.get("forecast") or {}).get("external") is True, short(me.get("forecast")))
+    ext_label = (groups[0] if groups else {}).get("label", "")
+    query = urllib.parse.urlencode({"label": ext_label, "checkpoint": "d5"})
+    sc, ext_drawer = fcext.req("GET", "/api/forecast/groups/members?" + query)
+    check("G", "External all: the members drawer carries no totals or per-status counts",
+          sc == 200 and not any(k in ext_drawer for k in ("n", "total", "resolved", "refused", "corp_action")),
+          f"{sc} {short(ext_drawer)}")
+    # The drawer lists only reports the reader can open. The default population is the scored one,
+    # which is empty while the evaluator is off, so this asks for population=all: that is the list
+    # an unfiltered drawer would leak from. The admin alias, which has no such filter, proves the
+    # same query has members to leak, so an empty answer is the filter and not an empty ledger.
+    query = urllib.parse.urlencode({"label": ext_label, "checkpoint": "d5", "population": "all"})
+    sc, ext_all = fcext.req("GET", "/api/forecast/groups/members?" + query)
+    sc_adm, adm_all = admin.req("GET", "/api/admin/forecast/groups/members?" + query)
+    ext_members = ext_all.get("members") or []
+    # A member whose report id was blanked is unreadable by definition: the id is cleared exactly
+    # when the reader cannot see the report.
+    unreadable = [m.get("set_id") for m in ext_members
+                  if m.get("report_id") is None
+                  or fcext.req("GET", f"/api/report/{m['report_id']}/predictions")[0] != 200]
+    check("G", "External all: the members drawer lists only reports the reader can open (population=all)",
+          sc == 200 and sc_adm == 200 and len(adm_all.get("members") or []) >= 1 and not unreadable
+          and not any(k in ext_all for k in ("n", "total", "resolved", "refused", "corp_action")),
+          f"{sc} external={len(ext_members)} unreadable_sets={unreadable} admin={sc_adm}/{len(adm_all.get('members') or [])}")
+    sc, ext_card = fcext.req("GET", f"/api/report/{RID_ACCEPTED}/predictions")
+    check("G", "External all: another OU's report is not disclosed through the reading page (404, not its sets)",
+          sc == 404, f"{sc} {short(ext_card)}")
+    sc, ext_adm = fcext.req("GET", "/api/admin/forecast/groups")
+    check("G", "External all: the admin alias stays closed", sc == 403, f"{sc}")
+
+
+forecast_access_checks()
 
 # ---------------------------------------------------------------- restart
 print("\nE. State survives a restart")

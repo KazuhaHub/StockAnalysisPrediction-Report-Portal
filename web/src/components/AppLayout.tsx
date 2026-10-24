@@ -1,6 +1,6 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Badge, Breadcrumb, Button, Divider, Dropdown, FloatButton, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
-import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
@@ -21,6 +21,7 @@ import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
+import NotificationBell from './NotificationBell'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -42,7 +43,7 @@ function AppShell() {
   const { t } = useTranslation()
   const { settings, title } = useSite()
   const { mode, setMode, lang, setLang, langs } = usePrefs()
-  const { user, name, admin, can, logout } = useAuth()
+  const { user, name, admin, forecast, can, logout } = useAuth()
   const navigate = useNavigate()
   const loc = useLocation()
   const { token } = theme.useToken()
@@ -77,7 +78,9 @@ function AppShell() {
     if (p === '/apps/batch') return [home, apps, { label: t('nav.batch') }]
     if (p.startsWith('/apps/x/')) return [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
+    if (p === '/notifications') return [home, { label: t('inbox.title') }]
     if (p === '/chat') return [home, { label: t('nav.chat') }]
+    if (p === '/forecast') return [home, { label: t('nav.forecast_record') }]
     if (p.startsWith('/stock/') || p.startsWith('/run/')) return [home, { label: decodeURIComponent(p.split('/')[2] || '') }]
     return []
   }, [loc.pathname, t])
@@ -100,6 +103,9 @@ function AppShell() {
   const [accountOpen, setAccountOpen] = useState(false)
   const canRun = can('run_batch')
   const canWrite = can('report_edit')
+  // The record is offered to whoever the model gives some access to. This is a navigation hint, not
+  // a gate: the server decides on every request, and an absent hint (an older server) offers nothing.
+  const canForecast = admin || forecast?.scope === 'all' || forecast?.scope === 'own'
 
   // Show back-to-top once the window has scrolled past ~one screen. Self-controlled
   // (rather than antd's FloatButton.BackTop) so it's reliable across pages.
@@ -212,6 +218,9 @@ function AppShell() {
       ? [{ key: 'chat', label: t('nav.chat'), path: '/chat', icon: <MessageOutlined />, color: token.colorPrimary, background: token.colorPrimaryBg }]
       : []),
     { key: 'review', label: t('nav.review'), path: '/review', icon: <AuditOutlined />, color: token.colorWarning, background: token.colorWarningBg },
+    ...(canForecast
+      ? [{ key: 'forecast', label: t('nav.forecast_record'), path: '/forecast', icon: <LineChartOutlined />, color: token.colorInfo, background: token.colorInfoBg }]
+      : []),
     { key: 'apps', label: t('nav.apps'), path: '/apps', icon: <AppstoreOutlined />, color: token.colorSuccess, background: token.colorSuccessBg },
   ]
 
@@ -295,6 +304,7 @@ function AppShell() {
         {/* Vertical gap (14) clears the queue badge's overhang so a 2-digit count (10+)
             doesn't collide with the button on the wrapped row above it. */}
         <Space size={compact ? [8, 14] : 10} wrap style={{ flexShrink: 0, marginLeft: 'auto' }}>
+          {user && <NotificationBell key={user} user={user} />}
           {canRun && !chatFocus && (
             // Keep the primary run action direct. Related run surfaces share a compact menu,
             // so single-run execution remains one click away.
@@ -382,11 +392,17 @@ function AppShell() {
               destroyOnHidden
               styles={{ container: { padding: 12, borderRadius: 18 } }}
               content={
-                <div className="rp-workbench-menu" role="menu" aria-label={t('nav.workbench')}>
+                // The card grows with its tiles (see .rp-workbench-menu): a fixed width held three.
+                <div
+                  className="rp-workbench-menu"
+                  role="menu"
+                  aria-label={t('nav.workbench')}
+                  style={{ '--rp-workbench-cols': workbenchItems.length } as CSSProperties}
+                >
                   <div className="rp-workbench-menu__title">{t('nav.workbench')}</div>
                   <div
                     className="rp-workbench-menu__grid"
-                    style={{ gridTemplateColumns: `repeat(${workbenchItems.length}, minmax(76px, 1fr))` }}
+                    style={{ gridTemplateColumns: `repeat(${workbenchItems.length}, minmax(88px, 1fr))` }}
                   >
                     {workbenchItems.map((item) => (
                       <Button
@@ -394,6 +410,9 @@ function AppShell() {
                         type="text"
                         role="menuitem"
                         aria-label={item.label}
+                        // A label too long for its tile wraps to two lines and then clips; this keeps
+                        // the whole of it readable.
+                        title={item.label}
                         className="rp-workbench-menu__item"
                         onClick={(event) => {
                           event.stopPropagation()
@@ -494,6 +513,20 @@ function AppShell() {
                     >
                       {t('nav.review')}
                     </Button>
+                    {canForecast && (
+                      <Button
+                        type="text"
+                        block
+                        icon={<LineChartOutlined />}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}
+                        onClick={() => {
+                          setAccountOpen(false)
+                          navigate('/forecast')
+                        }}
+                      >
+                        {t('nav.forecast_record')}
+                      </Button>
+                    )}
                     <Button
                       type="text"
                       block

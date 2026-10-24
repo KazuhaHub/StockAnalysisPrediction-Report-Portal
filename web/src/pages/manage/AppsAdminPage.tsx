@@ -5,6 +5,7 @@ import { AppstoreOutlined, CloudDownloadOutlined, DeleteOutlined, ShopOutlined, 
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { AppMarketEntry, AppMarketResp, AppPreviewResp, AppsResp, AppSummary } from '../../api/types'
+import AppBackendModal from '../../components/AppBackendModal'
 import ScopePermissionModal from '../../components/ScopePermissionModal'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
@@ -19,6 +20,7 @@ export default function AppsAdminPage() {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [apps, setApps] = useState<AppSummary[]>([])
+  const [backendApp, setBackendApp] = useState<AppSummary | null>(null)
   const [loaded, setLoaded] = useState(false) // [] is the starting state, not "nothing is installed"
   const [loadErr, setLoadErr] = useState('')
 
@@ -148,11 +150,14 @@ export default function AppsAdminPage() {
     { title: t('apps.scopes'), dataIndex: 'scopes', width: 180, render: scopeTags },
     {
       title: t('batch.col.actions'),
-      width: 90,
+      width: 180,
       render: (_: unknown, a: AppSummary) => (
+        <Space>
+        <Button size="small" onClick={() => setBackendApp(a)}>{t('apps.backendButton')}</Button>
         <Popconfirm title={t('apps.deleteConfirm')} onConfirm={() => remove(a.id)}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
         </Popconfirm>
+        </Space>
       ),
     },
   ]
@@ -192,6 +197,7 @@ export default function AppsAdminPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <AppBackendModal app={backendApp} onClose={() => setBackendApp(null)} />
       <Card
         title={
           <Space>

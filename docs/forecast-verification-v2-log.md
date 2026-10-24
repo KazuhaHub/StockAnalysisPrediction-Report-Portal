@@ -214,44 +214,37 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   clicks twice to cover the memo. The gate's response counts and the unused UI fields were dropped.
   The two snapshot files are regenerated in their own commit with the byte-level explanation above.
 
-## Current progress (2026-10-22)
+## Current progress (2026-10-23)
 
-- **Merged.** R1a-β1: P5 #116, P2 #117, P36 #118, P4 #119. R1a-β2: P1 #120, P6 #121,
-  P7 #122, P8 #123, P16a #124. R1b: P9 #127, P41 #129, P10 #131, P38 #133, P39a #134,
-  P30 #135, P31 #136, P11 #137. R2a: P15 #143, P22 #146 (`669810fd`). The standalone Go
-  1.26.10 security fix #144, upload-test timer fix #147, vendor-evidence fix #148, halt evidence
-  #149 and P14 isolated seeded preview #150 (`74e8c564`) are merged. Owner-authorized dependency
-  PR #138 is also merged at `8ab51334` after current-base CI and independent review passed.
-  P23 #152 is merged at `08b1c1a0` after full exact-head validation. P24 #154 is merged at
-  `c4f0c93c` after independent review and full exact-head CI/CodeQL.
-  P25 #155 is merged at `402a0fa0` after exact-head CI/CodeQL and independent review.
-- **In flight.** P26 #145 on `feat/forecast-record-access` has completed local validation and
-  independent review; main was integrated at `af036007`, whose full CI/CodeQL and combined
-  local Go/Postgres, 1018 web tests and repeated race checks passed. It remains a draft because read-only merge
-  previews report shared-token text overlap with Apps PRs 141/142. Coordination authorization
-  is pending; neither Apps branch nor the user's checkout was changed. The local P16/P26/P37
-  integration and reviewed P17/P18 server work are preserved on `feat/forecast-reader-server`
-  at `8734b287`; own-scoped purge-history evidence still needs schema approval. P37 #151 is now
-  integrating main `402a0fa0`, including the DOMPurify #138 dependency fix, for fresh validation.
-  P23's source/runtime/admin/readiness work and ADR 0041 passed final branch-wide review, full
-  exact-head CI and local browser verification before merging #152. P24's capture, integrity-checked
-  offline replay, fixed-panel CLI and no-database dispatch guards are merged. P25's bounded Sina
-  comparison-only runtime, audited controls, durable counters and administrator diagnostics are
-  merged without alternate writers. No production enablement is implied.
-- **Next step.** Complete current-base P37 review/CI. Resolve the
-  purge-evidence decision and P26 integration order before P27/P28.
-  P13 still requires authorized production baseline screenshots and owner
-  review before P19/P20. P39b's Dify publication and undeclared-input gates are verified below;
-  the R1b deployment and subsequent Portal target refresh remain outstanding. No production
-  action has been performed here.
-- **Known limitations.** Beijing 30%/listing-day and rights-issue captures remain missing. The
-  follow-ups cover real live suspensions, delisted-response availability, 301/689/low-price
-  controls and a P8 bonus/unchanged-ratio pair; they do not claim settlement from unavailable delisted history. The P15
-  forecast translations are machine-generated, pending owner-arranged human review. Seeded
-  responsive parity and the reading UI still require owner review. Re-check ADR numbers before P23: Apps reserves
-  0038/0040 and P22 uses 0039.
-  P30's legacy `g:<Default>` ambiguity and P31's missing-account behavior remain as recorded below.
-- **Evaluator state.** `forecast_auto` remains off pending the owner-controlled readiness gates.
+- **Released and deployed.** v2026.43 (Beta, main `5359857e`) carries R1a-β1, R1a-β2 and R1b. It was
+  deployed after a full backup taken with the previous release and verified by a throwaway restore.
+  Steps `0005` and `0006` applied, and the 20 premature refusals were repaired at boot. The owner set the
+  ledger start to `2026-10-18T16:00:00Z` (sets 1-6 excluded) and scheduled CSI 800 (`sh000906`) from
+  cohort 2026-11 through the administrator page; both writes are audited. The pre-release read-only
+  checks found Q3 = 20, Q5 = 0, and no console or debug run of the covered workflow since the ledger start.
+- **Merged since.** P26 #145 (`dd24e285`), P16-P18 #160 (`a383f107`), P28 #161 (`38569ef5`), reader
+  signals and runbook #162 (`d9db4d9f`), P27 #163 (`02c7c4bc`), the migration-order guard #159, and
+  purge ownership evidence, step `0009` (#165). With #165, R2a is complete in code.
+- **Held.**
+  - P39b, draft #157. Waiting only for the run-target refresh after the v2026.43 deploy.
+  - P19 #166 and P20 #168 (drafts). Waiting for the owner's review of the P13 demo revision, #167.
+- **Next step.**
+  - The owner reviews the revised demo. Appendix A's "Today" column still needs production baseline
+    screenshots.
+  - An administrator refreshes the run targets, then P39b merges as its own Beta.
+  - PR 141/142 append their steps after `0009` when they rebase (the list is merge order, and
+    `migrationListOrder` now pins `[…0006, 0010, 0009]`).
+  - After PR 141 lands, re-enable scoped bridge reads on its shared token binding.
+- **Next deploy: pull and restart (2026-10-24).** The first release that contains step `0009` is deployed
+  like any other: the owner reversed the explicit offline upgrade, so startup applies the step in its
+  own transaction and nothing has to be run first. The maintainer takes the backup with the previous
+  release before pulling (under `pull_policy: always`, from the running container's image id; see
+  [the upgrade notes](forecast-purge-ownership-upgrade.md)). Rollback is a restore of that backup with
+  the previous release into a clean target. After the new release has started, `own` can be set per OU.
+- **Known limitations.** Unchanged from 2026-10-22, plus: zh-TW strings added by P27 are OpenCC output
+  pending human review.
+- **Evaluator state.** `forecast_auto` is off. Before mode `1` the readiness list still needs a dry pass,
+  dry-run checks for `sh000852` and `sh000906`, and a test alert delivered to both channels.
 
 ### P9 — operating the evaluator
 
@@ -519,8 +512,9 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   boxes now stretch to their row's tallest content (83 px at 1280; 126 px at 375/768 in this
   fixture). Screenshots are saved under `~/Downloads/forecast-foundations-p15-401f6cc4/`.
   This component preview does not replace P14's seeded full-page acceptance.
-- Rollback: revert this PR; no data or schema changes. P11 and #144 are merged. P15 awaits
-  required CI on its final rebased head; independent review and full local checks passed.
+- Merged as #143 after full CI on `cb77ccba` (run 39766606158), including SQLite/Postgres,
+  race, web and container smoke/E2E checks. Independent review and full local checks passed.
+  Rollback: revert the PR; no data or schema changes.
 
 ### P39b precondition audit (2026-10-22)
 
@@ -540,6 +534,261 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Read-only container inspection found Portal `v2026.42.3`, revision `c9b2b747`, started
   2026-10-18. P38/P39a/P30 are not deployed, so P39b remains blocked on the R1b production rollout
   and the subsequent Portal target refresh. No deployment or production-data write was performed.
+
+### P26 — access implementation in progress (2026-10-22)
+
+- The pure resolver reads the account fields once and the strict OU index in one read-only
+  transaction (Postgres repeatable read). It denies missing/inactive accounts, errors, unknown
+  values and broken chains; nearest-value inheritance and external restrictions are independent
+  passes, so a leaf override cannot hide a restricted ancestor. No authorization result is cached.
+- `own` uses the leaf's actual parent-edge subtree; Default's appended inheritance role does not
+  make unrelated root OUs descendants. The loader filters `attributed_ou` before membership is
+  computed. Existing callers explicitly retain `all` until their request gates are integrated.
+- Population cache and seed helpers retain the exact `all` identity and add the sorted subtree
+  digest for `own`. Existing golden snapshots are unchanged. A deny population has a non-nil
+  empty OU slice, never the nil slice that means the whole ledger.
+- Tests were added first and failed for the missing resolver, population loader and identity
+  helpers. SQLite/Postgres tests pin attribution, account moves, subtree changes, account reads
+  and failure directions. Another OU's earlier set cannot displace the own population's member.
+  A deterministic Postgres interleaving starts and ends denied: using read-committed isolation
+  incorrectly mixed the old account and new tree and failed by granting `all`; repeatable read
+  passes, and the next request observes the committed account move.
+- This is a partial implementation, not an access rollout. No new reader route is registered yet.
+  Remaining: per-user limits and the limits form before route registration, route gates and full access matrix,
+  cookie/bridge prediction shaping, `/api/me`, OU
+  settings and preview, compute pools/flights/rate limits, count-only weekly adoption, StockPage
+  suppression and the complete security/regression suite. No schema change is included.
+- Checkpoint validation: build, vet, full SQLite Go suite, full Postgres app suite, staticcheck,
+  web typecheck, 120 Vitest files / 1006 tests and production web build passed. The existing
+  attribution source guard initially rejected the new reader; it now permits only that loader's
+  single read predicate and explicitly forbids writes there, retaining all original writer checks.
+  Independent adversarial review found no actionable issues in this foundation checkpoint.
+- Reader handler checkpoint: groups and members now share population-aware implementations with
+  the admin aliases, which retain their existing response shapes. Internal `all` records match
+  admin records except `unrecorded`; own period bounds, seeds and cached cells are isolated from
+  other OUs. The clock is injectable on both handlers.
+- External `all` shaping omits coverage, unrecorded and every denominator/count, recursively
+  including policy slices. Mature cells retain metrics and `min_n_met`; non-mature cells carry
+  state only. Copies protect cached cells from redaction. External `own` retains its own counts.
+  External members are report-readable only, omit purged/orphaned rows, and paginate after that
+  filtering with opaque cursors and no global total. Custom ranges and none scopes are refused
+  before query validation or ledger reads. Two refusal messages were added to all locales, with
+  zh-TW produced by OpenCC.
+- Review found the member drawer taking frozen matrix state but recomputing counts after a
+  backdated insert. It now takes frozen n/refused/corporate-action counts and reconstructs the
+  mature gate's resolved/total counts. Resolved and pending backdated inserts failed first;
+  regressions now pass, including a cell with both excluded outcome classes. Follow-up review
+  confirmed the issue closed. Existing golden snapshots remain unchanged.
+- Reader checkpoint validation: build, vet, full Go suite (SQLite), full Postgres app suite,
+  staticcheck, web typecheck, 120 Vitest files / 1006 tests and production web build passed.
+  The extra excluded-count regression also passed after the full Go runs were started.
+- Compute checkpoint: only uncached mature scoring occupies a slot. Official and exploratory
+  pools are independent; identical population/range/checkpoint requests share a detached flight.
+  An official follower promotes a queued exploratory flight rather than waiting behind its pool;
+  an already-running shared computation is not duplicated. Caller cancellation does not cancel
+  followers. Waiting is bounded, and scorer panics release capacity with a generic failure.
+- Groups handlers now return a retryable `forecast_busy` (503 plus `Retry-After`) rather than a
+  partial record when capacity is unavailable or the request wait expires. Cache hits and
+  non-mature gates bypass slots. The existing limits API reads/writes all five bounded settings;
+  omitted values remain unchanged, and invalid values are rejected before writes. The two
+  per-user settings are not yet enforced; their limiter and the web form remain pending.
+- Review identified a generation race when a purge occurred after loading sets but before worker
+  admission: stale inputs could acquire the new generation and refill the memo. The request now
+  captures generation before any population reads, carries it through flight/cache operations,
+  and rejects changed generations. A deterministic test deletes sets and purges at the existing
+  settings-read seam between loading and admission. A late-generation mutation failed by serving
+  stale HTTP 200; the fixed path answers 503, leaves the memo empty, and reloads on the next call.
+  Follow-up review confirmed the issue closed. No reader route has been registered yet.
+- The plan assumed an existing limits audit, but the security-save audit did not record limit
+  values. Resolved numeric before/after limits are now recorded under the existing `policy.change`
+  action with target `security/limits` immediately after a real change. This also covers the
+  existing partial-save behavior when a later policy block fails validation. Tests failed first
+  for missing values and for that unaudited partial-save path, then passed; unchanged saves do
+  not create another limits-change row. No secret or schema change is involved.
+- Compute checkpoint validation: build, vet, full SQLite Go suite and full Postgres app suite,
+  staticcheck, three targeted race repetitions, web typecheck, 120 Vitest files / 1006 tests and
+  production build passed. Final full Go tests with Postgres enabled passed again after the
+  limits-audit refinement. Independent review confirmed the generation and audit fixes; the
+  remaining P26 requirements above still block merge.
+- Matrix alignment correction: replaced unreliable percentage heights inside native table cells
+  with shared grid tracks and stretched flex cells. Mixed mature, pending, small and open states
+  now share the same top/bottom edges within each row, including wrapped text and exclusions.
+  Group labels and metadata wrap within the first track instead of overlapping a checkpoint.
+  Browser checks at 1100, 740 and 360 pixel container widths confirmed equal card rectangles
+  in all six fixture rows and no label overflow. Added a regression test; all 26 forecast
+  component/page tests, typecheck and production build passed. Independent review closed the
+  long-label overflow finding. Apps code and production state were not changed.
+- Reader governance checkpoint: custom/member request ceilings are per-user, independent fixed
+  windows. Zero removes only the frequency ceiling. A user may have one distinct custom query
+  in flight; identical followers share scoring but spend request budget. Detached flights retain
+  the query lease after an HTTP cancellation, releasing it only when the background work finishes.
+  Rate refusal is `forecast_rate_limited` (429 plus `Retry-After`). Existing admin aliases retain
+  their behavior. The security form now exposes all five bounded settings and preserves zero.
+- Registered the two reader statistics routes through the new `forecast_scope` gate annotation.
+  Route-table tests enforce session-only authentication, the enrolment wall, `none` denial, and
+  refusal of persistent and bridge bearer credentials. Positive all/own sessions receive records,
+  never `unrecorded`, and cannot use the admin aliases. Revoking scope after memo population
+  immediately refuses the same session. The tests first failed for the absent gate/registration;
+  the added positive fixture also required the signing configuration omitted by machine fixtures.
+- Independent limiter/settings/route review found no actionable issue. Full Go tests with
+  Postgres enabled passed; all 120 Vitest files / 1008 tests, typecheck, build, vet, staticcheck,
+  production web build and three targeted race repetitions passed. The final scope-revocation
+  extension passed separately after the full run. Remaining P26 work: prediction cookie/bridge
+  gates and shaping, me hints, OU editing/audit/preview, weekly count-only adoption, StockPage
+  suppression and the complete cross-surface access matrix. This draft is not ready to merge.
+- Reading-page hint checkpoint: `meJSON` now returns only `forecast: {scope, external}` from the
+  strict resolver, including the shared login payload. Auth context defaults a missing hint to
+  `none`. StockPage skips both prediction reads at `none`, immediately hides loaded forecasts on
+  revocation and suppresses only the server's 403 `forecast_unavailable`; other failures retain
+  the existing inline retry. Tests first failed for absent hints, unwanted reads and retry UI.
+- Review found that an enabled-to-enabled policy change (internal to external, or all to own)
+  could leave old data displayed. Both requests and result states now carry the full user/scope/
+  external identity; symbol history also carries its symbol. Derived values reject old-policy
+  results before effect cleanup. Dynamic regressions clear the old value, require both refetches,
+  and then show the new value. A mutation removing the full-identity effect dependencies failed
+  both regressions; restoring them passed. Independent follow-up review closed the finding.
+- Hint checkpoint validation: full Go suite with Postgres enabled, vet, staticcheck, web typecheck,
+  all 120 Vitest files / 1016 tests and production build passed. Server-side prediction gates and
+  bridge shaping remain pending; navigation suppression does not substitute for those gates.
+- Cookie prediction checkpoint: both SPA prediction reads and both v1 cookie reads now resolve
+  current forecast permission before ledger access. `none` answers `forecast_unavailable` after
+  the independent enrolment wall. External/scoped views return accepted, report-backed sets only;
+  the SQL filters precede LIMIT so newer rejected or orphaned sets cannot hide readable results.
+  Payload, errors and membership pointers are omitted. Persistent machine reads keep diagnostics,
+  rejected sets and orphaned history. New failure-direction tests first reproduced the old 200
+  for `none`, membership leakage and rejected rows consuming a one-row limit. Store controls run
+  on SQLite and Postgres. Existing positive fixtures now explicitly grant forecast access; broken
+  account/tree fixtures expect the new strict 403 instead of the old report-level 404.
+- Review found an external decision could race account deletion or restriction removal and then
+  receive nil (unrestricted) legacy report scope. The shared view composition now substitutes
+  deny-all for an external decision plus nil scope, matching the member drawer. Deterministic
+  deletion and unrestriction interleavings first leaked on both report and symbol reads, then
+  passed with the fallback. Independent follow-up review confirmed the finding closed.
+- Apps PRs 141 and 142 both extend app-token identity using username, session revision and account
+  creation identity. Their shared files remain untouched here; bridge prediction identity is still
+  pending and this draft must not merge before that integration and all other P26 requirements.
+- Final cookie checkpoint validation: full Go suite with Postgres enabled passed after the
+  interleaving fix; three targeted race repetitions, vet and staticcheck passed. No web changes
+  were made in this checkpoint. Independent review has no remaining finding in this slice.
+- OU scope settings checkpoint: PUT group settings decodes `forecast_scope` as RawMessage so
+  omission leaves it unchanged, explicit null restores inheritance (Default stores `none`), and
+  only `all`, `own` or `none` are accepted. Invalid values are refused before any existing group
+  mutation; tests also prove they do not rename/restrict the OU or emit an audit change.
+  The scope save uses a transaction and locks the prior value on Postgres, returning an exact
+  from/to delta only on change for the existing `group.change` row. No schema changes were made.
+- GET groups now supplies the own nullable value, strict effective scope and source OU. Tests
+  first failed for absent persistence and missing inherited fields, then passed, including exact
+  audit deltas, omitted/null distinction, Default normalization and Postgres storage controls.
+  Independent review found no actionable issue. Added the new refusal translation in all three
+  locales, with Traditional Chinese generated through OpenCC. The access impact preview remains
+  pending, along with bridge integration, adoption counts and the complete access matrix.
+- OU checkpoint validation: full Go suite with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed. Web typecheck, 28 locale/generator tests and production build passed.
+  The full error-code parity guard caught the missing new translation before it was added. The
+  final Go run was serialized after the frontend build to avoid the existing dist cleanup/embed
+  race during concurrent builds. The branch remains a draft; no production state changed.
+- Admin impact preview checkpoint: `GET /api/admin/forecast/access` reports each OU's nullable
+  own scope, strict effective scope/source, external flag and direct-member account counts, plus
+  overall counts. Unassigned members count under Default; root-OU members and admin overrides
+  are included. Snapshot reads active accounts, the panel timezone and the OU tree through one
+  read-only transaction (repeatable read on Postgres), and returns no account identities.
+- Optional `ou` and `scope` parameters preview all/own/none/inherit on an in-memory tree only.
+  Invalid, missing or duplicate parameters fail before the snapshot; a missing OU is rejected.
+  The response marks a preview and counts accounts whose access changes, excluding source-only
+  changes. Tests compare the hypothetical overview against a real saved scope, prove the preview
+  left persistent policy unchanged, cover Default inheritance and admin-only routing, and check
+  active-account snapshot loading on Postgres. No new schema or production write is involved.
+- Independent review caught expired accounts being included. The snapshot now uses the panel-tz
+  civil date with the same inclusive cutoff rule as login/session validation. The regression
+  first counted the expired account, then passed for expired/today/future/unlimited controls in
+  Pacific/Kiritimati. Follow-up review confirmed the issue closed. Failed store reads return an
+  error rather than a plausible empty summary. Bridge integration, weekly adoption counts and
+  the complete P26 access matrix remain pending.
+- Preview checkpoint validation: full Go regression with Postgres enabled, three targeted race
+  repetitions, vet, staticcheck and diff checks passed after the expiry fix. The extra closed-store
+  regression passed separately after the full run began. Existing required CI checks on the
+  preceding OU-settings commit are green; this preview commit still requires its own CI run.
+- Weekly adoption implementation: successful non-admin reader-groups responses add a per-UTC-ISO-week
+  HMAC to an in-memory set under a fresh random salt. The hourly loop writes only a bare integer
+  `forecast_viewers_<week>` equal to this process's initial persisted baseline plus its set size.
+  Repeated flushes are idempotent; restart draws a fresh salt and intentionally yields an upper
+  bound. Failed observations never affect the response and log only a constant diagnostic.
+- Week rollover clears the salt and set, retaining only an integer if the old week's flush needs
+  retry. A monotonic week watermark ignores late older-week requests. Tests cover duplicate and
+  concurrent observations, successful-reader-only counting, ISO-year rollover, failed flush retry,
+  restart baselines, corrupt/overflow counts and SQLite/Postgres storage. A backup dump contains
+  no test viewer username, salt or digest; tracking meta rows contain only the expected key and
+  integer. No schema changes or production writes occurred.
+- Weekly implementation validation: full Go suite with Postgres enabled, three targeted race
+  repetitions, vet and staticcheck passed; additional invalid-baseline and privacy/log checks
+  passed separately. Independent review was retried after an availability failure and remains
+  pending until a result is received. This checkpoint is not eligible for merge without review.
+- Independent weekly review completed with no actionable findings. Its scheduler validation gap
+  is covered by a shared due-decision helper and deterministic before/exact/after-hour and ISO-week
+  boundary tests. The live minute ticker itself is not advanced through a wall-clock boundary.
+  Hourly persistence necessarily permits losing the latest unflushed observations on abrupt
+  termination; the adoption indicator is not an exact analytics ledger.
+- Access-table reconciliation: internal non-admin prediction readers now receive accepted sets
+  without error diagnostics, while retaining payload and orphaned history. Internal `own` readers
+  also omit membership pointers because those refer to the all-population record. Admin and
+  persistent-machine diagnostic contracts remain unchanged. Both SQL filters precede LIMIT.
+- Regression tests first exposed rejected rows, errors and own membership, then passed after the
+  view-policy correction. Positive controls retain internal payload/orphans and compare both SPA
+  reads against their real cookie-authenticated v1 counterparts. Independent review found no
+  actionable issue. Full Go regression with Postgres enabled, three targeted race repetitions,
+  vet and staticcheck passed; the final orphan/v1 extensions passed in the race run separately.
+- Cross-surface matrix checkpoint: `TestForecastAccessMatrix` exercises the real mux on SQLite
+  and Postgres, with both Default-none and Default-own trees, one account per specified OU,
+  unassigned/restricted/admin/mandated subjects, anonymous requests, persistent query tokens and
+  bridge-token denial on session routes. Two resolved months include frozen own/subtree
+  attribution, a genuinely purged member, rejected diagnostics, and readable/unreadable reports.
+- Explicit fixture expectations pin exact members and own sample sizes, both mature all-months
+  and their numeric spread, required payload/membership/count fields and recursive forbidden
+  paths. The pre-existing authentication wrappers take precedence: a dangling tree returns 503
+  `enrolment_policy_unavailable` before forecast resolution, and missing admin permission returns
+  plain 403 before checking enrolment. These stricter refusals are tested without changing the
+  independent authentication policy. Pure resolver tests separately pin dangling-tree `none`.
+- Independent review found that own groups could disappear without failing the original loop.
+  Both fixture months are now required exactly once. A temporary empty-own-groups mutation fails
+  this check; temporarily removing internal reader/no-membership policy also fails on diagnostic
+  and membership leaks. Both mutations were restored. Follow-up review found no remaining issue.
+- Matrix checkpoint validation: SQLite/Postgres matrix passed, three race repetitions passed,
+  and the full Go suite with Postgres enabled, vet, staticcheck and diff checks passed. Shared
+  Postgres runs were serialized; an initial overlapping invocation was cancelled and discarded.
+  Bound bridge prediction subjects remain to be added with the shared token-identity integration;
+  this matrix checkpoint does not claim that pending P26 contract or P27/P18 UI contracts complete.
+- Bridge integration checkpoint: the shared app-token registry now carries its minting user's
+  username, session revision and account creation identity. `mintForApp` and its API call match
+  the interfaces already present in both parallel Apps PRs; its body is byte-identical in both.
+  No notification or extension capability was added, no second identity registry was introduced,
+  and neither parallel branch was changed. This is an in-memory binding, not a schema change.
+- Prediction reads preserve cookie precedence and the persistent query token's diagnostic shape.
+  Bound bridge tokens recheck current scope and account identity/active/expiry/enrolment state.
+  Identity freshness and scope use the same strict account/tree snapshot. Unbound bridges deny;
+  all allowed bridges, including admin-minted ones, return accepted report-backed sets only,
+  without payload, errors or membership. Newly external readers use current report visibility.
+- Bridge regressions first reproduced none-scope HTTP 200 and diagnostics/orphan/stale-account
+  disclosure, then passed. The matrix now includes tokens actually minted by the Internal and
+  InternalNone members, with no skipped v1 probes. Extra controls cover none-to-all updates,
+  restriction filtering before LIMIT, denied-cookie precedence, exact expiry boundaries,
+  non-query/unbound/nil registries and closed-store denial. Independent slice/follow-up review
+  found no actionable issue. Full Go/Postgres regression, build, vet, staticcheck and three
+  targeted bridge/matrix/snapshot race repetitions passed.
+- Final requirements reconciliation corrected the older-server navigation contract: an omitted
+  `me.forecast` remains undefined and preserves reading-page prediction requests; explicit `none`
+  still prevents both requests and immediately hides existing forecast data. Legacy identity is
+  distinct from known policy identities. Auth and reading-page regressions failed before the
+  correction and passed afterward. This supersedes the earlier deny-by-default hint fallback.
+- Final independent P26 audit found no actionable finding or missing implementation requirement.
+  Local validation passed: full Go suite with Postgres enabled, three targeted race repetitions,
+  build/vet/staticcheck, web typecheck, all 120 Vitest files / 1018 tests, production web build,
+  and a serialized Go embed rebuild after that build. Latest pushed-head CI remains required.
+- Integration hold: read-only `merge-tree` against Apps PR 141 reports `apps_token.go`; against
+  PR 142 it reports `apps_api.go` and `apps_token.go`. Shared mint code is identical, but textual
+  overlap is not a clean integration. Neither branch nor the user's checkout was modified.
+  Coordination authorization was requested before messaging the other development conversation;
+  do not merge this draft until the shared edits have a verified integration order and clean
+  combined validation. No schema, release, deployment, production data or Dify publish occurred.
 
 ### P22 — reader access decision record (2026-10-22)
 
@@ -610,6 +859,22 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   build passed. All seven captures retain every response byte plus one terminal LF and match
   their documented SHA-256. Exact-head full CI and CodeQL remain required before merge.
 
+### P26 — integrate independently validated main changes (2026-10-22)
+
+- Integrates main at `fa250ced`: P22 #146, upload timer lifetime #147 and captured adjustment
+  parsing #148, each independently reviewed with green exact-head CI and CodeQL before merge.
+- The merge had only a running-log conflict. Both sides' append-only evidence is retained; the
+  progress summary distinguishes previously green P26 `27a5a6af` from the new combined head,
+  which must be validated again. No runtime conflict required a manual resolution.
+- P26 remains a draft awaiting authorized Apps integration coordination. This merge does not
+  claim that its shared-token overlap with Apps PRs 141/142 is resolved and changes neither
+  Apps branch nor the original user checkout. No production action is included.
+- Independent merge review found no actionable issue and verified all imported files except
+  the resolved log are byte-identical to main. Combined full Go tests with Postgres enabled,
+  vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests, production build and serialized
+  embed rebuild passed. Three-repeat bridge/snapshot/captured-fixture race validation and
+  exact-head CI remain to be confirmed; the Apps sequencing hold remains independent of them.
+
 ### P7 follow-up — live suspension and delisted-response evidence (2026-10-22)
 
 - Starts from main `fa250ced`, independently of P26 and both Apps branches. P26's normal main
@@ -677,6 +942,219 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - Rollback: revert this PR and stop the local preview. No production deployment, workflow
   publication, evaluator enablement, Apps-branch edit or database migration was performed.
 
+### P16 — ordered membership classifier checkpoint (2026-10-22, in progress)
+
+- Starts from merged main `74e8c564` in an independent statistics lane. P26 draft #145 has
+  integrated that main as `af036007`, with full local validation and exact-head test run
+  39805130175 / CodeQL run 39805121956 completed successfully. It still awaits Apps integration
+  ordering; this P16 work neither removes that hold nor changes either Apps branch.
+- Extracted the pure ordered membership classifier and rebuilt the statistics wrapper on it.
+  Canonical symbol/receipt/id order preserves the permutation inputs. Pre-live and non-accepted
+  rows do not reserve a symbol; pending/degraded/mismatch and off-benchmark first decisions
+  cannot be replaced by a rerun. Unknown states now remain visible in an explicit coverage
+  bucket instead of disappearing, and never become members.
+- Tests first failed for the absent classifier and unknown bucket. Explicit precedence/order
+  tests and 500 deterministic fixtures against an independent frozen old implementation pass;
+  existing golden cells/members remain byte-identical without fixture changes. Independent
+  checkpoint review found no actionable issue. Full Go/SQLite/Postgres regression, vet and
+  staticcheck passed; three repeated classifier/golden race passes also passed (10.037 s),
+  including the final unknown-does-not-reserve and per-cohort-intent controls.
+- This is not P16 completion. Remaining work includes read-time membership against full cohort
+  populations, display/counted set identity, read fields and integer upside, restricted/error
+  omission, cross-process purge markers, revised phases and OpenAPI contract tests. No P16 PR
+  is ready to merge, and no schema or production action is included.
+
+### P16 — read identity and membership checkpoint (2026-10-22, in progress)
+
+- Read membership now uses the shared classifier over complete monthly populations, independent
+  of report revision limits and symbol pagination. Restricted readers never load the global
+  population; failed population loads omit membership and counted identity without losing the
+  readable report. Tests compare restricted responses byte for byte before and after another
+  tenant's earlier decision.
+- Display identity prefers the latest accepted revision matching the current body, with the
+  latest accepted revision as fallback. Counted identity comes only from the monthly member.
+  Compact identity scans preserve both selected revisions beyond the 200-set detail limit;
+  supplemental loads require both report and set identity and retain viewer filtering.
+- Added report dates and exact integer upside truncated toward zero, with overflow rejection.
+  Existing report-local counted helpers were removed. SQLite and Postgres tests cover 221
+  revisions, timestamp ties, cross-report supplemental-load rejection and paginated symbol reads.
+  The test fixture writer now uses the existing portable insert-ID helper on both drivers.
+- Independent checkpoint review found no actionable issue. Full Go/SQLite/Postgres regression,
+  build, vet, staticcheck, web typecheck, 120 Vitest files / 1006 tests and production SPA build
+  passed. Existing golden snapshots remain unchanged. Final serialized embed rebuild also passed.
+- This checkpoint is not P16 completion or merge readiness: persistent purge checks, phases,
+  drawer population semantics and OpenAPI remain, as does reconciliation with P26's protected
+  access rules. No schema, Apps-branch, deployment or workflow-publication change is included.
+
+### P16 — persistent purge-read checkpoint (2026-10-22, in progress)
+
+- Statistics and drawer requests now check persisted retention markers before consulting cell
+  caches. Marker query/scan failures return a database error rather than serving cached metrics.
+  Monthly ranges retain months represented only by markers; those rows and drawers return
+  `purged` with `purged_at`, without scoring or reusing a mature cell.
+- Exploratory populations exclude marked cohorts and disclose sorted `excluded_months` with
+  dates. A request with exclusions bypasses full-population cache entries; unaffected requests
+  retain their existing cache behavior. Later writes into a marked cohort cannot resurrect it.
+  Optional client types describe the new metadata; final visual rendering remains with P19.
+- Tests first failed for the absent purge response fields. The final test uses two independent
+  file-backed SQLite connections and two servers, primes the reader's mature cache, and runs the
+  writer's real retention transaction. Mixed-range controls verify exact surviving metrics,
+  all surviving drawer members and matching exclusions, including same-symbol rows reintroduced
+  into the marked month. Marker-table failure refuses both monthly/custom statistics and drawers.
+- Independent review requested the mixed-range control; the added control closed that gap and
+  follow-up review found no actionable issue. Full Go/SQLite/Postgres regression passed
+  (32.676 s for the app package), as did vet/staticcheck, three repeated purge/golden race passes
+  (13.802 s), web typecheck and the 18 targeted matrix/export tests. Golden files are unchanged.
+- This remains an unmerged P16 checkpoint. Phases, drawer population semantics, OpenAPI and
+  P26 access reconciliation still need completion and final review. No schema or production
+  action was performed.
+
+### P16 — read-phase and published-calendar checkpoint (2026-10-22, in progress)
+
+- Added the seven reader phase constants. An unresolved mark waits until its 15:30 lower bound,
+  then settles; it becomes overdue after 21 days without an exact date, or 48 hours after an
+  evidenced exact due date. Only a valid recorded due session can produce `retrying`; malformed,
+  contradictory early and future session records do not manufacture a retry. Terminal statuses
+  win, and repeated annotation clears previous derived dates and phases.
+- Readers can reuse immutable copies of evaluator-validated completed calendars without fetching
+  market data. Publication occurs only after index/volume validation and excludes intraday and
+  future sessions. A calendar window replaces rather than joins previous windows. Missing
+  receipt coverage or a frozen start absent from the window retains the conservative fallback;
+  an incomplete window cannot establish an exact deadline. No settlement arithmetic changed.
+- Committed test-only scheduled-closure ranges and source URLs from SSE's 2023, 2024, 2025 and
+  2026 notices. The independent session enumeration checks 39,854 receipt/time/checkpoint/frozen
+  start combinations for the lower-bound property, preserving existing normalized leap-day month
+  arithmetic. These are scheduled-calendar test evidence, not runtime calendars or vendor bars.
+- Initial tests exposed the old indefinitely-waiting/retrying behavior and retained derived
+  metadata. New controls cover nanosecond deadline boundaries, immutable input/output copies,
+  invalid-publication retention, no read-time network call and concurrent publication/readers.
+  Independent checkpoint review found no actionable implementation issue. Full Go/SQLite/Postgres
+  regression passed (45.015 s app package); vet/staticcheck, web typecheck and all 120 Vitest files /
+  1006 tests passed. Three repeated phase/calendar/concurrency/golden race passes also passed
+  (40.334 s). Golden fixtures are unchanged.
+- This does not complete P16: source/direction fields, paused notices, drawer population semantics,
+  OpenAPI and protected-access reconciliation remain. No schema or production action is included.
+
+### P16 — outcome fields, pause notice and read contract checkpoint (2026-10-22, in progress)
+
+- Read marks now expose their stored source and use the shared hit predicate for resolved
+  direction. Missing inputs and corporate-action exclusions are untested; unresolved/final-refusal
+  marks do not carry a direction. Dual-driver tests pin agreement, disagreement, flat results,
+  missing data, exclusions and both sides of the absolute five-percent threshold.
+- Both reading responses expose a separate `settlement_paused` notice for off/dry/unknown modes.
+  The stock page keys it to the displayed report with the existing stale-response guard. The
+  panel renders the pause notice separately from settling/overdue phases in all three UI locales.
+  Tests verify pending navigation and a late abandoned response cannot retain another report's
+  notice; older responses without the optional flag remain supported.
+- Removed never-filled `counted_in_group`, `baseline_bar` and `baseline_fen` read fields and their
+  obsolete client fixture values. Added complete read set/claim/mark/response OpenAPI schemas,
+  linked both machine-route responses, documented display/counting identity and corrected the
+  old report-local counting description. Tests lock phase/direction/membership to Go constants,
+  cover every exported read field and verify response bindings in all three localized specs.
+- Tests first failed for absent fields and pause rendering. Independent review found that an
+  empty symbol query still serialized `sets: null`, contradicting the new array contract. A new
+  route regression reproduced it; the store now returns an empty non-nil slice, and follow-up
+  review confirmed closure with no further actionable issue. Existing golden files are unchanged.
+- Final validation: full Go/SQLite/Postgres regression passed (48.744 s app package), as did vet,
+  staticcheck, three repeated outcome/empty-result/privacy/golden/OpenAPI race passes (21.608 s),
+  web typecheck and all 120 Vitest files / 1007 tests. Production SPA build and the serialized Go
+  embed rebuild also passed.
+- P16 remains unmerged: drawer membership population/link semantics, removal of the unused
+  coverage refusal bucket, final contract audit and P26 protected-access reconciliation remain.
+  Apps integration PRs #141/#142 remain open at their previous heads; P26 #145 remains held.
+  No schema, production deployment or workflow publication was performed.
+
+### P16 — member population and readable links checkpoint (2026-10-22, in progress)
+
+- The legacy management drawer accepts `population=all` to explain all group members and
+  first-decision pending-baseline candidates. Duplicate reruns never become additional members.
+  Exclusion reasons distinguish pending baselines, missing marks, pending/refused/final marks,
+  corporate actions, non-standard h12 horizons and unknown mark statuses. The default/scored
+  population stays unchanged; the statistical gate receives the same inputs as before.
+- Non-mature cells send no outcomes, including for individually resolved marks. Even in a mature
+  cell, excluded rows carry no prices, returns, upside or direction. Membership mode invokes no
+  permutation scorer. Tests cover mixed exclusions, duplicate reruns, mature exclusions and h12.
+- Report links use the existing report-read scope in one batched metadata query; an unreadable or
+  concurrently removed report loses its report ID and link metadata. Visible reports use `repKind`
+  rather than raw stored categories. SQLite/Postgres controls prove both a granted readable
+  report and a hidden sibling, including version grants and a legacy category alias.
+- Initial tests failed for the absent mode and raw category. Fixture setup now uses the actual
+  account restriction setter and version grants rather than assuming account upsert grants read
+  access. Independent review found no actionable issue. Full regression exposed missing UI
+  translations for the new error code; all three locales now cover it. Golden files are unchanged.
+- Validation after that correction: full Go/SQLite/Postgres regression passed, as did vet,
+  staticcheck, three repeated drawer/link/purge/golden race passes (23.730 s), web typecheck and
+  the 10 focused matrix/locale tests. The full 120-file / 1007-test web run passed before the
+  error-message-only locale addition.
+- This checkpoint does not remove the P26 integration hold or make P16 merge-ready. No schema,
+  Apps-branch, deployment or workflow-publication change is included.
+
+### P16 — retired coverage field and frozen characterization (2026-10-22, in progress)
+
+- Removed the never-populated `coverage.refused` field from the live Go/TypeScript contracts and
+  client fixtures. Checkpoint refusal counts remain: the raw-response regression proves one
+  final refusal still appears on a mature checkpoint while all 35 decisions remain members in
+  coverage. Its initial failure confirmed that the retired live field was still present.
+- Preserved the archived golden files byte for byte through an explicit test-only coverage DTO.
+  It copies every live counter and adds only the historical zero refusal placeholder in the
+  original key order. It describes frozen characterization serialization, not today's API.
+  A reflection guard gives every live counter a distinct nonzero value and checks matching
+  names, JSON tags and exact values; it also rejects unexpected archive-only fields. New live
+  coverage fields therefore cannot silently disappear from characterization assertions.
+- Independent review of both the approach and implementation found no actionable issue. The
+  raw API, adapter guard and golden tests pass without regenerating any fixture. This resolves
+  the plan's live-field removal while retaining its unchanged-statistics characterization gate.
+- Validation: full Go/SQLite/Postgres regression, vet/staticcheck, three repeated raw-contract /
+  adapter/golden/member/link race passes (12.904 s), web typecheck and all 120 Vitest files /
+  1007 tests passed. Production SPA build and the serialized embed rebuild passed. No archived
+  fixture was regenerated.
+- P16 still needs final protected-access reconciliation with P26 and an integrated requirement
+  audit before a merge-ready PR. No schema, Apps-branch or production change is included.
+### P26 — integrate seeded preview and captured halt evidence (2026-10-22)
+
+- Normal merge of main `74e8c564` brings independently validated #149 and P14 #150 into the
+  held P26 draft. Both histories' append-only evidence is retained in this log.
+- Resolved overlapping reader functions by retaining P26's authorization and protected-set
+  projection while selecting P14's `forecastNow` for periods and read phases. Custom/member
+  ceilings and adoption observations keep their separate operational clock.
+- New real-seed integration tests exercise the own/sub-OU population below 30, external-all
+  metrics without coverage or sample size, none denial and exact operational-week adoption.
+  Moving the demo clock cannot replenish either request ceiling. Temporary wrong-clock
+  mutations failed the period assertion, adoption persistence and both limiter subtests;
+  every mutation was restored before validation.
+- Independent review found no actionable issue in the conflict resolutions or new tests and
+  confirmed incoming seed/clock/evidence files match main. Full Go regression with Postgres,
+  build/vet/staticcheck, web typecheck, 120 Vitest files / 1018 tests and three-repeat
+  access-matrix/demo-clock race checks passed (174.475 s). Supplemental three-repeat
+  bridge/snapshot/captured-fixture race checks also passed (221.801 s). The serialized
+  SPA/embed rebuild passed; exact-head CI remains required for the new combined commit.
+- P26 stays a draft for the existing Apps integration sequencing hold. No Apps branch,
+  original user checkout, production database, workflow publication or evaluator mode changed.
+
+### P16 / P26 — uncommitted reader integration checkpoint (2026-10-22)
+
+- Resolved the overlapping read, group, member and stock-page implementations in the P16
+  worktree, preserving population authorization, protected projections and reader semantics.
+  The integration remains uncommitted and is not merge-ready.
+- Purge exclusions now distinguish exploratory cache entries and in-flight computations
+  without changing statistical seeds. A two-store shared-database regression holds an older
+  calculation open, purges June, then verifies a new request independently scores July.
+  Removing the purge cache tag makes the new request join the blocked flight and fail;
+  the mutation was restored and the regression subsequently passed three times.
+- Integration tests verify restricted read responses do not change with another report's
+  membership decision, and purged external reader responses retain retention metadata
+  without exposing volume fields. Independent review found no additional actionable issue.
+- Validation: full Go regression without Postgres passed (app package 38.551 s), vet and
+  staticcheck passed, targeted integration race checks passed (3.071 s), and web typecheck
+  plus all 120 Vitest files / 1019 tests passed. The subsequent full Go regression with
+  Postgres passed (app package 45.604 s), followed by the production SPA build and serialized
+  Go embed rebuild. The existing mixed static/dynamic locale import warning remains.
+- The owner explicitly rejected exposing global purge months to own-scoped readers.
+  Historical purge rows cannot establish organization attribution after their source sets
+  have been deleted. A minimal organization-evidence side table and unknown-history handling
+  were proposed for approval; no schema change has been written. Current draft marker reads
+  still require that resolution before release. No Apps branch or production state changed.
+
 ### P37 — exchange-backed reading projections (2026-10-22)
 
 - Implements build document section 8.7 and owner decision V23(a) independently from P16/P26.
@@ -701,6 +1179,273 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   schema, evaluator mode or pending P16/P26 merge was changed.
 - P16 integration must preserve the new qualification flag alongside its published-calendar
   and overdue rules; a scheduled closure is not exact observed evidence for its 48-hour rule.
+
+### P16 / P37 — local projection integration checkpoint (2026-10-22)
+
+- Preserved P16's phase vocabulary, calendar publication, protected reads and derived metadata
+  alongside P37's expected flag. Updated the reflected OpenAPI mark schema, source-boundary
+  guard and panel tests. The standalone P37 PR remains unchanged and unmerged.
+- Published completed sessions and recorded due-session evidence outrank scheduled closures,
+  including a synthetic unexpected-open-day control. A published S0 also prevents the read
+  from claiming it is still waiting for an already observed start. No read fetch was added.
+- Expected dates never become exact evidence for the 48-hour rule. A deliberate mutation that
+  treated the expected flag as exact evidence failed the new deadline test and was restored.
+  Independent review additionally found the estimate was delaying the 21-day deadline.
+  Added a failing boundary regression, then separated the display estimate from the weekday
+  phase clock: for the September 17 d20 fixture, display remains expected October 26, settling
+  starts at the October 16 lower-bound close, and overdue starts November 6. Follow-up review
+  found no remaining actionable issue.
+- Final full Go regression with Postgres passed (app package 55.284 s); vet/staticcheck and
+  three-repeat targeted race checks passed (3.411 s). Web typecheck and all 120 Vitest files /
+  1020 tests passed. The SPA production build and serialized Go embed rebuild passed.
+- This is a local integration checkpoint, not merge readiness. The own-scoped purge-history
+  evidence schema still awaits approval, as does reconciliation/merge of the existing DOMPurify
+  dependency PR #138 that blocks P37 CI. No production, Apps branch, schema or evaluator mode
+  was changed, and no separately owned PR was modified.
+
+### P17 — pending-cell explanations checkpoint (2026-10-22, in progress)
+
+- Added request-time phase counts, the final-refusal-cap flag and the earliest outstanding
+  not-before date/expected qualifier to non-mature cells. The classified member and pending-baseline
+  populations feed the explanation, with the same standard-horizon filter for h12. Invalid timing
+  has an explicit unknown bucket rather than silently disappearing. Counts include resolved and
+  final phases so they reconcile with the full selected population, not only failed attempts.
+- Read the already-existing frozen `s0_date` alongside group metadata on both drivers; no schema
+  change is involved. SQLite and Postgres tests prove explanations retain that frozen start.
+- The scoring builder has a read-time wrapper. Explanations are copied onto response cells after
+  computation and never enter mature-cell memos. Pure computation and archived golden fixtures
+  remain unchanged. A fixed 500-fixture independent gate oracle exercises open, pending, small
+  and mature outcomes; metadata must not alter any state.
+- External-all shaping removes every explanation field, including from a deliberately decorated
+  mature cell and recursively from slices. The positive leak fixture failed before adding those
+  removals; own readers retain their explanations, and shaping never mutates its source response.
+  Independent review found no actionable issue in this checkpoint.
+- Validation: full Go regression with Postgres passed (app package 53.364 s), vet/staticcheck,
+  three-repeat targeted race checks (33.185 s), web typecheck and all 120 Vitest files / 1020 tests
+  passed. The production SPA build and serialized Go embed rebuild passed.
+- This is not P17 completion. The response-level summary, covered types, limits, timestamps,
+  ledger start, evaluator mode and capabilities (with route-gate parity and external-all omission
+  tests) remain to implement. No PR, production action, Apps-branch change or database DDL was made.
+
+### P17 — response metadata checkpoint (2026-10-22, review pending)
+
+- Added retained-range summary scalars, classified checkpoint phase totals and the earliest
+  outstanding result date. Mature counts reuse resolved/scored/corporate-action/refusal counters;
+  purged cells and stale mature-cell waiting metadata cannot enter pending totals or next dates.
+  No new query or scorer invocation is used to construct the summary.
+- Added covered types, minimum sample size, active range/compute/request limits, UTC generation
+  time, ledger start, evaluator mode and permission capabilities. The capability helper is shared
+  with route authorization and tested against monthly/custom/member gates across admin, internal
+  and external all/own/none subjects. Capabilities do not promise free capacity or rate budget.
+- External-all requests skip explain generation, and response shaping independently omits every
+  metadata field even when handed a deliberately decorated response. Own-scoped positive controls
+  retain scoped counts and existing frozen S0 semantics. The own-cache isolation test fixes its
+  clock so required generation timestamps do not invalidate the cross-population control.
+- Full regression initially found that an anonymous pointer to an unexported metadata type could
+  serialize but not decode. Exported the metadata type and added typed admin/reader JSON round-trip
+  guards. Full Go regression with Postgres then passed (app package 54.176 s). Targeted race checks
+  passed three times (3.175 s); vet/staticcheck, web typecheck and all 120 Vitest files / 1020 tests
+  passed. The production SPA build and serialized Go embed rebuild passed.
+- Independent review of this response-level checkpoint did not complete because the review
+  runtime reported exhausted credits. The earlier cell-level review does not cover this addition.
+  Do not represent P17 as reviewed or merge-ready; its requirement/contract audit and independent
+  review remain outstanding. No PR was opened, no production or Apps branch changed, and the
+  pending schema/dependency authorization boundaries remain unchanged.
+
+### P17 — summary retention and contract audit (2026-10-22)
+
+- Added a real-route cross-month regression for summary retention boundaries. A marked June
+  containing a late ledger row stays excluded; a June-July custom range counts July only and
+  cannot import August into its scalar or phase totals. The existing monthly record still counts
+  July and August separately, including the same symbol appearing in both cohorts.
+- Documented every response-level explanation field and its population/denominator in the
+  operations runbook. In particular, accepted rows include repeat editions while checkpoint
+  phase counts use classified members; retained counts are not historical all-time totals.
+  Capabilities are permission hints, not available capacity, and delayed next dates may be past.
+- These fields remain on session/admin statistics surfaces, not the machine API. No new machine
+  endpoint or OpenAPI route was added. The earlier typed response round-trip guard remains intact.
+- The new route test passed; three repeats of the summary/metadata/privacy/capability race tests
+  passed (3.714 s), and diff checks passed. No production code changed in this checkpoint.
+  Independent response-level review, final P17 requirement audit and existing authorization
+  holds remain outstanding; this is not merge readiness.
+
+### P18 — reading-stage gate checkpoint (2026-10-22, in progress)
+
+- Added the existing-meta `forecast_reader` setting with closed off/card/full values, default
+  card, unknown-value refusal and an admin full override. Scope remains an independent gate;
+  full cannot widen none. Session prediction routes, including v1 cookie reads, apply the gate;
+  persistent machine tokens and the independently authorized record remain unchanged.
+- The settings endpoint validates the stage before writes and records `forecast.reader` only
+  on an actual transition. Added audit translations in all three locales. No schema changed.
+- Added helper, settings/audit and real-route tests. The first route run exposed a missing
+  session-signing configuration in the test fixture; repaired the fixture and reran validation.
+  Full Go regression with Postgres, three-repeat targeted race checks, vet/staticcheck, web
+  typecheck and all 120 Vitest files / 1020 tests passed.
+- This is a local, unreviewed checkpoint, not P18 completion or release readiness. Stock/run
+  summaries, timeline flags, prefetch/deep-link/edition behavior, the extended access matrix and
+  the benchmark remain outstanding. The own-scoped purge-evidence schema and upgrade path still
+  require approval. No Apps worktree, production setting or separately owned PR was changed.
+
+### P18 — reading navigation and timeline checkpoint (2026-10-22, in progress)
+
+- Added the resolved `forecast_reader` hint to the shared login/me payload without changing
+  `forecast.scope` or the independent record permission. Tests cover all/own/none, external own,
+  admin overrides, unknown settings and repeated live policy reads. Updated the SPA contract types.
+- A readable `r` now selects its own stock-report date and category before default selection,
+  overriding stale date/category parameters. Selection searches only the already-scoped symbol
+  list; foreign-symbol, absent, invalid and unreadable IDs fall back without disclosing a date.
+  The new positive deep-link test failed before the handler change, then passed on both drivers.
+- Added full-stage stock timeline flags from accepted, covered, report-backed ledger identities
+  intersected with the caller's readable reports. Prefetch retains the flags. A 60-day route
+  fixture covers internal all/own, external all, none and admin, rejected and unsupported rows,
+  same-day unreadable accepted reports, every stage, and real/prefetch requests on both drivers.
+  A fault-injected ledger read failure omits the flags while preserving the report and navigation.
+- Isolated fixture versions from the default version configuration and cleaned temporary stage
+  settings so the shared Postgres test database does not inherit test policy changes. The final
+  full Go/Postgres regression passed (app package 52.506 s); three-repeat targeted race checks
+  passed (9.088 s), as did vet/staticcheck, web typecheck and all 120 Vitest files / 1020 tests.
+  The production SPA build and subsequent serialized Go embed rebuild passed.
+- Reading summaries, sibling-edition behavior, the final access matrix and the 800 ms performance
+  gate remain outstanding. Independent review has not covered this checkpoint. No schema, Apps
+  branch, production setting or separately owned PR changed; this is not P18 completion.
+
+### P18 — selected-body reading summary checkpoint (2026-10-22, in progress)
+
+- Added the optional stock/run `prediction` summary at full stage, using an explicit allowlist:
+  display set, stance/weight, frozen-baseline upside, body-change warning and the next nonterminal
+  checkpoint with the existing phase/date/expected semantics. Missing marks remain obligations;
+  unknown timing cannot invent a phase or deadline. Resolved and final-refusal marks are skipped.
+- Reused compact identity selection rather than a bounded revision page. The existing 220-revision
+  regression now also proves that the reading summary retains the body-matching display set and
+  distinct counted set, on SQLite and Postgres. Rejected revisions cannot become summary chips.
+- A deliberate concurrent-ingest regression initially paired a future prediction with the old
+  selected response body. Added a body-hash-aware identity helper that still rechecks visibility,
+  and derive selection/body-change state against the body already selected for this response.
+  The regression failed before this repair and passed afterward; existing read callers retain
+  their current-body behavior through the unchanged wrapper.
+- Internal own and external readers receive no membership or counted identity and do not invoke
+  global membership classification. Prefetch omits summaries and keeps scoped timeline flags.
+  Fault injection against sets, claims and marks preserves the body on both stock and run routes.
+  Added contract types and documented omission, body-selection, privacy and date semantics in the runbook.
+- Full Go/Postgres regression passed (app package 66.206 s), as did three-repeat targeted race
+  checks (16.127 s), vet/staticcheck, web typecheck, all 120 Vitest files / 1020 tests and the SPA
+  production build. The subsequent serialized Go embed rebuild passed. Independent review has not
+  covered this checkpoint.
+- Sibling-edition links, counted-edition presentation, final access-matrix expansion and the
+  recorded 800 ms performance gate remain outstanding. No PR, production action, Apps change or
+  schema change was made; the own purge-evidence approval remains pending.
+
+### P18 — readable-edition association checkpoint (2026-10-22, in progress)
+
+- Added explicit empty-edition envelopes and readable sibling links. An edition without an
+  accepted set does not borrow stance, display identity, body-change status or checkpoint data.
+  Links group by symbol/report-date/type, never title, exclude the current version and carry exact
+  report/set/version/cohort identities with a report-ID deep link ending in `#forecast`.
+- Internal all readers and admins receive a separate counted-edition identity. The report's own
+  counted ID stays unchanged; a full-stage duplicate badge is suppressed when the member belongs
+  to a readable sibling. Own and external readers cannot request global classification even by
+  passing an affirmative helper flag; the negative guard failed before enforcing the view policy.
+- Card-stage session routes carry the same optional edition metadata, including v1 cookie reads.
+  Real persistent-query and bridge credentials retain their existing shape. Each edition's card
+  retains only its own sets. Later output in the same version cannot hide an older counted report.
+- Added SQLite/Postgres route fixtures for differing titles, all/own/external/admin subjects,
+  private versions, exact links, card/full stages, empty and populated JSON round trips and
+  retained counted identity. Separate controls reject other symbols/dates/types. A cross-cohort
+  regression initially showed a newer own-report member hiding the displayed month's sibling;
+  repaired both summary and card lookup gates without changing counted-ID selection semantics.
+  A September sibling cannot label an October receipt as counted.
+- Final full Go/Postgres regression passed (app package 55.672 s); three-repeat targeted race
+  checks passed (17.123 s), along with vet/staticcheck, web typecheck and all 120 Vitest files /
+  1020 tests. The production SPA build and subsequent serialized Go embed rebuild passed.
+  Independent review has not covered this checkpoint.
+- Final access-matrix expansion, the recorded performance gate and P20 presentation remain
+  outstanding. No schema change, Apps-worktree edit, production action or separately owned PR
+  mutation was made. The purge-evidence approval and existing integration holds remain pending.
+
+### P18 — route-stage matrix and local performance checkpoint (2026-10-22)
+
+- Extended `TestForecastAccessMatrix` through the real mux for off/card/full/unknown settings,
+  both Default scope variants and both database drivers. Stock/run, hidden reports, prefetch,
+  session/v1 predictions, me hints and stage-independent record/member controls add 4,032 probes
+  across 21 credential/OU subjects. None leaves readable bodies intact while omitting forecast
+  metadata; enrolment and broken-policy walls retain their exact refusals. Positive required
+  paths prevent a blanket denial from satisfying the matrix. Counted-edition metadata joined
+  the recursive own/external/bridge forbidden-path list. Fixture settings restore presence as
+  well as values so absent reader configuration cannot accidentally become an off-valued key.
+- Added an opt-in, shape-validated reading measurement over 240 reports, 60 dates, 41.5 KB bodies
+  and 1,120 accepted sets. It includes real session/security/gzip wrappers, alternating real and
+  prefetch requests and actual all-population sibling classification where authorized. Used the
+  identical measurement source against exported pre-P18 source `0f0c477f` and current application
+  source `5a483f8b`, serially, with three repetitions on SQLite and local Postgres 18.6.
+- Recorded the method, source checksum, every profile's before/card/full p95 and limitations in
+  `forecast-reading-performance.md`. Worst full real-request p95 was 16.471 ms; worst mixed p95
+  was 15.765 ms, below the local 800 ms budget. These in-process warm local measurements do not
+  replace production transport/load observations or the owner-controlled full-stage rollout.
+- Full Go/Postgres regression passed (app package 63.221 s); three-repeat SQLite route-matrix
+  race checks passed (120.568 s), as did vet/staticcheck. Frontend sources are unchanged from the
+  preceding validated checkpoint. The Go embed rebuild passed. The measurement is skipped by
+  default in regular tests.
+- P18 still needs independent review and a final requirement audit before PR/merge readiness.
+  This fixture does not resolve own-scoped purge history; its evidence schema still awaits
+  approval. P20 UI/production observation and Apps/dependency integration holds remain separate.
+  No production action, schema change, Apps edit or separately owned PR mutation was made.
+
+### P18 — independent-review checkpoint repair (2026-10-22, validation pending)
+
+- Independent review confirmed an inapplicable next h12 checkpoint on nonstandard-horizon sets
+  after their four session checkpoints were terminal. Added Stock/Run regressions for absent
+  and persisted pending h12 rows on SQLite and Postgres; both controls failed before skipping
+  inapplicable h12 during synthesis and next-checkpoint selection.
+- Requirement audit additionally found that malformed receipt timing erased known terminal
+  phases before summary selection. Added failing phase and Stock/Run regressions for resolved
+  and final-refusal marks. Terminal phases now derive before receipt-date parsing, while unknown
+  nonterminal timing still carries no fabricated phase/date/expected promise.
+- Targeted driver regressions passed (0.824 s). Full regression, repeat performance measurement
+  and review follow-up remain outstanding at this code checkpoint. P17 metadata review and
+  existing schema/integration/production authorization holds remain separate.
+
+### P17/P18 — review repair validation and server requirement audit (2026-10-22)
+
+- Exact application/test head `228a9f0a` passed full Go regression with Postgres enabled (app
+  package 61.285 s), three-repeat targeted race checks with Postgres disabled (11.509 s), vet,
+  staticcheck and the subsequent serialized Go embed build. Independent read-only follow-up
+  closed the nonstandard-horizon h12 finding and found no additional actionable P18 issues.
+  Separate P17 response-metadata review also completed without actionable findings, including
+  retained-range scalars, classified phases, mature totals, purge exclusion, capabilities and
+  external-all omission. Review used SQLite, not a second concurrent Postgres process.
+- Added positive controls proving that a standard-horizon set still has a next h12 obligation
+  when its four session checkpoints are terminal, whether h12 is absent or stored pending.
+  Both-driver targeted controls passed (0.928 s). The fixes therefore remove only inapplicable
+  obligations rather than hiding every missing checkpoint.
+- Remeasured the repaired application source `49b49b40` using the unchanged opt-in benchmark,
+  three serial repetitions per driver. Maximum full real/prefetch/mixed p95 values were
+  9.128/1.254/9.101 ms on SQLite and 12.767/3.655/12.606 ms on Postgres. All 800 ms assertions
+  passed; the performance document records these separately from the earlier before/after run.
+- Binding implementation section 8.3 audit: `forecast_groups_explain_test.go` covers non-mature
+  phase counts, cap boundaries, earliest dates, 500 frozen state comparisons and external-all
+  volume omission. `forecast_groups_metadata_test.go` covers typed JSON round trips, route-gate
+  capability parity, scoped retained ranges, mature/terminal counts and purged-month exclusion.
+  These are local implementation checks, not resolution of the separate own purge-history leak.
+- Binding implementation section 8.4 audit: stage defaults, unknown/off denial, independent scope
+  gates, admin full and audited changes are covered by `forecast_reader_stage_test.go` and the
+  real-mux reading-stage matrix. Deep-link readable/hidden/foreign-ID controls are in
+  `stock_deeplink_test.go`. Stock/Run summaries, selected-body identity, ledger fail-open behavior,
+  full-stage gating and prefetch omission are in `forecast_reading_summary_test.go`; the scoped
+  60-date timeline fixture and reading matrix check positive and negative flags. Edition fixtures
+  cover empty editions, readable siblings, actual counted editions, cross-analysis/cohort denial
+  and machine/bridge shape preservation. Session non-accepted/error redaction and token isolation
+  are exercised by the credential/access matrix. Store/route variants run on both drivers.
+- This closes the local P17/P18 implementation/review audit, not their integration, CI, release
+  or rollout gates. P20 owns the chip/card/overlay/timeline presentation; production baseline
+  review and a week of admin full-stage observations remain unperformed. The owner has confirmed
+  that own readers must not see global purge months; the proposed evidence side table and its
+  compatible upgrade path still need approval before any schema write. No production action,
+  schema change, Apps edit or separately owned PR mutation was made.
+- A fresh frontend check at documentation head `f417d340` passed typecheck, all 120 Vitest files /
+  1020 tests (41.26 s), the production SPA build and the subsequent serialized Go embed rebuild.
+  No golden fixture changed since `10190278`.
+  Read-only remote checks still show P26 #145 draft with successful required checks, dependency
+  #138 open with a failed Go check, and P37 #151 open with a failed Docker check. No PR was changed.
 
 ### P23 capability-boundary checkpoint (2026-10-22, in progress)
 
@@ -1348,3 +2093,182 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   local race repetitions passed (2.683 s); independent follow-up race repetitions passed (2.602 s)
   and explicitly closed the finding with no further actionable issue. Final full Go/Postgres
   regression is repeated after the repair; unchanged frontend validation remains recorded above.
+
+### P37 merge and current-main reader-server reconciliation (2026-10-22)
+
+- P37 #151 merged at `5359857e340e543c8a16d0673ae9968c5c4d1267`, reviewed head
+  `94c6de2dabb53ccef32fa684af0a28984cd82a58`, after full PR CI `39902017406` and CodeQL
+  `39902013987` passed. The final scoped race job passed; main-only full-race shards and release
+  cross-compilation were skipped on that PR, not claimed passed. P25's post-merge main pipeline
+  `39897793291` also passed all full-race shards and release cross-compilation. No deployment or
+  evaluator enablement followed either merge.
+- Resumed the preserved `feat/forecast-reader-server` checkpoint `8734b287` and integrated main
+  `5359857e`, without switching or editing the original checkout or either Apps branch. Conflict
+  resolutions keep both reader-stage and fallback fields, independent pre-write validation, both
+  audit actions/locale labels, published-calendar precedence and all historical execution sections.
+  Traditional Chinese labels are regenerated, not translated by hand. P37's receipt-consistent
+  frozen-S0 qualification remains in the combined read path; neither estimates nor shadow data
+  become observed calendar evidence or settlement input.
+- Added combined guards for invalid mixed reader/fallback requests writing neither field, valid
+  independent settings retaining both audit actions, and receipt-consistent qualification through
+  the reader annotation wrapper without modifying stored S0. Existing published-calendar and
+  conservative 21-day deadline controls remain intact. Focused controls passed. Full combined
+  Go/SQLite/Postgres passed (app 76.870 s); all 122 frontend test files / 1036 tests, typecheck,
+  staticcheck, vet, SPA production build and serialized embed build passed. A first Go build ran
+  during npm's dependency replacement and saw a transient missing node_modules directory; it was
+  repeated successfully after installation, without changing source or weakening a check.
+- This is an integration checkpoint, not release approval. The known own-scoped global purge-month
+  visibility defect remains unresolved: the proposed `(rtype, cohort, attributed_ou)` evidence key,
+  pre-delete snapshot transaction, live-subtree filtering, OU-deletion reattribution/deduplication,
+  no guessed historic backfill and explicit supported-database upgrade path were submitted to the
+  owner for approval before any DDL. P26's shared-token Apps integration ordering is still held.
+  No new table, column, migration or schema acceptance-contract change is written here. P13's
+  baseline/owner review, production rollout gates and later reader UI remain outstanding.
+- Three combined runtime/reader/projection/ledger race repetitions passed (66.418 s). Independent
+  integration review found no new actionable issue; separate three-repeat reader/projection controls
+  passed (6.673 s), and published-calendar concurrency plus shadow ledger-isolation checks passed
+  (42.755 s). The review explicitly preserves the known purge-history hold rather than treating
+  a clean merge or green tests as reader-scope release approval.
+
+### P27 reader-request and export foundations (2026-10-22, in progress)
+
+- Continued non-DDL frontend work on the held integration branch, without opening a new PR or
+  changing Apps. Added a reader-only groups loader for `/api/forecast/groups`, with no management
+  alias or administrator prefetch reuse. Denied/unresolved permission makes no request and clears
+  retained results. Query/identity changes hide stale results; cleanup discards late responses and
+  pending retry timers. Future page wiring must include user/access/population changes in identity.
+- A 403 becomes terminal unavailable, with a no-op retry callback. A 429 or non-busy failure is not
+  automatically retried. Only 503 `forecast_busy` allows three additional attempts, with exponential
+  bounded jitter; an explicit error retry starts a new bounded cycle. Tests pin request counts,
+  actual jitter delays, permission revoke/regrant, identity switches and unmount cancellation.
+- The CSV helper accepts explicit reader context: single-line disclaimer/population and benchmark
+  headers, and mode/official/benchmark on every row. Reader exports omit site-wide unrecorded totals;
+  external-all exports remove the sample-size column even if malformed input carries counts, using
+  only a mature publication-gate flag. Non-mature sample sizes are not exported for any reader.
+  Existing administrator export behavior is unchanged until the management page is split in P27.
+- New tests failed before implementation. A test hook initially returned its mock as an unintended
+  cleanup callback, and timer-spy restoration briefly reinstalled fake timers during global cleanup;
+  both test harness issues were fixed without changing production behavior or weakening assertions.
+  Eighteen final focused tests and typecheck passed. Full frontend regression passed all 123 files /
+  1044 tests. Lint completed with existing unrelated hook warnings; no new warning was introduced.
+  Production SPA and serialized embed builds are repeated at the checkpoint. Independent foundation
+  review found no actionable issue; final defensive retry/count guards are reviewed separately.
+- P27 is not complete: record route/page states, permission-sensitive navigation, reader drawer
+  wiring, operations-page separation/access summary, OU editor inheritance and full accessibility /
+  browser acceptance remain. These helpers are not yet wired to a route, and their tests do not prove
+  page-level enforcement. The schema, Apps integration ordering and production gates remain held;
+  no new database shape, production setting or evaluator mode has been written.
+- Independent follow-up reviewed the final unavailable-state retry and malformed non-mature count
+  guards, reran all eighteen focused tests and reported no new finding. Page-level integration and
+  the held release/security decisions remain separate acceptance work.
+
+### Own purge-evidence store foundation (2026-10-22, in progress)
+
+- The owner approved the `(rtype, cohort, attributed_ou)` evidence table and explicit upgrade path.
+  Recorded the decision in ADR 0039 and the decision register. Added isolated store primitives for
+  idempotent table creation, pre-delete distinct attribution capture, parent transfer/deduplication,
+  and population-filtered marker loading. Nil population retains global history; an empty subtree
+  returns none; historic global-only markers never grant own visibility. Missing evidence storage
+  returns an error for an own read rather than falling back to global history.
+- Tests failed before implementation, then passed on SQLite and Postgres. They cover positive own
+  and unrelated populations, legacy-only history, duplicate owners and destination collisions,
+  transaction rollback, no-destination removal, invalid/null ownership and unavailable evidence.
+  Test-owned tables are removed on cleanup, including assertion failure. A source fixture with a
+  literal placeholder report type is explicitly normalized in this new test rather than silently
+  changing unrelated existing fixtures.
+- Independent review identified a PostgreSQL purge/OU-delete race: evidence inserted but not yet
+  committed could be missed by deletion, leaving a reused OU id. Added a transaction-only ownership
+  lock, requiring both future callers to acquire it before their first read or set mutation. The
+  primitives reacquire it defensively; Postgres uses a transaction-scoped advisory lock and SQLite
+  reserves its writer before reading. A deterministic PostgreSQL interleaving uses lock timeout to
+  prove exclusion, then verifies transfer after the first commit. Three dual-driver repetitions
+  passed (1.534 s). Independent follow-up closed the foundation finding and reran SQLite three times
+  (0.523 s); closure is conditional on correct early-lock wiring in both business transactions.
+- These primitives are deliberately not registered in automatic startup migrations or wired into
+  business routes yet. Explicit upgrade, fresh initialization, startup verification, backup/restore,
+  retention/OU-delete/read integration and their route-level access/concurrency acceptance remain.
+  Therefore the known own-history release hold is not resolved by this foundation. No production
+  database, Apps checkout, evaluator setting, workflow or release was changed.
+- Full Go/SQLite/Postgres regression passed (app 61.328 s), as did build, vet, staticcheck and
+  three SQLite race repetitions (2.213 s). The initial full run correctly rejected the evidence
+  file under the existing attribution-source allowlist; the exact allowlist now includes this
+  approved snapshot path and separately forbids it from inserting/updating/deleting/replacing
+  prediction sets. Existing sanctioned writers remain unchanged. Independent follow-up reviewed
+  this guard extension and reran its SQLite controls three times (0.518 s). No frontend source was
+  changed at this checkpoint, and frontend acceptance is not claimed.
+
+### 2026-10-23 — takeover, release and the R2a merges
+
+- The previous implementer stopped mid-checkpoint with the explicit step for purge ownership evidence
+  uncommitted. The work was carried to a new branch unchanged and validated: full Go suite on SQLite and
+  Postgres. It was then committed.
+- **Step id.** The step was first registered as `0007`, which PR 141 also uses (PR 142 uses `0008`). It is
+  now `0009`, and the unapproved Tier 2 provenance proposal takes the next free id. Announcements then
+  merged `0010` (#158) ahead of all three. Because a backup's header must be a prefix of `migrations()`,
+  the list is ordered by merge, not by id. #159 pins that order in `TestMigrationListKeepsItsMergeOrder`.
+- **P26 and the Apps branches.** P26's only textual conflicts with PR 141/142 came from its copy of their
+  app-token identity binding. P26 now fails closed instead. A bridge Bearer gets 403 `forecast_unavailable`
+  on both v1 prediction reads and reads nothing from the ledger. That is stricter than main before it,
+  where a bridge query token received the unscoped machine shape. `apps_token.go` and `apps_api.go` are
+  unchanged from main. A follow-up restores scoped bridge reads on the shared binding once PR 141 lands.
+  ADR 0029, ADR 0039, the design doc and this plan were amended to match.
+- **Own-scoped purge reads (P16-P18).** Disclosure uses the subtree's evidence, set exclusion uses the
+  site-wide history, and an undisclosed purged month is indistinguishable from an empty one. A
+  `forecast_reader` restore keeps the lower stage.
+- **Review and integration.** Each unit was implemented test-first and passed at least two rounds of
+  independent adversarial review with distinct lenses before its PR. Squashed predecessors were merged
+  into stacked branches as `-s ours` merges, only after their trees were checked to be identical to the
+  branch's own copy.
+- **P28.** The e2e run against current main passed 152/152 on a throwaway portal. P27 was checked in the
+  browser on the isolated seeded preview: the record page, the operations page and the OU editor field.
+
+### Explicit purge-evidence schema upgrade (2026-10-22, in progress)
+
+- Registered the owner-approved evidence table as step `0007`, an explicit operator step. Fresh
+  initialization creates it; existing supported databases without its ledger row refuse normal
+  startup before any earlier automatic migration runs. Existing baseline and released steps remain
+  unchanged. The separate offline `schema-upgrade` command reads existing infrastructure config:
+  no arguments inspect only, `--apply` is required for mutation. SQLite inspection opens read-only
+  and cannot create an absent database/config. Initialization failure closes its pool rather than
+  leaking connections. Applying uses existing initialization serialization and transactional steps.
+- Startup and upgrade verify actual key columns, exact primary-key order, types, nullability and
+  positive-owner checks, not just the migration record. Independent review found PostgreSQL
+  `NOT VALID` checks could masquerade as enforced historic constraints; a red regression now
+  requires `convalidated`, with a validated positive control. SQLite's metadata exposes raw DDL:
+  comment-only and quoted-expression counterfeit checks failed red, then the verifier was tightened
+  to the exact emitted declaration modulo case, whitespace and `IF NOT EXISTS`, retaining quotes.
+  No generic quoted-expression normalization is treated as proof of a real comparison.
+- Portable dumps declare and carry evidence rows. A dump claiming a step but omitting its declared
+  table is refused before deletion; a missing/repeated section is refused, with forced restore
+  rolling back. Tests cover both a missing evidence table in the header and a header that names it
+  without its body section, in inspection and forced modes. Legitimate old backups restore with
+  empty evidence, never a guessed backfill. Evidence round trips SQLite/Postgres in both directions.
+- Updated legacy baseline-upgrade tests to enter through the now-required explicit path; ordinary
+  reopen remains ordinary startup. Older step-0006 dump fixtures remove both later ledger claims
+  rather than claiming a noncontiguous prefix. The new refusal test also removes an earlier
+  automatic ledger entry and verifies that startup/inspection leave the complete database unchanged.
+- Added the offline upgrade/rollback runbook, amended ADR 0035/0039, and moved the unapproved Tier 2
+  provenance proposal to `0008` (recheck at its future go). R2a is no longer described as schema-free
+  or safe for binary rollback across `0007`; the supported route restores the pre-upgrade backup.
+  Review identified and closed stale rollback/doc-map references. No deployment is implied.
+- This checkpoint delivers the explicit schema and backup boundary, not the business-path fix.
+  Retention capture, early ownership locking in retention/OU deletion, reattribution and scoped
+  reader marker integration remain next, with route-level access/concurrency acceptance required.
+  The own-history release hold and separate Apps integration ordering remain. No production
+  database, workflow, evaluator setting, release, or Apps checkout was changed.
+
+### 2026-10-24 — step 0009 applies at startup
+
+- The owner reversed the 2026-10-22 approval of an explicit offline upgrade: a deploy is pull and
+  restart, and no schema step may make an operator run a command before the server can start. The
+  `explicit` step flag, the startup preflight and the explicit open mode are removed; an existing
+  database gets `0009` at normal startup, in list order, with the evidence table created empty and no
+  backfill. The shape verification is unchanged and still refuses a recorded-but-damaged table and a
+  lookalike table in front of an unrecorded step. Maintainers back up with the previous release; the
+  program takes no automatic backups.
+- `schema-upgrade` stays as an optional tool: no arguments lists the pending steps read-only, `--apply`
+  runs the normal runner and verifies. The tests that asserted the refusal now assert the upgrade at
+  startup from a database at `0006` and from a baseline database, in both drivers. The Postgres checks
+  look only at the steps they applied, because other tests in the shared database re-stamp earlier
+  steps. ADR 0035 and 0039, the decisions page, the upgrade notes and the operations document carry the
+  reasoning.

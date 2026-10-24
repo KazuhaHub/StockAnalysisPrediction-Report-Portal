@@ -45,13 +45,25 @@ type routeRow struct {
 	pattern string
 	class   authClass
 	perm    string // for authPerm
+	gate    string // an additional handler-enforced policy
 }
 
 // route records the registration and hands it to the mux. Every registration in the server goes
 // through here, and routes_test.go asserts that by reading this package's source.
 func (s *Server) route(mux *http.ServeMux, pattern string, class authClass, perm string, h http.HandlerFunc) {
-	s.routeTable = append(s.routeTable, routeRow{pattern: pattern, class: class, perm: perm})
+	s.routeGated(mux, pattern, class, perm, "", h)
+}
+
+func (s *Server) routeGated(mux *http.ServeMux, pattern string, class authClass, perm, gate string, h http.HandlerFunc) {
+	s.routeTable = append(s.routeTable, routeRow{pattern: pattern, class: class, perm: perm, gate: gate})
 	mux.HandleFunc(pattern, h)
+}
+
+// The annotation is verified against actual refusals in forecast_routes_test.go.
+const gateForecastScope = "forecast_scope"
+
+func (s *Server) sessionGated(mux *http.ServeMux, gate, pattern string, h handler) {
+	s.routeGated(mux, pattern, authSession, "", gate, s.requireUserJSON(h))
 }
 
 func (s *Server) public(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
@@ -175,6 +187,10 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// it is a ceiling an abusive caller uses the hole in. It is off until an admin sets one.
 	v1 := func(pattern string, h http.HandlerFunc) { s.bearer(mux, pattern, h) }
 	v1("POST /api/v1/reports", s.v1Ingest)
+	v1("POST /api/v1/notifications", s.v1PublishNotification)
+	v1("GET /api/v1/notifications/publisher", s.v1NotificationPublisherIdentity)
+	v1("POST /api/v1/extensions/{id}/request", s.v1ExtensionRequest)
+	v1("GET /api/v1/extensions/{id}/principals", s.v1ExtensionPrincipals)
 	v1("GET /api/v1/reports", s.v1QueryReports)
 	v1("GET /api/v1/reports/manifest", s.v1Manifest) // more specific than {id}, matched first
 	v1("GET /api/v1/reports/{id}", s.v1GetReport)
@@ -207,6 +223,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	// The reading page asks for the symbol's other sets. Session-scoped, because the SPA must not
 	// use /api/v1 and the viewer scope is what a browser read is gated by.
 	s.session(mux, "GET /api/predictions", s.apiQueryPredictions)
+	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups", s.apiReaderForecastGroups)
+	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups/members", s.apiReaderForecastGroupMembers)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.
@@ -311,6 +329,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "PUT /api/admin/groups/{id}/targets", s.apiGroupTargetsSave)
 	s.admin(mux, "GET /api/admin/settings", s.apiAdminSettings)
 	s.admin(mux, "GET /api/admin/forecast", s.apiForecastSettings)
+	s.admin(mux, "GET /api/admin/forecast/access", s.apiForecastAccess)
 	s.admin(mux, "POST /api/admin/forecast", s.apiForecastSettingsSave)
 	// One pass now, in the current mode (P9). Admin, like the switch it stands in for.
 	s.admin(mux, "POST /api/admin/forecast/evaluate", s.apiForecastEvaluate)
@@ -442,6 +461,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/apps/market/install", s.apiAppMarketInstall)
 	s.admin(mux, "POST /api/admin/apps/market/index", s.apiAppMarketIndexSave)
 	s.admin(mux, "DELETE /api/admin/apps/{id}", s.apiAppDelete)
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		s.admin(mux, method+" /api/admin/apps/{id}/backend", s.apiExtensionBackend)
+	}
 	s.public(mux, "GET /app-assets/{id}/{path...}", s.appAssets)
 	s.public(mux, "GET /site-assets/{name}", s.siteAsset)
 
@@ -450,6 +472,28 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/webhooks", s.apiWebhookAdd)
 	s.admin(mux, "DELETE /api/admin/webhooks/{id}", s.apiWebhookDelete)
 	s.admin(mux, "POST /api/admin/webhooks/{id}/test", s.apiWebhookTest)
+	s.admin(mux, "GET /api/admin/notifications", s.apiNotifications)
+	s.admin(mux, "PUT /api/admin/notifications/retention", s.apiNotificationRetention)
+	s.session(mux, "GET /api/notifications", s.apiNotificationInbox)
+	s.session(mux, "GET /api/notifications/unread", s.apiNotificationUnread)
+	s.session(mux, "POST /api/notifications/{id}", s.apiNotificationInboxUpdate)
+	s.session(mux, "POST /api/notifications/read-snapshot", s.apiNotificationReadSnapshot)
+	s.session(mux, "POST /api/notifications/read-all", s.apiNotificationReadAll)
+	s.session(mux, "GET /api/notifications/preferences", s.apiNotificationPreferences)
+	s.session(mux, "PUT /api/notifications/preferences", s.apiNotificationPreferencesSave)
+	s.admin(mux, "POST /api/admin/notifications/channels", s.apiNotificationChannelSave)
+	s.admin(mux, "PUT /api/admin/notifications/channels/{id}", s.apiNotificationChannelSave)
+	s.admin(mux, "POST /api/admin/notifications/routes", s.apiNotificationRouteSave)
+	s.admin(mux, "PUT /api/admin/notifications/routes/{id}", s.apiNotificationRouteSave)
+	s.admin(mux, "GET /api/admin/notifications/deliveries", s.apiNotificationHistory)
+	s.admin(mux, "GET /api/admin/notifications/deliveries/{id}", s.apiNotificationDelivery)
+	s.admin(mux, "POST /api/admin/notifications/deliveries/{id}/replay", s.apiNotificationReplay)
+	s.admin(mux, "POST /api/admin/notifications/deliveries/{id}/review", s.apiNotificationReview)
+	s.admin(mux, "POST /api/admin/notifications/dispatch", s.apiNotificationDispatch)
+	s.admin(mux, "POST /api/admin/notifications/preview", s.apiNotificationPreview)
+	s.admin(mux, "POST /api/admin/notifications/channels/{id}/test", s.apiNotificationChannelTest)
+	s.admin(mux, "DELETE /api/admin/notifications/channels/{id}", s.apiNotificationChannelDelete)
+	s.admin(mux, "DELETE /api/admin/notifications/routes/{id}", s.apiNotificationRouteDelete)
 
 	// ---- Downloads: MD / PDF (cookie session) ----
 	s.sessionHTML(mux, "GET /report/{id}/md", s.reportMD)

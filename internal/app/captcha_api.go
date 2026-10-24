@@ -3,6 +3,7 @@ package app
 import (
 	"log"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -263,8 +264,17 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 	}
 	// Validated and stored before anything else touches the store, and it answers 400 itself: a
 	// ceiling nobody meant must not land, and it must not land next to a captcha change that did.
-	if in.Limits != nil && !s.applyLimits(w, in.Limits) {
-		return
+	if in.Limits != nil {
+		before := s.limitsJSON()
+		if !s.applyLimits(w, in.Limits) {
+			return
+		}
+		after := s.limitsJSON()
+		if !reflect.DeepEqual(before, after) {
+			// Limits have already been stored. Audit them here even if a later policy block
+			// fails validation; the final security-save audit cannot cover that path.
+			s.recordChange(r, user, AuditPolicyChange, "security", "limits", map[string]any{"limits": after, "from": before})
+		}
 	}
 	if !s.applySecurityPolicy(w, &in.securityPolicyInput) {
 		return
