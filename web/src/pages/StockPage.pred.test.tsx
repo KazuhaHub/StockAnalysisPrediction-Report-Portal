@@ -73,6 +73,7 @@ const setFor = (reportId: number, terminal: number) => ({
     ] : []),
   ],
   marks: [], s0_fen: 100000,
+  ...(withPath ? { s0_date: '2026-09-01', horizon_end: '2027-09-01' } : {}),
 })
 
 let predCalls: string[]
@@ -82,6 +83,10 @@ let aDeferred: { resolve: (v: unknown) => void } | null
 let pendingB: boolean
 let withSummary: boolean
 let withScenarios: boolean
+// Whether the sets have a recorded start and a horizon, so the forecast-and-actual chart can draw.
+let withPath: boolean
+// Every quote URL asked for, range included.
+let quoteURLs: string[]
 // Whether the server says the ledger covers the report's type: undefined omits the field.
 let coveredFlag: boolean | undefined
 let emptyReport: boolean
@@ -101,7 +106,14 @@ vi.mock('../api/client', () => ({
       if (url.startsWith('/api/quote/')) {
         const quoteSymbol = decodeURIComponent(url.slice('/api/quote/'.length).split('?')[0])
         quoteCalls.push(quoteSymbol)
-        const quote = { ...QUOTE, symbol: quoteSymbol, bars: [{ ...QUOTE.bars[0], c: quoteSymbol === '001238' ? 3335 : 4400 }] }
+        quoteURLs.push(url)
+        // The chart's window of closes since the set's start: two closes, so the actual line can be
+        // drawn, distinct per symbol.
+        const yearBars = [
+          { ...QUOTE.bars[0], d: '2026-09-02', c: quoteSymbol === '001238' ? 3300 : 4300 },
+          { ...QUOTE.bars[0], d: '2026-09-04', c: quoteSymbol === '001238' ? 3335 : 4400 },
+        ]
+        const quote = { ...QUOTE, symbol: quoteSymbol, bars: url.includes('from=') ? yearBars : [{ ...QUOTE.bars[0], c: quoteSymbol === '001238' ? 3335 : 4400 }] }
         if (quoteSymbol === deferQuoteFor) return new Promise((resolve) => { releaseQuote = () => resolve(quote) })
         return Promise.resolve(quote)
       }
@@ -159,6 +171,7 @@ function page() {
       {/* A date no earlier test visited, so the prefetch cache cannot answer this one warm. */}
       <Link to="/stock/600519?date=2026-07-09">other-stock-cold</Link>
       <Link to="/stock/600519?date=2026-07-10">other-stock-cold-overlay</Link>
+      <Link to="/stock/600519?date=2026-07-11">other-stock-cold-path</Link>
       <Routes>
         <Route path="/stock/:symbol" element={<StockPage />} />
       </Routes>
@@ -185,6 +198,8 @@ beforeEach(() => {
   pendingB = true
   withSummary = false
   withScenarios = false
+  withPath = false
+  quoteURLs = []
   coveredFlag = undefined
   emptyReport = false
   deferQuoteFor = null
@@ -375,6 +390,42 @@ describe('StockPage predictions', () => {
       emptyReport = true
       show()
       expect(await screen.findByText('forecast.reading.no_forecast')).toBeTruthy()
+    })
+  })
+
+  describe('the forecast-and-actual chart', () => {
+    it("asks for the closes from the set's start once it has one, and draws the actual line from them", async () => {
+      withPath = true
+      show()
+      await waitFor(() => expect(quoteURLs.some((u) => u.startsWith('/api/quote/001238') && u.includes('from=2026-09-01') && u.includes('to='))).toBe(true))
+      expect(await screen.findByTestId('forecast-path')).toBeTruthy()
+      const actual = await screen.findByTestId('forecast-path-actual')
+      expect((actual.getAttribute('points') || '').trim().split(/\s+/)).toHaveLength(2)
+    })
+
+    it('asks for no extra series while no set has a recorded start', async () => {
+      show()
+      expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
+      await new Promise((r) => setTimeout(r, 20))
+      expect(quoteURLs.some((u) => u.includes('from='))).toBe(false)
+      expect(screen.queryByTestId('forecast-path')).toBeNull()
+    })
+
+    it("never draws the next stock's closes under the previous stock's forecast", async () => {
+      withPath = true
+      deferStockFor = '600519'
+      show()
+      expect(await screen.findByTestId('forecast-path-actual')).toBeTruthy()
+      await userEvent.click(screen.getByText('other-stock-cold-path'))
+      // The next symbol's year of bars answers while the card on screen is still the previous stock's.
+      await waitFor(() => expect(quoteURLs.some((u) => u.startsWith('/api/quote/600519') && u.includes('from='))).toBe(true))
+      await new Promise((r) => setTimeout(r, 20))
+      // The legend repeats the terminal value, so the price is on screen more than once.
+      expect(screen.getAllByText(/1,111\.00/).length).toBeGreaterThan(0)
+      expect(screen.queryByTestId('forecast-path-actual')).toBeNull()
+      releaseStock!()
+      expect((await screen.findAllByText(/3,333\.00/)).length).toBeGreaterThan(0)
+      expect(await screen.findByTestId('forecast-path-actual')).toBeTruthy()
     })
   })
 

@@ -234,7 +234,8 @@ describe('ForecastReadingCard', () => {
 
     it('shows only the date of a non-standard horizon', () => {
       show([{ ...accepted, horizon_std: false, horizon_end: '2027-01-15' }])
-      expect(screen.getByText('2027-01-15')).toBeTruthy()
+      // The chart's time axis also ends on that date; the horizon line is the text outside it.
+      expect(screen.getAllByText('2027-01-15').filter((el) => !el.closest('svg'))).toHaveLength(1)
     })
   })
 
@@ -271,6 +272,36 @@ describe('ForecastReadingCard', () => {
   it('puts the meta line inside the card', () => {
     const { container } = show([accepted], { reportDate: '2026-09-18', receivedAt: 'unparsed', edition: 'V3.17' })
     expect(container.querySelector('#forecast')?.textContent).toContain('forecast.reading.meta')
+  })
+
+  describe('forecast and actual chart', () => {
+    const withHorizon = { ...accepted, horizon_end: '2027-09-17' }
+    const bars = [
+      { d: '2026-09-18', o: 19004, h: 19004, l: 19004, c: 19004, v: 1 },
+      { d: '2026-09-25', o: 20500, h: 20500, l: 20500, c: 20500, v: 1 },
+    ]
+
+    it('draws the chart under its own heading once the set has a start and a horizon', () => {
+      show([withHorizon], { pathBars: bars })
+      expect(screen.getByText('forecast.path.title')).toBeTruthy()
+      expect(screen.getByTestId('forecast-path')).toBeTruthy()
+      expect(screen.getByTestId('forecast-path-actual')).toBeTruthy()
+    })
+
+    it('draws no chart without the closes it compares against: while they load, or where the page has none', () => {
+      show([withHorizon])
+      expect(screen.queryByTestId('forecast-path')).toBeNull()
+    })
+
+    it('draws nothing before the evaluator has recorded the start', () => {
+      show([{ ...withHorizon, s0_date: undefined, s0_fen: undefined }], { pathBars: bars })
+      expect(screen.queryByTestId('forecast-path')).toBeNull()
+    })
+
+    it('draws nothing for a test run', () => {
+      show([{ ...withHorizon, state: 'test', marks: [] }], { pathBars: bars })
+      expect(screen.queryByTestId('forecast-path')).toBeNull()
+    })
   })
 
   describe('legibility', () => {

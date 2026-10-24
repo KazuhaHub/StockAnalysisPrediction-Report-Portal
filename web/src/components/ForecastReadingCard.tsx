@@ -4,9 +4,11 @@ import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import type { ForecastReadingEdition, PredictionClaim, PredictionMark, PredictionSet } from '../api/types'
+import type { ForecastReadingEdition, PredictionClaim, PredictionMark, PredictionSet, QuoteBar } from '../api/types'
 import { fenToYuan } from '../lib/money'
 import { readingSet } from '../lib/forecastReading'
+import { chinaToday, forecastPath } from '../lib/forecastPath'
+import ForecastPathChart from './ForecastPathChart'
 import ScrollRegion from './forecast/ScrollRegion'
 import { formatReportDateTime, isInstant } from '../lib/datetime'
 import { forecastLinkColor, forecastPalette } from '../lib/forecastPresentation'
@@ -61,6 +63,9 @@ interface Props {
   otherSets: PredictionSet[]
   latestClose?: number
   latestDate?: string
+  // Completed daily bars of the route symbol covering the set's start, for the forecast-and-actual
+  // chart. Absent while the quote loads or when it belongs to another stock.
+  pathBars?: QuoteBar[]
   symbol: string
   reportDate?: string
   receivedAt?: string
@@ -89,6 +94,7 @@ export default function ForecastReadingCard({
   otherSets,
   latestClose,
   latestDate,
+  pathBars,
   symbol,
   reportDate,
   receivedAt,
@@ -137,6 +143,8 @@ export default function ForecastReadingCard({
     )
   }
   const isTest = set.state === 'test'
+  // No chart without the closes it compares against: while they load, or on a page that has none.
+  const path = isTest || !pathBars ? undefined : forecastPath(set, pathBars, chinaToday())
 
   const toggle = () => {
     const next = !open
@@ -349,6 +357,15 @@ export default function ForecastReadingCard({
               ))}
             </div>
           </div>
+
+          {path && (
+            <div>
+              <Typography.Text strong>{t('forecast.path.title')}</Typography.Text>
+              <div style={{ marginTop: 8 }}>
+                <ForecastPathChart path={path} />
+              </div>
+            </div>
+          )}
 
           {!isTest && (
             <div>
