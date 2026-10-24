@@ -129,8 +129,8 @@ export default function StockPage() {
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
   // A quote for another symbol is not this page's quote. The effect below clears it when the symbol
-  // changes, and this guard covers the render before that effect runs, so the strip, the chart and the
-  // card's completed-bar cursor never price one stock against another stock's close.
+  // changes, and this guard covers the render before that effect runs, so the strip and the chart never
+  // show another stock's close (the card has its own, stricter guard where `completedBar` is derived).
   const quote = loadedQuote && sameSymbol(loadedQuote.symbol, symbol) ? loadedQuote : null
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
   // The sets, the counted pointer and the error are ONE value keyed by the report they describe.
@@ -379,7 +379,10 @@ export default function StockPage() {
         ]
       : []
   const overlaySource = acceptedSet?.marks.find((m) => m.status === 'resolved' && m.source)?.source
-  const completedBar = latestCompletedBar(quote)
+  // The card belongs to the report on screen, and that report can still be the previous stock's while
+  // the next one loads. The route-symbol guard above is not enough for it: the next symbol's quote
+  // may answer first, and the previous stock's card must not be priced against that close.
+  const completedBar = latestCompletedBar(quote && sameSymbol(quote.symbol, data.symbol) ? quote : null)
 
   // Back + stock name/code. This is the page's identity/nav header — it sits at the very
   // top of every layout (above the timeline), so "where am I / go back" is the first thing

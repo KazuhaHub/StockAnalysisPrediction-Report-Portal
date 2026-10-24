@@ -84,12 +84,17 @@ let emptyReport: boolean
 // The symbol whose quote never answers until the test releases it.
 let deferQuoteFor: string | null
 let releaseQuote: (() => void) | null
+// The symbol whose report never answers until the test releases it, and the quote symbols asked for.
+let deferStockFor: string | null
+let releaseStock: (() => void) | null
+let quoteCalls: string[]
 
 vi.mock('../api/client', () => ({
   api: {
     get: (url: string) => {
       if (url.startsWith('/api/quote/')) {
         const quoteSymbol = decodeURIComponent(url.slice('/api/quote/'.length).split('?')[0])
+        quoteCalls.push(quoteSymbol)
         const quote = { ...QUOTE, symbol: quoteSymbol, bars: [{ ...QUOTE.bars[0], c: quoteSymbol === '001238' ? 3335 : 4400 }] }
         if (quoteSymbol === deferQuoteFor) return new Promise((resolve) => { releaseQuote = () => resolve(quote) })
         return Promise.resolve(quote)
@@ -120,6 +125,7 @@ vi.mock('../api/client', () => ({
         })
       }
       const stockSymbol = url.startsWith('/api/stock/') ? decodeURIComponent(url.slice('/api/stock/'.length).split('?')[0]) : '001238'
+      if (stockSymbol === deferStockFor) return new Promise((resolve) => { releaseStock = () => resolve(report(3, '2026-07-07', stockSymbol)) })
       if (stockSymbol === '600519') return Promise.resolve(report(3, '2026-07-07', stockSymbol))
       if (url.includes('date=2026-07-08')) return Promise.resolve(report(2, '2026-07-08'))
       return Promise.resolve(report(1, '2026-07-07'))
@@ -140,6 +146,8 @@ function page() {
     <MemoryRouter initialEntries={['/stock/001238?date=2026-07-07']}>
       <Link to="/stock/001238?date=2026-07-08">next-report</Link>
       <Link to="/stock/600519?date=2026-07-07">other-stock</Link>
+      {/* A date no earlier test visited, so the prefetch cache cannot answer this one warm. */}
+      <Link to="/stock/600519?date=2026-07-09">other-stock-cold</Link>
       <Routes>
         <Route path="/stock/:symbol" element={<StockPage />} />
       </Routes>
@@ -170,6 +178,9 @@ beforeEach(() => {
   emptyReport = false
   deferQuoteFor = null
   releaseQuote = null
+  deferStockFor = null
+  releaseStock = null
+  quoteCalls = []
   try {
     window.localStorage.clear()
   } catch {
@@ -371,6 +382,27 @@ describe('StockPage predictions', () => {
       releaseQuote!()
       expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
       // The cursor now sits where the NEW quote's close puts it, not where the first one did.
+      expect(screen.getByTestId('forecast-scenario-cursor').getAttribute('data-position')).toBe(String((4400 - 2000) / (5000 - 2000) * 100))
+    })
+
+    it("does not price the report still on screen against the next symbol's close", async () => {
+      withScenarios = true
+      deferStockFor = '600519'
+      show()
+      expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
+      await userEvent.click(screen.getByText('other-stock-cold'))
+      // The next symbol's quote answers first; its report is still on its way, so the card on screen
+      // is the previous stock's.
+      await waitFor(() => expect(quoteCalls).toContain('600519'))
+      await waitFor(() => expect(releaseStock).not.toBeNull())
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.getByText(/1,111\.00/)).toBeTruthy()
+      expect(screen.queryByText('forecast.panel.latest_close')).toBeNull()
+      expect(screen.queryByTestId('forecast-scenario-cursor')).toBeNull()
+      releaseStock!()
+      // Once the next stock's own report is on screen, its card is priced against its own close.
+      expect(await screen.findByText(/3,333\.00/)).toBeTruthy()
+      expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
       expect(screen.getByTestId('forecast-scenario-cursor').getAttribute('data-position')).toBe(String((4400 - 2000) / (5000 - 2000) * 100))
     })
   })
