@@ -1,7 +1,6 @@
 package app
 
 import (
-	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,48 +68,15 @@ type SecuritySettings struct {
 // while the mandate rides in front of a GATE (a failed read there has to refuse). One read, and each
 // caller decides which way its own failure falls.
 func (s *Store) SecuritySettings(username string) (SecuritySettings, error) {
-	out := SecuritySettings{TOTPAllowed: true, PasskeyAllowed: true}
-	chain, err := s.groupChainErr(username)
+	sub, snapshot, err := s.loadOUPolicySubject(username)
 	if err != nil {
 		return SecuritySettings{}, err
 	}
-	for _, gid := range chain {
-		raw, err := s.rawGroupSecurity(gid)
-		if err != nil {
-			return SecuritySettings{}, err
-		}
-		if raw.totp != nil {
-			out.TOTPAllowed = *raw.totp
-		}
-		if raw.passkey != nil {
-			out.PasskeyAllowed = *raw.passkey
-		}
-		// STICKY, not deeper-wins: a parent OU that requires a second factor of its division cannot
-		// be un-required by a child, or the mandate is advice. That is the same argument ADR 0022
-		// makes for `restricted`.
-		if raw.require != nil && *raw.require {
-			out.Require2FA = true
-		}
+	policies, err := snapshot.resolve(sub.EffectiveOU)
+	if err != nil {
+		return SecuritySettings{}, err
 	}
-	return out, nil
-}
-
-// rawGroupSecurity reads one OU's overrides; nil means it sets nothing and inherits.
-func (s *Store) rawGroupSecurity(id int64) (raw struct{ totp, passkey, require *bool }, err error) {
-	var t, p, r sql.NullInt64
-	if err := s.queryRow(`SELECT totp_enroll, passkey_enroll, require_2fa FROM user_groups WHERE id=?`, id).
-		Scan(&t, &p, &r); err != nil {
-		return raw, err
-	}
-	ptr := func(v sql.NullInt64) *bool {
-		if !v.Valid {
-			return nil
-		}
-		b := v.Int64 != 0
-		return &b
-	}
-	raw.totp, raw.passkey, raw.require = ptr(t), ptr(p), ptr(r)
-	return raw, nil
+	return policies.security(), nil
 }
 
 // SetGroupEnrolment writes an OU's overrides; a nil pointer clears it back to inherit. The column is
@@ -134,16 +100,12 @@ func (s *Store) SetGroupEnrolment(id int64, totp, passkey, require *bool) error 
 // GroupRequires2FA reports whether a mandate applies to an OU, counting its ancestors: the flag is
 // sticky down the tree, so an OU under a mandated parent is mandated too.
 func (s *Store) GroupRequires2FA(id int64) bool {
-	for _, gid := range s.groupAncestry(id, s.DefaultGroupID()) {
-		raw, err := s.rawGroupSecurity(gid)
-		if err != nil {
-			continue
-		}
-		if raw.require != nil && *raw.require {
-			return true
-		}
+	snapshot, err := s.loadOUPolicySnapshotFrom(s.db)
+	if err != nil {
+		return false
 	}
-	return false
+	p, err := snapshot.resolve(id)
+	return err == nil && p.Require2FA.Effective
 }
 
 // SetGroupRequire2FA sets one OU's mandate on its own.
@@ -318,36 +280,11 @@ func (s *Store) subtreeIDs(root int64) ([]int64, error) {
 	if root == 0 {
 		return nil, nil
 	}
-	rows, err := s.query(`SELECT id, parent_id FROM user_groups`)
+	snapshot, err := s.loadOUPolicySnapshotFrom(s.db)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	children := map[int64][]int64{}
-	for rows.Next() {
-		var id int64
-		var parent sql.NullInt64
-		if err := rows.Scan(&id, &parent); err != nil {
-			return nil, err
-		}
-		children[parent.Int64] = append(children[parent.Int64], id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	out, stack := []int64{}, []int64{root}
-	seen := map[int64]bool{}
-	for len(stack) > 0 {
-		id := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		out = append(out, id)
-		stack = append(stack, children[id]...)
-	}
-	return out, nil
+	return snapshot.graph.subtree(root)
 }
 
 // enrolmentReachable reports whether a pattern is on that list.
@@ -526,7 +463,11 @@ func (s *Server) unsatisfiableMandates(p proposedPolicy) ([]string, error) {
 	if or(p.staff, s.switchOn(setRequire2FAForStaff, false)) {
 		stuck = append(stuck, "staff")
 	}
-	for _, g := range s.st.ListUserGroups() {
+	groups, err := s.st.ListUserGroupsErr()
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
 		require := g.Require2FA
 		if g.ID == p.ouID && p.ouRequire != nil {
 			require = *p.ouRequire

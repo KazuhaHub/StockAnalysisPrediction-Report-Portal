@@ -237,7 +237,7 @@ func (s *Server) apiReportCreate(w http.ResponseWriter, r *http.Request, user st
 		return
 	}
 	if err := s.st.SetReportViewers(id, rep.Date, viewers); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGrantWriteError(w, err)
 		return
 	}
 	s.recordChange(r, user, AuditReportCreate, "report", strconv.FormatInt(id, 10), map[string]any{
@@ -291,7 +291,7 @@ func (s *Server) apiReportSave(w http.ResponseWriter, r *http.Request, user stri
 		return
 	}
 	if err := s.st.SetReportViewers(id, next.Date, viewers); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGrantWriteError(w, err)
 		return
 	}
 	s.recordChange(r, user, AuditReportEdit, "report", strconv.FormatInt(id, 10), map[string]any{

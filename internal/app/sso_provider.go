@@ -1,6 +1,10 @@
 package app
 
-import "strings"
+import (
+	"database/sql"
+	"errors"
+	"strings"
+)
 
 // SSO provider configuration (ADR 0023). One row per IdP, addressed by slug. v1's admin UI manages
 // a single SAML row and a single OIDC row, but nothing here assumes that: adding more providers is
@@ -137,38 +141,55 @@ func (s *Store) EnabledSSOProviders() []SSOProvider {
 
 // SaveSSOProvider inserts or updates a provider by slug and returns its id.
 func (s *Store) SaveSSOProvider(p SSOProvider) (int64, error) {
-	if existing, ok := s.SSOProviderBySlug(p.Slug); ok {
-		p.ID = existing.ID
-		_, err := s.exec(`UPDATE sso_providers SET kind=?,name=?,enabled=?,provisioning=?,
+	var id int64
+	err := s.withOUMutation(func(e migExec) error {
+		if p.DefaultGroup != 0 {
+			snapshot, err := s.loadOUPolicySnapshotFrom(e.ex)
+			if err != nil {
+				return err
+			}
+			if _, err := snapshot.graph.policyChain(p.DefaultGroup); err != nil {
+				return err
+			}
+		}
+		err := e.queryRow(`SELECT id FROM sso_providers WHERE slug=?`, p.Slug).Scan(&p.ID)
+		if err == nil {
+			id = p.ID
+			_, err := e.exec(`UPDATE sso_providers SET kind=?,name=?,enabled=?,provisioning=?,
 			default_group=?,default_role=?,default_expiry_days=?,allow_admin_role=?,
 			issuer=?,client_id=?,client_secret_enc=?,scopes=?,discovery_json=?,discovery_fetched_at=?,
 			idp_metadata_url=?,idp_metadata_xml=?,idp_metadata_fetched_at=?,idp_metadata_error=?,idp_entity_id=?,idp_cert_pem=?,
 			sp_cert_pem=?,sp_cert_not_after=?,sp_key_enc=?,allow_idp_initiated=?,clock_skew_sec=?,
 			attr_upn=?,attr_email=?,attr_display=?,attr_groups=?,attr_external_id=?,session_hours=?,icon=?,link_by=?,updated_at=?
 			WHERE id=?`,
-			p.Kind, p.Name, boolInt(p.Enabled), p.Provisioning,
-			nullZero(p.DefaultGroup), p.DefaultRole, p.DefaultExpiryDays, boolInt(p.AllowAdminRole),
-			p.Issuer, p.ClientID, p.ClientSecretEnc, p.Scopes, p.DiscoveryJSON, p.DiscoveryFetched,
-			p.IdPMetadataURL, p.IdPMetadataXML, p.IdPMetadataFetched, p.IdPMetadataError, p.IdPEntityID, p.IdPCertPEM,
-			p.SPCertPEM, p.SPCertNotAfter, p.SPKeyEnc, boolInt(p.AllowIdPInit), p.ClockSkewSec,
-			p.AttrUPN, p.AttrEmail, p.AttrDisplay, p.AttrGroups, p.AttrExternalID, p.SessionHours, p.Icon, p.LinkBy,
-			nowStr(), p.ID)
-		return p.ID, err
-	}
-	return s.insertID(`INSERT INTO sso_providers(kind,slug,name,enabled,provisioning,
+				p.Kind, p.Name, boolInt(p.Enabled), p.Provisioning,
+				nullZero(p.DefaultGroup), p.DefaultRole, p.DefaultExpiryDays, boolInt(p.AllowAdminRole),
+				p.Issuer, p.ClientID, p.ClientSecretEnc, p.Scopes, p.DiscoveryJSON, p.DiscoveryFetched,
+				p.IdPMetadataURL, p.IdPMetadataXML, p.IdPMetadataFetched, p.IdPMetadataError, p.IdPEntityID, p.IdPCertPEM,
+				p.SPCertPEM, p.SPCertNotAfter, p.SPKeyEnc, boolInt(p.AllowIdPInit), p.ClockSkewSec,
+				p.AttrUPN, p.AttrEmail, p.AttrDisplay, p.AttrGroups, p.AttrExternalID, p.SessionHours, p.Icon, p.LinkBy,
+				nowStr(), p.ID)
+			return err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return e.queryRow(`INSERT INTO sso_providers(kind,slug,name,enabled,provisioning,
 		default_group,default_role,default_expiry_days,allow_admin_role,
 		issuer,client_id,client_secret_enc,scopes,discovery_json,discovery_fetched_at,
 		idp_metadata_url,idp_metadata_xml,idp_metadata_fetched_at,idp_metadata_error,idp_entity_id,idp_cert_pem,
 		sp_cert_pem,sp_cert_not_after,sp_key_enc,allow_idp_initiated,clock_skew_sec,
 		attr_upn,attr_email,attr_display,attr_groups,attr_external_id,session_hours,icon,link_by,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		p.Kind, p.Slug, p.Name, boolInt(p.Enabled), p.Provisioning,
-		nullZero(p.DefaultGroup), p.DefaultRole, p.DefaultExpiryDays, boolInt(p.AllowAdminRole),
-		p.Issuer, p.ClientID, p.ClientSecretEnc, p.Scopes, p.DiscoveryJSON, p.DiscoveryFetched,
-		p.IdPMetadataURL, p.IdPMetadataXML, p.IdPMetadataFetched, p.IdPMetadataError, p.IdPEntityID, p.IdPCertPEM,
-		p.SPCertPEM, p.SPCertNotAfter, p.SPKeyEnc, boolInt(p.AllowIdPInit), p.ClockSkewSec,
-		p.AttrUPN, p.AttrEmail, p.AttrDisplay, p.AttrGroups, p.AttrExternalID, p.SessionHours, p.Icon, p.LinkBy,
-		nowStr(), nowStr())
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+			p.Kind, p.Slug, p.Name, boolInt(p.Enabled), p.Provisioning,
+			nullZero(p.DefaultGroup), p.DefaultRole, p.DefaultExpiryDays, boolInt(p.AllowAdminRole),
+			p.Issuer, p.ClientID, p.ClientSecretEnc, p.Scopes, p.DiscoveryJSON, p.DiscoveryFetched,
+			p.IdPMetadataURL, p.IdPMetadataXML, p.IdPMetadataFetched, p.IdPMetadataError, p.IdPEntityID, p.IdPCertPEM,
+			p.SPCertPEM, p.SPCertNotAfter, p.SPKeyEnc, boolInt(p.AllowIdPInit), p.ClockSkewSec,
+			p.AttrUPN, p.AttrEmail, p.AttrDisplay, p.AttrGroups, p.AttrExternalID, p.SessionHours, p.Icon, p.LinkBy,
+			nowStr(), nowStr()).Scan(&id)
+	})
+	return id, err
 }
 
 // DeleteSSOProvider removes a provider and its rules. Existing identity links are left alone on

@@ -567,7 +567,7 @@ func (s *Server) apiAnnouncementAdd(w http.ResponseWriter, r *http.Request, user
 	}
 	if len(grants) > 0 {
 		if err := s.st.SetAnnouncementGrants(id, grants); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			writeGrantWriteError(w, err)
 			return
 		}
 	}
@@ -622,7 +622,7 @@ func (s *Server) apiAnnouncementSave(w http.ResponseWriter, r *http.Request, use
 		map[string]any{"op": "update", "title": a.Title, "level": a.Level, "scope": a.Scope})
 	if in.Grants != nil && !sameStrings(before, grants) {
 		if err := s.st.SetAnnouncementGrants(id, grants); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			writeGrantWriteError(w, err)
 			return
 		}
 		// Written after the change lands, with both sides, like version_api's grant trail: an

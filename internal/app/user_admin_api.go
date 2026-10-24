@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 )
@@ -75,11 +74,7 @@ func userGroupsJSON(gs []UserGroup) []map[string]any {
 // the users list the OU editor lives on) goes through it, so none can describe access differently.
 // The tree is read first, so a failed read is the only way this errors.
 func (s *Server) adminGroupsJSON() ([]map[string]any, error) {
-	ix, err := s.st.loadOUIndex()
-	if err != nil {
-		return nil, err
-	}
-	return adminGroupsWithAccess(s.st.ListUserGroups(), ix), nil
+	return s.st.adminOUGroups()
 }
 
 // adminGroupsWithAccess adds the three forecast fields to each OU the index holds. An OU the index
@@ -141,26 +136,6 @@ type groupInput struct {
 	TOTPEnroll    *bool `json:"totp_enroll"`
 	PasskeyEnroll *bool `json:"passkey_enroll"`
 	Require2FA    *bool `json:"require_2fa"`
-}
-
-// applyParent moves an OU, refusing a move that would make it its own ancestor. groupChain survives
-// a cycle — it dedupes and caps — so this is not a hang; but an OU resolving its settings from a ring
-// is a configuration no admin can reason about, and the refusal has to be at the door.
-func (s *Server) applyParent(id int64, parent *int64) error {
-	if parent == nil {
-		return nil
-	}
-	p := *parent
-	if p == id {
-		return fmt.Errorf("an OU cannot be its own parent")
-	}
-	for seen, g := map[int64]bool{}, p; g != 0 && !seen[g]; g = s.st.groupParent(g) {
-		seen[g] = true
-		if g == id {
-			return fmt.Errorf("that would place the OU under itself")
-		}
-	}
-	return s.st.SetGroupParent(id, p)
 }
 
 // tenancy normalizes the external-tenancy fields for storage: a negative quota is clamped to 0
@@ -254,43 +229,17 @@ func normalizeRunWindow(win string) string {
 
 func (s *Server) apiGroupAdd(w http.ResponseWriter, r *http.Request, user string) {
 	var in groupInput
-	readJSON(r, &in)
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		jsonError(w, http.StatusBadRequest, "group name required")
+	if err := readJSON(r, &in); err != nil {
+		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	weight, urgent := in.overrides(false) // new groups are never the Default
-	initWeight := 0
-	if weight != nil {
-		initWeight = *weight
-	}
-	id, err := s.st.CreateUserGroup(name, strings.TrimSpace(in.Description), initWeight)
+	result, err := s.writeOUInput(0, in, true)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "group name already exists")
+		ouWriteHTTPError(w, err)
 		return
 	}
-	// Re-apply as nullable so an omitted weight/urgent is stored as inherit (NULL).
-	s.st.UpdateGroup(id, name, strings.TrimSpace(in.Description), weight, urgent)
-	allow, mq, rw := in.governance(false)
-	s.st.SetGroupGovernance(id, allow, mq, rw)
-	s.st.SetGroupPriority(id, s.groupPriorityValid(in.Priority))
-	if restricted, quota := in.tenancy(false); restricted != nil || quota != nil {
-		if restricted != nil {
-			s.st.SetGroupRestricted(id, *restricted)
-		}
-		if quota != nil {
-			s.st.SetGroupDailyQuota(id, quota, in.quotaPeriod())
-		}
-	}
-	// Placing the OU in one step, so creating a sub-OU is one action rather than create-then-move.
-	if err := s.applyParent(id, in.ParentID); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.recordChange(r, user, AuditGroupCreate, "group", itoa64(id),
-		map[string]any{"name": name, "parent": in.ParentID})
-	writeJSON(w, map[string]any{"ok": true, "id": id})
+	s.recordChange(r, user, AuditGroupCreate, "group", itoa64(result.ID), result.Detail)
+	writeJSON(w, map[string]any{"ok": true, "id": result.ID})
 }
 
 func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user string) {
@@ -299,82 +248,15 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		jsonError(w, http.StatusBadRequest, "group name required")
-		return
-	}
 	id := pathID(r, "id")
-	isDefault := id == s.st.DefaultGroupID()
-	forecastScope, err := parseForecastScopeInput(in.ForecastScope, isDefault)
+	result, err := s.writeOUInput(id, in, false)
 	if err != nil {
-		jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_scope", "invalid forecast scope")
+		ouWriteHTTPError(w, err)
 		return
 	}
-	weight, urgent := in.overrides(isDefault)
-	if err := s.st.UpdateGroup(id, name, strings.TrimSpace(in.Description), weight, urgent); err != nil {
-		jsonError(w, http.StatusBadRequest, "group name already exists")
-		return
+	if result.Changed {
+		s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), result.Detail)
 	}
-	allow, mq, rw := in.governance(isDefault)
-	s.st.SetGroupGovernance(id, allow, mq, rw)
-	// The Default group carries no priority override (its members use the system
-	// default); force it clear so a stored value can't mislead.
-	if isDefault {
-		s.st.SetGroupPriority(id, "")
-	} else {
-		s.st.SetGroupPriority(id, s.groupPriorityValid(in.Priority))
-	}
-	// A mandate with no method enabled is refused here for the same reason as on the settings page:
-	// it is a lockout rather than a policy, and this OU is where it would take effect. The check is on
-	// the effective state, so it also covers a MOVE — re-parenting this OU under one that mandates a
-	// factor is caught by the ancestor's own flag.
-	if in.Require2FA != nil {
-		stuck, err := s.unsatisfiableMandates(proposedPolicy{ouID: id, ouRequire: in.Require2FA})
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "the security policy could not be read")
-			return
-		}
-		if len(stuck) > 0 {
-			jsonErrorCode(w, http.StatusBadRequest, "unsatisfiable_mandate",
-				"requiring a second factor here would leave it unsatisfiable with no method enabled: "+
-					strings.Join(stuck, ", "))
-			return
-		}
-	}
-	restricted, quota := in.tenancy(isDefault)
-	if restricted != nil {
-		s.st.SetGroupRestricted(id, *restricted)
-	}
-	s.st.SetGroupDailyQuota(id, quota, in.quotaPeriod()) // nil quota = inherit the parent OU
-	if err := s.st.SetGroupEnrolment(id, in.TOTPEnroll, in.PasskeyEnroll, in.Require2FA); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := s.applyParent(id, in.ParentID); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// An OU's settings decide what its members may run and what they may see, so this is an
-	// access change even when it looks like a rename. The fields that carry consequences are
-	// named; the row says which knobs moved, not their whole prior state.
-	detail := map[string]any{
-		"name": name, "parent": in.ParentID, "restricted": restricted,
-		"quota": quota, "quota_period": in.quotaPeriod(), "priority": in.Priority,
-		"totp_enroll": in.TOTPEnroll, "passkey_enroll": in.PasskeyEnroll, "require_2fa": in.Require2FA}
-	if len(in.ForecastScope) != 0 {
-		change, err := s.st.saveGroupForecastScope(id, forecastScope)
-		if err != nil {
-			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-			return
-		}
-		if change != nil {
-			detail["forecast_scope"] = change
-		}
-	}
-	s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), detail)
-	// The count, not just the flag: turning a mandate on asks people to do something at their next
-	// sign-in, and how many is the difference between a policy and a surprise.
 	pending := 0
 	if s.st.GroupRequires2FA(id) {
 		if n, err := s.st.membersWithoutFactor(id); err == nil {
@@ -388,8 +270,24 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 // admin matrix can render "which workflows may this OU run, and on which surfaces".
 func (s *Server) apiGroupTargets(w http.ResponseWriter, r *http.Request, user string) {
 	id := pathID(r, "id")
+	snapshot, err := s.st.loadOUPolicySnapshotFrom(s.st.db)
+	if err != nil {
+		ouWriteHTTPError(w, err)
+		return
+	}
+	chain, err := snapshot.graph.policyChain(id)
+	if err != nil {
+		ouWriteHTTPError(w, err)
+		return
+	}
+	policies, err := loadOUTargetPoliciesFrom(s.st.db)
+	if err != nil {
+		ouWriteHTTPError(w, err)
+		return
+	}
+	resolved := resolveOUTargetPolicy(chain, policies)
 	granted := make([]map[string]any, 0)
-	for _, g := range s.st.GroupTargets(id) {
+	for _, g := range policies[id] {
 		granted = append(granted, map[string]any{"target_id": g.TargetID, "surfaces": TargetSurfaces(g.Surfaces)})
 	}
 	targets := make([]map[string]any, 0)
@@ -397,13 +295,20 @@ func (s *Server) apiGroupTargets(w http.ResponseWriter, r *http.Request, user st
 		targets = append(targets, map[string]any{"id": t.ID, "name": t.Name,
 			"surfaces": TargetSurfaces(t.Surfaces), "output_subtype": targetOutputSubtype(t.Config)})
 	}
-	writeJSON(w, map[string]any{"granted": granted, "targets": targets})
+	effective := make([]map[string]any, 0)
+	for _, g := range resolved.Effective {
+		effective = append(effective, map[string]any{"target_id": g.TargetID, "surfaces": TargetSurfaces(g.Surfaces)})
+	}
+	_, configured := policies[id]
+	writeJSON(w, map[string]any{"granted": granted, "targets": targets, "configured": configured,
+		"effective": effective, "source_ou": resolved.SourceOU})
 }
 
 // apiGroupTargetsSave replaces an OU's allow-list atomically. An empty list means "this OU may run
 // nothing" — default-deny is the point, so it is a legitimate save, not an error.
 func (s *Server) apiGroupTargetsSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in struct {
+		Inherit bool `json:"inherit"`
 		Granted []struct {
 			TargetID int64    `json:"target_id"`
 			Surfaces []string `json:"surfaces"`
@@ -430,7 +335,13 @@ func (s *Server) apiGroupTargetsSave(w http.ResponseWriter, r *http.Request, use
 	for _, g := range s.st.GroupTargets(gid) {
 		before = append(before, map[string]any{"target_id": g.TargetID, "surfaces": TargetSurfaces(g.Surfaces)})
 	}
-	if err := s.st.SetGroupTargets(gid, rows); err != nil {
+	var saveErr error
+	if in.Inherit {
+		saveErr = s.st.InheritGroupTargets(gid)
+	} else {
+		saveErr = s.st.SetGroupTargets(gid, rows)
+	}
+	if err := saveErr; err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -439,7 +350,7 @@ func (s *Server) apiGroupTargetsSave(w http.ResponseWriter, r *http.Request, use
 		after = append(after, map[string]any{"target_id": g.TargetID, "surfaces": TargetSurfaces(g.Surfaces)})
 	}
 	s.recordChange(r, user, AuditGrantChange, "group", itoa64(gid),
-		map[string]any{"kind": "run_allowlist", "before": before, "after": after})
+		map[string]any{"kind": "run_allowlist", "before": before, "after": after, "inherit": in.Inherit})
 	writeJSON(w, okJSON)
 }
 
@@ -498,7 +409,7 @@ func (s *Server) apiGroupDelete(w http.ResponseWriter, r *http.Request, user str
 	}
 	reattributed, targetOU, err := s.st.DeleteUserGroup(id)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
+		ouWriteHTTPError(w, err)
 		return
 	}
 	if reattributed == 0 {
@@ -540,6 +451,23 @@ func (s *Server) apiUsersBulk(w http.ResponseWriter, r *http.Request, user strin
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if in.Action == "set_group" || in.Action == "clear_group" {
+		destination := in.GroupID
+		if in.Action == "clear_group" {
+			destination = 0
+		}
+		changes, err := s.st.SetPrimaryGroups(in.Usernames, destination)
+		if err != nil {
+			ouWriteHTTPError(w, err)
+			return
+		}
+		for name, from := range changes {
+			s.recordChange(r, user, AuditUserChange, "user", name, map[string]any{
+				"op": in.Action, "from": from, "group_id": destination, "bulk": true})
+		}
+		writeJSON(w, map[string]any{"ok": true, "n": len(changes)})
 		return
 	}
 	n := 0

@@ -667,6 +667,11 @@ func (s *Server) apiBatchJobCreate(w http.ResponseWriter, r *http.Request, user 
 	// to slip outside the window (nor wrongly rejected for a submit that lands outside it).
 	if !s.isAdmin(user) {
 		hour := time.Now().In(s.panelLocation()).Hour()
+		policy, policyErr := s.st.EffectiveGroupSettingsErr(user)
+		if policyErr != nil {
+			jsonErrorCode(w, http.StatusServiceUnavailable, "ou_policy_unavailable", "the organizational policy could not be read")
+			return
+		}
 		if runAt != "" {
 			if rt, err := time.ParseInLocation("2006-01-02 15:04:05", runAt, time.Local); err == nil {
 				hour = rt.In(s.panelLocation()).Hour()
@@ -676,7 +681,7 @@ func (s *Server) apiBatchJobCreate(w http.ResponseWriter, r *http.Request, user 
 			jsonError(w, http.StatusForbidden, "runs are only allowed during "+win+":00 (panel time)")
 			return
 		}
-		if cap := s.st.EffectiveGroupSettings(user).MaxQueued; cap > 0 && s.st.ActiveJobCount(user) >= cap {
+		if cap := policy.MaxQueued; cap > 0 && s.st.ActiveJobCount(user) >= cap {
 			jsonError(w, http.StatusConflict, "you already have the maximum number of active runs; wait for one to finish")
 			return
 		}

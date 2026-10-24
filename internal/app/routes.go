@@ -309,8 +309,10 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "DELETE /api/admin/users/{name}/identity", s.apiAdminUserUnlink)
 	// Organizational user groups (labels; permissions still come from the role).
 	s.admin(mux, "GET /api/admin/groups", s.apiAdminGroups)
+	s.admin(mux, "GET /api/admin/groups/topology", s.apiOUTopology)
 	s.admin(mux, "POST /api/admin/groups", s.apiGroupAdd)
 	s.admin(mux, "PUT /api/admin/groups/{id}", s.apiGroupSave)
+	s.admin(mux, "POST /api/admin/groups/{id}/preview", s.apiGroupPolicyPreview)
 	// Asked before the delete is offered: deleting an OU can leave an announcement addressed to
 	// nobody, and DELETE refuses until the caller says what should happen to those (ADR 0025).
 	s.admin(mux, "GET /api/admin/groups/{id}/announcements", s.apiGroupAnnouncements)

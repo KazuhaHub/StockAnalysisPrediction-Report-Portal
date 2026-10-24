@@ -3,7 +3,6 @@ package app
 import (
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -258,28 +257,27 @@ func (s *Store) ReportViewers(reportID int64) []string {
 // asking for the same generated report JOINS its readers. A hand-written report's audience is a
 // decision somebody made in a form, so removing a recipient there has to actually remove them; an
 // additive save would make the picker able to widen an audience but never to narrow one.
+//
+// It shares the OU writer boundary with deletion, so an OU principal is validated against a tree
+// that cannot change until the save commits.
 func (s *Store) SetReportViewers(reportID int64, rdate string, principals []string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(s.bind("DELETE FROM report_viewers WHERE report_id=?"), reportID); err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, p := range principals {
-		if p = strings.TrimSpace(p); p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		if _, err := tx.Exec(s.bind(
-			"INSERT INTO report_viewers(principal,rdate,report_id) VALUES(?,?,?) ON CONFLICT(principal,rdate,report_id) DO NOTHING"),
-			p, rdate, reportID); err != nil {
+	return s.withOUMutation(func(e migExec) error {
+		validated, err := validateOUPrincipals(e, principals)
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if _, err := e.exec("DELETE FROM report_viewers WHERE report_id=?", reportID); err != nil {
+			return err
+		}
+		for _, p := range validated {
+			if _, err := e.exec(
+				"INSERT INTO report_viewers(principal,rdate,report_id) VALUES(?,?,?) ON CONFLICT(principal,rdate,report_id) DO NOTHING",
+				p, rdate, reportID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // IsManualReport reports whether an id names a hand-written report. The editor's edit and delete

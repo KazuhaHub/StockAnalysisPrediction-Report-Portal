@@ -153,34 +153,38 @@ func (s *Store) BumpSessionRev(username string) error {
 // happens to expire. An unchanged assignment is a no-op, so an ordinary repeat login does not log
 // the user out of their other devices.
 func (s *Server) applyAssignment(username, role string, group int64) error {
-	u := s.st.GetUser(username)
-	if u == nil {
-		return sql.ErrNoRows
-	}
-	changed := false
-	if role != "" && role != u.EffRole() {
-		if err := s.st.SetUserRole(username, validRole(role)); err != nil {
+	return s.st.withOUMutation(func(e migExec) error {
+		u, err := scanUser(e.queryRow(`SELECT `+userCols+` FROM users u WHERE u.username=?`, username).Scan)
+		if err != nil {
 			return err
 		}
-		changed = true
-	}
-	if group != 0 && group != s.st.PrimaryGroupOf(username) {
-		// A group id that no longer exists (a deleted OU, a typo in a rule) must NOT be applied:
-		// SetPrimaryGroup treats an unknown id as "clear", which would drop the user into the
-		// unrestricted Default group — turning a misconfiguration into a silent privilege
-		// escalation. Refuse instead, so the login fails visibly and the rule gets fixed.
-		if !s.st.GroupExists(group) {
-			return fmt.Errorf("rule targets group %d, which does not exist", group)
-		}
-		if err := s.st.SetPrimaryGroup(username, group); err != nil {
+		var currentGroup int64
+		if err := e.queryRow(`SELECT COALESCE(group_id,0) FROM users WHERE username=?`, username).Scan(&currentGroup); err != nil {
 			return err
 		}
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return s.st.BumpSessionRev(username)
+		if group != 0 {
+			snapshot, err := s.st.loadOUPolicySnapshotFrom(e.ex)
+			if err != nil {
+				return err
+			}
+			if _, err := snapshot.graph.policyChain(group); err != nil {
+				return fmt.Errorf("rule targets invalid OU %d: %w", group, err)
+			}
+		}
+		nextRole, nextGroup := u.Role, currentGroup
+		if role != "" {
+			nextRole = validRole(role)
+		}
+		if group != 0 {
+			nextGroup = group
+		}
+		if nextRole == u.Role && nextGroup == currentGroup {
+			return nil
+		}
+		_, err = e.exec(`UPDATE users SET role=?,group_id=?,session_rev=COALESCE(session_rev,0)+1,updated_at=? WHERE username=?`,
+			nextRole, nullZero(nextGroup), nowStr(), username)
+		return err
+	})
 }
 
 // LastSeenAttrs returns the claims recorded on the most recent sign-in through a provider. It backs

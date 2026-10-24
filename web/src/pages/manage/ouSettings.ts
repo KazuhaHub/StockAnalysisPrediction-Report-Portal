@@ -1,4 +1,18 @@
-import type { UserGroupRow } from '../../api/types'
+import type { OUPolicyResults, UserGroupRow } from '../../api/types'
+
+/** Presentation only: effective values and provenance have already been resolved by the server. */
+export function presentOUPolicies(p: OUPolicyResults, priority?: string): OUSettings {
+  const field = <T>(v: { effective: T; inherited: boolean }): Resolved<T> => ({ value: v.effective, inherited: v.inherited })
+  const urgent = !p.allow_urgent.effective ? p.allow_urgent : p.urgent_unlimited.effective ? p.urgent_unlimited : p.weight
+  return {
+    urgent: { value: !p.allow_urgent.effective ? 'off' : p.urgent_unlimited.effective ? 'unlimited' : 'ticket', inherited: urgent.inherited },
+    weight: field(p.weight), maxQueued: field(p.max_queued), runWindow: field(p.run_window),
+    priority: { value: priority ? Number(priority) : null, inherited: !priority },
+    dailyQuota: { value: p.quota.effective.limit, inherited: p.quota.inherited },
+    quotaPeriod: { value: p.quota.effective.period, inherited: p.quota.inherited },
+    totpAllowed: field(p.totp_enroll), passkeyAllowed: field(p.passkey_enroll), require2fa: field(p.require_2fa),
+  }
+}
 
 // Resolving what an organizational unit's settings actually ARE.
 //
@@ -49,6 +63,7 @@ export interface OUSettings {
  * it those fall back to the permissive baseline, which is what every caller got before.
  */
 export function resolveOU(g: UserGroupRow, def?: UserGroupRow, groups?: UserGroupRow[]): OUSettings {
+  if (g.policy_results) return presentOUPolicies(g.policy_results, g.priority)
   const isDefault = !!g.is_default
   // The Default group inherits from nobody: it IS the fallback, so a null there is simply unset.
   const own = <T>(v: T | null | undefined, fallback: T): Resolved<T> =>

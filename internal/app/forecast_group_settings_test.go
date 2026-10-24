@@ -47,6 +47,7 @@ func TestGroupSaveForecastScope(t *testing.T) {
 		{`,"forecast_scope":""`, scopeOwn, 400, false},
 	} {
 		before := read(id)
+		beforeAudit := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log`)
 		w := save(id, tc.extra)
 		if w.Code != tc.status || tc.status == 400 && !hasCode(w.Body.Bytes(), "forecast_bad_scope") {
 			t.Fatalf("%s: %d %s", tc.extra, w.Code, w.Body.String())
@@ -56,6 +57,12 @@ func TestGroupSaveForecastScope(t *testing.T) {
 			t.Fatalf("%s: scope %#v, want %v", tc.extra, v, tc.want)
 		}
 		if w.Code == http.StatusOK {
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log`) == beforeAudit {
+				if tc.changed {
+					t.Fatal("changed scope was not audited")
+				}
+				continue
+			}
 			var detail string
 			if err := s.st.queryRow("SELECT detail FROM audit_log WHERE action=? AND target_id=? ORDER BY id DESC LIMIT 1", AuditGroupChange, itoa64(id)).Scan(&detail); err != nil {
 				t.Fatal(err)

@@ -2,7 +2,6 @@ package app
 
 import (
 	"database/sql"
-	"strings"
 	"time"
 )
 
@@ -245,28 +244,24 @@ func (s *Store) SetAnnouncementDisplay(id int64, display string) error {
 	return err
 }
 
-// SetAnnouncementGrants replaces one announcement's principal list, mirroring SetVersionGrants.
+// SetAnnouncementGrants replaces one announcement's principal list, sharing the OU writer boundary
+// with deletion so an OU principal is validated against a tree that cannot change until it commits.
 func (s *Store) SetAnnouncementGrants(id int64, principals []string) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(s.bind("DELETE FROM announcement_grants WHERE announcement_id=?"), id); err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, p := range principals {
-		if p = strings.TrimSpace(p); p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		if _, err := tx.Exec(s.bind("INSERT INTO announcement_grants(announcement_id,principal) VALUES(?,?)"),
-			id, p); err != nil {
+	return s.withOUMutation(func(e migExec) error {
+		validated, err := validateOUPrincipals(e, principals)
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if _, err := e.exec("DELETE FROM announcement_grants WHERE announcement_id=?", id); err != nil {
+			return err
+		}
+		for _, p := range validated {
+			if _, err := e.exec("INSERT INTO announcement_grants(announcement_id,principal) VALUES(?,?)", id, p); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeleteAnnouncement drops the row and its grants together. Two statements in one transaction, so

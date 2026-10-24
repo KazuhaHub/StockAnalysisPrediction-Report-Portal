@@ -70,7 +70,14 @@ func TestForecastDemoReadClockDoesNotDriveReceipt(t *testing.T) {
 	// The seed can control receipt through a per-server test seam, never through the environment.
 	seedReceipt := time.Date(2026, 3, 2, 13, 0, 0, 0, time.UTC)
 	s.forecastReceiptForTest = func() time.Time { return seedReceipt }
-	code, response = ingestPost(t, s, ingestBody(string(predWire(nil))))
+	// The horizon must be a standard one RELATIVE TO THIS RECEIPT. predWire derives it from the real
+	// clock, which is right for an unpinned ingest and wrong here by however far 2026-03-02 is from
+	// today; without this override the payload is accepted as a non-standard horizon, which is fine
+	// but makes the assertion below read a row from the previous ingest instead of this one.
+	seeded := predWire(func(m map[string]any) {
+		m["horizon_end"] = seedReceipt.AddDate(1, 0, 0).Format("2006-01-02")
+	})
+	code, response = ingestPost(t, s, ingestBody(string(seeded)))
 	if code != 200 || response["predictions_status"] != predStateAccepted {
 		t.Fatalf("seed receipt ingest status = %d / %v", code, response)
 	}

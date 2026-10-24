@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import UsersPage from './UsersPage'
@@ -9,11 +9,12 @@ import UsersPage from './UsersPage'
 const listing = vi.hoisted(() => ({
   groups: [] as { id: number; name: string; is_default?: boolean; members: number; weight: number | null }[],
 }))
+const post = vi.hoisted(() => vi.fn().mockResolvedValue({}))
 vi.mock('../../api/client', () => ({
   api: {
     get: (url: string) =>
       Promise.resolve(url === '/api/admin/users' ? { users: [], roles: [], groups: listing.groups, me: '' } : { targets: [], granted: [] }),
-    post: () => Promise.resolve({}),
+    post,
     put: () => Promise.resolve({}),
     del: () => Promise.resolve({}),
   },
@@ -24,6 +25,15 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('UsersPage — accounts / groups sub-tabs', () => {
+  it('creates an ordinary OU beneath Default instead of creating another root', async () => {
+    listing.groups = [{ id: 1, name: 'Default', is_default: true, members: 0, weight: 2 }]
+    render(<MemoryRouter initialEntries={['/manage/users?tab=groups']}><App><UsersPage /></App></MemoryRouter>)
+    fireEvent.click(await screen.findByText('ou.add'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'New team' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'common.save' }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/admin/groups', expect.objectContaining({ parent_id: 1 })))
+  })
   it('renders both sub-tabs', async () => {
     render(
       <MemoryRouter>

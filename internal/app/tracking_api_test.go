@@ -22,6 +22,7 @@ func trackingGET(t *testing.T, s *Server, user, query string) map[string]any {
 
 func TestTrackingAPIReturnsTheQueueWithItsVocabulary(t *testing.T) {
 	s, _, _ := trackingFixture(t)
+	mustAddUser(t, s, "admin", true)
 	out := trackingGET(t, s, "admin", "")
 
 	items, _ := out["items"].([]any)

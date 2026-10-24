@@ -22,16 +22,34 @@ import (
 // fourth principal table added later fails here on the day it is added, rather than on the day
 // somebody notices the wrong person is reading something.
 
-// principalTables finds them the only way that cannot go stale: from baseSchemaStmts, which is the
-// single source of truth for the schema.
-func principalTables(s *Store) []string {
-	var out []string
-	for _, stmt := range s.baseSchemaStmts() {
-		table, cols, ok := parseCreateTable(stmt)
-		if !ok {
-			continue
+// Principal discovery includes migration products as well as the frozen baseline. Inspect the
+// initialized catalog so a newly added grant table cannot escape lifecycle coverage.
+func principalColumnDefinitions(t *testing.T, s *Store, table string) []schemaCol {
+	t.Helper()
+	rows, err := s.query("SELECT name,type FROM pragma_table_info(?)", table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var columns []schemaCol
+	for rows.Next() {
+		var c schemaCol
+		if err := rows.Scan(&c.name, &c.def); err != nil {
+			t.Fatal(err)
 		}
-		for _, c := range cols {
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return columns
+}
+
+func principalTables(t *testing.T, s *Store) []string {
+	t.Helper()
+	var out []string
+	for _, table := range s.backupTables() {
+		for _, c := range principalColumnDefinitions(t, s, table) {
 			if c.name == "principal" {
 				out = append(out, table)
 				break
@@ -41,37 +59,25 @@ func principalTables(s *Store) []string {
 	return out
 }
 
-// seedPrincipalRow inserts one row naming `principal`, filling every other column with something
-// valid for its declared type. Generic on purpose: a new principal table must be seedable here
-// without anybody remembering to teach this test about it.
 func seedPrincipalRow(t *testing.T, s *Store, table, principal string) {
 	t.Helper()
-	for _, stmt := range s.baseSchemaStmts() {
-		name, cols, ok := parseCreateTable(stmt)
-		if !ok || name != table {
-			continue
+	var names []string
+	var args []any
+	for _, c := range principalColumnDefinitions(t, s, table) {
+		names = append(names, c.name)
+		switch {
+		case c.name == "principal":
+			args = append(args, principal)
+		case strings.Contains(strings.ToUpper(c.def), "INT"):
+			args = append(args, 1)
+		default:
+			args = append(args, "x")
 		}
-		var names []string
-		var args []any
-		for _, c := range cols {
-			names = append(names, c.name)
-			switch {
-			case c.name == "principal":
-				args = append(args, principal)
-			case strings.Contains(strings.ToUpper(c.def), "INT"):
-				args = append(args, 1)
-			default:
-				args = append(args, "x")
-			}
-		}
-		q := fmt.Sprintf("INSERT INTO %s(%s) VALUES(%s)",
-			table, strings.Join(names, ","), strings.TrimSuffix(strings.Repeat("?,", len(args)), ","))
-		if _, err := s.exec(q, args...); err != nil {
-			t.Fatalf("seed %s: %v [%s]", table, err, q)
-		}
-		return
 	}
-	t.Fatalf("no CREATE TABLE found for %s", table)
+	q := fmt.Sprintf("INSERT INTO %s(%s) VALUES(%s)", table, strings.Join(names, ","), strings.TrimSuffix(strings.Repeat("?,", len(args)), ","))
+	if _, err := s.exec(q, args...); err != nil {
+		t.Fatalf("seed %s: %v [%s]", table, err, q)
+	}
 }
 
 func principalRows(t *testing.T, s *Store, table, principal string) int {
@@ -83,8 +89,8 @@ func principalRows(t *testing.T, s *Store, table, principal string) int {
 
 func TestEveryPrincipalTableIsSweptOnDelete(t *testing.T) {
 	st := newTestStore(t)
-	tables := principalTables(st)
-	if len(tables) < 3 {
+	tables := principalTables(t, st)
+	if len(tables) < 4 {
 		t.Fatalf("found %v principal tables; expected at least report_viewers, version_grants and "+
 			"announcement_grants — has the schema or parseCreateTable changed?", tables)
 	}

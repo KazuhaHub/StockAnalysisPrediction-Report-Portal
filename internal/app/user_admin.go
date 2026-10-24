@@ -209,6 +209,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	if isDefault != 0 {
 		return 0, 0, fmt.Errorf("the Default group cannot be deleted")
 	}
+	if err := validateOUDeletionReferences(owned, id); err != nil {
+		return 0, 0, err
+	}
 	var defaultID int64
 	if err := tx.QueryRow(s.bind(`SELECT id FROM user_groups WHERE is_default=1 ORDER BY id LIMIT 1`)).
 		Scan(&defaultID); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -267,6 +270,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		}
 	}
 	if _, err := tx.Exec(s.bind(`DELETE FROM group_targets WHERE group_id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec(s.bind(`DELETE FROM group_target_policies WHERE group_id=?`), id); err != nil {
 		return 0, 0, err
 	}
 	// Children keep inheriting along the line they were in: to the deleted OU's parent, or as roots
@@ -364,91 +370,24 @@ func (s *Store) EnsureDefaultGroup() int64 {
 // ListUserGroups returns all groups (Default first, then by name) with their primary-
 // member counts, per-field override values, and inherit flags.
 func (s *Store) ListUserGroups() []UserGroup {
-	rows, err := s.query(`SELECT g.id, g.name, COALESCE(g.description,''), COALESCE(g.created_at,''),
-			COALESCE(g.is_default,0), g.weight, g.urgent_unlimited, g.allow_urgent, g.max_queued, g.run_window,
-			COALESCE(g.priority,''), COALESCE(g.restricted,0), g.daily_run_quota,
-			COALESCE(g.run_quota_period,''), g.parent_id, g.totp_enroll, g.passkey_enroll, g.require_2fa,
-			COUNT(u.username)
-		FROM user_groups g
-		LEFT JOIN users u ON u.group_id=g.id
-		GROUP BY g.id, g.name, g.description, g.created_at, g.is_default, g.weight, g.urgent_unlimited,
-			g.allow_urgent, g.max_queued, g.run_window, g.priority, g.restricted, g.daily_run_quota,
-			g.run_quota_period, g.parent_id, g.totp_enroll, g.passkey_enroll, g.require_2fa
-		ORDER BY g.is_default DESC, g.name`)
+	groups, _ := s.ListUserGroupsErr()
+	return groups
+}
+
+func (s *Store) ListUserGroupsErr() ([]UserGroup, error) {
+	snapshot, members, err := s.loadOUGroupListing()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer rows.Close()
-	var out []UserGroup
-	parents := map[int64]int64{}
-	restrictedOwn := map[int64]bool{}
-	for rows.Next() {
-		var g UserGroup
-		var isDefault, restricted int
-		var weight, urgent, allowUrgent, maxQueued, dailyQuota, parent, totpEnroll, passkeyEnroll, require2fa sql.NullInt64
-		var runWindow, quotaPeriod sql.NullString
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.Created, &isDefault, &weight, &urgent,
-			&allowUrgent, &maxQueued, &runWindow, &g.Priority, &restricted, &dailyQuota, &quotaPeriod,
-			&parent, &totpEnroll, &passkeyEnroll, &require2fa, &g.Members); err != nil {
-			continue
-		}
-		g.IsDefault = isDefault != 0
-		g.Weight, g.WeightInherit = int(weight.Int64), !weight.Valid && !g.IsDefault
-		g.UrgentFree, g.UrgentInherit = urgent.Int64 != 0, !urgent.Valid && !g.IsDefault
-		// Value fields carry the permissive default when unset, so the UI reads sensibly.
-		g.AllowUrgent, g.AllowUrgentInherit = !allowUrgent.Valid || allowUrgent.Int64 != 0, !allowUrgent.Valid && !g.IsDefault
-		g.MaxQueued, g.MaxQueuedInherit = int(maxQueued.Int64), !maxQueued.Valid && !g.IsDefault
-		g.RunWindow, g.RunWindowInherit = runWindow.String, !runWindow.Valid && !g.IsDefault
-		g.Restricted = restricted != 0
-		g.DailyRunQuota, g.DailyQuotaInherit = int(dailyQuota.Int64), !dailyQuota.Valid && !g.IsDefault
-		g.QuotaPeriod = quotaPeriod.String
-		if g.QuotaPeriod == "" {
-			g.QuotaPeriod = QuotaDay // a row written before the column existed meant per-day
-		}
-		g.ParentID = parent.Int64
-		// Value-plus-inherit, like AllowUrgent above: while the OU sets nothing the value reads as the
-		// permissive default, and Inherit says it is not this OU's own answer.
-		g.TOTPEnroll, g.TOTPEnrollInherit = !totpEnroll.Valid || totpEnroll.Int64 != 0, !totpEnroll.Valid && !g.IsDefault
-		g.PasskeyEnroll, g.PasskeyEnrollInherit = !passkeyEnroll.Valid || passkeyEnroll.Int64 != 0, !passkeyEnroll.Valid && !g.IsDefault
-		// The mandate is off unless set: unlike the two above, "this OU says nothing" must not read as
-		// "required", or every OU would inherit a requirement from a portal that never asked for one.
-		g.Require2FA, g.Require2FAInherit = require2fa.Valid && require2fa.Int64 != 0, !require2fa.Valid && !g.IsDefault
-		parents[g.ID], restrictedOwn[g.ID] = parent.Int64, g.Restricted
-		out = append(out, g)
-	}
-	// Restriction is sticky down the OU tree, so a group is effectively restricted when it or ANY
-	// ancestor sets the flag — this is what the admin UI shows as "inherited from the parent OU".
-	for i := range out {
-		seen := map[int64]bool{}
-		for id := out[i].ID; id != 0 && !seen[id]; id = parents[id] {
-			seen[id] = true
-			if restrictedOwn[id] {
-				out[i].RestrictedEffective = true
-				break
-			}
-		}
-	}
-	return out
+	return snapshot.groupRows(members), nil
 }
 
 // ---------- primary group (membership) ----------
 
-// SetPrimaryGroup sets a user's primary group; a groupID of 0 clears it (the user then
-// falls back to the Default group). A non-existent group id is treated as a clear so the
-// stored pointer is never left dangling (e.g. a stale UI targeting a just-deleted group).
+// SetPrimaryGroup validates both ends under the same writer boundary as OU deletion. Zero is
+// an explicit clear; an invalid destination or failed read is never interpreted as that choice.
 func (s *Store) SetPrimaryGroup(username string, groupID int64) error {
-	if groupID != 0 {
-		var exists sql.NullInt64
-		s.queryRow("SELECT 1 FROM user_groups WHERE id=?", groupID).Scan(&exists)
-		if exists.Int64 == 0 {
-			groupID = 0
-		}
-	}
-	if groupID == 0 {
-		_, err := s.exec("UPDATE users SET group_id=NULL WHERE username=?", username)
-		return err
-	}
-	_, err := s.exec("UPDATE users SET group_id=? WHERE username=?", groupID, username)
+	_, err := s.SetPrimaryGroups([]string{username}, groupID)
 	return err
 }
 
@@ -492,65 +431,26 @@ type GroupSettings struct {
 	QuotaPeriod     string // day | week | month | total; "" = day
 }
 
-// rawGroupSettings holds one group's un-coalesced governance columns (NULL = unset).
-type rawGroupSettings struct {
-	weight, urgent, allowUrgent, maxQueued, restricted, dailyQuota sql.NullInt64
-	runWindow, quotaPeriod                                         sql.NullString
-}
-
-func (s *Store) rawGroupSettings(id int64) rawGroupSettings {
-	var g rawGroupSettings
-	s.queryRow(`SELECT weight, urgent_unlimited, allow_urgent, max_queued, run_window, restricted,
-			daily_run_quota, run_quota_period FROM user_groups WHERE id=?`, id).
-		Scan(&g.weight, &g.urgent, &g.allowUrgent, &g.maxQueued, &g.runWindow, &g.restricted,
-			&g.dailyQuota, &g.quotaPeriod)
-	return g
-}
-
-// EffectiveGroupSettings resolves a user's run governance by layering along the OU tree, in order:
-// the permissive baseline, then each OU from the root (Default) down to the user's primary group,
-// so a set field on a nearer (deeper) OU wins over its ancestors (NULL = inherit). `restricted` is
-// STICKY rather than last-wins: a restricted ancestor restricts its whole subtree, and a descendant
-// can never un-restrict itself (ADR 0022).
+// EffectiveGroupSettings is the compatibility value-only view. Enforcement must use the
+// error-aware form; an unreadable policy must never become an unscoped permissive baseline.
 func (s *Store) EffectiveGroupSettings(username string) GroupSettings {
-	res := GroupSettings{AllowUrgent: true} // permissive baseline: no cap, any hour, urgent ok
-	apply := func(g rawGroupSettings) {
-		if g.weight.Valid {
-			res.Weight = int(g.weight.Int64)
-		}
-		if g.urgent.Valid {
-			res.UrgentUnlimited = g.urgent.Int64 != 0
-		}
-		if g.allowUrgent.Valid {
-			res.AllowUrgent = g.allowUrgent.Int64 != 0
-		}
-		if g.maxQueued.Valid {
-			res.MaxQueued = int(g.maxQueued.Int64)
-		}
-		if g.runWindow.Valid {
-			res.RunWindow = g.runWindow.String
-		}
-		if g.restricted.Valid && g.restricted.Int64 != 0 {
-			res.Restricted = true // sticky OR: never un-set by a descendant
-		}
-		// The period travels with the number rather than resolving separately: inheriting "20" from
-		// one OU and "month" from another would produce a cap neither of them configured. So the
-		// window is REPLACED whenever the number is, including when this row has no period of its
-		// own — a cap written before the column existed means the day window, not whatever window
-		// an ancestor happens to set. Skipping the reset there is how a legacy 5-per-day child
-		// silently became 5-per-month the moment someone put a monthly cap on its parent.
-		if g.dailyQuota.Valid {
-			res.DailyRunQuota = int(g.dailyQuota.Int64)
-			res.QuotaPeriod = QuotaDay
-			if validQuotaPeriod(g.quotaPeriod.String) {
-				res.QuotaPeriod = g.quotaPeriod.String
-			}
-		}
+	out, err := s.EffectiveGroupSettingsErr(username)
+	if err != nil {
+		return GroupSettings{Restricted: true}
 	}
-	for _, gid := range s.groupChain(username) {
-		apply(s.rawGroupSettings(gid))
+	return out
+}
+
+func (s *Store) EffectiveGroupSettingsErr(username string) (GroupSettings, error) {
+	sub, snapshot, err := s.loadOUPolicySubject(username)
+	if err != nil {
+		return GroupSettings{}, err
 	}
-	return res
+	policies, err := snapshot.resolve(sub.EffectiveOU)
+	if err != nil {
+		return GroupSettings{}, err
+	}
+	return policies.governance(), nil
 }
 
 // groupParent returns a group's parent OU id, or 0 for a root (NULL parent_id) or missing group.
@@ -560,78 +460,42 @@ func (s *Store) groupParent(id int64) int64 {
 	return p.Int64
 }
 
-// groupChain returns the OU ancestry a user's settings resolve through, ordered root→leaf so the
-// caller applies ancestors first and the leaf (the user's primary group, or the Default group when
-// unassigned) last. The Default/root baseline is always included even if a broken parent_id chain
-// never reaches it. Cycle- and depth-guarded.
+// groupChain is the compatibility view for existing audience callers. A broken tree yields
+// no OU principals. Enforcement callers use groupChainErr to retain the failure itself.
 func (s *Store) groupChain(username string) []int64 {
-	def := s.DefaultGroupID()
-	leaf := s.PrimaryGroupOf(username)
-	if leaf == 0 {
-		leaf = def
-	}
-	return s.groupAncestry(leaf, def)
+	chain, _ := s.groupChainErr(username)
+	return chain
 }
 
-// groupChainErr is groupChain with the store's failures surfaced instead of swallowed.
-//
-// The lenient form is right for the display paths — an unreadable group list there is an empty one —
-// and wrong for the enrolment gate, which must not read a closed or unhappy database as "this account
-// inherits nothing". Inheriting nothing means no mandate, and no mandate is the fail-open direction.
 func (s *Store) groupChainErr(username string) ([]int64, error) {
-	var def sql.NullInt64
-	if err := s.queryRow("SELECT id FROM user_groups WHERE is_default=1 ORDER BY id LIMIT 1").Scan(&def); err != nil &&
-		!errors.Is(err, sql.ErrNoRows) {
+	sub, snapshot, err := s.loadOUPolicySubject(username)
+	if err != nil {
 		return nil, err
 	}
-	var leafID sql.NullInt64
-	if err := s.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&leafID); err != nil &&
-		!errors.Is(err, sql.ErrNoRows) {
+	chain, err := snapshot.graph.policyChain(sub.EffectiveOU)
+	if err != nil {
 		return nil, err
 	}
-	leaf := leafID.Int64
-	if leaf == 0 {
-		leaf = def.Int64
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
 	}
-	var up []int64
-	seen := map[int64]bool{}
-	for gid := leaf; gid != 0 && !seen[gid] && len(up) < 64; {
-		seen[gid] = true
-		up = append(up, gid)
-		var parent sql.NullInt64
-		if err := s.queryRow("SELECT parent_id FROM user_groups WHERE id=?", gid).Scan(&parent); err != nil &&
-			!errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-		gid = parent.Int64
-	}
-	if def.Valid && def.Int64 != 0 && !seen[def.Int64] {
-		up = append(up, def.Int64)
-	}
-	for i, j := 0, len(up)-1; i < j; i, j = i+1, j-1 {
-		up[i], up[j] = up[j], up[i]
-	}
-	return up, nil
+	return chain, nil
 }
 
-// groupAncestry walks leaf up to the root and returns the chain root→leaf, with the Default group
-// guaranteed to be on it. Split out of groupChain so it can also be reached from a GROUP id rather
-// than a username: announcement preview asks "what would a member of this OU see", and the answer
-// has to be built the same way the real read path builds it, not approximated beside it.
-func (s *Store) groupAncestry(leaf, def int64) []int64 {
-	var up []int64
-	seen := map[int64]bool{}
-	for gid := leaf; gid != 0 && !seen[gid] && len(up) < 64; gid = s.groupParent(gid) {
-		seen[gid] = true
-		up = append(up, gid)
+// groupAncestry is a display compatibility view of the same validated policy graph.
+func (s *Store) groupAncestry(leaf, _ int64) []int64 {
+	snapshot, err := s.loadOUPolicySnapshotFrom(s.db)
+	if err != nil {
+		return nil
 	}
-	if def != 0 && !seen[def] {
-		up = append(up, def) // guarantee the baseline is applied even off an orphaned chain
+	chain, err := snapshot.graph.policyChain(leaf)
+	if err != nil {
+		return nil
 	}
-	for i, j := 0, len(up)-1; i < j; i, j = i+1, j-1 {
-		up[i], up[j] = up[j], up[i] // reverse to root→leaf
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
 	}
-	return up
+	return chain
 }
 
 // SetGroupParent moves an OU under a parent (0 = make it a root; NULL parent_id). No cycle check

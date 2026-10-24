@@ -86,6 +86,7 @@ func decodeFilenameStar(t *testing.T, cd string) string {
 // with the company name folded into the actual Content-Disposition filename.
 func TestReportMDDownloadFilenameFoldsCompanyName(t *testing.T) {
 	s := newV1Server(t)
+	mustAddUser(t, s, "tester", false)
 
 	rec, _ := postV1Ingest(t, s, map[string]any{
 		"symbol": "001696", "name": "宗申动力", "date": "2026-07-16",

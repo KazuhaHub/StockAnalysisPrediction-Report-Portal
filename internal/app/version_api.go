@@ -60,6 +60,15 @@ func (s *Server) apiAdminVersionSave(w http.ResponseWriter, r *http.Request, use
 		jsonError(w, http.StatusBadRequest, "a version needs a name")
 		return
 	}
+	// Validated BEFORE the version row is written. The store writer validates again under the OU
+	// mutation lock — that is what closes the race — but a refusal discovered only there would
+	// leave the version registered with its previous audience, which is the partial save this save
+	// deliberately avoids. Account principals are not checked: a historical grant may legitimately
+	// name someone whose account is gone.
+	if _, err := validateOUPrincipals(s.st.poolExec(), in.Grants); err != nil {
+		jsonErrorCode(w, http.StatusBadRequest, "unknown_principal", err.Error())
+		return
+	}
 	// Captured before the write, because the write is what destroys the answer. Reading a version
 	// takes BOTH a grant and a visibility that admits you (ADR 0024), so the two together are the
 	// read permission and the line has to carry both — recording only the grants meant flipping a
@@ -73,7 +82,7 @@ func (s *Server) apiAdminVersionSave(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 	if err := s.st.SetVersionGrants(name, in.Grants); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeGrantWriteError(w, err)
 		return
 	}
 	// Written AFTER the change lands, not before. An audit line asserting an access change that

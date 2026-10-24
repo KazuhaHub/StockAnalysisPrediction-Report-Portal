@@ -91,6 +91,7 @@ func TestParseAppBundleRejects(t *testing.T) {
 // scopes; /api/v1 then accepts it for those scopes (phase 2: query + ingest).
 func TestAppTokenEndpoint(t *testing.T) {
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "k"}, appTok: newAppTokens(30 * 60 * 1e9)}
+	mustAddUser(t, s, "user", false)
 	if err := s.st.InstallApp(App{ID: "hello", Name: "Hello", Entry: "index.html", Scopes: []string{"query", "ingest"}}, map[string]AppFile{
 		"index.html": {Ctype: "text/html", Content: []byte("x")},
 	}); err != nil {
@@ -151,6 +152,7 @@ func TestAppTokenEndpoint(t *testing.T) {
 // buggy caller asks for ingest downstream.
 func TestAppTokenEndpointReadOnlyApp(t *testing.T) {
 	s := &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "k"}, appTok: newAppTokens(30 * 60 * 1e9)}
+	mustAddUser(t, s, "user", false)
 	if err := s.st.InstallApp(App{ID: "ro", Name: "RO", Entry: "index.html", Scopes: []string{"query"}}, map[string]AppFile{
 		"index.html": {Ctype: "text/html", Content: []byte("x")},
 	}); err != nil {

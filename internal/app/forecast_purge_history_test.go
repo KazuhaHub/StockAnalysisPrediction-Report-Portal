@@ -51,6 +51,10 @@ func ensurePurgeEvidenceTable(t *testing.T, st *Store) {
 
 func newPurgeHistoryEnv(t *testing.T, st *Store) *purgeHistoryEnv {
 	t.Helper()
+	// The Postgres fixture clears user_groups, Default included, while the shared graph requires
+	// exactly one parentless Default OU. Recreate it before anything resolves a scope, the same way
+	// every other Postgres OU fixture does; on SQLite this is a no-op.
+	st.EnsureDefaultGroup()
 	s := &Server{st: st}
 	s.forecastEval.now = func() time.Time { return time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC) }
 	ensurePurgeEvidenceTable(t, st)

@@ -889,21 +889,6 @@ func (s *Store) Users() []User {
 	return out
 }
 
-// userRestrictedRow reads just the account's restricted flag, distinguishing "no such row" from a
-// read failure. The lenient GetUser collapses both to nil, which is why a database problem could read
-// as "not restricted" (P31).
-func (s *Store) userRestrictedRow(name string) (restricted, found bool, err error) {
-	var v int
-	err = s.queryRow(`SELECT COALESCE(restricted,0) FROM users WHERE username=?`, name).Scan(&v)
-	if err == sql.ErrNoRows {
-		return false, false, nil
-	}
-	if err != nil {
-		return false, false, err
-	}
-	return v == 1, true, nil
-}
-
 func (s *Store) GetUser(name string) *User {
 	u, err := scanUser(s.queryRow("SELECT "+userCols+" FROM users u WHERE u.username=?", name).Scan)
 	if err != nil {

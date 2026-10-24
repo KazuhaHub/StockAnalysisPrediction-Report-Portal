@@ -520,6 +520,9 @@ func TestDeletingAnOUKeepsItsPurgedMonthsVisibleToTheOUsThatInheritItsSets(t *te
 		told("reader-u", "2025-06")
 
 		// c and d are deleted: their evidence is carried to p, and the collision on 2025-06 is absorbed.
+		if err := st.SetPrimaryGroup("reader-c", 0); err != nil {
+			t.Fatal(err)
+		}
 		for _, ou := range []int64{c, d} {
 			if w := serveSession(t, s, mux, "admin", "DELETE", "/api/admin/groups/"+itoa64(ou)); w.Code != http.StatusOK {
 				t.Fatalf("delete OU %d: %d %s", ou, w.Code, w.Body.String())

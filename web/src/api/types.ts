@@ -458,7 +458,33 @@ export interface UserRow {
   sso_slug?: string // which provider, when federated
 }
 
+export interface OUPolicyResult<T> {
+  own: T | null
+  effective: T
+  source_ou: number
+  inherited: boolean
+  available: boolean
+}
+
+export interface OUPolicyResults {
+  weight: OUPolicyResult<number>
+  urgent_unlimited: OUPolicyResult<boolean>
+  allow_urgent: OUPolicyResult<boolean>
+  max_queued: OUPolicyResult<number>
+  run_window: OUPolicyResult<string>
+  restricted: OUPolicyResult<boolean>
+  quota: OUPolicyResult<{ limit: number; period: string }>
+  totp_enroll: OUPolicyResult<boolean>
+  passkey_enroll: OUPolicyResult<boolean>
+  require_2fa: OUPolicyResult<boolean>
+  forecast_scope: OUPolicyResult<ForecastScope>
+}
+
 export interface UserGroupRow {
+  policy_available?: boolean
+  policy_error?: string
+  policy_results?: OUPolicyResults
+  inherited_policy_results?: OUPolicyResults
   id: number
   name: string
   description?: string
@@ -506,6 +532,9 @@ export interface GroupTargetRow {
 }
 
 export interface GroupTargetsResp {
+  configured?: boolean
+  effective?: { target_id: number; surfaces: string[] }[]
+  source_ou?: number
   granted: { target_id: number; surfaces: string[] }[]
   targets: GroupTargetRow[]
 }

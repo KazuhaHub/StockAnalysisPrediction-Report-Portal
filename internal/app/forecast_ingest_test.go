@@ -19,6 +19,13 @@ import (
 
 // predWire builds a valid payload as raw JSON, then lets a case mutate it. Written as a map so a test
 // can express "the same payload, but the price is a number" without copying forty lines.
+//
+// horizon_end is derived from the REAL clock, because that is the receipt an unpinned ingest uses.
+// horizon_std is decided by how far the horizon lies from the receipt (within +-7 days of twelve
+// months), so a hard-coded horizon dates the fixture: it stayed a standard-horizon prediction only
+// during the week around 2026-10-17, and afterwards every "one mark per checkpoint" assertion failed
+// for a reason unrelated to the code under test. Deriving it keeps the fixture meaning the same thing
+// on every day the suite runs. A case that wants a specific horizon, or none, overrides the field.
 func predWire(mutate func(m map[string]any)) json.RawMessage {
 	m := map[string]any{
 		"schema": "predictions.v1",
@@ -31,7 +38,7 @@ func predWire(mutate func(m map[string]any)) json.RawMessage {
 		"decision_status":    "eligible",
 		"decision_quality":   "normal",
 		"baseline":           map[string]any{"price": "8.52", "as_of": "2026-10-16", "source": "company_quote"},
-		"horizon_end":        "2027-10-17",
+		"horizon_end":        time.Now().UTC().AddDate(1, 0, 0).Format("2006-01-02"),
 		"claims": []any{
 			map[string]any{"key": "stance", "kind": "stance", "stance": "long", "target_weight": "0.1000"},
 			map[string]any{"key": "expected_terminal", "kind": "terminal_value", "price": "9.95", "p_profit": "0.7000"},

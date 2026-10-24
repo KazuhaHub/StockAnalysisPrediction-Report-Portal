@@ -140,6 +140,8 @@ func TestExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T) {
 
 func TestPostgresExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T) {
 	testExtensionIdentityFailsClosedOnInvalidAncestry(t, func(t *testing.T) *Store { return pgStore(t, "notification_source_cycles", "users", "user_groups") })
+	st := pgStore(t, "users", "user_groups")
+	st.EnsureDefaultGroup()
 }
 
 func testExtensionIdentityFailsClosedOnInvalidAncestry(t *testing.T, makeStore func(*testing.T) *Store) {

@@ -95,7 +95,10 @@ func (s *Server) runQuotaCheck(user string, rows int) (limit, used int, ok bool)
 	if s.viewerScope(user) == nil { // internal / admin / anonymous → never rate-limited
 		return 0, 0, true
 	}
-	eff := s.st.EffectiveGroupSettings(user)
+	eff, err := s.st.EffectiveGroupSettingsErr(user)
+	if err != nil {
+		return 0, 0, false
+	}
 	limit = eff.DailyRunQuota
 	if limit <= 0 {
 		return 0, 0, true // 0 = unlimited

@@ -115,8 +115,11 @@ func TestExternalPredictionScopeChangeFailsClosed(t *testing.T) {
 			}
 			// Deterministic interleaving between the strict decision and the legacy report scope.
 			scope := s.viewerScope("external")
-			if scope != nil {
+			if change == "unrestrict" && scope != nil {
 				t.Fatal("interleaving did not produce an unscoped legacy read")
+			}
+			if change == "delete" && (scope == nil || !scope.denyAll) {
+				t.Fatal("deleted subject did not fail closed")
 			}
 			view := forecastPredictionViewFor(decision, scope)
 			w := httptest.NewRecorder()

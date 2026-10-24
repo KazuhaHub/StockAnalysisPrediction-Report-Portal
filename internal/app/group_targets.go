@@ -1,7 +1,10 @@
 package app
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 )
@@ -34,38 +37,134 @@ func (s *Store) GroupTargets(groupID int64) []GroupTarget {
 	return out
 }
 
-// SetGroupTargets replaces an OU's whole allow-list in one transaction, so a save is atomic and
-// can never leave a half-applied grant.
+// SetGroupTargets writes an explicit replacement, including an empty deny-all collection.
 func (s *Store) SetGroupTargets(groupID int64, rows []GroupTarget) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(s.bind(`DELETE FROM group_targets WHERE group_id=?`), groupID); err != nil {
-		return err
-	}
-	for _, r := range rows {
-		if _, err := tx.Exec(s.bind(`INSERT INTO group_targets(group_id,target_id,surfaces) VALUES(?,?,?)`),
-			groupID, r.TargetID, strings.TrimSpace(r.Surfaces)); err != nil {
+	return s.withOUMutation(func(e migExec) error {
+		var present int
+		if err := e.queryRow("SELECT 1 FROM user_groups WHERE id=?", groupID).Scan(&present); err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		seen := map[int64]bool{}
+		for _, row := range rows {
+			if seen[row.TargetID] {
+				return fmt.Errorf("duplicate target %d", row.TargetID)
+			}
+			seen[row.TargetID] = true
+			if err := e.queryRow("SELECT 1 FROM batch_targets WHERE id=?", row.TargetID).Scan(&present); err != nil {
+				return err
+			}
+			if row.Surfaces != "" {
+				for _, surface := range strings.Split(row.Surfaces, ",") {
+					switch strings.TrimSpace(surface) {
+					case SurfaceRun, SurfaceBatch, SurfaceRecurring, SurfaceChat:
+					default:
+						return fmt.Errorf("invalid target surface")
+					}
+				}
+			}
+		}
+		if _, err := e.exec("INSERT INTO group_target_policies(group_id) VALUES(?) ON CONFLICT(group_id) DO NOTHING", groupID); err != nil {
+			return err
+		}
+		if _, err := e.exec("DELETE FROM group_targets WHERE group_id=?", groupID); err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if _, err := e.exec("INSERT INTO group_targets(group_id,target_id,surfaces) VALUES(?,?,?)", groupID, row.TargetID, strings.TrimSpace(row.Surfaces)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// resolveGroupTargets returns the allow-list that applies to a user: the nearest OU on their
-// ancestry chain (leaf → root) that defines one wins outright — a nearer OU's list is an override,
-// not an addition, so a sub-team can be narrowed without touching its parent. Returns nil when no
-// OU on the chain defines a list, which for a restricted user means default-deny.
-func (s *Store) resolveGroupTargets(username string) []GroupTarget {
-	chain := s.groupChain(username) // root → leaf
-	for i := len(chain) - 1; i >= 0; i-- {
-		if rows := s.GroupTargets(chain[i]); len(rows) > 0 {
-			return rows
+func (s *Store) InheritGroupTargets(groupID int64) error {
+	return s.withOUMutation(func(e migExec) error {
+		var present int
+		if err := e.queryRow("SELECT 1 FROM user_groups WHERE id=?", groupID).Scan(&present); err != nil {
+			return err
+		}
+		if _, err := e.exec("DELETE FROM group_targets WHERE group_id=?", groupID); err != nil {
+			return err
+		}
+		_, err := e.exec("DELETE FROM group_target_policies WHERE group_id=?", groupID)
+		return err
+	})
+}
+
+// loadOUTargetPoliciesFrom decodes both new presence headers and old nonempty collections.
+// A query failure never becomes an unset collection that would inherit a broader parent grant.
+func loadOUTargetPoliciesFrom(ex execer) (map[int64][]GroupTarget, error) {
+	rows, err := ex.Query(`SELECT group_id,NULL AS target_id,NULL AS surfaces FROM group_target_policies
+  UNION ALL SELECT group_id,target_id,COALESCE(surfaces,'') FROM group_targets ORDER BY group_id,target_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]GroupTarget{}
+	for rows.Next() {
+		var id int64
+		var target sql.NullInt64
+		var surface sql.NullString
+		if err := rows.Scan(&id, &target, &surface); err != nil {
+			return nil, err
+		}
+		if _, ok := out[id]; !ok {
+			out[id] = make([]GroupTarget, 0)
+		}
+		if target.Valid {
+			out[id] = append(out[id], GroupTarget{TargetID: target.Int64, Surfaces: surface.String})
 		}
 	}
-	return nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func resolveOUTargetPolicy(chain []int64, values map[int64][]GroupTarget) ouPolicyResult[[]GroupTarget] {
+	return nearestOUPolicy(chain, make([]GroupTarget, 0), func(id int64) *[]GroupTarget {
+		rows, configured := values[id]
+		if !configured {
+			return nil
+		}
+		return &rows
+	})
+}
+
+func (s *Store) resolveGroupTargetsErr(username string) ([]GroupTarget, error) {
+	opts := &sql.TxOptions{ReadOnly: true}
+	if s.driver == "postgres" {
+		opts.Isolation = sql.LevelRepeatableRead
+	}
+	tx, err := s.db.BeginTx(context.Background(), opts)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	sub, snapshot, err := s.loadOUPolicySubjectFrom(tx, username)
+	if err != nil {
+		return nil, err
+	}
+	chain, err := snapshot.graph.policyChain(sub.EffectiveOU)
+	if err != nil {
+		return nil, err
+	}
+	values, err := loadOUTargetPoliciesFrom(tx)
+	if err != nil {
+		return nil, err
+	}
+	result := resolveOUTargetPolicy(chain, values)
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result.Effective, nil
+}
+
+// resolveGroupTargets is a deny-on-error compatibility adapter for boolean run gates.
+func (s *Store) resolveGroupTargets(username string) []GroupTarget {
+	rows, _ := s.resolveGroupTargetsErr(username)
+	return rows
 }
 
 // runAllowed reports whether a user may run a target on a surface. Unrestricted users (internal
