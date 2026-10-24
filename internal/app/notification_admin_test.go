@@ -25,6 +25,10 @@ func notificationAdminCall(t *testing.T, s *Server, h handler, method, id, body 
 func TestNotificationLegacyTestsShareManualCapacity(t *testing.T) {
 	s := batchServer(t)
 	enableEmail(s)
+	// The forecast test needs a configured channel to reach the capacity check at all.
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
 	id, err := s.st.CreateWebhook("http://127.0.0.1:1/test", []string{EventReportIngested}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +90,10 @@ func TestNotificationAdminPausedForecastCannotKeepReadiness(t *testing.T) {
 	if err := s.adoptNotificationChannels(); err != nil {
 		t.Fatal(err)
 	}
+	// Slack is the only configured channel, so pausing it leaves nothing to alert through.
+	if err := s.st.SetSetting(setForecastAlertSlackURL, "https://hooks.slack.com/services/T/B/x"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +105,42 @@ func TestNotificationAdminPausedForecastCannotKeepReadiness(t *testing.T) {
 		t.Fatal("paused forecast retained a readiness stamp")
 	}
 	test := notificationAdminCall(t, s, s.apiForecastAlertTest, "POST", "", `{}`)
-	if test.Code != http.StatusConflict {
+	if test.Code != http.StatusConflict || !strings.Contains(test.Body.String(), "notification_unavailable") {
 		t.Fatalf("paused forecast verified: %d %s", test.Code, test.Body.String())
+	}
+	for _, it := range s.forecastReadiness(time.Now()) {
+		if it.Key == "alerts" && it.Reason != "alerts_channels_paused" {
+			t.Errorf("alerts item = %+v, want reason alerts_channels_paused", it)
+		}
+	}
+}
+
+// TestUnpausingAForecastChannelDeletesTheStamp: a stamp made while a channel was paused never covered
+// it, so bringing the channel back must put item 5 back to "test again". Without this, a channel that
+// has never delivered would ride on the other channel's verification.
+func TestUnpausingAForecastChannelDeletesTheStamp(t *testing.T) {
+	s := batchServer(t)
+	if err := s.adoptNotificationChannels(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetSetting(setForecastAlertSlackURL, "https://hooks.slack.com/services/T/B/x"); err != nil {
+		t.Fatal(err)
+	}
+	if w := notificationAdminCall(t, s, s.apiNotificationChannelSave, "PUT", "legacy:forecast-slack", `{"label":"Forecast Slack","revision":1,"enabled":true,"paused":true}`); w.Code != 200 {
+		t.Fatalf("pause=%d %s", w.Code, w.Body.String())
+	}
+	// An email-only verification while Slack is paused.
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if w := notificationAdminCall(t, s, s.apiNotificationChannelSave, "PUT", "legacy:forecast-slack", `{"label":"Forecast Slack","revision":2,"enabled":true,"paused":false}`); w.Code != 200 {
+		t.Fatalf("unpause=%d %s", w.Code, w.Body.String())
+	}
+	if stamp := s.st.GetSetting(setForecastAlertTestOKAt, ""); stamp != "" {
+		t.Fatal("unpausing Slack kept a stamp that never covered it")
 	}
 }
 

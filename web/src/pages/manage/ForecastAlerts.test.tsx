@@ -9,7 +9,7 @@ import type { ForecastSettings } from '../../api/types'
 // The alert card (P41). Three things are load-bearing and easy to get wrong:
 //   - a blank Slack field must NOT clear the stored secret;
 //   - a failed test names the channel that failed, not a generic error;
-//   - with no channel configured the card says readiness item 5 cannot pass.
+//   - with no channel configured the card says readiness item 5 cannot pass; one channel is enough.
 
 const apiMock = vi.hoisted(() => ({ post: vi.fn() }))
 
@@ -23,7 +23,9 @@ vi.mock('../../api/client', async (importOriginal) => {
   }
 })
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (k: string, v?: Record<string, unknown>) => (k === 'forecast.alert.testOK' && v ? `${k} ${JSON.stringify(v)}` : k) }),
+}))
 
 const base: ForecastSettings = {
   enabled: false,
@@ -65,9 +67,42 @@ describe('ForecastAlerts', () => {
     expect(screen.getByText('forecast.alert.none')).toBeTruthy()
   })
 
-  it('warns when only one of the two channels is configured', () => {
-    show({ alerts: { email_to: 'ops@example.com', has_slack: false } })
+  it.each([
+    ['email', { email_to: 'ops@example.com', has_slack: false }],
+    ['Slack', { email_to: '', has_slack: true }],
+  ])('does not warn when only %s is configured: one channel is enough', (_, alerts) => {
+    show({ alerts })
+    expect(screen.queryByText('forecast.alert.none')).toBeNull()
+  })
+
+  it('says when every configured channel is disabled or paused, rather than asking for one', () => {
+    show({ alerts: { email_to: 'ops@example.com', has_slack: false, configured: ['email'], active: [] } })
+    expect(screen.queryByText('forecast.alert.none')).toBeNull()
+    expect(screen.getByText('forecast.alert.pausedAll')).toBeTruthy()
+  })
+
+  it('trusts the server on what is configured: a blank-looking list is no channel', () => {
+    show({ alerts: { email_to: ',', has_slack: false, configured: [], active: [] } })
     expect(screen.getByText('forecast.alert.none')).toBeTruthy()
+  })
+
+  it('shows a channel that takes no part as such, not by an old delivery result', () => {
+    show({
+      alerts: {
+        email_to: 'ops@example.com', has_slack: true, configured: ['email', 'slack'], active: ['email'],
+        last: { slack: { at: '2026-10-20T08:00:00Z', ok: false, error: 'destination_rejected' } },
+      },
+    })
+    expect(screen.getByText('forecast.alert.inactive.paused')).toBeTruthy()
+    expect(screen.queryByText('destination_rejected')).toBeNull()
+  })
+
+  it('names the channels a successful test reached', async () => {
+    apiMock.post.mockResolvedValue({ ok: true, results: { email: { ok: true } } })
+    show({ alerts: { email_to: 'ops@example.com', has_slack: false, configured: ['email'], active: ['email'] } })
+    fireEvent.click(screen.getByRole('button', { name: 'forecast.alert.test' }))
+    await waitFor(() => expect(screen.getByText(/forecast\.alert\.testOK/).textContent).toContain('forecast.alert.channel.email'))
+    expect(screen.getByText('forecast.alert.inactive.unused')).toBeTruthy()
   })
 
   it('keeps the typed Slack URL when the save is refused', async () => {

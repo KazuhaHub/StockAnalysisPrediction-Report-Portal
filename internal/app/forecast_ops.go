@@ -40,8 +40,8 @@ const (
 	setForecastDryGate = "forecast_dry_gate"
 	// setForecastAlertState de-duplicates watchdog alerts: reason → last emission.
 	setForecastAlertState = "forecast_alert_state"
-	// setForecastAlertTestOKAt is written by P41 when a test alert reaches both channels. P9 lists the
-	// readiness item; the writer arrives with the channels.
+	// setForecastAlertTestOKAt is written by P41 when a test alert reaches every configured channel.
+	// P9 lists the readiness item; the writer arrives with the channels.
 	setForecastAlertTestOKAt = "forecast_alert_test_ok_at"
 
 	forecastModeOff = "0"
@@ -151,6 +151,18 @@ type readinessItem struct {
 	Key    string `json:"key"`
 	OK     bool   `json:"ok"`
 	Detail string `json:"detail,omitempty"`
+	// Reason is a closed code for why a failing item fails, so the page can word it in the reader's
+	// language; Detail stays as the English fallback for logs and older clients. Codes names the
+	// benchmarks a gate item is missing, and Count carries a number the reason refers to.
+	Reason string   `json:"reason,omitempty"`
+	Codes  []string `json:"codes,omitempty"`
+	Count  int      `json:"count,omitempty"`
+}
+
+// fail marks the item failing with a reason code and its English detail. Every reason goes through
+// here, so TestReadinessReasonsAreTranslated can find each code and check the page can word it.
+func (it *readinessItem) fail(reason, detail string) {
+	it.OK, it.Reason, it.Detail = false, reason, detail
 }
 
 // step is one loop iteration. When the mode is off it makes exactly ONE settings read and nothing
@@ -492,52 +504,57 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 
 	// 2. The ledger start is set.
 	_, populationSet := s.st.ForecastPopulationFrom()
-	detail := ""
+	population := readinessItem{Key: "population", OK: populationSet}
 	if !populationSet {
-		detail = "forecast_population_from is not set"
+		population.fail("population_unset", "forecast_population_from is not set")
 	}
-	items = append(items, readinessItem{Key: "population", OK: populationSet, Detail: detail})
+	items = append(items, population)
 
 	// 3. The mode is dry, and the last dry pass finished without errors.
 	mode := forecastMode(s.st.GetSetting(setForecastAuto, "0"))
 	hb, haveHB := s.st.ForecastHeartbeat()
 	dryOK := mode == forecastModeDry && haveHB && hb.Mode == forecastModeDry &&
 		hb.Pass.FinishedAt != "" && hb.Pass.Errors == 0 && hb.Pass.Panics == 0
-	dryDetail := ""
+	dry := readinessItem{Key: "dry_pass", OK: dryOK}
 	switch {
 	case mode != forecastModeDry:
-		dryDetail = "the evaluator is not in dry mode"
+		dry.fail("not_dry", "the evaluator is not in dry mode")
 	case !haveHB || hb.Mode != forecastModeDry:
 		// Switching 1 -> dry and straight back must not pass: the heartbeat is from the mode-1 run.
-		dryDetail = "no pass has run since the mode was set to dry"
+		dry.fail("no_dry_pass", "no pass has run since the mode was set to dry")
 	case hb.Pass.FinishedAt == "":
-		dryDetail = "no dry pass has finished yet"
+		dry.fail("dry_pass_running", "no dry pass has finished yet")
 	case hb.Pass.Errors > 0 || hb.Pass.Panics > 0:
-		dryDetail = "the last dry pass reported " + strconv.Itoa(hb.Pass.Errors) + " errors"
+		dry.Count = hb.Pass.Errors + hb.Pass.Panics
+		dry.fail("dry_pass_errors", "the last dry pass reported errors or panics: "+strconv.Itoa(dry.Count))
 	}
-	items = append(items, readinessItem{Key: "dry_pass", OK: dryOK, Detail: dryDetail})
+	items = append(items, dry)
 
 	// 4. A dry-run check is recorded for every benchmark the evaluator can select.
 	gates := s.st.ForecastDryGate()
 	var missing []string
 	gateCodes, gateErr := s.st.ForecastGateCodes()
 	if gateErr != nil {
-		items = append(items, readinessItem{Key: "dry_gate", OK: false,
-			Detail: "could not read the benchmarks in use"})
+		gate := readinessItem{Key: "dry_gate"}
+		gate.fail("gate_unreadable", "could not read the benchmarks in use")
+		items = append(items, gate)
 	} else {
 		for _, code := range gateCodes {
 			if _, ok := gates[code]; !ok {
 				missing = append(missing, code)
 			}
 		}
-		gateDetail := ""
+		gate := readinessItem{Key: "dry_gate", OK: len(missing) == 0}
 		if len(missing) > 0 {
-			gateDetail = "no dry-run check for " + strings.Join(missing, ", ")
+			gate.Codes = missing
+			gate.fail("gate_missing", "no dry-run check for "+strings.Join(missing, ", "))
 		}
-		items = append(items, readinessItem{Key: "dry_gate", OK: len(missing) == 0, Detail: gateDetail})
+		items = append(items, gate)
 	}
 
-	// 5. Alert channels were verified within thirty days. P41 writes the key.
+	// 5. At least one alert channel is configured and enabled, and a test reached every such channel
+	// within thirty days. P41 writes the key; any channel change deletes it. The owner dropped the
+	// original "both channels" requirement on 2026-10-24: one verified channel is enough.
 	alertsOK := false
 	if raw := s.st.GetSetting(setForecastAlertTestOKAt, ""); raw != "" {
 		if at, err := time.Parse(time.RFC3339, raw); err == nil {
@@ -546,22 +563,26 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 			alertsOK = age >= -5*time.Minute && age <= 30*24*time.Hour
 		}
 	}
-	alertDetail := ""
-	if snapshot, err := s.st.notificationSettings(); err != nil || !snapshot.forecastChannelsReady {
-		alertsOK = false
+	alerts := readinessItem{Key: "alerts", OK: true}
+	switch snapshot, err := s.st.notificationSettings(); {
+	case err != nil:
+		alerts.fail("alerts_unreadable", "could not read the alert configuration")
+	case len(snapshot.forecastConfigured) == 0:
+		alerts.fail("alerts_no_channel", "no alert channel is configured")
+	case !snapshot.forecastChannelsReady:
+		alerts.fail("alerts_channels_paused", "every configured alert channel is disabled or paused in the notification settings")
+	case !alertsOK:
+		alerts.fail("alerts_untested", "no test alert has reached the enabled channels in the last 30 days")
 	}
-	if !alertsOK {
-		alertDetail = "no test alert has reached both channels in the last 30 days"
-	}
-	items = append(items, readinessItem{Key: "alerts", OK: alertsOK, Detail: alertDetail})
+	items = append(items, alerts)
 	chain := s.quotes.configuredLedgerSources(s.quoteConfigLoad(), quoteIntervalSettled)
 	_, primaryOK := ledgerPrimary(chain)
 	ledgerOK := len(chain) > 0 && primaryOK
-	ledgerDetail := ""
+	ledger := readinessItem{Key: "ledger_chain", OK: ledgerOK}
 	if !ledgerOK {
-		ledgerDetail = "no enabled settlement source has both required evidence capabilities"
+		ledger.fail("ledger_no_primary", "no enabled settlement source has both required evidence capabilities")
 	}
-	items = append(items, readinessItem{Key: "ledger_chain", OK: ledgerOK, Detail: ledgerDetail})
+	items = append(items, ledger)
 
 	return items
 }

@@ -17,8 +17,13 @@ import (
 const notificationConfigRevision = "notification_config_revision"
 
 type notificationSettingsSnapshot struct {
-	values                map[string]string
-	fingerprint           string
+	values      map[string]string
+	fingerprint string
+	// forecastConfigured lists the forecast alert channels ("email", "slack") that have a destination;
+	// forecastActive, those of them that are also enabled and not paused. A test alert goes to exactly
+	// the active ones, and readiness item 5 needs at least one: forecastChannelsReady.
+	forecastConfigured    []string
+	forecastActive        []string
 	forecastChannelsReady bool
 }
 
@@ -50,7 +55,7 @@ func (s *Store) withNotificationConfig(fn func(migExec) error) error {
 }
 
 func notificationSettingsInTx(e migExec) (notificationSettingsSnapshot, error) {
-	ss := notificationSettingsSnapshot{values: make(map[string]string, len(notificationLegacySettingDefaults)), forecastChannelsReady: true}
+	ss := notificationSettingsSnapshot{values: make(map[string]string, len(notificationLegacySettingDefaults))}
 	for k, fallback := range notificationLegacySettingDefaults {
 		var value sql.NullString
 		err := e.queryRow(`SELECT v FROM meta WHERE k=?`, k).Scan(&value)
@@ -82,10 +87,22 @@ func notificationSettingsInTx(e migExec) (notificationSettingsSnapshot, error) {
 			}
 		}
 		ss.values["channel:"+ref] = fmt.Sprintf("%d:%d:%d", revision, enabled, paused)
-		if enabled == 0 || paused != 0 {
-			ss.forecastChannelsReady = false
+		configured := false
+		switch ref {
+		case "forecast-email":
+			configured = len(alertRecipients(ss.values[setForecastAlertEmailTo])) > 0
+		case "forecast-slack":
+			configured = strings.TrimSpace(ss.values[setForecastAlertSlackURL]) != ""
+		}
+		channel := strings.TrimPrefix(ref, "forecast-")
+		if configured {
+			ss.forecastConfigured = append(ss.forecastConfigured, channel)
+		}
+		if configured && enabled != 0 && paused == 0 {
+			ss.forecastActive = append(ss.forecastActive, channel)
 		}
 	}
+	ss.forecastChannelsReady = len(ss.forecastActive) > 0
 	body, _ := json.Marshal(ss.values)
 	digest := sha256.Sum256(body)
 	ss.fingerprint = hex.EncodeToString(digest[:])

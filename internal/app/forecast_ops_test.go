@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +48,10 @@ func satisfyForecastReadiness(t *testing.T, s *Server) {
 			At: time.Now().UTC().Format(time.RFC3339), By: "test", Note: "checked"}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Item 5 needs a configured channel as well as a recent verified test.
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
@@ -539,5 +546,117 @@ func TestWatchdogRunsWhileCleanupIsSlow(t *testing.T) {
 	s.forecastWatchdogOnce(time.Now())
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Errorf("watchdog waited %v for cleanup", elapsed)
+	}
+}
+
+// TestReadinessFailuresCarryAReasonCode: the page words a failing item in the reader's language from
+// a closed reason code and the benchmark codes it names, never from the English detail. A passing
+// item carries no reason.
+func TestReadinessFailuresCarryAReasonCode(t *testing.T) {
+	s := newV1Server(t)
+	byKey := func() map[string]readinessItem {
+		out := map[string]readinessItem{}
+		for _, it := range s.forecastReadiness(time.Now()) {
+			out[it.Key] = it
+		}
+		return out
+	}
+	items := byKey()
+	want := map[string]string{
+		"binary":     "",
+		"population": "population_unset",
+		"dry_pass":   "not_dry",
+		"dry_gate":   "gate_missing",
+		"alerts":     "alerts_no_channel",
+	}
+	for key, reason := range want {
+		if got := items[key].Reason; got != reason {
+			t.Errorf("%s reason = %q, want %q", key, got, reason)
+		}
+	}
+	codes, err := s.st.ForecastGateCodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := items["dry_gate"].Codes; len(got) == 0 || strings.Join(got, ",") != strings.Join(codes, ",") {
+		t.Errorf("dry_gate codes = %v, want %v", got, codes)
+	}
+
+	if err := s.st.SetSetting(setForecastAuto, forecastModeDry); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.saveForecastHeartbeat(forecastHeartbeat{
+		Mode: forecastModeDry, LastTickAt: time.Now().UTC().Format(time.RFC3339),
+		Pass: passStats{Kind: "tick", StartedAt: time.Now().UTC().Format(time.RFC3339),
+			FinishedAt: time.Now().UTC().Format(time.RFC3339), Errors: 3},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if it := byKey()["dry_pass"]; it.Reason != "dry_pass_errors" || it.Count != 3 {
+		t.Errorf("dry_pass = %+v, want reason dry_pass_errors with count 3", it)
+	}
+
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if it := byKey()["alerts"]; it.Reason != "alerts_untested" {
+		t.Errorf("alerts with a channel and no test = %+v, want reason alerts_untested", it)
+	}
+}
+
+// TestReadinessReasonsAreTranslated ties the three places a reason code lives: every code the server
+// can send (each goes through readinessItem.fail), the TypeScript union the page types it with, and a
+// wording in every locale. A code missing from either would reach the reader as a raw key.
+func TestReadinessReasonsAreTranslated(t *testing.T) {
+	src, err := os.ReadFile("forecast_ops.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\.fail\("([a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
+		codes[m[1]] = true
+	}
+	// A scan that finds nothing would pass silently.
+	if len(codes) < 10 {
+		t.Fatalf("found only %d reason codes; the scan is broken", len(codes))
+	}
+
+	types, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "api", "types.ts"))
+	if err != nil {
+		t.Skipf("web sources not present: %v", err)
+	}
+	union := regexp.MustCompile(`(?s)export type ForecastReadinessReason =(.*?)\n\n`).FindSubmatch(types)
+	if union == nil {
+		t.Fatal("ForecastReadinessReason union not found in types.ts")
+	}
+	typed := map[string]bool{}
+	for _, m := range regexp.MustCompile(`'([a-z_]+)'`).FindAllSubmatch(union[1], -1) {
+		typed[string(m[1])] = true
+	}
+	for code := range codes {
+		if !typed[code] {
+			t.Errorf("reason %q is not in the ForecastReadinessReason union", code)
+		}
+	}
+	for code := range typed {
+		if !codes[code] {
+			t.Errorf("the union lists %q, which the server never sends", code)
+		}
+	}
+
+	for _, loc := range []string{"en-US", "zh-CN", "zh-TW"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "locales", loc+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var bundle map[string]string
+		if err := json.Unmarshal(raw, &bundle); err != nil {
+			t.Fatal(err)
+		}
+		for code := range codes {
+			if bundle["forecast.eval.readiness.reason."+code] == "" {
+				t.Errorf("%s has no wording for reason %q", loc, code)
+			}
+		}
 	}
 }

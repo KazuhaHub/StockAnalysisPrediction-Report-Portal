@@ -85,7 +85,7 @@ func alertRecipients(raw string) []string {
 
 // forecastAlert sends one alert to every configured channel, best effort per channel.
 //
-// The returned map always has an entry per channel: nil for delivered, the error otherwise. It never
+// The returned map has an entry per configured channel: nil for delivered, the error otherwise. It never
 // returns an error itself, because a failing alert must not fail the operation that produced it; the
 // outcome is recorded in `forecast_alert_state` and shown on the page.
 func (s *Server) forecastAlert(kind, reason string, detail map[string]any) map[string]error {
@@ -107,8 +107,10 @@ func (s *Server) forecastAlertSnapshot(ctx context.Context, snapshot notificatio
 	body, _ := json.Marshal(payload)
 	event := NotificationEvent{Type: kind, Payload: string(body)}
 	mc := snapshot.mailConfig()
-	out := make(map[string]error, 2)
-	for _, channel := range []string{"email", "slack"} {
+	out := make(map[string]error, len(snapshot.forecastActive))
+	// Only the configured channels: an absent one is not a failed delivery, and recording it as one
+	// would show a permanent failure for a channel the operator chose not to use.
+	for _, channel := range snapshot.forecastActive {
 		func() {
 			defer func() {
 				if recover() != nil {
@@ -142,16 +144,25 @@ func (s *Server) forecastAlertSnapshot(ctx context.Context, snapshot notificatio
 }
 
 // forecastAlertsView is the GET shape: configuration plus the last delivery per channel. The Slack
-// URL itself is never included.
+// URL itself is never included. `configured` and `active` say which channels have a destination and
+// which of those are enabled and unpaused, so the page can tell a channel that takes part in tests
+// and alerts from one that does not, rather than showing an old delivery result for it.
 func (s *Server) forecastAlertsView() map[string]any {
 	rec := s.st.forecastAlertState()
 	last := map[string]forecastChannelResult{}
 	for k, v := range rec.Channels {
 		last[k] = v
 	}
+	configured, active := []string{}, []string{}
+	if snapshot, err := s.st.notificationSettings(); err == nil {
+		configured = append(configured, snapshot.forecastConfigured...)
+		active = append(active, snapshot.forecastActive...)
+	}
 	return map[string]any{
 		"email_to":   s.st.GetSetting(setForecastAlertEmailTo, ""),
 		"has_slack":  strings.TrimSpace(s.st.GetSetting(setForecastAlertSlackURL, "")) != "",
+		"configured": configured,
+		"active":     active,
 		"last":       last,
 		"test_ok_at": s.st.GetSetting(setForecastAlertTestOKAt, ""),
 	}

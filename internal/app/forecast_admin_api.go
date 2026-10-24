@@ -509,17 +509,22 @@ func (s *Server) apiForecastEvaluate(w http.ResponseWriter, r *http.Request, use
 	writeJSONStatus(w, status, body)
 }
 
-// apiForecastAlertTest sends a test alert to both channels. The verification stamp is written only
-// when BOTH succeed: a stamp that covered one channel would let readiness item 5 pass on a channel
-// that has never delivered anything.
+// apiForecastAlertTest sends a test alert to every configured channel. The verification stamp is
+// written only when ALL of them succeed: a stamp that covered some of them would let readiness item 5
+// pass on a configured channel that has never delivered anything. One configured channel is enough
+// (owner decision 2026-10-24); none is refused.
 func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, user string) {
 	snapshot, err := s.st.notificationSettings()
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	if len(snapshot.forecastConfigured) == 0 {
+		jsonErrorCode(w, http.StatusConflict, "forecast_alert_no_channel", "no forecast alert channel is configured")
+		return
+	}
 	if !snapshot.forecastChannelsReady {
-		jsonErrorCode(w, http.StatusConflict, "notification_unavailable", "forecast notification channels are disabled or paused")
+		jsonErrorCode(w, http.StatusConflict, "notification_unavailable", "every configured forecast alert channel is disabled or paused")
 		return
 	}
 	release, available := s.notificationTestSlot()
