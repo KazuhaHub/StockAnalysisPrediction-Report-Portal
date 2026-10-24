@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -138,10 +139,16 @@ func (s *Server) apiAppMarket(w http.ResponseWriter, r *http.Request, user strin
 // it through the same validated path as a manual upload. Admin-only.
 func (s *Server) apiAppMarketInstall(w http.ResponseWriter, r *http.Request, user string) {
 	var in struct {
-		ID string `json:"id"`
+		ID      string    `json:"id"`
+		Version string    `json:"version"`
+		Scopes  *[]string `json:"scopes"`
 	}
 	if err := readJSON(r, &in); err != nil || in.ID == "" {
 		jsonError(w, http.StatusBadRequest, "id is required")
+		return
+	}
+	if (in.Version != "") != (in.Scopes != nil) {
+		jsonError(w, http.StatusBadRequest, "reviewed version and scopes must be supplied together")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
@@ -154,12 +161,19 @@ func (s *Server) apiAppMarketInstall(w http.ResponseWriter, r *http.Request, use
 	var entry *appMarketEntry
 	for i := range entries {
 		if entries[i].ID == in.ID {
+			if entry != nil {
+				jsonError(w, http.StatusBadGateway, "duplicate app identity in market")
+				return
+			}
 			entry = &entries[i]
-			break
 		}
 	}
 	if entry == nil {
 		jsonError(w, http.StatusNotFound, "app not found in market")
+		return
+	}
+	if in.Scopes != nil && (in.Version != entry.Version || !sameMarketScopes(*in.Scopes, entry.Scopes)) {
+		jsonError(w, http.StatusConflict, "market declarations changed; refresh the market and review permissions again")
 		return
 	}
 	bundleURL := entry.URL
@@ -186,6 +200,10 @@ func (s *Server) apiAppMarketInstall(w http.ResponseWriter, r *http.Request, use
 		jsonError(w, http.StatusBadGateway, "invalid bundle: "+err.Error())
 		return
 	}
+	if app.ID != entry.ID || app.Version != entry.Version || !sameMarketScopes(app.Scopes, entry.Scopes) {
+		jsonError(w, http.StatusBadGateway, "bundle identity, version or capabilities disagree with market declarations")
+		return
+	}
 	if err := s.st.InstallApp(app, files); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -194,4 +212,11 @@ func (s *Server) apiAppMarketInstall(w http.ResponseWriter, r *http.Request, use
 	s.invalidateExtension(app.ID)
 	log.Printf("app installed from market: %s (%s) by %s, %d files", app.ID, app.Version, user, len(files))
 	writeJSON(w, map[string]any{"ok": true, "app": appJSON(app)})
+}
+
+func sameMarketScopes(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
 }

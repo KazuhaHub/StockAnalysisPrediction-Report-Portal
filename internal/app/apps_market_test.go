@@ -116,3 +116,81 @@ func TestAppMarketInstallUnknown(t *testing.T) {
 		t.Fatalf("unknown id → %d, want 404: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAppMarketInstallRejectsDeclarationDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name, manifest, request string
+		status                  int
+	}{
+		{"different identity", `{"id":"other","version":"2.0.0","scopes":["query"]}`, `{"id":"demo"}`, http.StatusBadGateway},
+		{"different version", `{"id":"demo","version":"3.0.0","scopes":["query"]}`, `{"id":"demo"}`, http.StatusBadGateway},
+		{"extra capability", `{"id":"demo","version":"2.0.0","scopes":["query","extension.manage"]}`, `{"id":"demo"}`, http.StatusBadGateway},
+		{"changed reviewed version", `{"id":"demo","version":"2.0.0","scopes":["query"]}`, `{"id":"demo","version":"1.0.0","scopes":["query"]}`, http.StatusConflict},
+		{"changed reviewed scopes", `{"id":"demo","version":"2.0.0","scopes":["query"]}`, `{"id":"demo","version":"2.0.0","scopes":[]}`, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var manifest map[string]any
+			if err := json.Unmarshal([]byte(tc.manifest), &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest["name"], manifest["entry"] = "Demo", "index.html"
+			raw, _ := json.Marshal(manifest)
+			bundle := makeZip(t, map[string]string{"app.json": string(raw), "index.html": "changed"})
+			market := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/index.json" {
+					w.Write([]byte(`{"apps":[{"id":"demo","name":"Demo","version":"2.0.0","scopes":["query"],"path":"demo.zip"}]}`))
+				} else {
+					w.Write(bundle)
+				}
+			}))
+			defer market.Close()
+			srv := appMarketServer(t)
+			if err := srv.st.InstallApp(App{ID: "demo", Name: "Previous", Version: "1.0.0", Entry: "index.html", Scopes: []string{"query"}}, map[string]AppFile{"index.html": {Ctype: "text/html", Content: []byte("previous")}}); err != nil {
+				t.Fatal(err)
+			}
+			srv.st.SetSetting(setAppMarketIndexURL, market.URL+"/index.json")
+			rec := httptest.NewRecorder()
+			srv.apiAppMarketInstall(rec, httptest.NewRequest("POST", "/x", strings.NewReader(tc.request)), "admin")
+			if rec.Code != tc.status {
+				t.Fatalf("install = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+			if got, _ := srv.st.GetApp("demo"); got.Version != "1.0.0" {
+				t.Fatalf("rejected install changed existing app: %+v", got)
+			}
+			if _, content, ok := srv.st.AppFile("demo", "index.html"); !ok || string(content) != "previous" {
+				t.Fatal("rejected install replaced existing assets")
+			}
+			if _, ok := srv.st.GetApp("other"); ok {
+				t.Fatal("rejected install created a different app")
+			}
+		})
+	}
+}
+
+func TestAppMarketReviewedInstallAndDuplicateIdentity(t *testing.T) {
+	market := marketAppServer(t)
+	defer market.Close()
+	srv := appMarketServer(t)
+	srv.st.SetSetting(setAppMarketIndexURL, market.URL+"/index.json")
+	rec := httptest.NewRecorder()
+	srv.apiAppMarketInstall(rec, httptest.NewRequest("POST", "/x", strings.NewReader(`{"id":"demo","version":"2.0.0","scopes":["query"]}`)), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reviewed install = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !sameMarketScopes([]string{"extension.manage", "extension.read"}, []string{"extension.read", "extension.manage"}) {
+		t.Fatal("scope order must not change capability identity")
+	}
+	duplicate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"apps":[{"id":"demo"},{"id":"demo"}]}`))
+	}))
+	defer duplicate.Close()
+	srv.st.SetSetting(setAppMarketIndexURL, duplicate.URL+"/index.json")
+	rec = httptest.NewRecorder()
+	srv.apiAppMarketInstall(rec, httptest.NewRequest("POST", "/x", strings.NewReader(`{"id":"demo"}`)), "admin")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("ambiguous identity = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := srv.st.GetApp("demo"); got.Version != "2.0.0" {
+		t.Fatal("ambiguous catalogue changed installed app")
+	}
+}
