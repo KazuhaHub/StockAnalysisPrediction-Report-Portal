@@ -19,9 +19,9 @@ import (
 // install runs the same parseAppBundle + InstallApp path as a manual upload.
 // See docs/adr/0003-downloadable-apps.md (phase 2).
 
-// defaultAppMarketIndexURL points at this repo's own apps/index.json so the market
-// works out of the box; an admin can repoint it via the app_market_index_url setting.
-const defaultAppMarketIndexURL = "https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/main/apps/index.json"
+// The shared application repository owns the default catalogue. Explicit administrator
+// overrides, including the previous Portal-hosted catalogue, keep their stored URL.
+const defaultAppMarketIndexURL = "https://raw.githubusercontent.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/main/index.json"
 
 // appMarketEntry is one app listed in the market index. `path` is resolved relative
 // to the index URL; an absolute `url` (if set) overrides it.
