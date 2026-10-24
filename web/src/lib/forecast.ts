@@ -427,10 +427,19 @@ export function capExceeded(
 /**
  * The earliest date a pending cell can finish. The twelve-month checkpoint is a coarse horizon, so
  * it is told as a month; every other checkpoint as the date. Either is a lower bound, never a promise.
+ *
+ * A bound earlier than the response's own day (generatedAt) is not told at all, by the same rule as
+ * the summary strip and the empty state (upcomingDate): it reads as a promise already broken, and how
+ * late the checkpoint is belongs to the phase counts beside it.
  */
-export function notBeforeInfo(cell: ForecastCell, cp: ForecastCheckpoint): { date: string; expected: boolean } | null {
-  if (!cell.not_before) return null
-  return { date: cp === 'h12' ? cell.not_before.slice(0, 7) : cell.not_before, expected: !!cell.expected }
+export function notBeforeInfo(
+  cell: ForecastCell,
+  cp: ForecastCheckpoint,
+  generatedAt?: string,
+): { date: string; expected: boolean } | null {
+  const date = upcomingDate(cell.not_before, generatedAt)
+  if (!date) return null
+  return { date: cp === 'h12' ? date.slice(0, 7) : date, expected: !!cell.expected }
 }
 
 // ── Custom range ─────────────────────────────────────────────────────────────────────────────────

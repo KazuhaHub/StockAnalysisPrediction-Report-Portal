@@ -125,6 +125,7 @@ export default function ForecastMatrix({ resp, metric, mode, onOpen, auditLink =
                         metric={metric}
                         mode={mode}
                         gateHintId={gateHintId}
+                        generatedAt={resp.generated_at}
                         onOpen={() => onOpen(g, cp)}
                       />
                     ) : null}

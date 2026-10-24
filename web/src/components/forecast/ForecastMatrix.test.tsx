@@ -317,6 +317,49 @@ describe('ForecastMatrix cell states', () => {
     expect(cellOf('pending').textContent).not.toContain('2027-05-14')
   })
 
+  // The summary strip and the empty state already hide a bound that has passed (upcomingDate); a cell
+  // that printed it would read as a promise already broken, and with the evaluator off every due cell
+  // is in this state.
+  describe('a pending cell whose date is earlier than the response\'s own day', () => {
+    const generated = '2027-06-20T07:00:00Z'
+    const reasons = { resolved: 0, waiting: 0, retrying: 0, overdue: 5, waiting_s0: 0, settling: 0, final: 0, unknown: 0 }
+    const onDay = (cells: Record<string, ForecastCell>) => ({ ...resp(cells), generated_at: generated })
+
+    it('prints no date, whether it is a lower bound or a calendar-backed expectation', () => {
+      show(onDay({
+        ...empty,
+        d5: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-19', pending_reasons: reasons },
+        d20: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-19', expected: true, pending_reasons: reasons },
+      }))
+      for (const pending of document.querySelectorAll('[data-state="pending"]')) {
+        expect(pending.textContent).not.toContain('2027-06-19')
+        expect(pending.textContent).not.toContain('forecast.cell.not_before')
+        expect(pending.textContent).not.toContain('forecast.cell.expected')
+      }
+    })
+
+    it('prints no month for the twelve-month checkpoint either', () => {
+      show(onDay({ ...empty, h12: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-01', pending_reasons: reasons } }))
+      expect(cellOf('pending').textContent).not.toContain('forecast.cell.from_month')
+    })
+
+    it('still says how late it is', () => {
+      show(onDay({ ...empty, d5: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-19', pending_reasons: reasons } }))
+      expect(cellOf('pending').textContent).toContain('forecast.cell.reason:{"phase":"forecast.phase.overdue","n":5}')
+    })
+
+    it('keeps a date that is the response\'s own day or later', () => {
+      show(onDay({
+        ...empty,
+        d5: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-20' },
+        d20: { state: 'pending', resolved: 0, total: 5, not_before: '2027-06-21', expected: true },
+      }))
+      const [first, second] = Array.from(document.querySelectorAll('[data-state="pending"]'))
+      expect(first.textContent).toContain('forecast.cell.not_before:{"date":"2027-06-20"}')
+      expect(second.textContent).toContain('forecast.cell.expected:{"date":"2027-06-21"}')
+    })
+  })
+
   it('draws no reasons and no date when the server explained nothing', () => {
     show(resp({ ...empty, d5: { state: 'pending', resolved: 4, total: 9 } }))
     const text = cellOf('pending').textContent!
