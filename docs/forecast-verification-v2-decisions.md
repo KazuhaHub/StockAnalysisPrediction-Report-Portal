@@ -118,6 +118,18 @@ The owner refused disclosure of global purge months to own readers and approved
 `prediction_purge_owners` with primary key `(rtype, cohort, attributed_ou)`, pre-delete transactional
 snapshot, current-subtree reads, same-transaction OU reattribution with deduplication, and no guessed
 legacy backfill. Existing supported databases require an explicit upgrade; startup must not
-silently create the table. See ADR 0039 for the evidence and serialization contract. Schema approval
-does not authorize production upgrade, and the own-history release hold stays until upgrade,
-business-path wiring, dual-driver access tests and independent review are complete.
+silently create the table (reversed 2026-10-24, below). See ADR 0039 for the evidence and
+serialization contract. Schema approval does not authorize production upgrade, and the own-history
+release hold stays until upgrade, business-path wiring, dual-driver access tests and independent
+review are complete.
+
+### No explicit upgrade (2026-10-24)
+
+The owner reversed the explicit-upgrade requirement. A deploy is "pull the new image and restart", and no
+schema step may require an operator to run a command before the server can start. Step `0009` is applied
+at normal startup like every other step, in its own transaction, verified before it is recorded.
+Maintainers take their own backup with the previous release before upgrading; the program takes no
+automatic backups. `schema-upgrade` stays as an optional tool that lists pending steps or applies them
+offline. Everything else in the decision above stands: the `(rtype, cohort, attributed_ou)` table, the
+pre-delete snapshot, current-subtree reads, same-transaction reattribution, no guessed backfill, and the
+own-history release hold. See ADR 0035 for the reasoning.

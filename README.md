@@ -79,7 +79,7 @@ zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-porta
 
 Backups contain password hashes and token hashes, so the files are secrets and are written with mode `0600`. The SSO keyring is encrypted in the database, but its wrapping key is derived from `secret_key` in `config.yaml`; keep the config directory with the backup.
 
-A release that adds an explicit schema step (the purge ownership evidence is the first) will not start an existing database until `report-portal schema-upgrade --apply` has run offline, and `backup`, `restore` and `adduser` from that release refuse the un-upgraded database too, so take the pre-upgrade backup with the previous release. In a container, `docker-entrypoint.sh` does not pass arguments: run the command with `docker compose run --rm --no-deps --entrypoint /app/report-portal report-portal ...` (or `docker run --rm --entrypoint /app/report-portal ...` with the service's real volume name, which compose prefixes with the project name). See [the upgrade runbook](docs/forecast-purge-ownership-upgrade.md).
+Schema steps are applied at startup, so a deploy is a new image and a restart. Take the pre-upgrade backup with the **previous** release: the new binary's `backup`, `restore` and `adduser` open the database the way startup does and apply pending steps first. Under a moving tag with `pull_policy: always`, back up from the running container's image id before pulling (see [the upgrade notes](docs/forecast-purge-ownership-upgrade.md)). `report-portal schema-upgrade` is an optional tool: with no arguments it lists the pending steps and changes nothing, and `--apply` applies them while the portal is stopped. In a container, `docker-entrypoint.sh` does not pass arguments, so run it with `--entrypoint /app/report-portal`.
 
 See [ADR 0027](docs/adr/0027-backup-and-restore.md) for the design and operational details.
 
@@ -157,7 +157,7 @@ go run ./cmd/report-portal adduser <name> <password> admin
 go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
-go run ./cmd/report-portal schema-upgrade [--apply]   # offline: inspect, or apply, the explicit schema steps
+go run ./cmd/report-portal schema-upgrade [--apply]   # optional, offline: list pending schema steps, or apply them
 go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
 go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out
 go run ./cmd/report-portal recompute-kinds
