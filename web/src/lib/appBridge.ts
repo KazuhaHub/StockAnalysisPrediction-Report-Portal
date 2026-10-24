@@ -43,13 +43,7 @@ export function validateApiRequest(msg: unknown, scopes: string[]): Validated {
   const m = msg as Record<string, unknown>
   if (m.type !== API_MESSAGE) return { ok: false, error: 'unknown message type' }
   const method = String(m.method || 'GET').toUpperCase()
-  if (method === 'GET') {
-    if (!scopes.includes('query')) return { ok: false, error: 'app lacks the query scope' }
-  } else if (WRITE_METHODS.has(method)) {
-    if (!scopes.includes('ingest')) return { ok: false, error: 'app lacks the ingest scope' }
-  } else {
-    return { ok: false, error: `method ${method} not permitted` }
-  }
+  if (method !== 'GET' && !WRITE_METHODS.has(method)) return { ok: false, error: `method ${method} not permitted` }
   if (typeof m.path !== 'string') return { ok: false, error: 'path must be a string' }
   const rawPath = m.path
   // Must be a same-origin API path, not an absolute/protocol-relative URL, and
@@ -79,6 +73,24 @@ export function validateApiRequest(msg: unknown, scopes: string[]): Validated {
   if (url.origin !== 'https://app-bridge.invalid' || !url.pathname.startsWith('/api/v1/') || url.hash) {
     return { ok: false, error: 'path must be under /api/v1/' }
   }
+  if (url.pathname.startsWith('/api/v1/extensions/')) {
+    if (method === 'GET' && /^\/api\/v1\/extensions\/[a-z0-9][a-z0-9_-]{0,63}\/principals$/.test(url.pathname)) {
+      if (!scopes.includes('extension.manage')) return { ok: false, error: 'app lacks directory permission' }
+      return { ok: true, method, path: url.pathname + url.search }
+    }
+    if (method !== 'POST' || url.search || !/^\/api\/v1\/extensions\/[a-z0-9][a-z0-9_-]{0,63}\/request$/.test(url.pathname)) return { ok: false, error: 'invalid extension endpoint' }
+    if (!m.body || typeof m.body !== 'object' || Array.isArray(m.body)) return { ok: false, error: 'invalid extension request' }
+    const inner = m.body as Record<string, unknown>
+    if (Object.keys(inner).some(k => !['method', 'path', 'body'].includes(k))) return { ok: false, error: 'invalid extension fields' }
+    if (typeof inner.path !== 'string' || !validExtensionPath(inner.path)) return { ok: false, error: 'invalid extension path' }
+    if (inner.method === 'GET') {
+      if (!scopes.includes('extension.read') || inner.body !== undefined) return { ok: false, error: 'app lacks extension read permission or sent a GET body' }
+    } else if (!['POST', 'PUT', 'DELETE'].includes(String(inner.method)) || !scopes.includes('extension.manage')) return { ok: false, error: 'app lacks extension management permission' }
+  } else if (url.pathname === '/api/v1/notifications') {
+    if (method !== 'POST' || !scopes.includes('notify')) return { ok: false, error: 'app lacks notification publication permission' }
+  } else if (method === 'GET') {
+    if (!scopes.includes('query')) return { ok: false, error: 'app lacks the query scope' }
+  } else if (!scopes.includes('ingest')) return { ok: false, error: 'app lacks the ingest scope' }
   return { ok: true, method, path: url.pathname + url.search, body: m.body }
 }
 
@@ -89,4 +101,11 @@ export function reqIdOf(msg: unknown): string | number | null {
   if (!msg || typeof msg !== 'object') return null
   const id = (msg as Record<string, unknown>).reqId
   return typeof id === 'string' || typeof id === 'number' ? id : null
+}
+
+function validExtensionPath(path: string): boolean {
+  if (!path.startsWith('/v1/') || path.length > 2048 || /\s/.test(path) || path.includes('#') || path.startsWith('/v1/handshake')) return false
+  let decoded = path
+  try { for (let i = 0; i < 3; i += 1) decoded = decodeURIComponent(decoded) } catch { return false }
+  return !decoded.includes('..') && !decoded.includes('//') && !decoded.includes('\\')
 }

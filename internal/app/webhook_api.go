@@ -30,7 +30,7 @@ func (s *Server) apiWebhooks(w http.ResponseWriter, r *http.Request, user string
 	for _, wh := range s.st.ListWebhooks() {
 		out = append(out, webhookJSON(wh))
 	}
-	writeJSON(w, map[string]any{"webhooks": out, "events": availableEvents()})
+	writeJSON(w, map[string]any{"webhooks": out, "events": s.notificationEvents()})
 }
 
 func (s *Server) apiWebhookAdd(w http.ResponseWriter, r *http.Request, user string) {
@@ -73,6 +73,12 @@ func (s *Server) apiWebhookTest(w http.ResponseWriter, r *http.Request, user str
 		jsonError(w, http.StatusNotFound, "webhook not found")
 		return
 	}
+	release, available := s.notificationTestSlot()
+	if !available {
+		notificationAPIError(w, errNotificationCapacity)
+		return
+	}
+	defer release()
 	body, _ := json.Marshal(map[string]any{"event": "ping", "message": "test delivery from report portal", "at": nowStr()})
 	ctx, cancel := context.WithTimeout(r.Context(), webhookTimeout)
 	defer cancel()

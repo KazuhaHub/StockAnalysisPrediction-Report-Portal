@@ -60,8 +60,7 @@ func (s *Store) GetWebhook(id int64) (Webhook, bool) {
 }
 
 func (s *Store) DeleteWebhook(id int64) error {
-	_, err := s.exec("DELETE FROM webhooks WHERE id=?", id)
-	return err
+	return s.deleteWebhookAndNotifications(id)
 }
 
 // WebhooksForEvent returns the active webhooks subscribed to event. Membership is

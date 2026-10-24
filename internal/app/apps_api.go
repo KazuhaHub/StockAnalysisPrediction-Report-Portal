@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -96,6 +97,8 @@ func (s *Server) apiAppInstall(w http.ResponseWriter, r *http.Request, user stri
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.appTok.revokeApp(app.ID)
+	s.invalidateExtension(app.ID)
 	log.Printf("app installed: %s (%s) by %s, %d files", app.ID, app.Version, user, len(files))
 	// An app runs in the browser against a scoped token it never sees, so what it may reach is
 	// decided by its manifest's scopes. Those are the part worth a row.
@@ -111,6 +114,8 @@ func (s *Server) apiAppDelete(w http.ResponseWriter, r *http.Request, user strin
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.appTok.revokeApp(id)
+	s.invalidateExtension(id)
 	s.recordChange(r, user, AuditAppDelete, "app", id, nil)
 	writeJSON(w, okJSON)
 }
@@ -130,6 +135,8 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 	// caller's own privilege: only an admin gets `ingest`; everyone else is downgraded to read-only.
 	if !s.isAdmin(user) {
 		scopes = dropScope(scopes, "ingest")
+		scopes = dropScope(scopes, "notify")
+		scopes = dropScope(scopes, "extension.manage")
 	}
 	// A restricted (external) user must not obtain an app-bridge query token: that Bearer token is not
 	// OU-bound, so replaying it against /api/v1 (no cookie → no viewerScope) would read cross-OU and
@@ -138,7 +145,18 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 	if s.viewerScope(user) != nil {
 		scopes = dropScope(scopes, "query")
 	}
-	token := s.appTok.mint(scopes, time.Now())
+	token := s.appTok.mintForApp(scopes, time.Now(), app.ID, s.st.GetUser(user))
+	if slices.Contains(scopes, "extension.read") || slices.Contains(scopes, "extension.manage") {
+		generation, err := notificationAccountGeneration(s.st.poolExec(), user)
+		if err != nil {
+			jsonError(w, 503, "extension identity unavailable")
+			return
+		}
+		connection, err := s.st.extensionConnection(app.ID)
+		if err == nil {
+			s.appTok.bindExtension(token, generation, connection.InstanceID)
+		}
+	}
 	writeJSON(w, map[string]any{
 		"app": appJSON(app), "token": token, "scopes": scopes, "expires_in": int(appTokenTTL / time.Second),
 	})

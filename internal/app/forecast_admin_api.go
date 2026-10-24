@@ -7,6 +7,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -331,32 +332,20 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// The alert channels. A real change also invalidates the verification stamp: the last test no
 	// longer proves the channel that is configured now.
 	if len(alertFields) > 0 {
-		changed := false
+		updates := map[string]string{}
 		if in.AlertEmailTo != nil {
-			next := strings.TrimSpace(*in.AlertEmailTo)
-			if next != s.st.GetSetting(setForecastAlertEmailTo, "") {
-				if err := s.st.SetSetting(setForecastAlertEmailTo, next); err != nil {
-					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-					return
-				}
-				changed = true
-			}
+			updates[setForecastAlertEmailTo] = strings.TrimSpace(*in.AlertEmailTo)
 		}
 		if in.AlertSlackURL != nil {
-			next := strings.TrimSpace(*in.AlertSlackURL)
-			if next != strings.TrimSpace(s.st.GetSetting(setForecastAlertSlackURL, "")) {
-				if err := s.st.SetSetting(setForecastAlertSlackURL, next); err != nil {
-					jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-					return
-				}
-				changed = true
-			}
+			updates[setForecastAlertSlackURL] = strings.TrimSpace(*in.AlertSlackURL)
 		}
+		changed, err := s.st.saveNotificationSettings(updates, false)
+		if err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+
 		if changed {
-			if err := s.st.DeleteSetting(setForecastAlertTestOKAt); err != nil {
-				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
-				return
-			}
 			sort.Strings(alertFields)
 			s.recordChange(r, user, AuditForecastAlert, "settings", "forecast_alerts",
 				map[string]any{"fields": alertFields})
@@ -524,7 +513,22 @@ func (s *Server) apiForecastEvaluate(w http.ResponseWriter, r *http.Request, use
 // when BOTH succeed: a stamp that covered one channel would let readiness item 5 pass on a channel
 // that has never delivered anything.
 func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, user string) {
-	results := s.forecastAlert("forecast.alert.test", "test", map[string]any{"by": user})
+	snapshot, err := s.st.notificationSettings()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	if !snapshot.forecastChannelsReady {
+		jsonErrorCode(w, http.StatusConflict, "notification_unavailable", "forecast notification channels are disabled or paused")
+		return
+	}
+	release, available := s.notificationTestSlot()
+	if !available {
+		notificationAPIError(w, errNotificationCapacity)
+		return
+	}
+	defer release()
+	results := s.forecastAlertSnapshot(r.Context(), snapshot, "forecast.alert.test", "test", map[string]any{"by": user})
 	view := make(map[string]map[string]any, len(results))
 	okAll := true
 	for channel, err := range results {
@@ -544,7 +548,11 @@ func (s *Server) apiForecastAlertTest(w http.ResponseWriter, r *http.Request, us
 		})
 		return
 	}
-	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := s.st.stampForecastNotificationTest(snapshot); err != nil {
+		if errors.Is(err, errNotificationConflict) {
+			jsonErrorCode(w, http.StatusConflict, "notification_config_changed", "notification configuration changed during test")
+			return
+		}
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
