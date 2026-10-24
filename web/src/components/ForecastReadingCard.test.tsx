@@ -1,10 +1,21 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import { ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
 import type { PredictionSet } from '../api/types'
+import en from '../locales/en-US.json'
 import ForecastReadingCard from './ForecastReadingCard'
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string, values?: { date?: string }) => values?.date && k.startsWith('forecast.phase.') ? `${k}: ${values.date}` : k }) }))
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, values?: { date?: string; months?: number }) => {
+      if (values?.date && k.startsWith('forecast.phase.')) return `${k}: ${values.date}`
+      if (k === 'forecast.reading.horizon_until_standard') return `${k}: ${values?.date} (${values?.months})`
+      return k
+    },
+  }),
+}))
 
 const accepted: PredictionSet = {
   id: 7,
@@ -178,5 +189,130 @@ describe('ForecastReadingCard', () => {
     show([{ ...accepted, marks: [{ checkpoint: 'd5', status: 'pending', phase: 'waiting', ret_bp: 1234, close_fen: 888888 }] }])
     expect(screen.queryByText('+12.34%')).toBeNull()
     expect(screen.queryByText('8,888.88')).toBeNull()
+  })
+
+  describe('checkpoints that apply to the set', () => {
+    const through120 = ['d5', 'd20', 'd60', 'd120'].map((checkpoint) => ({ checkpoint, status: 'resolved' as const, bar_date: '2026-09-28', close_fen: 21128, ret_bp: 100, bench_ret_bp: 50 }))
+    const rowKeys = () => Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) => row.getAttribute('data-row-key'))
+
+    it('shows no h12 step or row when the set has no standard horizon', () => {
+      show([{ ...accepted, horizon_std: false, horizon_end: '2027-01-15', marks: through120 }])
+      expect(screen.queryByText('forecast.cp.h12')).toBeNull()
+      expect(rowKeys()).toEqual(['d5', 'd20', 'd60', 'd120'])
+      expect(document.querySelectorAll('.ant-steps-item')).toHaveLength(4)
+    })
+
+    it('ignores an old pending h12 row on a set without a standard horizon', () => {
+      show([{ ...accepted, horizon_std: false, marks: [...through120, { checkpoint: 'h12', status: 'pending', phase: 'waiting' }] }])
+      expect(screen.queryByText('forecast.cp.h12')).toBeNull()
+      expect(rowKeys()).not.toContain('h12')
+    })
+
+    it('waits for h12 only on a standard-horizon set', () => {
+      show([{ ...accepted, horizon_std: true, marks: through120 }])
+      expect(rowKeys()).toEqual(['d5', 'd20', 'd60', 'd120', 'h12'])
+      expect(document.querySelectorAll('.ant-steps-item')).toHaveLength(5)
+    })
+  })
+
+  describe('horizon', () => {
+    it('states the end date of a standard horizon in the demo form', () => {
+      show([{ ...accepted, horizon_std: true, horizon_end: '2027-09-17' }])
+      expect(screen.getByText('forecast.reading.horizon_until_standard: 2027-09-17 (12)')).toBeTruthy()
+      expect(screen.queryByText('forecast.reading.standard_horizon')).toBeNull()
+    })
+
+    it('words the standard horizon as until the date, with months and standard', () => {
+      const text = en['forecast.reading.horizon_until_standard' as keyof typeof en] as string
+      expect(text.replace('{{date}}', '2027-09-17').replace('{{months}}', '12')).toBe('until 2027-09-17 (12 months, standard)')
+    })
+
+    it('still says the horizon is standard when the end date is missing', () => {
+      show([{ ...accepted, horizon_std: true, horizon_end: undefined }])
+      expect(screen.getByText('forecast.reading.standard_horizon')).toBeTruthy()
+    })
+
+    it('shows only the date of a non-standard horizon', () => {
+      show([{ ...accepted, horizon_std: false, horizon_end: '2027-01-15' }])
+      expect(screen.getByText('2027-01-15')).toBeTruthy()
+    })
+  })
+
+  describe('coverage', () => {
+    it('renders nothing for a report the ledger does not cover', () => {
+      const { container } = show([], { covered: false })
+      expect(container.querySelector('#forecast')).toBeNull()
+      expect(screen.queryByText('forecast.reading.no_forecast')).toBeNull()
+      expect(screen.queryByText('forecast.disclaimer')).toBeNull()
+    })
+
+    it('keeps the empty card for a covered report that made no forecast', () => {
+      const { container } = show([], { covered: true })
+      expect(container.querySelector('#forecast')).toBeTruthy()
+      expect(screen.getByText('forecast.reading.no_forecast')).toBeTruthy()
+    })
+
+    it('keeps the empty card when the server did not say', () => {
+      show([])
+      expect(screen.getByText('forecast.reading.no_forecast')).toBeTruthy()
+    })
+
+    it('still shows a set that exists whatever the coverage flag says', () => {
+      show([accepted], { covered: false })
+      expect(screen.getByText('forecast.panel.terminal')).toBeTruthy()
+    })
+
+    it('holds the slot while loading, before coverage is known', () => {
+      const { container } = show([], { loading: true, covered: false })
+      expect(container.querySelector('#forecast')).toBeTruthy()
+    })
+  })
+
+  it('puts the meta line inside the card', () => {
+    const { container } = show([accepted], { reportDate: '2026-09-18', receivedAt: 'unparsed', edition: 'V3.17' })
+    expect(container.querySelector('#forecast')?.textContent).toContain('forecast.reading.meta')
+  })
+
+  describe('accessibility', () => {
+    it('names the scenario band as a group', () => {
+      show([accepted])
+      expect(screen.getByRole('group', { name: 'forecast.panel.scenarios' })).toBeTruthy()
+    })
+
+    it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('has no axe violations for a full card in each theme', async (algorithm) => {
+      const { container } = render(
+        <ConfigProvider theme={{ algorithm }}>
+          <MemoryRouter>
+            <ForecastReadingCard
+              sets={[{ ...accepted, horizon_end: '2027-09-17', membership: 'member', payload: '{"schema":"predictions.v1"}', marks: [
+                { checkpoint: 'd5', status: 'resolved', bar_date: '2026-09-28', close_fen: 21128, ret_bp: 1117, bench_ret_bp: -511, low_fen: 120000, source: 'tencent' },
+                { checkpoint: 'd20', status: 'pending', phase: 'waiting', not_before: '2026-10-26' },
+              ] }]}
+              otherSets={[{ ...accepted, id: 9, report_id: 14001, made_on: '2026-09-17' }]}
+              symbol="600519"
+              reportDate="2026-09-18"
+              receivedAt="2026-09-18T05:00:00Z"
+              edition="V3.17"
+              latestClose={17101}
+              latestDate="2026-10-16"
+              settlementPaused
+            />
+          </MemoryRouter>
+        </ConfigProvider>,
+      )
+      // jsdom cannot measure layout or contrast; the palette suite measures contrast separately.
+      const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
+      expect(result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(' | ')}`)).toEqual([])
+    })
+
+    it('has no axe violations for the empty and test-run cards', async () => {
+      const empty = show([], { covered: true })
+      const emptyResult = await axe.run(empty.container, { rules: { 'color-contrast': { enabled: false } } })
+      expect(emptyResult.violations.map((v) => v.id)).toEqual([])
+      empty.unmount()
+      const test = show([{ ...accepted, state: 'test', marks: [] }])
+      const testResult = await axe.run(test.container, { rules: { 'color-contrast': { enabled: false } } })
+      expect(testResult.violations.map((v) => v.id)).toEqual([])
+    })
   })
 })

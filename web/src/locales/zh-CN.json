@@ -914,6 +914,7 @@
   "forecast.reading.reported_close": "报告值 {{reported}} = {{date}} 收盘价 {{close}}",
   "forecast.reading.what_said": "报告当时怎么说",
   "forecast.reading.standard_horizon": "{{months}} 个月，标准周期",
+  "forecast.reading.horizon_until_standard": "至 {{date}}（{{months}} 个月，标准周期）",
   "forecast.reading.other_edition": "打开有预测的版本",
   "forecast.reading.not_touched": "未触及（最低 {{low}}）",
   "forecast.reading.touched": "已触及",

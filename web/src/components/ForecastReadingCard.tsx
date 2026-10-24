@@ -3,6 +3,7 @@ import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Table, Tag, 
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { ForecastReadingEdition, PredictionClaim, PredictionMark, PredictionSet } from '../api/types'
 import { fenToYuan } from '../lib/money'
 import { readingSet } from '../lib/forecastReading'
@@ -28,6 +29,20 @@ function readOpen(): boolean {
 }
 
 const CHECKPOINTS = ['d5', 'd20', 'd60', 'd120', 'h12'] as const
+
+// The checkpoints the ledger actually schedules for this set. h12 exists only for a standard 12-month
+// horizon: the server never creates that mark otherwise (predMarkCheckpoints), so a row or step for it
+// would wait forever for a settlement that cannot happen.
+function checkpointsFor(s: PredictionSet): readonly (typeof CHECKPOINTS)[number][] {
+  return CHECKPOINTS.filter((cp) => cp !== 'h12' || s.horizon_std)
+}
+
+function horizonText(s: PredictionSet, t: TFunction): string {
+  if (!s.horizon_std) return s.horizon_end || '—'
+  return s.horizon_end
+    ? t('forecast.reading.horizon_until_standard', { date: s.horizon_end, months: 12 })
+    : t('forecast.reading.standard_horizon', { months: 12 })
+}
 
 function claim(s: PredictionSet, kind: string, label?: string): PredictionClaim | undefined {
   return s.claims.find((c) => c.kind === kind && (label === undefined || c.label === label))
@@ -57,6 +72,9 @@ interface Props {
   allowMembership?: boolean
   allowOrphans?: boolean
   reportKind?: string
+  // Whether forecast verification covers this report's type, as the server answered it. Only an
+  // explicit false hides the empty card; an older server that omits it keeps the card.
+  covered?: boolean
 }
 
 export default function ForecastReadingCard({
@@ -78,6 +96,7 @@ export default function ForecastReadingCard({
   allowMembership = true,
   allowOrphans = true,
   reportKind = '',
+  covered,
 }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -98,6 +117,9 @@ export default function ForecastReadingCard({
     return <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}><Skeleton active /></Card>
   }
   if (!set) {
+    // A report type the ledger never covers has no forecast to be missing. The empty state belongs to a
+    // covered report that made none.
+    if (covered === false) return null
     return (
       <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}>
         <Typography.Text>{t('forecast.reading.no_forecast')}</Typography.Text>
@@ -209,7 +231,7 @@ export default function ForecastReadingCard({
       low: m.low_fen,
     }
   }
-  const marks: PredictionMark[] = CHECKPOINTS.map((cp) => set.marks.find((m) => m.checkpoint === cp) ?? {
+  const marks: PredictionMark[] = checkpointsFor(set).map((cp) => set.marks.find((m) => m.checkpoint === cp) ?? {
     checkpoint: cp, status: 'pending', phase: 'waiting',
   })
 
@@ -246,7 +268,7 @@ export default function ForecastReadingCard({
               {stanceClaim?.weight_bp !== undefined && ` · ${(stanceClaim.weight_bp / 100).toFixed(0)}%`}
             </Descriptions.Item>
             <Descriptions.Item label={t('forecast.panel.horizon')}>
-              {set.horizon_std ? t('forecast.reading.standard_horizon', { months: 12 }) : set.horizon_end || '—'}
+              {horizonText(set, t)}
             </Descriptions.Item>
             <Descriptions.Item label={t('forecast.panel.terminal')}>
               {terminal === undefined ? '—' : fenToYuan(terminal)}
@@ -269,7 +291,7 @@ export default function ForecastReadingCard({
             </Descriptions.Item>
           </Descriptions>
 
-          <div aria-label={t('forecast.panel.scenarios')} style={{ position: 'relative', padding: '22px 12px 4px' }}>
+          <div role="group" aria-label={t('forecast.panel.scenarios')} style={{ position: 'relative', padding: '22px 12px 4px' }}>
             <div style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${token.colorErrorBg}, ${token.colorInfoBg}, ${token.colorSuccessBg})` }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
               {scenarios.map(({ label, c }) => (

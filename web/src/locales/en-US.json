@@ -914,6 +914,7 @@
   "forecast.reading.reported_close": "Reported {{reported}} = close {{close}} on {{date}}",
   "forecast.reading.what_said": "What the report said",
   "forecast.reading.standard_horizon": "{{months}} months, standard",
+  "forecast.reading.horizon_until_standard": "until {{date}} ({{months}} months, standard)",
   "forecast.reading.other_edition": "Open the edition with a forecast",
   "forecast.reading.not_touched": "Not touched (low {{low}})",
   "forecast.reading.touched": "Touched",
