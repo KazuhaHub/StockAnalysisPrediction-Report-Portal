@@ -29,5 +29,7 @@ export default function ForecastSummaryChip({ prediction, loading = false }: Pro
     </Link>
   )
 
-  return <div style={{ minHeight: 28 }}><Tooltip title={t('forecast.disclaimer')}>{chip}</Tooltip></div>
+  // The disclaimer is the chip's description. It opens on keyboard focus as well as hover, and the
+  // tooltip names itself as the link's description while it is open, so it is not a pointer-only tip.
+  return <div style={{ minHeight: 28 }}><Tooltip title={t('forecast.disclaimer')} trigger={['hover', 'focus']}>{chip}</Tooltip></div>
 }
