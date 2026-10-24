@@ -3,9 +3,9 @@ import { Alert, App, Breadcrumb, Button, Card, Checkbox, Empty, Input, InputNumb
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-import type { ForecastScope, GroupTargetRow, GroupTargetsResp, UserGroupRow } from '../../api/types'
+import type { ForecastScope, GroupTargetRow, GroupTargetsResp, OUPolicyResults, UserGroupRow } from '../../api/types'
 import InheritField from './InheritField'
-import { ouPath, resolveOU, type UrgentPolicy } from './ouSettings'
+import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSettings'
 
 const RUN_SURFACES = ['run', 'batch', 'recurring', 'chat'] as const
 const FORECAST_SCOPES = ['all', 'own', 'none'] as const
@@ -120,9 +120,11 @@ export default function OrgUnitDetail({
   // What this OU WOULD inherit — resolved as if it set nothing itself. The inherit option has to
   // name that, not the OU's current value: an OU overriding max-queued to 9 was offering "inherit
   // Default — 9", which is the override it would be replacing.
-  const wouldInherit = resolveOU(
+  const [previewPolicies, setPreviewPolicies] = useState<OUPolicyResults | null>(null)
+  const inheritedPolicies = previewPolicies ?? group.inherited_policy_results
+  const wouldInherit = inheritedPolicies ? presentOUPolicies(inheritedPolicies) : resolveOU(
     {
-      ...group,
+      ...group, policy_results: undefined,
       allow_urgent: null,
       urgent_unlimited: null,
       weight: null,
@@ -142,19 +144,39 @@ export default function OrgUnitDetail({
   // Absent on a server that predates the access model: then there is nothing true to show or send.
   const hasForecast = group.forecast_scope_effective !== undefined
   const forecastInherit = inheritedForecast(group, groups)
+  if (inheritedPolicies) {
+    forecastInherit.value = inheritedPolicies.forecast_scope.effective
+    forecastInherit.from = groups.find((g) => g.id === inheritedPolicies.forecast_scope.source_ou)?.name ?? t('ou.systemDefault')
+  }
 
   const [d, setD] = useState<Draft>(() => draftOf(group, def, groups))
   const [saving, setSaving] = useState(false)
+  const [previewError, setPreviewError] = useState('')
   const [impact, setImpact] = useState<AffectedAnnouncement[] | null>(null)
   const [orphanChoice, setOrphanChoice] = useState<'disable' | 'keep'>('disable')
   const [deleting, setDeleting] = useState(false)
   // Re-seed when the tree selection moves, or the pane would keep the previous OU's draft.
   useEffect(() => setD(draftOf(group, def, groups)), [group, def, groups])
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }))
+  useEffect(() => {
+    setPreviewPolicies(null)
+    setPreviewError('')
+    if (!group.policy_results || d.parent_id === (group.parent_id ?? 0)) return
+    let current = true
+    const timer = setTimeout(() => {
+      api.post<{ inherited_policy_results: OUPolicyResults }>(`/api/admin/groups/${group.id}/preview`, {
+        name: d.name, parent_id: d.parent_id,
+      }).then((r) => { if (current) setPreviewPolicies(r.inherited_policy_results) })
+        .catch((e) => { if (current) setPreviewError(errText(e, t)) })
+    }, 150)
+    return () => { current = false; clearTimeout(timer) }
+  }, [group.id, group.parent_id, group.policy_results, d.parent_id])
 
   // Who the inherited values come from. Run governance falls back to the Default group; the OU tree
   // is not involved, which is a distinction the old screen never drew and this label has to.
   const from = def?.name ?? t('users.defaultGroupTag')
+  const sourceOf = (key: keyof OUPolicyResults) => inheritedPolicies
+    ? groups.find((g) => g.id === inheritedPolicies[key].source_ou)?.name ?? t('ou.systemDefault') : from
   const num = (n: number) => (n > 0 ? String(n) : t('ou.unlimited'))
   // "20" does not say 20 of what, and "0 per month" is a contradiction — unlimited has no window.
   const quotaLabel = (n: number, period: string) => (n > 0 ? `${n} ${t(`ou.period.${period}`)}` : t('ou.unlimited'))
@@ -180,7 +202,7 @@ export default function OrgUnitDetail({
         totp_enroll: d.totpInherit ? null : d.totpAllowed,
         passkey_enroll: d.passkeyInherit ? null : d.passkeyAllowed,
         require_2fa: d.requireInherit ? null : d.require2fa,
-        ...(isDefault ? {} : { parent_id: d.parent_id }),
+        ...(!isDefault && d.parent_id !== (group.parent_id ?? 0) ? { parent_id: d.parent_id } : {}),
         // Presence-aware on the server: omitted leaves the stored value alone, so a save that
         // changed only the name can never rewrite who may read the record.
         ...(hasForecast && d.forecastScope !== storedForecastScope(group) ? { forecast_scope: d.forecastScope } : {}),
@@ -240,6 +262,7 @@ export default function OrgUnitDetail({
 
   return (
     <Space orientation="vertical" size={16} style={{ flex: 1, minWidth: 0, maxWidth: 760 }}>
+      {(group.policy_available === false || previewError) && <Alert type="error" showIcon title={previewError || t('err.ou_invalid_topology')} />}
       <Card
         size="small"
         title={
@@ -255,7 +278,7 @@ export default function OrgUnitDetail({
           </Space>
         }
         extra={
-          <Button type="primary" size="small" loading={saving} onClick={save}>
+          <Button type="primary" size="small" loading={saving} disabled={group.policy_available === false || !!previewError} onClick={save}>
             {t('common.save')}
           </Button>
         }
@@ -284,7 +307,7 @@ export default function OrgUnitDetail({
               value={d.parent_id}
               onChange={(v) => set('parent_id', v)}
               options={[
-                { value: 0, label: t('users.parentOuNone') },
+                ...(d.parent_id === 0 ? [{ value: 0, label: t('users.parentOuNone'), disabled: true }] : []),
                 // An OU cannot be placed under itself. Descendants are refused server-side too,
                 // but not offering them keeps the admin out of a dead end.
                 ...groups.filter((g) => g.id !== group.id).map((g) => ({ value: g.id, label: g.name })),
@@ -299,9 +322,9 @@ export default function OrgUnitDetail({
 
       <Card size="small" title={t('ou.sectionRuns')}>
         <InheritField
-          label={t('users.urgentPolicy')}
+label={t('users.urgentPolicy')}
           hint={t('users.urgentPolicyHint')}
-          from={from}
+          from={sourceOf('weight')}
           inherited={t(`ou.urgent.${wouldInherit.urgent.value}`)}
           inheriting={d.urgentInherit}
           onInheritingChange={(v) => set('urgentInherit', v)}
@@ -325,9 +348,9 @@ export default function OrgUnitDetail({
         </InheritField>
 
         <InheritField
-          label={t('users.maxQueued')}
+label={t('users.maxQueued')}
           hint={t('users.maxQueuedHint')}
-          from={from}
+          from={sourceOf('max_queued')}
           inherited={num(wouldInherit.maxQueued.value)}
           inheriting={d.maxqInherit}
           onInheritingChange={(v) => set('maxqInherit', v)}
@@ -336,9 +359,9 @@ export default function OrgUnitDetail({
         </InheritField>
 
         <InheritField
-          label={t('users.runWindow')}
+label={t('users.runWindow')}
           hint={t('users.runWindowHint')}
-          from={from}
+          from={sourceOf('run_window')}
           inherited={wouldInherit.runWindow.value || t('ou.anyHour')}
           inheriting={d.windowInherit}
           onInheritingChange={(v) => set('windowInherit', v)}
@@ -365,9 +388,9 @@ export default function OrgUnitDetail({
           someone already has, which is what stops this from being a lockout. */}
       <Card size="small" title={t('ou.sectionSecurity')}>
         <InheritField
-          label={t('ou.allowTOTP')}
+label={t('ou.allowTOTP')}
           hint={t('ou.allowTOTPHint')}
-          from={from}
+          from={sourceOf('totp_enroll')}
           inherited={wouldInherit.totpAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
           inheriting={d.totpInherit}
           onInheritingChange={(v) => set('totpInherit', v)}
@@ -375,9 +398,9 @@ export default function OrgUnitDetail({
           <Switch checked={d.totpAllowed} onChange={(v) => set('totpAllowed', v)} />
         </InheritField>
         <InheritField
-          label={t('ou.allowPasskey')}
+label={t('ou.allowPasskey')}
           hint={t('ou.allowPasskeyHint')}
-          from={from}
+          from={sourceOf('passkey_enroll')}
           inherited={wouldInherit.passkeyAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
           inheriting={d.passkeyInherit}
           onInheritingChange={(v) => set('passkeyInherit', v)}
@@ -389,7 +412,7 @@ export default function OrgUnitDetail({
         <InheritField
           label={t('ou.require2fa')}
           hint={t('ou.require2faHint')}
-          from={t('users.parentOu')}
+          from={sourceOf('require_2fa')}
           inherited={wouldInherit.require2fa.value ? t('ou.required') : t('ou.notRequired')}
           inheriting={d.requireInherit}
           onInheritingChange={(v) => set('requireInherit', v)}
@@ -444,7 +467,7 @@ export default function OrgUnitDetail({
           <InheritField
             label={t('users.dailyRunQuota')}
             hint={t('users.dailyRunQuotaHint')}
-            from={t('users.parentOu')}
+            from={sourceOf('quota')}
             inherited={quotaLabel(wouldInherit.dailyQuota.value, wouldInherit.quotaPeriod.value)}
             inheriting={d.quotaInherit}
             onInheritingChange={(v) => set('quotaInherit', v)}
@@ -524,6 +547,7 @@ function TargetsSection({ group }: { group: UserGroupRow }) {
   const [granted, setGranted] = useState<Record<number, string[]>>({})
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [inherit, setInherit] = useState(false)
 
   useEffect(() => {
     setData(null)
@@ -532,6 +556,7 @@ function TargetsSection({ group }: { group: UserGroupRow }) {
       .get<GroupTargetsResp>(`/api/admin/groups/${group.id}/targets`)
       .then((r) => {
         setData(r)
+        setInherit(r.configured === false)
         const m: Record<number, string[]> = {}
         for (const g of r.granted || []) m[g.target_id] = g.surfaces
         setGranted(m)
@@ -549,6 +574,7 @@ function TargetsSection({ group }: { group: UserGroupRow }) {
     setSaving(true)
     try {
       await api.put(`/api/admin/groups/${group.id}/targets`, {
+        inherit,
         granted: Object.entries(granted).map(([id, surfaces]) => ({ target_id: Number(id), surfaces })),
       })
       message.success(t('common.saved'))
@@ -574,6 +600,12 @@ function TargetsSection({ group }: { group: UserGroupRow }) {
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
         {t('users.groupTargetsHint')}
       </Typography.Paragraph>
+      {data?.configured !== undefined && <Radio.Group value={inherit} onChange={(e) => setInherit(e.target.value)}>
+        <Radio value={true}>{t('ou.targetsInherit')}</Radio>
+        <Radio value={false}>{t('ou.targetsOverride')}</Radio>
+      </Radio.Group>}
+      {inherit && <Typography.Paragraph type="secondary">{t('ou.targetsEffective', { count: data?.effective?.length ?? 0 })}</Typography.Paragraph>}
+      <fieldset disabled={inherit} style={{ border: 0, padding: 0, margin: 0 }}>
       {data && data.targets.length === 0 ? (
         <Empty description={t('users.groupTargetsNoTargets')} />
       ) : (
@@ -687,6 +719,7 @@ function TargetsSection({ group }: { group: UserGroupRow }) {
           ]}
         />
       )}
+      </fieldset>
     </Card>
   )
 }

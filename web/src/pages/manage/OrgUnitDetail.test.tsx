@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { App } from 'antd'
 import axe from 'axe-core'
 import OrgUnitDetail from './OrgUnitDetail'
-import type { UserGroupRow } from '../../api/types'
+import type { OUPolicyResult, OUPolicyResults, UserGroupRow } from '../../api/types'
 
 const put = vi.hoisted(() => vi.fn())
 const get = vi.hoisted(() => vi.fn())
@@ -31,6 +31,21 @@ const mount = (target: UserGroupRow, groups: UserGroupRow[] = [DEF, target]) =>
   )
 
 describe('OrgUnitDetail', () => {
+  it('renders the server parent result even when raw ancestor fields disagree', () => {
+    const result = <T,>(value: T): OUPolicyResult<T> => ({ own: null, effective: value, source_ou: 8, inherited: true, available: true })
+    const policies: OUPolicyResults = {
+      weight: result(2), urgent_unlimited: result(false), allow_urgent: result(true),
+      max_queued: result(9), run_window: result(''), restricted: result(false),
+      quota: result({ limit: 20, period: 'month' }), totp_enroll: result(false),
+      passkey_enroll: result(true), require_2fa: result(true), forecast_scope: result('none'),
+    }
+    const parent = g({ id: 8, name: 'Server parent', max_queued: 33, totp_enroll: true })
+    mount(g({ id: 3, parent_id: 8, policy_results: policies, inherited_policy_results: policies }), [DEF, parent])
+    const labels = screen.getAllByText(/ou\.inheritedAs/).map((n) => n.textContent ?? '')
+    expect(labels.some((l) => l.includes('"value":"9"') && l.includes('Server parent'))).toBe(true)
+    expect(labels.some((l) => l.includes('ou.notAllowed') && l.includes('Server parent'))).toBe(true)
+    expect(labels.some((l) => l.includes('"value":"33"'))).toBe(false)
+  })
   beforeEach(() => {
     put.mockReset().mockResolvedValue({})
     del.mockReset().mockResolvedValue({})

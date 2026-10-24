@@ -575,7 +575,9 @@ function GroupsPanel({
     const name = newName.trim()
     if (!name) return
     try {
-      await api.post('/api/admin/groups', { name, description: '', parent_id: newParent })
+      await api.post('/api/admin/groups', {
+        name, description: '', parent_id: newParent || groups.find((g) => g.is_default)?.id,
+      })
       setAdding(false)
       setNewName('')
       setNewParent(0)
@@ -683,12 +685,9 @@ function GroupsPanel({
         <Typography.Text strong>{t('users.parentOu')}</Typography.Text>
         <Select
           style={{ width: '100%' }}
-          value={newParent}
+          value={newParent || groups.find((g) => g.is_default)?.id}
           onChange={setNewParent}
-          options={[
-            { value: 0, label: t('users.parentOuNone') },
-            ...groups.map((g) => ({ value: g.id, label: g.name })),
-          ]}
+          options={groups.map((g) => ({ value: g.id, label: g.name }))}
         />
       </Modal>
     </Space>
