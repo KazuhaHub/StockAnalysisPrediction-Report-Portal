@@ -78,6 +78,9 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 		predTestRtype, "1903-01", "2026-10-01T00:00:00Z", 3); err != nil {
 		t.Fatal(err)
 	}
+	// The database is shared with other tests, which re-stamp middle steps of the ledger, so only what
+	// this startup writes is checked: it must not be older than anything that was there before.
+	floor := newestLedgerStamp(st)
 	st.Close()
 
 	opened, err := OpenStore("postgres", dsn)
@@ -90,7 +93,7 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 		}
 		opened.Close()
 	})
-	requireStepsRecordedInListOrder(t, opened)
+	requireStepsRecordedSince(t, opened, floor, "0010", "0009")
 	if !opened.tableExists("prediction_purge_owners") || !opened.columnExists("announcements", "popup_dismissible") {
 		t.Fatal("startup recorded the steps without their products")
 	}
@@ -99,6 +102,62 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 	}
 	if n := scalar[int](t, opened, `SELECT COUNT(*) FROM prediction_purges WHERE cohort='1903-01'`); n != 1 {
 		t.Fatalf("the historic purge marker count = %d, want 1", n)
+	}
+	if err := opened.verifyMigrationProducts(opened.poolExec(), opened.migrations()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The Postgres twin of TestBaselineDatabaseUpgradesAtNormalStartup: a database with no ledger at all,
+// wound back past every step including 0010 and 0009, is carried forward by ordinary startup. Every
+// ledger row is rewritten by this one startup, so the whole ledger can be checked against list order.
+func TestPostgresBaselineDatabaseUpgradesAtNormalStartup(t *testing.T) {
+	dsn := pgDSN(t)
+	st := pgStore(t)
+	stmts := []string{
+		`DELETE FROM meta WHERE k LIKE 'mig:%'`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS totp_enroll`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS passkey_enroll`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS require_2fa`,
+		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+		`ALTER TABLE users DROP COLUMN IF EXISTS last_used_version`,
+		`DROP TABLE IF EXISTS user_sessions`,
+		`DROP TABLE IF EXISTS login_history`,
+		`ALTER TABLE users DROP COLUMN IF EXISTS login_history_keep`,
+		`ALTER TABLE users DROP COLUMN IF EXISTS login_history_initialized`,
+		`ALTER TABLE cleanup_runs DROP COLUMN IF EXISTS predictions_deleted`,
+		`ALTER TABLE announcements DROP COLUMN IF EXISTS popup_dismissible`,
+		`DROP TABLE IF EXISTS prediction_purge_owners`,
+	}
+	for _, tbl := range predictionTables {
+		stmts = append(stmts, `DROP TABLE IF EXISTS `+tbl)
+	}
+	if st.columnExists("announcements", "strip_dismissible") {
+		stmts = append(stmts, `ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`)
+	}
+	for _, q := range stmts {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if st.tableExists("prediction_purge_owners") || recorded(st, "0001") || recorded(st, "0009") || recorded(st, "0010") ||
+		st.columnExists("announcements", "popup_dismissible") || !st.columnExists("announcements", "dismissible") {
+		t.Fatal("the fixture is not a ledger-less baseline database")
+	}
+	st.Close()
+
+	opened, err := OpenStore("postgres", dsn)
+	if err != nil {
+		t.Fatalf("a baseline Postgres database must upgrade at normal startup: %v", err)
+	}
+	defer opened.Close()
+	requireStepsRecordedInListOrder(t, opened)
+	if !opened.tableExists("prediction_purge_owners") || !opened.columnExists("announcements", "popup_dismissible") ||
+		opened.columnExists("announcements", "dismissible") {
+		t.Fatal("startup recorded the steps without their products")
+	}
+	if n := scalar[int](t, opened, `SELECT COUNT(*) FROM prediction_purge_owners`); n != 0 {
+		t.Fatalf("the evidence table holds %d rows after the upgrade", n)
 	}
 	if err := opened.verifyMigrationProducts(opened.poolExec(), opened.migrations()); err != nil {
 		t.Fatal(err)
@@ -270,6 +329,38 @@ func requireStepsRecordedInListOrder(t *testing.T, st *Store) {
 		}
 		if stamp < previous {
 			t.Fatalf("step %s was recorded at %s, before the step ahead of it in the list (%s)", m.id, stamp, previous)
+		}
+		previous = stamp
+	}
+}
+
+// newestLedgerStamp is the latest ledger instant of any step this build knows, or "" when none is
+// recorded. RFC 3339 instants in UTC sort as strings.
+func newestLedgerStamp(st *Store) string {
+	newest := ""
+	for _, m := range st.migrations() {
+		if stamp := st.GetSetting(migrationLedgerKey(m.id), ""); stamp > newest {
+			newest = stamp
+		}
+	}
+	return newest
+}
+
+// requireStepsRecordedSince checks only the named steps: each is recorded, none is older than floor,
+// and the stamps never run against the order the ids are given. For a database other tests also write
+// to, where the stamps of steps this test never applied say nothing about it. The stamps have
+// one-second resolution, so steps applied in the same second tie; TestPendingStepsApplyInListOrder is
+// what proves the order itself.
+func requireStepsRecordedSince(t *testing.T, st *Store, floor string, ids ...string) {
+	t.Helper()
+	previous := floor
+	for _, id := range ids {
+		stamp := st.GetSetting(migrationLedgerKey(id), "")
+		if stamp == "" {
+			t.Fatalf("step %s is not recorded after startup", id)
+		}
+		if stamp < previous {
+			t.Fatalf("step %s was recorded at %s, before %s", id, stamp, previous)
 		}
 		previous = stamp
 	}
