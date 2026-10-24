@@ -77,6 +77,10 @@ interface Props {
   covered?: boolean
 }
 
+// A small card's 12px inset left the content against the border; the report card above uses the
+// standard 24px sides, so this one matches it while keeping the small card's vertical rhythm.
+const CARD_STYLES = { header: { paddingInline: 24 }, body: { padding: '16px 24px' } }
+
 export default function ForecastReadingCard({
   sets,
   countedSetID,
@@ -100,6 +104,10 @@ export default function ForecastReadingCard({
 }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  // Bear to bull reads as fall to rise, in the page's own colours (QuoteStrip: red for a rise, green
+  // for a fall). The level backgrounds the band used before measured about 1.1:1 against the card in
+  // both themes, which is why it could not be seen; these stops clear 2:1 in both.
+  const bandStops = [token.colorSuccess, token.colorTextTertiary, token.colorError]
   const palette = forecastPalette(token)
   const [open, setOpen] = useState(readOpen)
 
@@ -114,14 +122,14 @@ export default function ForecastReadingCard({
   }, [loading, set?.id])
   const anchorStyle = { marginTop: 12, scrollMarginTop: 'calc(var(--rp-header-h, 64px) + 16px)' }
   if (loading) {
-    return <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}><Skeleton active /></Card>
+    return <Card id="forecast" className="rp-forecast-panel" styles={CARD_STYLES} size="small" title={t('forecast.panel.title')} style={anchorStyle}><Skeleton active /></Card>
   }
   if (!set) {
     // A report type the ledger never covers has no forecast to be missing. The empty state belongs to a
     // covered report that made none.
     if (covered === false) return null
     return (
-      <Card id="forecast" className="rp-forecast-panel" size="small" title={t('forecast.panel.title')} style={anchorStyle}>
+      <Card id="forecast" className="rp-forecast-panel" styles={CARD_STYLES} size="small" title={t('forecast.panel.title')} style={anchorStyle}>
         <Typography.Text>{t('forecast.reading.no_forecast')}</Typography.Text>
         {sibling && <div style={{ marginTop: 8 }}><Link to={sibling.url}>{t('forecast.reading.other_edition')}</Link></div>}
         <Typography.Paragraph style={{ color: token.colorTextSecondary, margin: '12px 0 0' }}>{t('forecast.disclaimer')}</Typography.Paragraph>
@@ -238,7 +246,7 @@ export default function ForecastReadingCard({
   return (
     <Card
       id="forecast"
-      className="rp-forecast-panel"
+      className="rp-forecast-panel" styles={CARD_STYLES}
       size="small"
       title={t('forecast.panel.title')}
       extra={
@@ -292,7 +300,11 @@ export default function ForecastReadingCard({
           </Descriptions>
 
           <div role="group" aria-label={t('forecast.panel.scenarios')} style={{ position: 'relative', padding: '22px 12px 4px' }}>
-            <div style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${token.colorErrorBg}, ${token.colorInfoBg}, ${token.colorSuccessBg})` }} />
+            <div
+              data-testid="forecast-scenario-band"
+              data-stops={JSON.stringify(bandStops)}
+              style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
               {scenarios.map(({ label, c }) => (
                 <Typography.Text key={label} style={{ fontSize: 12 }}>

@@ -273,6 +273,57 @@ describe('ForecastReadingCard', () => {
     expect(container.querySelector('#forecast')?.textContent).toContain('forecast.reading.meta')
   })
 
+  describe('legibility', () => {
+    const parse = (c: string): number[] => {
+      const fn = c.match(/^rgba?\(([^)]+)\)$/)
+      if (fn) {
+        const [r, g, b, a = 1] = fn[1].split(',').map((v) => Number(v.trim()))
+        return [r, g, b, a]
+      }
+      const h = c.replace('#', '')
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1]
+    }
+    const over = (f: number[], b: number[]) => [0, 1, 2].map((i) => f[i] * f[3] + b[i] * (1 - f[3]))
+    const lum = (rgb: number[]) => {
+      const ch = (v: number) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * ch(rgb[0]) + 0.7152 * ch(rgb[1]) + 0.0722 * ch(rgb[2])
+    }
+    const contrast = (a: number[], b: number[]) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+      return (hi + 0.05) / (lo + 0.05)
+    }
+
+    it.each([
+      ['light', theme.defaultAlgorithm],
+      ['dark', theme.darkAlgorithm],
+    ] as const)('paints the scenario band visibly, falling to rising, in the %s theme', (_, algorithm) => {
+      const t = theme.getDesignToken({ algorithm })
+      render(
+        <ConfigProvider theme={{ algorithm }}>
+          <MemoryRouter>
+            <ForecastReadingCard sets={[accepted]} otherSets={[]} symbol="600519" />
+          </MemoryRouter>
+        </ConfigProvider>,
+      )
+      const stops: string[] = JSON.parse(screen.getByTestId('forecast-scenario-band').getAttribute('data-stops') || '[]')
+      // Bear to bull reads as fall to rise: the page's own convention is red for a rise, green for a fall.
+      expect(stops).toEqual([t.colorSuccess, t.colorTextTertiary, t.colorError])
+      const bg = over(parse(t.colorBgContainer), [0, 0, 0])
+      for (const stop of stops) expect(contrast(over(parse(stop), bg), bg)).toBeGreaterThanOrEqual(2)
+    })
+
+    it('keeps the card content clear of its border, like the other cards on the page', () => {
+      const { container } = show([accepted])
+      const body = container.querySelector('#forecast .ant-card-body') as HTMLElement
+      expect(body.style.padding).toBe('16px 24px')
+      const head = container.querySelector('#forecast .ant-card-head') as HTMLElement
+      expect(head.style.paddingInline).toBe('24px')
+    })
+  })
+
   describe('accessibility', () => {
     it('names the scenario band as a group', () => {
       show([accepted])
