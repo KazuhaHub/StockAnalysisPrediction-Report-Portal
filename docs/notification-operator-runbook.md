@@ -27,16 +27,16 @@ Related contracts:
 4. Confirm that the source database already satisfies the v0.4.72 baseline. A
    refused baseline must first pass through v0.4.72; do not edit schema products
    or migration markers by hand to bypass startup checks.
-5. With the isolated instance stopped, run the new binary's `schema-upgrade`
-   inspection, review its pending steps, then run `schema-upgrade --apply` and
-   inspect again before startup. The current main line includes explicit step
-   `0009`; starting the service is not a substitute for its offline upgrade.
-   Follow [the explicit upgrade runbook](forecast-purge-ownership-upgrade.md).
-   Migration order preserves the released prefix `0001` through `0006`, then
-   `0010`, `0009`, and appends notification step `0007`. Step IDs are labels,
-   not sort keys. Step `0007` creates eleven notification tables under the
-   ADR 0035 transaction and ledger without changing the frozen baseline.
-   Start the isolated instance only after inspection reports no pending steps.
+5. Start the isolated instance with the new binary. Startup applies every
+   pending step in its own transaction, and nothing has to be run first
+   ([ADR 0035](adr/0035-migrations-after-a-frozen-baseline.md), amended
+   2026-10-24). To review the pending steps beforehand, the optional
+   `schema-upgrade` command lists them without changing anything
+   ([upgrade notes](forecast-purge-ownership-upgrade.md)). Migration order
+   preserves the released prefix `0001` through `0006`, then `0010`, `0009`,
+   and appends notification step `0007`. Step IDs are labels, not sort keys.
+   Step `0007` creates eleven notification tables under the ADR 0035
+   transaction and ledger without changing the frozen baseline.
 6. Open Manage > Notifications. Existing SMTP, forecast Email/Slack and raw
    receivers appear as referenced channels. Compare their enabled states and
    destination hosts with the original settings pages. Existing configuration

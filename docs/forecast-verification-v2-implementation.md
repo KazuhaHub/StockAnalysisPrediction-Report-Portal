@@ -1,13 +1,15 @@
 # Forecast verification v2 (预测验证 v2): implementation plan
 
-> Current identifier/rollout amendment (2026-10-22): step `0006` is the implemented access attribution
-> shape; owner-approved purge ownership evidence now owns explicit step `0009` (`0007` and `0008` are the
+> Current identifier/rollout amendment (2026-10-22, updated 2026-10-24): step `0006` is the implemented access attribution
+> shape; owner-approved purge ownership evidence now owns step `0009` (`0007` and `0008` are the
 > notification and extension steps, which merge first). The migration list is in merge order, not id order:
 > the announcement step `0010` reached main first, so the list reads `0001`–`0006`, `0010`, then `0007`, `0008`
 > and `0009` as they land, and `0009` is always the last entry. Tier 2 provenance is proposed as `0011`, still
-> unapproved and requiring a fresh identifier check. R2a now requires
-> the [explicit purge-evidence upgrade](forecast-purge-ownership-upgrade.md), not a schema-free
-> deployment. Historical baseline references below describe their original source snapshot.
+> unapproved and requiring a fresh identifier check. R2a is no longer schema-free: it ships step `0009`,
+> which ordinary startup applies (a deploy is pull and restart, after a backup taken with the previous
+> release; see the [upgrade notes](forecast-purge-ownership-upgrade.md)). An explicit offline upgrade was
+> required between 2026-10-22 and 2026-10-24 and is no longer. Historical baseline references below
+> describe their original source snapshot.
 
 | | |
 |---|---|
@@ -1890,7 +1892,7 @@ return nothing, not everything. FC
 
 ---
 
-## 7. Release 2a: access (explicit purge evidence step `0009`; reads step `0006`)
+## 7. Release 2a: access (purge evidence step `0009`; reads step `0006`)
 
 ### 7.1 P13 `docs/forecast-demo-v2` — production baseline screenshots, then the demo revision
 
@@ -2167,11 +2169,11 @@ follow-up, after the shared binding lands, re-enables scoped bridge reads on it.
   failure still shows P10's inline error with retry. FC/FO
 - PG variants of the population loader.
 
-**Rollout.** Deploy only after the explicit step `0009` upgrade; step `0006` belongs to R1b. Every OU is `none`, so only admins see anything,
+**Rollout.** Deploying applies step `0009` at startup, after a backup taken with the previous release; step `0006` belongs to R1b. Every OU is `none`, so only admins see anything,
 and **non-admin members of OUs at `none` lose the reading-page card they have today** — that is the decided model.
 The owner then sets `安禅内部` to `all` in the OU editor (P27). **Rollback.** Fastest: set the OU values back to
 `none` (audited, no deploy). Binary rollback across `0009` requires the pre-upgrade backup and the
-[explicit upgrade runbook](forecast-purge-ownership-upgrade.md); do not remove the ledger row.
+[upgrade notes](forecast-purge-ownership-upgrade.md); do not remove the ledger row.
 
 ### 7.4 P27 `feat/forecast-record-page` — `/forecast`, the operations page, the OU editor field
 
@@ -2729,7 +2731,7 @@ Dify rejected undeclared inputs, revert P39b first.
 | Switching the evaluator on | — | §1.4 readiness list, all six items (item 6 `ledger_chain`) | Record the hand-checked closes in the dry-run gate; repair the source order if `ledger_chain` is red; then `1`. |
 | Scheduling a benchmark | — | the response's `effective_cohort` | CSI 800: must read `2026-11`. If the deploy slipped past 2026-10-31, use §1.2's contingency. |
 | An OU's members report "forecast missing" | — | `GET /api/admin/forecast/access` for that OU; then the day's `refused.<code>` counters | Expected at `none`; set the OU's scope if intended (audited `group.change`). |
-| Before any release deploy | — | — | ADR 0027 backup; for R1a-β2 record Q3 = 20; for a release containing step `0009`, the explicit offline upgrade first (the procedure document `forecast-purge-ownership-upgrade.md` ships with step `0009`). |
+| Before any release deploy | — | — | ADR 0027 backup, taken with the release that is running; for R1a-β2 record Q3 = 20; a release containing step `0009` needs nothing else, because startup applies it (`forecast-purge-ownership-upgrade.md` has the moving-tag backup procedure and the rollback). |
 | After a restore | — | `forecast_auto`, `forecast_reader`, dry-run gates, alert test, `GET /api/admin/forecast/access` | A restore never raises the mode or the stage (each becomes the lower of the dump and the live value; an unreadable stage counts as `off`; the stage change is audited `forecast.reader`), resets the gates, and caps a restored `1` at `dry` (audited `restore_gates_empty`); re-check deliberately. **OU scopes and attribution come back exactly as dumped and can widen access** (the audit log with them): save `GET /api/admin/forecast/access` before restoring, compare after, and set incident OUs back to `none` before readers return. |
 | December | — | the exchanges' closure notice | Update the projection table (P37). |
 | Reading-page incident | — | — | `forecast_reader=off` (immediate, audited). |
@@ -2751,7 +2753,7 @@ evidence capabilities. While it is red, mode `1` is refused (409 `forecast_not_r
 | R1b | Backup (step `0006` makes later binary rollback restore-only) | `TestMigration0006` green in CI; boot shows step `0006` recorded; Default OU reads `none` | Set mode `dry`; configure Email recipients and the Slack URL; send the test alert; record the dry-run check for `sh000852`; then mode `1` | Revert individual PRs (forward fix). Binary rollback below `0006` = restore the backup. |
 | P39b (its own Beta after R1b) | Preconditions §11.1 (P38, P39a, P30 deployed; Dify batch published) | §11.5 step 5 | — | Revert P39b (attributed sets stay). |
 | Evaluator on | Readiness list | Status card healthy; first d5 settles from history; `/healthz/forecast` 200 | Watch freshness for a week | Mode `dry` or `0` (immediate, audited). |
-| R2a | Backup with previous release; Q4; explicit `schema-upgrade --apply` | Verify `0009`; all OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); binary rollback across `0009` requires restoring the pre-upgrade backup per the upgrade runbook. |
+| R2a | Backup with previous release; Q4 | Boot applies and records `0009` (ledger row, empty `prediction_purge_owners`); all OUs `none`; only admins see `/forecast` | Set `安禅内部` to `all`; one clean week; further OUs as the owner chooses | Set OU values to `none` (immediate); binary rollback across `0009` requires restoring the pre-upgrade backup per the upgrade notes. |
 | R2b | Backup | P18 benchmark recorded | Seeded-preview review; flip `forecast_reader` to `full` per P20's rollout | `forecast_reader=card`/`off`; binary revert (no schema). |
 | R3 | Backup | `/api/admin/forecast/groups` → JSON 404 | — | Revert. |
 | Tier 2 | Backup | `0011` recorded | Owner go/no-go per V19 | Restore-only. |
@@ -2772,7 +2774,7 @@ ADR numbers computed from `docs/adr` at the baseline (latest `0036`). Confirm at
 | ADR 0024 | Editions and forecast sets (C17); the restricted-only OU principal (P30). | P18, P30 |
 | ADR 0028 | Note at §1 (single-vendor stored closes) and at §3 (the detection-only qfq exception now exists). | P23, P8 |
 | ADR 0017 | Note: `pre_live` and `test` sets are purged by the ledger retention target like any other; `attributed_ou` does not affect retention. | P11 |
-| ADR 0035 | Amended for explicit operator step `0009`, startup refusal without upgrade and custom product verification; existing automatic steps and the frozen baseline stay unchanged. Proposed Tier 2 `0011` remains separately gated. | Own purge history |
+| ADR 0035 | Amended for step `0009` and custom product verification; the 2026-10-22 explicit-step gate was superseded on 2026-10-24, so every step applies at startup and `schema-upgrade` is optional. Existing automatic steps and the frozen baseline stay unchanged. Proposed Tier 2 `0011` remains separately gated. | Own purge history |
 | `docs/forecast-verification-design.md` | §7 and D6 superseded (pointer to 0039); acceptance condition 19 rewritten; §9.2 corrected (dividend element, corrected price-limit backstop, qfq ratio); §9.3 base rule for an S0 halt (V6b); §10 UI updated. | P11, P22 |
 | `docs/forecast-verification-operations.md` (new) | The runbook of §12.3. | P9 onward |
 | `docs/forecast-verification-demo.html` | P13's revision. | P13 |

@@ -110,12 +110,11 @@ S0 close. Preview the candidate list on the page, then save once. It survives re
 ### Before a release
 
 A release that contains step `0009` (the owner-approved `prediction_purge_owners` table, which lets
-an `own` reader be shown only the purged months of their own OU subtree) is upgraded explicitly and
-offline before it starts. Read [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md)
-first. The document, the `schema-upgrade` command and the startup refusal belong to step `0009`: a
-checkout without that step has none of them. That document is the source of truth for the sequence,
-for which other steps (`0007`, `0008`) are pending in the same release, and for rolling back across
-the step, which is restore-only.
+an `own` reader be shown only the purged months of their own OU subtree) is deployed like any other:
+pull the new image and restart. Startup applies the step. The one thing to get right is the backup,
+which must come from the **previous** release; read
+[forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md) for how to take it under a
+moving tag, and for rolling back across the step, which is restore-only.
 
 Take the ADR 0027 backup. For R1a-β2 also record the heal predicate's count (Q3 = 20). A binary older
 than step `0006` refuses a database that records it: rolling back across the access schema is
@@ -123,36 +122,26 @@ restore-only.
 
 ### Release with the purge ownership evidence step (`0009`)
 
-Step `0009` is an explicit offline step: a build that has it will not start against an existing database
-that has not been upgraded, and it writes no DDL while refusing. The full procedure is
+Step `0009` is an ordinary automatic step. The full notes are
 [forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md); the points that are easy to
 miss are:
 
-- **Take the pre-upgrade backup with the previous release.** The new binary's `backup`, `restore`,
-  `adduser`, `security`, `recompute-kinds` and `freeze-names` all open the store the way startup does and
-  refuse an un-upgraded database, so none of them can take it.
-- **Stop the container before upgrading, and keep a refused one stopped.** The new image against an
-  un-upgraded database exits with the refusal; under `restart: unless-stopped` or `always` it restarts and
-  refuses again in a loop. Stop it first, and start the new image only after the upgrade is verified.
-- **Run the upgrade by overriding the entrypoint.** `docker-entrypoint.sh` does not pass arguments, so
-  `docker run <image> schema-upgrade` starts the server. Use
-  `docker run --rm --entrypoint /app/report-portal ... <image> schema-upgrade [--apply]` with the same
-  volumes, environment (`RP_DB_*`) and network as the service, and for SQLite add `--user 10001:10001` (or
-  the deployment's `PUID:PGID`) so no root-owned files appear beside the database. Prefer
-  `docker compose run --rm --no-deps --entrypoint /app/report-portal report-portal ...`, which reuses the
-  service's mounts by construction. With plain `docker run`, the data volume is `<project>_rp-data`, not
-  the `rp-data` written in the compose file: a literal `rp-data` mounts a new empty volume, and on SQLite
-  `backup` then dumps an empty database and exits 0.
-- **Check the backup's size before upgrading.** `backup` prints its table and row counts on stderr; they
-  must match the deployment, and the previous release's restore dry run must list non-zero `users` and
-  `reports` rows.
-- **One `--apply` covers every pending step.** The dry run lists what is pending in the build's list order,
-  which is merge order and not id order: `0007`, `0008` and `0009` were reserved by branches that were still
-  open when the announcement step `0010` reached main, so they follow it. For a database that has recorded
-  `0001` to `0006`, a release that also ships the notification (`0007`) and extension (`0008`) steps lists
-  `[0010, 0007, 0008, 0009]`, and the same `--apply` performs all of them; `0009` is always last. An id that
-  looks out of order in that list is not an error. Inspect again afterwards; it must report nothing pending
-  before the new image starts.
+- **Take the backup with the previous release, before anything pulls.** The new binary's `backup`,
+  `restore`, `adduser`, `security`, `recompute-kinds` and `freeze-names` all open the store the way startup
+  does and apply pending steps first, so a backup taken with them already declares `0009` and the previous
+  release cannot restore it. Under `pull_policy: always` (the shipped compose file), `docker compose run`
+  pulls too: record the running container's image id first and back up from it with `docker run
+  --volumes-from <the stopped container> --env-file <an RP_* file only you can read>`, deleting the file
+  afterwards.
+- **Check the backup's size.** `backup` prints its table and row counts on stderr; they must match the
+  deployment, and the previous release's restore dry run must list non-zero `users` and `reports` rows.
+- **Optionally see what will run.** `report-portal schema-upgrade` lists the pending steps and changes
+  nothing; `--apply` applies them offline with the same runner. Neither is needed for a deploy. The list is
+  in the build's list order, which is merge order and not id order: `0007`, `0008` and `0009` were reserved
+  by branches that were still open when the announcement step `0010` reached main, so they follow it. For a
+  database that has recorded `0001` to `0006`, a release that also ships the notification (`0007`) and
+  extension (`0008`) steps lists `[0010, 0007, 0008, 0009]`; `0009` is always last. An id that looks out of
+  order in that list is not an error.
 - Evidence starts empty and is never back-filled. Months purged before the upgrade stay visible to `all`
   readers and the administrator views and are never disclosed to own readers.
 
@@ -236,7 +225,7 @@ the separate purge metadata must remain visible where authorized. An own reader'
 comes from the purge ownership evidence (ADR 0039): only months its current subtree owned sets in when
 retention removed them. Every other emptied month is an ordinary empty month for that reader, and months
 purged before the evidence table existed are never disclosed to it. Release of own-scoped reads still
-waits for the explicit upgrade and the review recorded in the implementation log.
+waits for a release carrying step `0009` to be deployed and the review recorded in the implementation log.
 
 ## Reading-page summary contract (P18 draft)
 

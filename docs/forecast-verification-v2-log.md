@@ -235,23 +235,12 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   - PR 141/142 append their steps after `0009` when they rebase (the list is merge order, and
     `migrationListOrder` now pins `[…0006, 0010, 0009]`).
   - After PR 141 lands, re-enable scoped bridge reads on its shared token binding.
-- **Next deploy: offline upgrade required.** The first release that contains step `0009` cannot be
-  deployed by replacing the image. Startup refuses a database without that step's ledger row before
-  any DDL. Follow [the upgrade runbook](forecast-purge-ownership-upgrade.md):
-  1. Stop the portal and every other writer, and disable its restart policy so a refused start cannot
-     loop.
-  2. Take a full backup with the previous release (a one-off container of the old image). Verify it
-     with a throwaway restore.
-  3. With the new image, run `schema-upgrade` through `--entrypoint /app/report-portal`, with the
-     service's own mounts and environment. It only inspects. Expect `0009` pending, plus `0007`/`0008`
-     if the notification and extension work ship in the same release.
-  4. Run `schema-upgrade --apply`, then inspect again: nothing may be pending.
-  5. Start the new release. Confirm health, the version and the ledger rows, then take a post-upgrade
-     backup.
-  6. Rollback is a restore of the step-2 backup with the previous release into a clean target. An
-     older binary refuses the upgraded database.
-  After the upgrade, `own` can be set per OU. Before it, own-scoped reads answer 503
-  `forecast_purge_history_unavailable`.
+- **Next deploy: pull and restart (2026-10-24).** The first release that contains step `0009` is deployed
+  like any other: the owner reversed the explicit offline upgrade, so startup applies the step in its
+  own transaction and nothing has to be run first. The maintainer takes the backup with the previous
+  release before pulling (under `pull_policy: always`, from the running container's image id; see
+  [the upgrade notes](forecast-purge-ownership-upgrade.md)). Rollback is a restore of that backup with
+  the previous release into a clean target. After the new release has started, `own` can be set per OU.
 - **Known limitations.** Unchanged from 2026-10-22, plus: zh-TW strings added by P27 are OpenCC output
   pending human review.
 - **Evaluator state.** `forecast_auto` is off. Before mode `1` the readiness list still needs a dry pass,
@@ -2267,3 +2256,19 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   reader marker integration remain next, with route-level access/concurrency acceptance required.
   The own-history release hold and separate Apps integration ordering remain. No production
   database, workflow, evaluator setting, release, or Apps checkout was changed.
+
+### 2026-10-24 — step 0009 applies at startup
+
+- The owner reversed the 2026-10-22 approval of an explicit offline upgrade: a deploy is pull and
+  restart, and no schema step may make an operator run a command before the server can start. The
+  `explicit` step flag, the startup preflight and the explicit open mode are removed; an existing
+  database gets `0009` at normal startup, in list order, with the evidence table created empty and no
+  backfill. The shape verification is unchanged and still refuses a recorded-but-damaged table and a
+  lookalike table in front of an unrecorded step. Maintainers back up with the previous release; the
+  program takes no automatic backups.
+- `schema-upgrade` stays as an optional tool: no arguments lists the pending steps read-only, `--apply`
+  runs the normal runner and verifies. The tests that asserted the refusal now assert the upgrade at
+  startup from a database at `0006` and from a baseline database, in both drivers. The Postgres checks
+  look only at the steps they applied, because other tests in the shared database re-stamp earlier
+  steps. ADR 0035 and 0039, the decisions page, the upgrade notes and the operations document carry the
+  reasoning.

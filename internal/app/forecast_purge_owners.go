@@ -6,8 +6,9 @@ import (
 	"strings"
 )
 
-// Purge ownership is evidence, not a reconstruction from today's report grants. Existing databases
-// require the explicit offline schema upgrade; startup only verifies the recorded shape.
+// Purge ownership is evidence, not a reconstruction from today's report grants. The table is step
+// 0009: ordinary startup creates it empty on an existing database and verifies its exact shape on
+// every start.
 
 // lockPredictionOwnership must be the first database operation in both the retention and OU-delete
 // transactions, before inspecting or reassigning sets. Holding it only around the evidence writes
@@ -32,8 +33,8 @@ const predictionPurgeOwnersDDL = `CREATE TABLE IF NOT EXISTS prediction_purge_ow
 		PRIMARY KEY (rtype, cohort, attributed_ou)
 	)`
 
-// createPredictionPurgeOwners is shared by explicit upgrade and fresh-database initialization.
-// It must never be called as an implicit repair of an existing database at server startup.
+// createPredictionPurgeOwners is step 0009's DDL, run by the migration runner on a fresh database
+// and on an upgraded one alike. It creates the table empty: historic markers are never backfilled.
 func createPredictionPurgeOwners(e migExec) error {
 	_, err := e.exec(predictionPurgeOwnersDDL)
 	return err

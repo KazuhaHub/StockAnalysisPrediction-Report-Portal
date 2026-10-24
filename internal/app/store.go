@@ -81,11 +81,9 @@ type LinkGroup struct {
 }
 
 type Store struct {
-	db     *sql.DB
-	driver string // "sqlite" | "postgres"
-	// explicitSchemaUpgrade is set only by the offline, operator-invoked upgrade command.
-	explicitSchemaUpgrade bool
-	ticketMu              sync.Mutex // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
+	db       *sql.DB
+	driver   string     // "sqlite" | "postgres"
+	ticketMu sync.Mutex // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
 	// onSettingRead is a test-only observer of GetSetting. It is nil in production; a test sets it to
 	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
 	// never fall back to forecast_bench for a set whose frozen code is empty).
@@ -104,15 +102,11 @@ type Store struct {
 // OpenStore opens the database using the given driver. driver: "sqlite" (default) or "postgres";
 // source: sqlite=file path, postgres=DSN(postgres://user:pass@host/db?sslmode=disable).
 func OpenStore(driver, source string) (*Store, error) {
-	return openStoreForMode(driver, source, false)
-}
-
-func openStoreForMode(driver, source string, explicit bool) (*Store, error) {
 	s, err := connectStore(driver, source)
 	if err != nil {
 		return nil, err
 	}
-	s.explicitSchemaUpgrade = explicit
+	// A store that failed to initialize is never handed back, so nothing else could close its pool.
 	if err := s.initSerialized(); err != nil {
 		s.Close()
 		return nil, err
@@ -120,6 +114,9 @@ func openStoreForMode(driver, source string, explicit bool) (*Store, error) {
 	return s, nil
 }
 
+// connectStore opens and pings the database without initializing it: no schema check, no DDL, no
+// migration. Initialization is OpenStore's job; the schema-upgrade inspection uses this to look at a
+// database it must not alter.
 func connectStore(driver, source string) (*Store, error) {
 	if driver == "" {
 		driver = "sqlite"
@@ -303,7 +300,7 @@ func (s *Store) init() error {
 	// does recognise is carried forward — the baseline is frozen, everything since it is a step. A
 	// fresh database runs the same steps as an upgraded one, so there is one shape in the world
 	// rather than two that must be kept in step.
-	if err := s.runMigrationsWithExplicit(state != schemaCurrent || s.explicitSchemaUpgrade); err != nil {
+	if err := s.runMigrations(); err != nil {
 		return err
 	}
 	if err := s.reconcileReportVersions(); err != nil {

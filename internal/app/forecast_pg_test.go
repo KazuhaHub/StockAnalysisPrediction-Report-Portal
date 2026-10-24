@@ -23,7 +23,7 @@ func TestPostgresForecastStepApplies(t *testing.T) {
 	windBackToBeforeTheForecastStep(t, st)
 	st.Close()
 
-	migrated, err := openStoreForMode("postgres", pgDSN(t), true)
+	migrated, err := OpenStore("postgres", pgDSN(t))
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 	dump := dumpOf(t, st)
 	st.Close()
 
-	fresh, err := openStoreForMode("postgres", pgDSN(t), true)
+	fresh, err := OpenStore("postgres", pgDSN(t))
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
