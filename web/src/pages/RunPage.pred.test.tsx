@@ -8,6 +8,7 @@ import type { PredictionSet } from '../api/types'
 const state = vi.hoisted(() => ({
   scope: 'all' as 'all' | 'own' | 'none', stage: 'full' as 'off' | 'card' | 'full', external: false,
   calls: [] as string[], deferred: null as null | ((value: unknown) => void),
+  covered: undefined as boolean | undefined, empty: false,
 }))
 vi.mock('../auth', () => ({ useAuth: () => ({ user: 'reader', admin: false, forecastReader: state.stage, forecast: { scope: state.scope, external: state.external } }) }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ fontSize: 15, fontWeight: 400, wide: false }) }))
@@ -29,7 +30,10 @@ vi.mock('../api/client', () => ({
     if (url.includes('/predictions')) {
       if (state.deferred) return new Promise((resolve) => { state.deferred = resolve })
       const id = url.includes('/2/') ? 2 : 1
-      return Promise.resolve({ ok: true, sets: [accepted(id)], display_set_id: id })
+      return Promise.resolve({
+        ok: true, sets: state.empty ? [] : [accepted(id)], display_set_id: state.empty ? 0 : id,
+        ...(state.covered === undefined ? {} : { covered: state.covered }),
+      })
     }
     const id = url.includes('r=2') ? 2 : 1
     return Promise.resolve({ key: 'run', symbol: '600519', name: 'Test', date: '2026-10-20', selId: id, tabs: [],
@@ -45,6 +49,7 @@ function page() {
 }
 beforeEach(() => {
   state.scope = 'all'; state.stage = 'full'; state.external = false; state.calls = []; state.deferred = null
+  state.covered = undefined; state.empty = false
   localStorage.clear()
 })
 describe('RunPage forecast access and revisions', () => {
@@ -55,7 +60,31 @@ describe('RunPage forecast access and revisions', () => {
     await screen.findByText('report-body')
     expect(document.querySelector('#forecast')).toBeNull()
     expect(screen.queryByTestId('forecast-summary-chip')).toBeNull()
+    expect(screen.queryByText('forecast.reading.meta')).toBeNull()
     expect(state.calls.some((url) => url.includes('/predictions'))).toBe(false)
+  })
+  it('keeps the forecast meta line inside the card, once, for a reader who has one', async () => {
+    render(page())
+    await screen.findByText(/1,111\.00/)
+    const lines = screen.getAllByText('forecast.reading.meta')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].closest('#forecast')).toBeTruthy()
+  })
+  it('renders no card for a report type the ledger does not cover', async () => {
+    state.covered = false
+    state.empty = true
+    render(page())
+    await screen.findByText('report-body')
+    await waitFor(() => expect(state.calls.some((url) => url.includes('/predictions'))).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(document.querySelector('#forecast')).toBeNull()
+    expect(screen.queryByText('forecast.reading.no_forecast')).toBeNull()
+  })
+  it('keeps the empty card for a covered report that made no forecast', async () => {
+    state.covered = true
+    state.empty = true
+    render(page())
+    expect(await screen.findByText('forecast.reading.no_forecast')).toBeTruthy()
   })
   it('shows a card at card stage and adds the body summary only at full', async () => {
     state.stage = 'card'

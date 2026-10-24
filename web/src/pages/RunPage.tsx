@@ -15,7 +15,6 @@ import { NO_ITEM_TOOLTIP } from '../lib/segmented'
 import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
-import { formatReportDateTime, isInstant } from '../lib/datetime'
 
 export default function RunPage() {
   const { t } = useTranslation()
@@ -181,7 +180,6 @@ export default function RunPage() {
         )}
           {rep && <VersionSwitcher reportId={rep.id} onPick={(id) => setSp({ r: String(id) })} />}
           <Card className="rp-doc-card" title={rep?.displayTitle} extra={rep ? <ReaderControls /> : undefined} style={readerVars}>
-            {rep && <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 8 }}>{t('forecast.reading.meta', { date: rep.date, received: isInstant(rep.time) ? formatReportDateTime(rep.time) : '—', edition: selectedEdition || '—' })}</Typography.Text>}
             {rep && forecastFullEnabled && !currentPrediction.unavailable && <ForecastSummaryChip prediction={dataAccess === accessKey ? data.prediction : undefined} loading={dataAccess !== accessKey && loading} />}
             {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
           </Card>
@@ -199,6 +197,7 @@ export default function RunPage() {
               countedSetID={currentPrediction.data?.counted_set_id}
               displaySetID={currentPrediction.data?.display_set_id}
               settlementPaused={currentPrediction.data?.settlement_paused}
+              covered={currentPrediction.data?.covered}
               otherSets={[]}
               symbol={data.symbol}
               reportDate={rep.date}

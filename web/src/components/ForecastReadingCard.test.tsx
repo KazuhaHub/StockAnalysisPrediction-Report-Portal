@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { ConfigProvider, theme } from 'antd'
 import axe from 'axe-core'
 import { MemoryRouter } from 'react-router'
-import type { PredictionSet } from '../api/types'
+import type { PredictionMark, PredictionSet } from '../api/types'
 import en from '../locales/en-US.json'
 import ForecastReadingCard from './ForecastReadingCard'
 
@@ -192,7 +192,7 @@ describe('ForecastReadingCard', () => {
   })
 
   describe('checkpoints that apply to the set', () => {
-    const through120 = ['d5', 'd20', 'd60', 'd120'].map((checkpoint) => ({ checkpoint, status: 'resolved' as const, bar_date: '2026-09-28', close_fen: 21128, ret_bp: 100, bench_ret_bp: 50 }))
+    const through120: PredictionMark[] = (['d5', 'd20', 'd60', 'd120'] as const).map((checkpoint) => ({ checkpoint, status: 'resolved' as const, bar_date: '2026-09-28', close_fen: 21128, ret_bp: 100, bench_ret_bp: 50 }))
     const rowKeys = () => Array.from(document.querySelectorAll('tbody tr[data-row-key]')).map((row) => row.getAttribute('data-row-key'))
 
     it('shows no h12 step or row when the set has no standard horizon', () => {
