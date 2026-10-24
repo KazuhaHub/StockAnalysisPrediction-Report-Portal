@@ -17,7 +17,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
-import type { ForecastDrySample, ForecastSettings } from '../../api/types'
+import type { ForecastDrySample, ForecastReadinessItem, ForecastSettings } from '../../api/types'
 import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
@@ -50,6 +50,16 @@ export default function ForecastEvaluatorStatus({
   const status = evaluatorStatus(settings, nowMs)
   const hb = settings.heartbeat
   const failing = settings.readiness.filter((r) => !r.ok)
+  // A failing item is worded from its reason code, with the benchmarks it names in their display
+  // names; the server's English detail is only the fallback for a server that sends no reason.
+  const readinessDetail = (r: ForecastReadinessItem) => {
+    if (!r.reason) return r.detail ?? ''
+    const key = `forecast.eval.readiness.reason.${r.reason}`
+    const codes = (r.codes ?? []).map((c) => t(`forecast.bench.${c}`)).join(t('forecast.listSeparator'))
+    const text = t(key, { codes, count: r.count ?? 0 })
+    // t answers with the key itself for a reason this page has no wording for (a newer server).
+    return text === key ? (r.detail ?? '') : text
+  }
 
   const post = async (body: Record<string, unknown>, success?: string) => {
     setBusy(true)
@@ -181,7 +191,7 @@ export default function ForecastEvaluatorStatus({
               {settings.readiness.map((r) => (
                 <Typography.Text key={r.key} type={r.ok ? undefined : 'danger'}>
                   {r.ok ? '✓' : '✗'} {t(`forecast.eval.readiness.${r.key}`)}
-                  {!r.ok && r.detail ? ` — ${r.detail}` : ''}
+                  {!r.ok && readinessDetail(r) ? ` — ${readinessDetail(r)}` : ''}
                 </Typography.Text>
               ))}
             </Space>

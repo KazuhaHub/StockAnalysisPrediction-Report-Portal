@@ -91,8 +91,9 @@ which is also the rollback story.
 **Switching on is gated by what has been exercised, not by a calendar.** The readiness list requires
 the build to contain the full evaluator, the ledger start to be set, a dry pass to have finished
 without errors, a hand check for every benchmark the evaluator can select, and a test alert that
-reached both channels in the last thirty days. The mode is refused — with the failing items — until
-every one holds. The list is code, not advice.
+reached every enabled alert channel in the last thirty days, with at least one channel enabled. The
+mode is refused — with the failing items — until every one holds. The list is code, not advice.
+(Amended 2026-10-24: the alert item required both channels until the owner decided one is enough.)
 
 **The loop is observable and the watchdog is independent.** Every pass writes a heartbeat: counters,
 fetches by source, market and code, the newest bar per benchmark, the dry sample, and the codes
@@ -104,9 +105,11 @@ emitted before the ledger chain exists, because there is nothing to check.
 
 **Alerts go to Email and Slack.** The webhook event remains the extension surface, fired once by the
 producer; the portal's own two channels deliver to every configured recipient and to a Slack webhook
-whose URL is write-only and host-locked. A test alert writes the readiness stamp only when both
-channels succeed, and changing a channel deletes the stamp. A failing alert never fails the operation
-that produced it.
+whose URL is write-only and host-locked. A test alert goes to the channels that are configured,
+enabled and unpaused, and writes the readiness stamp only when all of them succeed; with none it is
+refused. Changing a channel, pausing or resuming it included, deletes the stamp. A failing alert never
+fails the operation that produced it. (Amended 2026-10-24: a stamp used to need both channels; one
+configured channel is now enough, because a deployment may alert by email alone or by Slack alone.)
 
 **One connection, one transaction.** A migration and a restore do all of their work — probes, DDL,
 data, ledger rows, audits — through the transaction's own handle. On SQLite the pool is a single

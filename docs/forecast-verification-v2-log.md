@@ -2302,3 +2302,26 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   look only at the steps they applied, because other tests in the shared database re-stamp earlier
   steps. ADR 0035 and 0039, the decisions page, the upgrade notes and the operations document carry the
   reasoning.
+
+### 2026-10-24 — readiness item 5 needs one channel, failures read in the page's language
+
+- The owner dropped the "both channels" requirement of readiness item 5 while configuring production
+  alerts. The item now needs at least one channel that has a destination and is enabled and unpaused,
+  and a test alert that reached every such channel within 30 days. The test sends only to configured
+  channels, so an absent channel is neither tested nor recorded as a failed delivery; with none it is
+  refused with 409 `forecast_alert_no_channel`, and with every configured channel disabled or paused
+  with 409 `notification_unavailable` (reason `alerts_channels_paused`). Any channel change, pausing
+  or resuming included, still deletes the stamp, so adding or resuming the second channel needs a new
+  test; a test now pins the resume case. The alert card lists which channels take part (`configured`
+  and `active` in the settings view) and shows a channel that does not as such, not by an old delivery
+  result. Real alert delivery (the notification worker) is unchanged.
+- Readiness items now carry a closed `reason` code, plus `codes` (the benchmarks a gate item is
+  missing) and `count` where the reason refers to a number. The operations page words a failing item
+  from those in the reader's language, with benchmark display names, instead of showing the English
+  `detail`, which stays as the fallback for an older server and for logs.
+- Every reason goes through `readinessItem.fail`; `TestReadinessReasonsAreTranslated` scans for those
+  codes and checks each is in the TypeScript union and worded in every locale. A reason the page has no
+  wording for falls back to the English detail.
+- The readiness fixtures in the tests now configure an email recipient, because a stamp with nothing
+  configured to deliver to no longer satisfies the item. An SMTP save still deletes the stamp, as it
+  did before; that fails safe and is left alone.

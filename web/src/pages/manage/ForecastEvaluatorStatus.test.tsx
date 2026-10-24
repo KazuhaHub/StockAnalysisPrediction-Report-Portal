@@ -19,7 +19,14 @@ vi.mock('../../api/client', () => ({
   errText: (e: unknown, t: (k: string) => string) => t('err.forecast_eval_off'),
 }))
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+// Reason keys echo their values, so a test can see which benchmark a failure names. A reason this
+// page has no wording for answers with the bare key, as i18next does for a missing key.
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (k: string, v?: Record<string, unknown>) =>
+      v && k.startsWith('forecast.eval.readiness.reason.') && !k.endsWith('.not_yet_known') ? `${k} ${JSON.stringify(v)}` : k,
+  }),
+}))
 
 const now = dayjs().toISOString()
 
@@ -133,6 +140,34 @@ describe('ForecastEvaluatorStatus', () => {
     expect(on.disabled).toBe(true)
     const alerts = screen.getAllByText(/forecast\.eval\.readiness\.failed/)
     expect(alerts.length).toBeGreaterThan(0)
+  })
+
+  it("words a failing item from its reason in the reader's language, naming the benchmark", () => {
+    show({
+      readiness: base.readiness.map((r) =>
+        r.key === 'dry_gate' ? { ...r, ok: false, detail: 'no dry-run check for sh000852', reason: 'gate_missing', codes: ['sh000852'] } : r),
+    })
+    const row = screen.getByText(/forecast\.eval\.readiness\.reason\.gate_missing/)
+    expect(row.textContent).toContain('forecast.bench.sh000852')
+    expect(screen.queryByText(/no dry-run check/)).toBeNull()
+  })
+
+  it('carries the count a reason refers to', () => {
+    show({ readiness: base.readiness.map((r) => (r.key === 'dry_pass' ? { ...r, ok: false, reason: 'dry_pass_errors', count: 3 } : r)) })
+    expect(screen.getByText(/forecast\.eval\.readiness\.reason\.dry_pass_errors/).textContent).toContain('"count":3')
+  })
+
+  it('falls back to the detail from a server that sends no reason', () => {
+    show({ readiness: base.readiness.map((r) => (r.key === 'alerts' ? { ...r, ok: false, detail: 'older server text' } : r)) })
+    expect(screen.getByText(/older server text/)).toBeTruthy()
+  })
+
+  it('falls back to the detail for a reason this page has no wording for', () => {
+    // A page cached from before a newer server added a reason must not show the raw key.
+    const unknown = { key: 'alerts' as const, ok: false, detail: 'newer server text', reason: 'not_yet_known' as never }
+    show({ readiness: base.readiness.map((r) => (r.key === 'alerts' ? unknown : r)) })
+    expect(screen.getByText(/newer server text/)).toBeTruthy()
+    expect(screen.queryByText(/reason\.not_yet_known/)).toBeNull()
   })
 
   it('switches to dry without a confirmation', async () => {

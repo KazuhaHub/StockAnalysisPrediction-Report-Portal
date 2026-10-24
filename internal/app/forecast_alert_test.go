@@ -415,11 +415,94 @@ func TestAlertTestFailsWhenSlackFails(t *testing.T) {
 	}
 }
 
+// TestAlertTestNeedsOnlyTheConfiguredChannels: a deployment may alert by email alone or by Slack
+// alone. The test reaches every configured channel, records nothing for the absent one, and the
+// stamp it writes satisfies readiness item 5.
+func TestAlertTestNeedsOnlyTheConfiguredChannels(t *testing.T) {
+	s := newV1Server(t)
+	s.mailFn = func([]string, string, string) error { return nil }
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.apiForecastAlertTest(rec, httptest.NewRequest("POST", "/api/admin/forecast/alert-test", nil), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("email only: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Results map[string]map[string]any `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body.Results["email"]; !ok || len(body.Results) != 1 {
+		t.Errorf("results = %v, want email only", body.Results)
+	}
+	if got := s.st.GetSetting(setForecastAlertTestOKAt, ""); got == "" {
+		t.Error("test_ok_at not written after the only configured channel delivered")
+	}
+	if _, ok := s.st.forecastAlertState().Channels["slack"]; ok {
+		t.Error("a delivery was recorded for Slack, which is not configured")
+	}
+	for _, it := range s.forecastReadiness(time.Now()) {
+		if it.Key == "alerts" && !it.OK {
+			t.Errorf("alerts item fails with one verified channel: %+v", it)
+		}
+	}
+}
+
+// TestAlertTestSlackOnly: the other single-channel setup, with no email recipients at all.
+func TestAlertTestSlackOnly(t *testing.T) {
+	s := newV1Server(t)
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer stub.Close()
+	s.slackHostForTest = "127.0.0.1"
+	if err := s.st.SetSetting(setForecastAlertSlackURL, stub.URL); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.apiForecastAlertTest(rec, httptest.NewRequest("POST", "/api/admin/forecast/alert-test", nil), "admin")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"slack"`) || strings.Contains(rec.Body.String(), `"email"`) {
+		t.Fatalf("Slack only: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting(setForecastAlertTestOKAt, ""); got == "" {
+		t.Error("test_ok_at not written after the only configured channel delivered")
+	}
+}
+
+// TestAlertTestRefusedWithoutAnyChannel: item 5 still needs somewhere to send an alert. With no
+// channel configured the test is refused, nothing is stamped, and the item names the reason.
+func TestAlertTestRefusedWithoutAnyChannel(t *testing.T) {
+	s := newV1Server(t)
+	rec := httptest.NewRecorder()
+	s.apiForecastAlertTest(rec, httptest.NewRequest("POST", "/api/admin/forecast/alert-test", nil), "admin")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "forecast_alert_no_channel") {
+		t.Fatalf("no channel: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.st.GetSetting(setForecastAlertTestOKAt, ""); got != "" {
+		t.Errorf("test_ok_at written with no channel: %q", got)
+	}
+	// A stamp alone, with nothing configured to deliver to, does not satisfy the item either.
+	if err := s.st.SetSetting(setForecastAlertTestOKAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range s.forecastReadiness(time.Now()) {
+		if it.Key == "alerts" && (it.OK || it.Reason != "alerts_no_channel") {
+			t.Errorf("alerts item = %+v, want a failure with reason alerts_no_channel", it)
+		}
+	}
+}
+
 // TestAlertChangeInvalidatesTheVerification: a stamp only covers the configuration it was made
 // with, and only for thirty days.
 func TestAlertChangeInvalidatesTheVerification(t *testing.T) {
 	s := newV1Server(t)
 	now := time.Now().UTC()
+	if err := s.st.SetSetting(setForecastAlertEmailTo, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
 	item := func() readinessItem {
 		for _, it := range s.forecastReadiness(now) {
 			if it.Key == "alerts" {

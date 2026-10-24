@@ -248,8 +248,10 @@ response lists each item with its state (P9):
    recorded as `sh/000852` (or `sh/000906`). The evaluator in mode `1` still writes nothing for a set whose frozen
    code has no recorded check (it plans them as in dry mode), so the first November sets under `sh000906` wait for
    their own check.
-5. Alert channels verified: a test alert delivered to **both** the configured Email recipients and the Slack
-   webhook within the last 30 days (`forecast_alert_test_ok_at`, P41).
+5. Alert channels verified: at least one channel (Email recipients or the Slack webhook) is configured,
+   enabled and unpaused, and a test alert reached **every** configured channel within the last 30 days
+   (`forecast_alert_test_ok_at`, P41). *Amended 2026-10-24 by the owner: this read "both" channels
+   until then; one verified channel is now enough, and an unconfigured channel is not tested.*
 
 6. The ledger chain is usable: `ledger_chain` (`forecastReadiness` in `forecast_ops.go`), true when an explicitly
    enabled settlement chain exists and its primary carries both evidence capabilities (P23, §8.8). It was not in this
@@ -1622,7 +1624,7 @@ own timeouts, with its own `recover()`. One alert per failed ingest; there is no
 |---|---|---|
 | `GET /api/admin/forecast` | admin | adds `alerts: {email_to, has_slack, last: {email:{at,ok,error}, slack:{…}}, test_ok_at}` — never the Slack URL |
 | `POST /api/admin/forecast` | admin | accepts `alert_email_to` (each address validated; 400 `forecast_bad_alert_email`) and `alert_slack_url` (`""` clears; non-https or another host → 400 `forecast_bad_slack_url`); audited `forecast.alert` with the changed field names only (no values), the `changedSettingFields` convention (`audit.go:233`) |
-| `POST /api/admin/forecast/alert-test` | admin | **New.** Sends a test alert to both channels; 200 with per-channel results; `forecast_alert_test_ok_at` is written only when **both** succeed; otherwise 502 `forecast_alert_failed` with the per-channel errors. Audited `forecast.alert.test`. |
+| `POST /api/admin/forecast/alert-test` | admin | **New.** Sends a test alert to every configured channel; 200 with per-channel results; `forecast_alert_test_ok_at` is written only when **all** of them succeed; otherwise 502 `forecast_alert_failed` with the per-channel errors; 409 `forecast_alert_no_channel` when no channel is configured, 409 `notification_unavailable` when every configured channel is disabled or paused. Audited `forecast.alert.test`. (Amended 2026-10-24: previously both channels were required.) |
 
 **UI.** `ForecastAlerts` section on `/manage/forecast`: recipients input, Slack URL input (placeholder shows "set"
 when `has_slack`), Save, "Send test alert", last delivery per channel. States: empty (no channels: a warning that

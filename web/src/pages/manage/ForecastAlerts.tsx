@@ -5,9 +5,10 @@ import dayjs from 'dayjs'
 import { api, ApiError, errText } from '../../api/client'
 import type { ForecastChannelResult, ForecastSettings } from '../../api/types'
 
-// The alert channels (P41). Readiness item 5 is "a test alert reached BOTH channels in the last 30
-// days", so this card has to make both facts visible: whether a channel is configured at all, and
-// what its last delivery did.
+// The alert channels (P41). Readiness item 5 is "at least one channel is configured and enabled, and a
+// test alert reached every such channel in the last 30 days" (one channel is enough since 2026-10-24),
+// so this card has to make both facts visible: whether each channel takes part at all, and what its
+// last delivery did.
 //
 // The Slack URL is write-only. The field starts empty even when one is stored — the placeholder says
 // so — and a blank Save does not clear it. Clearing is an explicit button, because a form that cleared
@@ -28,8 +29,12 @@ export default function ForecastAlerts({
   const [testing, setTesting] = useState(false)
   const [results, setResults] = useState<Record<string, ForecastChannelResult> | null>(null)
 
-  // Readiness item 5 needs BOTH channels, so a single configured channel is still a warning.
-  const bothConfigured = alerts.email_to.trim() !== '' && alerts.has_slack
+  // Readiness item 5 needs at least one configured and enabled channel; either one alone is enough.
+  // The server says which channels have a destination and which of those are enabled and unpaused;
+  // an older server that does not is read from the two fields.
+  type Channel = 'email' | 'slack'
+  const configured: Channel[] = alerts.configured ?? ([alerts.email_to.trim() !== '' && 'email', alerts.has_slack && 'slack'].filter(Boolean) as Channel[])
+  const active: Channel[] = alerts.active ?? configured
   const verifiedOK = (() => {
     if (!alerts.test_ok_at) return false
     const age = Date.now() - Date.parse(alerts.test_ok_at)
@@ -74,7 +79,8 @@ export default function ForecastAlerts({
         {},
       )
       setResults(r.results)
-      message.success(t('forecast.alert.testOK'))
+      const reached = Object.keys(r.results ?? {}).map((c) => t(`forecast.alert.channel.${c}`))
+      message.success(t('forecast.alert.testOK', { channels: reached.join(t('forecast.listSeparator')) }))
       onChanged()
     } catch (e) {
       if (e instanceof ApiError) {
@@ -99,7 +105,12 @@ export default function ForecastAlerts({
     return msg
   }
 
-  const lastRow = (channel: 'email' | 'slack') => {
+  const lastRow = (channel: Channel) => {
+    // A channel that takes no part in tests and alerts says so, rather than showing a delivery result
+    // from when it did.
+    if (!active.includes(channel)) {
+      return <Typography.Text type="secondary">{t(configured.includes(channel) ? 'forecast.alert.inactive.paused' : 'forecast.alert.inactive.unused')}</Typography.Text>
+    }
     const last = results?.[channel] ?? alerts.last?.[channel]
     if (!last) return <Typography.Text type="secondary">{t('forecast.alert.never')}</Typography.Text>
     return (
@@ -117,7 +128,8 @@ export default function ForecastAlerts({
     <Card title={t('forecast.alert.title')}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">{t('forecast.alert.hint')}</Typography.Text>
-        {!bothConfigured && <Alert type="warning" showIcon title={t('forecast.alert.none')} />}
+        {configured.length === 0 && <Alert type="warning" showIcon title={t('forecast.alert.none')} />}
+        {configured.length > 0 && active.length === 0 && <Alert type="warning" showIcon title={t('forecast.alert.pausedAll')} />}
 
         <div>
           <Typography.Text>{t('forecast.alert.email')}</Typography.Text>

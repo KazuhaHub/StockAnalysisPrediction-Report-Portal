@@ -691,8 +691,22 @@ export interface ForecastHeartbeat {
 export interface ForecastReadinessItem {
   key: 'binary' | 'population' | 'dry_pass' | 'dry_gate' | 'alerts' | 'ledger_chain'
   ok: boolean
+  /** English explanation, for logs and as the fallback when a server sends no reason. */
   detail?: string
+  /** Why a failing item fails, as a closed code the page words in the reader's language. */
+  reason?: ForecastReadinessReason
+  /** The benchmark codes a gate failure names. */
+  codes?: string[]
+  /** A number the reason refers to, such as a dry pass's error count. */
+  count?: number
 }
+
+export type ForecastReadinessReason =
+  | 'population_unset'
+  | 'not_dry' | 'no_dry_pass' | 'dry_pass_running' | 'dry_pass_errors'
+  | 'gate_unreadable' | 'gate_missing'
+  | 'alerts_unreadable' | 'alerts_no_channel' | 'alerts_channels_paused' | 'alerts_untested'
+  | 'ledger_no_primary'
 
 export interface ForecastChannelResult {
   at?: string
@@ -705,9 +719,13 @@ export interface ForecastAlerts {
   email_to: string
   /** Whether a Slack webhook is stored. The URL itself is never returned. */
   has_slack: boolean
+  /** Channels with a destination. Absent from an older server. */
+  configured?: ('email' | 'slack')[]
+  /** Configured channels that are also enabled and unpaused: the ones tests and alerts go to. */
+  active?: ('email' | 'slack')[]
   /** The last delivery per channel, keyed "email" / "slack". */
   last?: Record<string, ForecastChannelResult>
-  /** When a test alert last reached both channels. */
+  /** When a test alert last reached every enabled channel. */
   test_ok_at?: string
 }
 

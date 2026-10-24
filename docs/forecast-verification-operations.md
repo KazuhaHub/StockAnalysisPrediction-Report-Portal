@@ -86,7 +86,10 @@ items. There are six: `binary`, `population` (the ledger start is set), `dry_pas
 
 1. `dry`, then "Evaluate now"; read the sample and `last_error`.
 2. Record a dry-run check for every benchmark in use (the card lists the codes).
-3. Send a test alert that reaches **both** channels (the readiness stamp is written only then).
+3. Configure at least one alert channel (email recipients, a Slack webhook, or both) and send a test
+   alert. It goes to every configured, enabled channel, and the readiness stamp is written only when
+   all of them deliver. A channel paused in the notification settings takes no part; resuming it
+   deletes the stamp, so test again.
 4. Check item 6, `ledger_chain`: the quote-source panel must show an enabled settlement chain whose
    primary carries both evidence capabilities. Without it settlement refuses every mark and the
    watchdog reports `no_source`, so the mode is refused rather than allowed to idle. If the item is
