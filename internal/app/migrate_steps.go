@@ -137,6 +137,51 @@ func (e migExec) columnExists(table, col string) bool {
 // colRef is a column a step guarantees, by table.
 type colRef struct{ table, name string }
 
+// colRename is a BASELINE column a step renames (ADR 0042). The frozen declaration keeps the old name
+// for the compatibility window, so the shape check, the step's verification and the restore all have
+// to know the column moved: checkRenamedBaseColumn, verifyMigrationProducts and restoreStream.
+type colRename struct{ table, from, to string }
+
+// stepRename is a colRename together with the step that performs it.
+type stepRename struct {
+	step string
+	colRename
+}
+
+// baseRenames indexes every rename the known steps declare by "table.from".
+func baseRenames(steps []migration) map[string]stepRename {
+	out := map[string]stepRename{}
+	for _, m := range steps {
+		for _, r := range m.renames {
+			out[r.table+"."+r.from] = stepRename{step: m.id, colRename: r}
+		}
+	}
+	return out
+}
+
+// renamesNotCarried is what a restore has to translate: the renames of the steps a dump predates,
+// by table, old name to new. A dump that declares the step must already carry the new name, so its
+// renames are deliberately absent here — an old name in such a dump is refused as unknown.
+func renamesNotCarried(declared []string, steps []migration) map[string]map[string]string {
+	carried := map[string]bool{}
+	for _, id := range declared {
+		carried[id] = true
+	}
+	out := map[string]map[string]string{}
+	for _, m := range steps {
+		if carried[m.id] {
+			continue
+		}
+		for _, r := range m.renames {
+			if out[r.table] == nil {
+				out[r.table] = map[string]string{}
+			}
+			out[r.table][r.from] = r.to
+		}
+	}
+	return out
+}
+
 // restoreRule says how a dump written BEFORE this step may be loaded into a build that has it. The
 // zero value refuses, which is the honest default: a step that has not said otherwise does not let an
 // older dump in, and the operator is told to restore with the release that wrote it.
@@ -155,18 +200,81 @@ type restoreRule struct {
 
 // migration is one schema step.
 type migration struct {
-	id      string
+	id string
+	// explicit forbids implicit upgrade of an existing database at server startup.
+	explicit bool
+	// runbook is the repository path of the operator procedure for an explicit step. A refused
+	// startup names it, because the person reading the refusal is mid-deployment.
+	runbook string
 	columns []colRef
 	tables  []string
 	indices []string
+	renames []colRename
 	restore restoreRule
 	up      func(migExec) error
+	verify  func(migExec) error
 }
 
-// migrations is the ordered list this build knows. Append only; never edit a released step.
+// migrations is the ordered list this build knows. Append only; never edit a released step. The order
+// is the order steps reached main, not id order: a step whose id is lower than one already here is still
+// appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0007()}
+		migration0006(), migration0010(), migration0009(), migration0007()}
+}
+
+// migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).
+//
+// announcements.dismissible only ever governed the band's close button, while the name read as if it
+// covered the popup too — the confusion behind a production report where an operator switched it off
+// and expected the popup to stop being dismissable. So the column is renamed to say what it governs,
+// strip_dismissible, and popup_dismissible is added beside it.
+//
+// popup_dismissible is nullable with no default and is NOT back-filled: NULL reads as "dismissible",
+// which is what every popup was before this step. That is what keeps the step free of data work, and
+// therefore restorable from an older dump (olderDumpOK) — the rename itself moves no data, and the
+// restore translates the old name (renamesNotCarried).
+//
+// The ids 0007-0009 are taken by work in flight on other branches; ids are labels, and the order is
+// this list's order.
+func migration0010() migration {
+	return migration{
+		id:      "0010",
+		columns: []colRef{{table: "announcements", name: "popup_dismissible"}},
+		renames: []colRename{{table: "announcements", from: "dismissible", to: "strip_dismissible"}},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			// Only from the exact old shape. With both names present nothing is renamed, and the
+			// verification below refuses the database rather than picking one.
+			if e.columnExists("announcements", "dismissible") && !e.columnExists("announcements", "strip_dismissible") {
+				if _, err := e.exec(`ALTER TABLE announcements RENAME COLUMN dismissible TO strip_dismissible`); err != nil {
+					return fmt.Errorf("rename announcements.dismissible: %w", err)
+				}
+			}
+			if !e.columnExists("announcements", "popup_dismissible") {
+				if _, err := e.exec(`ALTER TABLE announcements ADD COLUMN popup_dismissible INTEGER`); err != nil {
+					return fmt.Errorf("add announcements.popup_dismissible: %w", err)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
+// not prove OU membership, so this step never backfills them. Steps 0007 and 0008 are reserved by
+// the notification and extension work; these reserved steps append after the released prefix.
+// Tier 2 provenance has not shipped and
+// must take the next free id after this one if that work is later approved.
+func migration0009() migration {
+	return migration{
+		id: "0009", explicit: true, runbook: "docs/forecast-purge-ownership-upgrade.md",
+		tables:  []string{"prediction_purge_owners"},
+		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
+		restore: restoreRule{olderDumpOK: true},
+		up:      createPredictionPurgeOwners,
+		verify:  verifyPredictionPurgeOwners,
+	}
 }
 
 // The forecast-verification ledger: prediction_sets, prediction_claims, prediction_marks (ADR 0029).
@@ -495,14 +603,21 @@ func migration0006() migration {
 
 // ---------- running them ----------
 
-// runMigrations applies what this build knows and this database has not recorded, then verifies every
-// step's declared products.
+// runMigrations is the startup path. It applies the automatic steps this database has not recorded
+// and refuses to apply an explicit step on its own; see runMigrationsWithExplicit.
+func (s *Store) runMigrations() error { return s.runMigrationsWithExplicit(false) }
+
+// runMigrationsWithExplicit applies what this build knows and this database has not recorded, then
+// verifies every step's declared products. An explicit step (one that alters an existing supported
+// database in a way an operator must sanction) is applied only when allowExplicit is set, which is
+// the case for a database that does not exist yet and for the offline schema-upgrade command. Any
+// other caller finds an unrecorded explicit step refused, before any earlier step has written DDL.
 //
 // The "written by a newer release" check belongs HERE rather than in the runner below: it is a
 // judgement about the database as a whole, made once at startup against the full list this build
 // knows. The runner is also driven directly by tests with steps of their own, and a subset list is
 // not a statement that the other steps do not exist.
-func (s *Store) runMigrations() error {
+func (s *Store) runMigrationsWithExplicit(allowExplicit bool) error {
 	steps := s.migrations()
 	known := map[string]bool{}
 	for _, m := range steps {
@@ -511,7 +626,31 @@ func (s *Store) runMigrations() error {
 	if err := s.refuseUnknownLedgerRows(known); err != nil {
 		return err
 	}
+	// Preflight before applying even an earlier automatic step: a refused startup writes no DDL.
+	for _, m := range steps {
+		if m.explicit && !allowExplicit {
+			var recorded string
+			err := s.queryRow(`SELECT v FROM meta WHERE k=?`, migrationLedgerKey(m.id)).Scan(&recorded)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if recorded == "" {
+				return fmt.Errorf("migration %s requires an explicit offline upgrade: stop the portal, take a pre-upgrade backup with the previous release, then run report-portal schema-upgrade --apply%s; server startup does not alter this schema", m.id, runbookHint(m))
+			}
+			if err := s.verifyMigrationProducts(s.poolExec(), []migration{m}); err != nil {
+				return err
+			}
+		}
+	}
 	return s.runMigrationSteps(steps)
+}
+
+// runbookHint is the clause that points a refused operator at the written procedure.
+func runbookHint(m migration) string {
+	if m.runbook == "" {
+		return ""
+	}
+	return " (procedure: " + m.runbook + ")"
 }
 
 // runMigrationSteps is the runner itself, taking the list so the framework's contract can be tested
@@ -738,6 +877,20 @@ func (s *Store) verifyMigrationProducts(e migExec, steps []migration) error {
 		for _, idx := range m.indices {
 			if !e.indexExists(idx) {
 				return fmt.Errorf("migration %s declares index %s, which is missing", m.id, idx)
+			}
+		}
+		for _, r := range m.renames {
+			if !e.columnExists(r.table, r.to) {
+				return fmt.Errorf("migration %s renames %s.%s to %s, which is missing", m.id, r.table, r.from, r.to)
+			}
+			if e.columnExists(r.table, r.from) {
+				return fmt.Errorf("migration %s renames %s.%s to %s, but %s.%s is still present", m.id,
+					r.table, r.from, r.to, r.table, r.from)
+			}
+		}
+		if m.verify != nil {
+			if err := m.verify(e); err != nil {
+				return fmt.Errorf("migration %s: %w", m.id, err)
 			}
 		}
 	}

@@ -75,15 +75,29 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	diagnostics := map[string]any{
+		"status": "unavailable", "max_reads": forecastShadowMaxComparisons,
+		"max_http_attempts": forecastShadowMaxHTTPAttempts,
+	}
+	if shadow, calls, err := s.st.forecastDiagnosticsContext(r.Context()); err == nil {
+		diagnostics["status"] = "ready"
+		if shadow.UpdatedAt == "" {
+			diagnostics["status"] = "empty"
+		}
+		diagnostics["shadow"], diagnostics["calls"] = shadow, calls
+	}
 	writeJSON(w, map[string]any{
 		"ok":      true,
 		"enabled": enabled,
+		"reader":  s.forecastReaderStage(forecastDecision{Scope: scopeAll}),
 		// The three-way mode (P9): off / dry / on. `enabled` stays for one release so a cached SPA
 		// bundle keeps working.
-		"mode":      forecastMode(s.st.GetSetting(setForecastAuto, "0")),
-		"heartbeat": heartbeatOrNil(s.st.ForecastHeartbeat()),
-		"readiness": s.forecastReadiness(time.Now()),
-		"dry_gate":  s.st.ForecastDryGate(),
+		"mode":        forecastMode(s.st.GetSetting(setForecastAuto, "0")),
+		"fallback":    forecastFallbackMode(s.st.GetSetting(setForecastFallback, "off")),
+		"diagnostics": diagnostics,
+		"heartbeat":   heartbeatOrNil(s.st.ForecastHeartbeat()),
+		"readiness":   s.forecastReadiness(time.Now()),
+		"dry_gate":    s.st.ForecastDryGate(),
 		// The codes the readiness item asks about, so the page can offer exactly those in the
 		// dry-run check form rather than every allowed index.
 		"gate_codes": gateCodes,
@@ -119,8 +133,10 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 // cohort so the caller can show it instead of guessing.
 func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in struct {
+		Reader         json.RawMessage  `json:"reader"`
 		Enabled        *bool            `json:"enabled"`
 		Mode           *json.RawMessage `json:"mode"`
+		Fallback       json.RawMessage  `json:"fallback"`
 		Bench          *string          `json:"bench"` // legacy spelling of bench_schedule, through R1b
 		BenchSchedule  *string          `json:"bench_schedule"`
 		BenchCancel    *bool            `json:"bench_cancel"`
@@ -139,6 +155,21 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 	// Validate EVERY field before writing any: a request that changes the benchmark and is then
 	// refused for its ledger start must not have persisted the benchmark. "A refusal writes nothing"
 	// is about the request, not about the one field that happened to be checked last.
+	var readerStage string
+	if len(in.Reader) > 0 {
+		if err := json.Unmarshal(in.Reader, &readerStage); err != nil || !validForecastReaderStage(readerStage) {
+			jsonErrorCode(w, http.StatusBadRequest, "invalid_param", "reader must be off, card or full")
+			return
+		}
+	}
+	var fallback string
+	if len(in.Fallback) > 0 {
+		if err := json.Unmarshal(in.Fallback, &fallback); err != nil || (strings.TrimSpace(fallback) != "off" && strings.TrimSpace(fallback) != "shadow") {
+			jsonErrorCode(w, http.StatusBadRequest, "forecast_bad_fallback", "fallback must be off or shadow; alternate writers are not admitted")
+			return
+		}
+		fallback = strings.TrimSpace(fallback)
+	}
 	var bench string
 	benchSet := false
 	cancel := in.BenchCancel != nil && *in.BenchCancel
@@ -332,6 +363,13 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 			map[string]any{"code": gateCode, "note": gateNote})
 	}
 
+	if len(in.Fallback) > 0 {
+		if err := s.st.saveForecastFallback(r.Context(), fallback, AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user), IP: s.auditIP(r)}); err != nil {
+			jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+			return
+		}
+	}
+
 	// The evaluator switch. Only a real change is audited: a form that posts the values it read must
 	// not fill the log with no-ops, or the one row that turned it on is buried.
 	if modeSet {
@@ -351,6 +389,16 @@ func (s *Server) apiForecastSettingsSave(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	if len(in.Reader) > 0 {
+		old := s.st.GetSetting(setForecastReader, "card")
+		if old != readerStage {
+			if err := s.st.SetSetting(setForecastReader, readerStage); err != nil {
+				jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+				return
+			}
+			s.recordChange(r, user, AuditForecastReader, "settings", setForecastReader, map[string]any{"from": old, "to": readerStage})
+		}
+	}
 	resp := map[string]any{"ok": true}
 	if effective != "" {
 		resp["effective_cohort"] = effective

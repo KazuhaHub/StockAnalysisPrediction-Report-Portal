@@ -26,6 +26,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -53,6 +54,8 @@ const (
 type forecastEvaluator struct {
 	mu      sync.Mutex
 	running bool
+	// Immutable copies of validated completed calendars, shared with readers under mu.
+	readCalendars map[string][]string
 	// fetch is the market-data seam. Nil means the real vendor call; a test replaces it so the
 	// evaluator's arithmetic and its session rules are testable without a network.
 	fetch func(ctx context.Context, market, code, from, to string) (*QuoteResp, error)
@@ -61,6 +64,8 @@ type forecastEvaluator struct {
 	// adjust is the front-adjusted fetch seam. It is the ONE qfq call (ADR 0029 §10) and exists only
 	// to detect a bonus or rights issue the unadjusted body does not name.
 	adjust func(ctx context.Context, market, code, from, to string) (map[string]int64, error)
+	// shadowTimeout is a test seam; production uses a separate fixed candidate deadline.
+	shadowTimeout time.Duration
 
 	// tickFn is a test seam for step's panic recovery. Nil means e.tick.
 	tickFn func(*Server) error
@@ -74,6 +79,7 @@ type forecastEvaluator struct {
 	bench        map[string]benchStat
 	drySample    []drySample
 	awaitingGate map[string]bool
+	ledgerPass   *ledgerTick
 }
 
 // loop is the ticker. Every minute it asks whether it should run at all, then whether anything is
@@ -117,6 +123,8 @@ func (e *forecastEvaluator) clock() time.Time {
 // deferred rather than scored against whatever the setting happens to be — the current setting is
 // never read here.
 func (e *forecastEvaluator) tick(s *Server) error {
+	e.ledgerPass = &ledgerTick{}
+	defer func() { e.ledgerPass = nil }()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -134,6 +142,12 @@ func (e *forecastEvaluator) tick(s *Server) error {
 	if len(sets) == 0 {
 		return nil
 	}
+	shadow := newForecastShadowPass(s)
+	completed := false
+	defer func() {
+		cancel()
+		shadow.finish(s, e.ledgerPass.snapshotObservations(), e.clock(), completed, e.shadowTimeout)
+	}()
 
 	for _, group := range groupSetsByBench(sets) {
 		if err := ctx.Err(); err != nil {
@@ -190,6 +204,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 			continue
 		}
+		shadow.offer(s, indexSeries)
 		// Fetch every stock body before settling any of them: the stale valve asks whether the
 		// VENDOR's whole feed lags, which is a property of this pass and cannot be answered one
 		// series at a time.
@@ -207,6 +222,13 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		if e.stats != nil {
 			e.stats.StaleValveTripped = valve
 		}
+		if !valve {
+			for i := range stocks {
+				if stockErrs[i] == nil {
+					shadow.offer(s, stocks[i])
+				}
+			}
+		}
 		for i, set := range need {
 			if err := ctx.Err(); err != nil {
 				return nil
@@ -216,6 +238,7 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 		}
 	}
+	completed = true
 	return nil
 }
 
@@ -317,7 +340,7 @@ func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec b
 	if err != nil {
 		// Do NOT overwrite the last known bar with an empty series: the stale-calendar check must
 		// keep seeing the age of the last body that arrived, not the moment a fetch failed.
-		return series, &benchFault{code: "fetch_failed", err: err}
+		return series, &benchFault{code: ledgerFetchRefusal(err), err: err}
 	}
 	e.noteBench(spec.Code, series)
 	if len(series.Bars) == 0 {
@@ -339,6 +362,7 @@ func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec b
 		return series, &benchFault{code: "calendar_bad",
 			err: fmt.Errorf("benchmark %q calendar has a zero-volume bar", spec.Code)}
 	}
+	e.publishReadCalendar(spec.Code, completedSessions(series, e.clock()))
 	return series, nil
 }
 
@@ -421,7 +445,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				plan.wakes[m.ID] = wake
 				continue
 			}
-			plan.deferMark(m, "fetch_failed", "")
+			plan.deferMark(m, ledgerFetchRefusal(stockErr), "")
 		}
 		return e.applyPlan(s, set, stockSeries, plan, now)
 	}
@@ -500,7 +524,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			if werr != nil {
 				// The look-back is a delivery fault, not this set's data: never charge the attempt.
 				for _, m := range set.Marks {
-					plan.deferMark(m, "fetch_failed", "")
+					plan.deferMark(m, ledgerFetchRefusal(werr), "")
 				}
 				return e.applyPlan(s, set, stockSeries, plan, now)
 			}
@@ -623,6 +647,8 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		var aerr error
 		adj, aerr = fetch(ctx, set.Market, set.Symbol, baseDate, last)
+		observation, _ := forecastCallResult(ctx, quoteSourceTencent, aerr)
+		e.ledgerPass.observe(observation)
 		if aerr != nil {
 			// The adjustment check is part of the answer: the mark waits, it is never resolved
 			// without it (F10). A source failure, so no attempt is charged.
@@ -710,16 +736,25 @@ func containsDate(dates []string, date string) bool {
 // and the charts are using. The congestion control is kept — the upstream ceiling is shared with the
 // readers, so this loop cannot crowd them out.
 func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, code, from string, now time.Time) (forecastSeries, error) {
-	release, err := s.quotes.acquire(ctx)
-	if err != nil {
-		return forecastSeries{}, err
+	var resp *QuoteResp
+	var err error
+	if e.fetch != nil {
+		// Preserve the isolated arithmetic-test seam. Runtime calls always use the configured
+		// ledger chain below; a seam cannot silently replace that path in production.
+		release, acquireErr := s.quotes.acquire(ctx)
+		if acquireErr != nil {
+			return forecastSeries{}, acquireErr
+		}
+		defer release()
+		resp, err = e.fetch(ctx, market, code, from, now.In(chinaZone).Format("2006-01-02"))
+	} else {
+		pass := e.ledgerPass
+		if pass == nil {
+			pass = &ledgerTick{}
+		}
+		resp, err = s.quotes.walkLedger(ctx, s.quoteConfigLoad(), market, code, from,
+			now.In(chinaZone).Format("2006-01-02"), pass)
 	}
-	defer release()
-	fetch := e.fetch
-	if fetch == nil {
-		fetch = fetchTencentRange
-	}
-	resp, err := fetch(ctx, market, code, from, now.In(chinaZone).Format("2006-01-02"))
 	if err != nil {
 		return forecastSeries{}, err
 	}
@@ -746,6 +781,18 @@ func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, co
 		}
 	}
 	return out, nil
+}
+
+// Preserve typed delivery/configuration refusals through the planner instead of obscuring an
+// absent ledger primary as a vendor outage. Unknown transport/parser errors remain fetch_failed.
+func ledgerFetchRefusal(err error) string {
+	var refusal *ledgerRefusal
+	if errors.As(err, &refusal) {
+		if _, known := predRefusalClass[refusal.Code]; known {
+			return refusal.Code
+		}
+	}
+	return "fetch_failed"
 }
 
 // forecastSeries is one fetched series with the extra facts the evaluator needs from the same call.
@@ -883,18 +930,13 @@ func lastBarInWindow(bars []QuoteBar, floor, before string) (QuoteBar, bool) {
 
 // corporateActionBetween reports whether an ex-event fell in this window.
 //
-// Two signals, because one is not enough:
+// This helper combines cash-dividend dates and gaps beyond the board's fen-rounded daily limit.
+// The raw feed can also name a non-cash transfer in free text (the captured 001323 bonus does),
+// but an empty cash amount is not an ExDates signal and an under-limit move evades the gap test.
+// settleMark therefore adds the independent qfq/raw ratio check; ordinary limit-down days remain
+// trading outcomes, not corporate actions. Adjusted prices are never used to calculate returns.
 //
-//   - The dividend element the unadjusted feed carries on an ex-date names the event outright
-//     ({"fh_sh":"3.8","djr":…,"cqr":…}). But it is a CASH-dividend element: across every fixture in
-//     testdata/quote, no seventh element mentions 送, 转增 or 配股 — and a bonus issue is the case
-//     that matters most, because it halves the unadjusted close.
-//   - So a gap larger than the board's daily limit is the backstop, and the only signal that can
-//     catch a 送转 nobody told us about. A one-day move beyond the limit cannot be trading, so it is
-//     a corporate action. This is why the plan's original gap heuristic was rejected and this one is
-//     not: that one fired on ordinary limit-down days, which ARE a real move.
-//
-// A flagged mark is excluded from the metrics and counted (ADR 0029 §9). No qfq fetch is needed.
+// A flagged mark is excluded from the metrics and counted (ADR 0029 §9). This helper does not fetch.
 func corporateActionBetween(symbol string, stock, index []QuoteBar, exDates []string, from, to, seriesFrom string) bool {
 	for _, d := range exDates {
 		if d > from && d <= to {

@@ -33,6 +33,7 @@ type Status = 'off' | 'dry' | 'healthy' | 'stale' | 'lagging' | 'error'
 
 function statusOf(s: ForecastSettings, nowMs: number): Status {
   if (s.mode === '0') return 'off'
+  if (s.readiness.some((item) => item.key === 'ledger_chain' && !item.ok)) return 'error'
   const hb = s.heartbeat
   if (!hb) return 'stale'
   if (nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
@@ -182,6 +183,9 @@ export default function ForecastEvaluatorStatus({
         />
 
         {settings.mode === 'dry' && <Alert type="info" showIcon title={t('forecast.eval.dryHint')} />}
+        {settings.readiness.some((item) => item.key === 'ledger_chain' && !item.ok) && (
+          <Alert type="warning" showIcon title={t('quoteAdmin.ledgerNoPrimary')} />
+        )}
         {failing.length > 0 && settings.mode !== '1' && (
           <Alert
             type="warning"

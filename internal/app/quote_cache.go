@@ -146,6 +146,8 @@ const (
 // escaping as a success.
 var errQuoteNoSources = errors.New("quote: no vendor sources configured")
 
+var errQuoteLedgerInterval = errors.New("quote: ledger capability is unavailable on the display path")
+
 // quoteFetchFunc is the shape both vendor fetchers in quote.go already have.
 type quoteFetchFunc func(ctx context.Context, market, code string, bars int) (*QuoteResp, error)
 
@@ -218,6 +220,9 @@ func (g quoteCapability) covers(m *quoteMarket, iv quoteInterval) bool {
 type quoteSource struct {
 	name  string
 	fetch quoteFetchFunc
+	// These are evidence capabilities, not operator-editable preferences.
+	cashDividends bool
+	reportsKind   bool
 	// fetchAt is fetch for a source that needs the interval to answer at all — see
 	// quoteIntervalFetchFunc. Exactly one of the two is set; call prefers this one.
 	fetchAt quoteIntervalFetchFunc
@@ -270,6 +275,9 @@ type quoteSource struct {
 // (market, interval) pair, and then the code. It is what the RESOLVER asks, because the resolver has
 // a target in hand; the panel has only a market and asks covers below.
 func (src quoteSource) serves(t quoteTarget, iv quoteInterval) bool {
+	if iv.ledger() {
+		return src.servesExplicit(t, iv)
+	}
 	if !src.covers(t.Market, iv) {
 		return false
 	}
@@ -278,12 +286,29 @@ func (src quoteSource) serves(t quoteTarget, iv quoteInterval) bool {
 	return src.knows == nil || src.knows(t)
 }
 
+// servesExplicit never treats an absent declaration as permission. Ledger callers must also
+// resolve a known market before a market predicate may authorize their request.
+func (src quoteSource) servesExplicit(t quoteTarget, iv quoteInterval) bool {
+	if t.Market == nil {
+		return false
+	}
+	for _, grant := range src.caps {
+		if grant.covers(t.Market, iv) {
+			return src.knows == nil || src.knows(t)
+		}
+	}
+	return false
+}
+
 // covers is "may this source be asked about this MARKET at this interval", which is the declaration
-// alone, with the empty case spelled out: an undeclared source is asked for everything. It is the
-// panel's question (marketIDsFor) and half of the resolver's.
+// alone. An undeclared source keeps the display wildcard, but never receives a ledger grant.
+// It is the panel's question (marketIDsFor) and half of the resolver's.
 func (src quoteSource) covers(m *quoteMarket, iv quoteInterval) bool {
+	if iv.ledger() && m == nil {
+		return false
+	}
 	if len(src.caps) == 0 {
-		return true
+		return !iv.ledger()
 	}
 	for _, g := range src.caps {
 		if g.covers(m, iv) {
@@ -301,6 +326,9 @@ func (src quoteSource) covers(m *quoteMarket, iv quoteInterval) bool {
 // declaration that lets a test wire a bare stub means "no restriction recorded", and this is what
 // keeps that convenience from reaching the failover loop as a panic in a handler goroutine.
 func (src quoteSource) call(ctx context.Context, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, error) {
+	if iv.ledger() {
+		return nil, errQuoteLedgerInterval
+	}
 	// The bounded window first, and it never falls through to the other two. A source reached here
 	// for this interval declared it, so a nil fetcher is a wiring mistake and says so; answering it
 	// from fetch or fetchAt would return the last `bars` sessions labelled with the reader's dates.
@@ -379,7 +407,9 @@ func (src quoteSource) marketIDsFor(ivs ...quoteInterval) []string {
 func defaultQuoteSources() []quoteSource {
 	return []quoteSource{
 		{
-			name: quoteSourceTencent,
+			name:          quoteSourceTencent,
+			cashDividends: true,
+			reportsKind:   true,
 			// fetchAt rather than fetch, because this vendor now has TWO endpoints and only the
 			// interval says which one a request means: fqkline for the daily series, minute/query
 			// for 分时. Wiring it through the interval-blind fetcher would answer a minute request
@@ -392,6 +422,10 @@ func defaultQuoteSources() []quoteSource {
 			// And the same daily endpoint with its two date slots filled — see quoteTencentRangeURL.
 			fetchRange: fetchTencentRange,
 			caps: []quoteCapability{
+				// Tier 1 ledger evidence is measured for mainland daily series only. Beijing
+				// has no usable history; overseas display grants do not imply ledger admission.
+				{markets: func(m *quoteMarket) bool { return m.id == "sh" || m.id == "sz" },
+					intervals: []quoteInterval{quoteIntervalSettled}},
 				// The price, in every market: fqkline answers all five — every fixture in
 				// testdata/quote/ came out of it — and its snapshot half is trusted in all five.
 				{intervals: []quoteInterval{quoteIntervalSnapshot}},
@@ -453,13 +487,20 @@ func defaultQuoteSources() []quoteSource {
 			},
 		},
 		{
-			name:  quoteSourceSina,
-			fetch: fetchSinaQuote,
+			name:       quoteSourceSina,
+			fetch:      fetchSinaQuote,
+			fetchRange: fetchSinaRange,
 			// A-shares only. Sina's Hong Kong and US lines are `rt_hk00700` and `gb_aapl` — 19 and 36
 			// fields in a different order — so pointing the A-share parser at either would not be a
 			// second source, it would be a second shape read as the first. The predicate is the same
 			// `sina` column quoteSinaTarget refuses those two markets on.
 			caps: []quoteCapability{
+				// The bounded adapter validates full-tail snapshot coherence before trimming.
+				// This admits comparison only, never a ledger writer or a public display range.
+				{
+					markets:   func(m *quoteMarket) bool { return m.id == "sh" || m.id == "sz" },
+					intervals: []quoteInterval{quoteIntervalSettledShadow},
+				},
 				{
 					markets:   func(m *quoteMarket) bool { return m.sina },
 					intervals: []quoteInterval{quoteIntervalSnapshot},
@@ -759,11 +800,12 @@ type quoteFlight struct {
 type quoteCache struct {
 	once sync.Once
 
-	mu      sync.Mutex // guards entries, lru, bytes and health
-	entries map[string]*list.Element
-	lru     list.List
-	bytes   int
-	health  map[string]*QuoteSourceHealth
+	mu           sync.Mutex // guards entries, lru, bytes and health
+	entries      map[string]*list.Element
+	lru          list.List
+	bytes        int
+	health       map[string]*QuoteSourceHealth
+	ledgerHealth map[string]*QuoteSourceHealth
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight
@@ -1098,6 +1140,10 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 // The returned *QuoteResp is SHARED with every other caller holding the same cache entry. Nothing
 // downstream may mutate it; the handler copies the struct before stamping Cached on it.
 func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, bool, time.Duration, error) {
+	// Refuse before lookup, flight creation or upstream work, even if a matching entry exists.
+	if iv.ledger() {
+		return nil, false, 0, errQuoteLedgerInterval
+	}
 	c.init()
 	cfg = cfg.orDefaults()
 	key := quoteCacheKey(market, code, bars, iv, win)
@@ -1466,7 +1512,11 @@ func (c *quoteCache) clear() quoteCacheStats {
 // quoteSourceInfo is one compiled-in source as the panel sees it, before the operator's order and
 // the health counters are laid over it.
 type quoteSourceInfo struct {
-	Name string
+	Name          string
+	Settled       []string
+	SettledShadow []string
+	CashDividends bool
+	ReportsKind   bool
 	// Markets is the UNION over the intervals — every market this source can say anything about.
 	Markets []string
 	// Daily and Intraday are the same claim split by what it is a claim ABOUT, because the union
@@ -1492,11 +1542,15 @@ func (c *quoteCache) describeSources() []quoteSourceInfo {
 	out := make([]quoteSourceInfo, 0, len(c.sources))
 	for _, src := range c.sources {
 		out = append(out, quoteSourceInfo{
-			Name:       src.name,
-			Markets:    src.marketIDs(),
-			Daily:      src.marketIDsFor(quoteIntervalDaily),
-			Intraday:   src.marketIDsFor(quoteIntervalIntraday),
-			Intraday5D: src.marketIDsFor(quoteIntervalIntraday5D),
+			Name:          src.name,
+			Settled:       src.marketIDsFor(quoteIntervalSettled),
+			SettledShadow: src.marketIDsFor(quoteIntervalSettledShadow),
+			CashDividends: src.cashDividends,
+			ReportsKind:   src.reportsKind,
+			Markets:       src.marketIDs(),
+			Daily:         src.marketIDsFor(quoteIntervalDaily),
+			Intraday:      src.marketIDsFor(quoteIntervalIntraday),
+			Intraday5D:    src.marketIDsFor(quoteIntervalIntraday5D),
 		})
 	}
 	return out

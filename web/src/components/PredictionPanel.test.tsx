@@ -22,7 +22,6 @@ const accepted: PredictionSet = {
   horizon_std: true,
   baseline_check: 'match',
   body_changed: false,
-  counted_in_group: '2026-10',
   claims: [
     { key: 'stance', kind: 'stance', stance: 'long' },
     { key: 'expected_terminal', kind: 'terminal_value', price_fen: 149775, prob_bp: 7500 },
@@ -45,6 +44,20 @@ function show(sets: PredictionSet[], extra: Partial<React.ComponentProps<typeof 
 }
 
 describe('PredictionPanel', () => {
+  it('shows settlement paused separately from a mark phase', () => {
+    show([{ ...accepted, marks: [{ checkpoint: 'd5', status: 'pending', phase: 'settling' }] }], { settlementPaused: true })
+    expect(screen.getByText('forecast.phase.settlement_paused')).toBeTruthy()
+    expect(screen.getByText('forecast.phase.settling')).toBeTruthy()
+    expect(screen.queryByText('forecast.phase.retrying')).toBeNull()
+  })
+  it('qualifies only calendar-backed projections as expected', () => {
+    show([{ ...accepted, marks: [
+      { checkpoint: 'd20', status: 'pending', phase: 'waiting', not_before: '2026-10-26', expected: true },
+      { checkpoint: 'd120', status: 'pending', phase: 'waiting', not_before: '2027-03-15' },
+    ] }])
+    expect(screen.getAllByText('forecast.phase.expected')).toHaveLength(1)
+    expect(screen.getAllByText('forecast.phase.on_or_after')).toHaveLength(1)
+  })
   it('renders nothing when the report has no accepted set', () => {
     const { container } = show([{ ...accepted, state: 'absent' }])
     expect(container.firstChild).toBeNull()
@@ -82,7 +95,7 @@ describe('PredictionPanel', () => {
   })
 
   it('labels a test run and shows no checkpoint table', () => {
-    show([{ ...accepted, state: 'test', marks: [], counted_in_group: '' }])
+    show([{ ...accepted, state: 'test', marks: [] }])
     expect(screen.getByText('forecast.panel.test_run')).toBeTruthy()
     expect(screen.queryByText('forecast.panel.checkpoints')).toBeNull()
     // A test run is never "counted", even if a stale payload says it was.
@@ -90,7 +103,7 @@ describe('PredictionPanel', () => {
   })
 
   it('shows the accepted set rather than a newer test set for the same report', () => {
-    show([accepted, { ...accepted, id: 8, state: 'test', marks: [], counted_in_group: '' }], {
+    show([accepted, { ...accepted, id: 8, state: 'test', marks: [] }], {
       countedSetID: accepted.id,
     })
     expect(screen.getByText('forecast.panel.checkpoints')).toBeTruthy()
@@ -114,8 +127,8 @@ describe('PredictionPanel', () => {
     show([accepted], {
       otherSets: [
         accepted,
-        { ...accepted, id: 9, report_id: 14001, made_on: '2026-09-17', counted_in_group: undefined },
-        { ...accepted, id: 10, report_id: undefined, made_on: '2026-08-15', counted_in_group: undefined },
+        { ...accepted, id: 9, report_id: 14001, made_on: '2026-09-17' },
+        { ...accepted, id: 10, report_id: undefined, made_on: '2026-08-15' },
       ],
     })
     expect(screen.getByText('forecast.panel.others')).toBeTruthy()

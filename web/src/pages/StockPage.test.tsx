@@ -11,7 +11,7 @@ import StockPage from './StockPage'
 // The reading pages render an "edit this report" button, which asks the session what it may do.
 // In the app they only ever mount inside <Protected>, so the context is always there; here it is not.
 vi.mock('../auth', () => ({
-  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, can: () => true, logout: vi.fn() }),
+  useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, forecast: { scope: 'all', external: false }, can: () => true, logout: vi.fn() }),
 }))
 // The page now issues TWO independent requests, so the mock has to answer by URL. A mock that
 // returns the report shape for every call hands the quote panel a body with no snapshot, which is

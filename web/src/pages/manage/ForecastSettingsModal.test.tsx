@@ -59,7 +59,7 @@ describe('ForecastSettingsModal', () => {
 
   it('posts bench_schedule only when the index changed', async () => {
     show()
-    fireEvent.mouseDown(screen.getByRole('combobox'))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.bench' }))
     fireEvent.click(await screen.findByText('forecast.bench.sh000906'))
     save()
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
@@ -71,5 +71,21 @@ describe('ForecastSettingsModal', () => {
     expect(screen.getAllByText(/forecast\.settings\.scheduled/).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'forecast.settings.scheduledCancel' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast', { bench_cancel: true }))
+  })
+
+  it('posts shadow mode alone without changing evaluation or benchmark settings', async () => {
+    show({ fallback: 'off' })
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.fallback' }))
+    fireEvent.click(await screen.findByText('forecast.settings.fallbackShadow'))
+    expect(screen.queryByText('forecast.settings.fallbackOn')).toBeNull()
+    save()
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast', { fallback: 'shadow' }))
+  })
+
+  it('does not write unchanged shadow controls', () => {
+    const { onClose } = show({ fallback: 'shadow' })
+    save()
+    expect(apiMock.post).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledOnce()
   })
 })

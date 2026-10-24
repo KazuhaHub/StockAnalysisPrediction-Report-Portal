@@ -261,6 +261,18 @@ func (s *Server) apiMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.meJSON(u))
 }
 
+// forecastHint is the navigation hint /api/me carries. An own reader also gets the display name of the
+// OU their population is rooted at (the leaf, not the ancestor that decided the scope), so the record
+// page can say whose reports it covers. Nothing is added for the other scopes, and a failed name read
+// omits the field: the page then falls back to an unnamed line instead of guessing.
+func (s *Server) forecastHint(d forecastDecision) map[string]any {
+	hint := map[string]any{"scope": d.Scope, "external": d.External}
+	if name := s.forecastPopulationRoot(d); name != "" {
+		hint["ou"] = name
+	}
+	return hint
+}
+
 // mustEnrollForPage is the wall's state as a payload field. A policy that could not be read reads as
 // "not held": /api/me is answering, so the page has to render something, and the gate — not this
 // field — is what refuses the routes that matter.
@@ -272,6 +284,7 @@ func (s *Server) mustEnrollForPage(user string) bool {
 // meJSON is the shared "who am I" payload for /api/me and /api/login (email +
 // mail_enabled drive the "email me when done" opt-in).
 func (s *Server) meJSON(user string) map[string]any {
+	forecast := s.forecastAccess(user)
 	role, name, email := "", user, ""
 	federated, totpEnabled := false, false
 	if usr := s.st.GetUser(user); usr != nil {
@@ -281,6 +294,9 @@ func (s *Server) meJSON(user string) map[string]any {
 	return map[string]any{
 		"user": user, "name": name, "admin": s.isAdmin(user), "role": role, "perms": permsOf(role),
 		"email": email, "mail_enabled": s.emailEnabled(),
+		// Navigation only; every forecast read resolves current policy independently.
+		"forecast":        s.forecastHint(forecast),
+		"forecast_reader": s.forecastReaderStage(forecast),
 		// Security state, so the account page can branch before the user submits: offering a
 		// password change to a federated account, or enrolment to someone already enrolled, is a
 		// dead end they would otherwise only discover on failure.
@@ -578,6 +594,16 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		return all[i].Time < all[j].Time
 	})
 	q := r.URL.Query()
+	// Resolve the deep link only within the already-scoped symbol list. A readable report ID
+	// selects its own date and category, even when the URL carries stale navigation parameters.
+	selID, _ := strconv.ParseInt(q.Get("r"), 10, 64)
+	linkedDate, linkedKind := "", ""
+	for _, m := range all {
+		if m.ID == selID {
+			linkedDate, linkedKind = m.Date, repKind(m)
+			break
+		}
+	}
 	var order []string // rdate DESC → newest to oldest
 	byDate := map[string][]Rep{}
 	for _, m := range all {
@@ -587,6 +613,9 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		byDate[m.Date] = append(byDate[m.Date], m)
 	}
 	selDate := q.Get("date")
+	if linkedDate != "" {
+		selDate = linkedDate
+	}
 	if _, ok := byDate[selDate]; !ok {
 		selDate = order[0]
 	}
@@ -606,6 +635,9 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		kinds = append(kinds, k)
 	}
 	selKind := q.Get("kind")
+	if linkedKind != "" {
+		selKind = linkedKind
+	}
 	if !containsStr(kinds, selKind) {
 		selKind = kinds[0]
 	}
@@ -619,14 +651,18 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 		kindReps[i].Label = tabLabel(kindReps[i])
 	}
 	kindReps, defID := s.orderAndDefault(kindReps)
-	selID, _ := strconv.ParseInt(q.Get("r"), 10, 64)
 	if !repInList(kindReps, selID) {
 		selID = defID
 	}
 	rep := s.loadRep(r, user, selID)
+	predictedDates := s.forecastTimelineDates(user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {
-		timeline = append(timeline, map[string]any{"date": d, "n": len(byDate[d])})
+		node := map[string]any{"date": d, "n": len(byDate[d])}
+		if predictedDates != nil {
+			node["predicted"] = predictedDates[d]
+		}
+		timeline = append(timeline, node)
 	}
 	subtabs := make([]map[string]any, 0, len(kindReps))
 	for _, m := range kindReps {
@@ -636,12 +672,16 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 			// pointing at a tab and opening it agree.
 			"title": s.repDisplayTitle(&m)})
 	}
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"symbol": symbol, "market": marketPrefix(symbol), "name": s.names.Get(symbol),
 		"selDate": selDate, "selKind": selKind, "selId": selID,
 		"timeline": timeline, "kinds": kinds, "subtabs": subtabs,
 		"rep": repJSON(rep, s.names.Get),
-	})
+	}
+	if prediction := s.forecastReadingSummary(r, user, rep); prediction != nil {
+		out["prediction"] = prediction
+	}
+	writeJSON(w, out)
 }
 
 // apiRun reads a report group (legacy report card / single report): member tabs + selected body.
@@ -668,10 +708,14 @@ func (s *Server) apiRun(w http.ResponseWriter, r *http.Request, user string) {
 			"title": s.repDisplayTitle(&m)})
 	}
 	first := members[0]
-	writeJSON(w, map[string]any{
+	out := map[string]any{
 		"key": key, "symbol": first.Symbol, "name": s.names.Get(first.Symbol), "date": first.Date,
 		"selId": selID, "tabs": tabs, "rep": repJSON(rep, s.names.Get),
-	})
+	}
+	if prediction := s.forecastReadingSummary(r, user, rep); prediction != nil {
+		out["prediction"] = prediction
+	}
+	writeJSON(w, out)
 }
 
 func repJSON(rep *Rep, nameOf func(string) string) map[string]any {
@@ -1113,7 +1157,12 @@ func (s *Server) apiAdminUsers(w http.ResponseWriter, r *http.Request, user stri
 	for _, ro := range roleRegistry {
 		roles = append(roles, map[string]any{"code": ro.Code, "name": ro.Name})
 	}
-	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": userGroupsJSON(s.st.ListUserGroups())})
+	groups, err := s.adminGroupsJSON()
+	if err != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
+	writeJSON(w, map[string]any{"users": out, "me": user, "roles": roles, "groups": groups})
 }
 
 // parseExpiry validates an account-validity date from the admin UI: "" clears it (never expires),

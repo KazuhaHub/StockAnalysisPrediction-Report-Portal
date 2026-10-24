@@ -26,6 +26,7 @@ import {
 import { startVisibleDeadline } from '../lib/visiblePoll'
 import { FavoriteButton } from '../components/FavoriteButton'
 import PredictionPanel from '../components/PredictionPanel'
+import { useAuth } from '../auth'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
@@ -70,6 +71,13 @@ function writeChartOpen(open: boolean): void {
 
 export default function StockPage() {
   const { t } = useTranslation()
+  const { forecast, user } = useAuth()
+  // Older servers omit the navigation hint; preserve their existing reading-page requests.
+  // An explicit none still suppresses both reads, and every server response remains authoritative.
+  const forecastEnabled = forecast === undefined || forecast?.scope === 'all' || forecast?.scope === 'own'
+  // A still-enabled scope can become narrower. Neither loaded nor in-flight data crosses that
+  // boundary; checking only the enabled boolean would keep old internal payloads on screen.
+  const forecastKey = `${user ?? ''}\0${forecast?.scope ?? 'legacy'}\0${forecast?.external ?? false}`
   const { symbol = '' } = useParams()
   const [sp, setSp] = useSearchParams()
   const navigate = useNavigate()
@@ -99,13 +107,15 @@ export default function StockPage() {
   // That key is what makes a stale response harmless and, more importantly, what stops the render
   // that already shows report B's header from painting report A's marks: the derived values below
   // are empty until the state's key matches the report on screen.
-  const [pred, setPred] = useState<{ forId?: number; sets: PredictionSet[]; counted?: number; err: string }>({
+  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; counted?: number; paused?: boolean; err: string }>({
     sets: [],
     err: '',
   })
   const [predNonce, setPredNonce] = useState(0)
   const predForRef = useRef<number | undefined>(undefined)
-  const [otherSets, setOtherSets] = useState<PredictionSet[]>([])
+  const [otherPred, setOtherPred] = useState<{ key: string; sets: PredictionSet[] }>({ key: '', sets: [] })
+  const otherKey = `${symbol}\0${forecastKey}`
+  const otherSets = forecastEnabled && otherPred.key === otherKey ? otherPred.sets : []
   // The forecast overlay on the quote chart. On by default; the checkbox is for a reader who finds
   // the levels noise.
   const [overlay, setOverlay] = useState(true)
@@ -198,50 +208,53 @@ export default function StockPage() {
   const repId = data?.rep?.id
   useEffect(() => {
     predForRef.current = repId
-    setPred({ forId: repId, sets: [], err: '' })
-    if (!repId) return
+    setPred({ forId: repId, forAccess: forecastKey, sets: [], err: '' })
+    if (!repId || !forecastEnabled) return
     let cancelled = false
     const forId = repId
     api
       .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
         if (cancelled || predForRef.current !== forId) return
-        setPred({ forId, sets: r.sets ?? [], counted: r.counted_set_id, err: '' })
+        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], counted: r.counted_set_id, paused: r.settlement_paused, err: '' })
       })
       .catch((e) => {
         if (cancelled || predForRef.current !== forId) return
         // A failed request is not "this report made no prediction". The body still renders; the
         // panel area says what happened and offers one retry.
-        setPred({ forId, sets: [], err: errText(e, t) })
+        const unavailable = e instanceof ApiError && e.status === 403 && e.code === 'forecast_unavailable'
+        setPred({ forId, forAccess: forecastKey, sets: [], err: unavailable ? '' : errText(e, t) })
       })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repId, predNonce])
+  }, [repId, predNonce, forecastEnabled, forecastKey])
 
   // What may be shown NOW. A state that belongs to another report is not shown at all, even for the
   // one render between the new report arriving and the effect above running.
-  const predSets = pred.forId === repId ? pred.sets : []
-  const predCounted = pred.forId === repId ? pred.counted : undefined
-  const predErr = pred.forId === repId ? pred.err : ''
+  const predCurrent = forecastEnabled && pred.forId === repId && pred.forAccess === forecastKey
+  const predSets = predCurrent ? pred.sets : []
+  const predCounted = predCurrent ? pred.counted : undefined
+  const predErr = predCurrent ? pred.err : ''
 
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
-    if (!symbol) return
+    setOtherPred({ key: otherKey, sets: [] })
+    if (!symbol || !forecastEnabled) return
     let cancelled = false
     api
       .get<{ ok: boolean; sets: PredictionSet[] }>(`/api/predictions?symbol=${encodeURIComponent(symbol)}&limit=50`)
       .then((r) => {
-        if (!cancelled) setOtherSets(r.sets ?? [])
+        if (!cancelled) setOtherPred({ key: otherKey, sets: r.sets ?? [] })
       })
       .catch(() => {
-        if (!cancelled) setOtherSets([])
+        if (!cancelled) setOtherPred({ key: otherKey, sets: [] })
       })
     return () => {
       cancelled = true
     }
-  }, [symbol])
+  }, [symbol, forecastEnabled, otherKey])
 
   // Warm the neighbours on the timeline. Stepping a day forward or back is the move a reader makes
   // most, and it is the one that costs a whole report — measured at ~96% report, ~4% navigation
@@ -546,6 +559,7 @@ export default function StockPage() {
                 <PredictionPanel
                   sets={predSets}
                   countedSetID={predCounted}
+                  settlementPaused={predCurrent ? pred.paused : undefined}
                   otherSets={otherSets}
                   latestClose={quote?.snapshot.last}
                   latestDate={quote?.snapshot.asOf?.slice(0, 10)}

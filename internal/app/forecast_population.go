@@ -354,7 +354,7 @@ func (s *Store) firstCohortMature(now time.Time) (bool, error) {
 	start := time.Date(first.Year(), first.Month(), 1, 0, 0, 0, 0, chinaZone)
 	end := start.AddDate(0, 1, -1)
 	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
-	sets, err := s.loadForecastGroupSets(predTestRtype, from, to)
+	sets, err := s.loadForecastGroupSets(predTestRtype, from, to, forecastPopulation{Key: "all"})
 	if err != nil {
 		return false, err
 	}
