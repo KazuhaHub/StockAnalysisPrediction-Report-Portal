@@ -18,43 +18,14 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import type { ForecastDrySample, ForecastSettings } from '../../api/types'
+import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
 //
 // The switch is three-way here rather than in the settings modal, because the two things an operator
 // needs beside it — the readiness list and the dry-run sample — are the reasons a mode is refused or
-// trusted. "On" is disabled while any readiness item fails, and the failing items are named.
-//
-// Staleness is computed from the heartbeat's age, not from a server flag: a page left open must go
-// stale on its own, and a heartbeat that stopped is exactly the failure an operator has to see.
-const STALLED_MS = 10 * 60_000
-
-type Status = 'off' | 'dry' | 'healthy' | 'stale' | 'lagging' | 'error'
-
-function statusOf(s: ForecastSettings, nowMs: number): Status {
-  if (s.mode === '0') return 'off'
-  if (s.readiness.some((item) => item.key === 'ledger_chain' && !item.ok)) return 'error'
-  const hb = s.heartbeat
-  if (!hb) return 'stale'
-  if (nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
-  if (hb.pass.errors > 0 || hb.pass.panics > 0) return 'error'
-  if (
-    (hb.awaiting_gate?.length ?? 0) > 0 ||
-    hb.pass.stale_valve_tripped ||
-    hb.pass.oldest_due_unsettled_minutes > 360
-  )
-    return 'lagging'
-  return s.mode === 'dry' ? 'dry' : 'healthy'
-}
-
-const TONE: Record<Status, string> = {
-  off: 'default',
-  dry: 'blue',
-  healthy: 'green',
-  stale: 'orange',
-  lagging: 'orange',
-  error: 'red',
-}
+// trusted. "On" is disabled while any readiness item fails, and the failing items are named. The
+// state itself comes from lib/forecastEvaluator, shared with the record page's pill.
 
 export default function ForecastEvaluatorStatus({
   settings,
@@ -76,7 +47,7 @@ export default function ForecastEvaluatorStatus({
     return () => clearInterval(id)
   }, [])
 
-  const status = statusOf(settings, nowMs)
+  const status = evaluatorStatus(settings, nowMs)
   const hb = settings.heartbeat
   const failing = settings.readiness.filter((r) => !r.ok)
 
@@ -155,7 +126,7 @@ export default function ForecastEvaluatorStatus({
       title={
         <Space wrap>
           <span>{t('forecast.eval.status.title')}</span>
-          <Tag color={TONE[status]}>{t(`forecast.eval.status.${status}`)}</Tag>
+          <Tag color={EVALUATOR_TAG_COLOR[status]}>{t(`forecast.eval.status.${status}`)}</Tag>
           {hb && <Typography.Text type="secondary">{t('forecast.eval.lastTick', { at: dayjs(hb.last_tick_at).format('YYYY-MM-DD HH:mm') })}</Typography.Text>}
           {!hb && <Typography.Text type="secondary">{t('forecast.eval.never')}</Typography.Text>}
         </Space>

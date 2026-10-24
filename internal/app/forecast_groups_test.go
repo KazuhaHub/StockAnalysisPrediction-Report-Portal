@@ -17,6 +17,7 @@ import (
 type gsMark struct {
 	Status     string
 	CorpAction bool
+	Halted     bool
 	Close      *int64
 	Low        *int64
 	RetBp      *int32
@@ -102,8 +103,8 @@ func seedGroupSet(t *testing.T, s *Server, g gsSeed) int64 {
 	}
 	for cp, m := range g.Marks {
 		if _, err := s.st.exec(s.st.bind(`INSERT INTO prediction_marks(
-			set_id, checkpoint, status, corp_action, close_fen, low_fen, ret_bp, bench_ret_bp)
-			VALUES(?,?,?,?,?,?,?,?)`), id, cp, m.Status, boolInt(m.CorpAction), m.Close, m.Low, m.RetBp, m.BenchRetBp); err != nil {
+			set_id, checkpoint, status, halted, corp_action, close_fen, low_fen, ret_bp, bench_ret_bp)
+			VALUES(?,?,?,?,?,?,?,?,?)`), id, cp, m.Status, boolInt(m.Halted), boolInt(m.CorpAction), m.Close, m.Low, m.RetBp, m.BenchRetBp); err != nil {
 			t.Fatalf("insert mark: %v", err)
 		}
 	}

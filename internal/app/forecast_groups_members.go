@@ -55,6 +55,9 @@ type forecastMember struct {
 	S0Fen       *int64   `json:"s0_fen,omitempty"`
 	TerminalFen *int64   `json:"terminal_fen,omitempty"`
 	Upside      *float64 `json:"upside,omitempty"`
+	// Halted tags a scored row whose close is the stock's last traded close because it was suspended
+	// at the checkpoint. Like every outcome field it is sent only for a mature cell.
+	Halted bool `json:"halted,omitempty"`
 	// Direction is the ONE hit verdict (agree|disagree|flat|untested), from predHitClass. It is sent
 	// only for a mature cell; a non-mature cell carries identity and status only.
 	Direction string `json:"direction,omitempty"`
@@ -352,6 +355,7 @@ func (s *Server) serveForecastGroupMembers(w http.ResponseWriter, r *http.Reques
 			// until the whole cell passes its gates, and sending the numbers invites a reader to
 			// average a cell the matrix refuses to.
 			fm.CloseFen, fm.RetBp, fm.BenchRetBp = m.CloseFen, m.RetBp, m.BenchRetBp
+			fm.Halted = m.Halted
 			fm.S0Fen, fm.TerminalFen = gs.S0Fen, gs.TerminalFen
 			if m.RetBp != nil && m.BenchRetBp != nil {
 				v := *m.RetBp - *m.BenchRetBp

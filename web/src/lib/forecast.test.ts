@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import type { ForecastCell, ForecastGroupsResponse } from '../api/types'
-import { cellDisplay, forecastCsv, groupsQuery, readView } from './forecast'
+import type { ForecastCell, ForecastGroup, ForecastGroupsResponse } from '../api/types'
+import {
+  benchRuns,
+  capExceeded,
+  cellDisplay,
+  civilDate,
+  defaultRange,
+  forecastCsv,
+  groupsQuery,
+  notBeforeInfo,
+  pendingReasonParts,
+  rangePresets,
+  rangeProblem,
+  readView,
+  upcomingDate,
+  visibleGroups,
+  withRetention,
+} from './forecast'
 
 // These pin the two things a wrong implementation would hide: a number on a cell that is not
 // mature, and an export that cannot be told apart from the official record.
@@ -39,7 +55,7 @@ describe('cellDisplay', () => {
 
   it('formats spread in percentage points and colours it only when q passes 0.05', () => {
     const d = cellDisplay(mature, 'spread', 'month', t)
-    expect(d?.value).toBe('3.1 pt')
+    expect(d?.value).toBe('+3.1 pt')
     expect(d?.signal).toBe(1)
     expect(d?.sub).toContain('q=0.041')
 
@@ -47,8 +63,30 @@ describe('cellDisplay', () => {
     expect(uncoloured?.signal).toBe(0)
   })
 
+  it('signs a spread and an IC so direction reads without colour, and leaves rates unsigned', () => {
+    expect(cellDisplay({ ...mature, spread_bp: -210 }, 'spread', 'month', t)?.value).toBe('-2.1 pt')
+    expect(cellDisplay({ ...mature, spread_bp: 0 }, 'spread', 'month', t)?.value).toBe('0.0 pt')
+    expect(cellDisplay(mature, 'ic', 'month', t)?.value).toBe('+0.21')
+    expect(cellDisplay({ ...mature, ic: -0.04 }, 'ic', 'month', t)?.value).toBe('-0.04')
+    expect(cellDisplay(mature, 'hit', 'month', t)?.value).toBe('61%')
+    expect(cellDisplay(mature, 'fill', 'month', t)?.value).toBe('33%')
+  })
+
   it('marks p as p* in the exploratory view', () => {
     expect(cellDisplay(mature, 'ic', 'custom', t)?.sub).toContain('p*=')
+  })
+
+  // The exploratory view prints p*, so a cell that is tinted there must have a p* under 0.05 as well
+  // as a corrected q: the badge words the threshold from p*, and a tint it could not stand behind
+  // would be a claim the cell does not make.
+  it('tints an exploratory cell only when its p* is under 0.05 as well as its q', () => {
+    expect(cellDisplay(mature, 'spread', 'custom', t)?.signal).toBe(1)
+    expect(cellDisplay({ ...mature, spread_p: 0.2 }, 'spread', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, spread_p: undefined }, 'spread', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, ic_p: 0.2 }, 'ic', 'custom', t)?.signal).toBe(0)
+    expect(cellDisplay({ ...mature, hit: 0.7, hit_q: 0.01, hit_p: 0.3 }, 'hit', 'custom', t)?.signal).toBe(0)
+    // The record is untouched: its tint follows q alone.
+    expect(cellDisplay({ ...mature, spread_p: 0.2 }, 'spread', 'month', t)?.signal).toBe(1)
   })
 
   it('reports a one-armed spread as a dash rather than a zero', () => {
@@ -245,13 +283,13 @@ describe('forecastCsv', () => {
 
 describe('view state', () => {
   it('defaults to the monthly record', () => {
-    expect(readView(new URLSearchParams())).toEqual({ mode: 'month', from: '', to: '', group: 'month', metric: 'spread' })
+    expect(readView(new URLSearchParams())).toEqual({ mode: 'month', from: '', to: '', group: 'month', metric: 'spread', rtype: '', older: false })
   })
 
   it('round-trips a custom view', () => {
     const q = groupsQuery('custom', '2026-01-01', '2026-02-01', 'week')
     const view = readView(new URLSearchParams(q))
-    expect(view).toEqual({ mode: 'custom', from: '2026-01-01', to: '2026-02-01', group: 'week', metric: 'spread' })
+    expect(view).toEqual({ mode: 'custom', from: '2026-01-01', to: '2026-02-01', group: 'week', metric: 'spread', rtype: '', older: false })
   })
 
   it('sends no range in monthly mode, so the server never has to refuse one', () => {
@@ -262,5 +300,313 @@ describe('view state', () => {
     const view = readView(new URLSearchParams('mode=custom&group=decade&metric=bogus'))
     expect(view.group).toBe('month')
     expect(view.metric).toBe('spread')
+  })
+})
+
+describe('report type and older months in the view', () => {
+  it('sends the report type with a monthly or custom request only when one is chosen', () => {
+    expect(groupsQuery('month', '', '', 'month', 'A')).toBe('mode=month&rtype=A')
+    expect(groupsQuery('custom', '2026-01-01', '2026-02-01', 'week', 'A')).toBe('mode=custom&from=2026-01-01&to=2026-02-01&group=week&rtype=A')
+    expect(groupsQuery('month', '', '', 'month', '')).toBe('mode=month')
+  })
+
+  it('round-trips the report type and the older-months switch through the URL', () => {
+    const view = readView(new URLSearchParams('rtype=Decision+memo&older=1'))
+    expect(view.rtype).toBe('Decision memo')
+    expect(view.older).toBe(true)
+    expect(readView(new URLSearchParams('older=yes')).older).toBe(false)
+  })
+
+  it('names the report type in a reader export header, once, on one line', () => {
+    const resp: ForecastGroupsResponse = {
+      ok: true, mode: 'month', official: true, range: { from: '2026-01-01', to: '2026-01-31' }, checkpoints: ['d5'], groups: [],
+    }
+    const csv = forecastCsv(resp, 'now', { population: 'All', disclaimer: 'D', publicationGate: 'G', hideCounts: false, rtype: 'Type\nA' })
+    expect(csv).toContain('# rtype=Type A\n')
+    expect(forecastCsv(resp, 'now', { population: 'All', disclaimer: 'D', publicationGate: 'G', hideCounts: false })).not.toContain('# rtype=')
+  })
+})
+
+const group = (label: string, bench = 'sh000852'): ForecastGroup => ({
+  label, start: `${label}-01`, end: `${label}-28`, official: true, bench, cells: {} as ForecastGroup['cells'],
+})
+
+describe('visibleGroups', () => {
+  const months = Array.from({ length: 15 }, (_, i) => group(`2026-${String(i + 1).padStart(2, '0')}`))
+
+  it('keeps the newest twelve months of the record and counts what is folded away', () => {
+    const { shown, hidden } = visibleGroups(months, 'month', false)
+    expect(shown.map((g) => g.label)).toEqual(months.slice(3).map((g) => g.label))
+    expect(hidden).toBe(3)
+  })
+
+  it('shows everything when asked, and never folds a short record', () => {
+    expect(visibleGroups(months, 'month', true)).toEqual({ shown: months, hidden: 0 })
+    expect(visibleGroups(months.slice(0, 12), 'month', false)).toEqual({ shown: months.slice(0, 12), hidden: 0 })
+  })
+
+  it('never folds a custom range: its extent is the reader\'s own choice', () => {
+    expect(visibleGroups(months, 'custom', false)).toEqual({ shown: months, hidden: 0 })
+  })
+})
+
+describe('benchRuns', () => {
+  it('collapses consecutive groups on one benchmark and keeps a change visible', () => {
+    const runs = benchRuns([group('2026-10'), group('2026-11', 'sh000906'), group('2026-12', 'sh000906'), group('2027-01', 'sh000852')])
+    expect(runs).toEqual([
+      { bench: 'sh000852', from: '2026-10', to: '2026-10' },
+      { bench: 'sh000906', from: '2026-11', to: '2026-12' },
+      { bench: 'sh000852', from: '2027-01', to: '2027-01' },
+    ])
+  })
+
+  it('skips a group that states no benchmark rather than inventing one', () => {
+    expect(benchRuns([group('2026-10', ''), group('2026-11')])).toEqual([{ bench: 'sh000852', from: '2026-11', to: '2026-11' }])
+    expect(benchRuns([])).toEqual([])
+  })
+})
+
+describe('pending cell explanation', () => {
+  it('lists the phases that still hold marks, in a fixed order, without the settled count', () => {
+    const cell: ForecastCell = {
+      state: 'pending', resolved: 30, total: 40,
+      pending_reasons: { resolved: 30, waiting: 6, waiting_s0: 1, retrying: 2, overdue: 1, final: 0, settling: 0 },
+    }
+    expect(pendingReasonParts(cell)).toEqual([
+      { phase: 'waiting_s0', n: 1 }, { phase: 'waiting', n: 6 }, { phase: 'retrying', n: 2 }, { phase: 'overdue', n: 1 },
+    ])
+  })
+
+  it('says nothing when the server explained nothing, and keeps an unknown phase visible', () => {
+    expect(pendingReasonParts({ state: 'pending' })).toEqual([])
+    expect(pendingReasonParts({ state: 'pending', pending_reasons: { unknown: 3 } })).toEqual([{ phase: 'unknown', n: 3 }])
+  })
+
+  it('reads the final-refusal cap from the flag, the refusals and the member count', () => {
+    expect(capExceeded({ state: 'pending', failed_cap_exceeded: true, total: 50, pending_reasons: { final: 3 } })).toEqual({ refused: 3, total: 50, pct: 6 })
+    expect(capExceeded({ state: 'pending', failed_cap_exceeded: false, total: 50, pending_reasons: { final: 1 } })).toBeNull()
+    expect(capExceeded({ state: 'pending', total: 50, pending_reasons: { final: 9 } })).toBeNull()
+  })
+
+  it('does not read a missing refusal count as zero refusals', () => {
+    expect(capExceeded({ state: 'pending', failed_cap_exceeded: true, total: 50 })).toEqual({ refused: undefined, total: 50, pct: undefined })
+  })
+
+  it('does not invent a ratio when the member count is missing', () => {
+    expect(capExceeded({ state: 'pending', failed_cap_exceeded: true, pending_reasons: { final: 3 } })).toEqual({ refused: 3, total: undefined, pct: undefined })
+  })
+
+  it('reports the earliest date as a month for the twelve-month checkpoint and as a date elsewhere', () => {
+    const cell: ForecastCell = { state: 'pending', not_before: '2027-05-14', expected: true }
+    expect(notBeforeInfo(cell, 'd5')).toEqual({ date: '2027-05-14', expected: true })
+    expect(notBeforeInfo(cell, 'h12')).toEqual({ date: '2027-05', expected: true })
+    expect(notBeforeInfo({ state: 'pending' }, 'd5')).toBeNull()
+    expect(notBeforeInfo({ state: 'pending', not_before: '' }, 'd5')).toBeNull()
+  })
+
+  it('drops a date earlier than the response\'s own day, by the rule the summary uses', () => {
+    const generated = '2027-06-20T07:00:00Z'
+    const late: ForecastCell = { state: 'pending', not_before: '2027-06-19', expected: true }
+    expect(notBeforeInfo(late, 'd5', generated)).toBeNull()
+    expect(notBeforeInfo(late, 'h12', generated)).toBeNull()
+    expect(notBeforeInfo({ ...late, not_before: '2027-06-20' }, 'd5', generated)).toEqual({ date: '2027-06-20', expected: true })
+    expect(notBeforeInfo({ ...late, not_before: '2027-06-21' }, 'h12', generated)).toEqual({ date: '2027-06', expected: true })
+  })
+
+  it('prints the date as given when the response does not say what day it is', () => {
+    const cell: ForecastCell = { state: 'pending', not_before: '2026-06-09' }
+    expect(notBeforeInfo(cell, 'd5', undefined)).toEqual({ date: '2026-06-09', expected: false })
+    expect(notBeforeInfo(cell, 'd5', 'not a date')).toEqual({ date: '2026-06-09', expected: false })
+  })
+})
+
+describe('custom range helpers', () => {
+  const limits = { maxMonths: 36, maxWeekGroups: 26 }
+
+  it('turns the server instant into the panel civil date (Asia/Shanghai)', () => {
+    expect(civilDate('2027-06-20T07:00:00Z')).toBe('2027-06-20')
+    expect(civilDate('2027-06-20T17:00:00Z')).toBe('2027-06-21')
+    expect(civilDate('not a date')).toBe('')
+    expect(civilDate(undefined)).toBe('')
+  })
+
+  it('mirrors the server\'s range checks', () => {
+    expect(rangeProblem('2026-01-01', '2026-12-31', 'month', limits)).toBe('')
+    expect(rangeProblem('2026-12-31', '2026-01-01', 'month', limits)).toBe('inverted')
+    expect(rangeProblem('2023-01-01', '2026-01-01', 'month', limits)).toBe('')
+    expect(rangeProblem('2023-01-01', '2026-01-02', 'month', limits)).toBe('too_long')
+    expect(rangeProblem('2026-01-01', '2026-06-30', 'week', limits)).toBe('')
+    expect(rangeProblem('2026-01-01', '2026-07-02', 'week', limits)).toBe('week_too_long')
+    expect(rangeProblem('2026-01-01', '2026-01-31', 'month', { maxMonths: 0, maxWeekGroups: 0 })).toBe('')
+  })
+
+  it('does not second-guess a range it has no limits for', () => {
+    expect(rangeProblem('2000-01-01', '2026-01-01', 'week', undefined)).toBe('')
+    expect(rangeProblem('2026-12-31', '2026-01-01', 'week', undefined)).toBe('inverted')
+  })
+
+  it('offers presets that end today, start inside the limits, and add the ledger start only when known', () => {
+    const presets = rangePresets('2027-06-20', '2026-10-19', limits)
+    expect(presets.map((p) => p.key)).toEqual(['last3', 'last6', 'last12', 'since_ledger'])
+    expect(presets[0]).toEqual({ key: 'last3', from: '2027-03-20', to: '2027-06-20' })
+    expect(presets[3]).toEqual({ key: 'since_ledger', from: '2026-10-19', to: '2027-06-20' })
+    expect(rangePresets('2027-06-20', undefined, limits).map((p) => p.key)).toEqual(['last3', 'last6', 'last12'])
+  })
+
+  it('clamps the ledger preset to the longest range the server accepts and drops presets that cannot fit', () => {
+    const presets = rangePresets('2027-06-20', '2020-01-01', limits)
+    expect(presets.find((p) => p.key === 'since_ledger')).toEqual({ key: 'since_ledger', from: '2024-06-20', to: '2027-06-20' })
+    expect(rangePresets('2027-06-20', undefined, { maxMonths: 5, maxWeekGroups: 26 }).map((p) => p.key)).toEqual(['last3'])
+  })
+
+  it('never offers a ledger start in the future', () => {
+    expect(rangePresets('2027-06-20', '2027-07-01', limits).map((p) => p.key)).not.toContain('since_ledger')
+  })
+
+  it('opens on the record since the ledger began, and on six months when it does not know', () => {
+    expect(defaultRange('2027-06-20', '2026-10-19', limits)).toEqual({ from: '2026-10-19', to: '2027-06-20' })
+    expect(defaultRange('2027-06-20', undefined, limits)).toEqual({ from: '2026-12-20', to: '2027-06-20' })
+  })
+})
+
+// The server's "not before" is the earliest lower bound over every checkpoint still in flight, and an
+// overdue, settling or retrying one carries a bound that has already passed. Printed as "next result
+// expected 2026-06-09" on a page generated in 2027, it is a promise already broken.
+describe('upcomingDate', () => {
+  const generated = '2027-06-20T07:00:00Z'
+
+  it('keeps a date that is still ahead, and today', () => {
+    expect(upcomingDate('2027-06-26', generated)).toBe('2027-06-26')
+    expect(upcomingDate('2027-06-20', generated)).toBe('2027-06-20')
+  })
+
+  it('drops a date that is before the response\'s own civil date', () => {
+    expect(upcomingDate('2026-06-09', generated)).toBeUndefined()
+    expect(upcomingDate('2027-06-19', generated)).toBeUndefined()
+  })
+
+  it('judges by the panel\'s date, not the instant\'s UTC date', () => {
+    // 17:00 UTC on the 20th is already the 21st in the panel timezone.
+    expect(upcomingDate('2027-06-20', '2027-06-20T17:00:00Z')).toBeUndefined()
+    expect(upcomingDate('2027-06-21', '2027-06-20T17:00:00Z')).toBe('2027-06-21')
+  })
+
+  it('prints the date as given when the response does not say what day it is', () => {
+    expect(upcomingDate('2026-06-09', undefined)).toBe('2026-06-09')
+    expect(upcomingDate('2026-06-09', 'not a date')).toBe('2026-06-09')
+  })
+
+  it('has nothing to print when there is no date', () => {
+    expect(upcomingDate(undefined, generated)).toBeUndefined()
+    expect(upcomingDate('', generated)).toBeUndefined()
+  })
+})
+
+
+// A purged month inside a custom range. The server removes the purged sets and keeps the period, so a
+// month with nothing left comes back as a cell with no members, which the gate calls "small". The
+// response's excluded_months is the only thing that says it was retention that emptied it.
+describe('withRetention', () => {
+  const cell = (state: ForecastCell['state'], extra: Partial<ForecastCell> = {}): ForecastCell => ({ state, ...extra })
+  const cells = (state: ForecastCell['state'], extra: Partial<ForecastCell> = {}) => ({
+    d5: cell(state, extra), d20: cell(state, extra), d60: cell(state, extra), d120: cell(state, extra), h12: cell(state, extra),
+  })
+  const group = (label: string, start: string, end: string, state: ForecastCell['state'] = 'small'): ForecastGroup => ({
+    label, start, end, official: false, bench: 'sh000852', cells: cells(state, state === 'small' ? { n: 0 } : { n: 40 }),
+  })
+  const june = { cohort: '2026-06', purged_at: '2026-10-01T02:00:00Z' }
+  const july = { cohort: '2026-07', purged_at: '2026-10-02T02:00:00Z' }
+
+  it('draws a group whose every month was removed as purged, not as below the gate', () => {
+    const out = withRetention([group('2026-06', '2026-06-01', '2026-06-30')], [june])
+    expect(Object.values(out[0].cells).map((c) => c.state)).toEqual(['purged', 'purged', 'purged', 'purged', 'purged'])
+    expect(out[0].purged_at).toBe('2026-10-01T02:00:00Z')
+    // No size survives on a cell that is gone.
+    expect(Object.values(out[0].cells).some((c) => c.n !== undefined)).toBe(false)
+  })
+
+  it('leaves a group that only touches a removed month alone, since it still has a population', () => {
+    const quarter = group('2026-Q2', '2026-04-01', '2026-06-30', 'mature')
+    expect(withRetention([quarter], [june])[0]).toBe(quarter)
+    const all = group('all', '2026-06-01', '2026-07-31', 'small')
+    expect(withRetention([all], [june])[0]).toBe(all)
+  })
+
+  it('removes a group spanning several months only when every one of them was removed', () => {
+    const span = group('2026-06 – 2026-07', '2026-06-01', '2026-07-31')
+    expect(withRetention([span], [june])[0]).toBe(span)
+    const out = withRetention([span], [june, july])
+    expect(out[0].cells.d5.state).toBe('purged')
+    // The retention is complete when its last month was removed.
+    expect(out[0].purged_at).toBe('2026-10-02T02:00:00Z')
+  })
+
+  it('handles a week that straddles two months by both of them', () => {
+    const week = group('2026-06-29 – 2026-07-05', '2026-06-29', '2026-07-05')
+    expect(withRetention([week], [june])[0]).toBe(week)
+    expect(withRetention([week], [june, july])[0].cells.d5.state).toBe('purged')
+  })
+
+  it('never turns a result, a pending cell or an open cell into a purged one', () => {
+    const mixed: ForecastGroup = { ...group('2026-06', '2026-06-01', '2026-06-30'), cells: { d5: cell('mature', { n: 40 }), d20: cell('pending', { resolved: 1, total: 2 }), d60: cell('open'), d120: cell('small', { n: 0 }), h12: cell('small', { n: 0 }) } }
+    const out = withRetention([mixed], [june])
+    expect(out[0].cells.d5.state).toBe('mature')
+    expect(out[0].cells.d20.state).toBe('pending')
+    expect(out[0].cells.d60.state).toBe('open')
+    expect(out[0].cells.d120.state).toBe('purged')
+    // Not every cell is gone, so the group is not marked as purged.
+    expect(out[0].purged_at).toBeUndefined()
+  })
+
+  it('does nothing without a disclosure, for the monthly record, or for a group it cannot place', () => {
+    const g = group('2026-06', '2026-06-01', '2026-06-30')
+    expect(withRetention([g], undefined)[0]).toBe(g)
+    expect(withRetention([g], [])[0]).toBe(g)
+    const official = { ...g, official: true }
+    expect(withRetention([official], [june])[0]).toBe(official)
+    const odd = group('?', '', '')
+    expect(withRetention([odd], [june])[0]).toBe(odd)
+  })
+
+  it('is idempotent', () => {
+    const once = withRetention([group('2026-06', '2026-06-01', '2026-06-30')], [june])
+    expect(withRetention(once, [june])[0].cells.d5).toEqual(once[0].cells.d5)
+  })
+})
+
+describe('forecastCsv for a range with removed months', () => {
+  const june = { cohort: '2026-06', purged_at: '2026-10-01T02:00:00Z' }
+  // The file states one checkpoint here, so each group carries only that cell.
+  const only = (d5: ForecastCell) => ({ d5 }) as unknown as ForecastGroup['cells']
+  const base: ForecastGroupsResponse = {
+    ok: true,
+    mode: 'custom',
+    official: false,
+    range: { from: '2026-06-01', to: '2026-07-31', group: 'month' },
+    checkpoints: ['d5'],
+    groups: [
+      { label: '2026-06', start: '2026-06-01', end: '2026-06-30', official: false, bench: 'sh000852', cells: only({ state: 'small', n: 0 }) },
+      { label: '2026-07', start: '2026-07-01', end: '2026-07-31', official: false, bench: 'sh000852', cells: only(mature) },
+    ],
+    excluded_months: [june, { cohort: '2026-08', purged_at: 'bad\nvalue' }],
+  }
+
+  it('names every removed month and when it was removed, in the file itself', () => {
+    const csv = forecastCsv(base, 'now')
+    expect(csv).toContain('# excluded_months=2026-06@2026-10-01T02:00:00Z|2026-08@bad value')
+  })
+
+  it('writes the removed month as purged rather than as a cohort under the gate', () => {
+    const csv = forecastCsv(base, 'now')
+    expect(csv).toContain('2026-06,2026-06-01,2026-06-30,d5,purged,')
+    expect(csv).not.toContain('d5,small')
+    expect(csv).toContain('2026-07,2026-07-01,2026-07-31,d5,mature,spread_bp')
+  })
+
+  it('writes the same disclosure for a reader export, and nothing when nothing was removed', () => {
+    const reader = { population: 'All', disclaimer: 'D', publicationGate: 'G', hideCounts: false }
+    expect(forecastCsv(base, 'now', reader)).toContain('# excluded_months=2026-06@')
+    expect(forecastCsv({ ...base, excluded_months: undefined }, 'now')).not.toContain('excluded_months')
+    expect(forecastCsv({ ...base, excluded_months: [] }, 'now')).not.toContain('excluded_months')
   })
 })

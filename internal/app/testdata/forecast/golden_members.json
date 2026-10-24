@@ -125,6 +125,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -833,6 +834,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -1541,6 +1543,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -2249,6 +2252,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -2959,6 +2963,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -3627,6 +3632,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -4335,6 +4341,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -5043,6 +5050,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -5751,6 +5759,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
@@ -6461,6 +6470,7 @@
           "s0_fen": 10000,
           "terminal_fen": 10800,
           "upside": 0.08000000000000007,
+          "halted": true,
           "direction": "agree"
         },
         {
