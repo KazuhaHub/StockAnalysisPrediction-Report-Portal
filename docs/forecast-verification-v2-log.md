@@ -223,22 +223,35 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   cohort 2026-11 through the administrator page; both writes are audited. The pre-release read-only
   checks found Q3 = 20, Q5 = 0, and no console or debug run of the covered workflow since the ledger start.
 - **Merged since.** P26 #145 (`dd24e285`), P16-P18 #160 (`a383f107`), P28 #161 (`38569ef5`), reader
-  signals and runbook #162 (`d9db4d9f`), P27 #163 (`02c7c4bc`), and the migration-order guard #159.
-  R2a is complete except the `own` scope.
+  signals and runbook #162 (`d9db4d9f`), P27 #163 (`02c7c4bc`), the migration-order guard #159, and
+  purge ownership evidence, step `0009` (#165). With #165, R2a is complete in code.
 - **Held.**
-  - Purge ownership evidence, step `0009`, on `feat/forecast-purge-evidence`. It merges only after
-    PR 141 (`0007`) and PR 142 (`0008`). Until then every own-scoped record, drawer and custom read
-    answers 503 `forecast_purge_history_unavailable` by design.
   - P39b, draft #157. Waiting only for the run-target refresh after the v2026.43 deploy.
-  - P19 and P20 on `feat/forecast-cohort-parity` / `feat/forecast-reading-integration`. Waiting for
-    the owner's review of the P13 demo revision (`docs/forecast-demo-v2`).
+  - P19 #166 and P20 #168 (drafts). Waiting for the owner's review of the P13 demo revision, #167.
 - **Next step.**
   - The owner reviews the revised demo. Appendix A's "Today" column still needs production baseline
     screenshots.
   - An administrator refreshes the run targets, then P39b merges as its own Beta.
-  - After PR 141/142 land, rebase step `0009`. Append it after `0010`, turn the e2e own checks back into
-    subtree counts, and merge.
+  - PR 141/142 append their steps after `0009` when they rebase (the list is merge order, and
+    `migrationListOrder` now pins `[…0006, 0010, 0009]`).
   - After PR 141 lands, re-enable scoped bridge reads on its shared token binding.
+- **Next deploy: offline upgrade required.** The first release that contains step `0009` cannot be
+  deployed by replacing the image. Startup refuses a database without that step's ledger row before
+  any DDL. Follow [the upgrade runbook](forecast-purge-ownership-upgrade.md):
+  1. Stop the portal and every other writer, and disable its restart policy so a refused start cannot
+     loop.
+  2. Take a full backup with the previous release (a one-off container of the old image). Verify it
+     with a throwaway restore.
+  3. With the new image, run `schema-upgrade` through `--entrypoint /app/report-portal`, with the
+     service's own mounts and environment. It only inspects. Expect `0009` pending, plus `0007`/`0008`
+     if the notification and extension work ship in the same release.
+  4. Run `schema-upgrade --apply`, then inspect again: nothing may be pending.
+  5. Start the new release. Confirm health, the version and the ledger rows, then take a post-upgrade
+     backup.
+  6. Rollback is a restore of the step-2 backup with the previous release into a clean target. An
+     older binary refuses the upgraded database.
+  After the upgrade, `own` can be set per OU. Before it, own-scoped reads answer 503
+  `forecast_purge_history_unavailable`.
 - **Known limitations.** Unchanged from 2026-10-22, plus: zh-TW strings added by P27 are OpenCC output
   pending human review.
 - **Evaluator state.** `forecast_auto` is off. Before mode `1` the readiness list still needs a dry pass,
