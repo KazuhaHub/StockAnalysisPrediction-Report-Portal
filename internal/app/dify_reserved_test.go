@@ -122,9 +122,17 @@ func TestClientCannotSupplyAReservedInput(t *testing.T) {
 		t.Errorf("a client-supplied reserved input was stored: %s", inputs)
 	}
 
-	// runInputs drops it for an internal user and replaces it for a restricted one.
-	if _, ok := s.runInputs(BatchJob{CreatedBy: "staff"}, map[string]string{ownerTokenInput: "forged"})[ownerTokenInput]; ok {
-		t.Error("an internal run forwarded a caller-supplied reserved input")
+	// runInputs never forwards the caller's value: since P39b every run with a submitter gets the
+	// minted token in its place, and a run with no submitter gets nothing.
+	internal := s.runInputs(BatchJob{CreatedBy: "staff"}, map[string]string{ownerTokenInput: "forged"})[ownerTokenInput]
+	if internal == "" || internal == "forged" {
+		t.Errorf("an internal run kept the caller's reserved value: %q", internal)
+	}
+	if _, who, ok := s.ownerFromToken(internal); !ok || who != "staff" {
+		t.Errorf("the internal run's token is not the minted one for its submitter: user %q ok %v", who, ok)
+	}
+	if _, ok := s.runInputs(BatchJob{}, map[string]string{ownerTokenInput: "forged"})[ownerTokenInput]; ok {
+		t.Error("a run with no submitter forwarded a caller-supplied reserved input")
 	}
 	st := s.st
 	root := st.EnsureDefaultGroup()

@@ -322,21 +322,22 @@ func (s *Server) v1Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordChange(r, "", AuditReportIngest, "report", strconv.FormatInt(id, 10), ingestAudit)
 	// Stamp the generating OU first-writer-wins from the signed owner_token (ADR 0022 R1). A missing
-	// or invalid token leaves owner_group NULL (internal/unattributed), which fails closed for
-	// restricted viewers. Ownership is never taken from a plain client-supplied field.
+	// or invalid token leaves owner_group NULL (unattributed). Ownership is never taken from a plain
+	// client-supplied field.
 	// Attribution (ADR 0022 R1) and the requester's place on the report's viewer list (ADR 0024) are
 	// both decided by the signed token, never by a client-supplied field. The viewer row is what
 	// makes the report readable by the person who paid for it under per-person visibility; stamping
 	// the OU alone would leave them unable to open their own result.
 	// Decoded ONCE, before both users: the report's owner stamp and the set's frozen attribution
 	// come from the same signed token (P38).
-	ou, who, ownerOK := s.ownerFromToken(in.OwnerToken)
+	claims, ownerOK := s.parseOwnerToken(in.OwnerToken)
+	ou := claims.OU
 	if ownerOK {
 		if _, err := s.st.StampReportOwner(id, ou); err != nil {
 			log.Printf("v1 ingest stamp owner id=%d ou=%d: %v", id, ou, err)
 		}
-		if err := s.st.AddReportViewer(id, in.Date, who, ou); err != nil {
-			log.Printf("v1 ingest record viewer id=%d user=%q: %v", id, who, err)
+		if err := s.recordRunRequester(id, in.Date, claims); err != nil {
+			log.Printf("v1 ingest record viewer id=%d user=%q: %v", id, claims.User, err)
 		}
 	}
 	if len(in.Tracking) > 0 {

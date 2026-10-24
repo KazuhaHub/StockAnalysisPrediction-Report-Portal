@@ -58,8 +58,8 @@ func TestPostgresPurgeOwnershipAppliesAtStartup(t *testing.T) {
 	}
 }
 
-// The Postgres twin of the SQLite test below for a database whose ledger ends at 0006: 0010 and 0009
-// are applied by ordinary startup, in list order, and the evidence table starts empty next to a
+// The Postgres twin of the SQLite test below for a database whose ledger ends at 0006: all later
+// steps apply at ordinary startup in merge order, and the evidence table starts empty next to a
 // historic global marker.
 func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
 	dsn := pgDSN(t)
@@ -70,6 +70,11 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 		`DROP TABLE IF EXISTS prediction_purge_owners`,
 		`DELETE FROM meta WHERE k IN ('mig:0010','mig:0009')`,
 	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	for _, q := range rewindNotificationAndBackendStatements() {
 		if _, err := st.exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -93,7 +98,7 @@ func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T)
 		}
 		opened.Close()
 	})
-	requireStepsRecordedSince(t, opened, floor, "0010", "0009")
+	requireStepsRecordedSince(t, opened, floor, "0010", "0009", "0007", "0008")
 	if !opened.tableExists("prediction_purge_owners") || !opened.columnExists("announcements", "popup_dismissible") {
 		t.Fatal("startup recorded the steps without their products")
 	}
@@ -283,9 +288,22 @@ func backToStep0006(t *testing.T, path string) {
 	t.Helper()
 	backBeforeStep0010(t, path)
 	backBeforePurgeEvidence(t, path)
+	mutateFile(t, path, rewindNotificationAndBackendStatements()...)
 	mutateFile(t, path, fmt.Sprintf(
 		`INSERT INTO prediction_purges(rtype,cohort,purged_at,sets_removed) VALUES('%s','2025-06','2026-10-01T00:00:00Z',3)`,
 		predTestRtype))
+}
+
+// Later notification/backend products cannot remain in a step-0006 fixture.
+func rewindNotificationAndBackendStatements() []string {
+	var statements []string
+	for _, step := range []migration{migration0008(), migration0007()} {
+		for i := len(step.tables) - 1; i >= 0; i-- {
+			statements = append(statements, "DROP TABLE IF EXISTS "+step.tables[i])
+		}
+		statements = append(statements, "DELETE FROM meta WHERE k='"+migrationLedgerKey(step.id)+"'")
+	}
+	return statements
 }
 
 // dirListing is the names, sizes and modification times in a directory, so a test can prove a command
@@ -369,7 +387,7 @@ func requireStepsRecordedSince(t *testing.T, st *Store, floor string, ids ...str
 // ---------- upgrading at normal startup ----------
 
 // A database a release before 0010 and 0009 left, with its ledger at 0006, is carried forward by
-// ordinary startup: both steps are applied and recorded, nothing is asked of an operator, and the
+// ordinary startup: all later steps are applied and recorded, nothing is asked of an operator, and the
 // evidence table starts empty. A historic global purge marker proves nothing about OU membership,
 // so it is neither copied nor altered.
 func TestExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
@@ -456,6 +474,10 @@ func TestBaselineDatabaseUpgradesAtNormalStartup(t *testing.T) {
 // though its id is higher.
 func TestPendingStepsApplyInListOrder(t *testing.T) {
 	st := newTestStore(t)
+	// A later recorded step must retain its original time when an earlier step is replayed.
+	if _, err := st.exec(`UPDATE meta SET v='2000-01-01T00:00:00Z' WHERE k IN ('mig:0007','mig:0008')`); err != nil {
+		t.Fatal(err)
+	}
 	for _, q := range []string{
 		`ALTER TABLE announcements DROP COLUMN popup_dismissible`,
 		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
@@ -468,6 +490,13 @@ func TestPendingStepsApplyInListOrder(t *testing.T) {
 	}
 	var applied []string
 	steps := st.migrations()
+	var preserved []string
+	for _, step := range steps {
+		if step.id != "0010" && step.id != "0009" {
+			preserved = append(preserved, step.id)
+		}
+	}
+	before, floor := ledgerFor(t, st, preserved...), newestLedgerStamp(st)
 	for i := range steps {
 		id, up := steps[i].id, steps[i].up
 		steps[i].up = func(e migExec) error {
@@ -481,7 +510,36 @@ func TestPendingStepsApplyInListOrder(t *testing.T) {
 	if got := strings.Join(applied, ","); got != "0010,0009" {
 		t.Fatalf("steps applied = %s, want 0010,0009", got)
 	}
-	requireStepsRecordedInListOrder(t, st)
+	requireStepsRecordedSince(t, st, floor, "0010", "0009")
+	if after := ledgerFor(t, st, preserved...); after != before {
+		t.Fatal("replaying pending steps rewrote existing ledger timestamps")
+	}
+}
+
+func TestStep0006FixtureHasOnlyPrefixProductsAndLedger(t *testing.T) {
+	path := fileStore(t, "prefix-0006.db")
+	backToStep0006(t, path)
+	st, err := connectStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	afterPrefix := false
+	for _, step := range st.migrations() {
+		if afterPrefix {
+			if recorded(st, step.id) {
+				t.Errorf("fixture retained later ledger step %s", step.id)
+			}
+			for _, table := range step.tables {
+				if st.tableExists(table) {
+					t.Errorf("fixture retained later product %s", table)
+				}
+			}
+		}
+		if step.id == "0006" {
+			afterPrefix = true
+		}
+	}
 }
 
 // The startup entry point itself has no step it holds back.
@@ -618,7 +676,7 @@ func TestSchemaUpgradeInspectionListsPendingStepsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[0010, 0009]") || !strings.Contains(out, "next start") {
+	if !strings.Contains(out, "[0010, 0009, 0007, 0008]") || !strings.Contains(out, "next start") {
 		t.Fatalf("inspection did not list the pending steps in list order and say startup applies them: %q", out)
 	}
 	for _, stale := range []string{"refuse", "required", "requires"} {
@@ -653,7 +711,7 @@ func TestSchemaUpgradeApplyUpgradesOfflineWithTheNormalRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[0010, 0009]") {
+	if !strings.Contains(out, "[0010, 0009, 0007, 0008]") {
 		t.Fatalf("--apply did not report the steps it applied: %q", out)
 	}
 	for _, stale := range []string{"refuse", "required", "requires"} {

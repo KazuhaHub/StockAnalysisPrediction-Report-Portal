@@ -176,7 +176,9 @@ func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
 
 // TestOpenAPIIngestRequestDocumentsOwnerToken pins the specific field this PR exists for: the signed
 // OU-attribution token is documented, in all three languages, with the sentence that says what its
-// absence means (unattributed, never the client's to set).
+// absence means (unattributed, never the client's to set) and who receives it. Since P39b that is
+// every run with a submitter, so a description that still says "restricted OUs only" is a contract
+// that lies to the workflow authors reading it.
 func TestOpenAPIIngestRequestDocumentsOwnerToken(t *testing.T) {
 	var spec map[string]any
 	if err := json.Unmarshal(openapiJSON, &spec); err != nil {
@@ -185,22 +187,33 @@ func TestOpenAPIIngestRequestDocumentsOwnerToken(t *testing.T) {
 	schema := spec["components"].(map[string]any)["schemas"].(map[string]any)["IngestRequest"].(map[string]any)
 
 	desc := schema["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
-	for _, want := range []string{"归属", "受限 OU", "第一次有效的令牌"} {
+	for _, want := range []string{"归属", "每一次有发起人的运行", "第一次有效的令牌"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("IngestRequest.owner_token (zh-CN) description = %q, missing %q", desc, want)
 		}
 	}
 	i18n := schema["x-i18n"].(map[string]any)
 	en := i18n["en-US"].(map[string]any)["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
-	for _, want := range []string{"OU-attribution token", "_rp_owner_token", "attributed to any OU", "restricted OU", "first valid token"} {
+	for _, want := range []string{"OU-attribution token", "_rp_owner_token", "attributed to any OU", "every run that has a submitter", "first valid token"} {
 		if !strings.Contains(en, want) {
 			t.Errorf("IngestRequest.owner_token (en-US) description = %q, missing %q", en, want)
 		}
 	}
-	// zh-TW is machine-generated from zh-CN via OpenCC s2twp; it must exist and be non-empty.
+	// zh-TW is machine-generated from zh-CN via OpenCC s2twp; it must exist and say the same thing.
 	tw := i18n["zh-TW"].(map[string]any)["properties"].(map[string]any)["owner_token"].(map[string]any)["description"].(string)
 	if strings.TrimSpace(tw) == "" {
 		t.Error("IngestRequest.owner_token (zh-TW) description is empty")
+	}
+	if !strings.Contains(tw, "每一次有發起人的執行") {
+		t.Errorf("IngestRequest.owner_token (zh-TW) description = %q, missing the every-run sentence", tw)
+	}
+	// The retired restricted-only claim must be gone from all three.
+	for lang, text := range map[string]string{"zh-CN": desc, "en-US": en, "zh-TW": tw} {
+		for _, stale := range []string{"restricted OU", "only into runs", "受限 OU", "只在"} {
+			if strings.Contains(text, stale) {
+				t.Errorf("IngestRequest.owner_token (%s) description still says %q: %q", lang, stale, text)
+			}
+		}
 	}
 }
 

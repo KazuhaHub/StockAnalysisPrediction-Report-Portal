@@ -687,8 +687,8 @@ func (s *Server) startItem(job BatchJob, item batch.Item) {
 			s.st.FinishItem(item.ID, batch.Failed, 1, "", err.Error())
 			return
 		}
-		// A restricted OU's run gets a signed owner-attribution token injected into its inputs (ADR
-		// 0022 R1); internal runs pass through unchanged, so this is a no-op for existing usage.
+		// Every run with a submitter gets a signed owner-attribution token injected into its inputs
+		// (ADR 0022 R1, amended by P39b), minted now so the OU is the submitter's at run time.
 		res, attempts := batch.RunItem(itemCtx, prov, s.runInputs(job, item.Inputs), job.MaxRetries, nil, log.Printf)
 		// A cancelled run (this row or its whole job) is recorded as 'cancelled', not
 		// 'failed' — the operator stopped it on purpose. A run that actually finished

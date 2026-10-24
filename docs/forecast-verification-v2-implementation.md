@@ -2887,6 +2887,10 @@ None.
 Acceptance runs on the seeded preview (P14) at 375 and 1280 px, light and dark, against the annotated production
 baseline (P13). The "Today" column is corrected from P13's screenshots before P19 starts.
 
+**Status (2026-10-23).** The P13 demo revision is prepared for draft review. The "Today" column below still awaits
+the owner's production screenshots of `/manage/forecast` and of the 600519 reading page. It remains unchanged
+until those screenshots are captured. The draft implementation work does not satisfy this visual acceptance gate.
+
 | Demo element | Today | After (PR) | Note |
 |---|---|---|---|
 | Header, tabs and toolbar in one card | separate rows | one card (P19) | |
@@ -2916,7 +2920,7 @@ baseline (P13). The "Today" column is corrected from P13's screenshots before P1
 | Other predictions | bullets linked by receipt date | table with exact links (P20) | |
 | Chart overlay | collapsed, flat lines | toggle always shown; S0 window; dots at settled closes; legend with source; Sunday snap (P10, P20) | |
 | Disclaimer | none | card, chip tooltip, record header, CSV (P15, P20, P27) | V22 |
-| Summary in the report header | missing | chip in the same paint as the body (P18, P20) | not in the demo |
+| Summary in the report header | missing | chip in the same paint as the body (P18, P20) | in the demo; non-admins see it only at stage `full` (§8.4), admins always |
 | Run page | nothing | chip and card (P20) | not in the demo |
 | Record outside Manage | Manage only | `/forecast` with a nav item for OUs not at `none` (P27) | V12 |
 | Scope `none` | — | no record, no card, chip or overlay; no placeholder (P26, P20) | the access model |
