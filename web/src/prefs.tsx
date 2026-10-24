@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import dayjs from 'dayjs'
 import type { Locale as AntdLocale } from 'antd/es/locale'
 import i18n, { LOCALE_KEY } from './i18n'
@@ -54,6 +54,16 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const dark = mode === 'auto' ? sysDark : mode === 'dark'
+
+  // Native UI (scrollbars, form controls, the boot splash) follows the document's color-scheme, not
+  // antd's tokens. index.css only declares 'light dark', which means "whatever the OS says", so a
+  // reader who chose light on a dark OS kept dark scrollbars. Pin it to the effective theme before
+  // paint; public/theme-boot.js sets the same attributes before the app loads.
+  useLayoutEffect(() => {
+    const el = document.documentElement
+    el.style.colorScheme = dark ? 'dark' : 'light'
+    el.dataset.theme = dark ? 'dark' : 'light'
+  }, [dark])
 
   const setMode = useCallback((m: ThemeMode) => {
     setModeState(m)

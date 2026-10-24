@@ -10,6 +10,10 @@
     <meta name="theme-color" content="#1677ff" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>研报门户</title>
+    <!-- Sets data-theme and color-scheme from the reader's stored theme before anything paints, so the
+         splash below and native scrollbars follow it rather than only the OS. A file, not inline:
+         the CSP has no 'unsafe-inline'. -->
+    <script src="/theme-boot.js"></script>
     <style>
       /* Boot splash: pure CSS, no JS — shows the instant the HTML paints, before the
          app bundle has even started downloading. React's first render replaces
@@ -59,6 +63,20 @@
         #boot-splash #boot-name {
           color: #ffffffd9;
         }
+      }
+      /* theme-boot.js stamps the reader's choice on <html>; it outranks the OS media query above,
+         which stays as the fallback if the script cannot run. */
+      html[data-theme='light'] #boot-splash {
+        background: #fff;
+      }
+      html[data-theme='dark'] #boot-splash {
+        background: #141414;
+      }
+      html[data-theme='light'] #boot-splash #boot-name {
+        color: #000000d9;
+      }
+      html[data-theme='dark'] #boot-splash #boot-name {
+        color: #ffffffd9;
       }
     </style>
   </head>
