@@ -14,6 +14,7 @@ package app
 // than by the session policy — but the SPA still uses this route and never /api/v1.
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 	"strings"
@@ -170,6 +171,11 @@ func (s *Server) serveReportPredictionsView(w http.ResponseWriter, r *http.Reque
 	// revisions only make sense against the set they revised.
 	reverseSets(sets)
 	out := map[string]any{"ok": true, "sets": sets, "settlement_paused": s.forecastSettlementPaused()}
+	if view.editions {
+		if covered, known := s.reportCovered(id, sc); known {
+			out["covered"] = covered
+		}
+	}
 	if identityErr == nil && selectionErr == nil {
 		out["display_set_id"] = display
 	}
@@ -260,6 +266,25 @@ func (s *Server) canReadReport(id int64, sc *ownerScope) bool {
 		return false // unreadable is unreadable; a query failure must not grant access
 	}
 	return n > 0
+}
+
+// reportCovered reports whether the ledger covers this report's type (predictionCovered). The reading
+// card needs it to tell a covered report that made no forecast, which earns the explicit empty
+// state, from a report type forecast verification never applies to, which earns nothing at all.
+// known is false when the type cannot be read for this caller; the field is then omitted rather
+// than guessed, and the caller keeps showing the card.
+func (s *Server) reportCovered(id int64, sc *ownerScope) (covered, known bool) {
+	q := "SELECT rtype FROM reports WHERE id = ?"
+	args := []any{id}
+	if frag, fargs := sc.where(""); frag != "" {
+		q += " AND " + frag
+		args = append(args, fargs...)
+	}
+	var rtype sql.NullString
+	if err := s.st.queryRow(q, args...).Scan(&rtype); err != nil {
+		return false, false
+	}
+	return predictionCovered(rtype.String), true
 }
 
 func reverseSets(sets []PredictionSet) {

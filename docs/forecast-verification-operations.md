@@ -247,6 +247,10 @@ Own and external readers never receive counted-edition metadata or cause global 
 Card/full session prediction reads carry the same optional `sibling` and `counted_edition`
 metadata, including when using a cookie on the v1 report route. Persistent machine and app-bridge
 credentials retain their existing shape. Stage off still refuses non-admin session predictions.
+Those session reads also carry `covered`, whether the ledger covers the report's type. A covered
+report with no set made no forecast and shows the card's empty state; an uncovered type shows no
+card at all. The field is omitted when the type cannot be read, which the card treats as unknown
+and keeps showing itself.
 These are server contracts; the P20 card presentation and stale-edition UI guards remain separate.
 
 The stage access matrix now exercises these server surfaces through the real mux on both drivers
