@@ -316,26 +316,6 @@ func (s *Store) GrantedVersions(username string) []string {
 	return versions
 }
 
-// principalVersions lists the versions one principal is granted directly, ordered by the registry so
-// the reading page's version switcher is stable rather than reordering itself per report.
-func (s *Store) principalVersions(principal string) []string {
-	rows, err := s.query(`SELECT g.version FROM version_grants g
-		LEFT JOIN report_versions v ON v.name = g.version
-		WHERE g.principal=? ORDER BY COALESCE(v.ord,0), g.version`, principal)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var v string
-		if rows.Scan(&v) == nil {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 // SetUserRestricted throws the scoping switch on one ACCOUNT. Until now "restricted" was purely an
 // OU property, so a portal that never built an OU tree had no way to scope anybody — which is the
 // setup an external user is most likely to arrive into first.
