@@ -47,7 +47,7 @@ func TestPostgresMigrationsCatchUpAndStayPut(t *testing.T) {
 	windBackToThePreviousRelease(t, st)
 	st.Close()
 
-	migrated, err := OpenStore("postgres", dsn)
+	migrated, err := openStoreForMode("postgres", dsn, true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}
@@ -207,5 +207,50 @@ func TestPostgresFailedStepRollsBack(t *testing.T) {
 	}
 	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("9400")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Step 0010 on Postgres: the rename and the restore mapping, with the same expectations as the
+// SQLite tests. RENAME COLUMN is transactional on both drivers, which is what lets the step stay one
+// transaction.
+func TestPostgresStep0010RenamesAndRestores(t *testing.T) {
+	dsn := pgDSN(t)
+	st := pgStore(t, "announcement_grants", "announcements")
+	for _, q := range []string{
+		`DELETE FROM meta WHERE k='mig:0010'`,
+		`ALTER TABLE announcements DROP COLUMN IF EXISTS popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
+		`INSERT INTO announcements(title,dismissible,display,popup) VALUES('pg-0010',1,'both',1)`,
+	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	st.Close()
+
+	migrated, err := OpenStore("postgres", dsn)
+	if err != nil {
+		t.Fatalf("a pre-0010 Postgres database must be accepted and migrated: %v", err)
+	}
+	t.Cleanup(func() {
+		migrated.exec(`DELETE FROM announcements`) //nolint:errcheck
+		migrated.Close()
+	})
+	if migrated.columnExists("announcements", "dismissible") || !migrated.columnExists("announcements", "strip_dismissible") ||
+		!migrated.columnExists("announcements", "popup_dismissible") {
+		t.Fatal("step 0010 did not leave the renamed shape on Postgres")
+	}
+	id := scalar[int64](t, migrated, `SELECT id FROM announcements WHERE title='pg-0010'`)
+	if a := migrated.GetAnnouncement(id); a == nil || !a.StripDismissible || !a.PopupDismissible {
+		t.Errorf("row after the step = %+v", a)
+	}
+
+	dump := preMigrationDump(t,
+		`INSERT INTO announcements(id,title,content,dismissible) VALUES(92,'旧','',1)`)
+	if _, err := migrated.restoreFrom(bytes.NewReader(dump), true); err != nil {
+		t.Fatalf("restoring a pre-0010 dump on Postgres: %v", err)
+	}
+	if a := migrated.GetAnnouncement(92); a == nil || !a.StripDismissible || !a.PopupDismissible {
+		t.Errorf("restored row = %+v", a)
 	}
 }

@@ -27,16 +27,28 @@ Related contracts:
 4. Confirm that the source database already satisfies the v0.4.72 baseline. A
    refused baseline must first pass through v0.4.72; do not edit schema products
    or migration markers by hand to bypass startup checks.
-5. Start the new binary against the isolated database. Migration `0007` creates
-   eleven notification tables under the ADR 0035 transaction and ledger. It does
-   not modify the frozen baseline. Every restart verifies migration products.
+5. With the isolated instance stopped, run the new binary's `schema-upgrade`
+   inspection, review its pending steps, then run `schema-upgrade --apply` and
+   inspect again before startup. The current main line includes explicit step
+   `0009`; starting the service is not a substitute for its offline upgrade.
+   Follow [the explicit upgrade runbook](forecast-purge-ownership-upgrade.md).
+   Migration order preserves the released prefix `0001` through `0006`, then
+   `0010`, `0009`, and appends notification step `0007`. Step IDs are labels,
+   not sort keys. Step `0007` creates eleven notification tables under the
+   ADR 0035 transaction and ledger without changing the frozen baseline.
+   Start the isolated instance only after inspection reports no pending steps.
 6. Open Manage > Notifications. Existing SMTP, forecast Email/Slack and raw
    receivers appear as referenced channels. Compare their enabled states and
    destination hosts with the original settings pages. Existing configuration
    remains authoritative; do not create duplicate rules to reproduce automatic
    legacy deliveries.
-7. Verify the acceptance checklist below before upgrading production. A normal
-   upgrade preserves operational dispatch state; a *backup restore* pauses it.
+7. Verify the acceptance checklist below before upgrading production. Stop all
+   production writers, retain and verify a backup made with the old image, then
+   repeat the offline inspection/apply/inspection sequence before startup.
+   A normal upgrade preserves operational dispatch state; a *backup restore*
+   pauses it. Rollback restores the old backup into a clean target using the
+   retained old image; never remove ledger entries or open the upgraded database
+   with the old image.
 
 There is no backfill of historical completion consent or old notifications.
 Only persisted future consent is recoverable. Historical business records are

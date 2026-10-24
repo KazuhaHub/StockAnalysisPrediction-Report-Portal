@@ -130,6 +130,9 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
 		`ALTER TABLE prediction_sets DROP COLUMN attributed_ou`,
 		`ALTER TABLE user_groups DROP COLUMN forecast_scope`,
+		// Every step after 0006 goes too: a dump's migration list has to be a contiguous prefix.
+		`ALTER TABLE announcements DROP COLUMN popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
 	} {
 		if _, err := src.exec(q); err != nil {
 			t.Fatalf("cannot wind back: %v", err)
@@ -321,18 +324,34 @@ func TestNothingElseWritesAttributedOU(t *testing.T) {
 		}
 	}
 	// The INSERT that freezes attribution, the step that creates the column, and the single
-	// sanctioned re-attribution UPDATE on OU delete. Nothing else may name the column.
+	// sanctioned re-attribution UPDATE on OU delete. The population loader may name the column
+	// exactly once, as its read-only filter; it must never acquire another attribution writer.
+	// Purge evidence may snapshot the column but must never mutate prediction_sets.
 	var names []string
 	for name := range literals {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	want := []string{"forecast_store.go", "migrate_steps.go", "user_admin.go"}
+	want := []string{"forecast_groups_store.go", "forecast_purge_owners.go", "forecast_store.go", "migrate_steps.go", "user_admin.go"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("files naming attributed_ou = %v, want %v", names, want)
 	}
 	if !strings.Contains(literals["forecast_store.go"], "INSERT INTO prediction_sets") {
 		t.Error("forecast_store.go no longer holds the freezing INSERT")
+	}
+	reader := literals["forecast_groups_store.go"]
+	if strings.Count(reader, "attributed_ou") != 1 || !strings.Contains(reader, `" AND ps.attributed_ou IN ("`) {
+		t.Error("population loader names attribution outside its single read-only predicate")
+	}
+	for _, write := range []string{"INSERT ", "UPDATE ", "DELETE ", "REPLACE "} {
+		if strings.Contains(strings.ToUpper(reader), write) {
+			t.Errorf("population loader contains a write: %s", write)
+		}
+	}
+	for _, write := range []string{"INSERT INTO PREDICTION_SETS", "UPDATE PREDICTION_SETS", "DELETE FROM PREDICTION_SETS", "REPLACE INTO PREDICTION_SETS"} {
+		if strings.Contains(strings.ToUpper(literals["forecast_purge_owners.go"]), write) {
+			t.Errorf("purge evidence mutates frozen set attribution: %s", write)
+		}
 	}
 	updates := strings.Count(literals["user_admin.go"], "UPDATE prediction_sets SET attributed_ou")
 	if updates != 2 {

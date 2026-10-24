@@ -482,10 +482,9 @@ func (s *Store) ForecastGateCodes() ([]string, error) {
 
 // ---------- readiness ----------
 
-// forecastReadiness evaluates the §1.4 list. Item 6 (the ledger chain) arrives with P23 and is
-// deliberately absent here.
+// forecastReadiness evaluates the operational gates, including configured ledger capabilities.
 func (s *Server) forecastReadiness(now time.Time) []readinessItem {
-	items := make([]readinessItem, 0, 5)
+	items := make([]readinessItem, 0, 6)
 
 	// 1. This binary contains R1a and R1b, including the P1 refusal classification. True by
 	// construction in any build with this file; listed so the page says which build it is.
@@ -555,6 +554,14 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 		alertDetail = "no test alert has reached both channels in the last 30 days"
 	}
 	items = append(items, readinessItem{Key: "alerts", OK: alertsOK, Detail: alertDetail})
+	chain := s.quotes.configuredLedgerSources(s.quoteConfigLoad(), quoteIntervalSettled)
+	_, primaryOK := ledgerPrimary(chain)
+	ledgerOK := len(chain) > 0 && primaryOK
+	ledgerDetail := ""
+	if !ledgerOK {
+		ledgerDetail = "no enabled settlement source has both required evidence capabilities"
+	}
+	items = append(items, readinessItem{Key: "ledger_chain", OK: ledgerOK, Detail: ledgerDetail})
 
 	return items
 }
@@ -630,6 +637,11 @@ func (s *Server) forecastWatchdogOnce(now time.Time) {
 	// The daily benchmark promotion (P4) rides on the watchdog: it is already awake once a minute and
 	// the promotion is idempotent.
 	s.promoteForecastBench(now)
+	chain := s.quotes.configuredLedgerSources(s.quoteConfigLoad(), quoteIntervalSettled)
+	if _, primaryOK := ledgerPrimary(chain); len(chain) == 0 || !primaryOK {
+		s.emitForecastAlert("no_source",
+			"no qualified settlement primary is enabled; inspect the quote.order audit", now, forecastLaggingAlertEvery)
+	}
 
 	hb, have := s.st.ForecastHeartbeat()
 	if !have {

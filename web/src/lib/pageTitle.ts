@@ -51,6 +51,7 @@ const EXACT: Record<string, string> = {
   '/queue': 'nav.queue',
   '/notifications': 'inbox.title',
   '/chat': 'nav.chat',
+  '/forecast': 'nav.forecast_record',
   '/report/new': 'reportEditor.titleNew',
 }
 

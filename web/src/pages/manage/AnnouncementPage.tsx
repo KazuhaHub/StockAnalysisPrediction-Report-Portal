@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import { forgetTags } from '../../lib/conditionalGet'
+import { useAnnouncements } from '../../announcements'
 import type {
   AdminAnnouncement,
   Announcement,
@@ -62,7 +63,8 @@ const CROWDED = 5
 
 interface FormValues {
   enabled: boolean
-  dismissible: boolean
+  stripDismissible: boolean
+  popupDismissible: boolean
   level: AnnouncementLevel
   scope: AnnouncementScope
   audience: AnnouncementAudience
@@ -78,6 +80,7 @@ interface FormValues {
 export default function AnnouncementPage() {
   const { t } = useTranslation()
   const { message } = App.useApp()
+  const { refresh: refreshFeed } = useAnnouncements()
   const { token } = theme.useToken()
   const [items, setItems] = useState<AdminAnnouncement[]>([])
   const [groups, setGroups] = useState<Principal[]>([])
@@ -125,10 +128,16 @@ export default function AnnouncementPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // The admin's own shell polls the reader feed every 60s. After a change, drop its stored ETag so
-  // the edit shows up in this tab now rather than up to a minute later.
-  const refreshed = () => {
+  // The admin's own shell polls the reader feed every 60s. After a change, drop its stored ETag AND
+  // ask again, so the edit shows up in this tab now rather than up to a minute later. Dropping the
+  // tag alone only made the next poll a full one: an admin who switched "readers can close it" off
+  // and went straight back to check still found the close button, from the payload before the edit.
+  const feedChanged = () => {
     forgetTags('/api/announcements')
+    void refreshFeed()
+  }
+  const refreshed = () => {
+    feedChanged()
     return load()
   }
 
@@ -140,7 +149,7 @@ export default function AnnouncementPage() {
     setItems(next) // optimistic; the server is the arbiter and a rejection reloads
     api
       .post('/api/admin/announcements/reorder', { ids: orderedIds.map(Number) })
-      .then(() => forgetTags('/api/announcements'))
+      .then(feedChanged)
       // A 409 means somebody else changed the list while this page held an old copy. Reloading is
       // the honest response — better a list that visibly refreshes than an order that silently
       // reverts on the next visit.
@@ -155,7 +164,10 @@ export default function AnnouncementPage() {
     form.setFieldsValue({
       enabled: a ? a.enabled : true,
       display: a ? a.display : 'strip',
-      dismissible: a ? a.dismissible : false,
+      // A new announcement locks the band (an operator opts in to a close button) and leaves the
+      // popup dismissible, the two defaults the server applies as well.
+      stripDismissible: a ? a.stripDismissible : false,
+      popupDismissible: a ? a.popupDismissible : true,
       level: a?.level || 'notice',
       scope: a?.scope || 'home',
       audience: a?.audience || 'all',
@@ -173,7 +185,8 @@ export default function AnnouncementPage() {
     const payload = {
       enabled: v.enabled === true,
       display: v.display || 'strip',
-      dismissible: v.dismissible === true,
+      stripDismissible: v.stripDismissible === true,
+      popupDismissible: v.popupDismissible === true,
       level: v.level || 'notice',
       scope: v.scope || 'home',
       audience: v.audience || 'all',
@@ -205,7 +218,7 @@ export default function AnnouncementPage() {
     setItems((prev) => prev.map((x) => (x.id === a.id ? { ...x, ...patch } : x)))
     try {
       await api.patch(`/api/admin/announcements/${a.id}`, patch)
-      forgetTags('/api/announcements')
+      feedChanged()
     } catch (e) {
       message.error(errText(e, t))
       load()
@@ -218,7 +231,7 @@ export default function AnnouncementPage() {
     setCollapse(on) // optimistic; a failure puts it back
     try {
       await api.post('/api/admin/settings', { announcementCollapse: on })
-      forgetTags('/api/announcements')
+      feedChanged()
     } catch (e) {
       setCollapse(!on)
       message.error(errText(e, t))
@@ -363,7 +376,7 @@ export default function AnnouncementPage() {
                 level: getFieldValue('level') || 'notice',
                 title,
                 content,
-                dismissible: getFieldValue('dismissible') === true,
+                stripDismissible: getFieldValue('stripDismissible') === true,
               }}
               style={{ marginTop: 4 }}
             />
@@ -481,14 +494,9 @@ export default function AnnouncementPage() {
         }
       >
         <Form form={form} layout="vertical">
-          <Space size={20} wrap style={{ marginBottom: 12 }}>
-            <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked" noStyle={false} style={{ marginBottom: 0 }}>
-              <Switch />
-            </Form.Item>
-            <Form.Item name="dismissible" label={t('announcementAdmin.dismissible')} valuePropName="checked" style={{ marginBottom: 0 }}>
-              <Switch />
-            </Form.Item>
-          </Space>
+          <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked">
+            <Switch />
+          </Form.Item>
           <Form.Item name="display" label={t('announcementAdmin.display')} extra={t('announcementAdmin.displayHint')}>
             <Segmented
               options={[
@@ -497,6 +505,39 @@ export default function AnnouncementPage() {
                 { value: 'both', label: t('announcementAdmin.display.both') },
               ]}
             />
+          </Form.Item>
+          {/* One switch per surface, shown only for the surface this announcement is drawn on. The
+              other is hidden, not unmounted: it stays registered in the form, so a save sends every
+              value and never drops one just because its switch is off screen. */}
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.display !== next.display}>
+            {({ getFieldValue }) => {
+              const display = getFieldValue('display') || 'strip'
+              return (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ marginBottom: 8 }}>{t('announcementAdmin.dismissible')}</div>
+                  <Form.Item
+                    name="stripDismissible"
+                    label={t('announcementAdmin.stripDismissible')}
+                    extra={t('announcementAdmin.stripDismissibleHint')}
+                    valuePropName="checked"
+                    hidden={display === 'popup'}
+                    style={{ marginBottom: 12 }}
+                  >
+                    <Switch />
+                  </Form.Item>
+                  <Form.Item
+                    name="popupDismissible"
+                    label={t('announcementAdmin.popupDismissible')}
+                    extra={t('announcementAdmin.popupDismissibleHint')}
+                    valuePropName="checked"
+                    hidden={display === 'strip'}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Switch />
+                  </Form.Item>
+                </div>
+              )
+            }}
           </Form.Item>
           <Form.Item name="level" label={t('settings.announcementLevel')}>
             <Select

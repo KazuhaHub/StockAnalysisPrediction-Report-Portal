@@ -1,8 +1,12 @@
 # Status application: implementation and execution plan
 
-Status: implementation in progress. The shared public application repository and
-protocol/catalogue bootstrap exist; Status runtime, schemas, monitors and deployment
-are not yet implemented. See the execution log and storage approval gate.
+Status: implementation and deployment acceptance in progress. The shared Apps
+repository contains the independent runtime, approved SQLite schema, monitors,
+sandbox UI and release-artifact builder. The Portal platform is PR #142, depending
+on notification PR #141. Neither is yet merged or deployed. Deployment preparation
+has started at the owner's request; published releases, real pairing and provider
+acceptance remain gated. The full acceptance ledger is maintained in the Apps
+repository at `apps/status/docs/acceptance.md`.
 
 Prepared: 2026-10-21. Baseline: notification consolidation PR #141, commit
 `b4741355118c28d95dcf3c096115963ce5936f01`. Verify that PR's merge and deployed
@@ -640,3 +644,26 @@ One source repository does not mean one trust boundary: installed apps remain
 sandboxed and individually permissioned, backend credentials remain per app,
 Status keeps its own service/storage lifecycle, and host business pages remain
 owned by the Portal.
+
+
+## Deployment preparation update, 2026-10-23
+
+Synchronized the notification dependency and this platform branch with main
+`65c18abb`. Preserve the released migration prefix `0001` through `0006`, `0010`,
+`0009`, then append `0007` and `0008`. No schema layout or baseline changed.
+The current main requires explicit offline schema inspection/apply/inspection;
+follow `docs/forecast-purge-ownership-upgrade.md` and the updated notification
+operator runbook instead of relying on startup to perform the whole upgrade.
+
+The target Portal remains v2026.43, without the required paired backend API.
+The independent development image, private Compose candidate, paused initial store
+and verified backup/isolated restore are prepared on the target host. The formal
+Status instance is not paired or started, and no gateway route was changed.
+PostgreSQL TLS negotiation is unavailable in the current environment; Status
+requires verified TLS and must not fall back to an unverified/plaintext probe.
+
+Merged-candidate validation passed: full Go tests/vet/build, PostgreSQL integration,
+focused extension/migration race tests, frontend typecheck/1212 tests/build and six
+real Portal/Status browser workflows. Deployment readiness is distinct from these
+automated checks; provider billing identities and external delivery remain to be
+accepted in the actual environment.

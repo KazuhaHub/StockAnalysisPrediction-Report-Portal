@@ -36,13 +36,14 @@ function pctChange(numerator?: number, denominator?: number): string {
 interface Props {
   sets: PredictionSet[]
   countedSetID?: number
+  settlementPaused?: boolean
   otherSets: PredictionSet[]
   latestClose?: number
   latestDate?: string
   symbol: string
 }
 
-export default function PredictionPanel({ sets, countedSetID, otherSets, latestClose, latestDate, symbol }: Props) {
+export default function PredictionPanel({ sets, countedSetID, settlementPaused, otherSets, latestClose, latestDate, symbol }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(readOpen)
 
@@ -89,10 +90,10 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
   )
 
   // A pending mark is not a failure. The server sends the phase and the earliest date it can settle
-  // (a weekday projection); the panel only chooses the words.
+  // (an exchange-backed estimate or weekday lower bound); the panel only chooses the words.
   const phaseText = (m: PredictionMark) => {
     const onOrAfter = (date?: string) =>
-      date ? t('forecast.phase.on_or_after', { date }) : t('forecast.phase.waiting')
+      date ? t(m.expected ? 'forecast.phase.expected' : 'forecast.phase.on_or_after', { date }) : t('forecast.phase.waiting')
     switch (m.phase) {
       case 'waiting_s0':
         return `${t('forecast.phase.waiting_s0')}${m.not_before ? ` · ${onOrAfter(m.not_before)}` : ''}`
@@ -100,6 +101,10 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
         return onOrAfter(m.not_before)
       case 'retrying':
         return t('forecast.phase.retrying')
+      case 'settling':
+        return t('forecast.phase.settling')
+      case 'overdue':
+        return t('forecast.phase.overdue')
       case 'resolved':
         return t('forecast.phase.resolved')
       case 'final':
@@ -151,6 +156,7 @@ export default function PredictionPanel({ sets, countedSetID, otherSets, latestC
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {set.body_changed && <Alert type="warning" showIcon title={t('forecast.panel.body_changed')} />}
+          {settlementPaused && !isTest && <Alert type="info" showIcon title={t('forecast.phase.settlement_paused')} />}
           {badges}
 
           <Descriptions size="small" column={1} bordered>

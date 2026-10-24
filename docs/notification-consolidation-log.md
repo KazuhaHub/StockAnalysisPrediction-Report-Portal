@@ -575,3 +575,21 @@ scope. Production SMTP/Slack/n8n activation and release/deployment require the
 operator's normal environment-specific acceptance. Status remains future work.
 Implementation was verified locally before pull request preparation. No release
 or production configuration was changed.
+
+
+## Main-line upgrade integration, 2026-10-23
+
+Synchronized main commit `65c18abb` before deployment preparation. Released
+migration order remains `0001` through `0006`, `0010`, `0009`; notification
+`0007` appends afterward. The upgrade fixture now removes the complete later
+migration suffix when constructing a historical pre-0009 backup, including its
+ledger rows and tables. PostgreSQL's older-dump fixture uses the current migration
+list instead of assuming 0007 is the only later step. No approved schema product
+or frozen baseline changed.
+
+The operator runbook now requires offline schema inspection/apply/inspection for
+the explicit step inherited from main, with old-image backup and clean-target
+rollback. Validation passed: full Go tests, vet and build; all PostgreSQL tests
+in a separate `notification_merge_1023` test database; frontend typecheck, 1209
+tests across 129 files and production build. No live Portal upgrade, release,
+notification activation or production database write was performed.

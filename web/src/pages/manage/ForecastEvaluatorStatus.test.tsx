@@ -41,6 +41,7 @@ const base: ForecastSettings = {
     { key: 'dry_pass', ok: true },
     { key: 'dry_gate', ok: true },
     { key: 'alerts', ok: true },
+    { key: 'ledger_chain', ok: true },
   ],
   dry_gate: {},
   alerts: { email_to: '', has_slack: false },
@@ -117,6 +118,13 @@ describe('ForecastEvaluatorStatus', () => {
     })
     expect(screen.getByText('forecast.eval.status.error')).toBeTruthy()
     expect(screen.getByText('boom')).toBeTruthy()
+  })
+
+  it.each(['dry', '1'] as const)('warns about a removed settlement primary in mode %s', (mode) => {
+    show({ mode, readiness: base.readiness.map((item) => item.key === 'ledger_chain' ? { ...item, ok: false } : item) })
+    expect(screen.getByText('quoteAdmin.ledgerNoPrimary')).toBeTruthy()
+    expect(screen.getByText('forecast.eval.status.error')).toBeTruthy()
+    expect(screen.queryByText('forecast.eval.status.healthy')).toBeNull()
   })
 
   it('disables On while a readiness item fails, and names it', () => {

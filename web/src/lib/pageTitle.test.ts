@@ -33,6 +33,11 @@ describe('what the browser tab says', () => {
     expect(routeTitle('/', t)).toBe('')
   })
 
+  it('names the forecast record page for readers', () => {
+    expect(routeTitle('/forecast', t)).toBe('nav.forecast_record')
+    expect(routeTitle('/manage/forecast', t)).toBe('nav.forecast')
+  })
+
   it('distinguishes writing a report from editing one', () => {
     expect(routeTitle('/report/new', t)).toBe('reportEditor.titleNew')
     expect(routeTitle('/report/42/edit', t)).toBe('reportEditor.titleEdit')

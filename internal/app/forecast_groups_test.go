@@ -77,7 +77,7 @@ func seedGroupSet(t *testing.T, s *Server, g gsSeed) int64 {
 	if cohort == "" {
 		cohort = g.MadeOn[:7]
 	}
-	res, err := s.st.exec(s.st.bind(`INSERT INTO prediction_sets(
+	id, err := s.st.insertID(s.st.bind(`INSERT INTO prediction_sets(
 		report_id, symbol, rtype, version, title, report_date, made_at, made_on, cohort, zone, state,
 		policy_version, probability_method, probability_transform, decision_quality, horizon_std,
 		s0_fen, base_check, bench_code)
@@ -87,8 +87,6 @@ func seedGroupSet(t *testing.T, s *Server, g gsSeed) int64 {
 	if err != nil {
 		t.Fatalf("insert set: %v", err)
 	}
-	id, _ := res.LastInsertId()
-
 	insClaim := func(key, kind, stance, label string, price *int64, prob *int32) {
 		if _, err := s.st.exec(s.st.bind(`INSERT INTO prediction_claims(set_id, claim_key, kind, stance, label, price_fen, prob_bp)
 			VALUES(?,?,?,?,?,?,?)`), id, key, kind, stance, label, price, prob); err != nil {
@@ -132,7 +130,7 @@ func sampleMembers(t *testing.T, s *Server, n int, mutate func(i int, g *gsSeed)
 		}
 		seedGroupSet(t, s, g)
 	}
-	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30")
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30", forecastPopulation{Key: "all"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -332,7 +330,7 @@ func TestMembershipCountsDuplicatesAndBaseline(t *testing.T) {
 	pendingBase.Marks = map[string]gsMark{"d5": {Status: markPending}}
 	seedGroupSet(t, s, pendingBase)
 
-	sets, _ := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30")
+	sets, _ := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30", forecastPopulation{Key: "all"})
 	members, pb, cov := forecastMembership(sets, time.Time{}, "")
 	if cov.Member != 1 || cov.Duplicate != 1 || cov.PendingBaseline != 1 || len(members) != 1 || len(pb) != 1 {
 		t.Fatalf("coverage = %+v, members=%d pending=%d", cov, len(members), len(pb))

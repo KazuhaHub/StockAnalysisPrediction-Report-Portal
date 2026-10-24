@@ -35,6 +35,13 @@ func (m *mailSink) send(to []string, subject, body string) error {
 // TestAlertGoesToBothChannels: one watchdog event reaches the mailbox and the Slack webhook, and the
 // text names the reason. De-duplication is the watchdog's, so exactly one of each arrives.
 func TestAlertGoesToBothChannels(t *testing.T) {
+	for _, reason := range []string{"stalled", "no_source"} {
+		t.Run(reason, func(t *testing.T) { assertWatchdogAlertChannels(t, reason) })
+	}
+}
+
+func assertWatchdogAlertChannels(t *testing.T, reason string) {
+	t.Helper()
 	s := newV1Server(t)
 	mail := &mailSink{}
 	s.mailFn = mail.send
@@ -61,8 +68,15 @@ func TestAlertGoesToBothChannels(t *testing.T) {
 	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
 		t.Fatal(err)
 	}
+	heartbeatAt := time.Now().UTC().Add(-time.Hour)
+	if reason == "no_source" {
+		heartbeatAt = time.Now().UTC()
+		if err := s.st.SetSetting(setQuoteSourceOrder, quoteSourceSina); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := s.st.saveForecastHeartbeat(forecastHeartbeat{
-		Mode: forecastModeOn, LastTickAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+		Mode: forecastModeOn, LastTickAt: heartbeatAt.Format(time.RFC3339),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +89,7 @@ func TestAlertGoesToBothChannels(t *testing.T) {
 		if err := json.Unmarshal([]byte(p.body), &msg); err != nil {
 			t.Fatalf("slack body: %v (%s)", err, p.body)
 		}
-		if !strings.Contains(msg.Text, "stalled") {
+		if !strings.Contains(msg.Text, reason) {
 			t.Errorf("slack text does not name the reason: %q", msg.Text)
 		}
 	case <-time.After(3 * time.Second):
@@ -100,7 +114,7 @@ func TestAlertGoesToBothChannels(t *testing.T) {
 	if len(mail.to) != 1 || mail.to[0] != "ops@example.com" {
 		t.Errorf("recipients = %v", mail.to)
 	}
-	if !strings.Contains(mail.body, "stalled") {
+	if !strings.Contains(mail.body, reason) {
 		t.Errorf("email body does not name the reason: %q", mail.body)
 	}
 	// One deduplicated reason means one delivery per channel.

@@ -23,7 +23,7 @@ func TestPostgresForecastStepApplies(t *testing.T) {
 	windBackToBeforeTheForecastStep(t, st)
 	st.Close()
 
-	migrated, err := OpenStore("postgres", pgDSN(t))
+	migrated, err := openStoreForMode("postgres", pgDSN(t), true)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}
@@ -388,6 +388,9 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 		`DROP INDEX IF EXISTS idx_pred_sets_ou`,
 		`ALTER TABLE prediction_sets DROP COLUMN IF EXISTS attributed_ou`,
 		`ALTER TABLE user_groups DROP COLUMN IF EXISTS forecast_scope`,
+		// Every step after 0006 goes too: a dump's migration list has to be a contiguous prefix.
+		`ALTER TABLE announcements DROP COLUMN IF EXISTS popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
 	} {
 		if _, err := st.exec(q); err != nil {
 			t.Fatalf("winding back 0006: %v", err)
@@ -404,7 +407,7 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 	dump := dumpOf(t, st)
 	st.Close()
 
-	fresh, err := OpenStore("postgres", pgDSN(t))
+	fresh, err := openStoreForMode("postgres", pgDSN(t), true)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
