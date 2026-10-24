@@ -42,6 +42,32 @@ class RuntimeTests(unittest.TestCase):
         check_spa('http://localhost:18790')
         self.assertEqual(urlopen.call_count, 3)
 
+    @patch('e2e_runtime.urllib.request.urlopen')
+    def test_accepts_the_theme_boot_script_beside_built_assets(self, urlopen):
+        responses = []
+        for body, content_type in [
+            (b'<script src="/theme-boot.js"></script><div id="root"></div>'
+             b'<script src="/assets/app.js"></script>', 'text/html'),
+            (b'(function(){})()', 'text/javascript'),
+            (b'console.log("loaded")', 'text/javascript'),
+        ]:
+            response = MagicMock()
+            response.__enter__.return_value = response
+            response.read.return_value = body
+            response.headers.get_content_type.return_value = content_type
+            responses.append(response)
+        urlopen.side_effect = responses
+        check_spa('http://localhost:18790')
+        self.assertEqual(urlopen.call_count, 3)
+
+    @patch('e2e_runtime.urllib.request.urlopen')
+    def test_rejects_any_other_root_level_script(self, urlopen):
+        page = MagicMock()
+        page.read.return_value = b'<div id="root"></div><script src="/app.js"></script>'
+        urlopen.return_value.__enter__.return_value = page
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected SPA asset path'):
+            check_spa('http://localhost:18790')
+
     @patch('e2e_runtime.time.sleep')
     @patch('e2e_runtime.urllib.request.urlopen')
     @patch('e2e_runtime.subprocess.run')
