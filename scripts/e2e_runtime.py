@@ -25,6 +25,12 @@ class SPAParser(HTMLParser):
             self.assets[attrs['href']] = {'text/css'}
 
 
+# Same-origin scripts the shell loads from the site root rather than from the hashed /assets/ bundle.
+# theme-boot.js applies the reader's stored theme before the first paint (the CSP forbids inline
+# scripts). Anything else outside /assets/ is still a sign of a broken or tampered build.
+ROOT_SCRIPTS = {'/theme-boot.js'}
+
+
 def check_spa(base):
     with urllib.request.urlopen(base + '/', timeout=20) as response:
         parser = SPAParser()
@@ -32,7 +38,7 @@ def check_spa(base):
     if not parser.root or not parser.assets:
         raise RuntimeError('SPA shell is missing its root or built assets')
     for path, types in parser.assets.items():
-        if not path.startswith('/assets/'):
+        if not path.startswith('/assets/') and path not in ROOT_SCRIPTS:
             raise RuntimeError(f'Unexpected SPA asset path: {path}')
         with urllib.request.urlopen(base + path, timeout=20) as response:
             if response.headers.get_content_type() not in types:

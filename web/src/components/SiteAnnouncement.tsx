@@ -31,15 +31,17 @@ const LEVEL_ICON: Record<AnnouncementLevel, typeof InfoCircleFilled> = {
   error: CloseCircleFilled,
 }
 
-// antd token names per level. An announcement is painted entirely from ITS OWN level — background,
-// icon, close button and body text. The band around it is neutral, so a blue notice can never land on
-// the loudest row's amber; that mismatch (band tinted by the loudest, icon by its own level) is what
-// made a mixed-level strip read as if the icon had been dropped onto the wrong row.
-const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string; text: string }> = {
-  notice: { bg: 'colorInfoBg', fg: 'colorInfo', text: 'colorInfoText' },
-  success: { bg: 'colorSuccessBg', fg: 'colorSuccess', text: 'colorSuccessText' },
-  warning: { bg: 'colorWarningBg', fg: 'colorWarning', text: 'colorWarningText' },
-  error: { bg: 'colorErrorBg', fg: 'colorError', text: 'colorErrorText' },
+// antd token names per level. An announcement is painted from ITS OWN level — background, icon and
+// close button. The band around it is neutral, so a blue notice can never land on the loudest row's
+// amber; that mismatch (band tinted by the loudest, icon by its own level) is what made a mixed-level
+// strip read as if the icon had been dropped onto the wrong row. Title and body use the ordinary text
+// colour: no level text token reaches 4.5:1 on its own background in both themes (light warning text
+// on its pale yellow measured 1.8:1), and the level is already carried by the background and icon.
+const LEVEL_TOKENS: Record<AnnouncementLevel, { bg: string; fg: string }> = {
+  notice: { bg: 'colorInfoBg', fg: 'colorInfo' },
+  success: { bg: 'colorSuccessBg', fg: 'colorSuccess' },
+  warning: { bg: 'colorWarningBg', fg: 'colorWarning' },
+  error: { bg: 'colorErrorBg', fg: 'colorError' },
 }
 
 /**
@@ -84,7 +86,7 @@ export function AnnouncementRow({
           <div style={{ color: token.colorText, fontSize: 14, fontWeight: content ? 600 : 400 }}>{title}</div>
         )}
         {content && (
-          <Typography.Text style={{ color: palette[tokens.text], whiteSpace: 'pre-line', lineHeight: 1.5 }}>
+          <Typography.Text style={{ color: token.colorText, whiteSpace: 'pre-line', lineHeight: 1.5 }}>
             {content}
           </Typography.Text>
         )}
