@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/notification"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/version"
 )
 
@@ -42,37 +43,40 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
-	cfg                *config.Config
-	st                 *Store
-	names              *Names
-	pdf                *template.Template
-	geoUp              *geoUpdater                                                                // downloads the IP database; the reader notices the new file by itself
-	geo                *geoService                                                                // IP → place for the audit log; nil-safe, empty until a .mmdb is installed
-	proxySeen          atomic.Value                                                               // bool: a forwarded request arrived from a peer not in trusted_proxies
-	seenAt             sync.Map                                                                   // username -> time.Time of the last activity stamp WRITTEN (throttle; see touchSeen)
-	jobRuns            sync.Map                                                                   // jobID -> *jobRun; shared cancel scope for a job's in-flight runs (ADR 0011)
-	itemCancels        sync.Map                                                                   // itemID -> context.CancelFunc; per-row cancel of an in-flight run (ADR 0011)
-	jobNotify          sync.Map                                                                   // jobID -> bool; opt-in to email the submitter when the job finishes
-	buildProv          func(BatchJob, func(runID, convID, taskID string)) (batch.Provider, error) // test seam for the run-item provider; nil → real buildProvider
-	schedMu            sync.Mutex                                                                 // serializes scheduleTick (admission + finalize) so ticks can't over-admit or double-finalize (ADR 0004/0011)
-	mailFn             func(to []string, subject, htmlBody string) error                          // test seam; nil → real SMTP send
-	appTok             *appTokens                                                                 // short-lived scoped tokens for the iframe-app /api/v1 bridge (ADR 0003)
-	chatMu             sync.Mutex                                                                 // guards chatLive/chatSeq
-	chatLive           map[int64]*chatTurn                                                        // in-flight chat turns; independent ceiling + admin live view (ADR 0012), NOT the run queue
-	chatSeq            int64                                                                      // monotonic in-flight chat-turn id
-	cleanupMu          sync.Mutex                                                                 // serializes a storage-cleanup pass so the scheduled ticker and a manual "clean now" never overlap (ADR 0017)
-	loginThr           *loginThrottle                                                             // per-IP + per-account failed-login rate limiter (brute-force + bcrypt DoS)
-	v1Rate             *rateLimiter                                                               // per-source request ceiling on the machine API (limits.go); off until configured
-	trustedNets        []*net.IPNet                                                               // reverse proxies allowed to supply the client IP chain
-	mermaidCharts      mermaidChartCache                                                          // user-scoped, bounded rendered SVG cache for PDF export (ADR 0020)
-	quotes             quoteCache                                                                 // vendor quotes: its OWN bounded LRU + single-flight + upstream ceiling; lazily initialised (quote_cache.go)
-	ssoInsecureForTest bool                                                                       // test-only: permit a plain-http loopback IdP (ADR 0023)
-	slackHostForTest   string                                                                     // test-only: permit a plain-http loopback Slack host
-	dekOnce            dekCache                                                                   // lazily unwrapped data key for stored auth secrets (ADR 0023)
-	captchaSvc         *captcha.Service                                                           // public-form captcha (login / forgot password / registration)
-	health             healthCache                                                                // memoized /healthz database verdict, so a public probe cannot be a query amplifier
-	releases           releaseCatalog                                                             // GitHub Releases is the sole authority for notes and maturity
-	routeTable         []routeRow                                                                 // every registered route and the credential it accepts (routes.go)
+	mailExecMu            sync.Mutex
+	mailExec              *notification.Executor
+	notificationTestMu    sync.Mutex
+	notificationTestSlots chan struct{}
+	cfg                   *config.Config
+	st                    *Store
+	names                 *Names
+	pdf                   *template.Template
+	geoUp                 *geoUpdater                                                                // downloads the IP database; the reader notices the new file by itself
+	geo                   *geoService                                                                // IP → place for the audit log; nil-safe, empty until a .mmdb is installed
+	proxySeen             atomic.Value                                                               // bool: a forwarded request arrived from a peer not in trusted_proxies
+	seenAt                sync.Map                                                                   // username -> time.Time of the last activity stamp WRITTEN (throttle; see touchSeen)
+	jobRuns               sync.Map                                                                   // jobID -> *jobRun; shared cancel scope for a job's in-flight runs (ADR 0011)
+	itemCancels           sync.Map                                                                   // itemID -> context.CancelFunc; per-row cancel of an in-flight run (ADR 0011)
+	buildProv             func(BatchJob, func(runID, convID, taskID string)) (batch.Provider, error) // test seam for the run-item provider; nil → real buildProvider
+	schedMu               sync.Mutex                                                                 // serializes scheduleTick (admission + finalize) so ticks can't over-admit or double-finalize (ADR 0004/0011)
+	mailFn                func(to []string, subject, htmlBody string) error                          // test seam; nil → real SMTP send
+	appTok                *appTokens                                                                 // short-lived scoped tokens for the iframe-app /api/v1 bridge (ADR 0003)
+	chatMu                sync.Mutex                                                                 // guards chatLive/chatSeq
+	chatLive              map[int64]*chatTurn                                                        // in-flight chat turns; independent ceiling + admin live view (ADR 0012), NOT the run queue
+	chatSeq               int64                                                                      // monotonic in-flight chat-turn id
+	cleanupMu             sync.Mutex                                                                 // serializes a storage-cleanup pass so the scheduled ticker and a manual "clean now" never overlap (ADR 0017)
+	loginThr              *loginThrottle                                                             // per-IP + per-account failed-login rate limiter (brute-force + bcrypt DoS)
+	v1Rate                *rateLimiter                                                               // per-source request ceiling on the machine API (limits.go); off until configured
+	trustedNets           []*net.IPNet                                                               // reverse proxies allowed to supply the client IP chain
+	mermaidCharts         mermaidChartCache                                                          // user-scoped, bounded rendered SVG cache for PDF export (ADR 0020)
+	quotes                quoteCache                                                                 // vendor quotes: its OWN bounded LRU + single-flight + upstream ceiling; lazily initialised (quote_cache.go)
+	ssoInsecureForTest    bool                                                                       // test-only: permit a plain-http loopback IdP (ADR 0023)
+	slackHostForTest      string                                                                     // test-only: permit a plain-http loopback Slack host
+	dekOnce               dekCache                                                                   // lazily unwrapped data key for stored auth secrets (ADR 0023)
+	captchaSvc            *captcha.Service                                                           // public-form captcha (login / forgot password / registration)
+	health                healthCache                                                                // memoized /healthz database verdict, so a public probe cannot be a query amplifier
+	releases              releaseCatalog                                                             // GitHub Releases is the sole authority for notes and maturity
+	routeTable            []routeRow                                                                 // every registered route and the credential it accepts (routes.go)
 	// forecastEval is the prediction ledger's evaluator (ADR 0029 §6): a ticker, a single-flight
 	// guard, and two test seams (the clock and the vendor fetch) so its arithmetic and its session
 	// rules are testable without a network.
@@ -265,6 +269,7 @@ func RunServer(cfgPath string) {
 	// attempt that never happened; repair them once, before the loop can act on them.
 	s.runForecastRepair()
 
+	stopNotifications := s.startNotificationRuntime()
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
 	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
@@ -295,7 +300,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st)
+	serve(srv, st, stopNotifications, s.stopTransactionalMail)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter
@@ -318,7 +323,7 @@ const shutdownGrace = 10 * time.Second
 // case ADR 0015 exists for — the next boot reconciles it from the queue rather than trusting that
 // the previous process finished anything. Waiting on them would trade that guarantee for a slower
 // stop and no more safety.
-func serve(srv *http.Server, st *Store) {
+func serve(srv *http.Server, st *Store, stops ...func(context.Context)) {
 	// Registered BEFORE the listener starts. The other order has a window — short, but real — in
 	// which the process is already serving and a SIGTERM still has its default disposition, which is
 	// to die on the spot: the exact ungraceful stop this function exists to prevent.
@@ -352,6 +357,11 @@ func serve(srv *http.Server, st *Store) {
 	}
 	// Last, and after the handlers are done: closing it earlier would fail the very requests the
 	// grace period was granted for.
+	workerCtx, workerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer workerCancel()
+	for _, stop := range stops {
+		stop(workerCtx)
+	}
 	if err := st.Close(); err != nil {
 		log.Printf("closing the database: %v", err)
 	}

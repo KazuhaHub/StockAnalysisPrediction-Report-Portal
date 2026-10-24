@@ -268,6 +268,18 @@ func TestSchemaUpgradeInspectionDoesNotCreateFiles(t *testing.T) {
 
 func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 	t.Helper()
+	removedSteps := map[string]bool{}
+	removedTables := map[string]bool{"prediction_purge_owners": true}
+	pastPurge := false
+	for _, step := range newTestStore(t).migrations() {
+		pastPurge = pastPurge || step.id == "0009"
+		if !claim && pastPurge {
+			removedSteps[step.id] = true
+			for _, name := range step.tables {
+				removedTables[name] = true
+			}
+		}
+	}
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
 	table := ""
@@ -279,16 +291,16 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 		if i == 0 {
 			tables := []any{}
 			for _, name := range value["tables"].([]any) {
-				if name != "prediction_purge_owners" {
+				if !removedTables[name.(string)] {
 					tables = append(tables, name)
 				}
 			}
 			value["tables"] = tables
 			if !claim {
-				// By id, not by position: steps that land between 0006 and 0009 are not this step.
+				// A historical dump ends before 0009, including every later appended step.
 				migrations := []any{}
 				for _, id := range value["migrations"].([]any) {
-					if id != "0009" {
+					if !removedSteps[id.(string)] {
 						migrations = append(migrations, id)
 					}
 				}
@@ -298,11 +310,11 @@ func withoutPurgeEvidence(t *testing.T, dump []byte, claim bool) []byte {
 		if name, ok := value["table"].(string); ok {
 			table = name
 		}
-		if table == "prediction_purge_owners" {
+		if removedTables[table] {
 			continue
 		}
 		if !claim && table == "meta" {
-			if row, ok := value["row"].([]any); ok && len(row) > 0 && row[0] == "mig:0009" {
+			if row, ok := value["row"].([]any); ok && len(row) > 0 && removedSteps[strings.TrimPrefix(fmt.Sprint(row[0]), migrationLedgerPrefix)] {
 				continue
 			}
 		}
@@ -346,7 +358,7 @@ func TestRunMigrationsHoldsBackAnUnrecordedExplicitStep(t *testing.T) {
 // The migration list is in merge order, not id order. The ids 0007-0009 were reserved by branches that
 // were still open when 0010 reached main, so each reserved step is appended after whatever has already
 // shipped. The explicit purge evidence step (0009) therefore follows 0010.
-func TestPurgeEvidenceIsAppendedLastAndIsTheOnlyExplicitStep(t *testing.T) {
+func TestPurgeEvidenceFollowsReleasedPrefixAndIsTheOnlyExplicitStep(t *testing.T) {
 	steps := newTestStore(t).migrations()
 	ids := make([]string, len(steps))
 	seen := map[string]bool{}
@@ -360,15 +372,15 @@ func TestPurgeEvidenceIsAppendedLastAndIsTheOnlyExplicitStep(t *testing.T) {
 			t.Errorf("step %s explicit = %v; only 0009 may be explicit", m.id, m.explicit)
 		}
 	}
-	if ids[len(ids)-1] != "0009" {
-		t.Fatalf("steps %v: 0009 is appended after every step that reached main before it", ids)
+	if len(ids) < 8 || ids[6] != "0010" || ids[7] != "0009" {
+		t.Fatalf("steps %v: 0009 must follow the released 0010 prefix", ids)
 	}
 	for i := 0; i < 6; i++ {
 		if want := fmt.Sprintf("%04d", i+1); ids[i] != want {
 			t.Fatalf("steps %v: position %d is %s, want %s", ids, i+1, ids[i], want)
 		}
 	}
-	if err := checkDumpMigrations(ids[:len(ids)-1], steps); err != nil {
+	if err := checkDumpMigrations(ids[:7], steps); err != nil {
 		t.Fatalf("a dump written without 0009 is not a prefix of the list %v: %v", ids, err)
 	}
 }

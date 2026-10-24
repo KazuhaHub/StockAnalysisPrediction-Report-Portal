@@ -358,6 +358,7 @@ func TestWatchdogDetectsStalledEvaluator(t *testing.T) {
 	}
 
 	now := time.Now()
+	startNotificationRuntimeForTest(t, s)
 	s.forecastWatchdogOnce(now)
 	state := s.st.forecastAlertState()
 	if _, ok := state.Last["stalled"]; !ok {
