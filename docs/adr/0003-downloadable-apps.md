@@ -55,6 +55,22 @@ Principle: **downloadable apps run beside the host (sandboxed iframe + scoped AP
 never inside it.** This is the same "extend by talk-to-it, not code-in-it" stance
 as ADR 0002, applied to UIs.
 
+### Market declaration binding
+
+Market installation validates the downloaded manifest's ID, version and capability
+set against the selected catalogue entry before any app/file replacement, token
+revocation or backend invalidation. Conflicting declarations and duplicate app IDs
+are rejected. The browser submits the version and capabilities shown in the
+permission confirmation; a changed catalogue returns a conflict requiring another
+review. Capability order is immaterial. Older clients submitting only an ID remain
+compatible, but still receive the manifest-to-catalogue consistency check. Supplying
+only one of the reviewed version/capability fields is refused.
+
+This binds the permission review; it does not establish a package signature,
+enforce a download checksum or prove that bytes under a version are immutable.
+Publication tooling must separately verify immutable release assets. Existing
+installations and their files remain intact when validation fails.
+
 ## Alternatives rejected
 
 See the table above. The short version: Module Federation gives the nicest

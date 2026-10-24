@@ -98,13 +98,14 @@ export default function AppsAdminPage() {
     }
   }
 
-  // Market install: scopes are known from the index entry, so prompt straight away.
+  // Bind the confirmation to these declarations; the server also checks the ZIP.
   const marketInstall = (entry: AppMarketEntry) => {
+    const reviewed = { id: entry.id, version: entry.version, scopes: [...(entry.scopes || [])] }
     setPending({
       appName: entry.name,
       scopes: entry.scopes || [],
       run: async () => {
-        await api.post('/api/admin/apps/market/install', { id: entry.id })
+        await api.post('/api/admin/apps/market/install', reviewed)
         message.success(t('apps.msgInstalled'))
         load()
         fetchMarket()
