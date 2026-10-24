@@ -304,7 +304,6 @@ function AppShell() {
         {/* Vertical gap (14) clears the queue badge's overhang so a 2-digit count (10+)
             doesn't collide with the button on the wrapped row above it. */}
         <Space size={compact ? [8, 14] : 10} wrap style={{ flexShrink: 0, marginLeft: 'auto' }}>
-          {user && <NotificationBell key={user} user={user} />}
           {canRun && !chatFocus && (
             // Keep the primary run action direct. Related run surfaces share a compact menu,
             // so single-run execution remains one click away.
@@ -446,6 +445,7 @@ function AppShell() {
               />
             </Popover>
           )}
+          {user && <NotificationBell key={user} user={user} />}
           <Popover
             trigger="click"
             placement="bottomRight"
