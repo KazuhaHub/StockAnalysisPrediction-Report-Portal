@@ -1581,6 +1581,11 @@ export interface ReportPredictions {
   sibling?: ForecastReadingEdition
   counted_edition?: ForecastReadingEdition
   settlement_paused?: boolean
+  /**
+   * Whether forecast verification covers this report's type. A covered report without a set made no
+   * forecast; an uncovered one has nothing to show. Absent when the server could not say.
+   */
+  covered?: boolean
 }
 
 /** Who may read the forecast record from an OU (user_groups.forecast_scope). */

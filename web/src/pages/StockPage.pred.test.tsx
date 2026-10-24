@@ -5,7 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import StockPage from './StockPage'
 import { ApiError } from '../api/client'
 
-const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false, legacy: false, admin: true, stage: 'full' as 'off' | 'card' | 'full' }))
+const access = vi.hoisted(() => ({ scope: 'all' as 'all' | 'own' | 'none', external: false, legacy: false, admin: true, stage: 'full' as 'off' | 'card' | 'full', instant: false }))
 
 // The reading page's prediction request (P10).
 //
@@ -17,7 +17,7 @@ vi.mock('../auth', () => ({
   useAuth: () => ({ user: 'alice', name: 'Alice', admin: access.admin, forecastReader: access.stage, forecast: access.legacy ? undefined : { scope: access.scope, external: access.external }, can: () => true, logout: vi.fn() }),
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ fontSize: 15, fontWeight: 400, wide: false }) }))
-vi.mock('../lib/datetime', () => ({ isInstant: () => false, formatReportDateTime: (s: string) => s }))
+vi.mock('../lib/datetime', () => ({ isInstant: () => access.instant, formatReportDateTime: (s: string) => s }))
 vi.mock('../components/Markdown', () => ({ default: () => <div>report-body</div> }))
 vi.mock('../components/FavoriteButton', () => ({ FavoriteButton: () => <span>fav</span> }))
 vi.mock('../components/TimelinePanel', () => ({ default: () => <div>timeline</div> }))
@@ -47,10 +47,12 @@ const QUOTE = {
   barsSource: 'tencent', barsUnavailable: '', adjusted: false, cached: false,
 }
 
-const report = (id: number, date: string) => ({
-  symbol: '001238', market: 'sz', name: 'Test Co', selDate: date, selKind: 'Research', selId: id,
-  kinds: ['Research'], subtabs: [], timeline: [],
-  rep: { id, name: 'Test Co', title: 'T', displayTitle: 'Report', date, source: 'x', html: '', md: '# hi', time: '' },
+const RECEIVED = '2026-07-07T01:00:00Z'
+
+const report = (id: number, date: string, symbol = '001238') => ({
+  symbol, market: 'sz', name: 'Test Co', selDate: date, selKind: 'Research', selId: id,
+  kinds: ['Research'], subtabs: [{ id, label: 'V3', title: 'V3', version: 'V3' }], timeline: [],
+  rep: { id, name: 'Test Co', title: 'T', displayTitle: 'Report', date, source: 'x', html: '', md: '# hi', time: RECEIVED },
   ...(withSummary ? { prediction: { has_prediction: true, display_set_id: id, stance: 'long', weight_bp: 6500, upside_bp: 1234, body_changed: false } } : {}),
 })
 
@@ -58,7 +60,14 @@ const setFor = (reportId: number, terminal: number) => ({
   id: reportId, report_id: reportId, state: 'accepted', symbol: '001238', rtype: '投资决策建议',
   title: '', version: 'V3', made_at: '2026-09-01T13:00:00Z', made_on: '2026-09-01', cohort: '2026-09',
   zone: 'Asia/Shanghai', bench_code: 'sh000852', horizon_std: true, baseline_check: 'match',
-  body_changed: false, claims: [{ key: 'expected_terminal', kind: 'terminal_value', price_fen: terminal }],
+  body_changed: false,
+  claims: [
+    { key: 'expected_terminal', kind: 'terminal_value', price_fen: terminal },
+    ...(withScenarios ? [
+      { key: 'scenario.bear', kind: 'scenario', label: 'bear', price_fen: 2000 },
+      { key: 'scenario.bull', kind: 'scenario', label: 'bull', price_fen: 5000 },
+    ] : []),
+  ],
   marks: [], s0_fen: 100000,
 })
 
@@ -68,15 +77,30 @@ let denyForecast: boolean
 let aDeferred: { resolve: (v: unknown) => void } | null
 let pendingB: boolean
 let withSummary: boolean
+let withScenarios: boolean
+// Whether the server says the ledger covers the report's type: undefined omits the field.
+let coveredFlag: boolean | undefined
+let emptyReport: boolean
+// The symbol whose quote never answers until the test releases it.
+let deferQuoteFor: string | null
+let releaseQuote: (() => void) | null
 
 vi.mock('../api/client', () => ({
   api: {
     get: (url: string) => {
-      if (url.startsWith('/api/quote/')) return Promise.resolve(QUOTE)
+      if (url.startsWith('/api/quote/')) {
+        const quoteSymbol = decodeURIComponent(url.slice('/api/quote/'.length).split('?')[0])
+        const quote = { ...QUOTE, symbol: quoteSymbol, bars: [{ ...QUOTE.bars[0], c: quoteSymbol === '001238' ? 3335 : 4400 }] }
+        if (quoteSymbol === deferQuoteFor) return new Promise((resolve) => { releaseQuote = () => resolve(quote) })
+        return Promise.resolve(quote)
+      }
       if (url.includes('/predictions')) {
         predCalls.push(url)
         if (denyForecast) return Promise.reject(new ApiError(403, 'unavailable', 'forecast_unavailable'))
         if (url.startsWith('/api/predictions?')) return Promise.resolve({ ok: true, sets: [] })
+        if (url.includes('/api/report/3/')) {
+          return Promise.resolve({ ok: true, sets: [setFor(3, 333300)], display_set_id: 3 })
+        }
         if (url.includes('/api/report/2/')) {
           if (pendingB) return new Promise(() => {}) // the in-flight case
           return Promise.resolve({ ok: true, sets: [setFor(2, 222200)], counted_set_id: 2, settlement_paused: false })
@@ -87,8 +111,16 @@ vi.mock('../api/client', () => ({
             aDeferred!.resolve = resolve
           })
         }
-        return Promise.resolve({ ok: true, sets: [setFor(1, 111100)], counted_set_id: 1, settlement_paused: true })
+        return Promise.resolve({
+          ok: true,
+          sets: emptyReport ? [] : [setFor(1, 111100)],
+          counted_set_id: 1,
+          settlement_paused: true,
+          ...(coveredFlag === undefined ? {} : { covered: coveredFlag }),
+        })
       }
+      const stockSymbol = url.startsWith('/api/stock/') ? decodeURIComponent(url.slice('/api/stock/'.length).split('?')[0]) : '001238'
+      if (stockSymbol === '600519') return Promise.resolve(report(3, '2026-07-07', stockSymbol))
       if (url.includes('date=2026-07-08')) return Promise.resolve(report(2, '2026-07-08'))
       return Promise.resolve(report(1, '2026-07-07'))
     },
@@ -107,6 +139,7 @@ function page() {
   return (
     <MemoryRouter initialEntries={['/stock/001238?date=2026-07-07']}>
       <Link to="/stock/001238?date=2026-07-08">next-report</Link>
+      <Link to="/stock/600519?date=2026-07-07">other-stock</Link>
       <Routes>
         <Route path="/stock/:symbol" element={<StockPage />} />
       </Routes>
@@ -128,9 +161,15 @@ beforeEach(() => {
   access.legacy = false
   access.admin = true
   access.stage = 'full'
+  access.instant = false
   aDeferred = null
   pendingB = true
   withSummary = false
+  withScenarios = false
+  coveredFlag = undefined
+  emptyReport = false
+  deferQuoteFor = null
+  releaseQuote = null
   try {
     window.localStorage.clear()
   } catch {
@@ -259,5 +298,80 @@ describe('StockPage predictions', () => {
     show()
     expect(await screen.findByText('report-body')).toBeTruthy()
     expect(screen.getByTestId('forecast-summary-chip').textContent).toContain('+12.3%')
+  })
+
+  describe('the report body header', () => {
+    it.each([
+      ['scope none', () => { access.scope = 'none' }],
+      ['stage off', () => { access.admin = false; access.stage = 'off' }],
+    ])('shows no forecast meta line to a reader at %s', async (_name, setup) => {
+      setup()
+      show()
+      expect(await screen.findByText('report-body')).toBeTruthy()
+      expect(screen.queryByText('forecast.reading.meta')).toBeNull()
+    })
+
+    it('keeps the received clock line behind a parseable instant', async () => {
+      access.scope = 'none'
+      access.instant = true
+      show()
+      expect(await screen.findByText(RECEIVED)).toBeTruthy()
+      expect(screen.queryByText('forecast.reading.meta')).toBeNull()
+    })
+
+    it('shows no clock line when the received time is not an instant', async () => {
+      access.scope = 'none'
+      show()
+      expect(await screen.findByText('report-body')).toBeTruthy()
+      expect(screen.queryByText(RECEIVED)).toBeNull()
+    })
+
+    it('shows the meta line only inside the card for a reader who has one', async () => {
+      show()
+      expect(await screen.findByText(/1,111\.00/)).toBeTruthy()
+      const lines = screen.getAllByText('forecast.reading.meta')
+      expect(lines).toHaveLength(1)
+      expect(lines[0].closest('#forecast')).toBeTruthy()
+    })
+  })
+
+  describe('coverage', () => {
+    it('renders no card for a report type the ledger does not cover', async () => {
+      coveredFlag = false
+      emptyReport = true
+      show()
+      expect(await screen.findByText('report-body')).toBeTruthy()
+      await waitFor(() => expect(predCalls.some((u) => u.includes('/api/report/1/'))).toBe(true))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(document.querySelector('#forecast')).toBeNull()
+      expect(screen.queryByText('forecast.reading.no_forecast')).toBeNull()
+    })
+
+    it('keeps the empty card for a covered report that made no forecast', async () => {
+      coveredFlag = true
+      emptyReport = true
+      show()
+      expect(await screen.findByText('forecast.reading.no_forecast')).toBeTruthy()
+    })
+  })
+
+  describe('the quote beside the card', () => {
+    it("does not read the previous symbol's quote while the next symbol's quote loads", async () => {
+      withScenarios = true
+      deferQuoteFor = '600519'
+      show()
+      expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
+      expect(screen.getByTestId('forecast-scenario-cursor')).toBeTruthy()
+      await userEvent.click(screen.getByText('other-stock'))
+      // The new stock's card is on screen, and its own quote has not answered.
+      expect(await screen.findByText(/3,333\.00/)).toBeTruthy()
+      await waitFor(() => expect(releaseQuote).not.toBeNull())
+      expect(screen.queryByText('forecast.panel.latest_close')).toBeNull()
+      expect(screen.queryByTestId('forecast-scenario-cursor')).toBeNull()
+      releaseQuote!()
+      expect(await screen.findByText('forecast.panel.latest_close')).toBeTruthy()
+      // The cursor now sits where the NEW quote's close puts it, not where the first one did.
+      expect(screen.getByTestId('forecast-scenario-cursor').getAttribute('data-position')).toBe(String((4400 - 2000) / (5000 - 2000) * 100))
+    })
   })
 })

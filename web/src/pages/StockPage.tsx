@@ -88,6 +88,9 @@ function writeOverlay(open: boolean): void {
   }
 }
 
+// Quote symbols are canonical codes; the route carries whatever the reader typed or followed.
+const sameSymbol = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase()
+
 export default function StockPage() {
   const { t } = useTranslation()
   const { admin, forecast, forecastReader, user } = useAuth()
@@ -116,7 +119,7 @@ export default function StockPage() {
   // Which report the compare dialog is open for; null when closed.
   const [compareFor, setCompareFor] = useState<number | null>(null)
   const [notFound, setNotFound] = useState(false)
-  const [quote, setQuote] = useState<QuoteResp | null>(null)
+  const [loadedQuote, setLoadedQuote] = useState<QuoteResp | null>(null)
   const [quoteLoading, setQuoteLoading] = useState(true)
   const [quoteError, setQuoteError] = useState<unknown>(null)
   const [quoteRange, setQuoteRange] = useState<QuoteRange>('3m')
@@ -125,12 +128,16 @@ export default function StockPage() {
   // re-request without navigating, and a nonce is the smallest way to say "run that effect again".
   const [quoteNonce, setQuoteNonce] = useState(0)
   const [quoteRefresh, setQuoteRefresh] = useState<QuoteRefreshAdvice | null>(null)
+  // A quote for another symbol is not this page's quote. The effect below clears it when the symbol
+  // changes, and this guard covers the render before that effect runs, so the strip, the chart and the
+  // card's completed-bar cursor never price one stock against another stock's close.
+  const quote = loadedQuote && sameSymbol(loadedQuote.symbol, symbol) ? loadedQuote : null
   // The report's own sets, and the symbol's other sets for the panel's "other predictions" list.
   // The sets, the counted pointer and the error are ONE value keyed by the report they describe.
   // That key is what makes a stale response harmless and, more importantly, what stops the render
   // that already shows report B's header from painting report A's marks: the derived values below
   // are empty until the state's key matches the report on screen.
-  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; display?: number; counted?: number; paused?: boolean; sibling?: ReportPredictions['sibling']; countedEdition?: ReportPredictions['counted_edition']; loading?: boolean; unavailable?: boolean; err: string }>({
+  const [pred, setPred] = useState<{ forId?: number; forAccess?: string; sets: PredictionSet[]; display?: number; counted?: number; paused?: boolean; covered?: boolean; sibling?: ReportPredictions['sibling']; countedEdition?: ReportPredictions['counted_edition']; loading?: boolean; unavailable?: boolean; err: string }>({
     sets: [],
     err: '',
   })
@@ -203,11 +210,12 @@ export default function StockPage() {
     setQuoteLoading(true)
     setQuoteError(null)
     setQuoteRefresh(null)
+    setLoadedQuote((prev) => (prev && sameSymbol(prev.symbol, symbol) ? prev : null))
     api
       .get<QuoteResp>(`/api/quote/${encodeURIComponent(symbol)}${qs({ range: quoteRange })}`)
       .then((d) => {
         if (cancelled) return
-        setQuote(d)
+        setLoadedQuote(d)
         setQuoteError(null)
         setQuoteRefresh(readQuoteRefreshAdvice(d))
       })
@@ -215,7 +223,7 @@ export default function StockPage() {
         if (cancelled) return
         // The stale quote is dropped rather than left on screen under an error: a price with no
         // indication of when it stopped updating is the one thing worse than no price.
-        setQuote(null)
+        setLoadedQuote(null)
         setQuoteError(e)
         setQuoteRefresh(quoteErrorRefreshAdvice(e))
       })
@@ -246,7 +254,7 @@ export default function StockPage() {
       .get<ReportPredictions>(`/api/report/${forId}/predictions?include=payload`)
       .then((r) => {
         if (cancelled || predForRef.current !== forId) return
-        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], display: r.display_set_id, counted: r.counted_set_id, paused: r.settlement_paused, sibling: r.sibling, countedEdition: r.counted_edition, loading: false, err: '' })
+        setPred({ forId, forAccess: forecastKey, sets: r.sets ?? [], display: r.display_set_id, counted: r.counted_set_id, paused: r.settlement_paused, covered: r.covered, sibling: r.sibling, countedEdition: r.counted_edition, loading: false, err: '' })
       })
       .catch((e) => {
         if (cancelled || predForRef.current !== forId) return
@@ -572,13 +580,13 @@ export default function StockPage() {
                 }
                 style={readerVars}
               >
-                {rep && (
+                {rep && isInstant(rep.time) && (
                   <Typography.Text
                     type="secondary"
                     title={formatReportDateTime(rep.time)}
                     style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
                   >
-                    <ClockCircleOutlined /> {t('forecast.reading.meta', { date: rep.date, received: isInstant(rep.time) ? formatReportDateTime(rep.time) : '—', edition: selectedEdition || '—' })}
+                    <ClockCircleOutlined /> {formatReportDateTime(rep.time)}
                   </Typography.Text>
                 )}
                 {rep && forecastFullEnabled && !forecastDenied && <ForecastSummaryChip prediction={dataAccess === forecastKey ? data.prediction : undefined} loading={dataAccess !== forecastKey && summaryLoading} />}
@@ -603,6 +611,7 @@ export default function StockPage() {
                   countedSetID={predCounted}
                   displaySetID={predCurrent ? pred.display : undefined}
                   settlementPaused={predCurrent ? pred.paused : undefined}
+                  covered={predCurrent ? pred.covered : undefined}
                   otherSets={otherSets}
                   latestClose={completedBar?.c}
                   latestDate={completedBar?.d}
