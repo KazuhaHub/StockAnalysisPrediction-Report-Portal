@@ -1,6 +1,10 @@
 package app
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -9,14 +13,76 @@ import (
 // sqlite connection is still releasing its files — a race that flaked on Linux CI with
 // "directory not empty". OpenStore sets MaxOpenConns=1, so every query shares the one
 // connection's in-memory database, and separate stores stay isolated.
+//
+// Initializing a store runs the whole baseline schema and every migration: about 8ms normally but
+// about 320ms under -race, where the transpiled SQLite engine pays for every memory access, and
+// hundreds of tests open one or more. So the first call initializes a store through OpenStore and
+// keeps its serialized image, and every call restores that image into a new in-memory database.
+// Initialization only writes the database (no Store field or package state), so the restored store
+// is the one OpenStore would have returned. Tests of initialization itself (baselines, migrations,
+// startup refusals) call OpenStore directly and still run the full path.
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	st, err := OpenStore("sqlite", ":memory:")
+	img, err := testStoreImage()
 	if err != nil {
 		t.Fatalf("OpenStore: %v", err)
 	}
+	st, err := connectStore("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if err := withSQLiteConn(st.db, func(c sqliteImageConn) error { return c.Deserialize(img) }); err != nil {
+		st.Close()
+		t.Fatalf("restore the initialized test store: %v", err)
+	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st
+}
+
+var testStoreTemplate struct {
+	once sync.Once
+	img  []byte
+	err  error
+}
+
+func testStoreImage() ([]byte, error) {
+	testStoreTemplate.once.Do(func() {
+		st, err := OpenStore("sqlite", ":memory:")
+		if err != nil {
+			testStoreTemplate.err = err
+			return
+		}
+		defer st.Close()
+		testStoreTemplate.err = withSQLiteConn(st.db, func(c sqliteImageConn) error {
+			img, err := c.Serialize()
+			testStoreTemplate.img = img
+			return err
+		})
+	})
+	return testStoreTemplate.img, testStoreTemplate.err
+}
+
+// sqliteImageConn is the part of the modernc driver connection that copies a whole database.
+type sqliteImageConn interface {
+	Serialize() ([]byte, error)
+	Deserialize([]byte) error
+}
+
+// withSQLiteConn runs f on the pool's single connection, the one every later query of an in-memory
+// store uses (connectStore caps SQLite at one connection).
+func withSQLiteConn(db *sql.DB, f func(sqliteImageConn) error) error {
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Raw(func(dc any) error {
+		c, ok := dc.(sqliteImageConn)
+		if !ok {
+			return fmt.Errorf("sqlite driver connection %T cannot copy a database", dc)
+		}
+		return f(c)
+	})
 }
 
 // Links carry an optional icon name (chosen in the admin UI) that must survive

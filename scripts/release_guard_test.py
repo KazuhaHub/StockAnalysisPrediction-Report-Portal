@@ -25,8 +25,11 @@ def push_run_jobs(workflow):
         name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
         cond = re.search(r'^    if: (.+?)\s*$', block, re.M)
         cond = cond[1] if cond else None
-        if cond == "github.event_name == 'pull_request'":
+        # A summary job says always() so that a failed dependency fails it instead of skipping it.
+        if cond in ("github.event_name == 'pull_request'", "always() && github.event_name == 'pull_request'"):
             continue
+        if cond == 'always()':
+            cond = None
         # `!= 'pull_request' || <more>` runs on every push whatever <more> says.
         if cond is not None and cond.startswith("github.event_name != 'pull_request' ||"):
             cond = "github.event_name != 'pull_request'"
@@ -106,8 +109,9 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['go-test','web typecheck + build','workflow lint','docker image (font gate + smoke)',
-                 'go race full (other packages)','release targets (cross-compile)']]
+                ['go-test','web typecheck + build','web lint + typecheck + build','workflow lint',
+                 'docker image (font gate + smoke)','go race full (other packages)',
+                 'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertTrue(ci_ready(jobs))
@@ -141,6 +145,29 @@ class GuardTests(unittest.TestCase):
         self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
         self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
         self.assertIn('test -n "$regex"', block)
+
+    def test_web_test_shards_agree_on_their_count(self):
+        # The same two-places count as the race shards: the matrix deals the files out through
+        # vitest's --shard, and the "(N/3)" in the name is what ci_ready waits for.
+        block = job_block(read_workflow('test.yml'), 'web-test')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        self.assertIn('--shard=${{ matrix.shard }}/${{ strategy.job-total }}', block)
+
+    def test_summary_checks_fail_rather_than_skip(self):
+        # "go race" and "web typecheck + build" are required checks that now only summarise their
+        # shards. A job whose `needs` failed is skipped unless it says always(), and a skipped
+        # required check counts as passed, so each must run always() and test every result itself.
+        workflow = read_workflow('test.yml')
+        for job_id in ('go-race', 'web-build'):
+            with self.subTest(job=job_id):
+                block = job_block(workflow, job_id)
+                self.assertRegex(re.search(r'^    if: (.+?)\s*$', block, re.M)[1], r'^always\(\)')
+                needs = re.search(r'^    needs: (.+?)\s*$', block, re.M)[1].strip('[]').split(',')
+                for need in (n.strip() for n in needs):
+                    self.assertIn(f'test "${{{{ needs.{need}.result }}}}" = success', block)
 
     def test_ci_compiles_every_release_target(self):
         # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
