@@ -58,6 +58,53 @@ func TestPostgresPurgeOwnershipAppliesAtStartup(t *testing.T) {
 	}
 }
 
+// The Postgres twin of the SQLite test below for a database whose ledger ends at 0006: 0010 and 0009
+// are applied by ordinary startup, in list order, and the evidence table starts empty next to a
+// historic global marker.
+func TestPostgresExistingDatabaseAtStep0006UpgradesAtNormalStartup(t *testing.T) {
+	dsn := pgDSN(t)
+	st := pgStore(t)
+	for _, q := range []string{
+		`ALTER TABLE announcements DROP COLUMN IF EXISTS popup_dismissible`,
+		`ALTER TABLE announcements RENAME COLUMN strip_dismissible TO dismissible`,
+		`DROP TABLE IF EXISTS prediction_purge_owners`,
+		`DELETE FROM meta WHERE k IN ('mig:0010','mig:0009')`,
+	} {
+		if _, err := st.exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := st.exec(`INSERT INTO prediction_purges(rtype,cohort,purged_at,sets_removed) VALUES(?,?,?,?)`,
+		predTestRtype, "1903-01", "2026-10-01T00:00:00Z", 3); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	opened, err := OpenStore("postgres", dsn)
+	if err != nil {
+		t.Fatalf("an existing supported Postgres database must upgrade at normal startup: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := opened.exec(`DELETE FROM prediction_purges WHERE cohort='1903-01'`); err != nil {
+			t.Error(err)
+		}
+		opened.Close()
+	})
+	requireStepsRecordedInListOrder(t, opened)
+	if !opened.tableExists("prediction_purge_owners") || !opened.columnExists("announcements", "popup_dismissible") {
+		t.Fatal("startup recorded the steps without their products")
+	}
+	if n := scalar[int](t, opened, `SELECT COUNT(*) FROM prediction_purge_owners`); n != 0 {
+		t.Fatalf("the evidence table holds %d rows after the upgrade; historic markers must not be backfilled", n)
+	}
+	if n := scalar[int](t, opened, `SELECT COUNT(*) FROM prediction_purges WHERE cohort='1903-01'`); n != 1 {
+		t.Fatalf("the historic purge marker count = %d, want 1", n)
+	}
+	if err := opened.verifyMigrationProducts(opened.poolExec(), opened.migrations()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func windBackPostgresPurgeEvidence(t *testing.T, st *Store) {
 	t.Helper()
 	for _, q := range []string{`DROP TABLE IF EXISTS prediction_purge_owners`, `DELETE FROM meta WHERE k='mig:0009'`} {
