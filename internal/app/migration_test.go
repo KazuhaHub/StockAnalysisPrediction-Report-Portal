@@ -138,8 +138,7 @@ func TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce(t *testing.T) {
 		`ALTER TABLE user_groups DROP COLUMN require_2fa`,
 		`ALTER TABLE users DROP COLUMN last_used_version`)
 
-	// Existing supported databases require the explicit offline path for step 0009.
-	st, err := openStoreForMode("sqlite", path, true)
+	st, err := OpenStore("sqlite", path)
 	if err != nil {
 		t.Fatalf("a baseline database must be accepted and migrated: %v", err)
 	}

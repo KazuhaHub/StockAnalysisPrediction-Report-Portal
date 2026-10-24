@@ -9,8 +9,13 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
 
-// SchemaUpgradeCommand is the explicit, offline path for owner-approved schema changes. The default
-// inspects only; it neither creates a config nor runs initialization or an automatic migration.
+// SchemaUpgradeCommand is an optional offline tool; no deploy needs it. Every schema step is applied
+// by ordinary startup (ADR 0035), so a release is a new binary and a restart. This command exists for
+// an operator who wants to see what a start would apply, or to apply it while the portal is stopped.
+//
+// With no arguments it only inspects: it lists the pending steps, and it neither creates a config or
+// a database nor writes to the one it reads (a SQLite file is opened read-only). With --apply it runs
+// the same runner startup does, then verifies every step's declared products.
 func SchemaUpgradeCommand(cfgPath string, args []string) (string, error) {
 	apply := len(args) == 1 && args[0] == "--apply"
 	if len(args) > 0 && !apply {
@@ -48,7 +53,7 @@ func SchemaUpgradeCommand(cfgPath string, args []string) (string, error) {
 		return "", err
 	}
 	if state != schemaCurrent {
-		return "", fmt.Errorf("schema-upgrade requires an existing supported baseline database; use normal initialization for a new database")
+		return "", fmt.Errorf("schema-upgrade works on an existing supported database; a new database is created by normal startup")
 	}
 	if err := st.verifyBaseSchema(); err != nil {
 		return "", err
@@ -70,14 +75,24 @@ func SchemaUpgradeCommand(cfgPath string, args []string) (string, error) {
 	if err := st.verifyMigrationProducts(st.poolExec(), applied); err != nil {
 		return "", err
 	}
+	if len(pending) == 0 {
+		if apply {
+			return "no pending schema steps; nothing to apply.\n", nil
+		}
+		return "no pending schema steps; the database is up to date.\n", nil
+	}
+	list := strings.Join(pending, ", ")
 	if !apply {
-		return fmt.Sprintf("dry run: pending schema steps [%s]; no changes applied. Stop the portal and take a backup with the previous release before schema-upgrade --apply.\n", strings.Join(pending, ", ")), nil
+		return fmt.Sprintf("pending schema steps [%s]; nothing was changed. The portal applies them itself at its next start; to apply them offline instead, stop the portal and run schema-upgrade --apply.\n", list), nil
 	}
 	st.Close()
-	upgraded, err := openStoreForMode(c.DBDriver, c.DBSource(), true)
+	upgraded, err := OpenStore(c.DBDriver, c.DBSource())
 	if err != nil {
 		return "", err
 	}
 	defer upgraded.Close()
-	return fmt.Sprintf("schema upgrade complete: steps [%s] verified. Restart the portal with this release.\n", strings.Join(pending, ", ")), nil
+	if err := upgraded.verifyMigrationProducts(upgraded.poolExec(), upgraded.migrations()); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("schema upgrade complete: steps [%s] applied and verified.\n", list), nil
 }
