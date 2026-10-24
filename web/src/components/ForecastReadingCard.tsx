@@ -299,12 +299,47 @@ export default function ForecastReadingCard({
             </Descriptions.Item>
           </Descriptions>
 
-          <div role="group" aria-label={t('forecast.panel.scenarios')} style={{ position: 'relative', padding: '22px 12px 4px' }}>
-            <div
-              data-testid="forecast-scenario-band"
-              data-stops={JSON.stringify(bandStops)}
-              style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
-            />
+          <div role="group" aria-label={t('forecast.panel.scenarios')} style={{ padding: '32px 12px 4px' }}>
+            {/* The marker is positioned against the band's own box, so its percentage is a point on the
+                band rather than on the padded group. The tick stays on that point; only the label is
+                pulled inward near either end, so it runs at most 6px past the band, inside the padding. */}
+            <div style={{ position: 'relative' }}>
+              <div
+                data-testid="forecast-scenario-band"
+                data-stops={JSON.stringify(bandStops)}
+                style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
+              />
+              {cursor !== undefined && (
+                <div data-testid="forecast-scenario-cursor" data-position={cursor} style={{ position: 'absolute', insetBlockStart: 0, insetInlineStart: `${cursor}%`, width: 0, height: 8 }}>
+                  <span
+                    data-testid="forecast-scenario-cursor-label"
+                    style={{
+                      position: 'absolute',
+                      insetBlockEnd: 'calc(100% + 6px)',
+                      insetInlineStart: 0,
+                      whiteSpace: 'nowrap',
+                      transform: cursor < 15 ? 'translateX(-6px)' : cursor > 85 ? 'translateX(calc(-100% + 6px))' : 'translateX(-50%)',
+                    }}
+                  >
+                    <Tag style={{ marginInlineEnd: 0 }}>{fenToYuan(latestClose!)}</Tag>
+                  </span>
+                  <span
+                    data-testid="forecast-scenario-cursor-tick"
+                    style={{
+                      position: 'absolute',
+                      insetBlockStart: -6,
+                      insetInlineStart: -1,
+                      width: 2,
+                      height: 18,
+                      borderRadius: 1,
+                      background: token.colorText,
+                      // A hairline of the card colour keeps the tick distinct where it crosses the band.
+                      boxShadow: `0 0 0 1px ${token.colorBgContainer}`,
+                    }}
+                  />
+                </div>
+              )}
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
               {scenarios.map(({ label, c }) => (
                 <Typography.Text key={label} style={{ fontSize: 12 }}>
@@ -313,7 +348,6 @@ export default function ForecastReadingCard({
                 </Typography.Text>
               ))}
             </div>
-            {cursor !== undefined && <div data-testid="forecast-scenario-cursor" data-position={cursor} style={{ position: 'absolute', insetBlockStart: 0, insetInlineStart: `${cursor}%`, transform: cursor > 80 ? 'translateX(-100%)' : cursor > 20 ? 'translateX(-50%)' : undefined }}><Tag>{fenToYuan(latestClose!)}</Tag><div style={{ width: 2, height: 12, background: token.colorText }} /></div>}
           </div>
 
           {!isTest && (

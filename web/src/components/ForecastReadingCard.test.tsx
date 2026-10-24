@@ -315,6 +315,55 @@ describe('ForecastReadingCard', () => {
       for (const stop of stops) expect(contrast(over(parse(stop), bg), bg)).toBeGreaterThanOrEqual(2)
     })
 
+    describe('the latest-close marker', () => {
+      // Bear 1,000.00, bull 1,897.00: 1,448.50 sits halfway along the band.
+      const at = (latestClose: number) => {
+        show([accepted], { latestClose, latestDate: '2026-10-16' })
+        const cursor = screen.getByTestId('forecast-scenario-cursor')
+        return {
+          cursor,
+          tick: screen.getByTestId('forecast-scenario-cursor-tick'),
+          label: screen.getByTestId('forecast-scenario-cursor-label'),
+        }
+      }
+
+      it('is placed along the band itself, not along the padded group around it', () => {
+        const { cursor } = at(144850)
+        const box = cursor.parentElement as HTMLElement
+        expect(box.style.position).toBe('relative')
+        expect(box.contains(screen.getByTestId('forecast-scenario-band'))).toBe(true)
+        expect(box.style.padding).toBe('')
+        expect(cursor.style.insetInlineStart).toBe('50%')
+      })
+
+      it.each([0, 144850, 189700])('keeps the tick centred on the price wherever the label goes (close %i)', (close) => {
+        const { cursor, tick } = at(close)
+        // The point itself never moves; only the label is pulled inward near an end.
+        expect(cursor.style.transform).toBe('')
+        expect(cursor.style.width).toBe('0px')
+        expect(tick.style.width).toBe('2px')
+        expect(tick.style.insetInlineStart).toBe('-1px')
+        // The tick runs from the label down across the band.
+        expect(tick.style.insetBlockStart).toBe('-6px')
+        expect(tick.style.height).toBe('18px')
+      })
+
+      it('centres the label over the tick, and pulls it inward at either end of the band', () => {
+        expect(at(144850).label.style.transform).toBe('translateX(-50%)')
+        document.body.innerHTML = ''
+        expect(at(0).label.style.transform).toBe('translateX(-6px)')
+        document.body.innerHTML = ''
+        expect(at(189700).label.style.transform).toBe('translateX(calc(-100% + 6px))')
+      })
+
+      it('gives the label no outer margin that would pull it off centre', () => {
+        const { label } = at(144850)
+        const tag = label.querySelector('.ant-tag') as HTMLElement
+        expect(tag.style.marginInlineEnd).toBe('0px')
+        expect(label.textContent).toBe('1,448.50')
+      })
+    })
+
     it('keeps the card content clear of its border, like the other cards on the page', () => {
       const { container } = show([accepted])
       const body = container.querySelector('#forecast .ant-card-body') as HTMLElement
