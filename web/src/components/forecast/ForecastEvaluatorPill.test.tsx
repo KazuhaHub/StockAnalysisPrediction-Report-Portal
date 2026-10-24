@@ -97,6 +97,38 @@ describe('ForecastEvaluatorPill', () => {
     expect(within(drawer).queryByText(operationsHint)).toBeNull()
   })
 
+  // The drawer is a status display that is read again every few minutes, and the pass counts in it
+  // change with every reading. A role="alert" region announces each of those changes; a note is read
+  // when the reader gets to it, like the other notices on the record page.
+  it.each([
+    ['off', settings({ mode: '0', heartbeat: null }), 'forecast.eval.pill.off_hint'],
+    ['dry', settings({ mode: 'dry' }), 'forecast.eval.pill.dry_hint'],
+    ['healthy', settings(), 'forecast.eval.pill.pass:'],
+    ['stale', settings({}, 31), 'forecast.eval.pill.stale_hint:'],
+    ['lagging', settings({}, 1, { oldest_due_unsettled_minutes: 400 }), 'forecast.eval.pill.lagging_hint:'],
+    ['error', settings({}, 1, { errors: 1, last_error: 'ledger write timed out' }), 'ledger write timed out'],
+  ])('announces nothing for the %s explanation: it is a note, not an alert', async (_name, value, text) => {
+    apiMock.get.mockResolvedValue(value)
+    show()
+    fireEvent.click(await screen.findByRole('button', { name: /forecast\.eval\.pill:/ }))
+    const drawer = await screen.findByRole('dialog')
+    const notes = within(drawer).getAllByRole('note')
+    expect(notes).toHaveLength(1)
+    expect(notes[0].textContent).toContain(text)
+    expect(within(drawer).queryByRole('alert')).toBeNull()
+  })
+
+  it('keeps a real alert for the failed read, which is an event the reader just caused', async () => {
+    show()
+    await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+    apiMock.get.mockRejectedValueOnce(new Error('offline'))
+    fireEvent.click(screen.getByRole('button', { name: /forecast\.eval\.pill:/ }))
+    const drawer = await screen.findByRole('dialog')
+    const alert = await within(drawer).findByRole('alert')
+    expect(alert.textContent).toContain('forecast.eval.pill.refresh_failed')
+    expect(within(drawer).queryByRole('note')).toBeNull()
+  })
+
   it('says a pass has never run when there is no heartbeat', async () => {
     apiMock.get.mockResolvedValue(settings({ mode: '0', heartbeat: null }))
     show()
