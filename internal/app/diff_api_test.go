@@ -26,6 +26,7 @@ func diffGET(t *testing.T, s *Server, user string, a, b int64) (int, map[string]
 
 func TestDiffAPIComparesTwoReports(t *testing.T) {
 	s := tenancyServer(t)
+	mustAddUser(t, s, "admin", true)
 	older, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-06-30", RType: "投资决策",
 		Title: "六月", MD: "# 结论\n买入\n\n## 估值\n目标价 48 元\n"})
 	newer, _, _ := s.st.UpsertReport(Rep{Symbol: "600519", Date: "2026-07-31", RType: "投资决策",

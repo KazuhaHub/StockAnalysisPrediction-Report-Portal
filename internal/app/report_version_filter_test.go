@@ -48,6 +48,7 @@ func versionFilterFixture(t *testing.T) *Server {
 		names: LoadNames(t.TempDir(), st)}
 	s.names.fetch = func(string) string { return "" }
 	st.EnsureDefaultGroup()
+	mustAddUser(t, s, "admin", true)
 	st.UpsertReport(Rep{Symbol: "600519", Date: "2026-09-04", RType: "深度分析", Title: "工作流写的", MD: "机器"})
 	if _, err := st.CreateManualReport(Rep{
 		Symbol: "600519", Date: "2026-09-04", RType: "深度分析", Title: "人写的", MD: "人工", Author: "editor"}); err != nil {

@@ -3,8 +3,37 @@ package app
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 )
+
+func TestUserSaveRejectedBatchLeavesAccountAndAuditUnchanged(t *testing.T) {
+	for _, body := range []string{
+		`{"role":"operator","display_name":"changed","active":false,"primary_group":999999}`,
+		`{"role":"operator","email":"changed@example.com","expires_at":"invalid"}`,
+		`{"role":"operator","password":"short"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			s := userAdminServer(t)
+			if err := s.st.UpsertUser(User{Username: "atomic-user", PasswordHash: "unchanged", Role: "user"}); err != nil {
+				t.Fatal(err)
+			}
+			before := *s.st.GetUser("atomic-user")
+			audits := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log`)
+			code, _ := callPath(t, s.apiUserSave, http.MethodPost, body, map[string]string{"name": "atomic-user"}, "admin")
+			if code < 400 {
+				t.Fatalf("invalid combined save accepted: %d", code)
+			}
+			after := *s.st.GetUser("atomic-user")
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("rejected save changed account: before=%+v after=%+v", before, after)
+			}
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log`) != audits {
+				t.Fatal("rejected save recorded an audit")
+			}
+		})
+	}
+}
 
 // apiUserSave is the shared partial-update endpoint behind the edit form and the password-reset
 // modal: only the fields present in the body are applied, with guards for the last admin and the

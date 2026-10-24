@@ -17,10 +17,14 @@ import (
 // OwnerGroupOf resolves the OU that owns a user's output: their primary group, or the Default group
 // when unassigned. Returns 0 only if there is no Default group (which EnsureDefaultGroup prevents).
 func (s *Store) OwnerGroupOf(username string) int64 {
-	if gid := s.PrimaryGroupOf(username); gid != 0 {
-		return gid
+	sub, snapshot, err := s.loadOUPolicySubject(username)
+	if err != nil {
+		return 0
 	}
-	return s.DefaultGroupID()
+	if _, err := snapshot.graph.policyChain(sub.EffectiveOU); err != nil {
+		return 0
+	}
+	return sub.EffectiveOU
 }
 
 // StampReportOwner sets a report's owning OU first-writer-wins: it writes only while owner_group is
@@ -222,68 +226,14 @@ func (sc *ownerScope) where(prefix string) (string, []any) {
 // restriction — for anonymous callers, admins, and any user who is not scoped, so internal behaviour
 // is unchanged. A scoped user carries their granted versions, bucketed by visibility.
 func (s *Server) viewerScope(user string) *ownerScope {
-	restricted, err := s.isRestrictedStrict(user)
-	if err != nil {
-		// The restriction could not be read (or the chain is broken): deny everything for this
-		// request. Reading it as "not restricted" is how D3 failed open.
-		return &ownerScope{denyAll: true}
-	}
-	if !restricted {
+	if user == "" {
 		return nil
 	}
-	sc := &ownerScope{self: userPrincipal(user)}
-	sc.principals = append(sc.principals, sc.self)
-	// Group principals are the Default (the "all" audience is stored as its principal) and, on the
-	// user's chain, only the effectively restricted OUs (D4, P30). An unrestricted container is
-	// therefore not a principal, so a legacy g-row written for one never matches again. The Default
-	// is the exception the encoding forces: its principal is also the "all" audience, and a legacy
-	// ingest row for a Default-attributed run is byte-identical to it, so those rows remain readable
-	// (recorded as a known limitation in the log).
-	ix, err := s.st.loadOUIndex()
+	scope, err := s.st.viewerScopeSnapshot(user)
 	if err != nil {
 		return &ownerScope{denyAll: true}
 	}
-	if ix.defaultID != 0 {
-		sc.principals = append(sc.principals, groupPrincipal(ix.defaultID))
-	}
-	gid := s.st.PrimaryGroupOf(user)
-	if gid == 0 {
-		gid = ix.defaultID
-	}
-	if gid != 0 {
-		chain, cerr := ix.chain(gid)
-		if cerr != nil {
-			// A dangling or cyclic chain would drop a restricted ancestor: deny rather than share.
-			return &ownerScope{denyAll: true}
-		}
-		for _, g := range chain {
-			if g == ix.defaultID {
-				continue
-			}
-			restricted, rerr := ix.restrictedEffective(g)
-			if rerr != nil {
-				return &ownerScope{denyAll: true}
-			}
-			if restricted {
-				sc.principals = append(sc.principals, groupPrincipal(g))
-			}
-		}
-	}
-	for _, name := range s.st.GrantedVersions(user) {
-		v, ok := s.st.Version(name)
-		if !ok {
-			continue // a version nobody registered grants nothing
-		}
-		switch v.Visibility {
-		case VisibilityAll:
-			sc.versAll = append(sc.versAll, name)
-		case VisibilityGroup:
-			sc.versGroup = append(sc.versGroup, name)
-		default:
-			sc.versOwner = append(sc.versOwner, name)
-		}
-	}
-	return sc
+	return scope
 }
 
 // userCreatedLayout is how users.created_at is written (nowStr): local civil time, whole seconds.

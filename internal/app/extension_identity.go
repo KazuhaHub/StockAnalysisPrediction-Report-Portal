@@ -80,45 +80,25 @@ func (s *Store) extensionViewerIdentity(ctx context.Context, entry appTokenEntry
 	if generation != entry.accountGeneration {
 		return empty, errExtensionIdentity
 	}
+	snapshot, err := s.loadOUPolicySnapshotFrom(tx)
+	if err != nil {
+		return empty, err
+	}
 	groupID := primary.Int64
-	if !primary.Valid || groupID == 0 {
-		rows, err := e.query(`SELECT id FROM user_groups WHERE is_default=1 ORDER BY id LIMIT 2`)
-		if err != nil {
-			return empty, err
-		}
-		defaults := []int64{}
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return empty, err
-			}
-			defaults = append(defaults, id)
-		}
-		rowErr := rows.Err()
-		rows.Close()
-		if rowErr != nil {
-			return empty, rowErr
-		}
-		if len(defaults) != 1 {
-			return empty, errExtensionIdentity
-		}
-		groupID = defaults[0]
+	if groupID == 0 {
+		groupID = snapshot.graph.defaultID
+	}
+	chain, err := snapshot.graph.actualChain(groupID)
+	if err != nil {
+		return empty, errExtensionIdentity
 	}
 	facts := extensionViewerFacts{Subject: extensionOpaqueIdentity(binding, "account", entry.username, created, strconv.FormatInt(generation, 10)), SessionRevision: revision, Role: role, OUs: []string{}}
-	seen := map[int64]bool{}
-	for groupID != 0 {
-		if groupID < 0 || seen[groupID] || len(seen) >= 64 {
+	for _, id := range chain {
+		groupCreated := snapshot.graph.nodes[id].created
+		if groupCreated == "" {
 			return empty, errExtensionIdentity
 		}
-		seen[groupID] = true
-		var parent sql.NullInt64
-		var groupCreated string
-		if err := e.queryRow(`SELECT COALESCE(created_at,''),parent_id FROM user_groups WHERE id=?`, groupID).Scan(&groupCreated, &parent); err != nil || groupCreated == "" {
-			return empty, errExtensionIdentity
-		}
-		facts.OUs = append(facts.OUs, extensionOpaqueIdentity(binding, "ou", strconv.FormatInt(groupID, 10), groupCreated))
-		groupID = parent.Int64
+		facts.OUs = append(facts.OUs, extensionOpaqueIdentity(binding, "ou", strconv.FormatInt(id, 10), groupCreated))
 	}
 	if len(facts.OUs) == 0 {
 		return empty, errExtensionIdentity

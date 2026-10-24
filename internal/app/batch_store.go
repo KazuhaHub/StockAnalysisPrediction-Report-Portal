@@ -1044,8 +1044,18 @@ func (s *Store) SetTargetSurfaces(id int64, surfaces []string) error {
 }
 
 func (s *Store) DeleteTarget(id int64) error {
-	_, err := s.exec("DELETE FROM batch_targets WHERE id=?", id)
-	return err
+	return s.withOUMutation(func(e migExec) error {
+		if _, err := e.exec(`INSERT INTO group_target_policies(group_id)
+			SELECT DISTINCT group_id FROM group_targets WHERE target_id=?
+			ON CONFLICT(group_id) DO NOTHING`, id); err != nil {
+			return err
+		}
+		if _, err := e.exec(`DELETE FROM group_targets WHERE target_id=?`, id); err != nil {
+			return err
+		}
+		_, err := e.exec(`DELETE FROM batch_targets WHERE id=?`, id)
+		return err
+	})
 }
 
 // ---------- plugins ----------

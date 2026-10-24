@@ -1214,11 +1214,10 @@ func (s *Server) apiUserAdd(w http.ResponseWriter, r *http.Request, user string)
 		jsonError(w, http.StatusInternalServerError, "could not set password")
 		return
 	}
-	s.st.UpsertUser(User{Username: name, PasswordHash: string(h), Role: validRole(in.Role)})
-	s.st.SetUserProfile(name, strings.TrimSpace(in.DisplayName), strings.TrimSpace(in.Email))
-	s.st.SetPrimaryGroup(name, in.PrimaryGroup)
-	if expiry != "" {
-		s.st.SetUserExpiry(name, expiry)
+	if err := s.st.createOUAccount(name, string(h), validRole(in.Role), strings.TrimSpace(in.DisplayName),
+		strings.TrimSpace(in.Email), expiry, in.PrimaryGroup); err != nil {
+		ouWriteHTTPError(w, err)
+		return
 	}
 	s.recordChange(r, user, AuditUserCreate, "user", name, map[string]any{
 		"via": "admin", "role": validRole(in.Role), "primary_group": in.PrimaryGroup})
@@ -1234,26 +1233,8 @@ func (s *Server) apiUserSave(w http.ResponseWriter, r *http.Request, user string
 		jsonError(w, http.StatusNotFound, "not found")
 		return
 	}
-	var in struct {
-		Role         *string `json:"role"`
-		Password     string  `json:"password"`
-		DisplayName  *string `json:"display_name"`
-		Email        *string `json:"email"`
-		Active       *bool   `json:"active"`
-		PrimaryGroup *int64  `json:"primary_group"`
-		ExpiresAt    *string `json:"expires_at"`
-	}
+	var in ouAccountPatch
 	readJSON(r, &in)
-	if in.Role != nil {
-		newRole := validRole(*in.Role)
-		if newRole != "admin" && u.IsAdmin() && s.st.CountAdmins() <= 1 { // never demote the last admin
-			newRole = "admin"
-		}
-		s.st.WriteAudit(AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user),
-			Action: AuditUserChange, TargetType: "user", TargetID: name,
-			Detail: auditJSON(map[string]any{"field": "role", "to": newRole})})
-		s.st.SetUserRole(name, newRole)
-	}
 	if pw := in.Password; pw != "" {
 		if err := validateNewPassword(pw); err != nil {
 			jsonError(w, http.StatusBadRequest, err.Error())
@@ -1264,27 +1245,7 @@ func (s *Server) apiUserSave(w http.ResponseWriter, r *http.Request, user string
 			jsonError(w, http.StatusInternalServerError, "could not set password")
 			return
 		}
-		if err := s.st.SetUserPassword(name, string(h)); err != nil {
-			jsonError(w, http.StatusInternalServerError, "could not set password")
-			return
-		}
-	}
-	if in.DisplayName != nil || in.Email != nil {
-		dn, em := u.DisplayName, u.Email
-		if in.DisplayName != nil {
-			dn = strings.TrimSpace(*in.DisplayName)
-		}
-		if in.Email != nil {
-			em = strings.TrimSpace(*in.Email)
-		}
-		s.st.SetUserProfile(name, dn, em)
-	}
-	if in.Active != nil {
-		active := *in.Active
-		if !active && (name == user || (u.IsAdmin() && s.st.CountAdmins() <= 1)) {
-			active = true // can't disable yourself or the last admin
-		}
-		s.st.SetUserActive(name, active)
+		in.Password = string(h)
 	}
 	if in.ExpiresAt != nil {
 		expiry, err := parseExpiry(*in.ExpiresAt)
@@ -1292,25 +1253,15 @@ func (s *Server) apiUserSave(w http.ResponseWriter, r *http.Request, user string
 			jsonError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// An already-passed cutoff would lock the account out immediately; refuse it for your own
-		// account and the last admin, mirroring the self-disable / last-admin guard above.
-		if expiry != "" {
-			today := time.Now().In(s.panelLocation()).Format("2006-01-02")
-			if today > expiry && (name == user || (u.IsAdmin() && s.st.CountAdmins() <= 1)) {
-				jsonError(w, http.StatusBadRequest, "cannot set an already-passed expiry on your own or the last admin account")
-				return
-			}
-		}
-		s.st.SetUserExpiry(name, expiry)
+		in.ExpiresAt = &expiry
 	}
-	if in.PrimaryGroup != nil {
-		// Moving an account between OUs changes what it can read, so it belongs in the log for the
-		// same reason a grant change does.
-		s.st.WriteAudit(AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user),
-			Action: AuditUserChange, TargetType: "user", TargetID: name,
-			Detail: auditJSON(map[string]any{"field": "primary_group",
-				"from": s.st.PrimaryGroupOf(name), "to": *in.PrimaryGroup})})
-		s.st.SetPrimaryGroup(name, *in.PrimaryGroup)
+	changes, err := s.st.saveOUAccount(name, user, time.Now().In(s.panelLocation()).Format("2006-01-02"), in)
+	if err != nil {
+		ouWriteHTTPError(w, err)
+		return
+	}
+	for _, detail := range changes {
+		s.recordChange(r, user, AuditUserChange, "user", name, detail)
 	}
 	writeJSON(w, okJSON)
 }

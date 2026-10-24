@@ -223,7 +223,10 @@ func (s *Server) urgentAllowed(user, priority string, base int) (string, bool) {
 	if !s.urgentEnabled() {
 		return strconv.Itoa(base), true // urgent lane turned off → run at base priority
 	}
-	gs := s.st.EffectiveGroupSettings(user)
+	gs, err := s.st.EffectiveGroupSettingsErr(user)
+	if err != nil {
+		return strconv.Itoa(base), true
+	}
 	if !gs.AllowUrgent {
 		return strconv.Itoa(base), true // the user's group disallows urgent
 	}
@@ -241,7 +244,11 @@ func (s *Server) urgentAllowed(user, priority string, base int) (string, bool) {
 // always open. The caller passes the effective run hour (a scheduled run's run_at hour,
 // else now) so the window governs execution time, not submission time.
 func (s *Server) runWindowOpenAt(user string, hour int) (bool, string) {
-	win := s.st.EffectiveGroupSettings(user).RunWindow
+	policy, err := s.st.EffectiveGroupSettingsErr(user)
+	if err != nil {
+		return false, "unavailable"
+	}
+	win := policy.RunWindow
 	start, end, ok := parseRunWindow(win)
 	if !ok {
 		return true, ""
@@ -307,9 +314,10 @@ func (s *Server) groupPriorityValid(p string) string {
 // (and every unassigned user) use the system default (run_default_priority), so priority
 // resolves symmetrically with weight/urgent. A never-a-default urgent override is ignored.
 func (s *Server) resolveBasePriority(user string) int {
-	if gid := s.st.PrimaryGroupOf(user); gid != 0 && gid != s.st.DefaultGroupID() {
-		if p := s.st.GroupPriority(gid); p != "" {
-			if b, urgent, _ := parsePriority(p); !urgent {
+	sub, snapshot, err := s.st.loadOUPolicySubject(user)
+	if err == nil && sub.AssignedOU != 0 && sub.AssignedOU != snapshot.graph.defaultID {
+		if p := snapshot.values[sub.AssignedOU].priority; p != nil && *p != "" {
+			if b, urgent, _ := parsePriority(*p); !urgent {
 				return b
 			}
 		}

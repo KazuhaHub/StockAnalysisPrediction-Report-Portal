@@ -136,6 +136,7 @@ func TestOUParentIsSettableThroughTheAPI(t *testing.T) {
 // resolves settings from a ring, which no admin can reason about.
 func TestOUParentRefusesACycle(t *testing.T) {
 	s := ouAPIServer(t)
+	root := s.st.DefaultGroupID()
 	a := int64(postGroup(t, s, `{"name":"A"}`)["id"].(float64))
 	b := int64(postGroup(t, s, `{"name":"B","parent_id":`+itoa(a)+`}`)["id"].(float64))
 	c := int64(postGroup(t, s, `{"name":"C","parent_id":`+itoa(b)+`}`)["id"].(float64))
@@ -143,8 +144,8 @@ func TestOUParentRefusesACycle(t *testing.T) {
 	if rec := putGroup(s, a, `{"name":"A","parent_id":`+itoa(c)+`}`); rec.Code == http.StatusOK {
 		t.Error("moving an OU under its own descendant must be refused")
 	}
-	if got := s.st.groupParent(a); got != 0 {
-		t.Errorf("A's parent = %d after a refused move, want it unchanged (0)", got)
+	if got := s.st.groupParent(a); got != root {
+		t.Errorf("A's parent = %d after a refused move, want it unchanged (%d)", got, root)
 	}
 	if rec := putGroup(s, a, `{"name":"A","parent_id":`+itoa(a)+`}`); rec.Code == http.StatusOK {
 		t.Error("an OU cannot be its own parent")
@@ -167,11 +168,11 @@ func TestOUParentOmittedLeavesItAlone(t *testing.T) {
 	if got := s.st.groupParent(g); got != root {
 		t.Errorf("parent = %d after a save that omitted it, want it untouched (%d)", got, root)
 	}
-	// An explicit 0 detaches it, which is how the UI offers "no parent".
-	if rec := putGroup(s, g, `{"name":"X renamed","parent_id":0}`); rec.Code != http.StatusOK {
-		t.Fatalf("detach → %d", rec.Code)
+	// Ordinary OUs cannot detach into additional roots.
+	if rec := putGroup(s, g, `{"name":"X renamed","parent_id":0}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("detach returned %d, want refusal", rec.Code)
 	}
-	if got := s.st.groupParent(g); got != 0 {
-		t.Errorf("parent = %d after an explicit 0, want detached", got)
+	if got := s.st.groupParent(g); got != root {
+		t.Errorf("parent = %d after a refused detach, want %d", got, root)
 	}
 }

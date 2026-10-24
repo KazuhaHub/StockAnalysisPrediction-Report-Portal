@@ -281,28 +281,27 @@ func (s *Store) VersionGrants(version string) []string {
 
 // SetVersionGrants replaces one version's whole grant list in a transaction, so a save is atomic and
 // can never leave a version half-disclosed.
+//
+// The save also shares the OU writer boundary with deletion: an OU principal is validated against
+// the tree INSIDE that boundary, so a delete cannot land between the check and the insert and leave
+// a grant naming an OU that no longer exists.
 func (s *Store) SetVersionGrants(version string, principals []string) error {
 	version = normalizeVersion(version)
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(s.bind("DELETE FROM version_grants WHERE version=?"), version); err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, p := range principals {
-		if p = strings.TrimSpace(p); p == "" || seen[p] {
-			continue
-		}
-		seen[p] = true
-		if _, err := tx.Exec(s.bind("INSERT INTO version_grants(version,principal) VALUES(?,?)"),
-			version, p); err != nil {
+	return s.withOUMutation(func(e migExec) error {
+		validated, err := validateOUPrincipals(e, principals)
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		if _, err := e.exec("DELETE FROM version_grants WHERE version=?", version); err != nil {
+			return err
+		}
+		for _, p := range validated {
+			if _, err := e.exec("INSERT INTO version_grants(version,principal) VALUES(?,?)", version, p); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // GrantedVersions resolves which versions a user may read: their account's own grants if it has
@@ -313,16 +312,8 @@ func (s *Store) SetVersionGrants(version string, principals []string) error {
 // the Default OU, so a union would push whatever the root was granted down into every tenant, the
 // internal version included. Configuring a nearer principal is how an admin narrows.
 func (s *Store) GrantedVersions(username string) []string {
-	if v := s.principalVersions(userPrincipal(username)); len(v) > 0 {
-		return v
-	}
-	chain := s.groupChain(username) // root → leaf
-	for i := len(chain) - 1; i >= 0; i-- {
-		if v := s.principalVersions(groupPrincipal(chain[i])); len(v) > 0 {
-			return v
-		}
-	}
-	return nil
+	versions, _ := s.GrantedVersionsErr(username)
+	return versions
 }
 
 // principalVersions lists the versions one principal is granted directly, ordered by the registry so
@@ -368,31 +359,15 @@ func (s *Server) isRestrictedStrict(username string) (bool, error) {
 	if s.isAdmin(username) {
 		return false, nil
 	}
-	restricted, found, err := s.st.userRestrictedRow(username)
+	subject, snapshot, err := s.st.loadOUPolicySubject(username)
 	if err != nil {
 		return false, err
 	}
-	if !found {
-		// No account row: a session route has already validated the account before reaching here, so
-		// this is a request that raced a deletion (or a direct caller that supplied a name). Treat it
-		// as unscoped, matching the pre-P31 contract; a read FAILURE is the branch above and denies.
-		return false, nil
-	}
-	if restricted {
-		return true, nil
-	}
-	ix, err := s.st.loadOUIndex()
+	policies, err := snapshot.resolve(subject.EffectiveOU)
 	if err != nil {
 		return false, err
 	}
-	gid := s.st.PrimaryGroupOf(username)
-	if gid == 0 {
-		gid = ix.defaultID
-	}
-	if gid == 0 {
-		return false, nil
-	}
-	return ix.restrictedEffective(gid)
+	return subject.Restricted || policies.Restricted.Effective, nil
 }
 
 // isRestricted reports whether a user's reads are scoped at all. The account flag and the OU flag OR

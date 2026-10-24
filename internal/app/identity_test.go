@@ -135,6 +135,12 @@ func TestApplyAssignmentBumpsSessionOnChange(t *testing.T) {
 	st.SetPrimaryGroup("u", root)
 
 	before := st.GetUser("u").SessionRev
+	if err := s.applyAssignment("u", "operator", 999999); err == nil {
+		t.Fatal("assignment to a missing OU succeeded")
+	}
+	if u := st.GetUser("u"); u.Role != "user" || u.SessionRev != before || st.PrimaryGroupOf("u") != root {
+		t.Fatal("rejected assignment partially changed role, OU or session")
+	}
 	// A no-op assignment must NOT churn the session — otherwise every login logs the user out.
 	if err := s.applyAssignment("u", "user", root); err != nil {
 		t.Fatal(err)

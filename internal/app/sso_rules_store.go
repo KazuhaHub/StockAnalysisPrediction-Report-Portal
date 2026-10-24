@@ -61,14 +61,31 @@ func (s *Store) SaveSSORules(rules []storedRule) error {
 		rules[i].ID = int64(i + 1)
 		rules[i].Attr = strings.TrimSpace(rules[i].Attr)
 	}
-	if len(rules) == 0 {
-		return s.SetSetting(setSSORules, "")
-	}
-	b, err := json.Marshal(rules)
-	if err != nil {
+	return s.withOUMutation(func(e migExec) error {
+		if len(rules) > 0 {
+			snapshot, err := s.loadOUPolicySnapshotFrom(e.ex)
+			if err != nil {
+				return err
+			}
+			for _, rule := range rules {
+				if rule.TargetGroup != 0 {
+					if _, err := snapshot.graph.policyChain(rule.TargetGroup); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		value := ""
+		if len(rules) > 0 {
+			b, err := json.Marshal(rules)
+			if err != nil {
+				return err
+			}
+			value = string(b)
+		}
+		_, err := e.exec(`INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, setSSORules, value)
 		return err
-	}
-	return s.SetSetting(setSSORules, string(b))
+	})
 }
 
 // DeleteRulesOfProvider drops the rules pinned to one provider, leaving the global ones. Called when

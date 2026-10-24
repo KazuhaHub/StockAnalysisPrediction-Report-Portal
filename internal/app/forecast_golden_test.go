@@ -341,6 +341,7 @@ func checkpointIndex(cp string) int {
 func buildGoldenServer(t *testing.T, spec goldenFixtureSpec) (*Server, []*groupSet) {
 	t.Helper()
 	s := newV1Server(t)
+	mustAddUser(t, s, "admin", true)
 	for _, m := range spec.Months {
 		var prevReportID int64
 		for _, g := range m.Sets {

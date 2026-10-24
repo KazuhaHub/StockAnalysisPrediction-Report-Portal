@@ -24,7 +24,11 @@ const batchTestSpec = `{
 
 func batchServer(t *testing.T) *Server {
 	t.Helper()
-	return &Server{st: newTestStore(t), cfg: &config.Config{SecretKey: "test-secret"}}
+	st := newTestStore(t)
+	if err := st.UpsertUser(User{Username: "admin", PasswordHash: "h", Role: "operator"}); err != nil {
+		t.Fatal(err)
+	}
+	return &Server{st: st, cfg: &config.Config{SecretKey: "test-secret"}}
 }
 
 func post(t *testing.T, h func(http.ResponseWriter, *http.Request, string), body string) map[string]any {

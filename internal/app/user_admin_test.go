@@ -125,7 +125,13 @@ func TestUserGroupsCRUDAndMembership(t *testing.T) {
 		t.Fatalf("after switch PrimaryGroupOf(alice) = %d, want %d", got, gid2)
 	}
 
-	// Deleting a group drops its primary pointers (members fall back to Default).
+	// Move members deliberately before deleting the old group.
+	if err := st.SetPrimaryGroup("bob", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetPrimaryGroup("alice", 0); err != nil {
+		t.Fatal(err)
+	}
 	_, _, _ = st.DeleteUserGroup(gid2)
 	if got := st.PrimaryGroupOf("bob"); got != 0 {
 		t.Fatalf("bob still points at a deleted group: %d", got)
@@ -192,9 +198,9 @@ func TestGroupModelResolution(t *testing.T) {
 		t.Fatalf("after clear = (%d, %v), want (4, false)", st.UserTicketAllocation("u"), st.UserUrgentUnlimited("u"))
 	}
 
-	// A non-existent group id is not stored (it would dangle); the user inherits Default.
-	if err := st.SetPrimaryGroup("u", 999999); err != nil {
-		t.Fatalf("SetPrimaryGroup(bad id): %v", err)
+	// An invalid destination is refused instead of being interpreted as an explicit clear.
+	if err := st.SetPrimaryGroup("u", 999999); err == nil {
+		t.Fatal("SetPrimaryGroup accepted an unknown destination")
 	}
 	if got := st.PrimaryGroupOf("u"); got != 0 {
 		t.Fatalf("stale primary id was stored: %d, want 0", got)
@@ -203,6 +209,12 @@ func TestGroupModelResolution(t *testing.T) {
 	// Deleting a group also clears its primary members; a stray duplicate default (if one
 	// ever existed) is likewise protected — the guard checks the row's own is_default flag.
 	st.SetPrimaryGroup("u", g)
+	if _, _, err := st.DeleteUserGroup(g); err == nil {
+		t.Fatal("populated deletion was accepted")
+	}
+	if err := st.SetPrimaryGroup("u", 0); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := st.DeleteUserGroup(g); err != nil {
 		t.Fatalf("DeleteUserGroup(VIP): %v", err)
 	}

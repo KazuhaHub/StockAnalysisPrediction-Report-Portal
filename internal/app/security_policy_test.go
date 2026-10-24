@@ -70,11 +70,14 @@ func securityOf(t *testing.T, st *Store, user string) SecuritySettings {
 // existed, and what an upgrade must not change.
 func TestEnrolmentDefaultsToAllowed(t *testing.T) {
 	env := policyServer(t)
-	for _, u := range []string{"root-user", "child-user", "nobody-at-all"} {
+	for _, u := range []string{"root-user", "child-user"} {
 		got := securityOf(t, env.s.st, u)
 		if !got.TOTPAllowed || !got.PasskeyAllowed {
 			t.Errorf("%s defaults to %+v, want both allowed", u, got)
 		}
+	}
+	if _, err := env.s.st.SecuritySettings("nobody-at-all"); err == nil {
+		t.Fatal("an absent account must not acquire the Default OU's policy")
 	}
 }
 
