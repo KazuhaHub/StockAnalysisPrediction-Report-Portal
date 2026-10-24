@@ -44,7 +44,8 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
             >
               <span>{n.date}</span>
               <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.75 }}>{n.n}</span>
-              {n.predicted && <span aria-hidden="true" style={{ marginLeft: 6, color: token.colorPrimary }}>●</span>}
+              {/* The selected chip is filled with the primary colour, so its dot takes the chip's own text colour. */}
+              {n.predicted && <span aria-hidden="true" style={{ marginLeft: 6, color: active ? token.colorTextLightSolid : token.colorPrimary }}>●</span>}
             </button>
           )
         })}
