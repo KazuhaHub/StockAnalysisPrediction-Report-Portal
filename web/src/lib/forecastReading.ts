@@ -13,9 +13,13 @@ export function barIsComplete(date: string, asOf: string, now: Date): boolean {
   return chinaStamp.slice(11, 16) >= '15:00' && now.getTime() >= Date.parse(`${date}T15:30:00+08:00`)
 }
 
+export function completedBars(quote: QuoteResp, now = new Date()): QuoteBar[] {
+  return quote.bars.filter((bar) => barIsComplete(bar.d, quote.snapshot.asOf, now))
+}
+
 export function latestCompletedBar(quote?: QuoteResp | null, now = new Date()): QuoteBar | undefined {
   if (!quote) return undefined
-  const completed = quote.bars.filter((bar) => barIsComplete(bar.d, quote.snapshot.asOf, now))
+  const completed = completedBars(quote, now)
   return completed[completed.length - 1]
 }
 

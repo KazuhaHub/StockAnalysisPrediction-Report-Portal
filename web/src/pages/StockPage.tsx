@@ -24,7 +24,8 @@ import {
   type QuoteRefreshAdvice,
 } from '../lib/quoteRefresh'
 import { startVisibleDeadline } from '../lib/visiblePoll'
-import { latestCompletedBar, readingSet } from '../lib/forecastReading'
+import { completedBars, latestCompletedBar, readingSet } from '../lib/forecastReading'
+import { chinaToday, forecastWindow } from '../lib/forecastPath'
 import { FavoriteButton } from '../components/FavoriteButton'
 import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
@@ -279,6 +280,34 @@ export default function StockPage() {
   const predErr = predCurrent ? pred.err : ''
   const forecastDenied = predCurrent && pred.unavailable
 
+  // The accepted set the card and the chart describe: the counted one when there is one, else the latest.
+  const displaySet = readingSet(predSets, predCurrent ? pred.display : undefined)
+
+  // The forecast-and-actual chart's own series: the closes over exactly the set's window, from its
+  // recorded start to today (or to the window's end, once it has passed), whatever range the quote
+  // chart shows. Nothing is asked until the set has a start. It follows the quote's refresh, so the
+  // chart's last close moves with the card's.
+  const pathWindow = displaySet?.state === 'accepted' ? forecastWindow(displaySet) : undefined
+  const pathFrom = pathWindow?.from
+  const today = chinaToday()
+  const pathTo = pathWindow ? (pathWindow.end < today ? pathWindow.end : today) : undefined
+  const [pathQuote, setPathQuote] = useState<QuoteResp | null>(null)
+  useEffect(() => {
+    if (!symbol || !pathFrom || !pathTo || pathTo < pathFrom) return
+    let cancelled = false
+    api
+      .get<QuoteResp>(`/api/quote/${encodeURIComponent(symbol)}${qs({ from: pathFrom, to: pathTo })}`)
+      .then((d) => {
+        if (!cancelled) setPathQuote(d)
+      })
+      .catch(() => {
+        if (!cancelled) setPathQuote(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [symbol, pathFrom, pathTo, quoteNonce])
+
   // The symbol's other sets, for "this stock's other predictions". Once per symbol, not per report.
   useEffect(() => {
     setOtherPred({ key: otherKey, sets: [] })
@@ -344,8 +373,6 @@ export default function StockPage() {
   const rep = data.rep
   const selectedEdition = data.subtabs.find((tab) => tab.id === data.selId)?.version
 
-  // The accepted set the overlay describes: the counted one when there is one, else the latest.
-  const displaySet = readingSet(predSets, predCurrent ? pred.display : undefined)
   const acceptedSet = displaySet?.state === 'accepted' ? displaySet : undefined
   const claimOf = (s: PredictionSet, kind: string, label?: string) =>
     s.claims.find((c) => c.kind === kind && (label === undefined || c.label === label))
@@ -390,6 +417,8 @@ export default function StockPage() {
   // the next one loads. The route-symbol guard above is not enough for it: the next symbol's quote
   // may answer first, and the previous stock's card must not be priced against that close.
   const completedBar = latestCompletedBar(quote && sameSymbol(quote.symbol, data.symbol) ? quote : null)
+  // The same guard for the chart's closes.
+  const pathBars = pathQuote && sameSymbol(pathQuote.symbol, data.symbol) ? completedBars(pathQuote) : undefined
 
   // Back + stock name/code. This is the page's identity/nav header — it sits at the very
   // top of every layout (above the timeline), so "where am I / go back" is the first thing
@@ -625,6 +654,7 @@ export default function StockPage() {
                   otherSets={otherSets}
                   latestClose={completedBar?.c}
                   latestDate={completedBar?.d}
+                  pathBars={pathBars}
                   symbol={data.symbol}
                   reportDate={rep.date}
                   receivedAt={rep.time}
