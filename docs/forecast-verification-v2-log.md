@@ -2268,5 +2268,7 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
   program takes no automatic backups.
 - `schema-upgrade` stays as an optional tool: no arguments lists the pending steps read-only, `--apply`
   runs the normal runner and verifies. The tests that asserted the refusal now assert the upgrade at
-  startup from a database at `0006` and from a baseline database, in both drivers. ADR 0035 and 0039,
-  the decisions page, the upgrade notes and the operations document carry the reasoning.
+  startup from a database at `0006` and from a baseline database, in both drivers. The Postgres checks
+  look only at the steps they applied, because other tests in the shared database re-stamp earlier
+  steps. ADR 0035 and 0039, the decisions page, the upgrade notes and the operations document carry the
+  reasoning.

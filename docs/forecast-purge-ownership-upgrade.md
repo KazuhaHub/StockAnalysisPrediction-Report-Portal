@@ -36,8 +36,9 @@ against the old database and upgrade it before dumping it. Take the backup from 
 running now, by id, before anything pulls:
 
 ```sh
-# 1. The previous release, by image id. The container keeps pointing at it after a later pull.
-docker inspect report-portal --format '{{.Image}}'
+# 1. The previous release, by image id (it prints as sha256:<hex>). The container keeps pointing at
+#    it after a later pull.
+img=$(docker inspect report-portal --format '{{.Image}}'); echo "$img"
 
 # 2. The service's RP_* settings (RP_DB_DRIVER, RP_DB_DSN and the like) in a file only you can read.
 (umask 077; docker inspect report-portal --format '{{range .Config.Env}}{{println .}}{{end}}' \
@@ -48,12 +49,14 @@ docker inspect report-portal --format '{{.Image}}'
 docker stop report-portal
 docker run --rm --volumes-from report-portal --env-file backup.env \
   --user 10001:10001 --entrypoint /app/report-portal \
-  sha256:<the id from step 1> backup - | gzip > pre-upgrade-$(date +%F).gz
+  "$img" backup - | gzip > pre-upgrade-$(date +%F).gz
 
 # 4. The file holds database credentials. Remove it.
 rm -f backup.env
 ```
 
+- Keep the printed id: `img` lives only in the shell that ran step 1, and in another shell it must be set
+  again from that value (`img=sha256:<hex>`, prefix included).
 - `--entrypoint /app/report-portal` is what makes the trailing arguments reach the binary:
   `docker-entrypoint.sh` ignores them and always starts the server.
 - `--volumes-from` takes the data volume and the config mount from the stopped container, so there is no
