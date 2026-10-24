@@ -36,6 +36,12 @@ through the documented v0.4.72 bridge.
    previous image or binary for this, and for rollback. Verify the backup with that release's restore
    dry run on a disposable target, and preserve a secure copy of the infrastructure config and its
    secret keys. Backups contain sensitive data.
+   **With a moving tag and `pull_policy: always`, `docker compose run` is not the previous release.**
+   Compose pulls before it runs, so once the new release is published a service on `:latest` or `:beta`
+   runs the new binary, which refuses the database. Nothing is changed, but there is no backup either.
+   Before pulling anything, record the running container's image id:
+   `docker inspect report-portal --format '{{.Image}}'`. Then take the backup from that id with the
+   plain `docker run` form below, adding `--volumes-from report-portal` for the service's mounts.
 3. Point the new binary at the same infrastructure configuration using `RP_CONFIG`. Existing `RP_DB_*`
    overrides still apply: the command prints no target, so verify that it receives exactly the
    environment the portal runs with, or it inspects a different database. Do not put credentials on
@@ -61,8 +67,11 @@ docker compose run --rm --no-deps --user 10001:10001 --entrypoint /app/report-po
   tag for `schema-upgrade`. Drop `--no-deps` if the database service is not already running.
 - `--user 10001:10001` matters for SQLite, see below. Use the deployment's `PUID:PGID` if it sets them.
 
-If you must use plain `docker run`, copy every mount and variable from the running service rather than
-typing them from memory:
+If you must use plain `docker run`, for example for the pre-upgrade backup from the previous image id,
+copy every mount and variable from the service rather than typing them from memory. A stopped service
+container still lends its mounts (`--volumes-from report-portal`). Its environment can be written to a
+file only you can read, which you delete afterwards:
+`docker inspect report-portal --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^RP_' > portal.env`.
 
 ```sh
 docker run --rm --user 10001:10001 --entrypoint /app/report-portal \
