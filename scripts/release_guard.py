@@ -35,10 +35,11 @@ def validate_metadata(meta, tag, image, commit):
 
 
 def ci_ready(jobs):
-    required = {'go-test', 'web typecheck + build', 'workflow lint',
+    required = {'go-test', 'web typecheck + build', 'web lint + typecheck + build', 'workflow lint',
                 'docker image (font gate + smoke)', 'go race full (other packages)',
                 'release targets (cross-compile)'}
     required.update(f'go race full ({i}/4)' for i in range(1, 5))
+    required.update(f'web tests ({i}/3)' for i in range(1, 4))
     passed = {j['name'] for j in jobs if j.get('conclusion') == 'success'}
     return required <= passed
 
