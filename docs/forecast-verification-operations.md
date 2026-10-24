@@ -121,6 +121,41 @@ Take the ADR 0027 backup. For R1a-β2 also record the heal predicate's count (Q3
 than step `0006` refuses a database that records it: rolling back across the access schema is
 restore-only.
 
+### Release with the purge ownership evidence step (`0009`)
+
+Step `0009` is an explicit offline step: a build that has it will not start against an existing database
+that has not been upgraded, and it writes no DDL while refusing. The full procedure is
+[forecast-purge-ownership-upgrade.md](forecast-purge-ownership-upgrade.md); the points that are easy to
+miss are:
+
+- **Take the pre-upgrade backup with the previous release.** The new binary's `backup`, `restore`,
+  `adduser`, `security`, `recompute-kinds` and `freeze-names` all open the store the way startup does and
+  refuse an un-upgraded database, so none of them can take it.
+- **Stop the container before upgrading, and keep a refused one stopped.** The new image against an
+  un-upgraded database exits with the refusal; under `restart: unless-stopped` or `always` it restarts and
+  refuses again in a loop. Stop it first, and start the new image only after the upgrade is verified.
+- **Run the upgrade by overriding the entrypoint.** `docker-entrypoint.sh` does not pass arguments, so
+  `docker run <image> schema-upgrade` starts the server. Use
+  `docker run --rm --entrypoint /app/report-portal ... <image> schema-upgrade [--apply]` with the same
+  volumes, environment (`RP_DB_*`) and network as the service, and for SQLite add `--user 10001:10001` (or
+  the deployment's `PUID:PGID`) so no root-owned files appear beside the database. Prefer
+  `docker compose run --rm --no-deps --entrypoint /app/report-portal report-portal ...`, which reuses the
+  service's mounts by construction. With plain `docker run`, the data volume is `<project>_rp-data`, not
+  the `rp-data` written in the compose file: a literal `rp-data` mounts a new empty volume, and on SQLite
+  `backup` then dumps an empty database and exits 0.
+- **Check the backup's size before upgrading.** `backup` prints its table and row counts on stderr; they
+  must match the deployment, and the previous release's restore dry run must list non-zero `users` and
+  `reports` rows.
+- **One `--apply` covers every pending step.** The dry run lists what is pending in the build's list order,
+  which is merge order and not id order: `0007`, `0008` and `0009` were reserved by branches that were still
+  open when the announcement step `0010` reached main, so they follow it. For a database that has recorded
+  `0001` to `0006`, a release that also ships the notification (`0007`) and extension (`0008`) steps lists
+  `[0010, 0007, 0008, 0009]`, and the same `--apply` performs all of them; `0009` is always last. An id that
+  looks out of order in that list is not an error. Inspect again afterwards; it must report nothing pending
+  before the new image starts.
+- Evidence starts empty and is never back-filled. Months purged before the upgrade stay visible to `all`
+  readers and the administrator views and are never disclosed to own readers.
+
 ### After a restore
 
 A restore resets the heartbeat, the alert state, the dry gate and the alert verification. The mode
@@ -197,9 +232,11 @@ request-time copies, not additional scoring and not entries in the mature-cell c
 
 Retention exclusions apply before summary construction. A late row in a marked month cannot
 resurrect that month in summary counts. These scalars describe retained data, not all-time totals;
-the separate purge metadata must remain visible where authorized. Historical own attribution is
-still pending the separately approved evidence-storage design, so this contract is not release
-readiness for the current draft.
+the separate purge metadata must remain visible where authorized. An own reader's purge metadata
+comes from the purge ownership evidence (ADR 0039): only months its current subtree owned sets in when
+retention removed them. Every other emptied month is an ordinary empty month for that reader, and months
+purged before the evidence table existed are never disclosed to it. Release of own-scoped reads still
+waits for the explicit upgrade and the review recorded in the implementation log.
 
 ## Reading-page summary contract (P18 draft)
 

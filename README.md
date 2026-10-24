@@ -79,6 +79,8 @@ zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-porta
 
 Backups contain password hashes and token hashes, so the files are secrets and are written with mode `0600`. The SSO keyring is encrypted in the database, but its wrapping key is derived from `secret_key` in `config.yaml`; keep the config directory with the backup.
 
+A release that adds an explicit schema step (the purge ownership evidence is the first) will not start an existing database until `report-portal schema-upgrade --apply` has run offline, and `backup`, `restore` and `adduser` from that release refuse the un-upgraded database too, so take the pre-upgrade backup with the previous release. In a container, `docker-entrypoint.sh` does not pass arguments: run the command with `docker compose run --rm --no-deps --entrypoint /app/report-portal report-portal ...` (or `docker run --rm --entrypoint /app/report-portal ...` with the service's real volume name, which compose prefixes with the project name). See [the upgrade runbook](docs/forecast-purge-ownership-upgrade.md).
+
 See [ADR 0027](docs/adr/0027-backup-and-restore.md) for the design and operational details.
 
 ### Rotating `secret_key`
@@ -155,6 +157,7 @@ go run ./cmd/report-portal adduser <name> <password> admin
 go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
+go run ./cmd/report-portal schema-upgrade [--apply]   # offline: inspect, or apply, the explicit schema steps
 go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
 go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out
 go run ./cmd/report-portal recompute-kinds

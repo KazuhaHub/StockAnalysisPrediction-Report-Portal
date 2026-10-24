@@ -21,7 +21,10 @@ func TestPostgresPredictionPurgeOwnershipSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := st.exec(`DROP TABLE IF EXISTS prediction_purge_owners`); err != nil {
+		if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+			t.Error(err)
+		}
+		if _, err := st.exec(`DELETE FROM prediction_purge_owners`); err != nil {
 			t.Error(err)
 		}
 	})
@@ -83,12 +86,24 @@ func TestPostgresPredictionPurgeOwnershipSerialization(t *testing.T) {
 
 func testPredictionPurgeOwnerStore(t *testing.T, st *Store) {
 	t.Helper()
-	// Explicit setup only: this foundation must not add startup DDL before the upgrade gate exists.
+	t.Cleanup(func() {
+		if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := st.exec(`DELETE FROM prediction_purge_owners`); err != nil {
+			t.Error(err)
+		}
+	})
+	// Exercise the idempotent explicit creation primitive against a freshly initialized test store.
 	if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := st.exec(`DROP TABLE IF EXISTS prediction_purge_owners`); err != nil {
+		if err := createPredictionPurgeOwners(st.poolExec()); err != nil {
+			t.Error(err)
+		}
+		if _, err := st.exec(`DELETE FROM prediction_purge_owners`); err != nil {
 			t.Error(err)
 		}
 	})

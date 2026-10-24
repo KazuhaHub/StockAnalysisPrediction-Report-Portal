@@ -200,13 +200,19 @@ type restoreRule struct {
 
 // migration is one schema step.
 type migration struct {
-	id      string
+	id string
+	// explicit forbids implicit upgrade of an existing database at server startup.
+	explicit bool
+	// runbook is the repository path of the operator procedure for an explicit step. A refused
+	// startup names it, because the person reading the refusal is mid-deployment.
+	runbook string
 	columns []colRef
 	tables  []string
 	indices []string
 	renames []colRename
 	restore restoreRule
 	up      func(migExec) error
+	verify  func(migExec) error
 }
 
 // migrations is the ordered list this build knows. Append only; never edit a released step. The order
@@ -214,7 +220,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010()}
+		migration0006(), migration0010(), migration0009()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).
@@ -252,6 +258,21 @@ func migration0010() migration {
 			}
 			return nil
 		},
+	}
+}
+
+// The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
+// not prove OU membership, so this step never backfills them. Steps 0007 and 0008 are reserved by
+// the notification and extension work, which lands first; Tier 2 provenance has not shipped and
+// must take the next free id after this one if that work is later approved.
+func migration0009() migration {
+	return migration{
+		id: "0009", explicit: true, runbook: "docs/forecast-purge-ownership-upgrade.md",
+		tables:  []string{"prediction_purge_owners"},
+		columns: []colRef{{"prediction_purge_owners", "rtype"}, {"prediction_purge_owners", "cohort"}, {"prediction_purge_owners", "attributed_ou"}},
+		restore: restoreRule{olderDumpOK: true},
+		up:      createPredictionPurgeOwners,
+		verify:  verifyPredictionPurgeOwners,
 	}
 }
 
@@ -581,14 +602,21 @@ func migration0006() migration {
 
 // ---------- running them ----------
 
-// runMigrations applies what this build knows and this database has not recorded, then verifies every
-// step's declared products.
+// runMigrations is the startup path. It applies the automatic steps this database has not recorded
+// and refuses to apply an explicit step on its own; see runMigrationsWithExplicit.
+func (s *Store) runMigrations() error { return s.runMigrationsWithExplicit(false) }
+
+// runMigrationsWithExplicit applies what this build knows and this database has not recorded, then
+// verifies every step's declared products. An explicit step (one that alters an existing supported
+// database in a way an operator must sanction) is applied only when allowExplicit is set, which is
+// the case for a database that does not exist yet and for the offline schema-upgrade command. Any
+// other caller finds an unrecorded explicit step refused, before any earlier step has written DDL.
 //
 // The "written by a newer release" check belongs HERE rather than in the runner below: it is a
 // judgement about the database as a whole, made once at startup against the full list this build
 // knows. The runner is also driven directly by tests with steps of their own, and a subset list is
 // not a statement that the other steps do not exist.
-func (s *Store) runMigrations() error {
+func (s *Store) runMigrationsWithExplicit(allowExplicit bool) error {
 	steps := s.migrations()
 	known := map[string]bool{}
 	for _, m := range steps {
@@ -597,7 +625,31 @@ func (s *Store) runMigrations() error {
 	if err := s.refuseUnknownLedgerRows(known); err != nil {
 		return err
 	}
+	// Preflight before applying even an earlier automatic step: a refused startup writes no DDL.
+	for _, m := range steps {
+		if m.explicit && !allowExplicit {
+			var recorded string
+			err := s.queryRow(`SELECT v FROM meta WHERE k=?`, migrationLedgerKey(m.id)).Scan(&recorded)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if recorded == "" {
+				return fmt.Errorf("migration %s requires an explicit offline upgrade: stop the portal, take a pre-upgrade backup with the previous release, then run report-portal schema-upgrade --apply%s; server startup does not alter this schema", m.id, runbookHint(m))
+			}
+			if err := s.verifyMigrationProducts(s.poolExec(), []migration{m}); err != nil {
+				return err
+			}
+		}
+	}
 	return s.runMigrationSteps(steps)
+}
+
+// runbookHint is the clause that points a refused operator at the written procedure.
+func runbookHint(m migration) string {
+	if m.runbook == "" {
+		return ""
+	}
+	return " (procedure: " + m.runbook + ")"
 }
 
 // runMigrationSteps is the runner itself, taking the list so the framework's contract can be tested
@@ -833,6 +885,11 @@ func (s *Store) verifyMigrationProducts(e migExec, steps []migration) error {
 			if e.columnExists(r.table, r.from) {
 				return fmt.Errorf("migration %s renames %s.%s to %s, but %s.%s is still present", m.id,
 					r.table, r.from, r.to, r.table, r.from)
+			}
+		}
+		if m.verify != nil {
+			if err := m.verify(e); err != nil {
+				return fmt.Errorf("migration %s: %w", m.id, err)
 			}
 		}
 	}

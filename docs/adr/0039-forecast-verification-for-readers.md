@@ -78,7 +78,7 @@ one transaction re-attributes its sets to its parent, or Default for a deleted r
 children to the same parent, deletes the OU and records the counts in the audit. A root's children
 remain roots. No set may retain a reference to the deleted OU.
 
-### Purge ownership evidence (owner-approved 2026-10-22; implementation incomplete)
+### Purge ownership evidence (owner-approved 2026-10-22; wired, release held)
 
 `own` must not disclose the site's global purge-month history. The owner approved a separate
 `prediction_purge_owners` table, keyed by `(rtype, cohort, attributed_ou)`, with non-null report
@@ -95,16 +95,28 @@ set mutation**. Postgres uses a transaction-scoped advisory lock; SQLite reserve
 before reading. Locking only the final evidence write permits a concurrent OU deletion to miss an
 uncommitted snapshot and is insufficient.
 
+Both transactions are wired this way. `DeletePredictionsBefore` nominates months from a scan that
+runs outside the transaction (the single-connection rule), then begins its transaction, takes the
+lock, and verifies each nominated month again from fresh reads before it snapshots the month's
+owners, deletes its claims, marks and sets, and writes the marker. `DeleteUserGroup` takes the lock
+before it reads the OU, moves the sets, then moves the evidence to the same destination whether or
+not any set is left, because retention may already have deleted them all. The two therefore
+serialize in either order: whichever commits second reads the other's committed result, so no
+evidence can name an OU that is gone and no OU id is free to be reused while evidence still
+mentions it. The acceptance tests hold one transaction at a blocking row while the other queues on
+the lock, in both orders, and show that each transaction reads only after it holds the lock.
+
 Existing global markers without ownership evidence remain visible to all but are hidden from own;
 there is no guessed historical backfill. This new table requires an explicit operator upgrade for
 existing supported databases, not automatic DDL at server startup. The upgrade step must deliver,
 together with the table, fresh initialization, startup shape verification, membership in the
 dump/restore table set (so a restore replaces the evidence with the dump's rows instead of leaving
 rows keyed by OU ids the restored tree may reuse) and rollback instructions. The reader routes read
-the table only where it exists and fail closed where it does not, so they can be merged ahead of
-that step; no database has the table until the step ships, and the hold below stands until it
-does. No released migration is edited and the frozen baseline stays unchanged. Approval of the
-schema is not authorization to change a production database.
+the table only where it exists and fail closed where it does not. Because the step is explicit, a
+build that has it refuses an un-upgraded database at startup, so that fail-closed path is reached
+only by a table damaged while the portal runs. No released migration is edited and the frozen
+baseline stays unchanged. Approval of the schema is not authorization to change a production
+database.
 
 The two reader routes read purge history through one view. The global markers still remove sets
 from every computation and decide cache identity, so no partial data from a month that retention
@@ -126,8 +138,28 @@ Months before the reader's own first month are not found, exactly as any month b
 
 If the evidence table cannot be read, including before the explicit upgrade has created it, an own
 read answers `503 forecast_purge_history_unavailable` and never falls back to the global markers;
-reads that do not need evidence never touch the table. Retention and OU deletion do not yet write
-or transfer evidence, so the hold on releasing own-scoped reads stands until they do.
+reads that do not need evidence never touch the table. From the moment of the upgrade retention
+records and OU deletion carries the evidence, so the table is complete for everything purged after
+that point; everything purged before it stays global history.
+
+The implementation assigns this evidence to step `0009`. The migration list is in merge order, not id
+order: it is appended after every step that reached main before it (the announcement step `0010` today,
+and the notification `0007` and extension `0008` steps, which merge first), so `0009` is always the last
+entry and a backup written by the release before it is a prefix of the list. The unapproved Tier 2
+provenance proposal takes an unused id when it is approved (`0011` at the time of writing), subject to a
+fresh identifier check, and is appended after this step. Existing supported databases use the offline
+`schema-upgrade` command (inspection by default, mutation only with `--apply`). Startup refuses an
+unrecorded explicit step before applying even earlier automatic steps. A fresh database creates the
+step with the rest of its schema. Every startup checks the evidence columns, exact primary key,
+non-null types and positive-owner constraint; a recorded but damaged step is refused, not repaired.
+The startup refusal names the [upgrade runbook](../forecast-purge-ownership-upgrade.md), which also
+covers running the command in a container (the entrypoint ignores arguments), taking the pre-upgrade
+backup with the previous release (the new binary refuses an un-upgraded database for every command
+that opens the store), stopping a refused container that a restart policy keeps restarting, and the
+same `--apply` covering the notification and extension steps when they ship in the same release.
+Retention, OU deletion and the reader routes now all use the evidence. The own-history release hold
+remains until the upgrade has run on the target databases and the independent review of the wiring
+is recorded.
 
 Membership is computed **after population filtering**. D4's earliest accepted set per symbol and
 group is chosen inside that population, so another OU's earlier report cannot displace an own
