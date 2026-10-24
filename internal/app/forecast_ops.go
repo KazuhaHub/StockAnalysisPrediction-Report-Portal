@@ -547,6 +547,9 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 		}
 	}
 	alertDetail := ""
+	if snapshot, err := s.st.notificationSettings(); err != nil || !snapshot.forecastChannelsReady {
+		alertsOK = false
+	}
 	if !alertsOK {
 		alertDetail = "no test alert has reached both channels in the last 30 days"
 	}
@@ -767,15 +770,6 @@ func (s *Server) emitForecastAlert(reason, detail string, now time.Time, every t
 		"at":           now.UTC().Format(time.RFC3339),
 	}
 	s.fireEvent(EventForecastEvaluatorUnhealthy, payload)
-	// The channels do network I/O with their own timeouts; they must not hold the watchdog.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("forecast alert: panic: %v", r)
-			}
-		}()
-		s.forecastAlert(EventForecastEvaluatorUnhealthy, reason, payload)
-	}()
 }
 
 // ---------- manual pass ----------

@@ -1590,7 +1590,8 @@ func (s *Server) apiTokenAdd(w http.ResponseWriter, r *http.Request, user string
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	if in.Scope != "all" && in.Scope != "ingest" && in.Scope != "query" {
+	_, notificationScope := notificationServiceScope(in.Scope)
+	if in.Scope != "all" && in.Scope != "ingest" && in.Scope != "query" && !notificationScope {
 		jsonError(w, http.StatusBadRequest, "invalid token scope")
 		return
 	}

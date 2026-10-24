@@ -2,28 +2,16 @@ package app
 
 // Forecast verification: alert delivery (ADR 0029 §6, plan §6.2 / V18).
 //
-// The webhook events are the extension surface: signed JSON, one shape for every subscriber. They
-// cannot reach Slack, whose incoming webhook wants a {"text"} body, and they cannot reach a mailbox
-// at all. This file is the portal's own two channels beside them.
-//
-// Two rules are deliberate:
-//
-//   - The webhook is fired by the PRODUCER (the watchdog, the ingest branch), never here. If this
-//     function also fired it, one event would be delivered twice.
-//   - The Slack URL is a write-only secret with a closed host list. It is stored so the portal can
-//     POST to it, and never returned; and a URL that is not https on hooks.slack.com is refused, so a
-//     later settings write cannot turn the portal into a request forwarder.
+// Producers capture one durable event for raw Webhooks, Email and Slack. This
+// file retains message formatting, host validation and explicit test delivery;
+// it never republishes a business event or owns an automatic retry loop.
+// Slack destinations remain write-only and restricted to the approved host.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
-	"io"
-	"log"
-	"net/http"
 	"net/mail"
 	"net/url"
 	"sort"
@@ -39,11 +27,6 @@ const (
 // slackHost is the only host a Slack webhook may point at. A test may add one loopback host through
 // Server.slackHostForTest, which is empty in production.
 const slackHost = "hooks.slack.com"
-
-const (
-	slackTimeout  = 10 * time.Second
-	slackAttempts = 3 // the first try and two retries
-)
 
 var errSlackURL = errors.New("a Slack webhook URL must be https on hooks.slack.com")
 
@@ -66,68 +49,6 @@ func (s *Server) slackURLAllowed(raw string) (*url.URL, error) {
 	default:
 		return nil, errSlackURL
 	}
-}
-
-// slackPost delivers one message. Transport errors and 5xx retry twice; a 4xx is final, because a
-// revoked or malformed webhook will not start working on the second attempt.
-func (s *Server) slackPost(ctx context.Context, raw, text string) error {
-	u, err := s.slackURLAllowed(raw)
-	if err != nil {
-		return err
-	}
-	body, err := json.Marshal(map[string]string{"text": text})
-	if err != nil {
-		return err
-	}
-	client := &http.Client{
-		Timeout: slackTimeout,
-		// A redirect would leave the host list and, on 301/302/303, turn the POST into a GET whose
-		// 2xx would be mistaken for a delivered message. Treat any 3xx as final and let it fail.
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	var last error
-	for attempt := 0; attempt < slackAttempts; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(attempt) * time.Second):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := client.Do(req)
-		if err != nil {
-			// url.Error carries the full URL, which is the secret. Take the underlying cause when
-			// there is one, then scrub every spelling of the URL (the raw setting is not necessarily
-			// byte-identical to u.String(), e.g. an uppercase scheme).
-			msg := err.Error()
-			var ue *url.Error
-			if errors.As(err, &ue) && ue.Err != nil {
-				msg = ue.Err.Error()
-			}
-			for _, spelling := range []string{raw, u.String(), u.RequestURI()} {
-				if spelling != "" {
-					msg = strings.ReplaceAll(msg, spelling, "<slack-webhook>")
-				}
-			}
-			last = errors.New(msg)
-			continue
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		last = fmt.Errorf("slack returned HTTP %d", resp.StatusCode)
-		if resp.StatusCode < 500 {
-			return last
-		}
-	}
-	return last
 }
 
 // forecastAlertText is the plain-text body every channel carries. The detail keys are sorted so two
@@ -168,25 +89,45 @@ func alertRecipients(raw string) []string {
 // returns an error itself, because a failing alert must not fail the operation that produced it; the
 // outcome is recorded in `forecast_alert_state` and shown on the page.
 func (s *Server) forecastAlert(kind, reason string, detail map[string]any) map[string]error {
-	text := forecastAlertText(kind, reason, detail)
-	subject := fmt.Sprintf("%s — %s", s.brandName(), kind)
-	out := map[string]error{"email": nil, "slack": nil}
-
-	if to := alertRecipients(s.st.GetSetting(setForecastAlertEmailTo, "")); len(to) == 0 {
-		out["email"] = errors.New("no email recipients configured")
-	} else if err := s.sendEmail(to, subject, "<p>"+strings.ReplaceAll(html.EscapeString(text), "\n", "<br>")+"</p>"); err != nil {
-		out["email"] = err
+	snapshot, err := s.st.notificationSettings()
+	if err != nil {
+		return map[string]error{"email": errors.New("configuration_unavailable"), "slack": errors.New("configuration_unavailable")}
 	}
+	return s.forecastAlertSnapshot(context.Background(), snapshot, kind, reason, detail)
+}
 
-	raw := strings.TrimSpace(s.st.GetSetting(setForecastAlertSlackURL, ""))
-	if raw == "" {
-		out["slack"] = errors.New("no Slack webhook configured")
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), slackTimeout*time.Duration(slackAttempts)+3*time.Second)
-		defer cancel()
-		out["slack"] = s.slackPost(ctx, raw, text)
+// Explicit tests use the same one-attempt adapters as workers, against a frozen
+// configuration. They neither publish business events nor enter normal retry.
+func (s *Server) forecastAlertSnapshot(ctx context.Context, snapshot notificationSettingsSnapshot, kind, reason string, detail map[string]any) map[string]error {
+	payload := make(map[string]any, len(detail)+1)
+	for k, v := range detail {
+		payload[k] = v
 	}
-
+	payload["reason"] = reason
+	body, _ := json.Marshal(payload)
+	event := NotificationEvent{Type: kind, Payload: string(body)}
+	mc := snapshot.mailConfig()
+	out := make(map[string]error, 2)
+	for _, channel := range []string{"email", "slack"} {
+		func() {
+			defer func() {
+				if recover() != nil {
+					out[channel] = errors.New("adapter_panic")
+				}
+			}()
+			c := NotificationChannel{Adapter: channel, LegacyRef: "forecast-" + channel}
+			cfg := notificationChannelConfig{Recipients: alertRecipients(snapshot.values[setForecastAlertEmailTo]), URL: snapshot.values[setForecastAlertSlackURL], smtp: &mc}
+			accepted, uncertain, _, _, _ := s.attemptNotification(ctx, c, cfg, event)
+			switch {
+			case accepted:
+				out[channel] = nil
+			case uncertain:
+				out[channel] = errors.New("acceptance_unknown")
+			default:
+				out[channel] = errors.New("destination_rejected")
+			}
+		}()
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	s.st.updateForecastAlertState(func(rec *forecastAlertRecord) {
 		for channel, err := range out {
@@ -197,9 +138,6 @@ func (s *Server) forecastAlert(kind, reason string, detail map[string]any) map[s
 			rec.Channels[channel] = res
 		}
 	})
-	if out["email"] != nil || out["slack"] != nil {
-		log.Printf("forecast alert %s/%s: email=%v slack=%v", kind, reason, out["email"], out["slack"])
-	}
 	return out
 }
 

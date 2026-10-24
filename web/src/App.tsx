@@ -42,6 +42,8 @@ const RunQueueSettingsPage = lazyRetry(() => import('./pages/manage/RunQueueSett
 const RunDefaultsPage = lazyRetry(() => import('./pages/manage/RunDefaultsPage'))
 const ChatAdminPage = lazyRetry(() => import('./pages/manage/ChatAdminPage'))
 const WebhooksPage = lazyRetry(() => import('./pages/manage/WebhooksPage'))
+const NotificationsPage = lazyRetry(() => import('./pages/manage/NotificationsPage'))
+const InboxPage = lazyRetry(() => import('./pages/NotificationsPage'))
 const StoragePage = lazyRetry(() => import('./pages/manage/StoragePage'))
 const AuditPage = lazyRetry(() => import('./pages/manage/AuditPage'))
 const QuoteSourcesPage = lazyRetry(() => import('./pages/manage/QuoteSourcesPage'))
@@ -144,6 +146,7 @@ function AppRoutes() {
         {/* The apps hub and installed iframe apps are open to any logged-in user;
             the built-in batch console stays permission-gated. */}
         <Route path="/apps" element={<AppsHub />} />
+        <Route path="/notifications" element={<InboxPage />} />
         <Route path="/apps/x/:id" element={<AppView />} />
         {/* Quotes is ungated on purpose: it reads market data and nothing about this portal, and
             every signed-in user can already see a price on a reading page. Its `perm` in
@@ -207,6 +210,7 @@ function AppRoutes() {
           <Route path="assistant" element={<ChatAdminPage />} />
           <Route path="apps" element={<AppsAdminPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="quotes" element={<QuoteSourcesPage />} />
           <Route path="storage" element={<StoragePage />} />
           <Route path="audit" element={<AuditPage />} />

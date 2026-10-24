@@ -1,0 +1,153 @@
+{
+  "name": "Report Portal signed receiver example",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "report-portal-events",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "portal-webhook",
+      "name": "Receive signed bytes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "report-portal-events"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst secret = $env.REPORT_PORTAL_WEBHOOK_SECRET;\nif (!secret || secret.length < 16) throw new Error('Configure the receiver signing secret before use');\nconst raw = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst supplied = String(item.json.headers?.['x-report-portal-signature'] || '');\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');\nconst valid = /^sha256=[0-9a-f]{64}$/.test(supplied) && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));\nif (!valid) return [{ json: { valid: false } }];\n// Verify exact bytes before parsing. Preserve the raw UTF-8 JSON string so\n// downstream code can retain integers beyond JavaScript's safe integer range.\nreturn [{ json: {\n  valid: true,\n  body_utf8: raw.toString('utf8'),\n  body_sha256: crypto.createHash('sha256').update(raw).digest('hex'),\n  delivery_id: String(item.json.headers?.['x-report-portal-delivery-id'] || ''),\n  event_id: String(item.json.headers?.['x-report-portal-event-id'] || ''),\n} }];"
+      },
+      "id": "verify-signature",
+      "name": "Verify exact bytes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "verified",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "valid-signature",
+      "name": "Signature valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true, \"verified_only\": true, \"body_sha256\": \"{{ $json.body_sha256 }}\" }",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "verified-response",
+      "name": "Verified demo response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\":false}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "rejected-response",
+      "name": "Reject invalid signature",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Receive signed bytes": {
+      "main": [
+        [
+          {
+            "node": "Verify exact bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify exact bytes": {
+      "main": [
+        [
+          {
+            "node": "Signature valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid": {
+      "main": [
+        [
+          {
+            "node": "Verified demo response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject invalid signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}

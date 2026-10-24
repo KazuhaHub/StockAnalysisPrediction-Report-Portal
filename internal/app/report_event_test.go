@@ -28,6 +28,7 @@ func eventSink(t *testing.T, s *Server) <-chan map[string]any {
 	if _, err := s.st.CreateWebhook(recv.URL, []string{EventReportIngested}, ""); err != nil {
 		t.Fatalf("CreateWebhook: %v", err)
 	}
+	startNotificationRuntimeForTest(t, s)
 	return out
 }
 

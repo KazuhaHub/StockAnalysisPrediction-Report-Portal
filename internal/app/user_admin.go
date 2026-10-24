@@ -184,6 +184,11 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
+	if s.driver == "postgres" {
+		if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(780716)`); err != nil {
+			return 0, 0, err
+		}
+	}
 
 	var parent sql.NullInt64
 	var isDefault int
@@ -255,6 +260,7 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		`DELETE FROM report_viewers WHERE principal=?`,
 		`DELETE FROM version_grants WHERE principal=?`,
 		`DELETE FROM announcement_grants WHERE principal=?`,
+		`DELETE FROM notification_route_grants WHERE principal=?`,
 	} {
 		if _, err := tx.Exec(s.bind(q), groupPrincipal(id)); err != nil {
 			return 0, 0, err

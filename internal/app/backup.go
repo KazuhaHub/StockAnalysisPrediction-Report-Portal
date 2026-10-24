@@ -467,6 +467,20 @@ func (s *Store) populationFromRow() string {
 // takes the data back with it rather than leaving a half-loaded database behind.
 func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if err := resetRestoredExtensionConnections(e); err != nil {
+		return err
+	}
+	// Restored pending work may already have reached an external destination
+	// after the backup was made. Never resume it silently on the next boot.
+	if err := e.setSetting("notification_dispatch_paused", "1"); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE notification_attempts SET finished_at=?,outcome='uncertain',error_code='restored_attempt' WHERE finished_at=0`, time.Now().UTC().UnixMilli()); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE notification_deliveries SET state='uncertain',last_error='restored_attempt',lease_token='',lease_until=0,sending=0 WHERE state='leased'`); err != nil {
+		return err
+	}
 	// The write-once keys. `meta` was just replaced by the dump's, so a key the dump lacked is now
 	// absent and one it carried is now the dump's value. Both rules run on the tx handle only.
 	if err := applyRestorePrior(e, prior); err != nil {

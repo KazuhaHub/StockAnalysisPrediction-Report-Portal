@@ -218,7 +218,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010(), migration0009()}
+		migration0006(), migration0010(), migration0009(), migration0007(), migration0008()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).
@@ -262,9 +262,9 @@ func migration0010() migration {
 // The owner-approved purge ownership evidence is empty on upgrade. Historic global markers do
 // not prove OU membership, so this step never backfills them. Like every step it is applied by
 // ordinary startup, in its own transaction, and a table that does not have the exact shape is
-// refused before the ledger row is written. Steps 0007 and 0008 are reserved by the notification
-// and extension work, which lands first; Tier 2 provenance has not shipped and must take the next
-// free id after this one if that work is later approved.
+// refused before the ledger row is written. The notification (0007) and extension (0008) steps were
+// appended after it, in merge order. Tier 2 provenance has not shipped and must take the next free
+// id if that work is later approved.
 func migration0009() migration {
 	return migration{
 		id:      "0009",

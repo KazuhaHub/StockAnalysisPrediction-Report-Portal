@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 )
@@ -177,19 +178,37 @@ func (s *Store) MarkItemDifyStarted(itemID int64) error {
 }
 
 func (s *Store) FinishJob(jobID int64, cancelled bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s, ex: tx}
 	var total, ok, partial, failed int
-	s.queryRow(`SELECT COUNT(*),
+	if err := e.queryRow(`SELECT COUNT(*),
 		COALESCE(SUM(CASE WHEN status='succeeded' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN status='partial'   THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN status='failed'    THEN 1 ELSE 0 END),0)
-		FROM batch_items WHERE job_id=?`, jobID).Scan(&total, &ok, &partial, &failed)
+		FROM batch_items WHERE job_id=?`, jobID).Scan(&total, &ok, &partial, &failed); err != nil {
+		return err
+	}
 	status := "finished"
 	if cancelled {
 		status = "cancelled"
 	}
-	_, err := s.exec(`UPDATE batch_jobs SET status=?, total=?, succeeded=?, partial=?, failed=?, finished_at=? WHERE id=?`,
+	_, err = e.exec(`UPDATE batch_jobs SET status=?, total=?, succeeded=?, partial=?, failed=?, finished_at=? WHERE id=?`,
 		status, total, ok, partial, failed, nowStr(), jobID)
-	return err
+	if err != nil {
+		return err
+	}
+	j, err := scanBatchJob(e.queryRow(`SELECT `+batchJobCols+` `+batchJobFrom+` WHERE b.id=?`, jobID).Scan)
+	if err != nil {
+		return err
+	}
+	if err := recordJobNotificationOccurrence(e, j); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ---------- crash recovery ----------
@@ -315,7 +334,7 @@ func (s *Store) CancellingJobIDs() []int64 {
 // CreateBatchJob inserts a queued job (status 'queued', no started_at yet) with the
 // given priority and its items. The scheduler admits it to 'running' later, subject
 // to the global budget (see docs/adr/0004-run-queue.md).
-func (s *Store) CreateBatchJob(targetID int64, concurrency, maxRetries int, createdBy string, rows []map[string]string, priority string) (int64, error) {
+func (s *Store) CreateBatchJob(targetID int64, concurrency, maxRetries int, createdBy string, rows []map[string]string, priority string, notify ...bool) (int64, error) {
 	if len(rows) == 0 {
 		return 0, fmt.Errorf("batch job has no rows")
 	}
@@ -333,6 +352,10 @@ func (s *Store) CreateBatchJob(targetID int64, concurrency, maxRetries int, crea
 	defer tx.Rollback()
 	jobSQL := `INSERT INTO batch_jobs(target_id,status,concurrency,max_retries,total,created_by,created_at,started_at,priority)
 		VALUES(?,?,?,?,?,?,?,?,?)`
+	ownerGeneration, err := jobNotificationOwnerGeneration(migExec{s: s, ex: tx}, createdBy)
+	if err != nil {
+		return 0, err
+	}
 	args := []any{targetID, "queued", concurrency, maxRetries, len(rows), createdBy, now, "", priority}
 	var jobID int64
 	if s.driver == "postgres" {
@@ -357,6 +380,14 @@ func (s *Store) CreateBatchJob(targetID int64, concurrency, maxRetries int, crea
 		if _, err := stmt.Exec(jobID, i, string(b)); err != nil {
 			return 0, err
 		}
+	}
+	if len(notify) > 0 && notify[0] {
+		if _, err := tx.Exec(s.bind(`INSERT INTO job_notification_intents(job_id,username,created_at) VALUES(?,?,?)`), jobID, createdBy, time.Now().UTC().UnixMilli()); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(s.bind(`INSERT INTO notification_source_cycles(source_key,occurrence_id,signature) VALUES(?,?,?) ON CONFLICT(source_key) DO UPDATE SET generation=notification_source_cycles.generation+1,occurrence_id=excluded.occurrence_id,signature=excluded.signature`), "job:"+itoa64(jobID), randToken(), strconv.FormatInt(ownerGeneration, 10)); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -565,6 +596,10 @@ func (s *Store) DeleteBatchJob(jobID int64) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+	if err := clearJobNotificationEvidence(migExec{s: s, ex: tx}, "id=?", jobID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(s.bind("DELETE FROM batch_items WHERE job_id=?"), jobID); err != nil {
 		tx.Rollback()
 		return err
@@ -602,14 +637,32 @@ func (s *Store) DeleteFinishedJobs() int {
 // is dispatching it); a running job is asked to stop and its workers observe the
 // 'cancelling' status via Cancelled().
 func (s *Store) CancelBatchJob(jobID int64) error {
-	res, err := s.exec("UPDATE batch_jobs SET status='cancelled', finished_at=? WHERE id=? AND status='queued'", nowStr(), jobID)
-	if err == nil {
-		if n, _ := res.RowsAffected(); n == 1 {
-			return nil
-		}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
 	}
-	_, err = s.exec("UPDATE batch_jobs SET status='cancelling' WHERE id=? AND status='running'", jobID)
-	return err
+	defer tx.Rollback()
+	e := migExec{s: s, ex: tx}
+	res, err := e.exec("UPDATE batch_jobs SET status='cancelled', finished_at=? WHERE id=? AND status='queued'", nowStr(), jobID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 1 {
+		j, err := scanBatchJob(e.queryRow(`SELECT `+batchJobCols+` `+batchJobFrom+` WHERE b.id=?`, jobID).Scan)
+		if err != nil {
+			return err
+		}
+		if err := recordJobNotificationOccurrence(e, j); err != nil {
+			return err
+		}
+	} else if _, err := e.exec("UPDATE batch_jobs SET status='cancelling' WHERE id=? AND status='running'", jobID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RequeueItems moves finished items of the given statuses back to queued and marks
@@ -638,6 +691,10 @@ func (s *Store) RequeueItems(jobID int64, statuses ...string) (int, error) {
 	n, _ := res.RowsAffected()
 	// Re-enter the queue (status 'queued'); the scheduler re-admits it by priority.
 	if _, err := tx.Exec(s.bind("UPDATE batch_jobs SET status='queued', finished_at='' WHERE id=?"), jobID); err != nil {
+		tx.Rollback()
+		return 0, err
+	}
+	if _, err := tx.Exec(s.bind(`UPDATE notification_source_cycles SET generation=generation+1,occurrence_id=? WHERE source_key=?`), randToken(), "job:"+itoa64(jobID)); err != nil {
 		tx.Rollback()
 		return 0, err
 	}

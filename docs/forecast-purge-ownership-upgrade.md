@@ -7,17 +7,17 @@ recorded.
 
 Step `0009` adds the owner-approved `prediction_purge_owners` table. It is an ordinary migration step
 ([ADR 0035](adr/0035-migrations-after-a-frozen-baseline.md)): **a normal deploy applies it.** Pull the new
-image and restart; at startup the step runs in its own transaction, creates an empty table, verifies its
-exact shape and only then records its ledger row. Nothing has to be run first, and there is no state in
-which a new image refuses to start for want of it. The frozen v0.4.72 baseline and every earlier step are
-unchanged.
+image and restart. At startup the step runs in its own transaction, creates an empty table, verifies its
+exact shape, and only then records its ledger row. Nothing has to be run first, and a new image never refuses
+to start because this step is missing. The frozen v0.4.72 baseline and every earlier step are unchanged.
 
 **The list is in merge order, not id order.** The ids `0007` to `0009` were reserved by branches that were
-still open when `0010` reached main, so they come after it; an id is a label and the order is the order the
-steps reached main. A database that has recorded `0001` to `0006` receives `[0010, 0009]`, plus `0007`
-(notification) and `0008` (extension) between them when those steps ship in the same release. An id that
-looks out of place in that list is not an error. All supported baseline databases take this path;
-pre-baseline databases must first pass through the documented v0.4.72 bridge.
+still open when `0010` reached main, so they come after it. An id is a label; the order is the order the
+steps reached main: `[0001 … 0006, 0010, 0009, 0007, 0008]`. A database that has recorded `0001` to `0006`
+therefore receives `0010`, `0009`, `0007` (notification) and `0008` (extension), in that order. An id that
+looks out of place in that list is not an error. The released prefix is fixed, and later steps append after
+it. All supported baseline databases take this path; pre-baseline databases must first pass through the
+documented v0.4.72 bridge.
 
 ## Before upgrading: back up with the previous release
 

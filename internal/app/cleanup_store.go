@@ -104,6 +104,10 @@ func (s *Store) DeleteFinishedJobsBefore(cutoff string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	defer tx.Rollback()
+	if err := clearJobNotificationEvidence(migExec{s: s, ex: tx}, batchTerminalPred, cutoff); err != nil {
+		return 0, err
+	}
 	// Children first: items whose parent job matches the terminal+age predicate.
 	if _, err := tx.Exec(s.bind("DELETE FROM batch_items WHERE job_id IN (SELECT id FROM batch_jobs WHERE "+batchTerminalPred+")"), cutoff); err != nil {
 		tx.Rollback()

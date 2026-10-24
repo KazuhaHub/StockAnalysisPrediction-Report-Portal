@@ -145,6 +145,7 @@ func TestMigration0006OlderDumpRestoresWithNulls(t *testing.T) {
 			}
 		}
 	}
+
 	dump := dumpOf(t, src)
 
 	dst := newTestStore(t)
