@@ -1,12 +1,17 @@
 package app
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
@@ -90,6 +95,87 @@ func TestOwnerTokenRoundTrip(t *testing.T) {
 	// ou 0 mints nothing.
 	if s.mintOwnerToken(0, "") != "" {
 		t.Fatal("ou 0 should mint no token")
+	}
+}
+
+// TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator pins that a token is parsed from both
+// ends: the prefix and the OU from the left, the expiry from the right, and the person as everything
+// between. A local account may be named with the separator character, and since every run now
+// carries a token, a name that could not be verified would silently leave that person's runs
+// unattributed.
+func TestOwnerTokenRoundTripsAUsernameContainingTheFieldSeparator(t *testing.T) {
+	s := &Server{cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
+	for _, name := range []string{"ops|desk", "|lead", "trail|", "a||b", "|", "x|1|2", "12|34"} {
+		tok := s.mintOwnerToken(42, name)
+		if tok == "" {
+			t.Errorf("%q: no token minted", name)
+			continue
+		}
+		if ou, who, ok := s.ownerFromToken(tok); !ok || ou != 42 || who != name {
+			t.Errorf("%q: round-trip = (ou %d, user %q, ok %v), want (42, %q, true)", name, ou, who, ok, name)
+		}
+	}
+
+	// A message with too few fields is still refused, whatever its signature: "ot1|42|<exp>" has no
+	// person field at all and must not be read as an OU with an empty person.
+	exp := time.Now().Add(time.Hour).Unix()
+	short := fmt.Sprintf("%s|%d|%d", ownerTokenPrefix, 42, exp)
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(short) + "." + s.hmac(short)); ok {
+		t.Error("a three-field message was accepted")
+	}
+	// An expired token is refused however its person field is spelt.
+	old := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, 42, "ops|desk", time.Now().Add(-time.Hour).Unix())
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(old) + "." + s.hmac(old)); ok {
+		t.Error("an expired token was accepted")
+	}
+	// A non-numeric OU is refused: the separator inside the person must not let a name pose as the OU.
+	forged := fmt.Sprintf("%s|%s|%s|%d", ownerTokenPrefix, "x", "ops", exp)
+	if _, _, ok := s.ownerFromToken(encodeSessionMessage(forged) + "." + s.hmac(forged)); ok {
+		t.Error("a non-numeric OU was accepted")
+	}
+}
+
+// TestMintOwnerTokenRefusesAnEmptySecret pins the guard that attribution now depends on: a token
+// signed with an empty key is well formed and verifiable by anyone holding the same empty key, so
+// neither side may mint or accept one. A server with no configuration at all (the shape of many
+// test servers) must refuse rather than panic.
+func TestMintOwnerTokenRefusesAnEmptySecret(t *testing.T) {
+	st := newTestStore(t)
+	root := st.EnsureDefaultGroup()
+
+	empty := &Server{st: st, cfg: &config.Config{SecretKey: ""}}
+	if tok := empty.mintOwnerToken(root, "asker"); tok != "" {
+		t.Errorf("an empty secret minted a token: %q", tok)
+	}
+
+	// A token the pre-change code path would have produced: signed with the empty key.
+	exp := time.Now().Add(time.Hour).Unix()
+	msg := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, root, "asker", exp)
+	m := hmac.New(sha256.New, nil)
+	m.Write([]byte(msg))
+	legacy := encodeSessionMessage(msg) + "." + hex.EncodeToString(m.Sum(nil))
+	if ou, who, ok := empty.ownerFromToken(legacy); ok {
+		t.Errorf("an empty-key token was accepted by an empty-key server: ou %d user %q", ou, who)
+	}
+
+	// The same token is also refused where a real key is configured.
+	keyed := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
+	if _, _, ok := keyed.ownerFromToken(legacy); ok {
+		t.Error("an empty-key token was accepted by a keyed server")
+	}
+
+	// No configuration object at all: both directions refuse without panicking.
+	bare := &Server{st: st}
+	if tok := bare.mintOwnerToken(root, "asker"); tok != "" {
+		t.Errorf("a server with no config minted a token: %q", tok)
+	}
+	if _, _, ok := bare.ownerFromToken(legacy); ok {
+		t.Error("a server with no config accepted a token")
+	}
+
+	// The guard does not break the keyed path.
+	if tok := keyed.mintOwnerToken(root, "asker"); tok == "" {
+		t.Error("a keyed server refused to mint")
 	}
 }
 

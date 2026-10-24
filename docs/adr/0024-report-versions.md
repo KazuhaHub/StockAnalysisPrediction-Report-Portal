@@ -9,8 +9,9 @@ read is the conclusion and the score, and nothing about how we got there.
 The portal had no way to express that, and the gap was not merely a missing feature — it was an
 active disclosure. ADR 0022 R1 gave a restricted OU a read predicate of
 `owner_group = :myOU OR (rdate = :panelToday AND owner_group IS NULL AND rtype IN :entitled)`. The
-owner token is injected only for restricted OUs, so **every internal report is NULL-owner**, which
-means the second clause is "today's internal reports". An external OU entitled to run 投资决策 was
+owner token is injected only for restricted OUs, so **every internal report is NULL-owner** (as it was
+then; since <release> internal runs are attributed too, see ADR 0022 R1),
+which means the second clause is "today's internal reports". An external OU entitled to run 投资决策 was
 therefore handed the internal analysis verbatim — scoring table, weights and all — by the very
 same-day-reuse rule that was supposed to save it a run. This was reproduced on a running server
 before the change and is the reason the work happened when it did.

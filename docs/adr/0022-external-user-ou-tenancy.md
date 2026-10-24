@@ -66,7 +66,7 @@ to the unrestricted root subtree → `restricted=false` → every new check is s
 | `user_groups.parent_id` | `BIGINT` (NULL = root) | OU tree; Default group is root |
 | `user_groups.restricted` | `INTEGER DEFAULT 0` | internal/external switch, inherited down the tree |
 | `user_groups.daily_run_quota` | `INTEGER` (NULL = inherit, 0 = unlimited) | R2 |
-| `reports.owner_group` | `BIGINT` (NULL = internal/legacy/unattributed) | R1 attribution |
+| `reports.owner_group` | `BIGINT` (NULL = unattributed: legacy, no token, or generated before <release>; otherwise the OU that generated it) | R1 attribution |
 | `idx_reports_owner` | `INDEX ON reports(owner_group, rdate)` | R1 read/reuse path |
 | `group_targets` | `(group_id BIGINT, target_id BIGINT, surfaces TEXT DEFAULT '', PRIMARY KEY(group_id,target_id))` | R3 allow-list |
 | `users.expires_at` | `TEXT` (NULL = never) | R4 account validity |
@@ -82,17 +82,29 @@ HMAC correlation token over `secret_key` + the `run_id→created_by` fallback), 
 ### R1 — owner-scoped reads + same-day dedup
 
 **Attribution (server-authoritative, payload not trusted).** A signed owner token
-(`mintOwnerToken`: `HMAC(secret_key, ot1|ou_id|exp)`, prefix-tagged so it can't be confused with a
-session cookie) is injected into a run's Dify inputs under the reserved key `_rp_owner_token` — but
-**only for a restricted OU's run** (`Server.runInputs`, gated on `EffectiveGroupSettings(createdBy).Restricted`).
-Internal runs pass their inputs through **byte-for-byte**, so existing (possibly undeclared-variable-strict)
-workflows are untouched and the money-path is unchanged. The workflow echoes the token back in the
+(`mintOwnerToken`: `HMAC(secret_key, ot1|ou_id|user|exp)`, prefix-tagged so it can't be confused with a
+session cookie) is injected into a run's Dify inputs under the reserved key `_rp_owner_token`. It is
+injected into **every run that has a submitter** (`Server.runInputs`), internal and external alike
+(since <release>), so prediction sets can be attributed per OU (ADR 0039); reserved `_rp_*` inputs are
+never user-facing (P39a). Until that release the token was injected only for a restricted OU's run and
+internal runs passed their inputs through byte-for-byte. A run with no submitter, or a portal with no
+signing key (`mintOwnerToken` and `ownerFromToken` both refuse an empty `secret_key`), carries no token
+and is unattributed; the run still starts. The workflow echoes the token back in the
 `/api/v1/reports` payload as `owner_token`; `v1Ingest` verifies it (`ownerFromToken`) and stamps
 `owner_group` **first-writer-wins** (`StampReportOwner`: `UPDATE ... WHERE id=? AND owner_group IS NULL`).
-A missing/invalid/expired token, and every internal run, leaves `owner_group` **NULL** (internal/
-unattributed). A payload-supplied owner is never trusted. (The `run_id → batch_items.run_id →
-batch_jobs.created_by` chain remains an optional best-effort fallback, deferred — the token is the
-authoritative path and internal-as-NULL is acceptable, see Read scoping.)
+A missing/invalid/expired token leaves `owner_group` **NULL** (unattributed). Since <release> an internal
+report's `owner_group` records the generating OU too; it remains attribution and audit only, never a read
+key (ADR 0024). A payload-supplied owner is never trusted. The submitter's `u:<user>` viewer row is
+written when the token still names that account: not for a person who has since been deleted (a workflow
+cannot be stopped by deleting its submitter, and a late ingest must not put the name back for the next
+holder), and not for an account created after the token was minted. The `g:<OU>` viewer principal is
+written only when the submitter's own reads are scoped and the OU is effectively restricted (P30), so
+attributing an internal report shares it with no one, and neither does the run of an unrestricted account
+(an admin) placed in a tenant's OU: it is attributed to that OU and counts in its own population, but is
+not shared with the tenant. The token is added to the inputs of every provider type, a manifest plugin
+target included; a backend that forwards or validates its inputs strictly must accept the key before
+this ships. (The `run_id → batch_items.run_id → batch_jobs.created_by` chain
+remains an optional best-effort fallback, deferred — the token is the authoritative path.)
 
 **Read scoping (P2, shipped).** For restricted viewers only (`viewerScope(user)` — nil for admins,
 internal users, and machine/Bearer callers), AND this fragment into the WHERE of every read path:
@@ -101,10 +113,12 @@ internal users, and machine/Bearer callers), AND this fragment into the WHERE of
 owner_group = :myOU  OR  (rdate = :panelToday AND owner_group IS NULL)
 ```
 
-Why so simple: the internal same-day pool is exactly `owner_group IS NULL`, not an `IN :internalOUs`
-list. Because the owner token is injected for **restricted OUs only** (`runInputs`), an internal run
-never stamps an owner — every internal report is NULL-owner and every non-NULL owner is a *restricted*
-OU. So `owner_group IN :internalOUs` would always be empty; the term (and the `InternalGroupIDs`
+Why so simple (as shipped; ADR 0024 has since retired this predicate, and since <release> internal
+runs are attributed too, so `owner_group IS NULL` no longer means "internal"): the internal same-day
+pool was exactly `owner_group IS NULL`, not an `IN :internalOUs` list. Because the owner token was
+injected for **restricted OUs only** (`runInputs`), an internal run never stamped an owner — every
+internal report was NULL-owner and every non-NULL owner was a *restricted* OU. So
+`owner_group IN :internalOUs` would always be empty; the term (and the `InternalGroupIDs`
 resolver + cache it would need) collapses away. A restricted OU thus sees: its own OU's reports (any
 date) + today's internal (NULL-owner) reports; another restricted OU's reports are non-NULL ≠ myOU and
 never match. Unrestricted viewers get **no** predicate. The `rtype IN :allowedSubtypes` intersection now ships with P4: `ownerScope.subtypes` narrows the
@@ -212,15 +226,16 @@ the self-disable guard); `userJSON` exposes it and the UI edits it with a date p
 OU, and a restricted reader's principals include only the restricted OUs on its chain (plus the
 Default, which encodes the "all" audience) — P30. An unrestricted container is no longer a sharing
 path. (The wider per-OU access model is R2a and will be recorded as ADR 0039; it does not exist yet.) The owner token's input name is reserved: every `_rp_*` input is hidden, stripped from
-a submission and recorded per Dify target (P39a). Injecting the token into **every** run, not only a
-restricted OU's, is P39b and follows the Dify batch publish; this ADR's R1 text still describes the
-restricted-only injection that ships today.
+a submission and recorded per Dify target (P39a). **Amendment, 2026-10-22 (P39b).** The token is injected
+into **every** run that has a submitter, not only a restricted OU's; R1 above is amended in place and the
+release that ships it is recorded there (<release>). It follows the Dify batch publish and the target
+refresh, and it neither backfills nor re-attributes existing reports.
 
 ## Enforcement points (audit checklist)
 
 | Concern | Hook |
 | --- | --- |
-| R1 attribution | `Server.runInputs` (mint + inject token for restricted OUs, at run execution) + `v1Ingest` (verify, stamp `owner_group`) |
+| R1 attribution | `Server.runInputs` (mint + inject token for every run with a submitter, at run execution) + `v1Ingest` (verify, stamp `owner_group`) |
 | R1 read filter | `apiHome`, `apiStock`, `apiRun`, `apiRepBody`, `/api/symbols`, PDF export |
 | R1 reuse gate | `apiBatchJobCreate`, before quota + job creation |
 | R2 quota | `apiBatchJobCreate` (`if !isAdmin` block) + `GET` remaining-runs endpoint |
@@ -245,8 +260,11 @@ restricted-only injection that ships today.
 
 ## Consequences
 
-- **Internal users unchanged by construction** — the master predicate + fail-closed NULL owner mean no
-  internal path changes behaviour until a restricted OU is created.
+- **Internal reads unchanged by construction** — the master predicate + fail-closed NULL owner mean no
+  internal *read* path changes behaviour until a restricted OU is created. Since <release> internal
+  *runs* are attributed too: their inputs carry the owner token, and their reports get an `owner_group`
+  stamp and the submitter's `u:` viewer row. That records who asked and which OU they belong to; it
+  widens nobody's reads.
 - **Read-filter completeness is the top risk.** The owner predicate must be added to *every* read path;
   missing one silently defeats R1. Guarded by a per-path audit + tests (the checklist above).
 - **Attribution depends on the Dify workflow echoing the token.** A blank/mismatched token lands

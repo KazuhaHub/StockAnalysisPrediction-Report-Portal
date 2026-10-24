@@ -72,6 +72,22 @@ the signed owner token. Moving an account or changing its report grants does not
 Injecting that token for every run is the separate, deployment-gated P39b rollout; this ADR does
 not imply it has occurred or backfill unattributed history.
 
+**Internal `own` requires P39b.** Before it, only a restricted run carries a token: one submitted
+by a restricted OU's member or by a restricted account wherever that account sits. An internal
+OU's own population therefore holds only those runs, that is the sets of restricted accounts
+placed in it and of the restricted OUs beneath it (the subtree is live), and the runs of its own
+unrestricted members join it only after P39b. P39b makes `runInputs` inject the token into every
+run that has a submitter ([ADR 0022](0022-external-user-ou-tenancy.md), R1 as amended), after
+which each new internal run is attributed to its submitter's primary OU at run time. Both
+internal and external `own` additionally depend on the Dify workflows echoing the token back as
+`owner_token`; a workflow that does not leaves its sets unattributed. The rollout neither
+backfills nor re-attributes: sets generated before it join no own population, and a population
+grows only as new runs arrive. Attribution is not sharing: an attributed report writes the
+submitter's own viewer row, and an OU principal only when the submitter's own reads are scoped and
+the OU is effectively restricted (P30). An internal report therefore stays unreadable by tenants
+under a group-visible version, and so does the report of an unrestricted account, an admin, that
+was placed in a tenant's OU: the run counts in that OU's own population and shares nothing with it.
+
 The subtree is live. Re-parenting an OU moves its attributed sets into its new ancestors' own
 populations and out of the old ones. Deleting an OU is the sole exception to frozen attribution:
 one transaction re-attributes its sets to its parent, or Default for a deleted root, reparents its
@@ -197,6 +213,10 @@ retain admin diagnostics until the separately gated P29 removal.
 | Persistent query token | `401` on session and admin routes | Unscoped v1 machine contract | Payload with `include=payload`; membership, non-accepted states, errors and orphan history retained |
 | App-bridge token | `401` on record, drawer and admin routes | `403 forecast_unavailable` on both v1 prediction reads, whoever minted it; the ledger is not read | No forecast data (fail closed until the shared token binding lands) |
 | Anonymous | `401` | `401` | None |
+
+The internal own row is the one that P39b changes: until internal runs carry a token its record
+holds only the sets of restricted accounts and restricted OUs beneath it (see Populations above).
+The table describes the access contract, not the state of the data.
 
 The SPA uses `/api/report/{id}/predictions` and `/api/predictions`. The v1 report and symbol
 prediction routes also admit a valid cookie through the independent enrolment wall; their

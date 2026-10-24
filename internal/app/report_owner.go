@@ -1,15 +1,18 @@
 package app
 
 import (
+	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/dify"
 )
 
-// Report ownership (ADR 0022 R1). A report is stamped with the OU that generated it so a restricted
-// external viewer sees only its own OU's reports (plus the same-day internal pool). Ownership is
-// stamped server-side from a signed token (mint/verify live on Server), never from a client field.
+// Report ownership (ADR 0022 R1). A report is stamped with the OU that generated it, and its
+// prediction set is attributed to that OU (ADR 0039). The stamp is attribution and audit only; who
+// may READ a report is decided by version grants and report_viewers (ADR 0024). Ownership is stamped
+// server-side from a signed token (mint/verify live on Server), never from a client field.
 
 // OwnerGroupOf resolves the OU that owns a user's output: their primary group, or the Default group
 // when unassigned. Returns 0 only if there is no Default group (which EnsureDefaultGroup prevents).
@@ -58,15 +61,17 @@ func (s *Store) FindSameDayReport(symbol, subtype, version, panelToday string) (
 }
 
 // ownerTokenInput is the reserved Dify input key that carries the owner-attribution token into a
-// restricted OU's run. The instrumented workflow passes it straight through into its
-// /api/v1/reports payload as owner_token. Injected ONLY for restricted OUs, so internal runs and
-// their (possibly undeclared-variable-strict) workflows never see it.
+// run. The instrumented workflow passes it straight through into its /api/v1/reports payload as
+// owner_token. It is injected into every run that has a submitter, internal or external (P39b).
 const ownerTokenInput = "_rp_owner_token"
 
-// runInputs returns the Dify inputs to send for a job's item. For a restricted OU's run it adds the
-// signed owner-attribution token (mintOwnerToken) under ownerTokenInput, so the produced report is
-// stamped to that OU at ingest (ADR 0022 R1). For every internal run it returns the caller's inputs
-// unchanged — the money-path stays byte-for-byte identical — and it never mutates the caller's map.
+// runInputs returns the Dify inputs to send for a job's item. Every run with a submitter carries a
+// signed owner-attribution token (mintOwnerToken) under ownerTokenInput (ADR 0022 R1, amended):
+// internal and external alike, so the produced report is stamped to the submitter's OU at ingest and
+// every prediction set can be attributed to the OU its run belonged to (ADR 0039). A run with no
+// submitter is unattributed and carries no token. The key is added whatever the provider: a manifest
+// plugin target's backend receives it among the inputs too, and must accept it. It never forwards a
+// caller-supplied reserved input, and it never mutates the caller's map.
 func (s *Server) runInputs(job BatchJob, inputs map[string]string) map[string]string {
 	// Reserved inputs are the portal's, never the caller's: a value submitted under _rp_* does not
 	// survive into the run, whoever submits it (P39a).
@@ -76,14 +81,14 @@ func (s *Server) runInputs(job BatchJob, inputs map[string]string) map[string]st
 			out[k] = v
 		}
 	}
-	if !s.isRestricted(job.CreatedBy) {
-		return out
+	if job.CreatedBy == "" {
+		return out // no submitter: nobody to attribute the run to
 	}
-	tok := s.mintOwnerToken(s.st.OwnerGroupOf(job.CreatedBy), job.CreatedBy)
-	if tok == "" {
-		return out
+	// A refused mint (no signing key) leaves the run without a token: it still starts, and its
+	// report is simply unattributed.
+	if tok := s.mintOwnerToken(s.st.OwnerGroupOf(job.CreatedBy), job.CreatedBy); tok != "" {
+		out[ownerTokenInput] = tok
 	}
-	out[ownerTokenInput] = tok
 	return out
 }
 
@@ -279,4 +284,55 @@ func (s *Server) viewerScope(user string) *ownerScope {
 		}
 	}
 	return sc
+}
+
+// userCreatedLayout is how users.created_at is written (nowStr): local civil time, whole seconds.
+const userCreatedLayout = "2006-01-02 15:04:05"
+
+// recordRunRequester puts the person a run was submitted for on the viewer list of the report the
+// run produced (ADR 0024), under the claims of the token the workflow echoed. Attribution of the
+// report and of its prediction set is decided by the token alone and is not touched here; this is
+// only the question of who may READ the report, and it errs toward less sharing in three ways.
+//
+//   - The token must still name the person it named. A run outlives its submitter's account (the
+//     token lasts days and deleting an account cannot stop a workflow that is executing), and a
+//     late ingest must not write the deleted name back onto a viewer list, where the next holder of
+//     the username would inherit the report. An account created after the token was minted is a
+//     different person, however it is spelt.
+//   - The OU's group principal is offered only for a submitter whose own reads are scoped. An
+//     unrestricted account, in practice an admin, can be placed in a restricted tenant's OU; the OU
+//     alone would then share that account's reports with the whole tenant, which on a run that
+//     carried no token never happened. Whether the OU may appear as a group principal at all is
+//     AddReportViewer's rule (P30); this only withholds the offer.
+//   - A token that names no person records nobody: there is no principal for no one.
+func (s *Server) recordRunRequester(reportID int64, rdate string, c ownerClaims) error {
+	if !s.tokenNamesCurrentAccount(c) {
+		if c.User != "" {
+			log.Printf("v1 ingest id=%d: no viewer row, %q is no longer the account the run was submitted by", reportID, c.User)
+		}
+		return nil
+	}
+	ou := c.OU
+	if scoped, err := s.isRestrictedStrict(c.User); err != nil || !scoped {
+		ou = 0
+	}
+	return s.st.AddReportViewer(reportID, rdate, c.User, ou)
+}
+
+// tokenNamesCurrentAccount reports whether the person a token names is still the same account: it
+// exists, and it was not created after the token was minted. A row whose creation time was never
+// stamped predates the stamp and is trusted as it always was; one that cannot be read is not.
+func (s *Server) tokenNamesCurrentAccount(c ownerClaims) bool {
+	if c.User == "" {
+		return false
+	}
+	u := s.st.GetUser(c.User)
+	if u == nil {
+		return false
+	}
+	if u.CreatedAt == "" {
+		return true
+	}
+	created, err := time.ParseInLocation(userCreatedLayout, u.CreatedAt, time.Local)
+	return err == nil && !created.After(c.IssuedAt)
 }
