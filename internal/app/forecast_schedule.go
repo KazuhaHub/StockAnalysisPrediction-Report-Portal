@@ -297,6 +297,7 @@ func annotateReadPhases(sets []PredictionSet, now time.Time) {
 // Reads never fetch a calendar. Published completed sessions and recorded due sessions are
 // evidence; scheduled exchange closures qualify estimates but never shorten the overdue deadline.
 func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calendars map[string][]string) {
+	memo := newPredSessionMemo()
 	for i := range sets {
 		set := &sets[i]
 		for j := range set.Marks {
@@ -313,7 +314,7 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 			continue
 		}
 		madeOn := madeAt.In(chinaZone).Format("2006-01-02")
-		baseline, baselineExpected := predReadProjection("d5", madeAt, set.HorizonStd, set.S0Date)
+		baseline, baselineExpected := predReadProjectionWith(memo, "d5", madeAt, set.HorizonStd, set.S0Date)
 		s0 := set.S0Date
 		s0Projected := s0 == ""
 		if s0Projected {
@@ -328,7 +329,7 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 			}
 		}
 		s0Ready := s0 != "" && readSessionCompleted(s0, now)
-		weekdays := predProjectSessions(shiftDays(madeOn, -1), 400)
+		weekdays := memo.weekdays(shiftDays(madeOn, -1))
 		for j := range set.Marks {
 			m := &set.Marks[j]
 			if m.Status == markResolved || m.Status == markRefusedFinal {
@@ -338,7 +339,7 @@ func annotateReadPhasesWithCalendars(sets []PredictionSet, now time.Time, calend
 				m.Phase, m.NotBefore, m.Expected = predPhaseWaitingS0, s0, baselineExpected
 				continue
 			}
-			sch, expected := predReadProjection(m.Checkpoint, madeAt, set.HorizonStd, projectionS0)
+			sch, expected := predReadProjectionWith(memo, m.Checkpoint, madeAt, set.HorizonStd, projectionS0)
 			exact := false
 			if calendarUsable {
 				actual := predScheduleFor(m.Checkpoint, madeAt, set.HorizonStd, set.S0Date, cal)
