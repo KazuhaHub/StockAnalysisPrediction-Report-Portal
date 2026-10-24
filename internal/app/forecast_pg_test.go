@@ -403,6 +403,7 @@ func TestPostgresMigration0006OlderDumpRestores(t *testing.T) {
 			}
 		}
 	}
+
 	dump := dumpOf(t, st)
 	st.Close()
 

@@ -2432,5 +2432,22 @@
   "scope.notify": "Publish source notifications",
   "apps.scopeNotify": "Publish notifications in this app’s namespace (administrator opens only)",
   "notify.publisher": "Publisher namespace",
-  "notify.publisherHelp": "Use a lowercase name with letters, digits and hyphens. The token publishes only extension.service.<name>.notice. Recipients are selected by administrator rules."
+  "notify.publisherHelp": "Use a lowercase name with letters, digits and hyphens. The token publishes only extension.service.<name>.notice. Recipients are selected by administrator rules.",
+  "apps.scopeExtensionRead": "Read this app’s backend using the current account and organizational units",
+  "apps.scopeExtensionManage": "Manage this app’s backend (administrators only)",
+  "apps.backendButton": "Backend",
+  "apps.backendTitle": "Backend connection: {{name}}",
+  "apps.backendHint": "Pair an independently deployed app backend. Review its destination and allowed routes before enabling.",
+  "apps.backendPolicyInvalid": "Policy must be valid JSON.",
+  "apps.backendPairAgain": "Restoring or reinstalling clears pairing. Re-enter a signing key and review the new registration.",
+  "apps.backendURL": "Backend root URL",
+  "apps.backendAudience": "Assertion audience",
+  "apps.backendKeyID": "Signing key ID",
+  "apps.backendKey": "Signing key (base64, 32 bytes)",
+  "apps.backendKeyHint": "Blank preserves the current key. Key rotation preserves existing account and OU identities.",
+  "apps.backendPolicy": "Allowed methods, paths, ports and private networks (JSON)",
+  "apps.backendEnabled": "Enable after review",
+  "apps.backendDeleteConfirm": "Delete this backend connection and revoke its access?",
+  "audit.a.app_backend.change": "App backend changed",
+  "audit.a.app_backend.delete": "App backend connection deleted"
 }

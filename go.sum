@@ -1,3 +1,5 @@
+github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a h1:Ulsql9QkXAyn5msTL21mDlD53G+s3WrDYLzIj0v/xug=
+github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a/go.mod h1:nKsohoVbRr768/uQCwJTGV0Mq7g9mzJCyx1g92UwwP4=
 github.com/KazuhaHub/authcore v0.6.1 h1:nilDf8Of4DnL3MdNNrz4iY6HOTclVRBwc+CiN4FjdKk=
 github.com/KazuhaHub/authcore v0.6.1/go.mod h1:DZoOd2YYIDnc4E87so+mEFVTG2rryj2JBhei9eJBgYg=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=

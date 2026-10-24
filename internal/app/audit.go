@@ -171,6 +171,8 @@ const (
 	AuditTokenDelete          = "token.delete"
 	AuditAppInstall           = "app.install"
 	AuditAppDelete            = "app.delete"
+	AuditAppBackendChange     = "app_backend.change"
+	AuditAppBackendDelete     = "app_backend.delete"
 	AuditWebhookCreate        = "webhook.create"
 	AuditWebhookDelete        = "webhook.delete"
 	AuditTargetChange         = "target.change"
@@ -435,7 +437,7 @@ var auditVocabulary = []string{
 	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
 	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
 	AuditTokenCreate, AuditTokenDelete,
-	AuditAppInstall, AuditAppDelete,
+	AuditAppInstall, AuditAppDelete, AuditAppBackendChange, AuditAppBackendDelete,
 	AuditWebhookCreate, AuditWebhookDelete,
 	AuditTargetChange,
 	AuditNotificationChange, AuditNotificationTest, AuditNotificationReplay, AuditNotificationReview, AuditNotificationDispatch,

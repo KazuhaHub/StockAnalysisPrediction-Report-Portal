@@ -154,3 +154,15 @@ func (s *Server) notificationPublishError(w http.ResponseWriter, err error) {
 		v1err(w, 500, "db_error", "notification capture failed")
 	}
 }
+
+// v1NotificationPublisherIdentity lets an external outbox verify its configured
+// namespace without publishing a test event or inspecting administrator records.
+func (s *Server) v1NotificationPublisherIdentity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	publisher, ok := s.notificationPublisher(r)
+	if !ok {
+		v1err(w, 401, "unauthorized", "a dedicated notification publication credential is required")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "publisher": publisher, "event_type": "extension." + publisher + ".notice"})
+}

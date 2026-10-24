@@ -160,3 +160,27 @@ func TestNotificationPublisherUsesAdministratorRulesForInbox(t *testing.T) {
 		t.Fatal("source event survived audience revocation")
 	}
 }
+
+func TestNotificationPublisherIdentityReadIsDedicatedAndReadOnly(t *testing.T) {
+	s := batchServer(t)
+	for _, scope := range []string{"all", "query", "ingest", "notify:status-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		token := "identity-" + scope
+		if err := s.st.CreateToken(token, "Publisher identity", scope, ""); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("GET", "/api/v1/notifications/publisher", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.v1NotificationPublisherIdentity(w, r)
+		if strings.HasPrefix(scope, "notify:") {
+			if w.Code != 200 || !strings.Contains(w.Body.String(), `"publisher":"service.status-`) {
+				t.Fatalf("identity=%d %s", w.Code, w.Body.String())
+			}
+		} else if w.Code != 401 {
+			t.Fatal("non-publication token introspected publisher")
+		}
+	}
+	if n := scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events`); n != 0 {
+		t.Fatal("identity check published a notification")
+	}
+}

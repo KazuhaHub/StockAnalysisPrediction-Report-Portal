@@ -188,6 +188,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	v1 := func(pattern string, h http.HandlerFunc) { s.bearer(mux, pattern, h) }
 	v1("POST /api/v1/reports", s.v1Ingest)
 	v1("POST /api/v1/notifications", s.v1PublishNotification)
+	v1("GET /api/v1/notifications/publisher", s.v1NotificationPublisherIdentity)
+	v1("POST /api/v1/extensions/{id}/request", s.v1ExtensionRequest)
+	v1("GET /api/v1/extensions/{id}/principals", s.v1ExtensionPrincipals)
 	v1("GET /api/v1/reports", s.v1QueryReports)
 	v1("GET /api/v1/reports/manifest", s.v1Manifest) // more specific than {id}, matched first
 	v1("GET /api/v1/reports/{id}", s.v1GetReport)
@@ -458,6 +461,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/apps/market/install", s.apiAppMarketInstall)
 	s.admin(mux, "POST /api/admin/apps/market/index", s.apiAppMarketIndexSave)
 	s.admin(mux, "DELETE /api/admin/apps/{id}", s.apiAppDelete)
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		s.admin(mux, method+" /api/admin/apps/{id}/backend", s.apiExtensionBackend)
+	}
 	s.public(mux, "GET /app-assets/{id}/{path...}", s.appAssets)
 	s.public(mux, "GET /site-assets/{name}", s.siteAsset)
 

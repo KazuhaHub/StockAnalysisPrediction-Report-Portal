@@ -465,11 +465,15 @@
       },
       "PredictionPayload": {
         "type": "object",
-        "required": ["schema"],
+        "required": [
+          "schema"
+        ],
         "properties": {
           "schema": {
             "type": "string",
-            "enum": ["predictions.v1"],
+            "enum": [
+              "predictions.v1"
+            ],
             "description": "契约版本。当前只有 predictions.v1。"
           },
           "emitter": {
@@ -496,7 +500,12 @@
           },
           "probability_method": {
             "type": "string",
-            "enum": ["approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable"],
+            "enum": [
+              "approved_valuation_source",
+              "approved_policy_default",
+              "subjective_committee",
+              "unavailable"
+            ],
             "description": "情景概率的来源。approved_policy_default 表示用的是策略默认值（25/50/25），概率校准统计会排除这类样本。"
           },
           "probability_transform": {
@@ -505,7 +514,9 @@
           },
           "scenario_basis": {
             "type": "string",
-            "enum": ["estimated"],
+            "enum": [
+              "estimated"
+            ],
             "description": "情景价的来源口径，按统计含义命名，不按工具命名。estimated 表示三个情景终值由模型推算而非引用已实现的数据。统计页面按此分段与剔除样本，所以取值是封闭枚举；以后新增取值需同时修改门户。省略等同于未声明。"
           },
           "scenario_provenance": {
@@ -537,7 +548,10 @@
                 "properties": {
                   "adoption": {
                     "type": "string",
-                    "enum": ["quote", "locator"],
+                    "enum": [
+                      "quote",
+                      "locator"
+                    ],
                     "description": "quote 表示正文里引到了原句，locator 表示只有章节定位。"
                   }
                 }
@@ -546,12 +560,19 @@
           },
           "decision_status": {
             "type": "string",
-            "enum": ["eligible", "no_trade"],
+            "enum": [
+              "eligible",
+              "no_trade"
+            ],
             "description": "只有这两类状态会写入预测。研究层只给出建议买入价（当时没有现价）的运行不发预测，因为没有基准价可结算。"
           },
           "decision_quality": {
             "type": "string",
-            "enum": ["normal", "degraded", "repaired"],
+            "enum": [
+              "normal",
+              "degraded",
+              "repaired"
+            ],
             "description": "仲裁质量。只有 normal 参与统计。"
           },
           "information_cutoff": {
@@ -582,7 +603,10 @@
           },
           "run_mode": {
             "type": "string",
-            "enum": ["production", "test"],
+            "enum": [
+              "production",
+              "test"
+            ],
             "description": "运行模式。缺省视为 production；test 表示测试运行，预测集单独存放、不结算、不参与统计。用于控制台或调试运行，避免测试数据进入记录。",
             "x-i18n": {
               "en-US": {
@@ -606,17 +630,24 @@
         "type": "string",
         "pattern": "^(\\d{1,7})(?:\\.(\\d{1,2}))?$",
         "description": "价格，以字符串传输，最多两位小数（如 \"8.65\"）。不接受 JSON 数字：浮点会在传输中改变数值，也无法精确比对。负号、指数形式和三位小数一律拒绝。",
-        "examples": ["8.65"]
+        "examples": [
+          "8.65"
+        ]
       },
       "PredictionProbability": {
         "type": "string",
         "pattern": "^(?:0(?:\\.(\\d{1,4}))?|1(?:\\.(0{1,4}))?)$",
         "description": "概率或权重，以字符串传输，取值 [0,1]，最多四位小数，按万分之一整数存储。不接受 JSON 数字。",
-        "examples": ["0.2500"]
+        "examples": [
+          "0.2500"
+        ]
       },
       "PredictionClaim": {
         "type": "object",
-        "required": ["key", "kind"],
+        "required": [
+          "key",
+          "kind"
+        ],
         "properties": {
           "key": {
             "type": "string",
@@ -624,16 +655,29 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["stance", "terminal_value", "scenario", "entry_price", "stop_loss"],
+            "enum": [
+              "stance",
+              "terminal_value",
+              "scenario",
+              "entry_price",
+              "stop_loss"
+            ],
             "description": "预测项类型。stop_loss 为保留值：在代码节点能算出止损价之前一律拒绝。"
           },
           "stance": {
             "type": "string",
-            "enum": ["long", "no_position"]
+            "enum": [
+              "long",
+              "no_position"
+            ]
           },
           "label": {
             "type": "string",
-            "enum": ["bull", "base", "bear"]
+            "enum": [
+              "bull",
+              "base",
+              "bear"
+            ]
           },
           "price": {
             "$ref": "#/components/schemas/PredictionPrice"
@@ -2126,7 +2170,9 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["payload"]
+              "enum": [
+                "payload"
+              ]
             },
             "description": "传 payload 时返回入库时的 predictions 原文。列表接口默认不返回，因为每集约 2KB。"
           }
@@ -2471,7 +2517,9 @@
     },
     "/healthz/forecast": {
       "get": {
-        "tags": ["meta"],
+        "tags": [
+          "meta"
+        ],
         "operationId": "healthzForecast",
         "summary": "预测评估器探针（公开）——只返回状态",
         "x-scope": "public",
@@ -2481,28 +2529,53 @@
             "summary": "Forecast evaluator probe, public — status only",
             "description": "200 while the evaluator is off, or while it is on and its heartbeat is under ten minutes old; 503 when it is on and the heartbeat is missing or older. The body is exactly one boolean and never carries the heartbeat, which holds counts an anonymous caller must not see.",
             "responses": {
-              "200": {"description": "evaluator off, or on and current"},
-              "503": {"description": "evaluator on, heartbeat stale or missing"}
+              "200": {
+                "description": "evaluator off, or on and current"
+              },
+              "503": {
+                "description": "evaluator on, heartbeat stale or missing"
+              }
             }
           },
           "zh-TW": {
             "summary": "預測評估器探針（公開）——只回傳狀態",
             "description": "評估器關閉時回傳 200；開啟且心跳在十分鐘內也回傳 200；開啟但心跳缺失或過舊時回傳 503。回應只有一個布林值，絕不帶心跳內容——那裡有匿名呼叫者不該看到的計數。",
             "responses": {
-              "200": {"description": "評估器關閉，或已開啟且心跳正常"},
-              "503": {"description": "評估器已開啟，但心跳過舊或缺失"}
+              "200": {
+                "description": "評估器關閉，或已開啟且心跳正常"
+              },
+              "503": {
+                "description": "評估器已開啟，但心跳過舊或缺失"
+              }
             }
           }
         },
-        "x-codeSamples": [{"lang": "cURL", "source": "curl -s $BASE/healthz/forecast"}],
+        "x-codeSamples": [
+          {
+            "lang": "cURL",
+            "source": "curl -s $BASE/healthz/forecast"
+          }
+        ],
         "responses": {
           "200": {
             "description": "评估器关闭，或已开启且心跳正常",
-            "content": {"application/json": {"example": {"ok": true}}}
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": true
+                }
+              }
+            }
           },
           "503": {
             "description": "评估器已开启，但心跳过旧或缺失",
-            "content": {"application/json": {"example": {"ok": false}}}
+            "content": {
+              "application/json": {
+                "example": {
+                  "ok": false
+                }
+              }
+            }
           }
         },
         "description": "评估器关闭时返回 200；开启且心跳在十分钟内也返回 200；开启但心跳缺失或过旧时返回 503。响应只有一个布尔值，绝不带心跳内容——那里有匿名调用者不该看到的计数。"
@@ -2600,6 +2673,148 @@
           },
           "500": {
             "description": "Capture failed; retry with the same occurrence id"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/request": {
+      "post": {
+        "summary": "Proxy a viewer-bound request to an installed application backend",
+        "description": "Requires an ephemeral app-bound bridge token for the same installed app. Machine API tokens are refused. Inner GET requires extension.read; POST/PUT/DELETE require extension.manage and a current administrator. The fixed registration controls destination and route policy. No caller headers, credentials or identity claims are accepted. Private responses use Cache-Control: no-store.",
+        "tags": [
+          "Extensions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "method",
+                  "path"
+                ],
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "GET",
+                      "POST",
+                      "PUT",
+                      "DELETE"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^/v1/"
+                  },
+                  "body": {
+                    "description": "An optional JSON value for management methods. GET has no body."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded application JSON response"
+          },
+          "400": {
+            "description": "Invalid path, body or policy"
+          },
+          "403": {
+            "description": "Current app or viewer is not authorized"
+          },
+          "429": {
+            "description": "Extension capacity is full"
+          },
+          "502": {
+            "description": "Backend unavailable or invalid response"
+          },
+          "503": {
+            "description": "Connection unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/principals": {
+      "get": {
+        "summary": "List opaque grant principals for the current application",
+        "description": "Only app-bound extension.manage tokens belonging to a current administrator may read this directory. Returns opaque OU or account identities and labels, never profile or credential fields.",
+        "tags": [
+          "Extensions"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ou",
+                "user"
+              ]
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 principals, with count, offset and limit"
+          },
+          "400": {
+            "description": "Invalid directory parameters"
+          },
+          "403": {
+            "description": "Current app administrator permission is required"
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/publisher": {
+      "get": {
+        "summary": "Read the authenticated notification publisher namespace without publishing",
+        "description": "Requires a dedicated notify:<name> service credential or authorized app-bound notify token. Generic all, query and ingest scopes are refused. Returns its publisher namespace and event selector only, with Cache-Control: no-store.",
+        "tags": [
+          "Notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Current publisher and exact notification event selector"
+          },
+          "401": {
+            "description": "Dedicated publication credential required"
           }
         }
       }

@@ -84,3 +84,24 @@ describe('reqIdOf', () => {
     expect(reqIdOf(null)).toBeNull()
   })
 })
+
+describe('extension bridge capabilities', () => {
+  const request = { type: API_MESSAGE, method: 'POST', path: '/api/v1/extensions/status/request', body: { method: 'GET', path: '/v1/components?limit=20' } }
+  it('requires a separate read capability for an inner GET', () => {
+    expect(validateApiRequest(request, ['extension.read']).ok).toBe(true)
+    for (const scope of ['query', 'ingest', 'notify', 'extension.manage']) expect(validateApiRequest(request, [scope]).ok).toBe(false)
+  })
+  it('requires management capability for inner writes', () => {
+    for (const method of ['POST', 'PUT', 'DELETE']) {
+      const write = { ...request, body: { method, path: '/v1/components', body: { label: 'Example' } } }
+      expect(validateApiRequest(write, ['extension.manage']).ok).toBe(true)
+      expect(validateApiRequest(write, ['extension.read']).ok).toBe(false)
+    }
+  })
+  it('rejects malformed endpoints, host overrides and traversal', () => {
+    for (const path of ['/api/v1/extensions/status/request?x=1', '/api/v1/extensions/status/other', '/api/v1/extensions/status/request/extra']) expect(validateApiRequest({ ...request, path }, ['ingest', 'extension.read']).ok).toBe(false)
+    for (const path of ['https://evil/v1/components', '/v1/%252e%252e/secrets', '/v1//components', '/v1/components#x', '/v1/handshake']) expect(validateApiRequest({ ...request, body: { method: 'GET', path } }, ['extension.read']).ok).toBe(false)
+    expect(validateApiRequest({ ...request, method: 'GET' }, ['extension.read']).ok).toBe(false)
+    expect(validateApiRequest({ ...request, body: { ...request.body, headers: {} } }, ['extension.read']).ok).toBe(false)
+  })
+})

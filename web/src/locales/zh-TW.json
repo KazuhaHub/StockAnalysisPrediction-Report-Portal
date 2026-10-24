@@ -2432,5 +2432,22 @@
   "scope.notify": "發佈來源通知",
   "apps.scopeNotify": "發佈此應用程式來源的通知（僅管理員開啟時授權）",
   "notify.publisher": "發佈來源識別碼",
-  "notify.publisherHelp": "使用小寫字母開頭，可包含數字與連字號。此權杖僅能發佈 extension.service.<識別碼>.notice，收件範圍由管理員規則決定。"
+  "notify.publisherHelp": "使用小寫字母開頭，可包含數字與連字號。此權杖僅能發佈 extension.service.<識別碼>.notice，收件範圍由管理員規則決定。",
+  "apps.scopeExtensionRead": "依目前帳號與組織單元權限讀取此應用程式後端",
+  "apps.scopeExtensionManage": "管理此應用程式後端（僅限管理員）",
+  "apps.backendButton": "後端連線",
+  "apps.backendTitle": "後端連線：{{name}}",
+  "apps.backendHint": "連接獨立部署的應用程式後端。啟用前請核對目標位址與允許的路由。",
+  "apps.backendPolicyInvalid": "政策必須為有效的 JSON。",
+  "apps.backendPairAgain": "還原備份或重新安裝後需重新配對。請重新輸入簽章金鑰，並核對新的註冊資訊。",
+  "apps.backendURL": "後端根位址",
+  "apps.backendAudience": "簽章受眾",
+  "apps.backendKeyID": "簽章金鑰編號",
+  "apps.backendKey": "簽章金鑰（Base64，32 位元組）",
+  "apps.backendKeyHint": "留空則保留目前金鑰。輪換金鑰會保留現有帳號與 OU 身分。",
+  "apps.backendPolicy": "允許的方法、路徑、連接埠與私有網路（JSON）",
+  "apps.backendEnabled": "核對後啟用",
+  "apps.backendDeleteConfirm": "刪除後端連線並撤銷其存取權限？",
+  "audit.a.app_backend.change": "修改應用程式後端",
+  "audit.a.app_backend.delete": "刪除應用程式後端連線"
 }
