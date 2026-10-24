@@ -14,9 +14,9 @@ import (
 	"testing"
 )
 
-// apps/index.json is not a fixture. Every portal left on the default market reads it, and the
-// bundles it names, straight from main (defaultAppMarketIndexURL), so a change to it reaches
-// installed portals the moment it merges, with no release in between. The other market tests
+// apps/index.json remains live for older binaries and explicit legacy overrides. Its URL and
+// archives survive the compiled default's move to the shared application repository. A change
+// reaches those installations from main without a binary release. The other market tests
 // serve synthetic JSON; this one holds the published files to the install path they will meet:
 // the index must decode, each entry must resolve to a bundle committed next to it, the bundle
 // must pass parseAppBundle, and what the market shows before install (id, version, and the
@@ -41,7 +41,7 @@ func TestPublishedAppMarketMatchesItsBundles(t *testing.T) {
 	if len(idx.Apps) == 0 {
 		t.Fatal("apps/index.json lists no apps")
 	}
-	base, err := url.Parse(defaultAppMarketIndexURL)
+	base, err := url.Parse(previousMarketURL)
 	if err != nil {
 		t.Fatal(err)
 	}

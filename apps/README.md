@@ -5,9 +5,17 @@ Runtime-installable, sandboxed iframe apps for the portal. See the design in
 
 An **app** is a `.zip` bundle: an `app.json` manifest plus self-contained frontend
 files. An admin installs it under **Manage → Apps** — either by uploading the `.zip`
-or one-click from the **App market** (a GitHub-hosted [`index.json`](index.json)) —
+or one-click from the **App market** (the shared repository's
+[`index.json`](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/index.json)) —
 and it then appears as a card in the **Apps** hub for every user and opens inside a
 sandboxed `<iframe>`.
+
+The source/distribution repository is
+[StockAnalysisPrediction-Report-Portal-Apps](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps).
+This directory retains the legacy catalogue and demo archive for older binaries
+and explicit overrides. It is not removed when the compiled default changes.
+See [the migration runbook](../docs/app-market-migration.md) for upgrade behavior,
+explicit legacy export and rollback.
 
 ## Manifest (`app.json`)
 
