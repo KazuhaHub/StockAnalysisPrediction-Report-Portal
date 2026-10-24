@@ -889,6 +889,7 @@
   "forecast.eval.hint": "這些是自動結算的積壓計數，不是取數結果。",
   "forecast.matrix.title": "分組統計",
   "forecast.matrix.pending": "分組統計尚未上線，此處暫時留空。",
+  "forecast.matrix.region": "驗證矩陣",
   "forecast.export.button": "匯出 CSV",
   "forecast.tab.month": "按月",
   "forecast.tab.custom": "自定義區間",

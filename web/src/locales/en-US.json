@@ -889,6 +889,7 @@
   "forecast.eval.hint": "These are the evaluator's backlog counts, not the results of a fetch.",
   "forecast.matrix.title": "Group statistics",
   "forecast.matrix.pending": "Group statistics has not shipped yet, so this section is intentionally empty.",
+  "forecast.matrix.region": "Verification matrix",
   "forecast.export.button": "Export CSV",
   "forecast.tab.month": "Monthly",
   "forecast.tab.custom": "Custom range",

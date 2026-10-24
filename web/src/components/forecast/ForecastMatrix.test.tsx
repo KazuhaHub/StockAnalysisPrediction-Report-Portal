@@ -255,6 +255,23 @@ describe('ForecastMatrix', () => {
   })
 })
 
+describe('ForecastMatrix scrolling', () => {
+  it('scrolls inside one named region the keyboard can reach, even when no cell is a button', () => {
+    show(resp(empty))
+    expect(document.querySelector('button')).toBeNull()
+    const region = screen.getByRole('region', { name: 'forecast.matrix.region' })
+    expect(region.getAttribute('tabindex')).toBe('0')
+    expect(region.classList.contains('rp-fc-scroll')).toBe(true)
+    expect(within(region).getByRole('table')).toBeTruthy()
+  })
+
+  it('keeps the legend and the hints outside the scrolling region', () => {
+    show(resp(empty))
+    const region = screen.getByRole('region', { name: 'forecast.matrix.region' })
+    expect(region.textContent).not.toContain('forecast.metric.spread.help')
+  })
+})
+
 // The cell states a young ledger spends most of its life in. Each one has to say what the cell is
 // waiting for, and none of them may show a number the matrix refuses to publish.
 describe('ForecastMatrix cell states', () => {

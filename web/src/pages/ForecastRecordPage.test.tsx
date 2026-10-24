@@ -738,8 +738,10 @@ describe('ForecastRecordPage shell', () => {
       expect(el, part).not.toBeNull()
       expect(el.style.flexWrap).toBe('wrap')
     }
-    // The matrix scrolls inside the card, never the page.
-    expect((screen.getByRole('table').parentElement as HTMLElement).style.overflowX).toBe('auto')
+    // The matrix scrolls inside the card, never the page: in one region (rp-fc-scroll sets overflow-x: auto).
+    const region = screen.getByRole('table').parentElement as HTMLElement
+    expect(region.getAttribute('role')).toBe('region')
+    expect(region.classList.contains('rp-fc-scroll')).toBe(true)
   })
 })
 

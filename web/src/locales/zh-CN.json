@@ -889,6 +889,7 @@
   "forecast.eval.hint": "这些是自动结算的积压计数，不是取数结果。",
   "forecast.matrix.title": "分组统计",
   "forecast.matrix.pending": "分组统计尚未上线，此处暂时留空。",
+  "forecast.matrix.region": "验证矩阵",
   "forecast.export.button": "导出 CSV",
   "forecast.tab.month": "按月",
   "forecast.tab.custom": "自定义区间",
