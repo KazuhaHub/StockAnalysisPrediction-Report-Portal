@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { ConfigProvider, theme } from 'antd'
-import type { ForecastPath } from '../lib/forecastPath'
+import { dayIndex, type ForecastPath } from '../lib/forecastPath'
 import ForecastPathChart from './ForecastPathChart'
 
 vi.mock('react-i18next', () => ({
@@ -29,6 +29,7 @@ const path: ForecastPath = {
     { checkpoint: 'd20', d: '2026-10-23', fen: 118800, direction: 'disagree' },
   ],
   today: '2026-10-24',
+  corpAction: false,
   min: 90000,
   max: 155000,
 }
@@ -101,6 +102,59 @@ describe('ForecastPathChart', () => {
     expect(Math.max(...xs)).toBe(right)
     const scenarioEnd = num(screen.getAllByTestId('forecast-path-scenario')[0], 'x2')
     expect(scenarioEnd).toBeLessThan(right)
+  })
+
+  it.each([
+    ['the default width', undefined],
+    ['a late checkpoint widening the window', '2027-09-27'],
+  ])("reads back every drawn price and date from the chart's own scales (%s)", (_, end) => {
+    const p: ForecastPath = end
+      ? { ...path, end, checkpoints: [...path.checkpoints, { checkpoint: 'h12', d: end, fen: 131000, direction: 'agree' }], today: undefined }
+      : path
+    render(<ForecastPathChart path={p} />)
+    // What a reader has to go on: the labelled price ticks, and the start and horizon dates under the axis.
+    const ticks = screen.getAllByTestId('forecast-path-tick').map((el) => ({
+      fen: Math.round(Number((el.textContent || '').replace(/,/g, '')) * 100),
+      y: num(el, 'y') - 4,
+    }))
+    const [lo, hi] = [ticks[0], ticks[ticks.length - 1]]
+    const fenPerPx = (hi.fen - lo.fen) / (hi.y - lo.y)
+    const priceAt = (y: number) => lo.fen + (y - lo.y) * fenPerPx
+    const fromLabel = screen.getByText(p.from)
+    const toLabel = screen.getByText(p.to)
+    const [x0, xTo] = [num(fromLabel, 'x'), num(toLabel, 'x')]
+    const dayAt = (x: number) => dayIndex(p.from) + ((x - x0) / (xTo - x0)) * (dayIndex(p.to) - dayIndex(p.from))
+    // Coordinates are rounded to 0.1px, so a reading is good to a little over half of that.
+    const priceTol = Math.abs(fenPerPx) * 0.06
+    const dayTol = (0.06 / (xTo - x0)) * (dayIndex(p.to) - dayIndex(p.from))
+    const expectAt = (x: number, y: number, d: string, fen: number) => {
+      expect(Math.abs(priceAt(y) - fen)).toBeLessThanOrEqual(priceTol)
+      expect(Math.abs(dayAt(x) - dayIndex(d))).toBeLessThanOrEqual(dayTol)
+    }
+
+    for (const [i, dot] of screen.getAllByTestId('forecast-path-checkpoint').entries()) {
+      expectAt(num(dot, 'cx'), num(dot, 'cy'), p.checkpoints[i].d, p.checkpoints[i].fen)
+    }
+    const points = (screen.getByTestId('forecast-path-actual').getAttribute('points') || '').trim().split(/\s+/).map((q) => q.split(',').map(Number))
+    points.forEach(([x, y], i) => expectAt(x, y, p.actual[i].d, p.actual[i].c))
+    for (const [i, line] of screen.getAllByTestId('forecast-path-scenario').entries()) {
+      expectAt(num(line, 'x1'), num(line, 'y1'), p.from, p.s0)
+      expectAt(num(line, 'x2'), num(line, 'y2'), p.to, p.scenarios[i].fen)
+    }
+    const terminal = screen.getByTestId('forecast-path-terminal')
+    expectAt(num(terminal, 'x2'), num(terminal, 'y2'), p.to, p.terminal!)
+    if (p.today) {
+      const today = screen.getByTestId('forecast-path-today').querySelector('line')!
+      expect(Math.abs(dayAt(num(today, 'x1')) - dayIndex(p.today))).toBeLessThanOrEqual(dayTol)
+    }
+  })
+
+  it('warns that prices are not adjusted when a corporate action fell inside the window', () => {
+    const { unmount } = render(<ForecastPathChart path={path} />)
+    expect(screen.queryByText('forecast.path.corpAction')).toBeNull()
+    unmount()
+    render(<ForecastPathChart path={{ ...path, corpAction: true }} />)
+    expect(screen.getByText('forecast.path.corpAction')).toBeTruthy()
   })
 
   it('draws no actual line until there are two closes to join', () => {

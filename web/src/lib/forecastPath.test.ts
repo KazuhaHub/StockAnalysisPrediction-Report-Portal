@@ -99,6 +99,12 @@ describe('forecastPath', () => {
     expect(path.checkpoints[path.checkpoints.length - 1].d).toBe('2027-09-24')
   })
 
+  it('flags a corporate action inside the window, since the closes are not adjusted', () => {
+    expect(forecastPath(set, bars, '2026-10-24')!.corpAction).toBe(false)
+    const split = { ...set, marks: [...set.marks, { checkpoint: 'd60' as const, status: 'resolved' as const, bar_date: '2026-12-15', close_fen: 60000, corp_action: true }] }
+    expect(forecastPath(split, bars, '2026-10-24')!.corpAction).toBe(true)
+  })
+
   it('places today only when it falls inside the window', () => {
     expect(forecastPath(set, bars, '2026-10-24')!.today).toBe('2026-10-24')
     expect(forecastPath(set, bars, '2026-09-18')!.today).toBeUndefined()

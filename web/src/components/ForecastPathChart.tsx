@@ -146,6 +146,9 @@ export default function ForecastPathChart({ path, height = 220 }: Props) {
           )
         })}
       </div>
+      {path.corpAction && (
+        <Typography.Paragraph type="warning" style={{ fontSize: 12, margin: '6px 0 0' }}>{t('forecast.path.corpAction')}</Typography.Paragraph>
+      )}
       <Typography.Paragraph style={{ color: token.colorTextSecondary, fontSize: 12, margin: '6px 0 0' }}>{t('forecast.path.note')}</Typography.Paragraph>
     </div>
   )

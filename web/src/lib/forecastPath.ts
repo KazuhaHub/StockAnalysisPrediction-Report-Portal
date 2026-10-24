@@ -28,6 +28,11 @@ export interface ForecastPath {
   checkpoints: ForecastPathCheckpoint[]
   /** Set only when today falls strictly inside the window. */
   today?: string
+  /**
+   * A bonus or rights issue fell inside the window. The closes are unadjusted (the same basis as the
+   * ledger's), so after the event they are on a different footing from the scenario prices.
+   */
+  corpAction: boolean
   min: number
   max: number
 }
@@ -101,6 +106,7 @@ export function forecastPath(set: PredictionSet, bars: QuoteBar[], today: string
     actual,
     checkpoints,
     today: today > from && today < end ? today : undefined,
+    corpAction: set.marks.some((m) => m.corp_action === true),
     min: lo - pad,
     max: hi + pad,
   }
