@@ -62,6 +62,8 @@ then estimate each PR against the verified integration work.
 ## P00. Inventory, decisions and authority map
 
 **Inputs:** this plan; current source and release inventory. **No storage changes.**
+The initial [source inventory](08-source-inventory.md) is available; its existence
+does not complete P00 or establish runtime acceptance.
 
 Actions:
 

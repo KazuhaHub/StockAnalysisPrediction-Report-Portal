@@ -31,6 +31,7 @@ reader, authentication or analysis queue down with it.
 | [05 Storage decision proposal](05-storage-proposal.md) | Logical records, alternatives, backup/deletion rules and decisions requiring owner approval |
 | [06 Acceptance specification](06-acceptance.md) | Reproducible tests, failure injection, evidence and release gates |
 | [07 Developer and operator guide](07-handbook.md) | Concrete authoring, deployment, support and release workflows |
+| [08 Source inventory](08-source-inventory.md) | Verified legacy code locations, reuse boundaries and compatibility traps |
 
 Read the architecture and lifecycle before implementing an endpoint. Then take
 the next work package whose dependencies and decision gates are satisfied. Do not
