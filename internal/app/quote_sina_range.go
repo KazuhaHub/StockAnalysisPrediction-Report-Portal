@@ -2,10 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 )
+
+var errSinaHistoryObservation = errors.New("quote: sina newest history does not agree with its snapshot")
 
 // fetchSinaRange is comparison-only. Sina has a count endpoint, not a range endpoint:
 // request the full bounded tail, validate its newest observation, then trim by actual row dates.
@@ -18,11 +21,47 @@ func fetchSinaRange(ctx context.Context, market, code, from, to string) (*QuoteR
 	if err != nil || !window.bounded() {
 		return nil, &ledgerRefusal{Code: "bad_window"}
 	}
-	response, err := fetchSinaQuote(ctx, market, code, quoteMaxBars)
+	target, err := quoteSinaTarget(market, code)
 	if err != nil {
 		return nil, err
 	}
-	return boundedSinaHistory(response, window)
+	if !quoteMarketHasDailyHistory(market) {
+		return nil, fmt.Errorf("quote: sina has no eligible daily history for this market")
+	}
+	ctx, cancel := context.WithTimeout(ctx, quoteFetchTimeout)
+	defer cancel()
+	continuation := sinaContinuation(ctx, forecastReadKey(market, code, from, to))
+	response := continuation.get()
+	resumed := response != nil
+	if response == nil {
+		response, err = fetchSinaSnapshot(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rawURL := fmt.Sprintf(quoteSinaKlineURL, target.Symbol, quoteMaxBars)
+	body, err := vendorGet(ctx, rawURL, quoteSinaReferer, quoteBodyLimit)
+	if err != nil {
+		var refusal *ledgerRefusal
+		if isVendorDeferred(err) || (errors.As(err, &refusal) && refusal.Code == "shadow_budget") {
+			continuation.keep(response)
+		} else {
+			continuation.forget()
+		}
+		return nil, err
+	}
+	continuation.forget()
+	response.Bars, err = parseSinaKLine(body)
+	if err != nil {
+		return nil, err
+	}
+	response.BarsSource = quoteSourceSina
+	bounded, err := boundedSinaHistory(response, window)
+	if resumed && errors.Is(err, errSinaHistoryObservation) {
+		// A delayed second component can describe a different observation without a delivery fault.
+		return nil, &ledgerRefusal{Code: "incomplete"}
+	}
+	return bounded, err
 }
 
 func boundedSinaHistory(response *QuoteResp, window quoteWindow) (*QuoteResp, error) {
@@ -57,7 +96,7 @@ func boundedSinaHistory(response *QuoteResp, window quoteWindow) (*QuoteResp, er
 	}
 	newest := bars[len(bars)-1]
 	if newest.Date != stamp.In(zone).Format(quoteWindowLayout) || newest.Close != response.Snapshot.Last {
-		return nil, fmt.Errorf("quote: sina newest history does not agree with its snapshot")
+		return nil, errSinaHistoryObservation
 	}
 	// A full tail starting after the requested beginning cannot establish that earlier window.
 	// A shorter response can reflect a new listing or suspension; do not invent sessions before it.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -88,7 +89,12 @@ func (pass *forecastShadowPass) finish(s *Server, observations []forecastCallObs
 				} else {
 					before := budget.attempts()
 					denials := budget.denials()
-					response, called, err := fetchForecastShadow(ctx, s, source, sample)
+					scope := fmt.Sprintf("%s|%s|%s|%s|%t",
+						forecastMode(s.st.GetSetting(setForecastAuto, forecastModeOff)),
+						forecastFallbackMode(s.st.GetSetting(setForecastFallback, "off")),
+						strings.Join(cfg.Order, ","), now.In(chinaZone).Format("2006-01-02"), predSessionStamp(now))
+					readCtx := withSinaRangeProgress(ctx, &s.quotes.sinaProgress, scope, now)
+					response, called, err := fetchForecastShadow(readCtx, s, source, sample)
 					if called {
 						run.Reads++
 					}

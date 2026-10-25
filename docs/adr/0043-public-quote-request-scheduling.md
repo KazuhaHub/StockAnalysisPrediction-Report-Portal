@@ -63,6 +63,20 @@ Dry evaluation still runs only on an operator action. A deferred dry pass must b
 Evaluate now. On mode continues through the normal ticker. A waiting heartbeat explicitly states
 that work is deferred rather than silently reporting a completed evaluation.
 
+Sina shadow comparison needs two HTTP requests, snapshot then history. If history admission is
+deferred or its per-pass HTTP budget is exhausted, retain only the independently parsed snapshot
+and request history on the next selected comparison. This separate continuation holds at most
+64 entries for six hours, scoped by evaluator mode, fallback mode, source order, Shanghai civil
+date and completed-session boundary. Repeated deferrals preserve the original timestamp and
+expiry. Completion or a non-admission error discards the entry; restart also discards it. Display
+queries and deliberate probes never consume this continuation, and it grants no ledger authority.
+
+The full untrimmed history must still agree with its snapshot before comparing the requested
+window. If a resumed snapshot and newly fetched history describe different observations, discard
+the partial evidence and record `incomplete`, without counting a vendor delivery failure. Fresh
+two-request incoherence retains its existing error behavior. Each actual HTTP request remains
+charged to its dispatching pass, including the successful first component of a deferred read.
+
 ### Expose protection and progress
 
 The quotes panel shows configured limits, actual requests since process start and in the last

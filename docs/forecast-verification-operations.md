@@ -723,6 +723,16 @@ A fifth attempt is blocked before transport and recorded as `shadow_budget`, not
 A genuine fourth-request failure is still a failure. Waiting for a concurrency slot does not bill a
 source call. Caller deadline/cancellation and typed refusals are neutral, not source faults.
 
+When shared scheduling defers Sina's history request after a successful snapshot, the next selected
+comparison resumes history instead of requesting that snapshot again. The same applies when the
+per-pass HTTP cap blocks the second component. This bounded in-memory continuation expires after
+six hours without renewal and is invalidated by evaluator mode, fallback mode, source order,
+Shanghai civil date or completed-session boundary changes. It holds at most 64 entries and is
+independent of display cache. Each real HTTP request is counted in the pass that dispatches it.
+Dry mode still requires another Evaluate now action; On mode uses its normal ticker. If prices or
+dates no longer agree between the retained snapshot and the new history, the comparison is
+`incomplete`; the entry is discarded and no vendor delivery failure or ledger write is recorded.
+
 Sina's newest untrimmed kline must agree with the snapshot date and close. History is never silently
 replaced by a display-only degradation; an unproven window beyond the full 800-row tail is refused as
 `window_not_covered`. The shared comparator checks integer-fen OHLC, the date union and both anchors.
