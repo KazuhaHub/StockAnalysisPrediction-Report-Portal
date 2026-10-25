@@ -102,7 +102,7 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 	if source < 0 || target < 1 || stateRevision < 1 || (managed != 0 && managed != 1) || installation != lease.installationID || epoch != lease.controllerEpoch || completed.Valid {
 		return zero, errAppPlatformLeaseConflict
 	}
-	if phase == "review_required" || phase == "recovery_required" || phase == "quarantined" || desired == "removed" {
+	if phase == "review_required" || phase == "recovery_required" || phase == "quarantined" || (desired == "removed" && action != string(appplatform.ActionUninstall)) {
 		return zero, errAppPlatformLeaseConflict
 	}
 	if (action == string(appplatform.ActionInstall)) != (source == 0) || source == math.MaxInt64 || target != source+1 || (generation != source && generation != target) || controlFence < lease.fence {
@@ -125,12 +125,8 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 	}
 	// Sample the database clock after obtaining locks. Independent worker clocks
 	// cannot extend or shorten another worker's lease.
-	clockSQL := `SELECT CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)`
-	if s.driver == "postgres" {
-		clockSQL = `SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint`
-	}
-	var now int64
-	if err := e.queryRow(clockSQL).Scan(&now); err != nil {
+	now, err := platformDatabaseNow(e)
+	if err != nil {
 		return zero, err
 	}
 	if now < 0 || now > math.MaxInt64-appPlatformLeaseMS || lease.rowRevision == math.MaxInt64 {
