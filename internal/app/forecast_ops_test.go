@@ -18,8 +18,9 @@ import (
 )
 
 // satisfyForecastReadiness makes every §1.4 item hold, so a test that is about something else can
-// switch the evaluator on. It seeds a dry pass heartbeat, the ledger start, a gate for every code in
-// use, and the alert verification stamp P41 will own.
+// switch the evaluator on. It seeds a dry pass heartbeat CARRYING A SAMPLE — readiness requires one,
+// because "no error" is also what a vendor outage looks like (ADR 0037) — the ledger start, a gate for
+// every code in use, and the alert verification stamp P41 will own.
 func satisfyForecastReadiness(t *testing.T, s *Server) {
 	t.Helper()
 	if _, _, code, err := s.st.SaveForecastPopulationFrom(
@@ -33,9 +34,11 @@ func satisfyForecastReadiness(t *testing.T, s *Server) {
 		Mode:       forecastModeDry,
 		LastTickAt: time.Now().UTC().Format(time.RFC3339),
 		Pass: passStats{
-			Kind: "tick", StartedAt: time.Now().UTC().Format(time.RFC3339),
-			FinishedAt: time.Now().UTC().Format(time.RFC3339),
+			Kind: "manual", StartedAt: time.Now().UTC().Format(time.RFC3339),
+			FinishedAt: time.Now().UTC().Format(time.RFC3339), Sets: 1, Bodies: 1,
 		},
+		DrySample: []drySample{{SetID: 1, Kind: "settle", Market: "sh", Code: "600160",
+			Source: quoteSourceTencent}},
 	}); err != nil {
 		t.Fatal(err)
 	}

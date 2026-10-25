@@ -62,6 +62,7 @@ const base: ForecastSettings = {
       finished_at: now,
       sets: 1,
       fetches: {},
+      bodies: 1,
       resolved: 0,
       halted: 0,
       refused: {},

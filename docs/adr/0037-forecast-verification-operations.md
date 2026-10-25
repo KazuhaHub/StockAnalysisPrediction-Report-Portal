@@ -99,6 +99,17 @@ whatever the last manual pass wrote — so `/healthz/forecast` answers 200 in dr
 `stalled` only in mode 1. `lagging` is still evaluated in dry, because a due mark nobody is settling
 is exactly what a dry evaluator left running unnoticed looks like.
 
+**A dry pass must leave a sample, or it proves nothing.** (Amended 2026-10-25.) The readiness item
+requires the last dry pass to have planned at least one write, not merely to have raised no error. A
+vendor outage is a SOURCE-class fault: it charges no attempt and finalises nothing — correct, and the
+reason it is also invisible to an error count. On 2026-10-24 a deployment sat in dry with every
+vendor request refused, finished clean, planned nothing, and showed six green items; an operator
+would have switched the evaluator on over a vendor answering 501. A pass that produced no sample has
+not been checked, whatever its error count. When the sample is empty the item says which fact it is:
+`dry_pass_no_source` when not one vendor body came back (the vendor, or the egress to it, is not
+answering), and `dry_pass_no_plan` when bodies did come back and nothing was plannable (no due mark,
+or nothing selected can settle yet). The heartbeat's `pass.bodies` is what separates them.
+
 **The loop is observable and the watchdog is independent.** Every pass writes a heartbeat: counters,
 fetches by source, market and code, the newest bar per benchmark, the dry sample, and the codes
 awaiting a gate. A separate goroutine with its own recovery reports `stalled` (mode 1 only, heartbeat
