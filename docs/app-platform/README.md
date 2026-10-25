@@ -33,6 +33,7 @@ reader, authentication or analysis queue down with it.
 | [07 Developer and operator guide](07-handbook.md) | Concrete authoring, deployment, support and release workflows |
 | [08 Source inventory](08-source-inventory.md) | Verified legacy code locations, reuse boundaries and compatibility traps |
 | [09 Execution evidence](09-execution-log.md) | Actual implementation progress, verification and remaining work |
+| [11 Compatibility contract](11-compatibility-contract.md) | Protocol ranges, runtime matching and refusal semantics |
 | [13 Initial physical storage](13-control-storage-spec.md) | Concrete control-plane/runner layout and incremental D2 decision |
 
 Read the architecture and lifecycle before implementing an endpoint. Then take
