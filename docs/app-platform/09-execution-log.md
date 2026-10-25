@@ -98,6 +98,11 @@ stable effect identities to current worker leases and preserves uncertain result
 across reclaim. It does not dispatch work or complete a stage; typed evidence and
 authenticated runner integration remain pending.
 
+The private [removal control stage repository](20-removal-control-stage-implementation.md)
+connects consumed disable/uninstall admission to `queued → validate → revoke`
+with an atomic stage audit. It cannot complete revocation or claim physical stop;
+final provider evidence and the complete installer remain unfinished.
+
 1. Add the v2 generated JSON Schema and expand shared Go/TypeScript refusal cases.
 2. Add the bounded compatibility evaluator and select/review publisher signature
    verification with common vectors; keep parsing separate from admission.
