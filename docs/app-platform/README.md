@@ -33,6 +33,7 @@ reader, authentication or analysis queue down with it.
 | [07 Developer and operator guide](07-handbook.md) | Concrete authoring, deployment, support and release workflows |
 | [08 Source inventory](08-source-inventory.md) | Verified legacy code locations, reuse boundaries and compatibility traps |
 | [09 Execution evidence](09-execution-log.md) | Actual implementation progress, verification and remaining work |
+| [10 Interactive prototype](10-prototype-review.md) | Local preview instructions, review sequence and verified limits |
 
 Read the architecture and lifecycle before implementing an endpoint. Then take
 the next work package whose dependencies and decision gates are satisfied. Do not

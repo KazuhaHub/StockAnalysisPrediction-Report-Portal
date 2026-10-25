@@ -28,7 +28,7 @@ __pycache__/
 /local-build/
 
 # Frontend dependencies — never commit
-web/node_modules/
+web/node_modules
 
 # Frontend build output: built by CI then go:embed'd. Keep the .gitkeep
 # placeholder so `go build` compiles the embed even before the SPA is built.
