@@ -215,7 +215,7 @@ func forecastCallResult(ctx context.Context, source string, err error) (forecast
 		code := refusal.Code
 		if _, known := predRefusalClass[code]; !known {
 			switch code {
-			case "window_not_covered", "shadow_budget", "incomplete", "breaker", "missing_fetcher":
+			case "window_not_covered", "shadow_budget", "incomplete", "breaker", "cooldown", "missing_fetcher":
 			default:
 				code = "other_refusal"
 			}
