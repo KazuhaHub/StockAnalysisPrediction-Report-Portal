@@ -10,7 +10,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | --- | --- | --- |
 | P00 | In progress | Source inventory and compatibility map complete; detailed runtime/trust decisions and physical storage approval remain |
 | P01 | Not started | Whole-flow shell/market/install prototypes and visible acceptance required |
-| P02 | In progress | Go descriptor parser, checked-in sample corpus and pure lifecycle transition model implemented; cross-language schemas, compatibility evaluator, signature policy and package inspector remain |
+| P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; generated schemas, compatibility evaluator, signature policy and package inspector remain |
 | P03..P14 | Not started | Follow dependencies and approval gates; no durable schema, runner or production operation is implied by P02 |
 
 ## First contract implementation
@@ -63,7 +63,19 @@ GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test ./internal/appplatform -ru
 Targeted tests/race/vet pass; statement coverage is 92.8% for these primitives.
 A short single-worker fuzz run passes. This is bounded development evidence,
 not exhaustive fuzzing or a claim that the 90 platform acceptance cases pass.
-The first fixtures cover only the proposed Go contract; SDK parity remains open.
+The initial sample fixtures covered the proposed Go contract only. The subsequent
+Go/TypeScript parity corpus covers 44 exact-byte inputs, including malformed UTF-8,
+BOM, escaped duplicate keys, integer lexical forms, null defaults, capability
+dependencies and invalid route layout types. Both repositories pin the corpus
+SHA-256 to `16128f031fd71d83429db6a4209f8cfb02e5209b7c4f76a202c5dda1a00d929e`
+and require LF checkout bytes. The SDK validator is an experimental separate
+subpath, without changes to the legacy bridge/provider or installed apps.
+
+The current Apps-source verification passes 62 SDK tests, nine Status UI tests,
+two demo tests, all-workspace typechecks and generated-template typecheck/test/build.
+Go shared-corpus and targeted race/vet checks pass. These are source checks; the
+separate PRs still need their own exact-source CI. Shared corpus agreement is
+bounded evidence and does not freeze or fully prove every possible input.
 
 No current installed app, legacy parser/bridge, database baseline, release or
 server `beta` configuration is changed by this implementation. The planning PR
@@ -72,7 +84,7 @@ on main. Implementation still requires its own review and exact-source CI.
 
 ## Next steps
 
-1. Add the v2 JSON Schema/TypeScript validator and shared accept/refuse corpus.
+1. Add the v2 generated JSON Schema and expand shared Go/TypeScript refusal cases.
 2. Add the bounded compatibility evaluator and select/review publisher signature
    verification with common vectors; keep parsing separate from admission.
 3. Build the P01 whole-flow prototype against fake typed installation states.

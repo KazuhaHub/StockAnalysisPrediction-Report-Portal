@@ -6,3 +6,4 @@ scripts/font-coverage-corpus.txt text eol=lf
 scripts/*.sh                     text eol=lf
 Dockerfile*                      text eol=lf
 docker-entrypoint.sh             text eol=lf
+internal/appplatform/testdata/descriptor-corpus.json text eol=lf
