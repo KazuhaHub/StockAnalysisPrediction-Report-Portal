@@ -37,10 +37,25 @@ describe('evaluatorStatus', () => {
     expect(evaluatorStatus(settings({ mode: 'dry' }), NOW)).toBe('dry')
   })
 
-  it('is stale without a heartbeat or once it is older than ten minutes', () => {
+  it('is stale without a heartbeat or once it is older than ten minutes — in mode 1 only', () => {
     expect(evaluatorStatus(settings({ heartbeat: null }), NOW)).toBe('stale')
     expect(evaluatorStatus(settings({}, {}, 10), NOW)).toBe('healthy')
     expect(evaluatorStatus(settings({}, {}, 11), NOW)).toBe('stale')
+  })
+
+  // Dry mode's ticker does no vendor work, so the only heartbeat it will ever have is the one a
+  // manual pass wrote. Reporting that as stalled an hour later would put a red light on the mode
+  // working as designed, and would do it on every deployment that had not pressed "Evaluate now"
+  // since the mode was set.
+  it('does not call dry mode stale for a heartbeat only a manual pass refreshes', () => {
+    expect(evaluatorStatus(settings({ mode: 'dry' }, {}, 600), NOW)).toBe('dry')
+    expect(evaluatorStatus(settings({ mode: 'dry', heartbeat: null }), NOW)).toBe('dry')
+  })
+
+  it('still reports a failed or panicking dry pass, which is what the operator is there to read', () => {
+    expect(evaluatorStatus(settings({ mode: 'dry' }, { errors: 1 }), NOW)).toBe('error')
+    expect(evaluatorStatus(settings({ mode: 'dry' }, { panics: 1 }), NOW)).toBe('error')
+    expect(evaluatorStatus(settings({ mode: 'dry' }, { oldest_due_unsettled_minutes: 400 }), NOW)).toBe('lagging')
   })
 
   it('is lagging when the oldest due checkpoint has waited over six hours, a gate is awaited or the valve tripped', () => {

@@ -167,9 +167,20 @@ func (it *readinessItem) fail(reason, detail string) {
 
 // step is one loop iteration. When the mode is off it makes exactly ONE settings read and nothing
 // else; otherwise it runs one pass and writes the heartbeat, whatever happens inside.
+//
+// A dry mode TICK runs no pass at all (ADR 0037, amended 2026-10-24). Dry exists so an operator can
+// look at what a pass would write; it is an operator action, not a background job, and a ticker that
+// re-fetched the same due sets every minute was doing vendor work whose result was then discarded by
+// the single write door. On a deployment holding a few hundred checkpoints that was thousands of
+// vendor requests a day, which is what got the settlement endpoints rate-limited and then the
+// display ones blocked by the same egress. The manual route (runForecastNow) still runs a pass, and
+// that is the only way a dry pass happens now; nothing else about the mode changed.
 func (e *forecastEvaluator) step(s *Server, kind string) {
 	mode := forecastMode(s.st.GetSetting(setForecastAuto, "0"))
 	if mode == forecastModeOff {
+		return
+	}
+	if mode == forecastModeDry && kind == "tick" {
 		return
 	}
 	if !e.tryStart() {
@@ -606,10 +617,12 @@ func readinessFailure(items []readinessItem) []readinessItem {
 //
 // While the mode is off the route answers 200: a switched-off evaluator is healthy by definition,
 // and a probe that failed on every install that never enabled it would be ignored on the one that
-// did.
+// did. DRY answers 200 for the same reason: its ticker deliberately does no work (step), so a
+// heartbeat that only a manual pass refreshes is not evidence of a dead loop, and a probe that went
+// red a few minutes after every dry pass would be reporting the design.
 func (s *Server) handleHealthzForecast(w http.ResponseWriter, r *http.Request) {
 	ok := true
-	if forecastMode(s.st.GetSetting(setForecastAuto, "0")) != forecastModeOff {
+	if mode := forecastMode(s.st.GetSetting(setForecastAuto, "0")); mode == forecastModeOn {
 		hb, have := s.st.ForecastHeartbeat()
 		if !have {
 			ok = false
@@ -666,13 +679,23 @@ func (s *Server) forecastWatchdogOnce(now time.Time) {
 
 	hb, have := s.st.ForecastHeartbeat()
 	if !have {
-		s.emitForecastAlert("stalled", "no heartbeat has been written yet", now, forecastStallAlertEvery)
+		// A dry evaluator has no background loop to hear from, so only mode 1 can be missing its
+		// heartbeat. Reporting it in dry would page on every deployment that had never run a manual
+		// pass, which is the ordinary state of the mode.
+		if mode == forecastModeOn {
+			s.emitForecastAlert("stalled", "no heartbeat has been written yet", now, forecastStallAlertEvery)
+		}
 		return
 	}
-	if at, err := time.Parse(time.RFC3339, hb.LastTickAt); err != nil || now.Sub(at) > forecastStalledAfter {
-		s.emitForecastAlert("stalled",
-			"the heartbeat is older than 10 minutes", now, forecastStallAlertEvery)
+	if mode == forecastModeOn {
+		if at, err := time.Parse(time.RFC3339, hb.LastTickAt); err != nil || now.Sub(at) > forecastStalledAfter {
+			s.emitForecastAlert("stalled",
+				"the heartbeat is older than 10 minutes", now, forecastStallAlertEvery)
+		}
 	}
+	// Lagging is about the LEDGER, not about the loop, so dry mode is held to it too: a due mark
+	// nobody is settling is exactly what a dry evaluator left running unnoticed looks like, and the
+	// heartbeat carries its age from whichever pass last ran.
 	if hb.Pass.OldestDueUnsettledMinutes*int(time.Minute) > int(forecastLaggingAfter) {
 		s.emitForecastAlert("lagging",
 			"a due mark has been unsettled for over 6 hours", now, forecastLaggingAlertEvery)

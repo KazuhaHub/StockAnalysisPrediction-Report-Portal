@@ -800,7 +800,7 @@ type quoteFlight struct {
 type quoteCache struct {
 	once sync.Once
 
-	mu           sync.Mutex // guards entries, lru, bytes and health
+	mu           sync.Mutex // guards entries, lru, bytes, health and cooling
 	entries      map[string]*list.Element
 	lru          list.List
 	bytes        int
@@ -809,6 +809,12 @@ type quoteCache struct {
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight
+
+	// cooling is the cross-pass breaker: one entry per source that has exhausted an evaluator pass's
+	// three failures, and when it may be asked again. It is separate from health, because a source
+	// can be cooling without being wrong (and vice versa) and because the panel's counters must keep
+	// reading the vendor's own record rather than the scheduler's decision about it.
+	cooling map[string]*ledgerCooling
 
 	sem chan struct{} // the upstream concurrency ceiling
 
@@ -828,6 +834,7 @@ func (c *quoteCache) init() {
 		c.entries = make(map[string]*list.Element)
 		c.flights = make(map[string]*quoteFlight)
 		c.health = make(map[string]*QuoteSourceHealth)
+		c.cooling = make(map[string]*ledgerCooling)
 		c.sem = make(chan struct{}, quoteUpstreamConcurrency)
 		if c.sources == nil {
 			c.sources = defaultQuoteSources()

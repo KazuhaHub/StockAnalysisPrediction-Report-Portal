@@ -6,17 +6,23 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 type ledgerRefusal struct{ Code string }
 
 func (r *ledgerRefusal) Error() string { return "ledger: " + r.Code }
 
-// One instance belongs to one evaluator pass. Lifetime, not wall-clock time, resets the breaker.
+// One instance belongs to one evaluator pass, and the three-failure ceiling below is per pass. That
+// ceiling alone is not enough, and the 2026-10-24 incident is why: a pass is rebuilt every minute, so
+// a source that has failed six times in a row is asked to fail a seventh, and an outage the vendor
+// would have shrugged off becomes load that gets the whole egress blocked. The CROSS-pass state is
+// the quoteCache's (`cooling`): one pass is not a lifetime, and a cooldown has to outlive it.
 type ledgerTick struct {
 	mu           sync.Mutex
 	failures     map[string]int
 	lastError    map[string]error
+	recovered    map[string]bool
 	gate         chan struct{}
 	observations []forecastCallObservation
 }
@@ -73,6 +79,107 @@ func (tick *ledgerTick) fail(source string, err error) {
 	tick.lastError[source] = err
 }
 
+// recoverInPass records that source answered this pass, whatever it did before that. The cross-pass
+// breaker uses it to tell "failed and stayed down" from "failed once and recovered", which is the
+// difference between benching a source for longer and letting it back.
+func (tick *ledgerTick) recoverInPass(source string) {
+	tick.mu.Lock()
+	defer tick.mu.Unlock()
+	if tick.recovered == nil {
+		tick.recovered = map[string]bool{}
+	}
+	tick.recovered[source] = true
+}
+
+// ledgerCooldowns is the escalating wait after a pass in which a source failed and never answered:
+// one minute, then five, fifteen, thirty. It is deliberately NOT exponential from the first failure —
+// one bad minute is an ordinary vendor blip, and a source that comes back within it should not be
+// benched for an hour — and it has a ceiling rather than growing without bound, because a probe every
+// half hour is what lets the evaluator notice the vendor returning on its own.
+var ledgerCooldowns = []time.Duration{
+	time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	30 * time.Minute,
+}
+
+// ledgerCooling is one source's cross-pass breaker.
+type ledgerCooling struct {
+	// streak counts consecutive PASSES that ended with this source failing and never answering, so
+	// each one benches it for longer. Any success, in any pass, ends it.
+	streak int
+	until  time.Time
+	last   error
+}
+
+// ledgerCooled reports whether source is cooling down and the failure to hand back while it is. The
+// error is the source's own last one rather than a "breaker open" placeholder: the planner records
+// what it is given, and "the vendor returned 501" is what an operator can act on while "blocked" is
+// not.
+func (c *quoteCache) ledgerCooled(source string) (error, bool) {
+	c.init()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cooling := c.cooling[source]
+	if cooling == nil || !c.now().Before(cooling.until) {
+		return nil, false
+	}
+	return cooling.last, true
+}
+
+// closeLedgerPass settles each source's cross-pass state at the end of a pass.
+//
+// The rule is "a pass that ended with this source failing and never answering", not the in-pass
+// ceiling: a group's benchmark is fetched ONCE per pass, so a down vendor trips the ceiling only when
+// there happen to be three sets in the same group, while the exchange's whole settlement path is
+// already failing. Requiring a success somewhere in the pass is what separates that from one odd
+// symbol: a source that answered anything at all is working, and one mark's parse failure must not
+// pause settlement for every other set.
+func (c *quoteCache) closeLedgerPass(tick *ledgerTick) {
+	if tick == nil {
+		return
+	}
+	tick.mu.Lock()
+	failed := map[string]error{}
+	for source, err := range tick.lastError {
+		if !tick.recovered[source] {
+			failed[source] = err
+		}
+	}
+	tick.mu.Unlock()
+	if len(failed) == 0 {
+		return
+	}
+	c.init()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cooling == nil {
+		c.cooling = map[string]*ledgerCooling{}
+	}
+	now := c.now()
+	for source, err := range failed {
+		cooling := c.cooling[source]
+		if cooling == nil {
+			cooling = &ledgerCooling{}
+			c.cooling[source] = cooling
+		}
+		if cooling.streak < len(ledgerCooldowns) {
+			cooling.streak++
+		}
+		cooling.until = now.Add(ledgerCooldowns[cooling.streak-1])
+		cooling.last = err
+	}
+}
+
+// ledgerSucceeded ends a source's cooldown and streak. Called on every success, so a source that
+// came back is not benched for the outage it just recovered from.
+func (c *quoteCache) ledgerSucceeded(source string) {
+	c.init()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.cooling, source)
+}
+
 // walkLedger never uses display cache or single-flight. Tier 1 admits only sources that provide
 // both forms of evidence; a merely declared fallback cannot become an unapproved Tier 2 writer.
 func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, code, from, to string, tick *ledgerTick) (*QuoteResp, error) {
@@ -111,8 +218,20 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 		if !src.cashDividends || !src.reportsKind {
 			continue
 		}
+		// Two breakers, checked together and for the same reason. The in-pass one bounds one pass;
+		// the cross-pass cooldown is what an outage actually needs, because a pass that is rebuilt
+		// every minute would otherwise re-ask a source that has already failed six times. Neither
+		// records a CALL: the vendor was not asked, and a refusal that counted traffic would report
+		// load that never happened.
 		if failure, blocked := tick.blocked(src.name); blocked {
 			tick.observe(forecastCallObservation{Source: src.name, Refusal: "breaker"})
+			if firstErr == nil {
+				firstErr = failure
+			}
+			continue
+		}
+		if failure, cooling := c.ledgerCooled(src.name); cooling {
+			tick.observe(forecastCallObservation{Source: src.name, Refusal: "cooldown"})
 			if firstErr == nil {
 				firstErr = failure
 			}
@@ -146,6 +265,8 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 		}
 		if err == nil {
 			c.noteLedgerResult(src.name, nil)
+			c.ledgerSucceeded(src.name)
+			tick.recoverInPass(src.name)
 			return resp, nil
 		}
 		if firstErr == nil {

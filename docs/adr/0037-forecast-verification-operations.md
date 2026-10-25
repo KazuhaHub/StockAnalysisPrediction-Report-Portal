@@ -88,6 +88,42 @@ writes, but only for a benchmark whose dry run an admin has checked by hand; a b
 check is planned and listed in the heartbeat, never written. An older binary reads `dry` as off,
 which is also the rollback story.
 
+**A dry pass is an operator action; only mode 1 has a working ticker.** (Amended 2026-10-24.) The
+background loop skips dry entirely; a dry pass happens only through "Evaluate now". The reason is
+measured, not stylistic: dry writes no backoff and no `next_attempt_at`, so every tick re-selects
+the same due sets and re-fetches the same bodies, and a deployment holding a few hundred checkpoints
+turned that into thousands of vendor requests a day. That pressure is what got the settlement
+endpoint answering 501 and, from the same egress, a display vendor answering 403 to the reader's own
+price requests. Dry mode has no liveness signal of its own for the same reason — the heartbeat is
+whatever the last manual pass wrote — so `/healthz/forecast` answers 200 in dry and the watchdog pages
+`stalled` only in mode 1. `lagging` is still evaluated in dry, because a due mark nobody is settling
+is exactly what a dry evaluator left running unnoticed looks like.
+
+**The loop is observable and the watchdog is independent.** Every pass writes a heartbeat: counters,
+fetches by source, market and code, the newest bar per benchmark, the dry sample, and the codes
+awaiting a gate. A separate goroutine with its own recovery reports `stalled` (mode 1 only, heartbeat
+older than ten minutes, at most hourly) and `lagging` (a due mark unsettled over six hours, the stale
+valve tripped, or a benchmark calendar behind the exchange after the close, at most daily). A
+status-only public route, `/healthz/forecast`, answers one boolean and never the heartbeat.
+`no_source` is not emitted before the ledger chain exists, because there is nothing to check.
+
+**A failing source is benched across passes, not just within one.** (Amended 2026-10-24.) The
+three-failure ceiling is per pass, and a pass is rebuilt every minute, so on its own it asks a source
+that has already failed six times in a row to fail a seventh. A source that fails a pass and does not
+recover during it now goes on cooldown outside the pass: one minute, then five, fifteen, thirty, each
+trip earned by a further pass that failed without a single success. A success ends the streak and the
+cooldown at once, so a vendor that came back is not punished for the outage. The cooldown is process
+state, like the health counters and for the same reason — a restart is a fresh observation, not a
+resumed grudge. It is deliberately not exponential from the first failure: one bad minute is an
+ordinary blip and should not bench a source for an hour.
+
+**A refusal carries the evidence needed to act on it.** `vendorGet` no longer discards a failed
+response. The error names the method, path and HTTP version, and carries `Server` and `Retry-After`
+plus a bounded, markup-stripped summary of the first two kilobytes of the body. That is what
+separates the three cases a bare status cannot: a WAF interstitial, a rate limit, and an endpoint
+that moved. It is evidence for a person reading a log, not a parser input; the body is not decoded
+from GBK and the summary is capped at 120 runes.
+
 **Switching on is gated by what has been exercised, not by a calendar.** The readiness list requires
 the build to contain the full evaluator, the ledger start to be set, a dry pass to have finished
 without errors, a hand check for every benchmark the evaluator can select, and a test alert that

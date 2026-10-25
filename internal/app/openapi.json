@@ -2529,10 +2529,10 @@
         "x-i18n": {
           "en-US": {
             "summary": "Forecast evaluator probe, public — status only",
-            "description": "200 while the evaluator is off, or while it is on and its heartbeat is under ten minutes old; 503 when it is on and the heartbeat is missing or older. The body is exactly one boolean and never carries the heartbeat, which holds counts an anonymous caller must not see.",
+            "description": "200 while the evaluator is off or in dry mode, or while it is on and its heartbeat is under ten minutes old; 503 when it is on and the heartbeat is missing or older. Dry mode has no background loop — its pass runs only on demand — so it has no heartbeat to be stale. The body is exactly one boolean and never carries the heartbeat, which holds counts an anonymous caller must not see.",
             "responses": {
               "200": {
-                "description": "evaluator off, or on and current"
+                "description": "evaluator off, dry, or on and current"
               },
               "503": {
                 "description": "evaluator on, heartbeat stale or missing"
@@ -2541,10 +2541,10 @@
           },
           "zh-TW": {
             "summary": "預測評估器探針（公開）——只回傳狀態",
-            "description": "評估器關閉時回傳 200；開啟且心跳在十分鐘內也回傳 200；開啟但心跳缺失或過舊時回傳 503。回應只有一個布林值，絕不帶心跳內容——那裡有匿名呼叫者不該看到的計數。",
+            "description": "評估器關閉或處於試執行時回傳 200；開啟且心跳在十分鐘內也回傳 200；開啟但心跳缺失或過舊時回傳 503。試執行沒有背景迴圈（只在使用者點擊時跑一次），因此沒有會過期的心跳。回應只有一個布林值，絕不帶心跳內容——那裡有匿名呼叫者不該看到的計數。",
             "responses": {
               "200": {
-                "description": "評估器關閉，或已開啟且心跳正常"
+                "description": "評估器關閉、試執行，或已開啟且心跳正常"
               },
               "503": {
                 "description": "評估器已開啟，但心跳過舊或缺失"
@@ -2560,7 +2560,7 @@
         ],
         "responses": {
           "200": {
-            "description": "评估器关闭，或已开启且心跳正常",
+            "description": "评估器关闭、试运行，或已开启且心跳正常",
             "content": {
               "application/json": {
                 "example": {
@@ -2580,7 +2580,7 @@
             }
           }
         },
-        "description": "评估器关闭时返回 200；开启且心跳在十分钟内也返回 200；开启但心跳缺失或过旧时返回 503。响应只有一个布尔值，绝不带心跳内容——那里有匿名调用者不该看到的计数。"
+        "description": "评估器关闭或处于试运行状态时返回 200；开启且心跳在十分钟内也返回 200；开启但心跳缺失或过旧时返回 503。试运行没有后台循环（只在点击时跑一次），因此没有会过期的心跳。响应只有一个布尔值，绝不带心跳内容——那里有匿名调用者不该看到的计数。"
       }
     },
     "/api/v1/notifications": {

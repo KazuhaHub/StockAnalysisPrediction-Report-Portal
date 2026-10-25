@@ -123,8 +123,15 @@ func (e *forecastEvaluator) clock() time.Time {
 // deferred rather than scored against whatever the setting happens to be — the current setting is
 // never read here.
 func (e *forecastEvaluator) tick(s *Server) error {
-	e.ledgerPass = &ledgerTick{}
-	defer func() { e.ledgerPass = nil }()
+	pass := &ledgerTick{}
+	e.ledgerPass = pass
+	defer func() {
+		// The cross-pass breaker is settled HERE, at the pass boundary, because that is the only
+		// point at which "this source exhausted its three attempts" is a fact about the pass rather
+		// than about one walk within it.
+		s.quotes.closeLedgerPass(pass)
+		e.ledgerPass = nil
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

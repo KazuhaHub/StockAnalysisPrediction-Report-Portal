@@ -492,9 +492,13 @@ func TestEvaluateNowRespectsModeAndSingleFlight(t *testing.T) {
 
 // TestPanicDoesNotKillTheLoop: a panicking pass is counted in the heartbeat and the next step still
 // runs. The loop itself is a ticker, so the property is step's.
+//
+// Driven in mode 1, because a dry TICK does no work at all (ADR 0037, amended 2026-10-24): the
+// recovery this pins belongs to the ticker that actually runs a pass, and a dry mode assertion here
+// would only prove the skip.
 func TestPanicDoesNotKillTheLoop(t *testing.T) {
 	s := newV1Server(t)
-	if err := s.st.SetSetting(setForecastAuto, forecastModeDry); err != nil {
+	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0

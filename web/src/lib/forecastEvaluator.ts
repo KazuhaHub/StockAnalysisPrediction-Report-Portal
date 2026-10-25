@@ -26,8 +26,12 @@ export function evaluatorStatus(s: ForecastSettings, nowMs: number): EvaluatorSt
   if (s.mode === '0') return 'off'
   if (s.readiness.some((item) => item.key === 'ledger_chain' && !item.ok)) return 'error'
   const hb = s.heartbeat
-  if (!hb) return 'stale'
-  if (nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
+  // Dry has no background loop: its ticker deliberately does no vendor work, so only a manual pass
+  // writes a heartbeat. "Stale" would therefore be the ordinary state of the mode minutes after the
+  // operator's own pass, which is a red light saying the design works. Dry is judged on what the
+  // last manual pass said, and on the ledger signals below, which do not expire.
+  if (!hb) return s.mode === 'dry' ? 'dry' : 'stale'
+  if (s.mode !== 'dry' && nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
   if (hb.pass.errors > 0 || hb.pass.panics > 0) return 'error'
   if (
     (hb.awaiting_gate?.length ?? 0) > 0 ||

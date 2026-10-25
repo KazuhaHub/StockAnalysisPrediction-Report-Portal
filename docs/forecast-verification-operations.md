@@ -44,6 +44,33 @@ calendar still ending before today after 18:00 CST on a weekday.
   Settlement follows the quotes panel's enabled source order and explicit ledger grants. Tencent
   remains the only Tier 1 writer; disabling it refuses settlement rather than using a display or
   shadow source. Restoring it permits normal retry without spending source-outage attempts.
+- A source that keeps failing is benched across passes, not just inside one: after a pass in which it
+  failed and never answered, it is not asked again for one minute, then five, fifteen, thirty for
+  each further failed pass. A single success clears the bench and the streak. The vendor's own last
+  error is what the planner records while a source is benched, so a refusal still names why.
+- Read the error, not only the status. A non-2xx now carries the method, path, HTTP version,
+  `Server`, `Retry-After` and a short summary of the body. `403` with an HTML interstitial and a CDN
+  `Server` is a WAF; `429` or a `Retry-After` is a rate limit; `501`/`404` with a body naming another
+  address is an endpoint that moved. The first asks for quieter traffic, the second for a wait, the
+  third for a code change — and the body is the only thing that tells the first from the third.
+
+### The vendor is throttling us
+
+Symptom: several sources fail at once, the reader's own price requests fail with the same status,
+and the evaluator's heartbeat shows the same host failing across passes. Check, from the deployment
+itself, one request per endpoint:
+
+```
+curl -4 --http1.1 -A 'Mozilla/5.0' -e 'https://gu.qq.com/' -o /dev/null -w '%{http_code}\n' \
+  'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh000852,day,2026-10-01,2026-10-24,800,bfq'
+```
+
+A `200` after a quiet period confirms request pressure rather than a moved endpoint. Then, in
+order: switch the evaluator to `0` (dry no longer polls, but a mode-1 ticker does), let the cooldown
+elapse rather than retrying by hand, and only then decide whether the deployment needs a different
+egress. Do not switch dry on expecting it to idle at a lower volume — a dry pass is now an operator
+action, so the right stop is `0`, and the right restart is a single manual dry pass when the vendor
+answers again.
 
 ### `awaiting_gate` names a benchmark
 
@@ -443,10 +470,14 @@ empty string. No shadow peer is advertised until it has an explicit enabled shad
 
 `ledgerHealth` is a separate array of source health records, with UTC RFC3339 timestamps and an
 empty string for an event that has not happened. It never overwrites the display health fields
-on `sources`. Clearing the display cache clears neither health history. Ledger refusals and caller
-cancellation do not count as vendor failures; three delivery/parser failures stop calls to that
-source for the current evaluator pass, preserving the actual failure rather than misreporting an
-absent configuration. A new pass resets its breaker, not the recorded diagnostic history.
+on `sources`. Clearing the display cache clears neither health history nor a cooldown. Ledger
+refusals and caller cancellation do not count as vendor failures; three delivery/parser failures
+stop calls to that source for the current evaluator pass, preserving the actual failure rather than
+misreporting an absent configuration. A pass in which the source failed and never answered also
+benches it OUTSIDE the pass — one minute, then five, fifteen, thirty, cleared by any success — and
+the observations recorded while benched carry the refusal `cooldown` rather than `breaker`. The
+cooldown is process state, so a restart forgets it; the health history is not, and a restart does
+not erase it either.
 
 The quote-source management page shows these declarations and the separate settlement history.
 Unavailable telemetry is distinct from an empty process-local history; neither claims readiness.

@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,11 +86,104 @@ func vendorGet(ctx context.Context, rawURL, referer string, limit int64) ([]byte
 		// caller reports "this stock has no name" instead of "we cannot reach any vendor". Nothing
 		// is logged and nothing is retried: the two-source failover is decorative until the status
 		// is checked here.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, limit)) // drained so the connection returns to the pool
-		return nil, fmt.Errorf("vendor %s returned %s", req.URL.Host, resp.Status)
+		//
+		// The response is read for EVIDENCE before it is drained, because a status alone cannot
+		// tell a WAF from a rate limit from an endpoint that moved: on 2026-10-24 one deployment saw
+		// 501 from the settlement endpoint and 403 from the display one, and the only way to tell
+		// "we are being throttled" from "this URL is gone" was a header and the start of the body —
+		// both of which this function used to discard.
+		return nil, vendorStatusFrom(req, resp, limit)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
+
+// vendorBodySummaryBytes bounds what is read off a FAILED response to describe it. The caller's own
+// limit bounds the success body and is usually far larger; this one is a log line's worth.
+const vendorBodySummaryBytes = 2048
+
+// vendorBodySummaryRunes bounds the summary itself. Runes, not bytes: the body is usually Chinese and
+// a byte cap would cut a character in half.
+const vendorBodySummaryRunes = 120
+
+// vendorStatusError is a non-2xx vendor answer, carrying what an operator needs to tell apart the
+// cases that all look identical as a bare status code: a WAF challenge (`Server`, a short HTML page),
+// a rate limit (429, or `Retry-After`), and an endpoint that moved (404/410/501).
+type vendorStatusError struct {
+	Host        string
+	Method      string
+	RequestPath string
+	StatusCode  int
+	Status      string
+	Proto       string
+	Server      string
+	RetryAfter  string
+	Body        string
+}
+
+func (e *vendorStatusError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "vendor %s returned %s (%s %s, %s", e.Host, e.Status, e.Method, e.RequestPath, e.Proto)
+	if e.Server != "" {
+		fmt.Fprintf(&b, ", Server: %s", e.Server)
+	}
+	if e.RetryAfter != "" {
+		fmt.Fprintf(&b, ", Retry-After: %s", e.RetryAfter)
+	}
+	b.WriteString(")")
+	if e.Body != "" {
+		b.WriteString(": ")
+		b.WriteString(e.Body)
+	}
+	return b.String()
+}
+
+// vendorStatusFrom reads a bounded, cleaned summary off a failed response and returns the typed
+// error. The rest of the body is drained so the connection returns to the pool either way — the
+// drain is what has to happen, and the summary is taken from the front of it rather than in place
+// of it.
+func vendorStatusFrom(req *http.Request, resp *http.Response, limit int64) error {
+	bound := int64(vendorBodySummaryBytes)
+	if limit > 0 && limit < bound {
+		bound = limit
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, bound))
+	// Only what is LEFT of the caller's budget: the summary bytes are part of that budget, not an
+	// addition to it, so a failed response never costs more than a successful one.
+	if limit > bound {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, limit-bound))
+	}
+	return &vendorStatusError{
+		Host:        req.URL.Host,
+		Method:      req.Method,
+		RequestPath: req.URL.Path,
+		StatusCode:  resp.StatusCode,
+		Status:      resp.Status,
+		Proto:       resp.Proto,
+		Server:      resp.Header.Get("Server"),
+		RetryAfter:  resp.Header.Get("Retry-After"),
+		Body:        vendorBodySummary(raw),
+	}
+}
+
+// vendorBodySummary turns a few hundred bytes of somebody else's error page into one short clause:
+// markup stripped, whitespace collapsed, cut to vendorBodySummaryRunes. It is NOT GBK-decoded — this
+// is evidence for a developer reading a log, and the ASCII around the Chinese (the code, "rate
+// limited", a redirect target) is what identifies the case.
+func vendorBodySummary(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	text := strings.Join(strings.Fields(vendorTagRE.ReplaceAllString(string(raw), " ")), " ")
+	if runes := []rune(text); len(runes) > vendorBodySummaryRunes {
+		text = string(runes[:vendorBodySummaryRunes]) + "…"
+	}
+	return text
+}
+
+// vendorTagRE matches an HTML tag. Deliberately crude: this runs on error bodies, a body that survives
+// with a little noise is still readable evidence, and a strict parser would add a dependency and a
+// failure mode to the one path that has already gone wrong.
+var vendorTagRE = regexp.MustCompile(`<[^>]*>`)
 
 // vendorGetGBK is vendorGet plus the GBK to UTF-8 decode these endpoints need: Sina's snapshot line
 // and Tencent's realtime line are both GBK, and Chinese company names come out as mojibake without it.

@@ -121,11 +121,22 @@ func TestWatchdogNoSourceDoesNotRequireAHeartbeat(t *testing.T) {
 	if _, have := s.st.ForecastHeartbeat(); have {
 		t.Fatal("fixture unexpectedly has a heartbeat")
 	}
+	// Dry does its vendor work only on a manual pass (step), so a missing heartbeat is the ordinary
+	// state of the mode and not a stall. `no_source` is about the configuration and still fires.
 	s.forecastWatchdogOnce(time.Now())
 	state := s.st.forecastAlertState()
-	for _, reason := range []string{"no_source", "stalled"} {
-		if _, have := state.Last[reason]; !have {
-			t.Fatalf("missing %s without a heartbeat: %+v", reason, state)
-		}
+	if _, have := state.Last["no_source"]; !have {
+		t.Fatalf("missing no_source without a heartbeat: %+v", state)
+	}
+	if _, have := state.Last["stalled"]; have {
+		t.Fatalf("dry mode with no manual pass paged as stalled: %+v", state)
+	}
+	// Mode 1 is the one with a loop to hear from, and it must still page when that loop is silent.
+	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
+		t.Fatal(err)
+	}
+	s.forecastWatchdogOnce(time.Now())
+	if _, have := s.st.forecastAlertState().Last["stalled"]; !have {
+		t.Fatal("mode 1 with no heartbeat did not page")
 	}
 }
