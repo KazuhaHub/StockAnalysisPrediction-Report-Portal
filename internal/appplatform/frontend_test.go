@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -42,9 +43,13 @@ func frontendTestArchive(t testing.TB, entries ...frontendTestEntry) []byte {
 	return b.Bytes()
 }
 
-func frontendManifest(t *testing.T, raw []byte) Manifest {
+func frontendManifest(t testing.TB, raw []byte) Manifest {
 	t.Helper()
-	parsed, err := ParseDescriptor(descriptorFixture(t, false))
+	rawDescriptor, err := os.ReadFile("testdata/descriptors/static.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseDescriptor(rawDescriptor)
 	if err != nil {
 		t.Fatal(err)
 	}

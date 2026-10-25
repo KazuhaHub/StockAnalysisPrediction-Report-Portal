@@ -138,13 +138,14 @@ func inspectFrontend(m Manifest, raw []byte, limits frontendLimits) (FrontendIns
 	}
 	result := FrontendInspection{SHA256: digest, Entry: m.Presentation.Entry, ArchiveBytes: int64(len(raw))}
 	foundEntry := false
+	scratch := make([]byte, 32<<10)
 	for _, file := range files {
 		stream, err := file.Open()
 		if err != nil {
 			return FrontendInspection{}, ErrInvalidFrontend
 		}
 		hash := sha256.New()
-		size, readErr := io.Copy(hash, io.LimitReader(stream, limits.fileBytes+1))
+		size, readErr := io.CopyBuffer(hash, io.LimitReader(stream, limits.fileBytes+1), scratch)
 		closeErr := stream.Close()
 		if readErr != nil || closeErr != nil || size > limits.fileBytes || uint64(size) != file.UncompressedSize64 || size > limits.totalBytes-result.UncompressedBytes {
 			return FrontendInspection{}, ErrInvalidFrontend

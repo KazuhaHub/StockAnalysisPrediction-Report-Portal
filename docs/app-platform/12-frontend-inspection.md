@@ -68,4 +68,13 @@ GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test ./internal/appplatform -ru
 GOWORK=off GOTOOLCHAIN=go1.26.10 go build ./...
 ```
 
+A single-iteration darwin/arm64 development benchmark with 1,024 small assets
+measured about 34.9 MB of cumulative allocations before scratch-buffer reuse and
+1.37 MB after it. These are local allocation observations, not peak RSS or a
+production throughput guarantee. The benchmark remains available for review:
+
+```sh
+GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test ./internal/appplatform -run '^$' -bench BenchmarkFrontendManySmallFiles -benchtime=1x -count=1
+```
+
 Remaining work includes the complete signed/offline envelope, OCI artifacts, publisher trust and revocation, generated schemas and packaging-tool parity, verified durable staging, compatibility/capability/data/resource admission, and real installer/runtime integration. The legacy ZIP parser and installed apps are unchanged. No server release/channel configuration changes are required to use this local tool.
