@@ -2,8 +2,9 @@
 
 Status: P03 in progress. This uses the already approved
 `app_platform_operation_effects` table and adds no storage products or public API.
-The runtime/trust candidate in [18](18-runtime-and-trust-proposal.md) remains
-pending approval. No container, signature verifier or control transport is added.
+The runtime/trust development approval is recorded in
+[18](18-runtime-and-trust-proposal.md#9-approval-record). No container, signature
+verifier or control transport is added by this storage work.
 
 ## Internal boundary
 
