@@ -13,3 +13,6 @@ scripts/generate_app_contract.py text eol=lf
 web/src/lib/descriptor-contract.generated.ts text eol=lf
 web/src/lib/bridge-v2.ts text eol=lf
 web/src/lib/bridge-v2.test.ts text eol=lf
+internal/appplatform/testdata/publisher-signatures.json text eol=lf
+internal/appplatform/contract/publisher-signature-v1.schema.json text eol=lf
+scripts/generate_publisher_signature_vectors.mjs text eol=lf
