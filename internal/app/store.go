@@ -121,7 +121,7 @@ func connectStore(driver, source string) (*Store, error) {
 	if driver == "" {
 		driver = "sqlite"
 	}
-	sqlDriver := "sqlite"
+	sqlDriver := portalSQLiteDriver
 	if driver == "postgres" {
 		sqlDriver = "pgx"
 	}
