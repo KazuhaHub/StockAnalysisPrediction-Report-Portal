@@ -116,6 +116,7 @@ func TestPostgresPlatformReleaseExpiryAfterAuditWait(t *testing.T) {
 	for _, mode := range []string{"stage", "admission"} {
 		t.Run(mode, func(t *testing.T) {
 			s, session := platformTrustTestServer(t, true)
+			priorAdmissionAudits := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='fixture.release_admission'`)
 			platformRegisterTestPublisher(t, s, session)
 			raw, sig, frontend := platformSignedReleaseFixture(t, "1.0.0-beta.1")
 			var staged platformStagedRelease
@@ -186,7 +187,7 @@ func TestPostgresPlatformReleaseExpiryAfterAuditWait(t *testing.T) {
 			if err := <-result; !errors.Is(err, errAppPlatformReleaseConflict) {
 				t.Fatalf("expired key accepted after wait: %v", err)
 			}
-			if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='fixture.release_admission'`) != 0 {
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='fixture.release_admission'`) != priorAdmissionAudits {
 				t.Fatal("expired admission left intent committed")
 			}
 			if mode == "stage" && (scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_frontend_artifacts`) != 0) {
