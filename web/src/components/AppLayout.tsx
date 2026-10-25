@@ -201,8 +201,8 @@ function AppShell() {
   const showFooterInfo = settings.footerShowInfo
   // The reader-facing version is the build THIS page is running, which the bundle always knows —
   // unlike before, when the footer waited on a server answer and a portal whose /api/version failed
-  // showed no version at all. Management keeps its own rail label regardless of this placement.
-  const showHeaderVersion = settings.versionDisplay === 'header' && !onManage
+  // showed no version at all. The configured placement applies to management routes as well.
+  const showHeaderVersion = settings.versionDisplay === 'header'
   const showFooterVersion = settings.versionDisplay === 'footer'
   const showFooter = showFooterInfo || showFooterVersion
   const workbenchItems = [
@@ -271,13 +271,13 @@ function AppShell() {
         )}
 
         {/* On mobile the search drops to its own full-width row (order:2) below the controls.
-            The home page has no header search, and this wrapper is not rendered there: an empty
+            Home and management pages have no header search, and this wrapper is not rendered there: an empty
             flex item still counts for line breaking, so once the control row came within one gap
             of full — a phone at 393px carrying a real version pill does exactly that — the empty
             wrapper wrapped onto a line of its own, and that phantom line's row-gap plus the
             stretch a single line gets from a taller min-height header pulled the visible controls
             ~6px above the header's middle. */}
-        {!onHome && !chatFocus && (
+        {!onHome && !onManage && !chatFocus && (
           <div
             className="rp-header-search"
             style={{

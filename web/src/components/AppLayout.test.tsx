@@ -94,7 +94,7 @@ function renderAt(path: string) {
           <Route path="review" element={<div>review-body</div>} />
           <Route path="apps" element={<div>apps-body</div>} />
           <Route path="apps/batch" element={<div>batch-body</div>} />
-          <Route path="manage" element={<div>manage-body</div>} />
+          <Route path="manage/*" element={<div>manage-body</div>} />
           <Route path="report/new" element={<div>write-report-body</div>} />
         </Route>
       </Routes>
@@ -326,7 +326,7 @@ describe('AppLayout header centring', () => {
     expect(container.querySelector('.ant-layout-footer .rp-version-label')).toBeNull()
   })
 
-  it('keeps the portal version hidden while the management rail remains responsible for its own label', async () => {
+  it('hides the version on management pages when configured as hidden', async () => {
     siteState.settings = { footerText: '', footerShowInfo: true, versionDisplay: 'hidden' }
     vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
     const { container } = renderAt('/manage')
@@ -463,4 +463,14 @@ describe('AppLayout forecast record navigation', () => {
     await new Promise((r) => setTimeout(r, 30))
     for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
   })
+})
+
+it.each([['/manage', true], ['/manage/overview', true], ['/manage', false], ['/manage/users', false]] as const)('hides report search and honors header version placement at %s (desktop=%s)', async (path, desktop) => {
+  siteState.settings = { footerText:'', footerShowInfo:true, versionDisplay:'header' }
+  vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({md:desktop} as ReturnType<typeof Grid.useBreakpoint>)
+  const { container } = renderAt(path)
+  expect(await screen.findByText('manage-body')).toBeTruthy()
+  expect(container.querySelector('#rp-app-header .rp-header-search')).toBeNull()
+  expect(screen.queryByLabelText('global-search')).toBeNull()
+  expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
 })
