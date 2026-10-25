@@ -82,7 +82,11 @@ type passStats struct {
 	Sets       int    `json:"sets"`
 	// Fetches counts vendor bodies by source|market|code, so an operator can see WHO answered the
 	// pass rather than only that it fetched.
-	Fetches        map[string]int `json:"fetches"`
+	Fetches map[string]int `json:"fetches"`
+	// Bodies is how many vendor bodies arrived — the count, not the census. readiness needs the one
+	// question "did anything come back at all", and answering it from the census would mean parsing
+	// keys, including the "unknown" bucket written when a request produced no answer.
+	Bodies         int            `json:"bodies"`
 	Resolved       int            `json:"resolved"`
 	Halted         int            `json:"halted"`
 	Refused        map[string]int `json:"refused"`
@@ -365,15 +369,19 @@ func checkpointOf(set forecastWorkSet, markID int64) string {
 	return strconv.FormatInt(markID, 10)
 }
 
-// noteFetch records one vendor body in the pass's fetch census.
+// noteFetch records one vendor request in the pass's fetch census. An EMPTY source means no body
+// arrived, which is exactly what readiness's dry_pass asks about, so that case counts as an attempt
+// and not as a body.
 func (e *forecastEvaluator) noteFetch(market, code, source string) {
 	if e.stats == nil {
 		return
 	}
 	if source == "" {
-		source = "unknown"
+		e.stats.Fetches["unknown|"+market+"|"+code]++
+		return
 	}
 	e.stats.Fetches[source+"|"+market+"|"+code]++
+	e.stats.Bodies++
 }
 
 // noteBench records the newest bar of a benchmark body, for the stale-calendar check.
@@ -521,11 +529,20 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	}
 	items = append(items, population)
 
-	// 3. The mode is dry, and the last dry pass finished without errors.
+	// 3. The mode is dry, and the last dry pass produced evidence: it finished without errors or
+	// panics AND planned at least one write.
+	//
+	// "No error" alone was not enough, and the 2026-10-24 incident is why. A vendor outage is a SOURCE
+	// fault: it charges no attempt and finalises nothing, which is correct, but it also raises no
+	// error — so a pass in which every vendor request was refused finished clean, planned nothing, and
+	// turned this item green. An operator read six ticks and switched the evaluator on over a vendor
+	// that was answering 501. The sample is the evidence the whole dry mode exists to produce; a pass
+	// that produced none has not been checked, whatever its error count.
 	mode := forecastMode(s.st.GetSetting(setForecastAuto, "0"))
 	hb, haveHB := s.st.ForecastHeartbeat()
 	dryOK := mode == forecastModeDry && haveHB && hb.Mode == forecastModeDry &&
-		hb.Pass.FinishedAt != "" && hb.Pass.Errors == 0 && hb.Pass.Panics == 0
+		hb.Pass.FinishedAt != "" && hb.Pass.Errors == 0 && hb.Pass.Panics == 0 &&
+		len(hb.DrySample) > 0
 	dry := readinessItem{Key: "dry_pass", OK: dryOK}
 	switch {
 	case mode != forecastModeDry:
@@ -538,6 +555,17 @@ func (s *Server) forecastReadiness(now time.Time) []readinessItem {
 	case hb.Pass.Errors > 0 || hb.Pass.Panics > 0:
 		dry.Count = hb.Pass.Errors + hb.Pass.Panics
 		dry.fail("dry_pass_errors", "the last dry pass reported errors or panics: "+strconv.Itoa(dry.Count))
+	case len(hb.DrySample) == 0 && hb.Pass.Bodies == 0:
+		// Due work and not one body came back. This is the incident: the vendor, or the egress to it,
+		// is not answering. Switching on would plan the same empty pass every minute.
+		dry.fail("dry_pass_no_source",
+			"the last dry pass fetched no vendor body, so nothing could be planned; check the quote sources")
+	case len(hb.DrySample) == 0:
+		// The vendor answered and nothing was plannable: no due mark, or the marks it has cannot be
+		// settled yet. A fact about the ledger, not about the vendor — and the next due session, or a
+		// later manual pass, is what changes it.
+		dry.fail("dry_pass_no_plan",
+			"the last dry pass planned no write; nothing is due yet, or nothing it selected can settle")
 	}
 	items = append(items, dry)
 

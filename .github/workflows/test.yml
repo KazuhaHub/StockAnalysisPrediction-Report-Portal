@@ -191,7 +191,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1'
+          subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1|AppPlatform|Keyring|Seal|RotateSecretKey'
           tests=$(go test -race -list "$subset" ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
           regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
