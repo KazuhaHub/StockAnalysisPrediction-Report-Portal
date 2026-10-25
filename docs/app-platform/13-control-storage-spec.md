@@ -1,7 +1,9 @@
 # Initial control-plane and runner storage specification
 
-Status: proposed physical design, awaiting owner review. No migration, database,
-runner journal or deployment is created by this document.
+Status: initial physical design approved by the owner on 2026-10-24 Pacific,
+covering Option A and the scope below (reviewed source `419cd28`). Implementation
+and validation remain separate; approval does not assert that migration, runner
+journal or deployment is complete.
 
 This refines [the logical storage proposal](05-storage-proposal.md) for the first
 P03 persistence slice. It covers install/update/disable/uninstall/restore control
@@ -513,7 +515,7 @@ or green parser tests alone do not satisfy these persistence cases.
 
 ## 11. Approval scope and later products
 
-Requested decision: approve Option A and these initial 14 Portal/four runner tables,
+Approved decision: Option A and these initial 14 Portal/four runner tables,
 including the named protected meta values, lifecycle cleanup, retention and paused
 restore behavior, for implementation in isolated development/staging fixtures.
 
