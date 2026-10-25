@@ -6,6 +6,10 @@ table definition, side-store creation or baseline edit. A later concrete schema
 must be reviewed with the owner before writing any database-shape code, including
 the runner's local store or application metadata side tables.
 
+The [initial physical specification](13-control-storage-spec.md) now makes the
+first P03 control-plane/runner slice concrete. It remains proposed until the owner
+accepts its exact scope; later business/job/event products are still separate.
+
 ## 1. Recommended ownership: Option A
 
 - Portal's existing database is the authority for desired installation state,
