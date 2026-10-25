@@ -1,6 +1,9 @@
 import { ADMIN_PAGES } from './adminNavigation'
 export interface DashboardBlock { id: string; visible: boolean; width: 1 | 2 | 3 | 6; metrics?: string[]; chart?: DashboardChart }
-export interface DashboardChart { range: 7 | 30 | 90 | 365; interval: 'auto' | 'day' | 'week' | 'month'; showValues: boolean; cumulative: boolean; topN: 5 | 10 | 15 }
+export type DashboardChartType = 'line' | 'column' | 'bar' | 'donut'
+export const dashboardChartTypes = (id: string): DashboardChartType[] => id === 'trend' || id === 'report-bars' ? ['line', 'column'] : ['donut', 'bar']
+export const dashboardChartType = (id: string, chart?: DashboardChart): DashboardChartType => chart?.type ?? (id === 'trend' ? 'line' : id === 'report-bars' ? 'column' : 'donut')
+export interface DashboardChart { type?: DashboardChartType; range: 7 | 30 | 90 | 365; interval: 'auto' | 'day' | 'week' | 'month'; showValues: boolean; cumulative: boolean; topN: 5 | 10 | 15 }
 export const defaultDashboardChart = (): DashboardChart => ({ range: 7, interval: 'auto', showValues: true, cumulative: false, topN: 5 })
 export const isDashboardChart = (id: string) => ['trend', 'kinds', 'report-bars', 'report-donut'].includes(id)
 export interface DashboardLayout { blocks: DashboardBlock[]; revision: string }

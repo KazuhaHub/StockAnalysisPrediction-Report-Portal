@@ -10,7 +10,7 @@ import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluato
 import { ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import DashboardLayoutEditor from './DashboardLayoutEditor'
-import { defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
+import { dashboardChartType, defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
 function useSnapshot<T>(url: string, revision: number, enabled = true) {
@@ -115,9 +115,10 @@ export default function AdminOverviewPage() {
         if (isDashboardChart(block.id)) {
           const config = block.chart ?? defaultDashboardChart()
           const kinds = reports.data?.kind_periods?.[String(config.range)] ?? reports.data?.kinds ?? []
-          const title = block.id === 'trend' ? 'reportTrend' : block.id === 'report-bars' ? 'reportBars' : block.id === 'kinds' ? 'reportKinds' : 'reportDonut'
-          return <Card size="small" title={t(`manage.dashboard.${title}`)} extra={<Tag>{t(`manage.dashboard.range.${config.range}`)}</Tag>} loading={reports.loading && !reports.data}>
-            {reports.data ? block.id === 'trend' ? <ReportTrend days={reports.data.days} config={config} /> : block.id === 'report-bars' ? <ReportBars days={reports.data.days} config={config} /> : block.id === 'kinds' ? <ReportKinds kinds={kinds} config={config} /> : <ReportDonut kinds={kinds} config={config} /> : reports.error && <Alert type="error" title={reports.error} />}
+          const type = dashboardChartType(block.id, config)
+          const title = block.id === 'trend' || block.id === 'report-bars' ? 'reportTrend' : 'reportKinds'
+          return <Card className="rp-dashboard-chart-card" size="small" title={t(`manage.dashboard.${title}`)} extra={<Tag>{t(`manage.dashboard.range.${config.range}`)}</Tag>} loading={reports.loading && !reports.data}>
+            {reports.data ? type === 'line' ? <ReportTrend days={reports.data.days} config={config} /> : type === 'column' ? <ReportBars days={reports.data.days} config={config} /> : type === 'bar' ? <ReportKinds kinds={kinds} config={config} /> : <ReportDonut kinds={kinds} config={config} /> : reports.error && <Alert type="error" title={reports.error} />}
           </Card>
         }
         if (block.id.startsWith('shortcut:')) {

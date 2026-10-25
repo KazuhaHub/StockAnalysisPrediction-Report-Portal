@@ -120,3 +120,18 @@ func TestDashboardChartOptionsValidation(t *testing.T) {
 		t.Fatal("chart options accepted on metrics")
 	}
 }
+
+func TestDashboardChartTypeCompatibility(t *testing.T) {
+	for id, allowed := range map[string][]string{"trend": {"", "line", "column"}, "report-bars": {"", "line", "column"}, "kinds": {"", "bar", "donut"}, "report-donut": {"", "bar", "donut"}} {
+		for _, kind := range []string{"", "line", "column", "bar", "donut", "unknown"} {
+			want := false
+			for _, candidate := range allowed {
+				want = want || candidate == kind
+			}
+			block := dashboardBlock{ID: id, Width: 3, Visible: true, Chart: &dashboardChart{Range: 30, Interval: "auto", TopN: 5, Type: kind}}
+			if validDashboardBlock(block) != want {
+				t.Errorf("%s type %q: expected valid=%v", id, kind, want)
+			}
+		}
+	}
+}

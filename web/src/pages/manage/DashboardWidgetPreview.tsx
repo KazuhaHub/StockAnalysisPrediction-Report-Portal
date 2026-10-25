@@ -1,6 +1,6 @@
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 import { useTranslation } from 'react-i18next'
-import { ReportBars, ReportDonut, ReportKinds, ReportTrend } from './DashboardCharts'
+import { ReportBars, ReportDonut, ReportTrend } from './DashboardCharts'
 
 /** Static illustrative values belong only to the component catalog, never to live cards. */
 export default function DashboardWidgetPreview({ id }: { id: string }) {
@@ -11,7 +11,7 @@ export default function DashboardWidgetPreview({ id }: { id: string }) {
   return <div className="rp-dashboard-example" aria-label={t('manage.dashboard.example')}>
     <span className="rp-dashboard-example-label">{t('manage.dashboard.example')}</span>
     <div aria-hidden="true">
-      {id === 'trend' ? <ReportTrend days={days} /> : id === 'kinds' ? <ReportKinds kinds={kinds} /> : id === 'report-bars' ? <ReportBars days={days} /> : id === 'report-donut' ? <ReportDonut kinds={kinds} /> :
+      {id === 'trend' ? <ReportTrend days={days} /> : id === 'kinds' ? <ReportDonut kinds={kinds} /> : id === 'report-bars' ? <ReportBars days={days} /> : id === 'report-donut' ? <ReportDonut kinds={kinds} /> :
         ['reports','queue','forecast'].includes(id) ? <div className="rp-dashboard-example-metrics">{metricLabels.map((label,index) => <div key={label}><span>{t(`manage.dashboard.${label}`)}</span><strong>{[128,24,56][index]}</strong></div>)}</div> :
           id === 'shortcuts' ? <div className="rp-dashboard-example-shortcuts">{['types','versions','forecast'].map((key) => {
             const page = adminPage(key)!

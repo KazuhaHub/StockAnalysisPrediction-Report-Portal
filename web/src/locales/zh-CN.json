@@ -2867,5 +2867,12 @@
   "manage.dashboard.cumulative": "累计显示",
   "manage.dashboard.showValues": "显示数值标签",
   "manage.dashboard.topCategories": "显示前几个分类",
-  "manage.dashboard.chartDensityHint": "点位较多时自动精简标签，悬停查看每个点的日期和数值。周按周一开始；首尾可能为不完整周期。"
+  "manage.dashboard.chartDensityHint": "点位较多时自动精简标签，悬停查看每个点的日期和数值。周按周一开始；首尾可能为不完整周期。",
+  "manage.dashboard.chartType": "图表类型",
+  "manage.dashboard.chartType.bar": "条形图",
+  "manage.dashboard.chartType.column": "柱状图",
+  "manage.dashboard.chartType.donut": "环形图",
+  "manage.dashboard.chartType.line": "折线图",
+  "manage.dashboard.tooltipCount": "报告数量：{{count}}",
+  "manage.dashboard.tooltipShare": "占比：{{percent}}%"
 }

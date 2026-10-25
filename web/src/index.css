@@ -2295,3 +2295,12 @@ body {
 .rp-captcha-field .ant-input { min-width: 0; flex: 1; border: 0; padding-inline: 0; background: transparent; box-shadow: none !important; }
 .rp-captcha-image { width: 96px; height: 32px; object-fit: contain; cursor: pointer; flex-shrink: 0; }
 .rp-captcha-field > .ant-btn { flex-shrink: 0; width: 32px; height: 32px; }
+
+.rp-dashboard-chart-field { display: flex; flex-direction: column; gap: 8px; }
+.rp-dashboard-chart-card { display: flex; flex-direction: column; }
+.rp-dashboard-chart-card .ant-card-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rp-dashboard-chart-card .rp-dashboard-chart { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rp-dashboard-chart-card .rp-dashboard-chart svg { flex: 1; min-height: 210px; }
+.rp-dashboard-chart figcaption { padding-top: 12px; }
+.rp-chart-datum { cursor: crosshair; outline: none; }
+.rp-chart-datum:hover .rp-chart-mark, .rp-chart-datum:focus .rp-chart-mark { filter: brightness(1.12); stroke: var(--ant-color-text); stroke-width: 1.5px; }

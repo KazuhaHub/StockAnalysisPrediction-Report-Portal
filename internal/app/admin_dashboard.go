@@ -19,6 +19,7 @@ type dashboardBlock struct {
 	Chart   *dashboardChart `json:"chart,omitempty"`
 }
 type dashboardChart struct {
+	Type       string `json:"type,omitempty"`
 	Range      int    `json:"range"`
 	Interval   string `json:"interval"`
 	ShowValues bool   `json:"showValues"`
@@ -34,6 +35,10 @@ func validDashboardChart(b dashboardBlock) bool {
 		return false
 	}
 	c := b.Chart
+	series := b.ID == "trend" || b.ID == "report-bars"
+	if c.Type != "" && !((series && (c.Type == "line" || c.Type == "column")) || (!series && (c.Type == "bar" || c.Type == "donut"))) {
+		return false
+	}
 	return (c.Range == 7 || c.Range == 30 || c.Range == 90 || c.Range == 365) &&
 		(c.Interval == "auto" || c.Interval == "day" || c.Interval == "week" || c.Interval == "month") &&
 		(c.TopN == 5 || c.TopN == 10 || c.TopN == 15)

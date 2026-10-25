@@ -12,7 +12,7 @@ import { usePendingSettings } from './AdminDraftBoundary'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import { animateDashboardChange, animateDashboardModeChange } from './dashboardMotion'
 import { dashboardCollision, snapshotDashboardWidget } from './dashboardDrag'
-import { defaultDashboardChart, isDashboardChart, dashboardBlockLabel, dashboardBlockCategory, dashboardCatalog, defaultDashboardBlocks, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
+import { dashboardChartType, dashboardChartTypes, defaultDashboardChart, isDashboardChart, dashboardBlockLabel, dashboardBlockCategory, dashboardCatalog, defaultDashboardBlocks, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 
 function SizeLabel({ width }: { width: DashboardBlock['width'] }) {
   const { t } = useTranslation()
@@ -193,9 +193,10 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
         const series = chartBlock === 'trend' || chartBlock === 'report-bars'
         return <Space orientation="vertical" size={18} style={{ width: '100%' }}>
           <Typography.Text type="secondary">{t('manage.dashboard.chartOptionsHint')}</Typography.Text>
-          <label>{t('manage.dashboard.chartRange')}<Select aria-label={t('manage.dashboard.chartRange')} value={config.range} style={{ display: 'block', width: '100%', marginTop: 8 }} onChange={range => update({range})} options={([7,30,90,365] as const).map(value => ({ value, label: t(`manage.dashboard.range.${value}`) }))} /></label>
+          <div className="rp-dashboard-chart-field"><Typography.Text>{t('manage.dashboard.chartType')}</Typography.Text><Select aria-label={t('manage.dashboard.chartType')} value={dashboardChartType(chartBlock, config)} style={{ width: '100%' }} onChange={type => update({type})} options={dashboardChartTypes(chartBlock).map(value => ({ value, label: t(`manage.dashboard.chartType.${value}`) }))} /></div>
+          <div className="rp-dashboard-chart-field"><Typography.Text>{t('manage.dashboard.chartRange')}</Typography.Text><Select aria-label={t('manage.dashboard.chartRange')} value={config.range} style={{ width: '100%' }} onChange={range => update({range})} options={([7,30,90,365] as const).map(value => ({ value, label: t(`manage.dashboard.range.${value}`) }))} /></div>
           {series ? <>
-            <label>{t('manage.dashboard.chartInterval')}<Select aria-label={t('manage.dashboard.chartInterval')} value={config.interval} style={{ display: 'block', width: '100%', marginTop: 8 }} onChange={interval => update({interval})} options={(['auto','day','week','month'] as const).map(value => ({ value, label: t(`manage.dashboard.interval.${value}`) }))} /></label>
+            <div className="rp-dashboard-chart-field"><Typography.Text>{t('manage.dashboard.chartInterval')}</Typography.Text><Select aria-label={t('manage.dashboard.chartInterval')} value={config.interval} style={{ width: '100%' }} onChange={interval => update({interval})} options={(['auto','day','week','month'] as const).map(value => ({ value, label: t(`manage.dashboard.interval.${value}`) }))} /></div>
             <Space><Switch checked={config.cumulative} onChange={cumulative => update({cumulative})} aria-label={t('manage.dashboard.cumulative')} />{t('manage.dashboard.cumulative')}</Space>
           </> : <label>{t('manage.dashboard.topCategories')}<Select aria-label={t('manage.dashboard.topCategories')} value={config.topN} style={{ marginInlineStart: 12, minWidth: 80 }} onChange={topN => update({topN})} options={([5,10,15] as const).map(value => ({ value, label: String(value) }))} /></label>}
           <Space><Switch checked={config.showValues} onChange={showValues => update({showValues})} aria-label={t('manage.dashboard.showValues')} />{t('manage.dashboard.showValues')}</Space>

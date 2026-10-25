@@ -2867,5 +2867,12 @@
   "manage.dashboard.cumulative": "Cumulative totals",
   "manage.dashboard.showValues": "Show value labels",
   "manage.dashboard.topCategories": "Number of categories",
-  "manage.dashboard.chartDensityHint": "Dense charts simplify labels automatically; hover for dates and values. Weeks begin on Monday; the first and last periods may be partial."
+  "manage.dashboard.chartDensityHint": "Dense charts simplify labels automatically; hover for dates and values. Weeks begin on Monday; the first and last periods may be partial.",
+  "manage.dashboard.chartType": "Chart type",
+  "manage.dashboard.chartType.bar": "Bars",
+  "manage.dashboard.chartType.column": "Columns",
+  "manage.dashboard.chartType.donut": "Donut",
+  "manage.dashboard.chartType.line": "Line",
+  "manage.dashboard.tooltipCount": "Reports: {{count}}",
+  "manage.dashboard.tooltipShare": "Share: {{percent}}%"
 }

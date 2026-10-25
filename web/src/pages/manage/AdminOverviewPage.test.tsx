@@ -47,7 +47,7 @@ it('charts report dates and categories, with no account chart, and handles empty
   const { unmount } = render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
   const trend = await screen.findByRole('img', { name: 'manage.dashboard.reportTrend' })
   expect(trend.textContent).toContain('2026-10-25: 2')
-  const kinds = await screen.findByRole('img', { name: 'manage.dashboard.reportKinds' })
+  const kinds = await screen.findByRole('img', { name: 'manage.dashboard.reportDonut' })
   expect(kinds.textContent).toContain('Research: 15')
   expect(screen.queryByRole('img', { name: 'manage.dashboard.accountChart' })).toBeNull()
   expect(screen.queryByRole('progressbar')).toBeNull()
@@ -177,4 +177,32 @@ it('persists independent chart ranges, grouping and cumulative display', async (
   fireEvent.click(screen.getByRole('button', {name:'manage.dashboard.saveGlobal'}))
   await waitFor(() => expect(saved?.blocks.find(b=>b.id==='trend')?.chart).toEqual({range:365,interval:'auto',cumulative:true,showValues:true,topN:5}))
   expect(saved?.blocks.find(b=>b.id==='kinds')?.chart).toBeUndefined()
+})
+
+it.each([['trend', 'column', 'reportBars'], ['kinds', 'donut', 'reportDonut'], ['report-bars', 'line', 'reportTrend'], ['report-donut', 'bar', 'reportKinds']])('switches %s chart presentation and retains the selection after reload', async (id, type, image) => {
+  const blocks = defaultDashboardBlocks().map(block => ({ ...block, visible: block.visible || block.id === id }))
+  api.get.mockImplementation((url: string) => Promise.resolve(url.endsWith('/dashboard/layout') ? { blocks, revision: 'initial' } : url.endsWith('/reports/overview') ? { days: [{key:'2026-10-25',count:4}], kinds:[{key:'Research',count:4}] } : {mode:'0'}))
+  let saved: DashboardLayout | undefined
+  api.put.mockImplementation((_url: string, body: DashboardLayout) => { saved = {...body, revision:'saved'}; return Promise.resolve(saved) })
+  const view = render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
+  await waitFor(() => expect(screen.getByRole('button', {name:/manage.dashboard.customize/}).hasAttribute('disabled')).toBe(false))
+  fireEvent.click(screen.getByRole('button', {name:/manage.dashboard.customize/}))
+  const block = document.querySelector(`[data-dashboard-block="${id}"]`) as HTMLElement
+  fireEvent.click(within(block).getByRole('button', {name:'manage.dashboard.customizeChart'}))
+  const range = screen.getByRole('combobox', {name:'manage.dashboard.chartRange'}).closest('.ant-select') as HTMLElement
+  expect(range.style.display).not.toBe('block')
+  if (id === 'kinds') {
+    fireEvent.mouseDown(screen.getByRole('combobox', {name:'manage.dashboard.chartType'}))
+    fireEvent.click(await screen.findByText('manage.dashboard.chartType.bar', {selector:'.ant-select-item-option-content'}))
+  }
+  fireEvent.mouseDown(screen.getByRole('combobox', {name:'manage.dashboard.chartType'}))
+  fireEvent.click(await screen.findByText(`manage.dashboard.chartType.${type}`, {selector:'.ant-select-item-option-content'}))
+  fireEvent.click(screen.getByRole('button', {name:'common.done'}))
+  expect(within(block).getByRole('img', {name:`manage.dashboard.${image}`})).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', {name:'manage.dashboard.saveGlobal'}))
+  await waitFor(() => expect(saved?.blocks.find(block=>block.id===id)?.chart?.type).toBe(type))
+  view.unmount()
+  api.get.mockImplementation((url: string) => Promise.resolve(url.endsWith('/dashboard/layout') ? saved : url.endsWith('/reports/overview') ? {days:[], kinds:[]} : {mode:'0'}))
+  render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
+  await waitFor(() => expect(within(document.querySelector(`[data-dashboard-block="${id}"]`) as HTMLElement).getByRole('img', {name:`manage.dashboard.${image}`})).toBeTruthy())
 })
