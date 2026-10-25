@@ -2405,6 +2405,8 @@
   "forecast.eval.readiness.reason.no_dry_pass": "No pass has run since the mode was set to dry",
   "forecast.eval.readiness.reason.dry_pass_running": "No dry pass has finished yet",
   "forecast.eval.readiness.reason.dry_pass_errors": "The last dry pass reported errors or panics: {{count}}",
+  "forecast.eval.readiness.reason.dry_pass_no_source": "The last dry pass fetched nothing from any quote source, so it could not plan anything. Check the quote sources before switching on.",
+  "forecast.eval.readiness.reason.dry_pass_no_plan": "The last dry pass reached the vendor but planned no write: nothing is due yet, or nothing it selected can be settled. Run it again once a checkpoint falls due.",
   "forecast.eval.readiness.reason.gate_unreadable": "Could not read the benchmarks in use",
   "forecast.eval.readiness.reason.gate_missing": "No dry-run check for {{codes}}",
   "forecast.eval.readiness.reason.alerts_no_channel": "No alert channel is configured",

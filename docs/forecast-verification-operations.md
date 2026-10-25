@@ -111,7 +111,11 @@ holds, `POST /api/admin/forecast {"mode":"1"}` answers 409 `forecast_not_ready` 
 items. There are six: `binary`, `population` (the ledger start is set), `dry_pass`, `dry_gate`,
 `alerts` and, item 6, `ledger_chain`.
 
-1. `dry`, then "Evaluate now"; read the sample and `last_error`.
+1. `dry`, then "Evaluate now"; read the sample and `last_error`. The pass MUST produce a sample for
+   this item to pass — "no error" is also what a refused vendor looks like. If the card says
+   `dry_pass_no_source`, not one vendor body came back: check the quote sources and the egress before
+   going further. If it says `dry_pass_no_plan`, the vendor answered and nothing was due; wait for a
+   checkpoint and run it again.
 2. Record a dry-run check for every benchmark in use (the card lists the codes).
 3. Configure at least one alert channel (email recipients, a Slack webhook, or both) and send a test
    alert. It goes to every configured, enabled channel, and the readiness stamp is written only when

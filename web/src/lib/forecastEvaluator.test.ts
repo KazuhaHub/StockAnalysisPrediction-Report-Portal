@@ -18,7 +18,7 @@ function settings(over: Partial<ForecastSettings> = {}, pass: Partial<NonNullabl
     heartbeat: {
       mode: '1', last_tick_at: at(tickMinutesAgo), bench: {},
       pass: {
-        kind: 'tick', started_at: at(1), finished_at: at(1), sets: 1, fetches: {}, resolved: 0, halted: 0, refused: {},
+        kind: 'tick', started_at: at(1), finished_at: at(1), sets: 1, fetches: {}, bodies: 1, resolved: 0, halted: 0, refused: {},
         refused_by_class: {}, finalised: 0, healed: 0, baselines: {}, awaiting_session: 0, due_unsettled: 0,
         oldest_due_unsettled_minutes: 0, stale_valve_tripped: false, errors: 0, panics: 0, ...pass,
       },

@@ -674,6 +674,9 @@ export interface ForecastPassStats {
   finished_at: string
   sets: number
   fetches: Record<string, number>
+  /** How many vendor bodies came back, as opposed to how many were asked for. Readiness requires a
+   *  non-zero value alongside a non-empty `dry_sample`: an outage raises no error and plans nothing. */
+  bodies: number
   resolved: number
   halted: number
   refused: Record<string, number>
@@ -733,6 +736,7 @@ export interface ForecastReadinessItem {
 export type ForecastReadinessReason =
   | 'population_unset'
   | 'not_dry' | 'no_dry_pass' | 'dry_pass_running' | 'dry_pass_errors'
+  | 'dry_pass_no_source' | 'dry_pass_no_plan'
   | 'gate_unreadable' | 'gate_missing'
   | 'alerts_unreadable' | 'alerts_no_channel' | 'alerts_channels_paused' | 'alerts_untested'
   | 'ledger_no_primary'

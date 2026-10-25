@@ -2405,6 +2405,8 @@
   "forecast.eval.readiness.reason.no_dry_pass": "切换到试运行后还没有跑过一轮",
   "forecast.eval.readiness.reason.dry_pass_running": "试运行还没有跑完一轮",
   "forecast.eval.readiness.reason.dry_pass_errors": "上一轮试运行报告了 {{count}} 个错误或异常",
+  "forecast.eval.readiness.reason.dry_pass_no_source": "上一轮试运行没有从任何行情源取到数据，因此规划不出任何结算。请先检查行情源，再开启。",
+  "forecast.eval.readiness.reason.dry_pass_no_plan": "上一轮试运行取到了数据，但没有可规划的写入：要么还没有到期，要么选中的检查点都无法结算。等到有检查点到期后再试运行一次。",
   "forecast.eval.readiness.reason.gate_unreadable": "读不到正在使用的基准",
   "forecast.eval.readiness.reason.gate_missing": "缺少{{codes}}的试运行核对",
   "forecast.eval.readiness.reason.alerts_no_channel": "还没有配置告警渠道",
