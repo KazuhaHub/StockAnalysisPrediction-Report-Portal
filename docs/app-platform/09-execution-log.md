@@ -93,6 +93,11 @@ This is frontend integrity only; it is not a trusted package or install admissio
 
 ## Next steps
 
+Private [effect intent persistence](19-effect-intent-implementation.md) now binds
+stable effect identities to current worker leases and preserves uncertain results
+across reclaim. It does not dispatch work or complete a stage; typed evidence and
+authenticated runner integration remain pending.
+
 1. Add the v2 generated JSON Schema and expand shared Go/TypeScript refusal cases.
 2. Add the bounded compatibility evaluator and select/review publisher signature
    verification with common vectors; keep parsing separate from admission.

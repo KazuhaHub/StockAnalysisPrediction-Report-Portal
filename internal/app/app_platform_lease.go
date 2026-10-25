@@ -59,9 +59,62 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 	}
 	defer tx.Rollback()
 	e := migExec{s: s, ex: tx}
+	facts, err := loadPlatformOperationLease(e, id)
+	if err != nil {
+		return zero, err
+	}
+	lease, installationRevision, controlFence, now := facts.lease, facts.installationRevision, facts.controlFence, facts.now
+	installation, epoch, stateRevision := lease.installationID, lease.controllerEpoch, int64(lease.snapshot.Revision)
+	if lease.rowRevision == math.MaxInt64 {
+		return zero, errAppPlatformLeaseConflict
+	}
+	old := lease
+	if expected != nil {
+		if old != *expected || old.owner == "" || old.leaseUntilMS <= now || controlFence != lease.fence {
+			return zero, errAppPlatformLeaseConflict
+		}
+	} else {
+		if (old.leaseUntilMS > now) || controlFence == math.MaxInt64 || installationRevision == math.MaxInt64 {
+			return zero, errAppPlatformLeaseConflict
+		}
+		lease.fence = controlFence + 1
+		result, err := e.exec(`UPDATE app_platform_installations SET control_fence=?,revision=revision+1,updated_ms=?
+            WHERE id=? AND revision=? AND control_fence=? AND controller_epoch=?`, lease.fence, now, installation, installationRevision, controlFence, epoch)
+		if err := platformLeaseCAS(result, err); err != nil {
+			return zero, err
+		}
+	}
+	lease.owner, lease.leaseUntilMS, lease.rowRevision = worker, now+appPlatformLeaseMS, old.rowRevision+1
+	eligibility := `(lease_until_ms IS NULL OR lease_until_ms<=?)`
+	if expected != nil {
+		eligibility = `lease_until_ms>? AND lease_owner=?`
+	}
+	args := []any{worker, lease.leaseUntilMS, lease.fence, now, id, installation, epoch, old.rowRevision, stateRevision, old.fence, now}
+	if expected != nil {
+		args = append(args, expected.owner)
+	}
+	result, err := e.exec(`UPDATE app_platform_operations SET lease_owner=?,lease_until_ms=?,fence=?,row_revision=row_revision+1,updated_ms=?
+        WHERE id=? AND installation_id=? AND controller_epoch=? AND row_revision=? AND state_revision=? AND fence=?
+        AND completed_ms IS NULL AND `+eligibility, args...)
+	if err := platformLeaseCAS(result, err); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return lease, nil
+}
+
+type platformLeaseFacts struct {
+	lease                                   platformOperationLease
+	installationRevision, controlFence, now int64
+}
+
+func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error) {
+	var zero platformLeaseFacts
 	// SQLite must obtain write intent before reading. A deferred read followed
 	// by a write upgrade could otherwise race another connection/process.
-	if s.driver != "postgres" {
+	if e.s.driver != "postgres" {
 		if _, err := e.exec(`UPDATE app_platform_installations SET revision=revision
             WHERE id=(SELECT installation_id FROM app_platform_operations WHERE id=?)`, id); err != nil {
 			return zero, err
@@ -72,7 +125,7 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 		return zero, platformLeaseReadError(err)
 	}
 	lock := ""
-	if s.driver == "postgres" {
+	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
 	}
 	var epoch, phase, desired string
@@ -129,44 +182,10 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 	if err != nil {
 		return zero, err
 	}
-	if now < 0 || now > math.MaxInt64-appPlatformLeaseMS || lease.rowRevision == math.MaxInt64 {
+	if now < 0 || now > math.MaxInt64-appPlatformLeaseMS {
 		return zero, errAppPlatformLeaseConflict
 	}
-	old := lease
-	if expected != nil {
-		if old != *expected || !owner.Valid || !until.Valid || until.Int64 <= now || controlFence != lease.fence {
-			return zero, errAppPlatformLeaseConflict
-		}
-	} else {
-		if (until.Valid && until.Int64 > now) || controlFence == math.MaxInt64 || installationRevision == math.MaxInt64 {
-			return zero, errAppPlatformLeaseConflict
-		}
-		lease.fence = controlFence + 1
-		result, err := e.exec(`UPDATE app_platform_installations SET control_fence=?,revision=revision+1,updated_ms=?
-            WHERE id=? AND revision=? AND control_fence=? AND controller_epoch=?`, lease.fence, now, installation, installationRevision, controlFence, epoch)
-		if err := platformLeaseCAS(result, err); err != nil {
-			return zero, err
-		}
-	}
-	lease.owner, lease.leaseUntilMS, lease.rowRevision = worker, now+appPlatformLeaseMS, old.rowRevision+1
-	eligibility := `(lease_until_ms IS NULL OR lease_until_ms<=?)`
-	if expected != nil {
-		eligibility = `lease_until_ms>? AND lease_owner=?`
-	}
-	args := []any{worker, lease.leaseUntilMS, lease.fence, now, id, installation, epoch, old.rowRevision, stateRevision, old.fence, now}
-	if expected != nil {
-		args = append(args, expected.owner)
-	}
-	result, err := e.exec(`UPDATE app_platform_operations SET lease_owner=?,lease_until_ms=?,fence=?,row_revision=row_revision+1,updated_ms=?
-        WHERE id=? AND installation_id=? AND controller_epoch=? AND row_revision=? AND state_revision=? AND fence=?
-        AND completed_ms IS NULL AND `+eligibility, args...)
-	if err := platformLeaseCAS(result, err); err != nil {
-		return zero, err
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
-	return lease, nil
+	return platformLeaseFacts{lease: lease, installationRevision: installationRevision, controlFence: controlFence, now: now}, nil
 }
 
 func platformLeaseReadError(err error) error {
