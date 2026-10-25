@@ -1216,7 +1216,7 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	if cfg.HistoryOnly {
 		key = "history:" + key
 	}
-	resp, left, stale := c.lookupForRefresh(key)
+	resp, left, _ := c.lookupForRefresh(key)
 	if resp != nil {
 		return resp, true, left, nil
 	}
@@ -1249,7 +1249,7 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	// Re-checked under the flight: a request that arrived while the PREVIOUS flight was between
 	// storing its result and deleting its map entry would otherwise start a second identical call
 	// against a cache that already has the answer.
-	resp, left, stale = c.lookupForRefresh(key)
+	resp, left, stale := c.lookupForRefresh(key)
 	if resp != nil {
 		fl.resp = resp
 		c.endFlight(key, fl)
