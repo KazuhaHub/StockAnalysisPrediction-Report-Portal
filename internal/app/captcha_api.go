@@ -262,12 +262,25 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
+	// Validate and audit limits before later policy blocks, preserving partial-save behavior.
+	if in.Limits != nil {
+		before := s.limitsJSON()
+		if !s.applyLimits(w, in.Limits) {
+			return
+		}
+		after := s.limitsJSON()
+		if !reflect.DeepEqual(before, after) {
+			s.recordChange(r, user, AuditPolicyChange, "security", "limits", map[string]any{"limits": after, "from": before})
+		}
+	}
+	if !s.applySecurityPolicy(w, &in.securityPolicyInput) {
+		return
+	}
 	provider := strings.ToLower(strings.TrimSpace(in.Captcha.Provider))
 	if provider == "" {
 		provider = captcha.ProviderImage
 	}
-	// Validate this block before applying any other optional policy. A bad hosted-provider
-	// configuration must not partly save the request or enable a gate whose widget cannot work.
+	// Validate before storing captcha settings so a gate whose widget cannot work is not enabled.
 	if !captcha.ValidProvider(provider) {
 		jsonError(w, http.StatusBadRequest, "unknown captcha provider")
 		return
@@ -291,23 +304,6 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 				"a secret key is required before enabling a hosted captcha provider")
 			return
 		}
-	}
-	// Validated and stored before anything else touches the store, and it answers 400 itself: a
-	// ceiling nobody meant must not land, and it must not land next to a captcha change that did.
-	if in.Limits != nil {
-		before := s.limitsJSON()
-		if !s.applyLimits(w, in.Limits) {
-			return
-		}
-		after := s.limitsJSON()
-		if !reflect.DeepEqual(before, after) {
-			// Limits have already been stored. Audit them here even if a later policy block
-			// fails validation; the final security-save audit cannot cover that path.
-			s.recordChange(r, user, AuditPolicyChange, "security", "limits", map[string]any{"limits": after, "from": before})
-		}
-	}
-	if !s.applySecurityPolicy(w, &in.securityPolicyInput) {
-		return
 	}
 	trigger := strings.ToLower(strings.TrimSpace(in.Captcha.Trigger))
 	if trigger != triggerAfterFailure {
