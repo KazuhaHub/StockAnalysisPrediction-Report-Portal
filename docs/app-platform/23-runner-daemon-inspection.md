@@ -36,7 +36,8 @@ amd64/arm64 before contacting a socket. It supports no remote Docker transport.
 On Linux it checks:
 
 - Absolute clean filesystem path, bounded Unix socket length, no symlink aliases,
-  root-owned socket, one hard link and no access for other users.
+  root-owned socket, one hard link and zero Unix other-user permission bits.
+  Docker-group access is permitted; ACLs and group membership are not attested.
 - Parent directories owned by root/the runtime UID, without group/world writes
   except a root-owned sticky ancestor such as `/tmp`. A private child directory
   must still protect the socket. Docker group access is root-equivalent authority;
@@ -107,5 +108,13 @@ artifacts, owned data/quota enforcement, a typed constrained container adapter a
 real hostile fixtures. Keep their proof separate from this inspection report.
 
 Local evidence: full Go tests/build/vet/staticcheck, driver/CLI race tests, workflow
-lint and Linux/Windows test cross-compilation pass. Native Linux workflow evidence
-must be checked on this PR; a local macOS run cannot supply that result.
+lint and Linux/Windows test cross-compilation pass.
+
+Native evidence: [workflow run 40189381328](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40189381328)
+passed on 2026-10-25 UTC for source
+`92bb2016d31bf28fbce30a9d838b0c42e0d2ab6c`. The disposable Ubuntu 24.04
+Linux/amd64 worker reported Docker Engine 28.0.4, metadata compatibility true and
+execution readiness false. Both the real-socket integration test and CLI passed;
+the driver/CLI race tests also passed on that worker. This records native socket
+and metadata evidence only. No quota exhaustion, sandbox escape, app execution,
+controller authentication or available-capacity acceptance was performed.
