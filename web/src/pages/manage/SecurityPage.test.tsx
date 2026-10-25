@@ -148,3 +148,14 @@ describe('the login-protection page', () => {
     const body = apiMock.post.mock.calls[0][1] as Record<string, any>
     expect(body.twofa.require_staff).toBe(true)
   })
+
+it.each(['hidden','contact','email'])('shows complete recovery choices and saves %s mode', async mode => {
+  mount({recovery:{enabled:mode==='hidden'}})
+  await userEvent.click(await screen.findByRole('button',{name:'security.recoveryTitle'}))
+  expect(screen.getAllByRole('radio')).toHaveLength(3)
+  for (const option of ['hidden','contact','email']) expect(screen.getByText(`security.recoveryModeHint.${option}`)).toBeTruthy()
+  await userEvent.click(screen.getByRole('radio',{name:new RegExp(`security.recoveryMode.${mode}`)}))
+  await userEvent.click(screen.getByText('common.save'))
+  await waitFor(()=>expect(apiMock.post).toHaveBeenCalled())
+  expect(apiMock.post.mock.calls[0][1].recovery).toEqual({enabled:mode==='email',mode})
+})
