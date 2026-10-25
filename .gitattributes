@@ -10,3 +10,6 @@ internal/appplatform/testdata/descriptor-corpus.json text eol=lf
 internal/appplatform/contract/descriptor-v2.schema.json text eol=lf
 internal/appplatform/descriptor_contract_generated.go text eol=lf
 scripts/generate_app_contract.py text eol=lf
+web/src/lib/descriptor-contract.generated.ts text eol=lf
+web/src/lib/bridge-v2.ts text eol=lf
+web/src/lib/bridge-v2.test.ts text eol=lf

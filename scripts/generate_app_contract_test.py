@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -83,6 +84,41 @@ class AppContractTests(unittest.TestCase):
             self.assertNotEqual(stale.returncode, 0)
             self.assertEqual(target.read_bytes(), before)
             self.assertFalse((root/"internal").exists())
+
+    def test_apps_bridge_export_requires_pinned_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root/"scripts/generate_app_contract.py"
+            sdk = root/"packages/app-sdk"
+            script.parent.mkdir(parents=True)
+            (sdk/"schema").mkdir(parents=True)
+            script.write_bytes(SCRIPT.read_bytes())
+            (sdk/"schema/descriptor-v2.schema.json").write_bytes(self.raw)
+            package = sdk/"package.json"
+            package.write_text("{}")
+            command = [sys.executable,"-B",str(script)]
+            subprocess.run(command,check=True,capture_output=True)
+            package.write_text(json.dumps({"exports":{"./bridge-v2":"./src/bridge-v2.ts"}}))
+            result = subprocess.run(command+["--check"],capture_output=True)
+            self.assertNotEqual(result.returncode,0,"exported bridge silently escaped its source pin")
+            source = sdk/"src/bridge-v2.ts"
+            tests = sdk/"tests/bridge-v2.test.ts"
+            tests.parent.mkdir(parents=True)
+            source.write_bytes(b"public source fixture\n")
+            tests.write_bytes(b"public test fixture\n")
+            pin = sdk/"tests/fixtures/bridge-v2-source.json"
+            pin.parent.mkdir()
+            pin.write_text(json.dumps({"format":"portal.bridge.source/1",
+                "protocol_sha256":hashlib.sha256(source.read_bytes()).hexdigest(),
+                "test_sha256":hashlib.sha256(tests.read_bytes()).hexdigest()}))
+            subprocess.run(command+["--check"],check=True,capture_output=True)
+            for path in (source,tests):
+                original = path.read_bytes()
+                path.write_bytes(original+b"changed\n")
+                result = subprocess.run(command+["--check"],capture_output=True)
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(path.read_bytes(),original+b"changed\n")
+                path.write_bytes(original)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,14 @@
 # Runtime and trust candidate A
 
-Status: proposed; owner approval pending. This is the concrete development
+Status: candidate A approved for development and isolated acceptance. This is the
+concrete development
 decision for [D1/D3/D4](README.md#decision-gates), not a production deployment
 instruction or a stable public SDK release. Initial storage D2 is already
 approved; this document adds no tables, columns or persistent side-store layout.
 
-## 1. Decision requested
+## 1. Development decision
 
-Approve the following direction for implementation and isolated acceptance:
+Candidate A adopts the following direction for implementation and isolated acceptance:
 
 1. One Linux Docker runner per deployment; installing an application creates its
    constrained backend automatically. Administrators do not manually deploy a
@@ -254,7 +255,13 @@ The [acceptance specification](06-acceptance.md) remains the full exit criterion
 
 ## 9. Approval record
 
-Pending owner response. Record the approved scope and any amendments here before
-enabling privileged integration. Track source work separately in the
-[execution register](09-execution-log.md). Existing storage test results and the
-journal's four-table schema do not imply runtime or production approval.
+Owner decision, 2026-10-25: approve candidate A and continue development and
+one-time Linux isolated acceptance; production remains separately authorized.
+This accepts the direction and limits in sections 1–8 for synthetic fixtures and
+disposable environments, including runtime integration, hard quota/isolation
+verification, Ed25519 signatures, allowlisted trust and default-deny brokerage.
+It does not establish passing runtime evidence or freeze a public SDK/protocol.
+Production privileges/enrollment, real credentials/publisher keys, Status adoption,
+release rollout and changes to server `beta` configuration are outside this grant.
+Track implementation and acceptance evidence separately in the
+[execution register](09-execution-log.md). D5 and D6 remain open.

@@ -204,6 +204,7 @@ def main():
     go, ts = render(raw)
     outputs = {}
     if PORTAL_MODE:
+        outputs[ROOT/"web/src/lib/descriptor-contract.generated.ts"] = ts
         # Pure stdin/stdout formatting, without a shell or fetched tool.
         outputs[ROOT/"internal/appplatform/descriptor_contract_generated.go"] = subprocess.run(
             ["gofmt"], input=go, check=True, stdout=subprocess.PIPE).stdout
@@ -218,6 +219,29 @@ def main():
         outputs[sdk/"src/descriptor-contract.generated.ts"] = ts
         outputs[sdk/"schema/descriptor-v2.schema.json"] = raw
         outputs[apps/"scripts/generate_app_contract.py"] = Path(__file__).read_bytes()
+        pin_path = sdk/"tests/fixtures/bridge-v2-source.json"
+        if PORTAL_MODE and (ROOT/"web/src/lib/bridge-v2.ts").is_file():
+            bridge = (ROOT/"web/src/lib/bridge-v2.ts").read_bytes()
+            tests = (ROOT/"web/src/lib/bridge-v2.test.ts").read_text()
+            if tests.count('from "./bridge-v2"') != 1:
+                raise ValueError("bridge test import must have one explicit source module")
+            tests = tests.replace('from "./bridge-v2"','from "../src/bridge-v2"').encode()
+            outputs[sdk/"src/bridge-v2.ts"] = bridge
+            outputs[sdk/"tests/bridge-v2.test.ts"] = tests
+            outputs[pin_path] = (json.dumps({
+                "format":"portal.bridge.source/1",
+                "protocol_sha256":hashlib.sha256(bridge).hexdigest(),
+                "test_sha256":hashlib.sha256(tests).hexdigest(),
+            },indent=2)+"\n").encode()
+        elif not PORTAL_MODE:
+            package = json.loads((sdk/"package.json").read_bytes(), object_pairs_hook=unique_object)
+            if "./bridge-v2" in package.get("exports",{}) or pin_path.exists():
+                pin = json.loads(pin_path.read_bytes(), object_pairs_hook=unique_object)
+                if not isinstance(pin,dict) or set(pin)!={"format","protocol_sha256","test_sha256"} or pin["format"]!="portal.bridge.source/1":
+                    raise ValueError("invalid bridge source pin")
+                for key,path in (("protocol_sha256",sdk/"src/bridge-v2.ts"),("test_sha256",sdk/"tests/bridge-v2.test.ts")):
+                    if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
+                        raise ValueError("bridge source differs; regenerate from the Portal checkout")
     stale = [str(path) for path, expected in outputs.items() if not path.is_file() or path.read_bytes() != expected]
     if args.check:
         if stale:

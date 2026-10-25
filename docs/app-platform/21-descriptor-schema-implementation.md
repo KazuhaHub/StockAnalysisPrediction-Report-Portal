@@ -16,6 +16,7 @@ type spelling, serialization and byte-parser bounds; they grant no authority.
 | Product | Purpose |
 | --- | --- |
 | Portal `internal/appplatform/descriptor_contract_generated.go` | Existing Go DTOs, regular expressions, enums, protocol literals and limits |
+| Portal `web/src/lib/descriptor-contract.generated.ts` | The same frontend domains for the isolated v2 host transport |
 | Apps `packages/app-sdk/src/descriptor-contract.generated.ts` | Descriptor interfaces, field lists and the same primitive domains/limits |
 | Apps `packages/app-sdk/schema/descriptor-v2.schema.json` | Exact source bytes for editors and standard JSON Schema tooling |
 | Apps `scripts/generate_app_contract.py` | Exact generator copy for offline SDK product checks |
@@ -31,6 +32,10 @@ Do not hand-edit generated products or maintain a second authored schema in Apps
 The Apps copy is a derived distribution artifact. Source changes need paired
 Portal/Apps review and verification; local checks alone cannot prove that an
 unrelated checkout has the same revision.
+
+The generator additionally distributes the [presentation transport and its
+source/test pins](22-presentation-bridge-implementation.md). Those are derived
+from Portal's canonical TypeScript, not a general JSON Schema semantic compiler.
 
 ## Updating the contract, step by step
 
@@ -117,5 +122,5 @@ cross-repository generator drift check. Source PR CI remains a separate gate.
 
 These are declaration/tooling checks, not a full generated semantic validator,
 trusted publisher service, new bridge, shell, runner or complete application
-installer. Runtime/trust, visual and rollout gates remain open. No database shape,
+installer. Runtime acceptance, public freeze, visual and rollout gates remain open. No database shape,
 installed application, market catalogue or server `beta` setting changes here.

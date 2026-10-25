@@ -8,11 +8,13 @@ not another Status-specific frontend or a manual backend deployment procedure.
 
 | Work package | State | Evidence / next requirement |
 | --- | --- | --- |
-| P00 | In progress | Initial physical storage scope approved; [concrete D1/D3/D4 development candidate](18-runtime-and-trust-proposal.md) awaits owner approval; later storage products remain |
+| P00 | In progress | Initial physical storage scope and [D1/D3/D4 candidate A for development/isolated acceptance](18-runtime-and-trust-proposal.md#9-approval-record) approved; runtime evidence, public freeze and later storage products remain |
 | P01 | In progress | Isolated interaction prototype in [PR #189](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/189); owner visual review and broader browser acceptance remain |
 | P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; [shared structural schema/types/domains](21-descriptor-schema-implementation.md) implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); full semantic generation, signature policy and complete envelope inspection remain |
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. Other action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
-| P04..P14 | Not started | Follow dependencies and approval gates; no runner or production operation is implied by the control schema |
+| P04..P05 | Not started | Runtime integration/isolated acceptance is now authorized under candidate A; no runner/installer is delivered by the control schema |
+| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented in isolation; React root, seamless shell, sizing/navigation/drafts and real-browser acceptance remain |
+| P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
 ## First contract implementation
 
