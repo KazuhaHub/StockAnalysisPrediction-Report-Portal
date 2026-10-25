@@ -76,7 +76,13 @@ func TestSocketToEnrolledJournal(t *testing.T) {
 	frame = append(frame, length...)
 	frame = append(frame, raw...)
 	sig := ed25519.Sign(key, frame)
-	if err := Exchange(ctx, path, uint32(os.Geteuid()), raw, make([]byte, 64)); err == nil {
+	invalid := command
+	invalid.EffectID = "00000000-0000-0000-0000-000000000499"
+	invalidRaw, err := json.Marshal(invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Exchange(ctx, path, uint32(os.Geteuid()), invalidRaw, make([]byte, 64)); err == nil {
 		t.Fatal("unsigned command accepted")
 	}
 	if err := Exchange(ctx, path, uint32(os.Geteuid()), raw, sig); err != nil {

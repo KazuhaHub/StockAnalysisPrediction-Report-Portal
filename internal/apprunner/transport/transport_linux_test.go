@@ -255,3 +255,57 @@ func TestForgedOrExtendedAcknowledgementRefused(t *testing.T) {
 		})
 	}
 }
+
+type waitingJournal struct{ entered chan struct{} }
+
+func (j *waitingJournal) AdmitControlCommand(ctx context.Context, _ []byte, _ []byte) (journal.CommandAdmission, error) {
+	j.entered <- struct{}{}
+	<-ctx.Done()
+	return journal.CommandAdmission{}, ctx.Err()
+}
+func TestEightSessionLimit(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "runner-limit-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "control.sock")
+	store := &waitingJournal{entered: make(chan struct{}, 8)}
+	server, err := Listen(path, uint32(os.Geteuid()), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	clients := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() { clients <- Exchange(ctx, path, uint32(os.Geteuid()), []byte("{}"), make([]byte, 64)) }()
+	}
+	for i := 0; i < 8; i++ {
+		select {
+		case <-store.entered:
+		case <-time.After(time.Second):
+			cancel()
+			t.Fatal("expected eight in-flight admissions")
+		}
+	}
+	overflow, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := Exchange(overflow, path, uint32(os.Geteuid()), []byte("{}"), make([]byte, 64)); err == nil {
+		t.Error("ninth session admitted")
+	}
+	if len(store.entered) != 0 {
+		t.Error("ninth session reached journal")
+	}
+	cancel()
+	for i := 0; i < 8; i++ {
+		if err := <-clients; err == nil {
+			t.Error("cancelled intent acknowledged")
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
