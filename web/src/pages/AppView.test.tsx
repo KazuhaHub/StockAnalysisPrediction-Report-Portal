@@ -57,3 +57,15 @@ test('panel language changes reach the existing app frame without reloading it',
     expect.objectContaining({ type: 'rp:theme', locale: 'en' }), '*',
   ))
 })
+
+
+test('the iframe canvas follows the panel color scheme before app scripts initialize', async () => {
+  preferences.dark = true
+  const view = render(host())
+  const frame = await screen.findByTitle<HTMLIFrameElement>('Status')
+  expect(frame.style.colorScheme).toBe('dark')
+  preferences.dark = false
+  view.rerender(host())
+  expect(frame.style.colorScheme).toBe('light')
+  expect(screen.getByTitle('Status')).toBe(frame)
+})
