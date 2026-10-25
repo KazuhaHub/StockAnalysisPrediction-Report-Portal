@@ -75,6 +75,32 @@ func NewOperation(action Action, managed bool, generation uint64) (Operation, er
 	return Operation{action: action, managed: managed, generation: generation, revision: 1, stage: StageQueued}, nil
 }
 
+// OperationFromSnapshot restores only states reachable through this model. It
+// does not establish a durable lease, authority or evidence for external effects.
+func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
+	stages := operationStages(snapshot.Action, snapshot.Managed)
+	if snapshot.Generation == 0 || snapshot.Revision == 0 || len(stages) == 0 {
+		return Operation{}, ErrInvalidTransition
+	}
+	valid := false
+	if snapshot.Stage == StageFailed || snapshot.Stage == StageRecoveryRequired {
+		// Failure follows one nonterminal state; it cannot precede queued or
+		// follow complete. State revisions do not include lease heartbeats.
+		valid = snapshot.Revision >= 2 && snapshot.Revision <= uint64(len(stages))
+	} else {
+		for index, stage := range stages {
+			if snapshot.Stage == stage && snapshot.Revision == uint64(index+1) {
+				valid = true
+				break
+			}
+		}
+	}
+	if !valid {
+		return Operation{}, ErrInvalidTransition
+	}
+	return Operation{action: snapshot.Action, managed: snapshot.Managed, generation: snapshot.Generation, revision: snapshot.Revision, stage: snapshot.Stage}, nil
+}
+
 func (o Operation) Snapshot() OperationSnapshot {
 	return OperationSnapshot{Action: o.action, Managed: o.managed, Generation: o.generation, Revision: o.revision, Stage: o.stage}
 }
