@@ -108,3 +108,37 @@ func TestInspectorHelpAndOutputFailure(t *testing.T) {
 type inspectorFailedWriter struct{}
 
 func (inspectorFailedWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestInspectorRejectsSymlinkOversizeAndInvalidDescriptorInputs(t *testing.T) {
+	descriptor, frontend := inspectorFixture(t)
+	dir := t.TempDir()
+	oversized := filepath.Join(dir, "oversized.json")
+	file, err := os.Create(oversized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate((128 << 10) + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(dir, "invalid.json")
+	if err := os.WriteFile(invalid, []byte(`{"private":"NEVER_PRINT_THIS"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(dir, "descriptor-link.json")
+	if err := os.Symlink(descriptor, linked); err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{oversized, invalid, linked} {
+		var output, diagnostics bytes.Buffer
+		code := run([]string{"-descriptor", input, "-frontend", frontend}, &output, &diagnostics)
+		if code == 0 || output.Len() != 0 {
+			t.Fatalf("invalid input accepted: %d %s", code, &output)
+		}
+		if strings.Contains(diagnostics.String(), input) || strings.Contains(diagnostics.String(), "NEVER_PRINT_THIS") {
+			t.Fatal("input data leaked")
+		}
+	}
+}
