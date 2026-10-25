@@ -86,6 +86,34 @@ func TestTheSecurityPolicyRoundTrips(t *testing.T) {
 	}
 }
 
+func TestHostedCaptchaCannotBeEnabledWithoutBothKeys(t *testing.T) {
+	for _, body := range []string{
+		`{"captcha":{"provider":"turnstile","login":true,"secret_key":"secret"}}`,
+		`{"captcha":{"provider":"turnstile","login":true,"site_key":"site"}}`,
+	} {
+		s := limitsServer(t)
+		if code := saveSecurity(t, s, body); code != http.StatusBadRequest {
+			t.Errorf("%s → %d, want 400", body, code)
+		}
+		if s.st.GetSetting(setCaptchaLogin, "") != "" {
+			t.Error("a refused captcha configuration was stored")
+		}
+	}
+
+	s := limitsServer(t)
+	configured := `{"captcha":{"provider":"turnstile","login":true,"site_key":"site","secret_key":"secret"}}`
+	if code := saveSecurity(t, s, configured); code != http.StatusOK {
+		t.Fatalf("complete hosted captcha → %d, want 200", code)
+	}
+	// An omitted secret means keep the sealed value already in the store.
+	if code := saveSecurity(t, s, `{"captcha":{"provider":"turnstile","login":true,"site_key":"new-site"}}`); code != http.StatusOK {
+		t.Fatalf("hosted captcha with stored secret → %d, want 200", code)
+	}
+	if code := saveSecurity(t, s, `{"captcha":{"provider":"hcaptcha","login":true,"site_key":"h-site"}}`); code != http.StatusBadRequest {
+		t.Fatalf("different provider reusing the stored secret → %d, want 400", code)
+	}
+}
+
 // The page sends the cards it renders. A block it omits has to survive untouched — otherwise opening
 // the page and saving the 2FA card would silently switch password recovery off.
 func TestAnOmittedBlockIsLeftAlone(t *testing.T) {

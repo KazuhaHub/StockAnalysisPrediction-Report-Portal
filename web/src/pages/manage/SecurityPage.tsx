@@ -257,7 +257,7 @@ function GlobalSecuritySettings() {
           </Row>
           {tokenProvider && (
             <>
-              <Alert type="warning" showIcon title={t('security.tokenProviderNote')} />
+              <Alert type="info" showIcon title={t('security.tokenProviderNote')} />
               <Row label={t('security.siteKey')}>
                 <Input value={captcha.site_key} onChange={(e) => setCaptcha({ ...captcha, site_key: e.target.value })} />
               </Row>

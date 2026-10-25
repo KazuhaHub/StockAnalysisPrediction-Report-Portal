@@ -262,8 +262,7 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	// Validated and stored before anything else touches the store, and it answers 400 itself: a
-	// ceiling nobody meant must not land, and it must not land next to a captcha change that did.
+	// Validate and audit limits before later policy blocks, preserving partial-save behavior.
 	if in.Limits != nil {
 		before := s.limitsJSON()
 		if !s.applyLimits(w, in.Limits) {
@@ -271,8 +270,6 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 		}
 		after := s.limitsJSON()
 		if !reflect.DeepEqual(before, after) {
-			// Limits have already been stored. Audit them here even if a later policy block
-			// fails validation; the final security-save audit cannot cover that path.
 			s.recordChange(r, user, AuditPolicyChange, "security", "limits", map[string]any{"limits": after, "from": before})
 		}
 	}
@@ -283,11 +280,30 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 	if provider == "" {
 		provider = captcha.ProviderImage
 	}
-	// Validated here so the store can never hold a provider Verify would reject — which would
-	// fail closed on every login and look like a portal-wide outage.
+	// Validate before storing captcha settings so a gate whose widget cannot work is not enabled.
 	if !captcha.ValidProvider(provider) {
 		jsonError(w, http.StatusBadRequest, "unknown captcha provider")
 		return
+	}
+	siteKey := strings.TrimSpace(in.Captcha.SiteKey)
+	if provider != captcha.ProviderImage && (in.Captcha.Login || in.Captcha.Forgot || in.Captcha.Register) {
+		if siteKey == "" {
+			jsonErrorCode(w, http.StatusBadRequest, "captcha_site_key_required",
+				"a site key is required before enabling a hosted captcha provider")
+			return
+		}
+		// Provider secrets are not interchangeable. A stored secret counts only while editing the
+		// same provider; switching providers requires an explicit replacement in this request.
+		hasSecret := s.st.GetSetting(setCaptchaProvider, captcha.ProviderImage) == provider &&
+			s.st.GetSetting(setCaptchaSecret, "") != ""
+		if in.Captcha.SecretKey != nil {
+			hasSecret = strings.TrimSpace(*in.Captcha.SecretKey) != ""
+		}
+		if !hasSecret {
+			jsonErrorCode(w, http.StatusBadRequest, "captcha_secret_key_required",
+				"a secret key is required before enabling a hosted captcha provider")
+			return
+		}
 	}
 	trigger := strings.ToLower(strings.TrimSpace(in.Captcha.Trigger))
 	if trigger != triggerAfterFailure {
@@ -326,7 +342,7 @@ func (s *Server) apiAdminSecuritySave(w http.ResponseWriter, r *http.Request, us
 	}
 
 	s.st.SetSetting(setCaptchaProvider, provider)
-	s.st.SetSetting(setCaptchaSiteKey, strings.TrimSpace(in.Captcha.SiteKey))
+	s.st.SetSetting(setCaptchaSiteKey, siteKey)
 	s.st.SetSetting(setCaptchaTrigger, trigger)
 	s.st.SetSetting(setCaptchaThreshold, strconv.Itoa(in.Captcha.FailThreshold))
 	for k, on := range map[string]bool{
