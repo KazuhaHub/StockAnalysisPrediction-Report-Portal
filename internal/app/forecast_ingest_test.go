@@ -92,7 +92,11 @@ func onlyReason(t *testing.T, errs []predError) string {
 // TestClassifyPredictionsAcceptsAValidPayload is the baseline the refusals are measured against: if
 // this fails, every other case in the file is testing the wrong thing.
 func TestClassifyPredictionsAcceptsAValidPayload(t *testing.T) {
-	set, claims, errs := classify(t, predWire(nil), predTestRtype)
+	// The pure classifier uses a fixed receipt; match its horizon rather than
+	// the wall clock used by unpinned HTTP-ingest fixtures.
+	set, claims, errs := classify(t, predWire(func(m map[string]any) {
+		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
+	}), predTestRtype)
 	if len(errs) != 0 {
 		t.Fatalf("a valid payload was refused: %+v", errs)
 	}
