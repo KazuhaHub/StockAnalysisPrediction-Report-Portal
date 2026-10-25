@@ -7,3 +7,6 @@ scripts/*.sh                     text eol=lf
 Dockerfile*                      text eol=lf
 docker-entrypoint.sh             text eol=lf
 internal/appplatform/testdata/descriptor-corpus.json text eol=lf
+internal/appplatform/contract/descriptor-v2.schema.json text eol=lf
+internal/appplatform/descriptor_contract_generated.go text eol=lf
+scripts/generate_app_contract.py text eol=lf
