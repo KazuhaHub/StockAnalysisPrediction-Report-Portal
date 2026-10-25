@@ -184,8 +184,12 @@ func TestQuoteAdminDefaultsReproduceTodaysBehaviour(t *testing.T) {
 
 	// The sources here are the COMPILED-IN ones — no stub is wired in this test — so the markets
 	// column is the real predicate's answer.
-	if len(view.Sources) != 3 {
-		t.Fatalf("panel lists %d sources, want all three compiled-in ones: %+v", len(view.Sources), view.Sources)
+	if len(view.Sources) != 4 {
+		t.Fatalf("panel lists %d sources, want all four compiled-in sources: %+v", len(view.Sources), view.Sources)
+	}
+	sohu := quoteAdminRow(t, view, quoteSourceSohu)
+	if sohu.Enabled || !sohu.HistoryOnly || len(sohu.Settled) != 0 || len(sohu.Intraday) != 0 {
+		t.Fatalf("unexpected historical source grants: %+v", sohu)
 	}
 	tencent := quoteAdminRow(t, view, quoteSourceTencent)
 	if !tencent.Enabled || tencent.Position != 1 {

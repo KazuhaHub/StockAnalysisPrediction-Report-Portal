@@ -386,7 +386,7 @@ export default function QuoteSourcesPage() {
   // vendor rather than about this build's state — and keyed rather than applied to every disabled
   // row, so a fourth source does not silently inherit Yahoo's licensing disclaimer. A source with
   // nothing to declare gets no box; an empty one would read as a warning with the text missing.
-  const sourceNotice = (name: string): string => (name === 'yahoo' ? t('quoteAdmin.yahooNotice') : '')
+  const sourceNotice = (name: string): string => name === 'yahoo' ? t('quoteAdmin.yahooNotice') : name === 'sohu' ? t('quoteAdmin.sohuNotice') : ''
 
   // One line of the capability column: an interval, and the markets this source declares for it.
   //

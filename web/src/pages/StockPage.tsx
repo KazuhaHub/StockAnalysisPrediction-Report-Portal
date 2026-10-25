@@ -4,6 +4,7 @@ import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpO
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, qs, errText, ApiError } from '../api/client'
+import { fetchQuoteWithHistory } from '../lib/quoteFetch'
 import type { PredictionSet, QuoteResp, ReportPredictions, StockResp } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
@@ -214,8 +215,7 @@ export default function StockPage() {
     setQuoteError(null)
     setQuoteRefresh(null)
     setLoadedQuote((prev) => (prev && sameSymbol(prev.symbol, symbol) ? prev : null))
-    api
-      .get<QuoteResp>(`/api/quote/${encodeURIComponent(symbol)}${qs({ range: quoteRange })}`)
+    fetchQuoteWithHistory(`/api/quote/${encodeURIComponent(symbol)}${qs({ range: quoteRange })}`)
       .then((d) => {
         if (cancelled) return
         setLoadedQuote(d)

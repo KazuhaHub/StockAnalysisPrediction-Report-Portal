@@ -447,6 +447,7 @@ func TestQuotePanelAdvertisesNothingTheResolverCannotBeAskedFor(t *testing.T) {
 		asked[spec.interval] = key
 	}
 	for _, src := range c.describeSources() {
+		all.HistoryOnly = src.HistoryOnly
 		// ONE interval per column, which is the half of this test that was missing. The 分时 column
 		// used to accept EITHER intraday interval, so a source declaring only the one-session window
 		// satisfied the check for a column an operator reads as covering both — and that is exactly

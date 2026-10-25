@@ -5,6 +5,7 @@ import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, qs, errText, ApiError } from '../api/client'
+import { fetchQuoteWithHistory } from '../lib/quoteFetch'
 import type { QuoteResp } from '../api/types'
 import QuoteStrip from '../components/QuoteStrip'
 import PriceChart, { type ChartInterval } from '../components/PriceChart'
@@ -95,7 +96,7 @@ const MARKET_KEYS = new Set(['sh', 'sz', 'bj', 'hk', 'us'])
 // also goes through t(). The set is the bundles' own list rather than the response type's, because
 // which sources are compiled in is an operator's choice that moves faster than this file does: a
 // source added to the server before its label exists here prints nothing, not `quote.source.acme`.
-const SOURCE_KEYS = new Set(['tencent', 'sina', 'yahoo'])
+const SOURCE_KEYS = new Set(['tencent', 'sina', 'yahoo', 'sohu'])
 
 // Where a report can exist at all. The `stocks` table, the ingest path and the search index are
 // A-share only and this change did not widen them — what widened is quote viewing. An INDEX is
@@ -264,10 +265,9 @@ export default function QuotesApp() {
     setLoading(true)
     setError(null)
     setRefresh(null)
-    api
-      .get<QuoteResp>(
-        `/api/quote/${encodeURIComponent(symbol)}${win ? qs({ from: win.from, to: win.to }) : qs({ range })}`,
-      )
+    fetchQuoteWithHistory(
+      `/api/quote/${encodeURIComponent(symbol)}${win ? qs({ from: win.from, to: win.to }) : qs({ range })}`,
+    )
       .then((d) => {
         if (cancelled) return
         shownSymbol.current = symbol

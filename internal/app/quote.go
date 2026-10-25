@@ -96,9 +96,14 @@ type QuoteSnapshot struct {
 
 // QuoteResp is one stock's quote as the SPA receives it.
 type QuoteResp struct {
-	Symbol string `json:"symbol"`
-	Name   string `json:"name"`
-	Market string `json:"market"`
+	// HistoryOnly separates a dated historical close from a live observation. HistoryThrough is
+	// a civil date; it must never be converted into a fabricated snapshot timestamp.
+	HistoryOnly    bool   `json:"historyOnly,omitempty"`
+	HistoryThrough string `json:"historyThrough,omitempty"`
+	Stale          bool   `json:"stale,omitempty"`
+	Symbol         string `json:"symbol"`
+	Name           string `json:"name"`
+	Market         string `json:"market"`
 	// Kind is what the VENDOR calls this instrument, "stock" or "index" — never inferred from the
 	// code, because the same six digits are an index on one exchange and a company on the other
 	// (000001 is 上证指数 on Shanghai and 平安银行 on Shenzhen). See quoteMarket.kindAt.

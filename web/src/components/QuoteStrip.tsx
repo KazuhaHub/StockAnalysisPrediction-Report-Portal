@@ -212,6 +212,29 @@ export default function QuoteStrip({ data, loading, error, onRetry }: Props) {
   // may not print a bare instant either.
   const zone = zoneLabel(data.tz)
 
+  if (data.historyOnly) {
+    return (
+      <section aria-label={t('quote.title')} data-testid="quote-strip" style={shell}>
+        <Typography.Paragraph type="warning" role="status" style={{ marginBottom: 6 }}>
+          {t('quote.historyFallback')}
+        </Typography.Paragraph>
+        <div>
+          <Typography.Text strong>{data.name || data.symbol}</Typography.Text>
+          {data.name && <Typography.Text type="secondary"> {data.symbol}</Typography.Text>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <Typography.Text>{t('quote.historyClose')}</Typography.Text>
+          <Typography.Text strong data-testid="quote-last" style={{ fontSize: 26 }}>
+            {fenToYuan(s.last)}
+          </Typography.Text>
+          <Typography.Text>{currencyLabel}</Typography.Text>
+          <Typography.Text type="secondary">{t('quote.historyThrough')} {data.historyThrough}</Typography.Text>
+        </div>
+        <Typography.Text type="secondary">{t('quote.source')} {t('quote.source.sohu')}</Typography.Text>
+      </section>
+    )
+  }
+
   const stats = [
     { key: 'open', label: t('quote.open'), value: fenToYuan(s.open) },
     { key: 'prevClose', label: t('quote.prevClose'), value: fenToYuan(s.prevClose) },
@@ -235,6 +258,9 @@ export default function QuoteStrip({ data, loading, error, onRetry }: Props) {
 
   return (
     <section aria-label={t('quote.title')} data-testid="quote-strip" style={shell}>
+      {(data.stale || Boolean(error)) && (
+        <Typography.Text type="warning" role="status">{t('quote.stale')}</Typography.Text>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
         <Typography.Text strong>{data.name}</Typography.Text>
         <Typography.Text type="secondary">{data.symbol}</Typography.Text>

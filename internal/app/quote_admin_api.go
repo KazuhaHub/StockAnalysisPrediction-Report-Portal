@@ -45,6 +45,7 @@ type quoteSourceStatus struct {
 	SettledShadow []string `json:"settledShadow"`
 	CashDividends bool     `json:"cashDividends"`
 	ReportsKind   bool     `json:"reportsKind"`
+	HistoryOnly   bool     `json:"historyOnly,omitempty"`
 	// What the source DECLARES it can serve, split by interval. Markets above is the union over all
 	// of them and is therefore a wider claim than either of these: Tencent names the US there for a
 	// price it serves correctly, and must not appear in Daily for a series it answers with two rows
@@ -106,6 +107,7 @@ func (s *Server) quoteSourceStatuses(cfg quoteConfig) []quoteSourceStatus {
 			SettledShadow: src.SettledShadow,
 			CashDividends: src.CashDividends,
 			ReportsKind:   src.ReportsKind,
+			HistoryOnly:   src.HistoryOnly,
 			Daily:         src.Daily,
 			Intraday:      src.Intraday,
 			Intraday5D:    src.Intraday5D,

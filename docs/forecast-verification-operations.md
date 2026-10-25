@@ -24,6 +24,25 @@ continues automatically. Dry mode requires another Evaluate now action, preferab
 
 See ADR 0043 for priority, cooldown and evidence lifetime boundaries.
 
+### Degraded display and optional historical fallback
+
+A failed live refresh may display the last successful response for up to fifteen minutes after
+its cache expiry, with a warning and its original vendor timestamp. It does not extend that expiry
+or become evaluator evidence. If no usable live response remains, an enabled Sohu source can provide
+prior-day historical daily charts through the separate `/api/quote-history/{symbol}` route.
+
+Sohu ships disabled. Before enabling it, run a bounded `quote-probe capture --sources sohu` from
+the deployment's actual egress, inspect every record's error and retain the raw evidence. Beijing
+is deliberately unsupported. A completed capture means the capture finished, not that every
+instrument succeeded. The local fixed-panel measurement is not production-egress validation.
+Enable the source in `/manage/quotes` only after this check, then verify the historical label,
+date and source on a daily chart during a live-source outage. Intraday requests must still fail
+or use a real intraday source; historical closes must not appear as live quotes.
+
+The reader surface retries the live path using its current outage advice, even while a historical
+chart remains cached. Neither enabling this source nor clearing the display cache changes ledger
+source authority. See ADR 0044 for the wire and cache boundaries.
+
 1. Read the status card on `/manage/forecast` (mode, last pass, last error, the counters and
    `awaiting_gate`), and the Alerts card for the last delivery per channel. The heartbeat's
    per-benchmark bars and the `panics`/`stale_valve_tripped` flags are in

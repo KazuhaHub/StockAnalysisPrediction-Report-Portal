@@ -1,4 +1,10 @@
 {
+  "quote.historyFallback": "实时行情暂不可用，当前仅显示历史日线，价格不是实时价格。",
+  "quote.historyClose": "历史收盘价",
+  "quote.historyThrough": "历史数据截至",
+  "quote.source.sohu": "搜狐",
+  "quoteAdmin.sohuNotice": "仅提供历史日线图表，默认关闭。不提供实时价格、分时图或预测结算。来源只有日期，没有行情时间戳，因此排除当天数据。公开网页接口，未公布可用性保证或请求限额。",
+  "quote.stale": "行情更新暂时失败，当前显示最近一次成功数据，请留意下方行情时间。",
   "quoteAdmin.traffic.title": "请求调度",
   "quoteAdmin.traffic.total": "总请求数/分钟",
   "quoteAdmin.traffic.background": "后台请求数/分钟",

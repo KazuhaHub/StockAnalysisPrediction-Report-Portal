@@ -40,6 +40,7 @@ import (
 )
 
 const (
+	quoteStaleGrace = 15 * time.Minute
 	// This cache is its OWN instance with its OWN bounds, and deliberately not the mermaidChartCache
 	// next door. That one is keyed by user, source and theme and holds the rendered SVGs a report's
 	// PDF export needs; it is process-wide at 512 entries and 32 MiB, and one entry per symbol per
@@ -218,8 +219,9 @@ func (g quoteCapability) covers(m *quoteMarket, iv quoteInterval) bool {
 // quoteSource is one vendor, named so the health counters and QuoteResp.Source agree without a
 // second table mapping one to the other.
 type quoteSource struct {
-	name  string
-	fetch quoteFetchFunc
+	historyOnly bool
+	name        string
+	fetch       quoteFetchFunc
 	// These are evidence capabilities, not operator-editable preferences.
 	cashDividends bool
 	reportsKind   bool
@@ -521,6 +523,7 @@ func defaultQuoteSources() []quoteSource {
 		// quote_yahoo.go for what it declares and why the operator rather than the build decides
 		// whether to depend on it. It is the only source that declares a US daily series.
 		quoteYahooSource(),
+		quoteSohuSource(),
 	}
 }
 
@@ -589,6 +592,7 @@ const (
 // by orDefaults below rather than obeyed: an empty order would mean "every source off" and a zero
 // TTL would mean "expire on arrival", and neither is a thing anybody configured.
 type quoteConfig struct {
+	HistoryOnly bool     // Selects the separate historical display path, never a live snapshot.
 	Order       []string // source names, in the order to try
 	TTLOpen     time.Duration
 	TTLClosed   time.Duration
@@ -634,6 +638,9 @@ func (cfg quoteConfig) orDefaults() quoteConfig {
 // field and never a calendar.
 func (cfg quoteConfig) ttlFor(resp *QuoteResp, iv quoteInterval) time.Duration {
 	cfg = cfg.orDefaults()
+	if resp != nil && resp.HistoryOnly {
+		return time.Hour
+	}
 	unknown := resp != nil && resp.Snapshot.Session == quoteSessionUnknown
 	if iv.intraday() {
 		if unknown {
@@ -917,6 +924,28 @@ func (c *quoteCache) get(key string) (*QuoteResp, time.Duration, bool) {
 	return entry.resp, left, true
 }
 
+// A failed refresh may reuse one recently expired display entry without changing its expiry or
+// vendor timestamp. The ordinary LRU bounds still apply; this is not a second historical store.
+func (c *quoteCache) lookupForRefresh(key string) (*QuoteResp, time.Duration, *quoteCacheEntry) {
+	c.init()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if element := c.entries[key]; element != nil {
+		entry := element.Value.(*quoteCacheEntry)
+		now := c.now()
+		if entry.expires.After(now) {
+			c.lru.MoveToFront(element)
+			return entry.resp, entry.expires.Sub(now), nil
+		}
+		if now.Before(entry.expires.Add(quoteStaleGrace)) {
+			copy := *entry
+			return nil, 0, &copy
+		}
+		c.removeLocked(element)
+	}
+	return nil, 0, nil
+}
+
 func (c *quoteCache) put(key string, resp *QuoteResp, ttl time.Duration) {
 	c.init()
 	c.mu.Lock()
@@ -1067,7 +1096,7 @@ func (c *quoteCache) sourcesFor(cfg quoteConfig, t quoteTarget, iv quoteInterval
 	out := make([]quoteSource, 0, len(cfg.Order))
 	for _, name := range cfg.Order {
 		src, ok := byName[name]
-		if !ok || !src.serves(t, iv) {
+		if !ok || src.historyOnly != cfg.HistoryOnly || !src.serves(t, iv) {
 			continue
 		}
 		out = append(out, src)
@@ -1184,7 +1213,11 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	c.init()
 	cfg = cfg.orDefaults()
 	key := quoteCacheKey(market, code, bars, iv, win)
-	if resp, left, ok := c.get(key); ok {
+	if cfg.HistoryOnly {
+		key = "history:" + key
+	}
+	resp, left, stale := c.lookupForRefresh(key)
+	if resp != nil {
 		return resp, true, left, nil
 	}
 
@@ -1201,6 +1234,9 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 		if fl.err != nil {
 			return nil, false, 0, fl.err
 		}
+		if fl.resp.Stale {
+			return fl.resp, true, 0, nil
+		}
 		// A follower is served the leader's answer, which is in the LRU by now, and reports it as
 		// cached. The flag answers "did this response cost an upstream call", which is the question
 		// both the 缓存 chip and Cache-Control actually need answered — a follower made none.
@@ -1213,7 +1249,8 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	// Re-checked under the flight: a request that arrived while the PREVIOUS flight was between
 	// storing its result and deleting its map entry would otherwise start a second identical call
 	// against a cache that already has the answer.
-	if resp, left, ok := c.get(key); ok {
+	resp, left, stale = c.lookupForRefresh(key)
+	if resp != nil {
 		fl.resp = resp
 		c.endFlight(key, fl)
 		return resp, true, left, nil
@@ -1236,7 +1273,12 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	// and 5d ranges let a request choose one, so the same market and the same code can be two
 	// different questions. It travels into quoteCacheKey above for the same reason.
 	fl.resp, fl.err = c.load(loadCtx, cfg, market, code, bars, iv, win)
-	if fl.err == nil {
+	if fl.err != nil && stale != nil && c.clockNow().Before(stale.expires.Add(quoteStaleGrace)) {
+		copy := *stale.resp
+		copy.Stale = true
+		fl.resp, fl.err = &copy, nil
+	}
+	if fl.err == nil && !fl.resp.Stale {
 		ttl = cfg.ttlFor(fl.resp, iv)
 		c.put(key, fl.resp, ttl)
 	}
@@ -1244,6 +1286,9 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	c.endFlight(key, fl)
 	if err != nil {
 		return nil, false, 0, err
+	}
+	if resp.Stale {
+		return resp, true, 0, nil
 	}
 	return resp, false, ttl, nil
 }
@@ -1549,6 +1594,7 @@ func (c *quoteCache) clear() quoteCacheStats {
 // quoteSourceInfo is one compiled-in source as the panel sees it, before the operator's order and
 // the health counters are laid over it.
 type quoteSourceInfo struct {
+	HistoryOnly   bool
 	Name          string
 	Settled       []string
 	SettledShadow []string
@@ -1580,6 +1626,7 @@ func (c *quoteCache) describeSources() []quoteSourceInfo {
 	for _, src := range c.sources {
 		out = append(out, quoteSourceInfo{
 			Name:          src.name,
+			HistoryOnly:   src.historyOnly,
 			Settled:       src.marketIDsFor(quoteIntervalSettled),
 			SettledShadow: src.marketIDsFor(quoteIntervalSettledShadow),
 			CashDividends: src.cashDividends,

@@ -42,6 +42,15 @@ const SH: QuoteResp = {
   cached: false,
 }
 
+it('labels historical fallback with a civil date and does not display live movement or time', () => {
+  render(<QuoteStrip data={{ ...SH, source: 'sohu', historyOnly: true, historyThrough: '2026-10-23', snapshot: { ...SH.snapshot, asOf: '', session: 'unknown' } }} loading={false} />)
+  expect(screen.getByText('quote.historyFallback')).toBeTruthy()
+  expect(screen.getByText(/2026-10-23/)).toBeTruthy()
+  expect(screen.queryByTestId('quote-change')).toBeNull()
+  expect(screen.queryByTestId('quote-session')).toBeNull()
+  expect(screen.queryByText('quote.asOf')).toBeNull()
+})
+
 // 艾融软件 (bj830799) from tencent_fqkline_bj830799.json: a suspended stock, which every vendor
 // reports as high / low / volume all zero with changePct "0.00".
 const BJ: QuoteResp = {
@@ -98,6 +107,13 @@ const IDX: QuoteResp = {
   name: '上证指数',
   kind: 'index',
 }
+
+it('retains the vendor timestamp and marks a failed refresh as stale', () => {
+  render(<QuoteStrip data={{ ...SH, stale: true }} loading={false} error={new Error('offline')} />)
+  expect(screen.getByTestId('quote-last').textContent).toBe('33.35')
+  expect(screen.getByText('quote.stale')).toBeTruthy()
+  expect(screen.getByText(/2026-09-04 16:14:58/)).toBeTruthy()
+})
 
 function withSnapshot(base: QuoteResp, over: Partial<QuoteSnapshot>): QuoteResp {
   return { ...base, snapshot: { ...base.snapshot, ...over } }
