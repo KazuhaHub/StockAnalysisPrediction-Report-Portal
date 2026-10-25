@@ -109,7 +109,13 @@ free, genuinely "download and install", and realistic for a small self-hosted to
    (`ScopePermissionModal`, driven by `install?preview=1` for uploads and the index
    entry for market installs), and a live theme handshake (`rp:theme` re-posted on
    change). One market only — the batch plugin market was removed.
-3. **Phase 3 (paused):** polish, a small developer SDK, and docs.
+3. **Phase 3 (implemented 2026-10-24):** the shared Apps repository supplies a
+   React/TypeScript/Ant Design SDK, tested application generator, maintained demo
+   source, UI/interaction standard and publication checks. See the
+   [authoring guide](../../apps/README.md#maintained-application-development-standard).
+   Each ZIP bundles its own dependencies and retains the existing sandbox/bridge;
+   this does not adopt remote modules or run app code in the host React tree.
+   Legacy published archives remain immutable and protocol-compatible.
 
 ## Appendix — layering
 

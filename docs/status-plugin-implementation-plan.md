@@ -1,12 +1,21 @@
 # Status application: implementation and execution plan
 
-Status: implementation and deployment acceptance in progress. The shared Apps
-repository contains the independent runtime, approved SQLite schema, monitors,
-sandbox UI and release-artifact builder. The Portal platform is PR #142, depending
-on notification PR #141. Neither is yet merged or deployed. Deployment preparation
-has started at the owner's request; published releases, real pairing and provider
-acceptance remain gated. The full acceptance ledger is maintained in the Apps
-repository at `apps/status/docs/acceptance.md`.
+This is the historical planning snapshot. The maintained
+[implementation plan](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/docs/implementation-plan.md),
+[acceptance ledger](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/apps/status/docs/acceptance.md)
+and [production rollout](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/apps/status/docs/react-ui-production-rollout.md)
+live in the shared Apps repository. Notification PR #141 and platform PR #142
+have been merged and deployed. Status Beta.3 is installed through the canonical
+market with its independent runtime and configured monitoring. Qwen billing
+authorization, recipients/grants and manual assistive-technology review remain
+separate disclosed configuration/acceptance work.
+
+The owner's later unified-plugin requirement supersedes the original
+framework-neutral proposal: maintained applications use React, TypeScript,
+Ant Design and the shared SDK/template under the
+[development standard](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/docs/plugin-development-standard.md).
+The inventory and proposed steps below retain their original planning context;
+use the linked current documents for operational status and executable commands.
 
 Prepared: 2026-10-21. Baseline: notification consolidation PR #141, commit
 `b4741355118c28d95dcf3c096115963ce5936f01`. Verify that PR's merge and deployed
@@ -489,8 +498,9 @@ and built frontend assets at its root. Service executables/images are separate
 artifacts, never files the Portal attempts to execute after installing a ZIP.
 
 Give each app its own package metadata and test/build commands. Shared tooling
-must not import app business logic. Add shared UI only after there is a real
-second consumer; do not force every app to use one frontend framework. Do not
+must not import app business logic. Maintained frontends now use the common
+React/TypeScript/Ant Design SDK and template under the subsequent unified standard.
+Independent application backends, versions and storage remain separate. Do not
 create a single cross-app Go module, database, runtime or version solely because
 source shares a repository.
 

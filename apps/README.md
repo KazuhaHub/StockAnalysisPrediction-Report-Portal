@@ -17,6 +17,39 @@ and explicit overrides. It is not removed when the compiled default changes.
 See [the migration runbook](../docs/app-market-migration.md) for upgrade behavior,
 explicit legacy export and rollback.
 
+## Maintained application development standard
+
+New and maintained applications are authored in the shared Apps repository using
+React, TypeScript, Ant Design and `@portal-app/sdk`. Follow its
+[development standard](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/blob/main/docs/plugin-development-standard.md)
+and start from the tested generator/template rather than copying this directory's
+historical single-file demo or handwritten bridge messages.
+
+From that repository's root:
+
+```sh
+python3 scripts/create-app.py my-app --name "My app"
+npm install
+python3 scripts/plugin-standard.py
+npm run typecheck
+npm test --workspace=apps/my-app/frontend
+python3 scripts/build-app-frontend.py my-app
+python3 scripts/catalogue.py package my-app
+```
+
+The SDK supplies trusted parent-window request handling and the host theme snapshot.
+Use its `PortalAppProvider` for Ant Design tokens/locales. Keep the initial page
+focused on the reader's task, configuration behind an administrator entry, advanced
+fields collapsed, and validation errors/drafts inside the active dialog. Include
+light/dark, narrow-layout, keyboard, locale, authorization and lifecycle checks.
+
+Each ZIP bundles its own compiled dependencies. Sharing a UI foundation does not
+load code into Portal's React tree or relax the null-origin iframe sandbox. Optional
+backends retain independent deployment, storage and keys and use the reviewed
+viewer-bound extension connection. No app may read host cookies/DOM or patch host
+business pages. Existing third-party ZIP protocol compatibility is unchanged;
+the shared repository enforces its maintained-source standard before publication.
+
 ## Manifest (`app.json`)
 
 ```json
@@ -34,7 +67,12 @@ An admin sees the requested scopes and approves them at install (the permission
 prompt). `query` grants `GET /api/v1/*`; `ingest` additionally grants `POST`/`DELETE`
 report writes. The catch-all `all` scope is never granted to an app.
 
-## Talking to the portal (the bridge)
+## Bridge wire protocol reference
+
+Use the shared SDK when authoring an app. The messages below document the wire
+contract for host compatibility; they are not a complete client implementation.
+In particular, a client must validate the parent source, bind replies, bound
+pending work/timeouts and dispose its listeners correctly, as the SDK does.
 
 The iframe runs with `sandbox="allow-scripts"` — a null origin, so it cannot read
 the host DOM, the session cookie, or localStorage. It reaches the portal only by
@@ -64,11 +102,10 @@ window.addEventListener('message', (e) => {
 Install `demo-symbols.zip` under **Manage → Apps** to try the whole chain:
 empty hub → install → a card appears → open it → it reads the API through the bridge.
 
-Rebuild the zip after editing:
-
-```sh
-cd demo-symbols && zip -j -X ../demo-symbols.zip app.json index.html
-```
+The archive is retained for older binaries and explicit legacy catalogue overrides.
+Do not rebuild or replace its published bytes to migrate styling. The maintained
+React demo source lives in the Apps repository; publish a distinct immutable
+version there using its normal release and catalogue checks.
 
 ### Notification publication capability
 
