@@ -13,10 +13,18 @@ PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 ENV = {"PATH": PATH, "LC_ALL": "C"}
 
 
+class ProbeCommandError(RuntimeError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 def command(*args):
-    result = subprocess.run(args, env=ENV, check=True, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(args, env=ENV, check=False, capture_output=True, text=True, timeout=60)
     if len(result.stdout) + len(result.stderr) > 65536:
         raise RuntimeError("unexpected probe command output size")
+    if result.returncode:
+        raise ProbeCommandError(result.returncode, f"{Path(args[0]).name} failed ({result.returncode}): {result.stderr[:2048]}")
     return result.stdout.strip()
 
 
@@ -49,6 +57,28 @@ def require_mount_owner(mountpoint, loop):
         raise RuntimeError("owned mount lacks required explicit options")
 
 
+def owned_mount_present(mountpoint, loop):
+    try:
+        require_mount_owner(mountpoint, loop)
+    except ProbeCommandError as error:
+        if error.code == 1:  # findmnt reports no exact mount point.
+            return False
+        raise
+    return True
+
+
+def discover_owned_loop(image):
+    data = json.loads(command("losetup", "--json", "--associated", str(image), "--output", "NAME,BACK-FILE"))
+    devices = data.get("loopdevices", [])
+    if not devices:
+        return None
+    if len(devices) != 1 or devices[0].get("back-file") != str(image):
+        raise RuntimeError("uncertain loop allocation requires worker teardown")
+    loop = devices[0].get("name", "")
+    require_loop_owner(loop, image)
+    return loop
+
+
 def main(args):
     require_disposable(args)
     root = Path(tempfile.mkdtemp(prefix="portal-quota-acceptance-", dir="/tmp"))
@@ -58,7 +88,6 @@ def main(args):
     mountpoint = root / "mount"
     mountpoint.mkdir()
     loop = None
-    mounted = False
     report = {"profile": "xfs-project-quota/disposable-v1-dev", "kernel": os.uname().release,
               "architecture": os.uname().machine, "execution_ready": False, "workloads": []}
     try:
@@ -70,7 +99,6 @@ def main(args):
         report["mkfs_version"] = command("mkfs.xfs", "-V")
         command("mkfs.xfs", "-f", loop)
         command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
-        mounted = True
         require_mount_owner(mountpoint, loop)
         quota_state = command("xfs_quota", "-x", "-c", "state -p", str(mountpoint))
         if "Accounting: ON" not in quota_state or "Enforcement: ON" not in quota_state:
@@ -87,7 +115,11 @@ def main(args):
             os.chown(folder, 10000, 10000)
             folder.chmod(0o700)
             folders[name] = folder
-        workload = Path(__file__).with_name("quota_workload.py").resolve()
+        # The synthetic UID must not depend on traversing the runner's private
+        # checkout/home. Keep the reviewed workload in the root-owned fixture.
+        workload = root / "workload.py"
+        workload.write_bytes(Path(__file__).with_name("quota_workload.py").read_bytes())
+        workload.chmod(0o444)
 
         def run_workload(mode, folder):
             output = command("setpriv", "--reuid=10000", "--regid=10000", "--clear-groups",
@@ -103,20 +135,23 @@ def main(args):
         require_loop_owner(loop, image)
         require_mount_owner(mountpoint, loop)
         command("umount", str(mountpoint))
-        mounted = False
         command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
-        mounted = True
         require_mount_owner(mountpoint, loop)
         run_workload("after-remount", folders["bytes"])
         report["remount_enforcement"] = True
     finally:
         # Never unmount, detach or delete a resource whose ownership changed.
         # On cleanup failure preserve it for this ephemeral worker's teardown.
-        if mounted:
-            require_loop_owner(loop, image)
-            require_mount_owner(mountpoint, loop)
-            command("umount", str(mountpoint))
+        # A failed/timed-out command can still have attached or mounted. Observe
+        # the owned resources instead of trusting an acknowledgement boolean.
+        if loop is None and image.exists():
+            loop = discover_owned_loop(image)
         if loop is not None:
+            require_loop_owner(loop, image)
+            if owned_mount_present(mountpoint, loop):
+                command("umount", str(mountpoint))
+            if owned_mount_present(mountpoint, loop):
+                raise RuntimeError("owned filesystem remained mounted after unmount")
             require_loop_owner(loop, image)
             command("losetup", "--detach", loop)
         shutil.rmtree(root)

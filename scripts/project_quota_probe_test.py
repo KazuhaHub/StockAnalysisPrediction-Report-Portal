@@ -51,6 +51,23 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     probe.require_mount_owner(Path("/tmp/owned-mount"), "/dev/loop7")
 
+    def test_missing_mount_is_observed_but_errors_are_not_absence(self):
+        with patch.object(probe, "command", side_effect=probe.ProbeCommandError(1, "no exact mount")):
+            self.assertFalse(probe.owned_mount_present(Path("/tmp/owned"), "/dev/loop7"))
+        with patch.object(probe, "command", side_effect=probe.ProbeCommandError(2, "inspection failed")):
+            with self.assertRaises(RuntimeError):
+                probe.owned_mount_present(Path("/tmp/owned"), "/dev/loop7")
+
+    def test_unknown_attach_acknowledgement_can_find_only_exact_owned_image(self):
+        response = '{"loopdevices":[{"name":"/dev/loop7","back-file":"/tmp/owned-image"}]}'
+        with patch.object(probe, "command", return_value=response):
+            self.assertEqual(probe.discover_owned_loop(Path("/tmp/owned-image")), "/dev/loop7")
+        with patch.object(probe, "command", return_value='{"loopdevices":[]}'):
+            self.assertIsNone(probe.discover_owned_loop(Path("/tmp/owned-image")))
+        with patch.object(probe, "command", return_value='{"loopdevices":[{"name":"/dev/sda","back-file":"/tmp/foreign-image"}]}'):
+            with self.assertRaises(RuntimeError):
+                probe.discover_owned_loop(Path("/tmp/owned-image"))
+
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(RuntimeError, "without EDQUOT"):
