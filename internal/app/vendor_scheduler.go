@@ -158,6 +158,14 @@ func (s *vendorScheduler) acquire(ctx context.Context, source string, priority v
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// A queue/budget wake-up can precede expiry but lose the mutex until after it. Selecting
+		// the deadline only while asleep would then admit an already expired reader.
+		select {
+		case <-deadline.C:
+			state.deferred++
+			return nil, &vendorDeferredError{Source: source, Reason: "queue_timeout"}
+		default:
+		}
 		now := s.now()
 		if now.Before(state.coolingUntil) || state.probing {
 			state.deferred++

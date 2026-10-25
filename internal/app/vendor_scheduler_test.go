@@ -64,6 +64,46 @@ func TestVendorTrafficClassifiesActualFailuresAndBoundsLatency(t *testing.T) {
 	}
 }
 
+func TestVendorQueueDeadlineIsRecheckedAfterMutexReacquisition(t *testing.T) {
+	s := newVendorScheduler()
+	clock := time.Now()
+	s.now = func() time.Time { return clock }
+	done, err := s.acquire(context.Background(), "tencent", vendorForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done(http.StatusOK, "", nil)
+	result := make(chan error, 1)
+	go func() {
+		finish, err := s.acquire(context.Background(), "tencent", vendorForeground)
+		if finish != nil {
+			finish(http.StatusOK, "", nil)
+		}
+		result <- err
+	}()
+	waitVendorQueued(t, s, "tencent", 1)
+	// A waiter can wake for a budget/queue change and then lose the mutex until its queue deadline.
+	// Expiry must still prevent dispatch even though the timer was not the selected wake-up case.
+	s.mu.Lock()
+	clock = clock.Add(2 * time.Second)
+	s.notifyLocked()
+	time.Sleep(vendorQueueWait + 25*time.Millisecond)
+	s.mu.Unlock()
+	select {
+	case err := <-result:
+		var deferred *vendorDeferredError
+		if !errors.As(err, &deferred) || deferred.Reason != "queue_timeout" {
+			t.Fatalf("expired waiter dispatched: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expired waiter did not return")
+	}
+	stats := s.snapshot()["tencent"]
+	if stats.Requests != 1 || stats.Deferred != 1 || stats.Queued != 0 {
+		t.Fatalf("expired admission spent vendor budget: %+v", stats)
+	}
+}
+
 func TestVendorSchedulerForegroundOvertakesHistoryAndCancellationRemovesWaiter(t *testing.T) {
 	s := newVendorScheduler()
 	clock := time.Now()
