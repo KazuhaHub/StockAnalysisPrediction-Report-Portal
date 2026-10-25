@@ -98,6 +98,10 @@ The same applicable fixtures run on SQLite and PostgreSQL, including:
 - Read-only dry restore and fenced full restore of pending control state.
 - Stronger live key revocation and refused key-identity replacement, with rollback.
 - Corrupt artifact restore refusal, with the previous target left intact.
+- Intact release restore and rejected descriptor/metadata/ZIP-entry mismatch,
+  with rollback preserving the target on both databases. Test signature bytes
+  are synthetic: restored trust stays disabled, and signature admission remains
+  separate from these integrity checks.
 - Account deletion, recreated username, OU deletion and policy invalidation,
   including actor plans created before an installation exists.
 - Existing backup, principal cleanup and migration-inspection integration fixtures.

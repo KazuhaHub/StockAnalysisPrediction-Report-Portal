@@ -1,12 +1,16 @@
 package app
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func platformTestInsert(t *testing.T, e migExec, table string, values map[string]any) {
@@ -156,4 +160,85 @@ func TestAppPlatformRestoreRejectsCorruptArtifact(t *testing.T) {
 }
 func TestPostgresAppPlatformRestoreRejectsCorruptArtifact(t *testing.T) {
 	testPlatformRestoreRejectsCorruptArtifact(t, true)
+}
+
+func testPlatformRestoreReleaseIntegrity(t *testing.T, postgres bool) {
+	st := platformTestStore(t, postgres)
+	platformSeedPublisher(t, st.poolExec(), "fixture-publisher")
+	platformSeedKey(t, st, bytes.Repeat([]byte{1}, 32))
+	var archive bytes.Buffer
+	w := zip.NewWriter(&archive)
+	f, err := w.Create("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("<!doctype html><title>Fixture</title>")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../appplatform/testdata/descriptors/static.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := archive.Bytes()
+	sum := sha256.Sum256(content)
+	frontend := hex.EncodeToString(sum[:])
+	raw = bytes.ReplaceAll(raw, []byte("example-publisher"), []byte("fixture-publisher"))
+	raw = bytes.ReplaceAll(raw, []byte(strings.Repeat("a", 64)), []byte(frontend))
+	parsed, err := appplatform.ParseDescriptor(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	platformTestInsert(t, st.poolExec(), "frontend_artifacts", map[string]any{"sha256": frontend, "archive_bytes": len(content), "content": content, "created_ms": 1})
+	platformTestInsert(t, st.poolExec(), "releases", map[string]any{
+		"sha256": parsed.SHA256, "app_id": parsed.Manifest.ID, "publisher_id": parsed.Manifest.Publisher, "version": parsed.Manifest.Version,
+		"descriptor": raw, "signature": bytes.Repeat([]byte{2}, 64), "verification_key_id": "fixture-key", "trust_revision": 1,
+		"verified_ms": 1, "frontend_sha256": frontend, "managed": 0, "created_ms": 1,
+	})
+	// These synthetic signature bytes are not trusted. Restore validates stored
+	// integrity and disables publisher trust; signature admission is separate.
+	if _, err := st.restoreFrom(bytes.NewReader(dumpOf(t, st)), true); err != nil {
+		t.Fatalf("intact release refused: %v", err)
+	}
+	for _, mutation := range []struct {
+		name, statement string
+	}{
+		{"metadata", `UPDATE app_platform_releases SET version='9.9.9'`},
+		{"descriptor", `UPDATE app_platform_releases SET descriptor=?`},
+		{"frontend_entry", `UPDATE app_platform_releases SET descriptor=?,sha256=?`},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			valid := dumpOf(t, st)
+			switch mutation.name {
+			case "descriptor":
+				mustExec(t, st, mutation.statement, []byte("{}"))
+			case "frontend_entry":
+				missing := bytes.ReplaceAll(raw, []byte("index.html"), []byte("missing.html"))
+				sum := sha256.Sum256(missing)
+				mustExec(t, st, mutation.statement, missing, hex.EncodeToString(sum[:]))
+			default:
+				mustExec(t, st, mutation.statement)
+			}
+			bad := dumpOf(t, st)
+			if _, err := st.restoreFrom(bytes.NewReader(valid), true); err != nil {
+				t.Fatal(err)
+			}
+			before := dumpOf(t, st)
+			if _, err := st.restoreFrom(bytes.NewReader(bad), true); err == nil {
+				t.Fatal("inconsistent release accepted")
+			}
+			if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, st))) {
+				t.Fatal("refused release restore changed target")
+			}
+		})
+	}
+}
+
+func TestAppPlatformRestoreReleaseIntegrity(t *testing.T) {
+	testPlatformRestoreReleaseIntegrity(t, false)
+}
+func TestPostgresAppPlatformRestoreReleaseIntegrity(t *testing.T) {
+	testPlatformRestoreReleaseIntegrity(t, true)
 }
