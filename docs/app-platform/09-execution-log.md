@@ -12,7 +12,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P01 | In progress | Isolated interaction prototype in [PR #189](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/189); owner visual review and broader browser acceptance remain |
 | P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; [shared structural schema/types/domains](21-descriptor-schema-implementation.md) implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); [exact-byte publisher verification](24-publisher-signature-verification.md) implemented in isolation; full semantic generation, [trust/staged-release transaction integration](25-trust-and-release-storage.md) implemented; full activation trust integration and complete envelope inspection remain |
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
-| P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, authenticated transport and physical lifecycle remain |
+| P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
 | P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md) implemented; actual provider admission, data/execution/activation and complete managed/static installer remain |
 | P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented in isolation; React root, seamless shell, sizing/navigation/drafts and real-browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
@@ -121,3 +121,16 @@ not establish completed physical stages or runtime acceptance.
    physical proposal. See [the accepted initial scope](13-control-storage-spec.md).
 5. Continue through P03..P14; do not release these internal primitives as a complete
    app platform or install an app-specific production backend as a shortcut.
+
+## Private Linux intent transport
+
+[Local intent transport](31-runner-local-intent-transport.md) connects kernel peer
+checks and bounded one-request streams to the existing signed journal admission.
+The endpoint is opt-in internal code, with a same-user 0700/0600 development
+profile. It does not register a service, enroll production trust, return physical
+receipts or change server version configuration. The previous signed-command
+source `a719efcd30f5bd11506e2110660703411245140e` passed full test run
+[40245984411](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40245984411)
+and Linux daemon run
+[40245984401](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40245984401).
+Current transport Linux execution evidence must be checked on its own source CI.
