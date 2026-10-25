@@ -61,24 +61,45 @@ export function noteSessionLost(status: number, code?: string) {
   if (status === 401 && code === SESSION_GONE) sessionLost?.()
 }
 
-async function request<T>(method: string, url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
-  const headers: Record<string, string> = { ...(extraHeaders ?? {}) }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
-  const res = await fetch(url, {
-    method,
-    headers: Object.keys(headers).length ? headers : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    credentials: 'same-origin',
-  })
-  const text = await res.text()
+let connectionError: string | null = null
+const connectionListeners = new Set<() => void>()
+export const getConnectionError = () => connectionError
+export function subscribeConnection(listener: () => void) {
+  connectionListeners.add(listener)
+  return () => { connectionListeners.delete(listener) }
+}
+export function clearConnectionError() {
+  const recovering = connectionError !== null
+  connectionError = null
+  connectionListeners.forEach(listener => listener())
+  if (recovering && typeof window !== 'undefined') window.dispatchEvent(new Event('rp:connection-restored'))
+}
+function unavailable(status: number, code: string): never {
+  connectionError = code
+  connectionListeners.forEach(listener => listener())
+  throw new ApiError(status, code, code)
+}
+async function checkedFetch(url: string, options: RequestInit): Promise<Response> {
+  try { return await fetch(url, options) }
+  catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    return unavailable(0, 'network_unavailable')
+  }
+}
+async function responseJSON<T>(res: Response): Promise<T> {
+  let text: string
+  try { text = await res.text() }
+  catch { return unavailable(0, 'network_unavailable') }
   let data: any = null
   if (text) {
-    try {
-      data = JSON.parse(text)
-    } catch {
+    try { data = JSON.parse(text) }
+    catch {
+      // A reverse proxy or stale SPA fallback is not a successful API response.
+      if (res.ok || [502, 503, 504].includes(res.status)) return unavailable(res.status, 'server_unavailable')
       data = text
     }
   }
+  if ([502, 503, 504].includes(res.status) && !data?.code) return unavailable(res.status, 'server_unavailable')
   if (!res.ok) {
     const msg = (data && typeof data === 'object' && data.error) || res.statusText || 'request failed'
     const code = data && typeof data === 'object' && typeof data.code === 'string' ? data.code : undefined
@@ -88,24 +109,21 @@ async function request<T>(method: string, url: string, body?: unknown, extraHead
   return data as T
 }
 
+async function request<T>(method: string, url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { ...(extraHeaders ?? {}) }
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const res = await checkedFetch(url, {
+    method,
+    headers: Object.keys(headers).length ? headers : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  })
+  return responseJSON<T>(res)
+}
+
 async function requestForm<T>(method: string, url: string, body: FormData): Promise<T> {
-  const res = await fetch(url, { method, body, credentials: 'same-origin' })
-  const text = await res.text()
-  let data: any = null
-  if (text) {
-    try {
-      data = JSON.parse(text)
-    } catch {
-      data = text
-    }
-  }
-  if (!res.ok) {
-    const msg = (data && typeof data === 'object' && data.error) || res.statusText || 'request failed'
-    const code = data && typeof data === 'object' && typeof data.code === 'string' ? data.code : undefined
-    noteSessionLost(res.status, code)
-    throw new ApiError(res.status, msg, code, data)
-  }
-  return data as T
+  const res = await checkedFetch(url, { method, body, credentials: 'same-origin' })
+  return responseJSON<T>(res)
 }
 
 export const api = {

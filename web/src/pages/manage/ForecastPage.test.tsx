@@ -91,6 +91,13 @@ const show = (initial = '/') =>
   )
 
 describe('ForecastPage', () => {
+  it('opens alert settings from a dashboard deep link without sending a test alert', async () => {
+    apiMock.get.mockImplementation(byUrl(on))
+    apiMock.post.mockClear()
+    show('/manage/forecast?section=alerts')
+    expect(await screen.findByLabelText('forecast.alert.email')).toBeTruthy()
+    expect(apiMock.post).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()
@@ -118,7 +125,7 @@ describe('ForecastPage', () => {
   it('reports a failed load instead of presenting zero counts as the state', async () => {
     apiMock.get.mockImplementation(() => Promise.reject(new Error('offline')))
     show()
-    await waitFor(() => expect(screen.getByText('common.loadFailed')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('common.loadFailed').length).toBeGreaterThan(0))
     // The four backlog numbers are exactly what must not be invented: "0 due" is a real and
     // reassuring answer, so a page that printed it after a failed request would be lying.
     expect(screen.queryByText('forecast.eval.due')).toBeNull()

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Card, Descriptions, Space, Tag, Typography } from 'antd'
 import { SettingOutlined } from '@ant-design/icons'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
@@ -34,6 +34,7 @@ export default function ForecastPage() {
 
 function GlobalForecastOperations() {
   const { t } = useTranslation()
+  const [params] = useSearchParams()
 
   const [settings, setSettings] = useState<ForecastSettings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,7 +42,10 @@ function GlobalForecastOperations() {
   const [loadErr, setLoadErr] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ledgerOpen, setLedgerOpen] = useState(false)
-  const [section, setSection] = useState('status')
+  const [section, setSection] = useState(() => {
+    const requested = params.get('section') ?? ''
+    return ['status', 'diagnostics', 'alerts', 'access'].includes(requested) ? requested : 'status'
+  })
 
   const load = () => {
     setLoading(true)

@@ -292,7 +292,7 @@ function ProviderForm({
   }
 
   return (
-    <Form form={form} name={`sso-${kind}`} layout="vertical" disabled={saving}>
+    <Form className="rp-sso-provider-form" form={form} name={`sso-${kind}`} layout="vertical" disabled={saving}>
       {!publicUrl && <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={t('sso.needPublicUrl')} />}
       <SettingsWorkspace active={section} onChange={setSection} sections={[
         { key: 'connection', label: t('sso.section.connection') },
@@ -519,11 +519,24 @@ export default function SSOPage() {
     providers.find((p) => p.kind === kind) ?? { ...emptyProvider(kind), ...(spDefaults[kind] ?? {}) }
 
   return (
-    <Card>
+    <div className="rp-sso-page">
       <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
-      {/* Network policy applies to every provider and saves independently. */}
-      <Collapse ghost style={{ marginBottom: 16 }} items={[{ key: 'network', label: t('sso.networkTitle'), children: (
-      <Space align="start" size={12} style={{ marginBottom: 16 }}>
+      <Tabs
+        items={[
+          ...(['saml', 'oidc'] as const).map((kind) => ({
+            key: kind,
+            label: kind === 'saml' ? t('sso.tabSaml') : t('sso.tabOidc'),
+            children: (
+              <ProviderForm
+                kind={kind}
+                provider={forKind(kind)}
+                groups={groups}
+                publicUrl={publicUrl}
+                onSaved={load}
+              />
+            ),
+          })),
+          { key: 'network', label: t('sso.networkTitle'), children: <div className="rp-sso-network"><Typography.Paragraph type="secondary">{t('sso.providersIndependent')}</Typography.Paragraph>      <Space align="start" size={12} style={{ marginBottom: 16 }}>
         <Switch
           checked={allowPrivate}
           loading={savingPrivate}
@@ -547,22 +560,7 @@ export default function SSOPage() {
           </Typography.Paragraph>
         </div>
       </Space>
-      ) }]} />
-      <Tabs
-        items={[
-          ...(['saml', 'oidc'] as const).map((kind) => ({
-            key: kind,
-            label: kind === 'saml' ? t('sso.tabSaml') : t('sso.tabOidc'),
-            children: (
-              <ProviderForm
-                kind={kind}
-                provider={forKind(kind)}
-                groups={groups}
-                publicUrl={publicUrl}
-                onSaved={load}
-              />
-            ),
-          })),
+</div> },
           {
             key: 'rules',
             label: t('sso.tabRules'),
@@ -571,6 +569,6 @@ export default function SSOPage() {
         ]}
       />
       </LoadGate>
-    </Card>
+    </div>
   )
 }

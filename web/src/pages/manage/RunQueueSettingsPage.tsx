@@ -196,7 +196,7 @@ function GlobalRunQueueSettings() {
         </Typography.Text>
       </SettingsPanel>
       </SettingsWorkspace>
-      {(section !== 'presets' || dirty) && <SettingsSaveBar scope={t('nav.runQueue')} dirty={dirty} saving={saving} onSave={save} onDiscard={() => { if (saved) restore(saved) }} />}
+      {(section !== 'presets' || dirty) && <SettingsSaveBar scope={t('manage.label.runqueue')} dirty={dirty} saving={saving} onSave={save} onDiscard={() => { if (saved) restore(saved) }} />}
       </LoadGate>
     </>
   )

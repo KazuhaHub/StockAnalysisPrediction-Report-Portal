@@ -77,8 +77,13 @@ func (s *Server) publicBaseURL() string {
 }
 
 // apiForgotPassword emails a reset link to the account matching the username or email.
-// It always returns 200 (and only sends when email is enabled and the account has an
-// address) so it can't be used to enumerate accounts.
+// Site-wide configuration and malformed input fail explicitly. Eligible and unknown accounts
+// receive the same acceptance response, so account existence cannot be inferred.
+func (s *Server) apiPasswordRecoveryConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"mode": s.passwordRecoveryMode()})
+}
+
 func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Account string `json:"account"`
@@ -89,9 +94,22 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acct := strings.TrimSpace(in.Account)
+	if acct == "" {
+		jsonErrorCode(w, http.StatusBadRequest, "account_required", "enter a username or email address")
+		return
+	}
+	if !s.passwordRecoveryEnabled() {
+		jsonErrorCode(w, http.StatusForbidden, "recovery_disabled", "self-service password recovery is disabled")
+		return
+	}
+
 	// Gated before anything else: this form's abuse is an outbound-email flood aimed at someone
 	// else's inbox, so the cost has to be imposed on the sender, not on the victim.
 	if !s.requireCaptcha(w, r, ctxForgot, acct, in.captchaProof) {
+		return
+	}
+	if !s.emailEnabled() || s.resetLinkBase() == "" {
+		jsonErrorCode(w, http.StatusServiceUnavailable, "recovery_unavailable", "password recovery is not configured; contact an administrator")
 		return
 	}
 	u := s.st.GetUser(acct)
@@ -103,10 +121,7 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 	// following one would silently give it a password that the SSO login path then refuses. The
 	// response is unchanged either way, so this is not an oracle for which accounts are federated.
 	//
-	// The portal's own switch is part of the same condition rather than a separate refusal for the
-	// reason above it: with recovery off the answer has to stay a constant ok, or switching it off
-	// would turn this endpoint into a way to ask which accounts exist.
-	eligible := u != nil && u.Active && !u.IsFederated() && u.Email != "" && s.emailEnabled() && s.passwordRecoveryEnabled()
+	eligible := u != nil && u.Active && !u.IsFederated() && u.Email != ""
 	// Rate-limit per resolved account so a flood of POSTs can't spam a victim's inbox or pile up SMTP
 	// goroutines/sockets. Only a real, eligible account ever spawns a send, so a per-account cap fully
 	// bounds it; the response stays a constant okJSON either way (no account-existence leak).
@@ -119,7 +134,7 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 		}
 		eligible = !limited
 	}
-	if eligible && base != "" {
+	if eligible {
 		link := base + "/reset?token=" + url.QueryEscape(s.resetToken(u))
 		// Send off the request path: a synchronous SMTP round-trip only for real
 		// accounts would leak account existence via response latency.
@@ -128,8 +143,6 @@ func (s *Server) apiForgotPassword(w http.ResponseWriter, r *http.Request) {
 				log.Printf("password reset email to %s failed: %v", u.Username, err)
 			}
 		})
-	} else if eligible {
-		log.Printf("password reset for %q skipped: set a Public URL in Email settings to enable reset links", u.Username)
 	}
 	writeJSON(w, okJSON)
 }

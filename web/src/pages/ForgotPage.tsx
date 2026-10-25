@@ -1,11 +1,10 @@
-import { useState } from 'react'
-import { Button, Card, Form, Input, Result, Space, Typography, theme } from 'antd'
-import { UserOutlined } from '@ant-design/icons'
+import { useEffect, useState } from 'react'
+import { Button, Card, Form, Input, Result, Space, Typography, theme, Spin } from 'antd'
+import { QuestionCircleOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../api/client'
 import CaptchaField, { type CaptchaValue } from '../components/CaptchaField'
-import { SiteLogo, useSite } from '../site'
 
 // Requesting a password-reset link.
 //
@@ -15,7 +14,6 @@ import { SiteLogo, useSite } from '../site'
 
 export default function ForgotPage() {
   const { t } = useTranslation()
-  const site = useSite()
   const navigate = useNavigate()
   const { token } = theme.useToken()
   const [account, setAccount] = useState('')
@@ -24,24 +22,26 @@ export default function ForgotPage() {
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
   const [err, setErr] = useState('')
+  const [mode, setMode] = useState<string | null>(null)
+  useEffect(() => {
+    const load = () => api.get<{ mode: string }>('/api/password/config').then(r => { setMode(r.mode ?? 'email'); setErr('') }).catch(e => setErr(errText(e, t)))
+    void load()
+    window.addEventListener('rp:connection-restored', load)
+    return () => window.removeEventListener('rp:connection-restored', load)
+  }, [t])
 
   const submit = async () => {
+    if (!account.trim()) { setErr(t('login.forgotRequired')); return }
+    if (mode !== 'email' || busy) return
     setBusy(true)
     setErr('')
     try {
-      await api.post('/api/password/forgot', { account: account.trim(), ...captcha })
+      const response = await api.post<{ ok: boolean }>('/api/password/forgot', { account: account.trim(), ...captcha })
+      if (response?.ok !== true) throw new ApiError(502, 'Unexpected response', 'server_unavailable')
       setSent(true)
     } catch (e) {
-      // "Always report sent" exists so nobody can enumerate accounts, and it holds for every
-      // failure that depends on WHICH account was named. A rejected captcha does not — the server
-      // decides it before it looks anything up — so saying so leaks nothing, and saying "sent"
-      // instead loses the mail the person is waiting for.
-      if (e instanceof ApiError && e.code === 'captcha_failed') {
-        setErr(errText(e, t))
-        setCaptchaRound((n) => n + 1) // a challenge is consumed on use
-      } else {
-        setSent(true)
-      }
+      setErr(errText(e, t))
+      if (e instanceof ApiError && e.code === 'captcha_failed') setCaptchaRound(n => n + 1)
     } finally {
       setBusy(false)
     }
@@ -53,17 +53,21 @@ export default function ForgotPage() {
     >
       <Card style={{ width: 420, maxWidth: '100%' }}>
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-          <Space>
-            <SiteLogo />
-            <Typography.Title level={4} style={{ margin: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <QuestionCircleOutlined style={{ fontSize: 24, display: 'flex', flexShrink: 0, lineHeight: 1 }} />
+            <Typography.Title level={4} style={{ margin: 0, lineHeight: 1.25 }}>
               {t('login.forgotTitle')}
             </Typography.Title>
-          </Space>
+          </div>
           {children}
         </Space>
       </Card>
     </div>
   )
+
+  if (!mode) return shell(err ? <Typography.Text role="alert" type="danger">{err}</Typography.Text> : <Spin />)
+  if (mode !== 'email') return shell(<Result status="info" subTitle={t(mode === 'contact' ? 'login.recoveryContact' : 'login.recoveryHidden')}
+    extra={<Button onClick={() => navigate('/login')}>{t('register.backToLogin')}</Button>} />)
 
   if (sent) {
     return shell(
@@ -82,7 +86,7 @@ export default function ForgotPage() {
   return shell(
     <Form layout="vertical" onFinish={submit} requiredMark={false}>
       <Typography.Text type="secondary">{t('login.forgotHint')}</Typography.Text>
-      <Form.Item style={{ marginTop: 12, marginBottom: 12 }}>
+      <Form.Item name="account" rules={[{ required: true, whitespace: true, message: t('login.forgotRequired') }]} style={{ marginTop: 12, marginBottom: 12 }}>
         <Input
           size="large"
           autoFocus
@@ -96,7 +100,7 @@ export default function ForgotPage() {
           captcha toggle names. It went years without one on screen. */}
       <CaptchaField context="forgot" account={account} refresh={captchaRound} value={captcha} onChange={setCaptcha} />
       {err && (
-        <Typography.Text type="danger" style={{ display: 'block', marginBottom: 12 }}>
+        <Typography.Text role="alert" type="danger" style={{ display: 'block', marginBottom: 12 }}>
           {err}
         </Typography.Text>
       )}

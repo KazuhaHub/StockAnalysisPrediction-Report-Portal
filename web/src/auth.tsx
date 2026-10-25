@@ -120,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           ...(captcha ?? {}),
         })
+        if (!res || (!res.user && !(res.totp_required && res.token))) throw new ApiError(502, 'Unexpected login response', 'server_unavailable')
         if (res.totp_required && res.token) return { totpToken: res.token }
         setExpired(false)
         setMe(res as Me)

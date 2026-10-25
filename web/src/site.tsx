@@ -77,11 +77,13 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     // Load once on mount whatever the tab's visibility — a link opened in a background tab
     // still has to show this portal's title and favicon in the tab strip.
     refresh().catch(() => setSettings(DEFAULT_SETTINGS))
+    const onRestored = () => { void refresh().catch(() => {}) }
+    window.addEventListener('rp:connection-restored', onRestored)
     // Then keep the chrome live without a full reload, but only while
     // somebody is looking: the previous plain interval kept asking every minute in a tab left
     // open behind others, for a page nobody could see. Becoming visible refreshes immediately,
     // so an admin's edit still reaches a returning reader at once.
-    return startVisiblePoll(
+    const stopPoll = startVisiblePoll(
       () =>
         refresh()
           .then(() => {})
@@ -89,6 +91,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       60000,
       { skipLeading: true },
     )
+    return () => { stopPoll(); window.removeEventListener('rp:connection-restored', onRestored) }
   }, [refresh])
 
   const title = settings.siteTitle || t('brand')

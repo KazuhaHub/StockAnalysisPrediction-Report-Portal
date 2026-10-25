@@ -83,7 +83,7 @@ interface SecurityDraft {
   login: LoginCfg | null
   limits: LimitsCfg | null
   twofa: TwoFACfg | null
-  recovery: boolean
+  recovery: string
   lockout: LockoutCfg | null
 }
 
@@ -99,7 +99,7 @@ function GlobalSecuritySettings() {
   const [login, setLogin] = useState<LoginCfg | null>(null)
   const [limits, setLimits] = useState<LimitsCfg | null>(null)
   const [twofa, setTwofa] = useState<TwoFACfg | null>(null)
-  const [recovery, setRecovery] = useState(false)
+  const [recovery, setRecovery] = useState('hidden')
   const [lockout, setLockout] = useState<LockoutCfg | null>(null)
   const [groups, setGroups] = useState<GroupRow[]>([])
   const [emailOK, setEmailOK] = useState(true)
@@ -120,7 +120,7 @@ function GlobalSecuritySettings() {
         login: LoginCfg
         limits: LimitsCfg
         twofa: TwoFACfg
-        recovery: { enabled: boolean }
+        recovery: { enabled: boolean; mode?: string }
         lockout: LockoutCfg
         groups: GroupRow[]
         email_configured: boolean
@@ -131,13 +131,13 @@ function GlobalSecuritySettings() {
         setLogin(r.login)
         setLimits(r.limits)
         setTwofa(r.twofa)
-        setRecovery(r.recovery.enabled)
+        setRecovery(r.recovery.mode ?? (r.recovery.enabled ? 'email' : 'hidden'))
         setLockout(r.lockout)
         setGroups(r.groups ?? [])
         setEmailOK(r.email_configured)
         setSecret(null)
         setSavedValues({ captcha: r.captcha, registration: r.registration, login: r.login,
-          limits: r.limits, twofa: r.twofa, recovery: r.recovery.enabled, lockout: r.lockout })
+          limits: r.limits, twofa: r.twofa, recovery: r.recovery.mode ?? (r.recovery.enabled ? 'email' : 'hidden'), lockout: r.lockout })
       })
       .catch((e) => {
         setLoadErr(errText(e, t))
@@ -168,7 +168,7 @@ function GlobalSecuritySettings() {
         login: { mode: login.mode, sso_only: login.sso_only },
         limits,
         twofa,
-        recovery: { enabled: recovery },
+        recovery: { enabled: recovery === 'email', mode: recovery },
         lockout,
       })
       message.success(t('common.saved'))
@@ -257,7 +257,7 @@ function GlobalSecuritySettings() {
           </Row>
           {tokenProvider && (
             <>
-              <Alert type="warning" showIcon title={t('security.tokenProviderNote')} />
+              <Alert type="info" showIcon title={t('security.tokenProviderNote')} />
               <Row label={t('security.siteKey')}>
                 <Input value={captcha.site_key} onChange={(e) => setCaptcha({ ...captcha, site_key: e.target.value })} />
               </Row>
@@ -332,9 +332,9 @@ function GlobalSecuritySettings() {
       <Card title={t('security.recoveryTitle')}>
         <Typography.Paragraph type="secondary">{t('security.recoveryDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-          {recovery && !emailOK && <Alert type="error" showIcon title={t('security.recoveryNeedsEmail')} />}
+          {recovery === 'email' && !emailOK && <Alert type="error" showIcon title={t('security.recoveryNeedsEmail')} />}
           <Row label={t('security.recoveryEnabled')} hint={t('security.recoveryEnabledHint')}>
-            <Switch checked={recovery} onChange={setRecovery} />
+            <Select value={recovery} onChange={setRecovery} style={{ minWidth: 220 }} options={['hidden', 'contact', 'email'].map(value => ({ value, label: t(`security.recoveryMode.${value}`) }))} />
           </Row>
         </Space>
       </Card>

@@ -58,6 +58,7 @@ import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import { useTableView } from './TableView'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
@@ -421,6 +422,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
 
   const cols: ColumnsType<BatchJob> = [
     {
+      key: 'workflow', minWidth: 150,
       title: t('queue.colWorkflow'),
       render: (_: unknown, j) => (
         <div>
@@ -430,9 +432,10 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </div>
       ),
     },
-    { title: t('batch.col.createdBy'), dataIndex: 'created_by', width: 110, responsive: ['md'] },
-    { title: t('queue.colSubmitted'), dataIndex: 'created_at', width: 160, responsive: ['lg'], render: (s: string) => <span style={{ fontSize: 12 }}>{s}</span> },
+    { key: 'owner', title: t('batch.col.createdBy'), dataIndex: 'created_by', width: 110, minWidth: 92, responsive: ['md'] },
+    { key: 'submitted', title: t('queue.colSubmitted'), dataIndex: 'created_at', width: 160, minWidth: 116, responsive: ['lg'], render: (s: string) => <span style={{ fontSize: 12 }}>{s}</span> },
     {
+      key: 'status', minWidth: 88,
       title: t('batch.col.status'),
       width: 108,
       render: (_: unknown, j) => queueStatusTag(t, j),
@@ -441,6 +444,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       // A queued non-urgent job gets an inline base-priority editor (admin only); urgent
       // and non-queued jobs, and non-admins, show a static tag (ADR 0008).
       title: t('batch.priorityLabel'),
+      key: 'priority', minWidth: 88,
       width: 116,
       responsive: ['md'],
       render: (_: unknown, j) =>
@@ -459,6 +463,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     },
     {
       title: t('queue.colProgress'),
+      key: 'progress', minWidth: 130,
       width: 220,
       render: (_: unknown, j) => {
         if (j.window_blocked) return <Typography.Text type="secondary">{t('queue.windowWaitHint')}</Typography.Text>
@@ -492,9 +497,10 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     },
     {
       title: t('batch.col.actions'),
+      key: 'actions', minWidth: 100,
       width: 150,
       render: (_: unknown, j) => (
-        <Space size={2}>
+        <Space size={[2, 2]} wrap>
           <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetailId(j.id)} title={t('batch.view')} />
           {admin && j.scheduled && <Button size="small" type="text" icon={<PlayCircleOutlined />} onClick={() => runNow(j.id)} title={t('queue.runNow')} />}
           {admin && j.status === 'queued' && (
@@ -518,6 +524,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       ),
     },
   ]
+  const tableView = useTableView('queue', cols, ['workflow', 'status', 'actions'])
 
   // null = the summary has not landed yet. A dash, not a 0: five tiles reading zero are a
   // statement about the queue, and rendering it before the server has answered makes the page
@@ -604,6 +611,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           <Select showSearch optionFilterProp="label" allowClear placeholder={t('batch.col.createdBy')} style={{ width: 140 }} value={fUser || undefined} onChange={(v) => setFUser(v || '')} options={submitters.map((u) => ({ value: u, label: u }))} />
           {/* loading, not an empty dropdown: "no workflows" is not something this filter knows. */}
           <Select showSearch optionFilterProp="label" allowClear loading={!targetsLoaded} placeholder={t('run.workflow')} style={{ width: 200 }} value={fTarget} onChange={setFTarget} options={targets.map((tg) => ({ value: tg.id, label: tg.name }))} />
+          {tableView.controls}
         </Space>
         {total > jobs.length && (
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
@@ -633,12 +641,11 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
               getCheckboxProps: (j) => ({ disabled: isTerminal(j.status) || !canCancel(j) }),
             }}
             dataSource={rows}
-            columns={cols}
+            columns={tableView.columns}
+            className={tableView.className}
+            tableLayout="fixed"
             pagination={{ pageSize: 15 }}
-            // Desktop shows every column (~1160px, scrolls); on mobile the secondary columns
-            // (submitter / time / priority) are hidden, so the essentials — workflow, status,
-            // progress, actions — fit a much narrower scroll instead of a 1160px sliver.
-            scroll={{ x: mobile ? 640 : 1160 }}
+            scroll={{ x: tableView.scroll.x + 32 }}
           />
         )}
         </LoadGate>

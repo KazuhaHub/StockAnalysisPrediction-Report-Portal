@@ -21,6 +21,7 @@ import {
 } from 'antd'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
+import { useTableView } from '../../components/TableView'
 import {
   DeleteOutlined,
   EditOutlined,
@@ -208,12 +209,14 @@ export default function UsersPage() {
   const cols: ColumnsType<UserRow> = [
     {
       title: t('users.user'),
+      minWidth: 230,
+      width: 300,
       dataIndex: 'username',
       render: (_, u) => (
-        <Space>
+        <div className="rp-user-identity">
           <UserAvatar name={u.display_name || u.username} seed={u.username} />
-          <div style={{ lineHeight: 1.3 }}>
-            <Space size={6}>
+          <div className="rp-user-identity-text">
+            <div className="rp-user-name">
               <Typography.Text strong>{u.display_name || u.username}</Typography.Text>
               {u.username === data?.me && <Tag color="green">{t('users.me')}</Tag>}
               {/* A federated account has no local password, so knowing which rows those are is the
@@ -230,29 +233,30 @@ export default function UsersPage() {
                   </Tag>
                 </Popconfirm>
               )}
-            </Space>
-            <div>
+            </div>
+            <div className="rp-user-secondary" title={`@${u.username}${u.email ? ` · ${u.email}` : ''}`}>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 @{u.username}
                 {u.email ? ` · ${u.email}` : ''}
               </Typography.Text>
             </div>
           </div>
-        </Space>
+        </div>
       ),
     },
     {
       title: t('users.role'),
       dataIndex: 'role',
-      width: 110,
+      width: 90, minWidth: 80,
       render: (role: string) => <Tag color={ROLE_COLOR[role] ?? 'default'}>{roleName(role)}</Tag>,
     },
     {
       title: t('users.group'),
       dataIndex: 'primary_group',
+      width: 150, minWidth: 120,
       render: (_, u) => {
         const g = primaryOf(u)
-        if (g) return <Tag color="blue">{g.name}</Tag>
+        if (g) return <Tag color="blue" title={g.name}>{g.name}</Tag>
         // No primary group → inherits the Default group.
         return (
           <Tag>
@@ -264,7 +268,7 @@ export default function UsersPage() {
     {
       title: t('users.status'),
       dataIndex: 'active',
-      width: 76,
+      width: 76, minWidth: 70,
       render: (active: boolean, u) => {
         const isLastAdmin = u.role === 'admin' && adminCount <= 1
         return (
@@ -282,7 +286,7 @@ export default function UsersPage() {
     {
       title: t('users.expires'),
       dataIndex: 'expires_at',
-      width: 130,
+      width: 110, minWidth: 100,
       render: (v: string) => {
         if (!v) return <Typography.Text type="secondary">{t('users.expiresNever')}</Typography.Text>
         const expired = dayjs(v).endOf('day').isBefore(dayjs())
@@ -303,7 +307,7 @@ export default function UsersPage() {
       // the tooltip rather than gone.
       title: t('users.lastSeen'),
       dataIndex: 'last_seen',
-      width: 160,
+      width: 150, minWidth: 140,
       render: (v: string, u) =>
         v ? (
           <Tooltip title={t('users.lastLoginWas', { at: u.last_login || t('users.never') })}>
@@ -315,10 +319,11 @@ export default function UsersPage() {
     },
     {
       title: '',
+      key: 'actions', minWidth: 96,
       width: 120,
       align: 'right',
       render: (_, u) => (
-        <Space>
+        <Space size={4}>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(u)} aria-label={t('common.edit')} />
           <Button size="small" icon={<KeyOutlined />} onClick={() => setPwUser(u.username)} aria-label={t('users.newPassword')} />
           <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(u.username)} disabled={u.username === data?.me}>
@@ -328,6 +333,7 @@ export default function UsersPage() {
       ),
     },
   ]
+  const tableView = useTableView('users', cols, ['username', 'actions'])
 
   const remove = async (name: string) => {
     await api.del(`/api/admin/users/${encodeURIComponent(name)}`)
@@ -355,9 +361,9 @@ export default function UsersPage() {
             options={roles.map((r) => ({ value: r.code, label: r.name }))}
           />
         </Space>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
+        <Space wrap>{tableView.controls}<Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
           {t('users.add')}
-        </Button>
+        </Button></Space>
       </Space>
 
       {selected.length > 0 && (
@@ -397,9 +403,12 @@ export default function UsersPage() {
         rowKey="username"
         loading={loading}
         dataSource={filtered}
-        columns={cols}
+        columns={tableView.columns}
+        size="small"
+        className={`${tableView.className} rp-users-table`}
+        tableLayout="fixed"
         pagination={false}
-        scroll={{ x: 'max-content' }}
+        scroll={{ x: tableView.scroll.x + 32 }}
         rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]) }}
       />
 
@@ -464,7 +473,7 @@ export default function UsersPage() {
   // Tree beside the list, the way an admin console scopes a directory: the OU hierarchy is visible
   // at all times, so inheritance stops being something you can only infer from an edit dialog.
   const accounts = (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+    <div className="rp-users-directory">
       <OrgUnitPicker
         groups={groups}
         loading={!settled}
@@ -480,7 +489,7 @@ export default function UsersPage() {
   )
 
   return (
-    <Tabs
+    <Tabs className="rp-users-page"
       activeKey={tab}
       onChange={setTab}
       items={[

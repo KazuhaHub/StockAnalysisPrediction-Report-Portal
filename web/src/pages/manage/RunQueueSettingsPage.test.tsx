@@ -7,7 +7,7 @@ import RunQueueSettingsPage from './RunQueueSettingsPage'
 const server = vi.hoisted(() => ({ resolve: null as null | ((v: unknown) => void), reject: null as null | ((e: unknown) => void), post: vi.fn().mockResolvedValue({}) }))
 vi.mock('../../api/client', () => ({
   api: {
-    get: () =>
+    get: (url: string) => url === '/api/admin/groups' ? Promise.resolve({ groups: [] }) :
       new Promise((resolve, reject) => {
         server.resolve = resolve
         server.reject = reject

@@ -155,11 +155,19 @@ func (s *Server) passkeyEnrolAllowed(username string) bool {
 	return s.enrolmentSettings(username).PasskeyAllowed
 }
 
-// passwordRecoveryEnabled is whether the portal offers the emailed reset link at all. It is a plain
-// switch: the reset path's other conditions (an active local account with an address, and a mail
-// service) are unchanged, and the response stays constant either way so the switch cannot become an
-// account-existence oracle.
-func (s *Server) passwordRecoveryEnabled() bool { return s.switchOn(setPasswordRecovery, true) }
+// passwordRecoveryMode resolves the public recovery behavior, falling back to the legacy switch.
+// Email recovery returns the same result for eligible and unknown accounts.
+func (s *Server) passwordRecoveryMode() string {
+	mode := s.st.GetSetting("password_recovery_mode", "")
+	if mode == "hidden" || mode == "contact" || mode == "email" {
+		return mode
+	}
+	if s.switchOn(setPasswordRecovery, true) {
+		return "email"
+	}
+	return "hidden"
+}
+func (s *Server) passwordRecoveryEnabled() bool { return s.passwordRecoveryMode() == "email" }
 
 // requireTOTPEnrolment / requirePasskeyEnrolment write the refusal and report whether the caller may
 // go ahead. They are checked BEFORE step-up: a policy refusal is not something a password can change,
@@ -420,7 +428,8 @@ type securityPolicyInput struct {
 		RequireStaff *bool `json:"require_staff"`
 	} `json:"twofa"`
 	Recovery *struct {
-		Enabled *bool `json:"enabled"`
+		Enabled *bool   `json:"enabled"`
+		Mode    *string `json:"mode"`
 	} `json:"recovery"`
 	Lockout *struct {
 		Enabled     *bool   `json:"enabled"`
@@ -485,6 +494,14 @@ func (s *Server) unsatisfiableMandates(p proposedPolicy) ([]string, error) {
 // something it will not do, and quietly storing 30 minutes instead would leave them believing a policy
 // they never wrote.
 func (s *Server) applySecurityPolicy(w http.ResponseWriter, in *securityPolicyInput) bool {
+	if in.Recovery != nil && in.Recovery.Mode != nil {
+		mode := *in.Recovery.Mode
+		if mode != "hidden" && mode != "contact" && mode != "email" {
+			jsonError(w, http.StatusBadRequest, "invalid password recovery mode")
+			return false
+		}
+	}
+
 	if in.Lockout != nil {
 		if in.Lockout.DurationMin != nil {
 			if d := *in.Lockout.DurationMin; d < 1 || d > maxLockoutDurationMin {
@@ -534,8 +551,18 @@ func (s *Server) applySecurityPolicy(w http.ResponseWriter, in *securityPolicyIn
 			s.st.SetSetting(setRequire2FAForStaff, boolSetting(*in.TwoFA.RequireStaff))
 		}
 	}
-	if in.Recovery != nil && in.Recovery.Enabled != nil {
-		s.st.SetSetting(setPasswordRecovery, boolSetting(*in.Recovery.Enabled))
+	if in.Recovery != nil {
+		if in.Recovery.Mode != nil {
+			s.st.SetSetting("password_recovery_mode", *in.Recovery.Mode)
+			s.st.SetSetting(setPasswordRecovery, boolSetting(*in.Recovery.Mode == "email"))
+		} else if in.Recovery.Enabled != nil {
+			mode := "hidden"
+			if *in.Recovery.Enabled {
+				mode = "email"
+			}
+			s.st.SetSetting("password_recovery_mode", mode)
+			s.st.SetSetting(setPasswordRecovery, boolSetting(*in.Recovery.Enabled))
+		}
 	}
 	if in.Lockout != nil {
 		if in.Lockout.Enabled != nil {

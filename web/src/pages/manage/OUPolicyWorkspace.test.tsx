@@ -23,6 +23,25 @@ function mount(entry = '/manage/security?scope=ou&ou=7') {
   return router
 }
 describe('Feature-owned organizational policy', () => {
+  it('keeps the unit rail visible alongside global settings instead of hiding it in a tab', async () => {
+    const router = mount('/manage/security')
+    expect(screen.getByText('Global security controls')).toBeTruthy()
+    expect(screen.queryByRole('tab')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /ou.globalScope/ }))
+    expect(router.state.location.search).toBe('')
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(router.state.location.search).toContain('ou=7'))
+    expect(await screen.findByText('ou.sectionSecurity')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /ou.globalScope/ }))
+    expect(await screen.findByText('Global security controls')).toBeTruthy()
+  })
+  it('does not hide global settings when the unit directory cannot be read', async () => {
+    api.get.mockRejectedValue(new Error('Directory unavailable'))
+    mount('/manage/security')
+    await screen.findByText('common.loadFailed')
+    expect(screen.getByText('Global security controls')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /common.retry/ })).toBeTruthy()
+  })
   it('edits only security fields without loading or writing the directory and run settings', async () => {
     mount()
     await screen.findByText('ou.sectionSecurity')

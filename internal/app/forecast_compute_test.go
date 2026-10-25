@@ -43,7 +43,7 @@ func TestForecastLimitsAreAudited(t *testing.T) {
 
 func TestForecastLimitsAuditSurvivesLaterValidationFailure(t *testing.T) {
 	s := limitsServer(t)
-	if code := saveSecurity(t, s, `{"limits":{"forecast_slots_official":3},"captcha":{"provider":"invalid-fixture"}}`); code != http.StatusBadRequest {
+	if code := saveSecurity(t, s, `{"limits":{"forecast_slots_official":3},"login":{"mode":"invalid-fixture"}}`); code != http.StatusBadRequest {
 		t.Fatal(code)
 	}
 	if s.forecastComputeLimits().Official != 3 {

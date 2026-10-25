@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Badge, Breadcrumb, Button, Divider, Dropdown, FloatButton, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
-import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined, VerticalAlignTopOutlined } from '@ant-design/icons'
+import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
+import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
@@ -14,6 +14,7 @@ import { prefetch } from '../lib/prefetch'
 import { queueOnScreen } from '../lib/queueWatch'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import Omnibox from './Omnibox'
+import ScrollToTop from './ScrollToTop'
 import RunAnalysisModal from './RunAnalysisModal'
 import QueueDrawer from './QueueDrawer'
 import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
@@ -98,7 +99,6 @@ function AppShell() {
   // view tagged this URL first, the badge's own first poll would be answered "nothing changed"
   // about a count it has never had — and an absent badge is how this header says "nothing queued".
   const heldQueue = useRef(false)
-  const [showTop, setShowTop] = useState(false)
   const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const canRun = can('run_batch')
@@ -107,14 +107,6 @@ function AppShell() {
   // a gate: the server decides on every request, and an absent hint (an older server) offers nothing.
   const canForecast = admin || forecast?.scope === 'all' || forecast?.scope === 'own'
 
-  // Show back-to-top once the window has scrolled past ~one screen. Self-controlled
-  // (rather than antd's FloatButton.BackTop) so it's reliable across pages.
-  useEffect(() => {
-    const onScroll = () => setShowTop(window.scrollY > 300)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    onScroll()
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
   // "New version" prompt: once a deploy lands under this open tab, the shared coordinator says so
   // with a persistent inline banner (not a floating notification that overlaps content) and the
   // actions the administrator's policy allows. Two ways to learn a new build exists — the server
@@ -667,18 +659,7 @@ function AppShell() {
       )}
       {canRun && <QueueDrawer open={queueOpen} onClose={() => setQueueOpen(false)} />}
 
-      {/* Back-to-top appears once scrolled down. Data refreshes automatically (queue
-          polls; the home list refetches on focus + interval), so no manual refresh.
-          Not on chat: that page scrolls its own thread and auto-sticks to the newest
-          message, and the float button would overlap the composer's send button. */}
-      {showTop && !onChat && (
-        <FloatButton
-          icon={<VerticalAlignTopOutlined />}
-          tooltip={t('nav.backTop')}
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          style={{ insetInlineEnd: 24, insetBlockEnd: 24 }}
-        />
-      )}
+      {!onChat && <ScrollToTop routeKey={loc.pathname + loc.search} />}
 
       {showFooter && !onManage && !onChat && (
         <Footer style={{ textAlign: 'center', background: 'transparent', color: token.colorTextTertiary, fontSize: 12 }}>

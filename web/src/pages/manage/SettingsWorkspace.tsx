@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, type ReactNode } from 'react'
+import { createContext, useContext, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Select } from 'antd'
 import { useTranslation } from 'react-i18next'
 
@@ -19,8 +19,30 @@ export default function SettingsWorkspace({ sections, active, onChange, children
 }) {
   const { t } = useTranslation()
   const id = useId()
+  const workspace = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState<number>()
+  useLayoutEffect(() => {
+    const element = workspace.current
+    if (!element) return
+    const container = element.closest('.rp-policy-content, .rp-admin-page-body')
+    const actionBars = [...(container?.querySelectorAll<HTMLElement>('.rp-settings-save-bar') ?? [])]
+      .filter((bar) => !element.contains(bar)).map((bar) => bar.parentElement!)
+    // Fix the workspace height for the viewport, independently of its active panel. Hiding a long
+    // form must not shrink the outer page and clamp its scroll position back to the top.
+    const fit = () => {
+      const bottom = container?.getBoundingClientRect().bottom || window.innerHeight
+      const reserved = Math.max(0, ...actionBars.map((bar) => bar.getBoundingClientRect().height ? bar.getBoundingClientRect().height + 8 : 0))
+      setHeight(Math.max(280, bottom - element.getBoundingClientRect().top - reserved))
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    if (container) observer.observe(container)
+    actionBars.forEach((bar) => observer.observe(bar))
+    window.addEventListener('resize', fit)
+    return () => { observer.disconnect(); window.removeEventListener('resize', fit) }
+  }, [])
   return (
-    <div className="rp-settings-workspace">
+    <div ref={workspace} className="rp-settings-workspace" style={{ height }}>
       <div className="rp-settings-section-picker">
         <Select aria-label={t('manage.sections')} value={active} onChange={onChange}
           options={sections.map((section) => ({ value: section.key, label: section.label }))} />
