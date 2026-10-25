@@ -249,3 +249,50 @@ func namespaceOverlap(a, b PublisherNamespace) bool {
 	}
 	return strings.HasPrefix(a.Value, b.Value) || strings.HasPrefix(b.Value, a.Value)
 }
+
+// ValidatePublisherTrust validates a typed deployment snapshot without granting
+// authority. Persistence repositories use it before committing trust changes.
+func ValidatePublisherTrust(trust PublisherTrust) error {
+	if !validPublisherTrust(trust) {
+		return ErrUntrustedDescriptor
+	}
+	return nil
+}
+
+// ParsePublisherNamespaces decodes the approved bounded stored namespace list.
+// Strict byte scanning precedes typed decoding to refuse ambiguous persisted JSON.
+func ParsePublisherNamespaces(raw []byte) ([]PublisherNamespace, error) {
+	if len(raw) == 0 || len(raw) > 8192 || !utf8.Valid(raw) {
+		return nil, ErrUntrustedDescriptor
+	}
+	scan := json.NewDecoder(bytes.NewReader(raw))
+	scan.UseNumber()
+	first, err := scan.Token()
+	if err != nil || first != json.Delim('[') {
+		return nil, ErrUntrustedDescriptor
+	}
+	for scan.More() {
+		if !scanValue(scan, 2) {
+			return nil, ErrUntrustedDescriptor
+		}
+	}
+	last, err := scan.Token()
+	if err != nil || last != json.Delim(']') {
+		return nil, ErrUntrustedDescriptor
+	}
+	if _, err = scan.Token(); err != io.EOF {
+		return nil, ErrUntrustedDescriptor
+	}
+	var result []PublisherNamespace
+	decode := json.NewDecoder(bytes.NewReader(raw))
+	decode.DisallowUnknownFields()
+	if decode.Decode(&result) != nil || len(result) > 64 {
+		return nil, ErrUntrustedDescriptor
+	}
+	for _, ns := range result {
+		if !validPublisherNamespace(ns) {
+			return nil, ErrUntrustedDescriptor
+		}
+	}
+	return result, nil
+}

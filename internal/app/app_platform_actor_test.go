@@ -13,7 +13,11 @@ import (
 
 func platformActorTestServer(t *testing.T, postgres bool) (*Server, platformActorSession) {
 	t.Helper()
-	st := platformTestStore(t, postgres)
+	return platformActorTestServerWithStore(t, platformTestStore(t, postgres))
+}
+
+func platformActorTestServerWithStore(t *testing.T, st *Store) (*Server, platformActorSession) {
+	t.Helper()
 	for _, key := range []string{setKeyringSalt, setKeyringDEK, "app_platform_actor_seed", "app_platform_controller_epoch", "app_platform_restore_paused"} {
 		var value sql.NullString
 		err := st.queryRow(`SELECT v FROM meta WHERE k=?`, key).Scan(&value)
