@@ -173,7 +173,9 @@ def render(raw):
         "path": p("Presentation", "entry")["pattern"],
     }
     for key, value in patterns.items():
-        go.append(f"var {key}Pattern = regexp.MustCompile({json.dumps(value)})")
+        if any(char in value for char in "`\r\n"):
+            raise ValueError("regexp source requires escaped controls and no literal backticks")
+        go.append(f"var {key}Pattern = regexp.MustCompile(`{value}`)")
     ts.append("export const DESCRIPTOR_PATTERNS = " + json.dumps(patterns, indent=2) + " as const;")
     capabilities = without_null(p("Capabilities", "required"))["items"]["enum"]
     if capabilities != without_null(p("Capabilities", "optional"))["items"]["enum"]:

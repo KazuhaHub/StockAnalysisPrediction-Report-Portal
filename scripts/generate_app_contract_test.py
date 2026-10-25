@@ -27,6 +27,17 @@ class AppContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate source key"):
             contract.render(self.raw.replace(b'"title":', b'"$schema":"other","title":', 1))
 
+    def test_regexp_products_use_readable_go_raw_literals(self):
+        go,_ = contract.render(self.raw)
+        self.assertIn(b"regexp.MustCompile(`",go)
+        self.assertNotIn(b"\\\\.",go)
+
+    def test_regexp_literal_controls_refused(self):
+        for char in ("`","\r","\n"):
+            self.schema["x-portal-parser-limits"]["key_pattern"] = "^a"+char+"$"
+            with self.assertRaisesRegex(ValueError,"escaped controls"):
+                contract.render(json.dumps(self.schema).encode())
+
     def test_unknown_assertion_refused(self):
         self.schema["$defs"]["Route"]["properties"]["path"]["format"] = "uri"
         with self.assertRaisesRegex(ValueError, "unsupported contract keyword"):

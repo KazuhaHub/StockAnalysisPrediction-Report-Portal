@@ -110,7 +110,7 @@ parsers still run their unchanged 44-case corpus. Generator tests cover repeatab
 output, read-only drift detection, offline Apps mode and refusal behavior.
 
 Local verification passed: full Portal Go tests with disposable PostgreSQL, vet,
-build, targeted appplatform race tests and all 50 Python harness tests; SDK 82
+build, full staticcheck, targeted appplatform race tests and all 52 Python harness tests; SDK 82
 tests, nine Status UI tests, two demo tests, all-workspace typecheck, foundation
 checks and generated-template typecheck/test/build. Both checkouts pass the
 cross-repository generator drift check. Source PR CI remains a separate gate.

@@ -78,14 +78,14 @@ const descriptorFormat = "portal.app/v2"
 const descriptorBackendKind = "oci"
 const descriptorBackendProtocol = "portal.backend/1"
 
-var slugPattern = regexp.MustCompile("^[a-z][a-z0-9-]{0,63}$")
-var keyPattern = regexp.MustCompile("^[a-z][a-z0-9_]*$")
-var copyKeyPattern = regexp.MustCompile("^[a-z][a-z0-9_.-]{0,95}$")
-var digestPattern = regexp.MustCompile("^[a-f0-9]{64}$")
-var versionPattern = regexp.MustCompile("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")
-var rangePattern = regexp.MustCompile("^[0-9A-Za-z.*+<>=~^| -]{1,96}$")
-var imagePattern = regexp.MustCompile("^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$")
-var pathPattern = regexp.MustCompile("^[A-Za-z0-9._/-]+$")
+var slugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+var copyKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,95}$`)
+var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
+var rangePattern = regexp.MustCompile(`^[0-9A-Za-z.*+<>=~^| -]{1,96}$`)
+var imagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$`)
+var pathPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}
