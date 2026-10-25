@@ -60,11 +60,14 @@ test('the content has one app title, no nested frame, and a locale change retain
   await act(async () => {
     await f.language.changeLanguage('zh-CN')
   })
-  expect(screen.getByLabelText('笔记内容')).toHaveProperty(
-    'value',
-    'Keep this draft',
-  )
-  expect(screen.queryByRole('combobox', { name: /language|语言/i })).toBeNull()
+  expect(
+    screen.getByLabelText(prototypeResources['zh-CN'].translation.notesLabel),
+  ).toHaveProperty('value', 'Keep this draft')
+  expect(
+    screen.queryByRole('combobox', {
+      name: prototypeResources['zh-CN'].translation.language,
+    }),
+  ).toBeNull()
   expect(fetch).not.toHaveBeenCalled()
 })
 
