@@ -9,7 +9,7 @@ const put = vi.hoisted(() => vi.fn())
 const get = vi.hoisted(() => vi.fn())
 const del = vi.hoisted(() => vi.fn())
 vi.mock('../../api/client', () => ({
-  api: { get, put, post: vi.fn(), del },
+  api: { get, put, patch: put, post: vi.fn(), del },
   errText: (e: unknown) => String(e),
 }))
 vi.mock('react-i18next', () => ({
@@ -26,11 +26,21 @@ const DEF = g({ id: 1, name: 'Default', is_default: true, weight: 2, allow_urgen
 const mount = (target: UserGroupRow, groups: UserGroupRow[] = [DEF, target]) =>
   render(
     <App>
-      <OrgUnitDetail group={target} groups={groups} onChanged={vi.fn()} onDeleted={vi.fn()} />
+      <OrgUnitDetail sections={['directory', 'runs', 'security', 'forecast', 'access', 'targets']} group={target} groups={groups} onChanged={vi.fn()} onDeleted={vi.fn()} />
     </App>,
   )
 
 describe('OrgUnitDetail', () => {
+  it('preserves a policy draft when an unrelated directory refresh changes member counts', async () => {
+    const target = g({ id: 2 })
+    const view = mount(target, [DEF, target])
+    fireEvent.change(screen.getByDisplayValue('Clients'), { target: { value: 'Pending unit name' } })
+    const refreshed = { ...target, members: 4 }
+    view.rerender(<App><OrgUnitDetail group={refreshed} groups={[DEF, refreshed]} onChanged={vi.fn()} onDeleted={vi.fn()} /></App>)
+    await waitFor(() => expect(screen.getByDisplayValue('Pending unit name')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
+    expect(screen.getByDisplayValue('Clients')).toBeTruthy()
+  })
   it('renders the server parent result even when raw ancestor fields disagree', () => {
     const result = <T,>(value: T): OUPolicyResult<T> => ({ own: null, effective: value, source_ou: 8, inherited: true, available: true })
     const policies: OUPolicyResults = {
@@ -112,6 +122,15 @@ describe('OrgUnitDetail', () => {
     expect(screen.queryByText('users.parentOu')).toBeNull()
     expect(screen.queryByText('ou.sectionTenancy')).toBeNull()
     expect(screen.queryByText('ou.deleteOu')).toBeNull()
+  })
+
+  it('does not offer a descendant as the unit parent', async () => {
+    const parent = g({ id: 2, name: 'Parent', parent_id: 1 })
+    const child = g({ id: 3, name: 'Child', parent_id: 2 })
+    mount(parent, [DEF, parent, child])
+    fireEvent.mouseDown(screen.getByRole('combobox'))
+    expect(await screen.findByText('Default', { selector: '.ant-select-item-option-content' })).toBeTruthy()
+    expect(screen.queryByText('Child', { selector: '.ant-select-item-option-content' })).toBeNull()
   })
 
   // The second-factor overrides ride with the OU, because that is where they are edited. null is

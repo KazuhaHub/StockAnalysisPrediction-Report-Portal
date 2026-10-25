@@ -21,6 +21,7 @@ import {
 } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import useFormDraft from './useFormDraft'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import { forgetTags } from '../../lib/conditionalGet'
@@ -96,6 +97,7 @@ export default function AnnouncementPage() {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<FormValues>()
+  const draft = useFormDraft(form, open, saving, () => setOpen(false))
 
   const load = () => {
     setLoading(true)
@@ -388,7 +390,7 @@ export default function AnnouncementPage() {
   )
 
   return (
-    <Space orientation="vertical" size={12} style={{ width: '100%', maxWidth: 860 }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%', minWidth: 0 }}>
       <LoadGate loading={loading} error={loadErr} onRetry={load}>
         <Space orientation="vertical" size={10} style={{ width: '100%' }}>
           <Space wrap>
@@ -480,20 +482,22 @@ export default function AnnouncementPage() {
 
       <Drawer
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={draft.close}
+        closable={!saving}
+        maskClosable={!saving}
         size={520}
         destroyOnHidden
         title={editing ? t('announcementAdmin.editTitle') : t('announcementAdmin.add')}
         footer={
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={() => setOpen(false)}>{t('common.cancel')}</Button>
+            <Button disabled={saving} onClick={draft.close}>{t('common.cancel')}</Button>
             <Button type="primary" loading={saving} onClick={submit}>
               {t('common.save')}
             </Button>
           </Space>
         }
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} disabled={saving} layout="vertical">
           <Form.Item name="enabled" label={t('announcementAdmin.enabled')} valuePropName="checked">
             <Switch />
           </Form.Item>

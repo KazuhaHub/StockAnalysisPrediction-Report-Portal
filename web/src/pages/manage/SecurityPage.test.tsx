@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router'
 import SecurityPage from './SecurityPage'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
@@ -39,9 +40,9 @@ function mount(overrides: Partial<typeof policy> = {}) {
   apiMock.get.mockResolvedValue({ ...policy, ...overrides })
   apiMock.post.mockResolvedValue({ ok: true })
   return render(
-    <App>
+    <MemoryRouter><App>
       <SecurityPage />
-    </App>,
+    </App></MemoryRouter>,
   )
 }
 
@@ -51,6 +52,7 @@ describe('the login-protection page', () => {
   it('edits all five bounded forecast limits and preserves zero exploration capacity', async () => {
     mount()
     await screen.findByText('security.forecastSlotsOfficial')
+    await userEvent.click(screen.getByRole('button', { name: 'security.limitsTitle' }))
     const fields = [
       ['forecastSlotsOfficial', 'forecast_slots_official', 1, 8, 3],
       ['forecastSlotsExplore', 'forecast_slots_explore', 0, 8, 0],
@@ -70,11 +72,11 @@ describe('the login-protection page', () => {
     const body = apiMock.post.mock.calls[0][1] as { limits: Record<string, number> }
     for (const [, key, , , value] of fields) expect(body.limits[key]).toBe(value)
   })
-  it('renders the second-factor, recovery and lockout cards', async () => {
+  it('offers second-factor, recovery and lockout settings as named sections', async () => {
     mount()
-    expect(await screen.findByText('security.twofaTitle')).toBeTruthy()
-    expect(screen.getByText('security.recoveryTitle')).toBeTruthy()
-    expect(screen.getByText('security.lockoutTitle')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'security.twofaTitle' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'security.recoveryTitle' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'security.lockoutTitle' })).toBeTruthy()
     // The switch means ALLOW TO ENROL, which is a reading an operator can get wrong from the label
     // alone — so the card has to say it.
     expect(screen.getByText('security.twofaLocalOnly')).toBeTruthy()
@@ -82,7 +84,8 @@ describe('the login-protection page', () => {
 
   it('saves the blocks it renders', async () => {
     mount()
-    await screen.findByText('security.twofaTitle')
+    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await userEvent.click(screen.getByRole('switch'))
     await userEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
     const body = apiMock.post.mock.calls[0][1] as Record<string, any>
@@ -93,9 +96,8 @@ describe('the login-protection page', () => {
 
   it('carries a changed switch into the block it belongs to', async () => {
     mount()
-    await screen.findByText('security.twofaTitle')
-    // Rows render label + switch in order; the first switch on the page is the login-mode one, so
-    // this takes the switches by their card instead.
+    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
     const switches = screen.getAllByRole('switch')
     await userEvent.click(switches[switches.length - 1]) // the last card's only switch: the lockout
     await userEvent.click(screen.getByText('common.save'))
@@ -111,7 +113,7 @@ describe('the login-protection page', () => {
 
   it('says nothing about the lockout while it is off', async () => {
     mount()
-    await screen.findByText('security.twofaTitle')
+    await screen.findByRole('button', { name: 'security.twofaTitle' })
     expect(screen.queryByText('security.lockoutDuration')).toBeNull()
     expect(screen.queryByText('security.lockoutAccountWarning')).toBeNull()
   })
@@ -120,11 +122,27 @@ describe('the login-protection page', () => {
     mount({ email_configured: false })
     expect(await screen.findByText('security.recoveryNeedsEmail')).toBeTruthy()
   })
+
+  it('preserves a draft between sections and discards it without a server write', async () => {
+    mount()
+    await screen.findByRole('button', { name: 'security.loginTitle' })
+    await userEvent.click(screen.getByRole('switch'))
+    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
+    await userEvent.click(screen.getByRole('switch'))
+    await userEvent.click(screen.getByRole('button', { name: 'security.loginTitle' }))
+    expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
+    expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
+    expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
+    expect(apiMock.post).not.toHaveBeenCalled()
+  })
 })
 
   it('sends the mandate with the methods it needs', async () => {
     mount({ twofa: { totp_enroll: true, passkey_enroll: true, require_staff: true } })
-    await screen.findByText('security.twofaTitle')
+    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await userEvent.click(screen.getByRole('switch'))
     await userEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
     const body = apiMock.post.mock.calls[0][1] as Record<string, any>

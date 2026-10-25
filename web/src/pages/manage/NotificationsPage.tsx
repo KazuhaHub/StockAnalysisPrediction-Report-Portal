@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
+import useFormDraft from './useFormDraft'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
@@ -32,6 +33,9 @@ export default function NotificationsPage() {
   const [sample, setSample] = useState('report.ingested')
   const [retentionOpen, setRetentionOpen] = useState(false)
   const [retentionForm] = Form.useForm()
+  const channelDraft = useFormDraft(channelForm, channel !== undefined, busy, () => setChannel(undefined))
+  const ruleDraft = useFormDraft(ruleForm, rule !== undefined, busy, () => setRule(undefined))
+  const retentionDraft = useFormDraft(retentionForm, retentionOpen, busy, () => setRetentionOpen(false))
 
   const load = async () => {
     setError('')
@@ -172,16 +176,16 @@ export default function NotificationsPage() {
         </Space> },
       ]} />
     </Space>
-    <Modal open={retentionOpen} title={t('notify.retention')} onCancel={() => setRetentionOpen(false)} confirmLoading={busy} onOk={async () => { const values = await retentionForm.validateFields(); await run(async () => { await notifications.retention(values); setRetentionOpen(false) }) }}>
+    <Modal open={retentionOpen} title={t('notify.retention')} onCancel={retentionDraft.close} confirmLoading={busy} closable={!busy} maskClosable={!busy} onOk={async () => { const values = await retentionForm.validateFields(); await run(async () => { await notifications.retention(values); setRetentionOpen(false) }) }}>
       <Alert type="warning" title={t('notify.retentionHelp')} />
-      <Form form={retentionForm} layout="vertical">
+      <Form form={retentionForm} disabled={busy} layout="vertical">
         <Form.Item name="enabled" valuePropName="checked" label={t('notify.enabled')}><Switch /></Form.Item>
         <Form.Item name="history_days" label={t('notify.historyDays')} rules={[{ required: true }]}><InputNumber min={1} max={3650} /></Form.Item>
         <Form.Item name="inbox_days" label={t('notify.inboxDays')} rules={[{ required: true }]}><InputNumber min={1} max={3650} /></Form.Item>
       </Form>
     </Modal>
-    <Modal open={channel !== undefined} title={t(channel ? 'notify.editChannel' : 'notify.addChannel')} onCancel={() => setChannel(undefined)} onOk={saveChannel} confirmLoading={busy} destroyOnHidden>
-      <Form form={channelForm} layout="vertical">
+    <Modal open={channel !== undefined} title={t(channel ? 'notify.editChannel' : 'notify.addChannel')} onCancel={channelDraft.close} onOk={saveChannel} confirmLoading={busy} closable={!busy} maskClosable={!busy} destroyOnHidden>
+      <Form form={channelForm} disabled={busy} layout="vertical">
         <Form.Item name="label" label={t('notify.label')} rules={[{ required: true, whitespace: true, max: 120 }]}><Input /></Form.Item>
         <Form.Item name="adapter" label={t('notify.adapter')} rules={[{ required: true }]}><Select disabled={!!channel} options={['email', 'slack', 'webhook', 'inbox'].map(value => ({ value, label: t(`notify.adapter.${value}`) }))} /></Form.Item>
         {selectedAdapter === 'email' && channel?.id !== 'legacy:smtp' && <Form.Item name="recipients" label={t('notify.recipients')} extra={t('notify.recipientHelp')}><Input /></Form.Item>}
@@ -190,8 +194,8 @@ export default function NotificationsPage() {
         <Form.Item name="enabled" label={t('notify.enabled')} valuePropName="checked"><Switch /></Form.Item><Form.Item name="paused" label={t('notify.paused')} valuePropName="checked"><Switch /></Form.Item>
       </Form>
     </Modal>
-    <Modal open={rule !== undefined} title={t(rule ? 'notify.editRule' : 'notify.addRule')} onCancel={() => setRule(undefined)} onOk={saveRule} confirmLoading={busy} destroyOnHidden>
-      <Form form={ruleForm} layout="vertical">
+    <Modal open={rule !== undefined} title={t(rule ? 'notify.editRule' : 'notify.addRule')} onCancel={ruleDraft.close} onOk={saveRule} confirmLoading={busy} closable={!busy} maskClosable={!busy} destroyOnHidden>
+      <Form form={ruleForm} disabled={busy} layout="vertical">
         <Form.Item name="label" label={t('notify.label')} rules={[{ required: true, whitespace: true, max: 120 }]}><Input /></Form.Item>
         <Form.Item name="channel_id" label={t('notify.channels')} rules={[{ required: true }]}><Select options={channels.filter(c => !c.id.startsWith('legacy:')).map(c => ({ value: c.id, label: c.label }))} /></Form.Item>
         <Form.Item name="events" label={t('notify.events')} rules={[{ required: true }]}><Select mode="multiple" options={data?.events.map(value => ({ value, label: eventLabel(value) }))} /></Form.Item>
@@ -208,7 +212,7 @@ export default function NotificationsPage() {
     <Modal open={resume} title={t('notify.resume')} onCancel={() => setResume(false)} confirmLoading={busy} onOk={() => run(async () => { await notifications.dispatch(false, data?.review_token); setResume(false) })}>
       <Alert type="warning" showIcon title={t('notify.resumeHelp')} /><Typography.Paragraph>{t('notify.queueCounts', data?.counts || {})}</Typography.Paragraph>
     </Modal>
-    <Drawer open={!!detail} size={640} title={t('notify.details')} onClose={() => setDetail(undefined)}>
+    <Drawer rootClassName="rp-admin-editor-drawer" open={!!detail} size={640} title={t('notify.details')} onClose={() => setDetail(undefined)}>
       {detail && <Space orientation="vertical" style={{ width: '100%' }}>
         <Typography.Text copyable>{detail.delivery.id}</Typography.Text><Tag>{stateLabel(detail.delivery.state)}</Tag><Typography.Text>{detail.delivery.error_code}</Typography.Text>
         <Typography.Title level={5}>{detail.preview.subject}</Typography.Title><Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{detail.preview.text}</Typography.Paragraph>

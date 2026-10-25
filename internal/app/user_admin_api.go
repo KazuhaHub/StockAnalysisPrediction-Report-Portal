@@ -106,8 +106,8 @@ func (s *Server) apiAdminGroups(w http.ResponseWriter, r *http.Request, user str
 	writeJSON(w, map[string]any{"groups": groups})
 }
 
-// groupInput is the create/update body. Weight and UrgentUnlimited are pointers so a
-// JSON null means "inherit the Default group" and a value means "override".
+// groupInput is the complete create/replacement body. PATCH first merges supplied fields with
+// the stored snapshot. Nullable policy values distinguish inheritance from explicit overrides.
 type groupInput struct {
 	ForecastScope   json.RawMessage `json:"forecast_scope"`
 	Name            string          `json:"name"`
@@ -131,8 +131,8 @@ type groupInput struct {
 	// inherited behaviour (restricted stickiness, quota inheritance, the run allow-list's and the
 	// version grants' nearest-ancestor resolution) unreachable through the product.
 	ParentID *int64 `json:"parent_id"`
-	// The login-protection overrides. Always sent by the form — the endpoint replaces an OU's whole
-	// configuration — so nil means "inherit the parent OU", exactly as daily_run_quota reads.
+	// The replacement contract uses nil for inheritance. PATCH distinguishes omission from null
+	// before decoding the merged input, so an unrelated editor cannot clear these overrides.
 	TOTPEnroll    *bool `json:"totp_enroll"`
 	PasskeyEnroll *bool `json:"passkey_enroll"`
 	Require2FA    *bool `json:"require_2fa"`
@@ -254,12 +254,32 @@ func (s *Server) apiGroupSave(w http.ResponseWriter, r *http.Request, user strin
 		ouWriteHTTPError(w, err)
 		return
 	}
+	s.finishOUUpdate(w, r, user, result, true)
+}
+
+func (s *Server) apiGroupPatch(w http.ResponseWriter, r *http.Request, user string) {
+	var patch map[string]json.RawMessage
+	if err := readJSON(r, &patch); err != nil {
+		jsonError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	result, err := s.patchOUInput(pathID(r, "id"), patch)
+	if err != nil {
+		ouWriteHTTPError(w, err)
+		return
+	}
+	_, mandate := patch["require_2fa"]
+	_, move := patch["parent_id"]
+	s.finishOUUpdate(w, r, user, result, mandate || move)
+}
+
+func (s *Server) finishOUUpdate(w http.ResponseWriter, r *http.Request, user string, result ouWriteResult, reportEnrolment bool) {
 	if result.Changed {
-		s.recordChange(r, user, AuditGroupChange, "group", itoa64(id), result.Detail)
+		s.recordChange(r, user, AuditGroupChange, "group", itoa64(result.ID), result.Detail)
 	}
 	pending := 0
-	if s.st.GroupRequires2FA(id) {
-		if n, err := s.st.membersWithoutFactor(id); err == nil {
+	if reportEnrolment && s.st.GroupRequires2FA(result.ID) {
+		if n, err := s.st.membersWithoutFactor(result.ID); err == nil {
 			pending = n
 		}
 	}

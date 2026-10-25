@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Divider, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
 import { AuditOutlined, DatabaseOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { CleanupConfig, CleanupResult, CleanupRun, CleanupUsage, CleanupUsageCategory } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
 
@@ -103,6 +104,23 @@ export default function StoragePage() {
   const [cfg, setCfg] = useState<CleanupConfig | null>(null) // last-saved view, drives the usage cards
   const [usage, setUsage] = useState<CleanupUsage | null>(null)
   const [history, setHistory] = useState<CleanupRun[]>([])
+  const [historyError, setHistoryError] = useState('')
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [section, setSection] = useState('usage')
+  const [saving, setSaving] = useState(false)
+  const values = { freq, time, weekday, monthday, batch_enabled: batchEnabled, batch_days: batchDays,
+    tokens_enabled: tokensEnabled, tokens_grace_days: tokensGraceDays, reports_enabled: reportsEnabled,
+    reports_days: reportsDays, audit_enabled: auditEnabled, audit_days: auditDays, revisions_enabled: revisionsEnabled,
+    revisions_days: revisionsDays, revisions_keep: revisionsKeep, predictions_enabled: predictionsEnabled, predictions_days: predictionsDays }
+  const dirty = !!cfg && Object.entries(values).some(([key, value]) => cfg[key as keyof CleanupConfig] !== value)
+  const restore = (r: CleanupConfig) => {
+    setFreq(r.freq); setTime(r.time); setWeekday(r.weekday); setMonthday(r.monthday)
+    setBatchEnabled(r.batch_enabled); setBatchDays(r.batch_days); setTokensEnabled(r.tokens_enabled)
+    setTokensGraceDays(r.tokens_grace_days); setReportsEnabled(r.reports_enabled); setReportsDays(r.reports_days)
+    setAuditEnabled(r.audit_enabled); setAuditDays(r.audit_days); setRevisionsEnabled(r.revisions_enabled)
+    setRevisionsDays(r.revisions_days); setRevisionsKeep(r.revisions_keep)
+    setPredictionsEnabled(r.predictions_enabled); setPredictionsDays(r.predictions_days)
+  }
 
   // The schedule fields start at this file's defaults — cleanup off, 365-day audit retention —
   // and the form is live, so until the server has answered nothing here may be shown as if it
@@ -141,7 +159,12 @@ export default function StoragePage() {
       .catch((e) => setLoadErr(errText(e, t)))
   }
   const loadUsage = () => api.get<CleanupUsage>('/api/admin/cleanup/usage').then(setUsage)
-  const loadHistory = () => api.get<{ runs: CleanupRun[] }>('/api/admin/cleanup/history').then((r) => setHistory(r.runs ?? []))
+  const loadHistory = () => {
+    setHistoryError('')
+    return api.get<{ runs: CleanupRun[] }>('/api/admin/cleanup/history')
+      .then((r) => { setHistory(r.runs ?? []); setHistoryLoaded(true) })
+      .catch((e) => setHistoryError(errText(e, t)))
+  }
 
   // Usage belongs inside the gate with the config: the card above reads `usage?.db_bytes ?? 0`,
   // and "0 B" over an empty proportion bar is this page's headline number reporting a database
@@ -158,28 +181,14 @@ export default function StoragePage() {
   }, [])
 
   const save = async () => {
-    await api.post('/api/admin/cleanup/config', {
-      freq,
-      time,
-      weekday,
-      monthday,
-      batch_enabled: batchEnabled,
-      batch_days: batchDays,
-      tokens_enabled: tokensEnabled,
-      tokens_grace_days: tokensGraceDays,
-      reports_enabled: reportsEnabled,
-      reports_days: reportsDays,
-      audit_enabled: auditEnabled,
-      audit_days: auditDays,
-      revisions_enabled: revisionsEnabled,
-      revisions_days: revisionsDays,
-      revisions_keep: revisionsKeep,
-      predictions_enabled: predictionsEnabled,
-      predictions_days: predictionsDays,
-    })
-    message.success(t('common.saved'))
-    loadConfig()
-    loadUsage().catch(() => {})
+    setSaving(true)
+    try {
+      await api.post('/api/admin/cleanup/config', values)
+      setCfg((current) => current && ({ ...current, ...values }))
+      message.success(t('common.saved'))
+      await loadConfig()
+      await loadUsage().catch(() => {})
+    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 
   const doRun = async (targets: string[]) => {
@@ -199,7 +208,6 @@ export default function StoragePage() {
     }
     loadUsage().catch(() => {})
     loadHistory().catch(() => {})
-    loadConfig()
   }
 
   // Reports (core content): preview the live count, then a strict confirm before arming or running.
@@ -369,7 +377,13 @@ export default function StoragePage() {
 
   return (
     <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <>
+    {loaded && loadErr && <Alert type="error" showIcon title={loadErr} style={{ marginBottom: 16 }} />}
+    <SettingsWorkspace active={section} onChange={setSection} sections={[
+      { key: 'usage', label: t('manage.operation.usage') }, { key: 'policy', label: t('manage.operation.retention') },
+      { key: 'login', label: t('manage.operation.loginHistory') }, { key: 'history', label: t('manage.operation.cleanupHistory') },
+    ]}>
+      <SettingsPanel section="usage">
       <Card title={t('storage.usageTitle')}>
         <Space orientation="vertical" size={14} style={{ width: '100%' }}>
           {/* Total + proportion bar: which category takes the space, at a glance. */}
@@ -408,9 +422,13 @@ export default function StoragePage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>{cats.map(renderCard)}</div>
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="login">
       <LoginHistoryRetentionCard />
+      </SettingsPanel>
+      <SettingsPanel section="policy">
       <Card title={t('storage.title')}>
+        <ConfigProvider componentDisabled={saving}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
           <Divider style={{ margin: '4px 0' }} titlePlacement="left" plain>
             {t('storage.scheduleTitle')}
@@ -518,14 +536,13 @@ export default function StoragePage() {
             t('storage.predictionsHint', { n: predictionsFloor }),
           )}
 
-          <StickyActionBar>
-            <Button type="primary" onClick={save}>
-              {t('common.save')}
-            </Button>
-          </StickyActionBar>
         </div>
+        </ConfigProvider>
+        <SettingsSaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => { if (cfg) restore(cfg) }} />
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="history">
+      <LoadGate loading={!historyLoaded && !historyError} error={historyError} onRetry={loadHistory}>
       {/* Absent until something has actually been deleted. The server stopped recording no-op
           passes, so an empty history means nothing has ever been removed — a card saying that every
           day is a card nobody reads, and the one that matters would be lost among them. */}
@@ -544,7 +561,11 @@ export default function StoragePage() {
           </div>
         </Card>
       )}
-    </div>
+      {historyLoaded && history.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.operation.noCleanupHistory')} />}
+      </LoadGate>
+      </SettingsPanel>
+    </SettingsWorkspace>
+    </>
     </LoadGate>
   )
 }

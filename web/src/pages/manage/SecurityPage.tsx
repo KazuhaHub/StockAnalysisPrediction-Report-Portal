@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Divider, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
+import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
+import { PolicyPage } from './OUPolicyWorkspace'
 
 // Login protection and self-service registration.
 //
@@ -74,7 +77,21 @@ interface GroupRow {
   restricted?: boolean
 }
 
+interface SecurityDraft {
+  captcha: CaptchaCfg | null
+  registration: RegCfg | null
+  login: LoginCfg | null
+  limits: LimitsCfg | null
+  twofa: TwoFACfg | null
+  recovery: boolean
+  lockout: LockoutCfg | null
+}
+
 export default function SecurityPage() {
+  return <PolicyPage section="security"><GlobalSecuritySettings /></PolicyPage>
+}
+
+function GlobalSecuritySettings() {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [captcha, setCaptcha] = useState<CaptchaCfg | null>(null)
@@ -89,10 +106,14 @@ export default function SecurityPage() {
   const [secret, setSecret] = useState<string | null>(null) // null = leave the stored one alone
   const [busy, setBusy] = useState(false)
   const [loadErr, setLoadErr] = useState('')
+  const [section, setSection] = useState('login')
+  const [savedValues, setSavedValues] = useState<SecurityDraft | null>(null)
+  const currentValues: SecurityDraft = { captcha, registration: reg, login, limits, twofa, recovery, lockout }
+  const dirty = savedValues !== null && (secret !== null || JSON.stringify(currentValues) !== JSON.stringify(savedValues))
 
   const load = useCallback(() => {
     setLoadErr('')
-    api
+    return api
       .get<{
         captcha: CaptchaCfg
         registration: RegCfg
@@ -115,6 +136,8 @@ export default function SecurityPage() {
         setGroups(r.groups ?? [])
         setEmailOK(r.email_configured)
         setSecret(null)
+        setSavedValues({ captcha: r.captcha, registration: r.registration, login: r.login,
+          limits: r.limits, twofa: r.twofa, recovery: r.recovery.enabled, lockout: r.lockout })
       })
       .catch((e) => {
         setLoadErr(errText(e, t))
@@ -122,7 +145,7 @@ export default function SecurityPage() {
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useEffect(load, [load])
+  useEffect(() => { void load() }, [load])
 
   const save = async () => {
     if (!captcha || !reg || !login || !limits || !twofa || !lockout) return
@@ -149,7 +172,7 @@ export default function SecurityPage() {
         lockout,
       })
       message.success(t('common.saved'))
-      load()
+      await load()
     } catch (e) {
       message.error(errText(e, t))
     } finally {
@@ -167,9 +190,32 @@ export default function SecurityPage() {
     )
   }
   const tokenProvider = captcha.provider !== 'image'
+  const sections = [
+    { key: 'login', label: t('security.loginTitle') },
+    { key: 'captcha', label: t('security.captchaTitle') },
+    { key: 'twofa', label: t('security.twofaTitle') },
+    { key: 'recovery', label: t('security.recoveryTitle') },
+    { key: 'registration', label: t('security.regTitle') },
+    { key: 'lockout', label: t('security.lockoutTitle') },
+    { key: 'limits', label: t('security.limitsTitle') },
+  ]
+  const discard = () => {
+    if (!savedValues) return
+    setCaptcha(savedValues.captcha)
+    setReg(savedValues.registration)
+    setLogin(savedValues.login)
+    setLimits(savedValues.limits)
+    setTwofa(savedValues.twofa)
+    setRecovery(savedValues.recovery)
+    setLockout(savedValues.lockout)
+    setSecret(null)
+  }
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 720 }}>
+    <div>
+      <ConfigProvider componentDisabled={busy}>
+      <SettingsWorkspace sections={sections} active={section} onChange={setSection}>
+      <SettingsPanel section="login">
       <Card title={t('security.loginTitle')}>
         <Row label={t('security.loginMode')} hint={t('security.loginModeHint')}>
           <Select
@@ -191,7 +237,8 @@ export default function SecurityPage() {
           <Alert type="warning" showIcon style={{ marginTop: 12 }} title={t('security.noProviderWarning')} />
         )}
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="captcha">
       <Card title={t('security.captchaTitle')}>
         <Typography.Paragraph type="secondary">{t('security.captchaDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -260,7 +307,8 @@ export default function SecurityPage() {
           </Row>
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="twofa">
       <Card title={t('security.twofaTitle')}>
         <Typography.Paragraph type="secondary">{t('security.twofaDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -279,7 +327,8 @@ export default function SecurityPage() {
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('security.twofaLocalOnly')}</Typography.Text>
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="recovery">
       <Card title={t('security.recoveryTitle')}>
         <Typography.Paragraph type="secondary">{t('security.recoveryDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -289,7 +338,8 @@ export default function SecurityPage() {
           </Row>
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="registration">
       <Card title={t('security.regTitle')}>
         <Typography.Paragraph type="secondary">{t('security.regDesc')}</Typography.Paragraph>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -333,7 +383,8 @@ export default function SecurityPage() {
           </Row>
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="lockout">
       {/* The lockout sits with the ceilings because that is what it extends: it is the failure
           ceiling below, held for longer than the window it was reached in. It is off by default —
           the window alone is what every deployment had before this existed. */}
@@ -375,7 +426,8 @@ export default function SecurityPage() {
           )}
         </Space>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="limits">
       {/* Three ceilings that were compiled in until now. They sit with the login policy because
           that is what they are: how long being signed in lasts, and how hard someone may knock. */}
       <Card title={t('security.limitsTitle')}>
@@ -438,11 +490,11 @@ export default function SecurityPage() {
           ))}
         </Space>
       </Card>
-
-      <Button type="primary" loading={busy} onClick={save}>
-        {t('common.save')}
-      </Button>
-    </Space>
+      </SettingsPanel>
+      </SettingsWorkspace>
+      </ConfigProvider>
+      <SettingsSaveBar dirty={dirty} saving={busy} onSave={save} onDiscard={discard} />
+    </div>
   )
 }
 

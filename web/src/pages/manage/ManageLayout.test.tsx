@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import ManageLayout from './ManageLayout'
 
 const navigate = vi.fn()
@@ -52,7 +52,7 @@ describe('ManageLayout — grouped rail', () => {
       'nav.group.batch',
       'nav.group.integrations',
     ]) {
-      expect(screen.getByText(header)).toBeTruthy()
+      expect(within(screen.getByRole('menu')).getByText(header)).toBeTruthy()
     }
     expect(screen.queryByText('nav.group.maintenance')).toBeNull()
   })
@@ -60,7 +60,7 @@ describe('ManageLayout — grouped rail', () => {
   it('exposes the pages that used to be buried under Settings; legacy import is gone', () => {
     render(<ManageLayout />)
     for (const leaf of ['settings.general', 'nav.announcement', 'settings.tokens', 'settings.apidoc']) {
-      expect(screen.getByText(leaf)).toBeTruthy()
+      expect(within(screen.getByRole('menu')).getByText(leaf)).toBeTruthy()
     }
     expect(screen.queryByText('settings.legacyTab')).toBeNull()
   })
@@ -69,6 +69,21 @@ describe('ManageLayout — grouped rail', () => {
     render(<ManageLayout />)
     fireEvent.click(screen.getByText('nav.webhooks'))
     expect(navigate).toHaveBeenCalledWith('/manage/webhooks')
+  })
+
+  it('finds settings by topic and navigates to the selected result', async () => {
+    render(<ManageLayout />)
+    fireEvent.click(screen.getByRole('button', { name: 'manage.search' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'manage.description.sso' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /nav.sso/ }))
+    expect(navigate).toHaveBeenCalledWith('/manage/sso')
+  })
+
+  it('offers a route back to the administration overview', () => {
+    render(<ManageLayout />)
+    fireEvent.click(screen.getByRole('menuitem', { name: /manage.overview/ }))
+    expect(navigate).toHaveBeenCalledWith('/manage/overview')
   })
 
   it('has a 预测验证 entry in the content group', () => {

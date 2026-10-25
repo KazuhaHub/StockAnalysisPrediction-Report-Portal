@@ -33,6 +33,8 @@ export default function AppsAdminPage() {
   const [savingIndex, setSavingIndex] = useState(false)
   const [pending, setPending] = useState<PendingInstall | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [search, setSearch] = useState('')
+  const matches = (app: AppMarketEntry) => `${app.id} ${app.name} ${app.version || ''} ${app.description || ''} ${(app.scopes || []).join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
 
   const load = () =>
     api
@@ -199,6 +201,7 @@ export default function AppsAdminPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <AppBackendModal app={backendApp} onClose={() => setBackendApp(null)} />
+      <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
       <Card
         title={
           <Space>
@@ -228,7 +231,7 @@ export default function AppsAdminPage() {
             size="small"
             loading={!loaded}
             locale={loadErr ? { emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadErr} /> } : undefined}
-            dataSource={apps}
+            dataSource={apps.filter(matches)}
             columns={cols}
             pagination={false}
             scroll={{ x: 'max-content' }}
@@ -280,7 +283,7 @@ export default function AppsAdminPage() {
           {market === null ? null : market.length === 0 ? (
             <Empty description={t('apps.marketEmpty')} />
           ) : (
-            <Table rowKey="id" size="small" dataSource={market} columns={marketCols} pagination={false} scroll={{ x: 'max-content' }} />
+            <Table rowKey="id" size="small" dataSource={market.filter(matches)} columns={marketCols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
           )}
         </Space>
       </Card>

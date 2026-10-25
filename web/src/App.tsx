@@ -26,6 +26,8 @@ const RunPage = lazyRetry(() => import('./pages/RunPage'))
 const ReviewPage = lazyRetry(() => import('./pages/ReviewPage'))
 const ReportEditorPage = lazyRetry(() => import('./pages/ReportEditorPage'))
 const ManageLayout = lazyRetry(() => import('./pages/manage/ManageLayout'))
+const AdminDraftBoundary = lazyRetry(() => import('./pages/manage/AdminDraftBoundary'))
+const AdminOverviewPage = lazyRetry(() => import('./pages/manage/AdminOverviewPage'))
 const LinksPage = lazyRetry(() => import('./pages/manage/LinksPage'))
 const TypesPage = lazyRetry(() => import('./pages/manage/TypesPage'))
 const UsersPage = lazyRetry(() => import('./pages/manage/UsersPage'))
@@ -188,11 +190,14 @@ function AppRoutes() {
           path="/manage"
           element={
             <AdminOnly>
+              <AdminDraftBoundary>
               <ManageLayout />
+              </AdminDraftBoundary>
             </AdminOnly>
           }
         >
-          <Route index element={<Navigate to="site" replace />} />
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<AdminOverviewPage />} />
           <Route path="site" element={<SiteSettingsPage />} />
           <Route path="announcement" element={<AnnouncementPage />} />
           <Route path="email" element={<EmailPage />} />

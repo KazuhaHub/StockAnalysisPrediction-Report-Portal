@@ -10,7 +10,7 @@ import type { ForecastAccessOverview, ForecastOUAccess, ForecastScope, UserGroup
 // Nothing here recomputes inheritance: the table shows the server's effective scope and the OU that
 // decided it, so it cannot disagree with what a member is actually allowed to open. Names come from
 // the OU list, because the access overview identifies units by id only. The values are edited in the
-// OU editor; this card is the read-only picture, with a link to where it is changed.
+// forecast settings' organizational scope; this card links directly to the relevant unit.
 
 type State =
   | { kind: 'loading' }
@@ -75,7 +75,7 @@ export default function ForecastAccessSummary() {
                 {
                   title: t('forecast.access.col_ou'),
                   key: 'ou',
-                  render: (_, r) => <Link to={`/manage/users?tab=groups&ou=${r.id}`}>{nameOf(r.id)}</Link>,
+                  render: (_, r) => <Link to={`/manage/forecast?scope=ou&ou=${r.id}`}>{nameOf(r.id)}</Link>,
                 },
                 {
                   title: t('forecast.access.col_own'),
@@ -114,7 +114,7 @@ export default function ForecastAccessSummary() {
   return (
     <Card
       title={t('forecast.access.title')}
-      extra={<Link to="/manage/users?tab=groups">{t('forecast.access.edit')}</Link>}
+      extra={<Link to="/manage/forecast?scope=ou">{t('forecast.access.edit')}</Link>}
     >
       <Typography.Paragraph type="secondary">{t('forecast.access.help')}</Typography.Paragraph>
       {body()}

@@ -286,3 +286,24 @@ refresh, and it neither backfills nor re-attributes existing reports.
   an indirection the four requirements don't need yet. Deferred; can layer on later.
 - **Forking per-owner report copies** instead of a shared upsert row. Breaks the dedup identity and
   multiplies storage. Rejected.
+
+## Amendment (2026-10-24) — Feature-owned policy editing
+
+An OU is a configuration scope, not a second administration console. The directory owns identity,
+hierarchy and membership. Login protection owns second-factor overrides; run settings own quotas,
+urgent policy and run governance; execution targets own workflow grants; report-version settings own
+access isolation; forecast operations own forecast-reader scope. Global urgent capacity and ticket
+refill belong to global run settings. Each feature provides a global view and an OU-scoped view,
+with server-resolved inheritance and source information. Unknown OU links must not fall back to a
+different unit's editable policy.
+
+The existing PUT endpoint replaces a complete OU configuration and remains compatible. Feature
+editors instead use `PATCH /api/admin/groups/{id}` with only the fields they own. Omitted fields are
+preserved; explicit null restores inheritance for nullable policies. The patch is merged with the
+current stored snapshot inside the existing OU mutation lock, then passed through the same topology,
+mandate and policy validation and writer. A read/merge/write in the browser would lose concurrent
+edits from another settings page, so the merge belongs inside the transaction. Unknown fields and
+invalid values are refused atomically; no-op updates do not write change audit entries.
+
+This changes editing ownership and adds a cookie-authenticated administrator endpoint. It changes no
+database shape, effective authorization semantics, inheritance contract or machine API.

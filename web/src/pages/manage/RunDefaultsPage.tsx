@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Card, InputNumber, Select, Space, Switch, Typography } from 'antd'
+import { App, ConfigProvider, InputNumber, Select, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { api, errText } from '../../api/client'
@@ -7,8 +7,11 @@ import { visibleOn } from '../../lib/batchUi'
 import { presetSummary } from '../../lib/runSchedule'
 import type { BatchConfig, BatchTarget, RunMode, RunPreset, RunPresetsResp } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
-import { GAP_FIELD } from './tokens'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
+import SettingsField from './SettingsField'
+import useSettingsDraft from './useSettingsDraft'
+import type { ReactElement, ReactNode } from 'react'
 
 // The run form's defaults, on their own page (docs/adr/0014 §4): what 运行分析 opens on before the
 // user touches anything — which workflow, which mode button, which preset window, whether 队列空闲
@@ -23,13 +26,10 @@ import { GAP_FIELD } from './tokens'
 export default function RunDefaultsPage() {
   const { t } = useTranslation()
   const { message } = App.useApp()
-  const [targetId, setTargetId] = useState(0) // 0 = no default workflow
-  const [mode, setMode] = useState<RunMode>('now')
-  const [presetId, setPresetId] = useState(0) // 0 = no default window
-  const [idle, setIdle] = useState(false)
-  const [retries, setRetries] = useState(0)
-  const [notify, setNotify] = useState(false)
-  const [showRule, setShowRule] = useState(false) // print a window's whole rule in the run form
+  const draft = useSettingsDraft({ targetId: 0, mode: 'now' as RunMode, presetId: 0, idle: false, retries: 0, notify: false, showRule: false })
+  const { targetId, mode, presetId, idle, retries, notify, showRule } = draft.value
+  const [saving, setSaving] = useState(false)
+  const [section, setSection] = useState('launch')
   const [targets, setTargets] = useState<BatchTarget[]>([])
   const [presets, setPresets] = useState<RunPreset[]>([])
   // Same rule as the other settings pages: until the server has answered, the numbers above are
@@ -48,13 +48,9 @@ export default function RunDefaultsPage() {
       api.get<RunPresetsResp>('/api/admin/batch/presets'),
     ])
       .then(([cfg, tg, ps]) => {
-        setTargetId(cfg.run_default_target_id ?? 0)
-        setMode(cfg.run_default_mode ?? 'now')
-        setPresetId(cfg.run_default_preset_id ?? 0)
-        setIdle(!!cfg.run_default_idle)
-        setRetries(cfg.run_default_retries ?? 0)
-        setNotify(!!cfg.run_default_notify)
-        setShowRule(!!cfg.run_show_preset_rule)
+        draft.accept({ targetId: cfg.run_default_target_id ?? 0, mode: cfg.run_default_mode ?? 'now',
+          presetId: cfg.run_default_preset_id ?? 0, idle: !!cfg.run_default_idle,
+          retries: cfg.run_default_retries ?? 0, notify: !!cfg.run_default_notify, showRule: !!cfg.run_show_preset_rule })
         setTargets(tg.targets || [])
         setPresets(ps.presets || [])
       })
@@ -67,7 +63,9 @@ export default function RunDefaultsPage() {
   }, [])
 
   const save = async () => {
-    await api.post('/api/admin/batch/config', {
+    setSaving(true)
+    try {
+      await api.post('/api/admin/batch/config', {
       run_default_target_id: targetId,
       run_default_mode: mode,
       run_default_preset_id: presetId,
@@ -76,8 +74,9 @@ export default function RunDefaultsPage() {
       run_default_notify: notify,
       run_show_preset_rule: showRule,
     })
-    message.success(t('common.saved'))
-    load()
+      draft.acknowledge(draft.value)
+      message.success(t('common.saved'))
+    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 
   // Only a workflow 运行分析 can actually offer is worth defaulting to. A saved default that has
@@ -104,31 +103,28 @@ export default function RunDefaultsPage() {
     [presets, t],
   )
 
-  const row = (label: string, hint: React.ReactNode, control: React.ReactNode) => (
-    <Space wrap>
-      <span style={{ display: 'inline-block', minWidth: 120 }}>{label}</span>
-      {control}
-      <Typography.Text type="secondary">{hint}</Typography.Text>
-    </Space>
-  )
+  const row = (label: string, hint: ReactNode, control: ReactElement) => <SettingsField label={label} hint={hint}>{control}</SettingsField>
 
   return (
-    <Card title={t('runDefaults.title')}>
+    <>
       <LoadGate loading={loading} error={loadErr} onRetry={load}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: GAP_FIELD, width: '100%' }}>
-          <Typography.Text type="secondary">{t('runDefaults.hint')}</Typography.Text>
-
+        <Typography.Paragraph type="secondary">{t('runDefaults.hint')}</Typography.Paragraph>
+        <ConfigProvider componentDisabled={saving}>
+        <SettingsWorkspace active={section} onChange={setSection} sections={[
+          { key: 'launch', label: t('runDefaults.section.launch') }, { key: 'completion', label: t('runDefaults.section.completion') },
+        ]}>
+          <SettingsPanel section="launch">
           {row(
             t('runDefaults.workflow'),
             t('runDefaults.workflowHint'),
-            <Select style={{ minWidth: 260 }} value={targetId} onChange={setTargetId} options={targetOptions} />,
+            <Select value={targetId} onChange={(targetId) => draft.patch({ targetId })} options={targetOptions} />,
           )}
           {row(
             t('runDefaults.mode'),
             t('runDefaults.modeHint'),
             <Select
               value={mode}
-              onChange={(v) => setMode(v as RunMode)}
+              onChange={(mode) => draft.patch({ mode })}
               style={{ width: 140 }}
               options={[
                 { value: 'now', label: t('run.now') },
@@ -149,9 +145,8 @@ export default function RunDefaultsPage() {
               t('runDefaults.presetHint')
             ),
             <Select
-              style={{ minWidth: 260 }}
               value={presetId}
-              onChange={setPresetId}
+              onChange={(presetId) => draft.patch({ presetId })}
               disabled={presets.length === 0}
               options={presetOptions}
             />,
@@ -159,23 +154,22 @@ export default function RunDefaultsPage() {
           {row(
             t('runDefaults.showRule'),
             t('runDefaults.showRuleHint'),
-            <Switch checked={showRule} onChange={setShowRule} disabled={presets.length === 0} />,
+            <Switch checked={showRule} onChange={(showRule) => draft.patch({ showRule })} disabled={presets.length === 0} />,
           )}
-          {row(t('runDefaults.idle'), t('runDefaults.idleHint'), <Switch checked={idle} onChange={setIdle} />)}
+          {row(t('runDefaults.idle'), t('runDefaults.idleHint'), <Switch checked={idle} onChange={(idle) => draft.patch({ idle })} />)}
+          </SettingsPanel>
+          <SettingsPanel section="completion">
           {row(
             t('runDefaults.retries'),
             t('runDefaults.retriesHint'),
-            <InputNumber min={0} max={5} value={retries} onChange={(v) => setRetries(v ?? 0)} />,
+            <InputNumber min={0} max={5} value={retries} onChange={(v) => draft.patch({ retries: v ?? 0 })} />,
           )}
-          {row(t('runDefaults.notify'), t('runDefaults.notifyHint'), <Switch checked={notify} onChange={setNotify} />)}
-
-          <StickyActionBar>
-            <Button type="primary" onClick={save}>
-              {t('common.save')}
-            </Button>
-          </StickyActionBar>
-        </div>
+          {row(t('runDefaults.notify'), t('runDefaults.notifyHint'), <Switch checked={notify} onChange={(notify) => draft.patch({ notify })} />)}
+          </SettingsPanel>
+        </SettingsWorkspace>
+        </ConfigProvider>
+        <SettingsSaveBar dirty={draft.dirty} saving={saving} onSave={save} onDiscard={draft.discard} />
       </LoadGate>
-    </Card>
+    </>
   )
 }

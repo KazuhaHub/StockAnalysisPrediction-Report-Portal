@@ -12,6 +12,7 @@ vi.mock('../../api/client', () => ({
     post: (...a: unknown[]) => post(...a),
     del: () => Promise.resolve({}),
   },
+  errText: () => 'Offline',
 }))
 
 // Echo the i18n key (plus interpolation) so buttons are findable by their key.
@@ -51,6 +52,18 @@ describe('TypesPage — kind colors', () => {
   beforeEach(() => {
     post.mockReset()
     get.mockReset()
+  })
+  it('retains failed configuration edits and discards without changing the saved taxonomy', async () => {
+    get.mockResolvedValue({ groups: [{ kind: 'Research', rows: [{ name: 'Overview', kind: 'Research', ord: 0, isSummary: true, label: 'Summary' }] }], kinds: ['Research'], colors: {} })
+    post.mockRejectedValue(new Error('Offline'))
+    renderPage()
+    const label = await screen.findByDisplayValue('Summary')
+    fireEvent.change(label, { target: { value: 'Draft label' } })
+    fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
+    await screen.findByText('Offline')
+    expect((label as HTMLInputElement).value).toBe('Draft label')
+    fireEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
+    expect((label as HTMLInputElement).value).toBe('Summary')
   })
 
   it('shows the configured color on the kind tag and saves a change immediately (no Save-page click needed)', async () => {

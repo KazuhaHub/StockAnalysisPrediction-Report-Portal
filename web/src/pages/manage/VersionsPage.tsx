@@ -1,18 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Empty, Input, Popconfirm, Select, Space, Tag, Typography } from 'antd'
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import { useEffect, useState } from 'react'
+import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-
-// Report versions (ADR 0024). A report can be published in several written forms; each is produced
-// by its own run. This page registers the forms and decides, per form, who may read it and whose
-// reports they see.
-//
-// Two settings, deliberately separate, because conflating them is what made the previous design
-// unable to express a read-only client:
-//   - grants   — WHICH principals (groups or accounts) may read this version at all
-//   - visibility — WHOSE reports of it they see: only their own requests, their group's, or all
-// Neither has anything to do with who may RUN a workflow.
+import LoadGate from '../../components/LoadGate'
+import SettingsSaveBar from './SettingsSaveBar'
+import { usePendingSettings } from './AdminDraftBoundary'
+import { PolicyPage } from './OUPolicyWorkspace'
 
 interface VersionRow {
   name: string
@@ -23,182 +17,151 @@ interface VersionRow {
   is_default: boolean
   reports: number
 }
-interface Principal {
-  principal: string
-  name: string
-  restricted?: boolean
-  display?: string
+interface Principal { principal: string; name: string; restricted?: boolean; display?: string }
+const VISIBILITY = { owner: 'versions.visOwner', group: 'versions.visGroup', all: 'versions.visAll' } as const
+
+// Grants decide who may read an edition; visibility decides whose reports those readers see.
+// Both are edited as one explicit draft so moving focus cannot publish an access change.
+export default function VersionsPage() {
+  return <PolicyPage section="access"><VersionRegistry /></PolicyPage>
 }
 
-export default function VersionsPage() {
+function VersionRegistry() {
   const { t } = useTranslation()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [groups, setGroups] = useState<Principal[]>([])
   const [users, setUsers] = useState<Principal[]>([])
   const [loading, setLoading] = useState(true)
-  const [adding, setAdding] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const [query, setQuery] = useState('')
+  const [original, setOriginal] = useState<VersionRow | null>(null)
+  const [draft, setDraft] = useState<VersionRow | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState('')
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(original)
+  usePendingSettings(dirty, saving)
 
-  const load = useCallback(() => {
+  const load = () => {
     setLoading(true)
-    api
-      .get<{ versions: VersionRow[]; groups: Principal[]; users: Principal[] }>('/api/admin/versions')
-      .then((r) => {
-        setVersions(r.versions ?? [])
-        setGroups(r.groups ?? [])
-        setUsers(r.users ?? [])
+    setLoadErr('')
+    return api.get<{ versions: (Omit<VersionRow, 'grants'> & { grants: string[] | null })[]; groups: Principal[]; users: Principal[] }>('/api/admin/versions')
+      .then((result) => {
+        setVersions((result.versions ?? []).map((version) => ({ ...version, grants: version.grants ?? [] })))
+        setGroups(result.groups ?? [])
+        setUsers(result.users ?? [])
+        setLoaded(true)
       })
-      .catch((e) => message.error(errText(e, t)))
+      .catch((error) => setLoadErr(errText(error, t)))
       .finally(() => setLoading(false))
-  }, [])
-  useEffect(load, [load])
-
-  const save = async (v: VersionRow) => {
-    try {
-      await api.post('/api/admin/versions', {
-        name: v.name,
-        label: v.label,
-        ord: v.ord,
-        visibility: v.visibility,
-        grants: v.grants,
-      })
-      message.success(t('versions.saved'))
-      load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
   }
+  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patch = (name: string, changes: Partial<VersionRow>) =>
-    setVersions((list) => list.map((v) => (v.name === name ? { ...v, ...changes } : v)))
-
+  const open = (version?: VersionRow) => {
+    const value: VersionRow = version ? { ...version, grants: [...version.grants] } : {
+      name: '', label: '', ord: versions.length, visibility: 'owner', grants: [], is_default: false, reports: 0,
+    }
+    setOriginal(value)
+    setDraft(value)
+    setAdding(!version)
+    setNameError('')
+  }
+  const close = () => {
+    if (saving) return
+    if (!dirty) { setDraft(null); return }
+    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
+      okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
+      onOk: () => setDraft(null) })
+  }
+  const save = async () => {
+    if (!draft) return
+    const name = draft.name.trim()
+    if (!name) { setNameError(t('versions.nameRequired')); return }
+    if (adding && versions.some((version) => version.name === name)) {
+      setNameError(t('versions.nameExists'))
+      return
+    }
+    setSaving(true)
+    try {
+      await api.post('/api/admin/versions', { name, label: draft.label, ord: draft.ord,
+        visibility: draft.visibility, grants: draft.grants })
+      message.success(t('versions.saved'))
+      setDraft(null)
+      await load()
+    } catch (error) { message.error(errText(error, t)) }
+    finally { setSaving(false) }
+  }
+  const remove = async (name: string) => {
+    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load() }
+    catch (error) { message.error(errText(error, t)) }
+  }
+  const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)
   const principalOptions = [
-    {
-      label: t('versions.principalGroups'),
-      options: groups.map((g) => ({
-        value: g.principal,
-        label: g.restricted ? `${g.name} · ${t('versions.restrictedTag')}` : g.name,
-      })),
-    },
-    {
-      label: t('versions.principalUsers'),
-      options: users.map((u) => ({
-        value: u.principal,
-        label: u.display && u.display !== u.name ? `${u.display} (${u.name})` : u.name,
-      })),
-    },
+    { label: t('versions.principalGroups'), options: groups.map((group) => ({ value: group.principal,
+      label: group.restricted ? `${group.name} · ${t('versions.restrictedTag')}` : group.name })) },
+    { label: t('versions.principalUsers'), options: users.map((user) => ({ value: user.principal,
+      label: user.display && user.display !== user.name ? `${user.display} (${user.name})` : user.name })) },
   ]
+  const names = new Map([...groups, ...users].map((principal) => [principal.principal, principal.display || principal.name]))
+  const filtered = versions.filter((version) => [version.name, version.label].join(' ').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-      <div>
-        <Typography.Title level={4} style={{ marginBottom: 4 }}>
-          {t('versions.title')}
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          {t('versions.desc')}
-        </Typography.Paragraph>
+    <LoadGate loading={loading && !loaded} error={!loaded ? loadErr : undefined} onRetry={load}>
+      <div className="rp-admin-list-page">
+        {loaded && loadErr && <Alert type="error" title={loadErr} showIcon />}
+        <Typography.Paragraph type="secondary">{t('versions.desc')}</Typography.Paragraph>
+        <div className="rp-admin-list-toolbar">
+          <Input allowClear prefix={<SearchOutlined />} aria-label={t('versions.search')} placeholder={t('versions.search')}
+            value={query} onChange={(event) => setQuery(event.target.value)} style={{ maxWidth: 360 }} />
+          <Button type="primary" icon={<PlusOutlined />} aria-label={t('versions.add')} onClick={() => open()}>{t('versions.add')}</Button>
+        </div>
+        <Table<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
+          pagination={{ pageSize: 12, hideOnSinglePage: true, showSizeChanger: false }} columns={[
+            { title: t('versions.name'), render: (_, version) => <Space orientation="vertical" size={2}>
+              <Space wrap size={4}><Typography.Text strong>{version.label || version.name}</Typography.Text>
+                {version.is_default && <Tag>{t('versions.default')}</Tag>}</Space>
+              <Typography.Text type="secondary" code>{version.name}</Typography.Text>
+            </Space> },
+            { title: t('versions.visibility'), dataIndex: 'visibility', render: (value: VersionRow['visibility']) => t(VISIBILITY[value] ?? value) },
+            { title: t('versions.grants'), render: (_, version) => <Typography.Text type={version.grants.length ? undefined : 'secondary'}>
+              {version.grants.map((principal) => names.get(principal) ?? principal).join(', ') || t('versions.noGrants')}
+            </Typography.Text> },
+            { title: t('versions.reportCount'), dataIndex: 'reports', width: 90 },
+            { title: '', width: 100, align: 'right', render: (_, version) => <Space size={4}>
+              <Button size="small" icon={<EditOutlined />} aria-label={t('common.edit')} onClick={() => open(version)} />
+              {!version.is_default && <Popconfirm title={t('versions.deleteConfirm')} onConfirm={() => remove(version.name)}>
+                <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
+              </Popconfirm>}
+            </Space> },
+          ]} />
       </div>
-
-      {!loading && versions.length === 0 && <Empty />}
-
-      {versions.map((v) => (
-        <Card
-          key={v.name}
-          title={
-            <Space>
-              <Typography.Text code>{v.name}</Typography.Text>
-              {v.is_default && <Tag>{t('versions.default')}</Tag>}
-              <Typography.Text type="secondary" style={{ fontWeight: 400 }}>
-                {t('versions.reports', { count: v.reports })}
-              </Typography.Text>
-            </Space>
-          }
-          extra={
-            !v.is_default && (
-              <Popconfirm
-                title={t('versions.deleteConfirm')}
-                onConfirm={async () => {
-                  try {
-                    await api.del(`/api/admin/versions/${encodeURIComponent(v.name)}`)
-                    load()
-                  } catch (e) {
-                    message.error(errText(e, t))
-                  }
-                }}
-              >
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-              </Popconfirm>
-            )
-          }
-        >
-          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-            {v.is_default && <Alert type="info" showIcon title={t('versions.defaultHint')} />}
-            <div>
-              <Typography.Text strong>{t('versions.label')}</Typography.Text>
-              <Input
-                value={v.label}
-                placeholder={v.name}
-                onChange={(e) => patch(v.name, { label: e.target.value })}
-                onBlur={() => save(v)}
-                style={{ marginTop: 6 }}
-              />
-            </div>
-            <div>
-              <Typography.Text strong>{t('versions.visibility')}</Typography.Text>
-              <Select
-                value={v.visibility}
-                style={{ width: '100%', marginTop: 6 }}
-                onChange={(vis) => {
-                  patch(v.name, { visibility: vis })
-                  save({ ...v, visibility: vis })
-                }}
-                options={[
-                  { value: 'owner', label: t('versions.visOwner') },
-                  { value: 'group', label: t('versions.visGroup') },
-                  { value: 'all', label: t('versions.visAll') },
-                ]}
-              />
-            </div>
-            <div>
-              <Typography.Text strong>{t('versions.grants')}</Typography.Text>
-              <Select
-                mode="multiple"
-                allowClear
-                value={v.grants}
-                style={{ width: '100%', marginTop: 6 }}
-                placeholder={t('versions.grantsPlaceholder')}
-                onChange={(g) => patch(v.name, { grants: g })}
-                onBlur={() => save(v)}
-                options={principalOptions}
-                optionFilterProp="label"
-              />
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {t('versions.grantsHint')}
-              </Typography.Text>
-            </div>
-          </Space>
-        </Card>
-      ))}
-
-      <Space.Compact style={{ width: '100%', maxWidth: 420 }}>
-        <Input
-          value={adding}
-          placeholder={t('versions.nameHint')}
-          onChange={(e) => setAdding(e.target.value)}
-          onPressEnter={() => adding.trim() && save({ name: adding.trim(), label: '', ord: versions.length, visibility: 'owner', grants: [], is_default: false, reports: 0 }).then(() => setAdding(''))}
-        />
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          disabled={!adding.trim()}
-          onClick={() =>
-            save({ name: adding.trim(), label: '', ord: versions.length, visibility: 'owner', grants: [], is_default: false, reports: 0 }).then(() => setAdding(''))
-          }
-        >
-          {t('versions.add')}
-        </Button>
-      </Space.Compact>
-    </Space>
+      <Drawer open={draft !== null} title={t(adding ? 'versions.add' : 'versions.title')} onClose={close} size={560}
+        className="rp-admin-editor-drawer" destroyOnHidden maskClosable={!saving} closable={!saving}
+        footer={<SettingsSaveBar dirty={dirty} saving={saving} onSave={save}
+          onDiscard={() => { setDraft(original); setNameError('') }} />}>
+        {draft && <ConfigProvider componentDisabled={saving}>
+          <Form layout="vertical">
+            {draft.is_default && <Alert style={{ marginBottom: 16 }} type="info" showIcon title={t('versions.defaultHint')} />}
+            <Form.Item label={t('versions.name')} validateStatus={nameError ? 'error' : undefined} help={nameError || undefined} required>
+              <Input aria-label={t('versions.name')} value={draft.name} disabled={!adding || saving}
+                onChange={(event) => { patch({ name: event.target.value }); setNameError('') }} />
+            </Form.Item>
+            <Form.Item label={t('versions.label')}>
+              <Input aria-label={t('versions.label')} value={draft.label} onChange={(event) => patch({ label: event.target.value })} />
+            </Form.Item>
+            <Form.Item label={t('versions.visibility')}>
+              <Select aria-label={t('versions.visibility')} value={draft.visibility} onChange={(value) => patch({ visibility: value })}
+                options={Object.entries(VISIBILITY).map(([value, label]) => ({ value, label: t(label) }))} />
+            </Form.Item>
+            <Form.Item label={t('versions.grants')} extra={t('versions.grantsHint')}>
+              <Select aria-label={t('versions.grants')} mode="multiple" allowClear value={draft.grants}
+                onChange={(value) => patch({ grants: value })} options={principalOptions} optionFilterProp="label" />
+            </Form.Item>
+          </Form>
+        </ConfigProvider>}
+      </Drawer>
+    </LoadGate>
   )
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -123,9 +124,125 @@ func validateOUMandates(e migExec, proposed ouPolicySnapshot) error {
 
 func (s *Server) writeOUInput(id int64, in groupInput, create bool) (ouWriteResult, error) {
 	in.Priority = s.groupPriorityValid(in.Priority)
+	return s.writeOUChanges(id, create, nil, func(ouPolicySnapshot) (groupInput, error) { return in, nil })
+}
+
+// Merge only supplied fields under the same lock that validates and persists OU changes.
+// Omission preserves a value; explicit null restores inheritance for nullable policies.
+func (s *Server) patchOUInput(id int64, patch map[string]json.RawMessage) (ouWriteResult, error) {
+	if patch == nil {
+		patch = map[string]json.RawMessage{}
+	}
+	return s.writeOUChanges(id, false, patch, func(snapshot ouPolicySnapshot) (groupInput, error) {
+		node, ok := snapshot.graph.nodes[id]
+		if !ok {
+			return groupInput{}, sql.ErrNoRows
+		}
+		value := snapshot.values[id]
+		scope, err := json.Marshal(value.scope)
+		if err != nil {
+			return groupInput{}, err
+		}
+		in := groupInput{Name: node.name, Description: node.description,
+			Weight: value.weight, UrgentUnlimited: value.urgent, AllowUrgent: value.allowUrgent,
+			MaxQueued: value.maxQueued, RunWindow: value.runWindow, Priority: ouValue(value.priority, ""),
+			Restricted: value.restricted, TOTPEnroll: value.totp, PasskeyEnroll: value.passkey,
+			Require2FA: value.require2FA, ForecastScope: scope}
+		if value.quota != nil {
+			in.DailyRunQuota = &value.quota.Limit
+			in.RunQuotaPeriod = &value.quota.Period
+		}
+		base, err := json.Marshal(in)
+		if err != nil {
+			return groupInput{}, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(base, &fields); err != nil {
+			return groupInput{}, err
+		}
+		for key, raw := range patch {
+			if _, exists := fields[key]; !exists {
+				return groupInput{}, invalidOU("ou_invalid_patch", "unknown organizational-unit field")
+			}
+			fields[key] = raw
+		}
+		merged, err := json.Marshal(fields)
+		if err != nil {
+			return groupInput{}, err
+		}
+		var next groupInput
+		if err := json.Unmarshal(merged, &next); err != nil {
+			return groupInput{}, invalidOU("ou_invalid_patch", "invalid organizational-unit field value")
+		}
+		if _, supplied := patch["priority"]; supplied {
+			next.Priority = s.groupPriorityValid(next.Priority)
+		}
+		return next, nil
+	})
+}
+
+// Full replacement normalization must not materialize root defaults for omitted PATCH fields.
+func preserveUnpatchedOUFields(before, proposed ouPolicySnapshot, id int64, patch map[string]json.RawMessage) {
+	has := func(key string) bool { _, ok := patch[key]; return ok }
+	node, nextNode := before.graph.nodes[id], proposed.graph.nodes[id]
+	if has("name") {
+		node.name = nextNode.name
+	}
+	if has("description") {
+		node.description = nextNode.description
+	}
+	if has("parent_id") {
+		node.parent = nextNode.parent
+	}
+	proposed.graph.nodes[id] = node
+	value, next := before.values[id], proposed.values[id]
+	if has("weight") {
+		value.weight = next.weight
+	}
+	if has("urgent_unlimited") {
+		value.urgent = next.urgent
+	}
+	if has("allow_urgent") {
+		value.allowUrgent = next.allowUrgent
+	}
+	if has("max_queued") {
+		value.maxQueued = next.maxQueued
+	}
+	if has("run_window") {
+		value.runWindow = next.runWindow
+	}
+	if has("priority") {
+		value.priority = next.priority
+	}
+	if has("restricted") {
+		value.restricted = next.restricted
+	}
+	if has("daily_run_quota") || (has("run_quota_period") && value.quota != nil) {
+		value.quota = next.quota
+	}
+	if has("totp_enroll") {
+		value.totp = next.totp
+	}
+	if has("passkey_enroll") {
+		value.passkey = next.passkey
+	}
+	if has("require_2fa") {
+		value.require2FA = next.require2FA
+	}
+	if has("forecast_scope") {
+		value.scope = next.scope
+	}
+	proposed.values[id] = value
+}
+
+func (s *Server) writeOUChanges(id int64, create bool, patch map[string]json.RawMessage, input func(ouPolicySnapshot) (groupInput, error)) (ouWriteResult, error) {
 	var result ouWriteResult
 	err := s.st.withOUMutation(func(e migExec) error {
 		snapshot, err := s.st.loadOUPolicySnapshotFrom(e.ex)
+		if err != nil {
+			return err
+		}
+		in, err := input(snapshot)
 		if err != nil {
 			return err
 		}
@@ -141,6 +258,9 @@ func (s *Server) writeOUInput(id int64, in groupInput, create bool) (ouWriteResu
 		proposed, err := prepareOUInput(snapshot, previewID, in, create)
 		if err != nil {
 			return err
+		}
+		if patch != nil {
+			preserveUnpatchedOUFields(snapshot, proposed, id, patch)
 		}
 		if err := validateOUMandates(e, proposed); err != nil {
 			return err

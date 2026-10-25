@@ -8,7 +8,6 @@ import {
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
   Select,
@@ -33,11 +32,10 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
-import CompactNumberInput from '../../components/CompactNumberInput'
 import UserAvatar from '../../components/UserAvatar'
 import OrgUnitDetail from './OrgUnitDetail'
-import LoadGate from '../../components/LoadGate'
-import type { BatchConfig, Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
+import { usePendingSettings } from './AdminDraftBoundary'
+import type { Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
 
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
 
@@ -487,79 +485,38 @@ export default function UsersPage() {
       onChange={setTab}
       items={[
         { key: 'accounts', label: t('users.tabAccounts'), children: accounts },
-        { key: 'groups', label: t('users.tabGroups'), children: <GroupsPanel groups={groups} groupsLoading={!settled} onChanged={load} initialId={Number(linked.get('ou')) || null} /> },
+        { key: 'groups', label: t('users.tabGroups'), children: <GroupsPanel groups={groups} groupsLoading={!settled} onChanged={load} initialId={Number(linked.get('ou')) || null}
+          onMembers={(id) => { setOuSelected([id]); setOuScoped(true); setTab('accounts') }} /> },
       ]}
     />
   )
 }
 
-// Groups list + editor, shown as the "groups" sub-tab of the users page. A group's
-// weight / urgent / priority drive the run queue for its members (group model B): a
-// non-default group either overrides a field or inherits it from the Default group,
-// which every unassigned user falls back to.
+// The directory owns OU identity, hierarchy and membership. Feature policies are edited on
+// their respective settings pages, using the OU as the scope.
 function GroupsPanel({
   groups,
   groupsLoading,
   onChanged,
   initialId,
+  onMembers,
 }: {
   groups: UserGroupRow[]
   groupsLoading: boolean
   onChanged: () => void
   initialId: number | null
+  onMembers: (id: number) => void
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   // Which OU the detail pane is showing. Held as an id, not the row: the list is refetched after
   // every save, so a held object would go stale the moment it was edited.
   const [selId, setSelId] = useState<number | null>(initialId)
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState('')
   const [newParent, setNewParent] = useState(0)
-  // The urgent lane + ticket config is GLOBAL (not per-group), but it belongs with the
-  // per-group weights conceptually, so it lives here rather than on the run-queue
-  // settings page. Loaded from / saved to the shared batch config.
-  const [urgentEnabled, setUrgentEnabled] = useState(false)
-  const [reservedSlots, setReservedSlots] = useState(1)
-  const [ticketPeriod, setTicketPeriod] = useState(7)
-  const [maxJobs, setMaxJobs] = useState(1)
-  const [cfgReady, setCfgReady] = useState(false)
-  const [cfgErr, setCfgErr] = useState('')
-
-  const loadCfg = () => {
-    setCfgErr('')
-    return api.get<BatchConfig>('/api/admin/batch/config').then(
-      (r) => {
-        setUrgentEnabled(!!r.urgent_enabled)
-        setReservedSlots(r.reserved_slots)
-        setTicketPeriod(r.ticket_period_days)
-        setMaxJobs(r.max_jobs)
-        setCfgReady(true)
-      },
-      // The controls were already disabled until this landed, but a disabled switch still shows a
-      // position, and OFF here means "the urgent lane is hidden everywhere" — a description of the
-      // deployment written by this file's useState. Group editing below stays usable either way.
-      (e) => setCfgErr(errText(e, t)),
-    )
-  }
-  useEffect(() => {
-    loadCfg()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const saveUrgent = async () => {
-    try {
-      await api.post('/api/admin/batch/config', {
-        urgent_enabled: urgentEnabled,
-        reserved_slots: reservedSlots,
-        ticket_period_days: ticketPeriod,
-      })
-      message.success(t('common.saved'))
-      loadCfg()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
+  const [detailPending, setDetailPending] = useState({ dirty: false, saving: false })
+  usePendingSettings(adding && !!newName.trim())
 
   const sel = groups.find((g) => g.id === selId) ?? null
   // Default to the root so the pane is never empty on arrival — an admin opening this tab wants to
@@ -588,59 +545,10 @@ function GroupsPanel({
   }
 
 
-  const cfgRow = (label: string, hint: string, control: React.ReactNode) => (
-    <Space wrap align="start">
-      <span style={{ display: 'inline-block', minWidth: 128 }}>{label}</span>
-      {control}
-      <Typography.Text type="secondary" style={{ maxWidth: 360, display: 'inline-block' }}>
-        {hint}
-      </Typography.Text>
-    </Space>
-  )
-
   return (
-    <Space orientation="vertical" size={16} style={{ width: '100%', maxWidth: 720 }}>
-      {/* Global urgent lane + ticket config (moved off the run-queue settings page). */}
-      <Card size="small" title={t('users.urgentTitle')}>
-        <LoadGate loading={!cfgReady && !cfgErr} error={cfgReady ? undefined : cfgErr} onRetry={loadCfg} minHeight={140}>
-        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          {cfgRow(
-            t('batch.admin.urgentEnabled'),
-            t('batch.admin.urgentEnabledHint'),
-            <Switch checked={urgentEnabled} onChange={setUrgentEnabled} disabled={!cfgReady} />,
-          )}
-          {urgentEnabled && (
-            <>
-              {cfgRow(
-                t('batch.admin.reservedSlots'),
-                t('batch.admin.reservedSlotsHint'),
-                <InputNumber min={0} max={Math.max(0, maxJobs - 1)} value={reservedSlots} onChange={(v) => setReservedSlots(v ?? 0)} disabled={!cfgReady} />,
-              )}
-              {cfgRow(
-                t('batch.admin.ticketPeriod'),
-                t('batch.admin.ticketPeriodHint'),
-                <CompactNumberInput
-                  min={1}
-                  max={365}
-                  value={ticketPeriod}
-                  onChange={(v) => setTicketPeriod(v || 7)}
-                  after={t('batch.admin.days')}
-                  disabled={!cfgReady}
-                />,
-              )}
-            </>
-          )}
-          <Button type="primary" onClick={saveUrgent} disabled={!cfgReady}>
-            {t('common.save')}
-          </Button>
-        </Space>
-        </LoadGate>
-      </Card>
-
-      {/* Pick one on the left, see all of it on the right. A flat list of every OU plus a modal of
-          ten fields plus a second modal for the allow-list was the thing that made this
-          unreadable — and it hid the hierarchy, which is what explains every inherited value. */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+    <div className="rp-ou-groups-page">
+      <Typography.Paragraph type="secondary">{t('ou.directoryHint')}</Typography.Paragraph>
+      <div className="rp-ou-console">
         <OrgUnitPicker
           mode="manage"
           groups={groups}
@@ -649,7 +557,15 @@ function GroupsPanel({
           scoped
           onScopedChange={() => {}}
           selected={sel ? [sel.id] : []}
-          onSelect={(ids) => setSelId(ids[0] ?? null)}
+          onSelect={(ids) => {
+            const next = ids[0] ?? null
+            if (next === selId) return
+            if (detailPending.saving) { message.info(t('manage.saveInProgress')); return }
+            if (!detailPending.dirty) { setSelId(next); return }
+            modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
+              okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
+              onOk: () => setSelId(next) })
+          }}
           onManage={() => {}}
           onAdd={() => setAdding(true)}
         />
@@ -659,6 +575,8 @@ function GroupsPanel({
             group={sel}
             groups={groups}
             onChanged={onChanged}
+            onPendingChange={setDetailPending}
+            onMembers={() => onMembers(sel.id)}
             onDeleted={() => {
               setSelId(null)
               onChanged()
@@ -690,6 +608,6 @@ function GroupsPanel({
           options={groups.map((g) => ({ value: g.id, label: g.name }))}
         />
       </Modal>
-    </Space>
+    </div>
   )
 }

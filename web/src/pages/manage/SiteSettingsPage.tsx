@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Divider, Form, Input, Radio, Select, Space, Switch, Typography, Upload } from 'antd'
-import { DeleteOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons'
+import { App, Button, Form, Input, Radio, Select, Space, Switch, Typography, Upload } from 'antd'
+import { DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { SettingsResp, UpdatePromptPolicy, VersionDisplay } from '../../api/types'
 import { useSite } from '../../site'
 import { BrandIcon } from '../../components/icons'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
 import GeoSection from './GeoSection'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
 
 // tzOptions lists the panel-timezone choices: a "follow system" default plus the
 // browser's full IANA zone list (Intl.supportedValuesOf, guarded for older engines).
@@ -37,14 +38,27 @@ export default function SiteSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [saving, setSaving] = useState(false)
+  const [section, setSection] = useState('branding')
+  const [savedValues, setSavedValues] = useState<Record<string, unknown> | null>(null)
+  const draft = Form.useWatch([], { form, preserve: true }) as Record<string, unknown> | undefined
+  const dirty = !!savedValues && Object.keys(savedValues).some((key) => draft?.[key] !== savedValues[key])
+  const sections = [
+    { key: 'branding', label: t('manage.section.branding') },
+    { key: 'pwa', label: t('settings.pwaEnabled') },
+    { key: 'footer', label: t('settings.footerSection') },
+    { key: 'updates', label: t('settings.updatePrompt') },
+    { key: 'url', label: t('settings.urlSection') },
+    { key: 'time', label: t('settings.timeSection') },
+    { key: 'geo', label: t('audit.geoTitle') },
+  ]
 
   const load = () => {
     setLoading(true)
     setLoadErr('')
     return api
       .get<SettingsResp>('/api/admin/settings')
-      .then((r) =>
-        form.setFieldsValue({
+      .then((r) => {
+        const values = {
           siteTitle: r.siteTitle || '',
           siteLogoUrl: r.siteLogoUrl || '',
           footerText: r.footerText || '',
@@ -55,8 +69,10 @@ export default function SiteSettingsPage() {
           pwaIconUrl: r.pwaIconUrl || '',
           timezone: r.timezone || '',
           publicUrl: r.publicUrl || '',
-        }),
-      )
+        }
+        form.setFieldsValue(values)
+        setSavedValues(values)
+      })
       // The spinner covered the wait but not the failure: `finally` alone dropped the rejection
       // and left an empty form claiming this portal has no title, no logo and no public URL —
       // in a form whose Save button would write exactly that.
@@ -69,7 +85,15 @@ export default function SiteSettingsPage() {
   }, [form])
 
   const save = async () => {
-    const v = await form.validateFields()
+    let v
+    try {
+      v = await form.validateFields()
+    } catch (error) {
+      const field = String((error as { errorFields?: { name: (string | number)[] }[] }).errorFields?.[0]?.name[0] ?? '')
+      const fieldSections: Record<string, string> = { siteTitle: 'branding', footerText: 'footer', publicUrl: 'url' }
+      if (fieldSections[field]) setSection(fieldSections[field])
+      return
+    }
     setSaving(true)
     try {
       await api.post('/api/admin/settings', {
@@ -85,7 +109,10 @@ export default function SiteSettingsPage() {
         publicUrl: v.publicUrl || '',
       })
       await refresh()
+      setSavedValues({ ...v })
       message.success(t('common.saved'))
+    } catch (error) {
+      message.error(errText(error, t))
     } finally {
       setSaving(false)
     }
@@ -127,9 +154,11 @@ export default function SiteSettingsPage() {
   }
 
   return (
-    <Space orientation="vertical" size={12} style={{ width: '100%', maxWidth: 720 }}>
       <LoadGate loading={loading} error={loadErr} onRetry={load}>
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={saving}>
+        <SettingsWorkspace sections={sections} active={section} onChange={setSection}>
+        <SettingsPanel section="branding">
+        <Typography.Title level={4}>{t('manage.section.branding')}</Typography.Title>
         <Form.Item
           name="siteTitle"
           label={t('settings.siteTitle')}
@@ -164,6 +193,9 @@ export default function SiteSettingsPage() {
             )
           }}
         </Form.Item>
+        </SettingsPanel>
+        <SettingsPanel section="pwa">
+        <Typography.Title level={4}>{t('settings.pwaEnabled')}</Typography.Title>
         <Form.Item name="pwaEnabled" label={t('settings.pwaEnabled')} valuePropName="checked">
           <Switch />
         </Form.Item>
@@ -193,9 +225,9 @@ export default function SiteSettingsPage() {
             )
           }}
         </Form.Item>
-        <Divider titlePlacement="left">
-          {t('settings.footerSection')}
-        </Divider>
+        </SettingsPanel>
+        <SettingsPanel section="footer">
+        <Typography.Title level={4}>{t('settings.footerSection')}</Typography.Title>
         <Form.Item name="footerShowInfo" label={t('settings.footerShowInfo')} valuePropName="checked">
           <Switch />
         </Form.Item>
@@ -225,7 +257,9 @@ export default function SiteSettingsPage() {
         </Form.Item>
         {/* One radio group, not a pair of switches: "may the reader defer" and "must they refresh"
             are the same decision, and two booleans can describe a state nobody chose. */}
-        <Divider titlePlacement="left">{t('settings.updatePrompt')}</Divider>
+        </SettingsPanel>
+        <SettingsPanel section="updates">
+        <Typography.Title level={4}>{t('settings.updatePrompt')}</Typography.Title>
         <Form.Item name="updatePromptPolicy" style={{ marginBottom: 8 }}>
           <Radio.Group>
             <Space orientation="vertical" size={10}>
@@ -247,7 +281,9 @@ export default function SiteSettingsPage() {
             first thing that needed an origin a forged Host header cannot poison — but the SAML
             entity id, the OIDC redirect URL, the WebAuthn relying-party id, registration links and
             the captcha host check all derive from it too, so it belongs with the deployment. */}
-        <Divider titlePlacement="left">{t('settings.urlSection')}</Divider>
+        </SettingsPanel>
+        <SettingsPanel section="url">
+        <Typography.Title level={4}>{t('settings.urlSection')}</Typography.Title>
         <Form.Item
           name="publicUrl"
           label={t('settings.publicUrl')}
@@ -267,9 +303,9 @@ export default function SiteSettingsPage() {
           {t('settings.publicUrlHint')}
         </Typography.Paragraph>
 
-        <Divider titlePlacement="left">
-          {t('settings.timeSection')}
-        </Divider>
+        </SettingsPanel>
+        <SettingsPanel section="time">
+        <Typography.Title level={4}>{t('settings.timeSection')}</Typography.Title>
         <Form.Item name="timezone" label={t('settings.timezone')} style={{ marginBottom: 8 }}>
           <Select
             showSearch
@@ -283,14 +319,12 @@ export default function SiteSettingsPage() {
         </Typography.Paragraph>
         {/* The IP database. It describes the DEPLOYMENT — like the public URL above it — rather
             than belonging to the one page that happens to display its output. */}
-        <GeoSection />
-        <StickyActionBar>
-          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={save}>
-            {t('common.save')}
-          </Button>
-        </StickyActionBar>
+        </SettingsPanel>
+        <SettingsPanel section="geo"><GeoSection /></SettingsPanel>
+        </SettingsWorkspace>
+        <SettingsSaveBar dirty={dirty} saving={saving} onSave={save}
+          onDiscard={() => { if (savedValues) { form.setFieldsValue(savedValues); form.setFields(Object.keys(savedValues).map((name) => ({ name, errors: [] }))) } }} />
       </Form>
       </LoadGate>
-    </Space>
   )
 }

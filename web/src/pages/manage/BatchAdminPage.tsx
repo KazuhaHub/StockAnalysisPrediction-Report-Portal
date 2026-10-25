@@ -3,6 +3,8 @@ import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Popover, 
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, CloudDownloadOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import useFormDraft from './useFormDraft'
+import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
 import { difyModeTag, surfaceSupportsMode } from '../../lib/batchUi'
 import { ALL_SURFACES } from '../../api/types'
@@ -80,6 +82,10 @@ export function TargetInputsPreview({ inputs }: { inputs: PluginInput[] }) {
 }
 
 export default function BatchAdminPage() {
+  return <PolicyPage section="targets"><GlobalExecutionTargets /></PolicyPage>
+}
+
+function GlobalExecutionTargets() {
   const { t } = useTranslation()
   const { message } = App.useApp()
 
@@ -109,6 +115,7 @@ export default function BatchAdminPage() {
   const [refreshOpen, setRefreshOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshResults, setRefreshResults] = useState<DifyRefreshResult[]>([])
+  const draft = useFormDraft(form, targetOpen, saving, () => setTargetOpen(false), [inputs, mode, reservedInputs])
 
   const isChat = mode !== '' && mode !== 'workflow'
 
@@ -594,10 +601,13 @@ export default function BatchAdminPage() {
         okButtonProps={{ disabled: !editing && !probed }}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
-        onCancel={() => setTargetOpen(false)}
+        onCancel={draft.close}
+        maskClosable={!saving}
+        closable={!saving}
+        cancelButtonProps={{ disabled: saving }}
         forceRender
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} disabled={saving} layout="vertical">
           <Form.Item name="base_url" label={t('batch.dify.baseUrl')} extra={t('batch.dify.baseUrlHint')} rules={[{ required: true }]}>
             <Input placeholder="https://dify.example.com/v1" />
           </Form.Item>

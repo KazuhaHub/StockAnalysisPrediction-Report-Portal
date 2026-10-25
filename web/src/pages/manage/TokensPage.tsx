@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../api/client'
+import { api, errText } from '../../api/client'
 import type { TokenRow } from '../../api/types'
+import LoadGate from '../../components/LoadGate'
+import useFormDraft from './useFormDraft'
 
 const SCOPE_COLORS: Record<string, string> = { all: 'gold', ingest: 'blue', query: 'green' }
 
@@ -17,16 +19,24 @@ export default function TokensPage() {
   const { message, modal } = App.useApp()
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const [search, setSearch] = useState('')
+  const [creating, setCreating] = useState(false)
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<number[]>([])
   const [form] = Form.useForm()
+  const draft = useFormDraft(form, open, creating, () => setOpen(false))
   const selectedScope = Form.useWatch('scope', form)
 
-  const load = () =>
-    api
+  const load = () => {
+    setLoading(true); setLoadErr('')
+    return api
       .get<{ tokens: TokenRow[] }>('/api/admin/tokens')
-      .then((r) => setTokens(r.tokens || []))
+      .then((r) => { setTokens(r.tokens || []); setLoaded(true) })
+      .catch((e) => setLoadErr(errText(e, t)))
       .finally(() => setLoading(false))
+  }
 
   useEffect(() => {
     load()
@@ -40,6 +50,8 @@ export default function TokensPage() {
 
   const create = async () => {
     const v = await form.validateFields()
+    setCreating(true)
+    try {
     const result = await api.post<{ token: string }>('/api/admin/tokens', {
       name: v.name || '',
       scope: v.scope === 'notify' ? `notify:${v.publisher || ''}` : v.scope || 'all',
@@ -70,6 +82,7 @@ export default function TokensPage() {
       ),
     })
     load()
+    } catch (e) { message.error(errText(e, t)) } finally { setCreating(false) }
   }
 
   // navigator.clipboard needs a secure context; where it is unavailable the field above is still
@@ -96,8 +109,11 @@ export default function TokensPage() {
   }
 
   return (
+    <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      {loaded && loadErr && <Alert type="error" title={loadErr} />}
       <Space wrap>
+        <Input.Search allowClear aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 280, maxWidth: '100%' }} />
         <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
           {t('common.add')}
         </Button>
@@ -114,8 +130,8 @@ export default function TokensPage() {
         rowKey="id"
         size="small"
         loading={loading}
-        dataSource={tokens}
-        pagination={false}
+        dataSource={tokens.filter((token) => `${token.name} ${token.scope} ${t(`scope.${token.scope}`, token.scope)} ${token.prefix}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
+        pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }}
         scroll={{ x: 'max-content' }}
         rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys as number[]) }}
         columns={[
@@ -151,14 +167,17 @@ export default function TokensPage() {
 
       <Modal
         open={open}
+        confirmLoading={creating}
+        closable={!creating}
+        maskClosable={!creating}
         title={t('settings.tokens')}
         onOk={create}
-        onCancel={() => setOpen(false)}
+        onCancel={draft.close}
         okText={t('common.add')}
         cancelText={t('common.cancel')}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" initialValues={{ scope: 'all' }}>
+        <Form form={form} disabled={creating} layout="vertical" initialValues={{ scope: 'all' }}>
           <Form.Item name="name" label={t('settings.tokenName')}>
             <Input placeholder={t('settings.tokenName')} />
           </Form.Item>
@@ -179,5 +198,6 @@ export default function TokensPage() {
         </Form>
       </Modal>
     </Space>
+    </LoadGate>
   )
 }

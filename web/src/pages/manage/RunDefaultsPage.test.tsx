@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
@@ -85,6 +85,18 @@ describe('RunDefaultsPage before its answers arrive', () => {
 })
 
 describe('RunDefaultsPage', () => {
+  it('retains a launch edit while changing completion defaults and discards both', async () => {
+    renderPage()
+    const idle = await screen.findByRole('switch', { name: 'runDefaults.idle' })
+    fireEvent.click(idle)
+    fireEvent.click(screen.getByRole('button', { name: 'runDefaults.section.completion' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'runDefaults.retries' }), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
+    expect((screen.getByRole('spinbutton', { name: 'runDefaults.retries' }) as HTMLInputElement).value).toBe('0')
+    fireEvent.click(screen.getByRole('button', { name: 'runDefaults.section.launch' }))
+    expect(idle.getAttribute('aria-checked')).toBe('false')
+    expect(server.posted).toHaveLength(0)
+  })
   it('posts the zeros that mean "no default" rather than omitting them', async () => {
     // Clearing a default has to be expressible: an omitted field leaves the stored one alone, so
     // "no default" must travel as an explicit 0 / false.
