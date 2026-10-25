@@ -38,6 +38,12 @@ python3 scripts/catalogue.py package my-app
 ```
 
 The SDK supplies trusted parent-window request handling and the host theme snapshot.
+The host includes its selected panel language as a top-level `locale` field in
+`rp:init` and `rp:theme`. Maintained apps follow it by default and receive later
+language changes without a frame reload or loss of unsaved drafts. The SDK maps
+Portal's `en` code to its supported `en-US` locale; older hosts omit this optional
+field and retain the documented browser-language fallback. App-specific explicit
+language overrides remain an app UI choice rather than a second required setup.
 Use its `PortalAppProvider` for Ant Design tokens/locales. Keep the initial page
 focused on the reader's task, configuration behind an administrator entry, advanced
 fields collapsed, and validation errors/drafts inside the active dialog. Include

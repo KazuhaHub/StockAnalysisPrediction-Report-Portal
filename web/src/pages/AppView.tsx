@@ -17,7 +17,7 @@ export default function AppView() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { token: tk } = theme.useToken()
-  const { dark } = usePrefs()
+  const { dark, lang } = usePrefs()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const sessionRef = useRef<AppTokenResp | null>(null)
   const [meta, setMeta] = useState<AppTokenResp | null>(null)
@@ -130,15 +130,15 @@ export default function AppView() {
   // On load, hand the app the current theme so it can match the host from the start.
   const onLoad = () => {
     setLoaded(true)
-    iframeRef.current?.contentWindow?.postMessage({ type: INIT_MESSAGE, theme: themePayload }, '*')
+    iframeRef.current?.contentWindow?.postMessage({ type: INIT_MESSAGE, theme: themePayload, locale: lang }, '*')
   }
 
-  // Re-post the theme whenever it changes (e.g. the user toggles light/dark while the
-  // app is open) so the app can follow live. Only after load, when the frame exists.
+  // Re-post presentation changes without reloading the frame, preserving app drafts.
+  // Locale is a top-level optional bridge field, as consumed by the shared app SDK.
   useEffect(() => {
     if (!loaded) return
-    iframeRef.current?.contentWindow?.postMessage({ type: THEME_MESSAGE, theme: themePayload }, '*')
-  }, [loaded, themePayload])
+    iframeRef.current?.contentWindow?.postMessage({ type: THEME_MESSAGE, theme: themePayload, locale: lang }, '*')
+  }, [loaded, themePayload, lang])
 
   if (error) {
     return (
