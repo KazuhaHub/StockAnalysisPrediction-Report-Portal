@@ -70,6 +70,17 @@ minute, network/HTTP failures, deferrals, reader queue depth, in-flight requests
 wait and cooldown/probe status. These are process observations, not vendor guarantees or durable
 accounting. The evaluator shows waiting state and the earliest known admission time.
 
+Display efficiency is measured separately for live and historical request paths, with started and
+finished requests, fresh cache hits, shared-load joins, completed logical loads, failures and stale
+responses. Batch traffic has its own per-request deduplicated symbol counts; its cache ratio uses
+symbols rather than HTTP calls. Cache clearing does not erase these process observations.
+
+Fixed-size latency histograms report p95 bucket upper bounds. Display latency includes waiting and
+failed requests; vendor latency covers dispatch through body close. Actual vendor failures identify
+HTTP 403, HTTP 429, server errors and connection failures separately. Other HTTP errors remain in
+the total. A manual observations refresh preserves unsaved settings; discarding those settings
+preserves the latest observations. No unbounded per-symbol metrics or durable accounting is added.
+
 ## Limits and follow-up
 
 This process cannot account for Dify, AKTools or another portal instance sharing its public IP.

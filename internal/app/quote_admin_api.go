@@ -142,11 +142,12 @@ func (s *Server) quoteAdminState() map[string]any {
 	cfg := s.quoteConfigLoad()
 	stats := s.quotes.stats()
 	out := map[string]any{
-		"ratePolicies": s.vendorPolicies(),
-		"schedule":     publicVendorScheduler.snapshot(),
-		"sources":      s.quoteSourceStatuses(cfg),
-		"cacheEntries": stats.Entries,
-		"cacheBytes":   stats.Bytes,
+		"ratePolicies":   s.vendorPolicies(),
+		"schedule":       publicVendorScheduler.snapshot(),
+		"sources":        s.quoteSourceStatuses(cfg),
+		"cacheEntries":   stats.Entries,
+		"cacheBytes":     stats.Bytes,
+		"displayTraffic": s.quotes.trafficSnapshot(),
 		// Already clamped both ways by quoteConfigLoad, so a form that round-trips this back cannot
 		// re-save a value the portal is not honouring.
 		"ttlOpenSecs":      quoteTTLSecs(cfg.TTLOpen),

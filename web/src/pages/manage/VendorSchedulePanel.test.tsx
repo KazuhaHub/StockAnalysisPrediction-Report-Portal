@@ -17,6 +17,7 @@ describe('VendorSchedulePanel', () => {
     fireEvent.change(screen.getByRole('spinbutton', { name: 'tencent quoteAdmin.traffic.total' }), { target: { value: '24' } })
     expect(onChange).toHaveBeenLastCalledWith({ tencent: { requestsPerMinute: 24, backgroundPerMinute: 6 }, sina: { requestsPerMinute: 20, backgroundPerMinute: 2 } })
     expect(screen.getByText('91')).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'quoteAdmin.sources' })).toBeTruthy()
     expect(screen.getByText('2026-10-26T08:00:00Z')).toBeTruthy()
     expect(screen.queryByText('0')).toBeNull()
   })

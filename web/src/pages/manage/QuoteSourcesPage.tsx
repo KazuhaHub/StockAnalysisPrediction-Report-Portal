@@ -11,6 +11,7 @@ import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from
 import { usePendingSettings } from './AdminDraftBoundary'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
+import QuoteTrafficPanel, { type QuoteDisplayTraffic } from './QuoteTrafficPanel'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -78,6 +79,7 @@ type QuoteAdminSource = {
 }
 
 type QuoteAdminState = {
+  displayTraffic?: QuoteDisplayTraffic
   ratePolicies?: Record<string, VendorRatePolicy>
   schedule?: Record<string, VendorScheduleStatus>
   sources: QuoteAdminSource[]
@@ -169,6 +171,8 @@ export default function QuoteSourcesPage() {
   const [rows, setRows] = useState<QuoteAdminSource[]>([])
   const [ratePolicies, setRatePolicies] = useState<Record<string, VendorRatePolicy> | null>(null)
   const [schedule, setSchedule] = useState<Record<string, VendorScheduleStatus>>()
+  const [displayTraffic, setDisplayTraffic] = useState<QuoteDisplayTraffic>()
+  const [refreshingTraffic, setRefreshingTraffic] = useState(false)
   const [cacheEntries, setCacheEntries] = useState(0)
   const [cacheBytes, setCacheBytes] = useState(0)
   const [ttlOpen, setTtlOpen] = useState(0)
@@ -199,7 +203,6 @@ export default function QuoteSourcesPage() {
 
   const apply = (st: QuoteAdminState, updateStats = true) => {
     setRatePolicies(st.ratePolicies ?? null)
-    setSchedule(st.schedule)
     setSavedState(st)
     setLedger(typeof st.ledgerPrimary === 'string' && Array.isArray(st.ledgerChain) ? {
       ledgerPrimary: st.ledgerPrimary,
@@ -214,6 +217,8 @@ export default function QuoteSourcesPage() {
     // sorts before 't'.
     setRows([...(st.sources ?? [])].sort((a, b) => seat(a) - seat(b)))
     if (updateStats) {
+      setSchedule(st.schedule)
+      setDisplayTraffic(st.displayTraffic)
       setCacheEntries(wireNumber(st.cacheEntries))
       setCacheBytes(wireNumber(st.cacheBytes))
     }
@@ -349,8 +354,25 @@ export default function QuoteSourcesPage() {
       const st = response && Array.isArray(response.sources) ? response : await api.get<QuoteAdminState>('/api/admin/quote')
       setCacheEntries(wireNumber(st.cacheEntries))
       setCacheBytes(wireNumber(st.cacheBytes))
+      setDisplayTraffic(st.displayTraffic)
     } catch (e) {
       message.error(errText(e, t))
+    }
+  }
+
+  const refreshTraffic = async () => {
+    setRefreshingTraffic(true)
+    try {
+      const st = await api.get<QuoteAdminState>('/api/admin/quote')
+      if (!active.current) return
+      setSchedule(st.schedule)
+      setDisplayTraffic(st.displayTraffic)
+      setCacheEntries(wireNumber(st.cacheEntries))
+      setCacheBytes(wireNumber(st.cacheBytes))
+    } catch (e) {
+      if (active.current) message.error(errText(e, t))
+    } finally {
+      if (active.current) setRefreshingTraffic(false)
     }
   }
 
@@ -621,7 +643,11 @@ export default function QuoteSourcesPage() {
         </div>
         </SettingsPanel>
         {ratePolicies && <SettingsPanel section="traffic">
-          <VendorSchedulePanel policies={ratePolicies} schedule={schedule} sources={rows.map((source) => source.source)} sourceLabel={sourceLabel} onChange={setRatePolicies} />
+          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+            <Button onClick={refreshTraffic} loading={refreshingTraffic}>{t('quoteAdmin.display.refresh')}</Button>
+            <QuoteTrafficPanel traffic={displayTraffic} />
+            <VendorSchedulePanel policies={ratePolicies} schedule={schedule} sources={rows.map((source) => source.source)} sourceLabel={sourceLabel} onChange={setRatePolicies} />
+          </Space>
         </SettingsPanel>}
         <SettingsPanel section="cache">
         <div className="rp-admin-list-page">

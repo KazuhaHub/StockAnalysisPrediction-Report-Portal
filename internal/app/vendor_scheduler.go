@@ -66,16 +66,24 @@ type vendorWaiter struct {
 }
 
 type vendorScheduleState struct {
-	queue                                        []*vendorWaiter
-	next, nextBackground, coolingUntil           time.Time
-	inFlight, backgroundInFlight, cooldownStreak int
-	probing                                      bool
-	requests, failures, deferred                 uint64
-	requestTimes                                 []time.Time
-	totalWait, totalDuration                     time.Duration
+	queue                                                        []*vendorWaiter
+	next, nextBackground, coolingUntil                           time.Time
+	inFlight, backgroundInFlight, cooldownStreak                 int
+	probing                                                      bool
+	requests, failures, deferred                                 uint64
+	completed, forbidden, throttled, serverErrors, networkErrors uint64
+	latency                                                      quoteLatencyHistogram
+	requestTimes                                                 []time.Time
+	totalWait, totalDuration                                     time.Duration
 }
 
 type vendorScheduleStatus struct {
+	Completed          uint64 `json:"completed"`
+	Forbidden          uint64 `json:"forbidden"`
+	Throttled          uint64 `json:"throttled"`
+	ServerErrors       uint64 `json:"serverErrors"`
+	NetworkErrors      uint64 `json:"networkErrors"`
+	P95Millis          int64  `json:"p95Millis"`
 	Requests           uint64 `json:"requests"`
 	Failures           uint64 `json:"failures"`
 	Deferred           uint64 `json:"deferred"`
@@ -197,6 +205,18 @@ func (s *vendorScheduler) acquire(ctx context.Context, source string, priority v
 					}
 					finished := s.now()
 					state.totalDuration += finished.Sub(now)
+					state.completed++
+					state.latency.observe(finished.Sub(now))
+					switch {
+					case err != nil:
+						state.networkErrors++
+					case status == http.StatusForbidden:
+						state.forbidden++
+					case status == http.StatusTooManyRequests:
+						state.throttled++
+					case status >= 500:
+						state.serverErrors++
+					}
 					if err != nil || status >= 400 {
 						state.failures++
 					}
@@ -275,6 +295,7 @@ func (s *vendorScheduler) snapshot() map[string]vendorScheduleStatus {
 	for source, state := range s.sources {
 		s.trimTimesLocked(state, now)
 		status := vendorScheduleStatus{Requests: state.requests, Failures: state.failures, Deferred: state.deferred,
+			Completed: state.completed, Forbidden: state.forbidden, Throttled: state.throttled, ServerErrors: state.serverErrors, NetworkErrors: state.networkErrors, P95Millis: state.latency.p95Millis(),
 			RequestsLastMinute: len(state.requestTimes), Queued: len(state.queue), InFlight: state.inFlight,
 			WaitMillis: state.totalWait.Milliseconds(), DurationMillis: state.totalDuration.Milliseconds(), Probing: state.probing}
 		for _, waiter := range state.queue {

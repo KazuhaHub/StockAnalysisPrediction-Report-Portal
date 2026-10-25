@@ -135,6 +135,25 @@ function renderPage() {
 }
 
 describe('QuoteSourcesPage', () => {
+  it('refreshes traffic observations without replacing unsaved policies', async () => {
+    const policies = { tencent: { requestsPerMinute: 30, backgroundPerMinute: 6 } }
+    const empty = { requests: 0, completed: 0, cacheHits: 0, merged: 0, loads: 0, failures: 0, stale: 0, p95Millis: 0 }
+    const traffic = { live: empty, history: empty, batch: { requests: 0, completed: 0, symbols: 0, cachedSymbols: 0, missingSymbols: 0, merged: 0, loads: 0, p95Millis: 0 } }
+    apiMock.get.mockResolvedValueOnce({ ...structuredClone(state), ratePolicies: policies, schedule: {}, displayTraffic: traffic })
+      .mockResolvedValueOnce({ ...structuredClone(state), ratePolicies: policies, schedule: {}, displayTraffic: { ...traffic, live: { ...empty, requests: 321 } } })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'quoteAdmin.traffic.title' }))
+    const total = screen.getByRole('spinbutton', { name: 'tencent quoteAdmin.traffic.total' })
+    fireEvent.change(total, { target: { value: '24' } })
+    await user.click(screen.getByRole('button', { name: 'quoteAdmin.display.refresh' }))
+    expect(await screen.findByText('321')).toBeTruthy()
+    expect(total).toHaveProperty('value', '24')
+    await user.click(screen.getByRole('button', { name: 'manage.discard' }))
+    expect(total).toHaveProperty('value', '30')
+    expect(screen.getByText('321')).toBeTruthy()
+    expect(apiMock.post).not.toHaveBeenCalled()
+  })
   it('saves server-provided traffic limits and keeps other source policies intact', async () => {
     const policies = { tencent: { requestsPerMinute: 30, backgroundPerMinute: 6 }, sina: { requestsPerMinute: 20, backgroundPerMinute: 2 } }
     apiMock.get.mockResolvedValue({ ...structuredClone(state), ratePolicies: policies, schedule: {} })
