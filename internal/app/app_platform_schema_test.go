@@ -56,6 +56,12 @@ func TestPostgresAppPlatformControlSchema(t *testing.T) {
 }
 
 func TestAppPlatformSchemaComparisonPreservesMeaning(t *testing.T) {
+	if compactPlatformSQL("CHECK(public.octet_length(id)=36)") == compactPlatformSQL("CHECK(octet_length(id)=36)") {
+		t.Fatal("qualified function identity erased")
+	}
+	if compactPlatformSQL("CHECK(octet_ifnotexistslength(id)=36)") == compactPlatformSQL("CHECK(octet_length(id)=36)") {
+		t.Fatal("function identifier bytes erased")
+	}
 	for _, suffix := range []string{"::text", "public.", "ondeletenoaction", "ifnotexists"} {
 		original := "phase='ready" + suffix + "'"
 		if compactPlatformSQL(original) == compactPlatformSQL("phase='ready'") {
@@ -214,5 +220,15 @@ func TestPostgresAppPlatformSchemaRejectsWeakenedCheck(t *testing.T) {
 	}
 	if err := migration0012().verify(migExec{s: st, ex: tx}); err == nil {
 		t.Fatal("weakened length constraint accepted")
+	}
+}
+
+func TestAppPlatformSchemaRejectsDisabledForeignKeys(t *testing.T) {
+	st := newTestStore(t)
+	if _, err := st.exec("PRAGMA foreign_keys=OFF"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migration0012().verify(st.poolExec()); err == nil {
+		t.Fatal("disabled enforcement accepted")
 	}
 }

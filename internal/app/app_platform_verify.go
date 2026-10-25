@@ -70,6 +70,7 @@ func verifyAppPlatformPostgres(e migExec) error {
 	columns := map[string]columnShape{}
 	constraints := map[string]string{}
 	constraintKinds := map[string]string{}
+	constraintTargets := map[string]string{}
 	for _, t := range platformSchemaTables() {
 		name := platformPrefix + t.name
 		for _, c := range t.columns() {
@@ -81,6 +82,7 @@ func verifyAppPlatformPostgres(e migExec) error {
 			key := fmt.Sprintf("%s_fk_%d", name, n+1)
 			constraints[key] = "FOREIGN KEY (" + r.columns + ") REFERENCES " + r.target + "(" + r.targetColumns + ") ON DELETE " + r.deletion + " DEFERRABLE INITIALLY DEFERRED"
 			constraintKinds[key] = "f"
+			constraintTargets[key] = r.target
 		}
 		for n, check := range t.checkExpressions("postgres") {
 			key := fmt.Sprintf("%s_ck_%d", name, n+1)
@@ -136,6 +138,9 @@ func verifyAppPlatformPostgres(e migExec) error {
 			return fmt.Errorf("application control constraint %s is incompatible", name)
 		}
 		same := compactPlatformSQL(definition) == compactPlatformSQL(want)
+		if kind == "f" {
+			same = compactPlatformForeignKey(definition, constraintTargets[name]) == compactPlatformForeignKey(want, constraintTargets[name])
+		}
 		if kind == "c" {
 			same = canonicalPlatformBoolean(strings.TrimSpace(strings.TrimPrefix(definition, "CHECK"))) == canonicalPlatformBoolean(want)
 		}
@@ -217,8 +222,12 @@ func compactPlatformSQL(s string) string {
 		b.WriteByte(c)
 	}
 	result := b.String()
-	for _, decoration := range []string{"ifnotexists", "ondeletenoaction", "public.", "::text"} {
-		result = stripPlatformDecoration(result, decoration)
+	result = stripPlatformDecoration(result, "::text")
+	for _, prefix := range []string{"createtableifnotexists", "createindexifnotexists", "createuniqueindexifnotexists"} {
+		if strings.HasPrefix(result, prefix) {
+			result = strings.Replace(result, prefix, strings.TrimSuffix(prefix, "ifnotexists"), 1)
+			break
+		}
 	}
 	return result
 }
@@ -323,11 +332,21 @@ func stripPlatformDecoration(s, decoration string) string {
 			quoted = !quoted
 			continue
 		}
-		if !quoted && strings.HasPrefix(s[i:], decoration) {
+		if !quoted && strings.HasPrefix(s[i:], decoration) && (i+len(decoration) == len(s) || !((s[i+len(decoration)] >= 'a' && s[i+len(decoration)] <= 'z') || (s[i+len(decoration)] >= '0' && s[i+len(decoration)] <= '9') || s[i+len(decoration)] == '_')) {
 			i += len(decoration) - 1
 			continue
 		}
 		out.WriteByte(s[i])
 	}
 	return out.String()
+}
+
+func compactPlatformForeignKey(definition, target string) string {
+	normalized := compactPlatformSQL(definition)
+	normalized = strings.Replace(normalized, "referencespublic."+target+"(", "references"+target+"(", 1)
+	suffix := "ondeletenoactiondeferrableinitiallydeferred"
+	if strings.HasSuffix(normalized, suffix) {
+		normalized = strings.TrimSuffix(normalized, suffix) + "deferrableinitiallydeferred"
+	}
+	return normalized
 }

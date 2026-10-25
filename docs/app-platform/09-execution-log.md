@@ -8,10 +8,11 @@ not another Status-specific frontend or a manual backend deployment procedure.
 
 | Work package | State | Evidence / next requirement |
 | --- | --- | --- |
-| P00 | In progress | Source inventory and compatibility map complete; detailed runtime/trust decisions and physical storage approval remain |
-| P01 | Not started | Whole-flow shell/market/install prototypes and visible acceptance required |
-| P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; generated schemas, compatibility evaluator, signature policy and package inspector remain |
-| P03..P14 | Not started | Follow dependencies and approval gates; no durable schema, runner or production operation is implied by P02 |
+| P00 | In progress | Initial physical storage scope approved; runtime/trust decisions and later storage products remain |
+| P01 | In progress | Isolated interaction prototype in [PR #189](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/189); owner visual review and broader browser acceptance remain |
+| P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); generated schemas, signature policy and complete envelope inspection remain |
+| P03 | In progress | Approved Portal control schema, catalog verification, restore fencing and principal cleanup; see [implementation evidence](14-control-storage-implementation.md). Durable operation repositories and runner journal remain |
+| P04..P14 | Not started | Follow dependencies and approval gates; no runner or production operation is implied by the control schema |
 
 ## First contract implementation
 
@@ -96,7 +97,8 @@ This is frontend integrity only; it is not a trusted package or install admissio
 2. Add the bounded compatibility evaluator and select/review publisher signature
    verification with common vectors; keep parsing separate from admission.
 3. Build the P01 whole-flow prototype against fake typed installation states.
-4. Prepare the concrete D2 storage specification for owner review before any DDL
-   or runner journal implementation. Earlier Status schema approval does not apply.
+4. Continue the approved initial D2 implementation through durable operation
+   repositories and runner journal; later storage products still need their own
+   physical proposal. See [the accepted initial scope](13-control-storage-spec.md).
 5. Continue through P03..P14; do not release these internal primitives as a complete
    app platform or install an app-specific production backend as a shortcut.

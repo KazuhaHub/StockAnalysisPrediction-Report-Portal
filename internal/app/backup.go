@@ -403,6 +403,11 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 			return nil, err
 		}
 		defer tx.Rollback() //nolint:errcheck // no-op once committed
+		captured, captureErr := capturePlatformRestorePrior(migExec{s: s, ex: tx})
+		if captureErr != nil {
+			return nil, captureErr
+		}
+		prior.appPlatform = &captured
 		// Empty EVERY table in the schema, not only the ones the dump carries: a table the dump
 		// omits must end up empty too, or the result is a mix of two databases that never existed.
 		for _, t := range s.backupTables() {
@@ -437,6 +442,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 // restorePrior holds the live values a restore must reconcile against the dump rather than replace
 // outright. It is captured before the restore's transaction clears the tables.
 type restorePrior struct {
+	appPlatform    *platformRestorePrior
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
 	readerStage    string // the live reading stage as the readers resolve it: off, card or full
@@ -467,6 +473,11 @@ func (s *Store) populationFromRow() string {
 // takes the data back with it rather than leaving a half-loaded database behind.
 func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if prior.appPlatform != nil {
+		if err := applyPlatformRestore(e, *prior.appPlatform); err != nil {
+			return err
+		}
+	}
 	if err := resetRestoredExtensionConnections(e); err != nil {
 		return err
 	}
