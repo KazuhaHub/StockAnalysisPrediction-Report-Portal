@@ -154,3 +154,21 @@ func TestPublisherTrustBounds(t *testing.T) {
 		t.Fatal("per-publisher namespace cap not enforced")
 	}
 }
+
+func TestStoredPublisherNamespaces(t *testing.T) {
+	good := []byte(`[{"kind":"prefix","value":"notes-"}]`)
+	if ns, err := ParsePublisherNamespaces(good); err != nil || len(ns) != 1 {
+		t.Fatalf("valid namespaces: %v", err)
+	}
+	for _, raw := range []string{`null`, `{}`, `[{"kind":"prefix","kind":"exact","value":"notes-"}]`, `[{"Kind":"exact","value":"notes"}]`, `[{"kind":"exact","value":"notes","extra":"ignored"}]`, `[{"kind":"prefix","value":"notes"}]`, `[] {}`} {
+		if _, err := ParsePublisherNamespaces([]byte(raw)); err == nil {
+			t.Fatalf("accepted ambiguous namespace bytes: %s", raw)
+		}
+	}
+	if err := ValidatePublisherTrust(PublisherTrust{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublisherTrust(PublisherTrust{Publishers: []TrustedPublisher{{ID: "bad"}}}); err == nil {
+		t.Fatal("invalid persisted trust accepted")
+	}
+}
