@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Input, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { Role, SSOProviderAdmin, SSORuleRow, SSORulesResp, UserGroupRow } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
+import SettingsSaveBar from './SettingsSaveBar'
 
 // The group-rules editor.
 //
@@ -55,14 +55,16 @@ export default function SSORulesEditor({
   const [loadErr, setLoadErr] = useState('')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [savedRules, setSavedRules] = useState<SSORuleRow[]>([])
 
   const load = () => {
     setLoading(true)
     setLoadErr('')
-    api
+    return api
       .get<SSORulesResp>('/api/admin/sso/rules')
       .then((r) => {
         setRules(r.rules || [])
+        setSavedRules(r.rules || [])
         setShadowed(r.shadowed || [])
         setDirty(false)
         setLoaded(true)
@@ -70,7 +72,7 @@ export default function SSORulesEditor({
       .catch((e) => setLoadErr(errText(e, t)))
       .finally(() => setLoading(false))
   }
-  useEffect(load, [])
+  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Row keys are positions, not ids: an unsaved row has no id yet, and the server assigns ids from
   // the array order on save, so a position is the only thing stable across an edit.
@@ -89,10 +91,12 @@ export default function SSORulesEditor({
     setSaving(true)
     try {
       await api.put('/api/admin/sso/rules', { rules })
+      setSavedRules(rules)
+      setDirty(false)
       message.success(t('common.saved'))
-      load()
+      await load()
     } catch (e) {
-      message.error(String(e))
+      message.error(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -231,10 +235,12 @@ export default function SSORulesEditor({
       {providers.filter((p) => p.id > 0).length === 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 12 }} title={t('sso.rules.noProviders')} />
       )}
-
+      {loaded && loadErr && <Alert type="error" showIcon title={loadErr} />}
+      <ConfigProvider componentDisabled={saving}>
       <SortableWrapper
         ids={keys}
         onReorder={(order) => {
+          if (saving) return
           setRules(order.map((k) => rules[Number(k)]))
           setDirty(true)
         }}
@@ -267,15 +273,9 @@ export default function SSORulesEditor({
         </Button>
         <Typography.Text type="secondary">{t('sso.rules.orderHint')}</Typography.Text>
       </Space>
-
-      {dirty && (
-        <StickyActionBar>
-          <Button onClick={load}>{t('common.cancel')}</Button>
-          <Button type="primary" loading={saving} onClick={save}>
-            {t('common.save')}
-          </Button>
-        </StickyActionBar>
-      )}
+      </ConfigProvider>
+      <SettingsSaveBar dirty={dirty} saving={saving} onSave={save}
+        onDiscard={() => { setRules(savedRules); setDirty(false) }} />
       </LoadGate>
     </div>
   )

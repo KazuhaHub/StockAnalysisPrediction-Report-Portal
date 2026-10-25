@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Radio, Space, Typography } from 'antd'
+import { Button, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 // One setting that is either inherited or set here.
@@ -12,8 +12,9 @@ import { useTranslation } from 'react-i18next'
 // placeholder "9-18", which is the EXAMPLE from the hint text, so an inheriting field displayed
 // something that reads exactly like a value.
 //
-// Here it is one line: the inherit option states the resolved value and where it came from, and the
-// override input exists only while it is the thing in effect.
+// Here it is one compact row: the current state says what is effective and where it came from, and
+// the action beside it is the only state change available. This follows the same override/inherit
+// model as Google Workspace without spending two radio rows on every setting.
 export default function InheritField({
   label,
   hint,
@@ -41,15 +42,18 @@ export default function InheritField({
   children: ReactNode
 }) {
   const { t } = useTranslation()
+  const inheritedLabel = inherited
+    ? t('ou.inheritedAs', { from, value: inherited })
+    : t('ou.inheritedFrom', { from })
   if (!canInherit) {
     return (
-      <div style={{ marginBottom: 16 }}>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>
+      <div className="rp-ou-policy-field">
+        <Typography.Text strong className="rp-ou-policy-field__label">
           {label}
         </Typography.Text>
-        {children}
+        <div className="rp-ou-policy-field__control">{children}</div>
         {hint && (
-          <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 6 }}>
+          <Typography.Text type="secondary" className="rp-ou-policy-field__hint">
             {hint}
           </Typography.Text>
         )}
@@ -57,32 +61,29 @@ export default function InheritField({
     )
   }
   return (
-    <div style={{ marginBottom: 16 }}>
-      <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>
+    <div className="rp-ou-policy-field">
+      <Typography.Text strong className="rp-ou-policy-field__label">
         {label}
       </Typography.Text>
-      <Radio.Group
-        value={inheriting ? 'inherit' : 'own'}
-        onChange={(e) => onInheritingChange(e.target.value === 'inherit')}
-      >
-        <Space orientation="vertical" size={6}>
-          <Radio value="inherit">
-            {/* Some sources have no value worth naming — the system default is just "the system
-                default" — and "inherit the system default — the system default" says it twice. */}
-            {inherited ? t('ou.inheritedAs', { from, value: inherited }) : t('ou.inheritedFrom', { from })}
-          </Radio>
-          <Radio value="own">
-            <Space size={8} align="center">
+      <div className="rp-ou-policy-field__state">
+        {inheriting ? (
+          <>
+            <Typography.Text type="secondary">{inheritedLabel}</Typography.Text>
+            <Button type="link" size="small" onClick={() => onInheritingChange(false)}>
               {t('ou.override')}
-              {/* Only when chosen: a disabled input beside a selected "inherit" is exactly the
-                  ambiguity this control exists to remove. */}
-              {!inheriting && children}
-            </Space>
-          </Radio>
-        </Space>
-      </Radio.Group>
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="rp-ou-policy-field__control">{children}</div>
+            <Button type="link" size="small" onClick={() => onInheritingChange(true)}>
+              {inheritedLabel}
+            </Button>
+          </>
+        )}
+      </div>
       {hint && (
-        <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12, marginTop: 6 }}>
+        <Typography.Text type="secondary" className="rp-ou-policy-field__hint">
           {hint}
         </Typography.Text>
       )}

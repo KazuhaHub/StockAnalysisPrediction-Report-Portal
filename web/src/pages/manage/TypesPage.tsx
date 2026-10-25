@@ -4,6 +4,7 @@ import {
   AutoComplete,
   Button,
   Checkbox,
+  ConfigProvider,
   Form,
   Input,
   Modal,
@@ -15,13 +16,13 @@ import {
   Tooltip,
   Typography,
 } from 'antd'
-import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOutlined, SaveOutlined } from '@ant-design/icons'
+import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
+import SettingsSaveBar from './SettingsSaveBar'
 
 // antd's Tag preset colors (https://ant.design/components/tag) — "default" maps
 // to no color prop (the neutral grey Tag).
@@ -139,6 +140,12 @@ export default function TypesPage() {
   const [loaded, setLoaded] = useState(false) // …and at least one has landed, so the page has something to show
   const [loadErr, setLoadErr] = useState('')
   const [saving, setSaving] = useState(false)
+  const [ordering, setOrdering] = useState(false)
+  const busy = saving || ordering
+  const [savedGroups, setSavedGroups] = useState<TypeGroup[]>([])
+  const [search, setSearch] = useState('')
+  const signature = (items: TypeGroup[]) => JSON.stringify(items.flatMap((group) => group.rows).map(({ name, label, kind, isSummary }) => ({ name, label, kind, isSummary })).sort((a, b) => a.name.localeCompare(b.name)))
+  const dirty = loaded && signature(groups) !== signature(savedGroups)
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const [reclassifying, setReclassifying] = useState(false)
@@ -152,6 +159,7 @@ export default function TypesPage() {
       .get<TypesResp>('/api/admin/types')
       .then((r) => {
         setGroups(r.groups || [])
+        setSavedGroups(r.groups || [])
         setKinds(r.kinds || [])
         setColors(r.colors || {})
         setLoaded(true)
@@ -179,15 +187,19 @@ export default function TypesPage() {
   // async function was an unhandled promise rejection — no toast, no revert, and the admin left
   // looking at an order the server never took. Handled here instead, and a rejection reloads.
   const reorderGroup = (kind: string, orderedNames: string[]) => {
+    if (dirty || busy || search.trim()) return
+    setOrdering(true)
     setGroups((gs) =>
       gs.map((g) =>
         g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g,
       ),
     )
-    api.post('/api/admin/types/reorder', { names: orderedNames }).catch((e) => {
+    api.post('/api/admin/types/reorder', { names: orderedNames }).then(() => {
+      setSavedGroups((gs) => gs.map((g) => g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g))
+    }).catch(async (e) => {
       message.error(errText(e, t))
-      load()
-    })
+      await load()
+    }).finally(() => setOrdering(false))
   }
 
   const remove = async (name: string) => {
@@ -203,7 +215,10 @@ export default function TypesPage() {
         .map((r) => ({ name: r.name, label: r.label, kind: r.kind, summary: r.isSummary }))
       await api.post('/api/admin/types/save', { rows })
       message.success(t('common.saved'))
-      load()
+      setSavedGroups(groups)
+      await load()
+    } catch (e) {
+      message.error(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -257,7 +272,7 @@ export default function TypesPage() {
   const kindOptions = kinds.map((k) => ({ value: k, label: k }))
 
   const columns = [
-    { key: 'sort', width: 44, align: 'center' as const, render: () => <DragHandle label={t('common.reorder')} /> },
+    { key: 'sort', width: 44, align: 'center' as const, render: () => <ConfigProvider componentDisabled={dirty || busy || !!search.trim()}><DragHandle label={t('common.reorder')} /></ConfigProvider> },
     {
       title: t('common.name'),
       dataIndex: 'name',
@@ -305,7 +320,7 @@ export default function TypesPage() {
       align: 'right' as const,
       render: (_: any, r: TypeRow) => (
         <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.name)}>
-          <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
+          <Button size="small" danger disabled={dirty || busy} icon={<DeleteOutlined />} aria-label={t('common.delete')} />
         </Popconfirm>
       ),
     },
@@ -320,29 +335,31 @@ export default function TypesPage() {
           gates: a reload after saving keeps the page up and spins the tables instead. */}
       <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
       <Space wrap>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+        <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 280, maxWidth: '100%' }} />
+        <Button type="primary" disabled={dirty || busy} icon={<PlusOutlined />} onClick={openAdd}>
           {t('common.add')}
         </Button>
         <Popconfirm title={t('types.reclassifyConfirm')} onConfirm={reclassify}>
-          <Button icon={<ReloadOutlined />} loading={reclassifying}>
+          <Button disabled={dirty || busy} icon={<ReloadOutlined />} loading={reclassifying}>
             {t('types.reclassify')}
           </Button>
         </Popconfirm>
         <Popconfirm title={t('types.restoreDefaultsConfirm')} onConfirm={restoreDefaults}>
-          <Button icon={<RollbackOutlined />} loading={restoring}>
+          <Button disabled={dirty || busy} icon={<RollbackOutlined />} loading={restoring}>
             {t('types.restoreDefaults')}
           </Button>
         </Popconfirm>
         {selected.length > 0 && (
           <Popconfirm title={t('common.deleteConfirm')} onConfirm={removeSelected}>
-            <Button danger icon={<DeleteOutlined />}>
+            <Button danger disabled={dirty || busy} icon={<DeleteOutlined />}>
               {t('common.deleteSelected')} ({selected.length})
             </Button>
           </Popconfirm>
         )}
       </Space>
-
-      {groups.map((g) => {
+      <Typography.Text type="secondary">{t('manage.typesSaveScope')}</Typography.Text>
+      <ConfigProvider componentDisabled={busy}>
+      {groups.filter((g) => g.rows.some((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))).map((g) => {
         const groupNames = g.rows.map((r) => r.name)
         return (
           <div key={g.kind}>
@@ -357,8 +374,9 @@ export default function TypesPage() {
                 rowKey="name"
                 size="small"
                 loading={loading}
-                dataSource={g.rows}
+                dataSource={g.rows.filter((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
                 pagination={false}
+                scroll={{ x: 700 }}
                 components={sortableTableComponents}
                 rowSelection={{
                   selectedRowKeys: selected.filter((n) => groupNames.includes(n)),
@@ -374,12 +392,8 @@ export default function TypesPage() {
           </div>
         )
       })}
-
-      <StickyActionBar>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={save}>
-          {t('types.save')}
-        </Button>
-      </StickyActionBar>
+      </ConfigProvider>
+      <SettingsSaveBar dirty={dirty} saving={busy} onSave={save} onDiscard={() => setGroups(savedGroups)} />
       </LoadGate>
 
       <Modal

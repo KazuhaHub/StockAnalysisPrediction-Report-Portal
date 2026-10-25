@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Button, Card, Space, Spin, Table, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Input, Pagination, Space, Spin, Table, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import Markdown from '../../components/Markdown'
 import { usePrefs } from '../../prefs'
@@ -106,6 +106,9 @@ export default function ApiDocPage() {
   const { lang } = usePrefs()
   const [doc, setDoc] = useState<{ conventions: string; endpoints: ApiEndpoint[] } | null>(null)
   const [failed, setFailed] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
   const apiDocURL = `/api/openapi.json?lang=${encodeURIComponent(lang)}`
 
   useEffect(() => {
@@ -113,7 +116,7 @@ export default function ApiDocPage() {
     setDoc(null)
     setFailed(false)
     fetch(apiDocURL, { credentials: 'same-origin' })
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json() })
       .then((spec) => {
         if (!ignore) setDoc(specToEndpoints(spec, window.location.origin))
       })
@@ -123,10 +126,13 @@ export default function ApiDocPage() {
     return () => {
       ignore = true
     }
-  }, [apiDocURL])
+  }, [apiDocURL, retry])
 
-  if (failed) return <Typography.Text type="danger">{t('apidoc.loadFailed')}</Typography.Text>
+  if (failed) return <Space orientation="vertical"><Typography.Text type="danger">{t('apidoc.loadFailed')}</Typography.Text><Button onClick={() => setRetry((v) => v + 1)}>{t('common.retry')}</Button></Space>
   if (!doc) return <Spin />
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  const endpoints = doc.endpoints.filter((e) => terms.every((term) => `${e.method} ${e.path} ${e.summary} ${e.scope}`.toLocaleLowerCase().includes(term)))
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(endpoints.length / 10)))
 
   return (
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
@@ -139,9 +145,12 @@ export default function ApiDocPage() {
       <Card size="small" title={t('apidoc.conventions')}>
         <Markdown md={doc.conventions} />
       </Card>
-      {doc.endpoints.map((e) => (
+      <Input.Search allowClear aria-label={t('manage.apiSearch')} placeholder={t('manage.apiSearch')} value={query} onChange={(e) => { setQuery(e.target.value); setPage(1) }} />
+      {endpoints.slice((currentPage - 1) * 10, currentPage * 10).map((e) => (
         <EndpointCard key={`${e.method} ${e.path}`} e={e} />
       ))}
+      {endpoints.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.noResults')} />}
+      <Pagination current={currentPage} pageSize={10} total={endpoints.length} onChange={setPage} showSizeChanger={false} hideOnSinglePage />
     </Space>
   )
 }

@@ -156,6 +156,7 @@ export default function OrgUnitPicker({
 
   return (
     <div
+      className={`rp-ou-picker${mode === 'manage' ? ' rp-ou-picker--manage' : ''}`}
       style={{
         width: 268,
         flex: '0 0 268px',
@@ -227,7 +228,7 @@ export default function OrgUnitPicker({
         )}
       </Space>
 
-      <div style={{ padding: '0 8px 8px', maxHeight: 420, overflow: 'auto' }}>
+      <div className="rp-ou-picker__tree" style={{ padding: '0 8px 8px', maxHeight: 420, overflow: 'auto' }}>
         {loading && nodes.length === 0 ? (
           <div style={{ padding: 16, textAlign: 'center' }}>
             <Spin size="small" />
@@ -260,7 +261,7 @@ export default function OrgUnitPicker({
         )}
       </div>
 
-      <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, padding: 8 }}>
+      {(mode !== 'manage' || onAdd) && <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, padding: 8 }}>
         {mode === 'manage' ? (
           <Button type="link" size="small" block onClick={onAdd}>
             {t('ou.add')}
@@ -270,7 +271,7 @@ export default function OrgUnitPicker({
             {t('ou.manage')}
           </Button>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

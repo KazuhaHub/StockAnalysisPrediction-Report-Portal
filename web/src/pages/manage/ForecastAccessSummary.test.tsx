@@ -62,8 +62,8 @@ describe('ForecastAccessSummary', () => {
 
   it('links to the OU editor, in general and for each unit', async () => {
     show()
-    expect((await screen.findByRole('link', { name: 'forecast.access.edit' })).getAttribute('href')).toBe('/manage/users?tab=groups')
-    expect(screen.getByRole('link', { name: 'Client A' }).getAttribute('href')).toBe('/manage/users?tab=groups&ou=3')
+    expect((await screen.findByRole('link', { name: 'forecast.access.edit' })).getAttribute('href')).toBe('/manage/forecast?scope=ou')
+    expect(screen.getByRole('link', { name: 'Client A' }).getAttribute('href')).toBe('/manage/forecast?scope=ou&ou=3')
   })
 
   it('says a unit has no deciding source when none applies', async () => {

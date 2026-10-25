@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { App, Button, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
+import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,7 @@ import { WEEK_ORDER, parseWeeklyRows, presetSummary, weeklyIntervals, wrapsMidni
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
+import { usePendingSettings } from './AdminDraftBoundary'
 
 // Admin editor for preset low-peak scheduling windows (docs/adr/0014). An ordered, drag-sortable
 // list (like LinksPage / TypesPage); each preset is edited in a modal whose anchor fields adapt to
@@ -104,7 +105,7 @@ const presetBody = (p: RunPreset) => ({
 
 export default function RunPresetsEditor() {
   const { t } = useTranslation()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [presets, setPresets] = useState<RunPreset[]>([])
   const [draft, setDraft] = useState<RunPreset | null>(null)
   // The weekly rows behind the draft, when it has a row form. They live here rather than being
@@ -117,6 +118,15 @@ export default function RunPresetsEditor() {
   // page's own LoadGate covers /api/admin/batch/config only, not this section's list.
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
+  const [baseline, setBaseline] = useState('')
+  const dirty = !!draft && JSON.stringify([draft, rows]) !== baseline
+  usePendingSettings(dirty, saving)
+  const close = () => {
+    if (saving) return
+    if (!dirty) { setDraft(null); return }
+    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'), okText: t('manage.leave'),
+      cancelText: t('manage.stay'), okButtonProps: { danger: true }, onOk: () => setDraft(null) })
+  }
 
   const load = () => {
     setLoadErr('')
@@ -136,12 +146,15 @@ export default function RunPresetsEditor() {
   const ids = useMemo(() => presets.map((p) => String(p.id)), [presets])
 
   const edit = (p: RunPreset) => {
+    setBaseline(JSON.stringify([p, weeklyRowsOf(p)]))
     setRows(weeklyRowsOf(p))
     setDraft({ ...p })
   }
   const add = () => {
     setRows(null)
-    setDraft(blankPreset())
+    const blank = blankPreset()
+    setBaseline(JSON.stringify([blank, null]))
+    setDraft(blank)
   }
 
   const toggleEnabled = async (p: RunPreset, enabled: boolean) => {
@@ -236,13 +249,16 @@ export default function RunPresetsEditor() {
         title={draft?.id ? t('preset.edit') : t('preset.add')}
         onOk={save}
         confirmLoading={saving}
-        onCancel={() => setDraft(null)}
+        onCancel={close}
+        closable={!saving}
+        maskClosable={!saving}
+        cancelButtonProps={{ disabled: saving }}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
         width={560}
         destroyOnHidden
       >
-        {draft && <PresetForm draft={draft} onChange={setDraft} rows={rows} onRows={setRows} />}
+        <ConfigProvider componentDisabled={saving}>{draft && <PresetForm draft={draft} onChange={setDraft} rows={rows} onRows={setRows} />}</ConfigProvider>
       </Modal>
     </Space>
   )

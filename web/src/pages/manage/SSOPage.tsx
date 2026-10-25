@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Form, Grid, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Button, Card, Collapse, Form, Grid, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload } from 'antd'
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -8,6 +8,9 @@ import SSORulesEditor from './SSORulesEditor'
 import SSOSetupGuide from './SSOSetupGuide'
 import SSOIcon, { SSO_ICON_PRESETS } from '../../components/SSOIcon'
 import LoadGate from '../../components/LoadGate'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
+import { usePendingSettings } from './AdminDraftBoundary'
 
 // SSO administration (ADR 0023). One SAML tab and one OIDC tab; the API is row-shaped, so adding
 // more providers later is a change here and nowhere else.
@@ -34,6 +37,7 @@ function CopyField({ label, value, hint }: { label: string; value: string; hint?
       <Space.Compact style={{ width: '100%' }}>
         <Input readOnly value={value} />
         <Button
+          aria-label={t('common.copy')}
           icon={<CopyOutlined />}
           onClick={() => {
             navigator.clipboard?.writeText(value)
@@ -218,12 +222,16 @@ function ProviderForm({
   provider: SSOProviderAdmin
   groups: UserGroupRow[]
   publicUrl: string
-  onSaved: () => void
+  onSaved: () => void | Promise<unknown>
 }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
+  const [section, setSection] = useState('connection')
+  const [savedValues, setSavedValues] = useState<Record<string, unknown> | null>(null)
+  const values = Form.useWatch([], { form, preserve: true }) as Record<string, unknown> | undefined
+  const dirty = !!savedValues && Object.keys(savedValues).some((key) => values?.[key] !== savedValues[key])
   // What the last metadata fetch returned, held locally. Reloading the page's providers after a
   // fetch would re-seed this form from the server — and the draft the fetch endpoint creates knows
   // only the URL, so every field the admin had typed and not yet saved came back blank. The button
@@ -236,7 +244,9 @@ function ProviderForm({
   // show the success toast, which is why the fetch appeared to clear the fields it never touched.
   const identity = `${provider.kind}:${provider.slug}:${provider.id}`
   useEffect(() => {
-    form.setFieldsValue({ ...provider, client_secret: '' })
+    const initial = { ...provider, client_secret: '' }
+    form.setFieldsValue(initial)
+    setSavedValues(initial)
     setFetched(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, form])
@@ -252,8 +262,10 @@ function ProviderForm({
       const body: Record<string, unknown> = { ...v, kind, slug: provider.slug }
       if (!v.client_secret) delete body.client_secret
       await api.post('/api/admin/sso/providers', body)
+      form.setFieldValue('client_secret', '')
+      setSavedValues({ ...form.getFieldsValue(true) })
       message.success(t('common.saved'))
-      onSaved()
+      await onSaved()
     } catch (e) {
       message.error(errText(e, t))
     } finally {
@@ -280,9 +292,15 @@ function ProviderForm({
   }
 
   return (
-    <Form form={form} layout="vertical" style={{ maxWidth: 720 }}>
+    <Form form={form} name={`sso-${kind}`} layout="vertical" disabled={saving}>
       {!publicUrl && <Alert type="warning" showIcon style={{ marginBottom: 16 }} title={t('sso.needPublicUrl')} />}
-
+      <SettingsWorkspace active={section} onChange={setSection} sections={[
+        { key: 'connection', label: t('sso.section.connection') },
+        { key: 'presentation', label: t('sso.section.presentation') },
+        { key: 'mapping', label: t('sso.mappingTitle') },
+        { key: 'accounts', label: t('sso.section.accounts') },
+      ]}>
+      <SettingsPanel section="connection">
       {/* Above everything, because the first question an admin has on this page is not "what is my
           ACS URL" — the page already answered that — but "which of the IdP's boxes does it go in". */}
       <SSOSetupGuide
@@ -293,7 +311,9 @@ function ProviderForm({
             : { redirect: provider.redirect_url }
         }
       />
-
+      </SettingsPanel>
+      <SettingsPanel section="presentation">
+      <Typography.Title level={4}>{t('sso.section.presentation')}</Typography.Title>
       <Form.Item name="enabled" valuePropName="checked" label={t('sso.enable')} extra={t('sso.enableHint')}>
         <Switch />
       </Form.Item>
@@ -303,7 +323,8 @@ function ProviderForm({
       <Form.Item name="icon" label={t('sso.icon')} extra={t('sso.iconHint')}>
         <IconPicker kind={kind} />
       </Form.Item>
-
+      </SettingsPanel>
+      <SettingsPanel section="connection">
       {kind === 'oidc' ? (
         <>
           <Form.Item name="issuer" label={t('sso.issuer')} extra={t('sso.issuerHint')}>
@@ -366,7 +387,8 @@ function ProviderForm({
           </Form.Item>
         </>
       )}
-
+      </SettingsPanel>
+      <SettingsPanel section="mapping">
       <Typography.Title level={5}>{t('sso.mappingTitle')}</Typography.Title>
       <Typography.Paragraph type="secondary">{t('sso.mappingHint')}</Typography.Paragraph>
       <LastSeenClaims slug={provider.slug} />
@@ -385,7 +407,8 @@ function ProviderForm({
       <Form.Item name="attr_external_id" label={t('sso.attrExternalId')} extra={t('sso.attrExternalIdHint')}>
         <Input placeholder="oid" />
       </Form.Item>
-
+      </SettingsPanel>
+      <SettingsPanel section="accounts">
       <Typography.Title level={5}>{t('sso.matchTitle')}</Typography.Title>
       <Typography.Paragraph type="secondary">{t('sso.matchHint')}</Typography.Paragraph>
       <Form.Item name="link_by" label={t('sso.linkBy')} extra={t('sso.linkByHint')}>
@@ -430,10 +453,10 @@ function ProviderForm({
       >
         <Switch />
       </Form.Item>
-
-      <Button type="primary" onClick={save} loading={saving}>
-        {t('common.save')}
-      </Button>
+      </SettingsPanel>
+      </SettingsWorkspace>
+      <SettingsSaveBar dirty={dirty} saving={saving} onSave={save}
+        onDiscard={() => { if (savedValues) form.setFieldsValue(savedValues) }} />
     </Form>
   )
 }
@@ -448,6 +471,7 @@ export default function SSOPage() {
   const [spDefaults, setSpDefaults] = useState<NonNullable<SSOProvidersResp['sp_defaults']>>({})
   const [allowPrivate, setAllowPrivate] = useState(false)
   const [savingPrivate, setSavingPrivate] = useState(false)
+  usePendingSettings(false, savingPrivate)
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
@@ -497,8 +521,8 @@ export default function SSOPage() {
   return (
     <Card>
       <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load}>
-      {/* Not a field on either provider form: it is not a property of one provider, and it widens
-          what EVERY outbound SSO call may reach. It sits above the tabs for the same reason. */}
+      {/* Network policy applies to every provider and saves independently. */}
+      <Collapse ghost style={{ marginBottom: 16 }} items={[{ key: 'network', label: t('sso.networkTitle'), children: (
       <Space align="start" size={12} style={{ marginBottom: 16 }}>
         <Switch
           checked={allowPrivate}
@@ -523,6 +547,7 @@ export default function SSOPage() {
           </Typography.Paragraph>
         </div>
       </Space>
+      ) }]} />
       <Tabs
         items={[
           ...(['saml', 'oidc'] as const).map((kind) => ({

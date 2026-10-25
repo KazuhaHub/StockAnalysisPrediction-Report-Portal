@@ -14,6 +14,7 @@ import { LINK_ICON_OPTIONS, linkIconComponent } from '../../components/linkIcons
 import LoadGate from '../../components/LoadGate'
 import { APP_SHORTCUTS, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
 import { BUILTIN_PIN_PREFIX } from '../../lib/builtinApps'
+import useFormDraft from './useFormDraft'
 
 const iconSelectOptions = LINK_ICON_OPTIONS.map(({ value }) => {
   const Icon = linkIconComponent(value)
@@ -40,6 +41,10 @@ export default function LinksPage() {
   const [groupEditing, setGroupEditing] = useState<LinkGroup | null>(null)
   const [groupOpen, setGroupOpen] = useState(false)
   const [groupForm] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+  const [groupSaving, setGroupSaving] = useState(false)
+  const draft = useFormDraft(form, open, saving, () => setOpen(false))
+  const groupDraft = useFormDraft(groupForm, groupOpen, groupSaving, () => setGroupOpen(false))
   const [batchTargets, setBatchTargets] = useState<BatchTarget[]>([])
   const [chatTargets, setChatTargets] = useState<ChatTarget[]>([])
   const [appList, setAppList] = useState<AppSummary[]>([])
@@ -178,13 +183,16 @@ export default function LinksPage() {
   }
   const submitGroup = async () => {
     const v = await groupForm.validateFields()
+    setGroupSaving(true)
+    try {
     // Preserve the visibility toggle across an edit (the modal doesn't expose it).
     const payload = { name: (v.name || '').trim(), mode: v.mode, showLabel: !!v.showLabel, icon: v.icon || '', visible: groupEditing ? groupEditing.visible !== false : true }
     if (groupEditing) await api.put(`/api/admin/link-groups/${groupEditing.id}`, payload)
     else await api.post('/api/admin/link-groups', payload)
     setGroupOpen(false)
     message.success(t('common.saved'))
-    load()
+    await load()
+    } catch (e) { message.error(errText(e, t)) } finally { setGroupSaving(false) }
   }
   const deleteGroup = async (id: number) => {
     await api.del(`/api/admin/link-groups/${id}`)
@@ -220,6 +228,8 @@ export default function LinksPage() {
   }
   const submit = async () => {
     const v = await form.validateFields()
+    setSaving(true)
+    try {
     // Preserve the visibility toggle across an edit (the modal doesn't expose it).
     const visible = editing ? editing.visible !== false : true
     const payload =
@@ -230,7 +240,8 @@ export default function LinksPage() {
     else await api.post('/api/admin/links', payload)
     setOpen(false)
     message.success(t('common.saved'))
-    load()
+    await load()
+    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
   const onValuesChange = (changed: Record<string, unknown>) => {
     // Changing the shortcut type invalidates any pinned target (its options come from the old type) —
@@ -396,12 +407,16 @@ export default function LinksPage() {
         open={groupOpen}
         title={groupEditing ? t('links.editGroup') : t('links.addGroup')}
         onOk={submitGroup}
-        onCancel={() => setGroupOpen(false)}
+        onCancel={groupDraft.close}
+        confirmLoading={groupSaving}
+        closable={!groupSaving}
+        maskClosable={!groupSaving}
+        cancelButtonProps={{ disabled: groupSaving }}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
         destroyOnHidden
       >
-        <Form form={groupForm} layout="vertical">
+        <Form form={groupForm} disabled={groupSaving} layout="vertical">
           <Form.Item name="name" label={t('links.groupName')}>
             <Input placeholder={t('links.groupNamePlaceholder')} />
           </Form.Item>
@@ -417,8 +432,8 @@ export default function LinksPage() {
         </Form>
       </Modal>
 
-      <Modal open={open} title={editing ? t('common.edit') : t('common.add')} onOk={submit} onCancel={() => setOpen(false)} okText={t('common.save')} cancelText={t('common.cancel')} destroyOnHidden>
-        <Form form={form} layout="vertical" onValuesChange={onValuesChange}>
+      <Modal open={open} title={editing ? t('common.edit') : t('common.add')} onOk={submit} onCancel={draft.close} confirmLoading={saving} closable={!saving} maskClosable={!saving} cancelButtonProps={{ disabled: saving }} okText={t('common.save')} cancelText={t('common.cancel')} destroyOnHidden>
+        <Form form={form} disabled={saving} layout="vertical" onValuesChange={onValuesChange}>
           {/* A shortcut's text is optional: left blank, the home page names it in the reader's
               language (linkDisplayLabel). A plain link has no such name, so it stays required. */}
           <Form.Item noStyle shouldUpdate={(a, b) => a.kind !== b.kind || a.shortcut !== b.shortcut || a.shortcutTarget !== b.shortcutTarget}>

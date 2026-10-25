@@ -14,6 +14,8 @@ import ForecastEvaluatorStatus from './ForecastEvaluatorStatus'
 import ForecastAlerts from './ForecastAlerts'
 import ForecastLedgerStart from './ForecastLedgerStart'
 import ForecastDiagnostics from './ForecastDiagnostics'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import { PolicyPage } from './OUPolicyWorkspace'
 
 // Forecast operations: the administrator's page for running the prediction ledger
 // (ADR 0029).
@@ -27,6 +29,10 @@ import ForecastDiagnostics from './ForecastDiagnostics'
 const WARM_MAX_AGE = 5 * 60_000
 
 export default function ForecastPage() {
+  return <PolicyPage section="forecast"><GlobalForecastOperations /></PolicyPage>
+}
+
+function GlobalForecastOperations() {
   const { t } = useTranslation()
 
   const [settings, setSettings] = useState<ForecastSettings | null>(null)
@@ -35,6 +41,7 @@ export default function ForecastPage() {
   const [loadErr, setLoadErr] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [section, setSection] = useState('status')
 
   const load = () => {
     setLoading(true)
@@ -84,10 +91,13 @@ export default function ForecastPage() {
           </Space>
         </div>
 
+        <SettingsWorkspace active={section} onChange={setSection} sections={[
+          { key: 'status', label: t('manage.operation.status') }, { key: 'diagnostics', label: t('manage.operation.diagnostics') },
+          { key: 'alerts', label: t('manage.operation.alerts') }, { key: 'access', label: t('manage.operation.access') },
+        ]}>
+        <SettingsPanel section="status">
+        <div className="rp-admin-list-page">
         {settings && <ForecastEvaluatorStatus settings={settings} onChanged={load} />}
-        {settings && <ForecastDiagnostics value={settings.diagnostics} fallback={settings.fallback} />}
-        {settings && <ForecastAlerts settings={settings} onChanged={load} />}
-
         <Card title={t('forecast.eval.title')}>
           {settings && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -140,8 +150,14 @@ export default function ForecastPage() {
             </div>
           )}
         </Card>
-
+        </div>
+        </SettingsPanel>
+        <SettingsPanel section="diagnostics">{settings && <ForecastDiagnostics value={settings.diagnostics} fallback={settings.fallback} />}</SettingsPanel>
+        <SettingsPanel section="alerts">{settings && <ForecastAlerts settings={settings} onChanged={load} />}</SettingsPanel>
+        <SettingsPanel section="access">
         <ForecastAccessSummary />
+        </SettingsPanel>
+        </SettingsWorkspace>
       </div>
 
       {settings && (

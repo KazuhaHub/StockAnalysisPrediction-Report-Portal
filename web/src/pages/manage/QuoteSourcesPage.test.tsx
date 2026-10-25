@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, ConfigProvider } from 'antd'
 import { ApiError } from '../../api/client'
@@ -135,6 +135,16 @@ function renderPage() {
 }
 
 describe('QuoteSourcesPage', () => {
+  it('clears cache occupancy without replacing an unsaved source order', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('sina')
+    await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByText('quoteAdmin.clearCache'))
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.sources' }))
+    expect(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }).getAttribute('aria-checked')).toBe('false')
+  })
   beforeEach(() => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()
@@ -518,6 +528,7 @@ describe('QuoteSourcesPage', () => {
 
     renderPage()
     await screen.findByText('sina')
+    fireEvent.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
     expect((screen.getByLabelText('quoteAdmin.ttlOpen') as HTMLInputElement).value).toBe('0')
     expect((screen.getByLabelText('quoteAdmin.ttlClosed') as HTMLInputElement).value).toBe('0')
     expect((screen.getByLabelText('quoteAdmin.ttlIntraday') as HTMLInputElement).value).toBe('0')
@@ -570,6 +581,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
 
     await user.click(screen.getByRole('switch', { name: 'quoteAdmin.homeCards' }))
     expect(screen.getByRole('switch', { name: 'quoteAdmin.homeCards' }).getAttribute('aria-checked')).toBe('true')
@@ -585,6 +597,7 @@ describe('QuoteSourcesPage', () => {
     // The floor is stated up front, in the hint beside each field.
     renderPage()
     const open = (await screen.findByLabelText('quoteAdmin.ttlOpen')) as HTMLInputElement
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
     expect(screen.getByText('quoteAdmin.ttlHint ≥ 5')).toBeTruthy()
     expect(screen.getByText('quoteAdmin.ttlHint ≥ 30')).toBeTruthy()
 
@@ -607,6 +620,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     const box = (await screen.findByLabelText('quoteAdmin.ttlIntraday')) as HTMLInputElement
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
     expect(box.value).toBe('60')
     // Three floors, three different numbers, each beside its own field — and the intraday one (15)
     // is neither of the others (5 and 30), so a hint wired to the wrong state variable shows up
@@ -636,6 +650,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
 
     // The sentence is on the page, not in a tooltip: showing prices on the home cards sends the
     // codes currently on screen to a third-party vendor on every home page view, which is the whole
@@ -664,6 +679,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
 
     expect(screen.getByText('quoteAdmin.autoRefreshHint')).toBeTruthy()
     const sw = screen.getByRole('switch', { name: 'quoteAdmin.autoRefresh' })
@@ -680,6 +696,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('33.8 KB')
+    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
 
     apiMock.post.mockResolvedValue({ ...structuredClone(state), cacheEntries: 0, cacheBytes: 0 })
     await user.click(screen.getByRole('button', { name: /quoteAdmin\.clearCache/ }))

@@ -1,318 +1,133 @@
 import { Suspense, useEffect, useState } from 'react'
-import { Button, Drawer, Menu, Spin, theme } from 'antd'
+import { Button, Drawer, Menu, Space, Spin, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
-import {
-  AuditOutlined,
-  IdcardOutlined,
-  LockOutlined,
-  TagsOutlined,
-  ApiOutlined,
-  AppstoreAddOutlined,
-  BranchesOutlined,
-  ControlOutlined,
-  DatabaseOutlined,
-  FundProjectionScreenOutlined,
-  LineChartOutlined,
-  FileTextOutlined,
-  GlobalOutlined,
-  KeyOutlined,
-  LinkOutlined,
-  MailOutlined,
-  MessageOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  NotificationOutlined,
-  PlayCircleOutlined,
-  SlidersOutlined,
-  TeamOutlined,
-} from '@ant-design/icons'
+import { HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
 import VersionLabel from '../../components/VersionLabel'
+import AdminSearch from './AdminSearch'
+import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const NARROW_QUERY = '(max-width: 767px)'
-// What each settings page asks for the moment it mounts. Listed here so hovering its menu item
-// can start that request early; a page missing from the table simply gets no head start.
-//
-// Deliberately only the cheap, page-defining GET, and only where that is what it is. The storage
-// page warms its schedule and not /api/admin/cleanup/usage, which measures the database; the apps
-// page is absent entirely, because its list comes from a remote market with a 25-second timeout.
-// A hover must never be able to start work like that.
-const WARM_ON_HOVER: Record<string, string> = {
-  site: '/api/admin/settings',
-  announcement: '/api/admin/announcements',
-  email: '/api/admin/email',
-  links: '/api/admin/links',
-  types: '/api/admin/types',
-  versions: '/api/admin/versions',
-  forecast: '/api/admin/forecast',
-  users: '/api/admin/users',
-  sso: '/api/admin/sso/providers',
-  security: '/api/admin/security',
-  tokens: '/api/admin/tokens',
-  batch: '/api/admin/batch/targets',
-  runqueue: '/api/admin/batch/config',
-  rundefaults: '/api/admin/batch/config',
-  assistant: '/api/admin/chat/config',
-  webhooks: '/api/admin/webhooks',
-  storage: '/api/admin/cleanup/config',
-}
-
-const warmPage = (key: string) => {
-  const url = WARM_ON_HOVER[key]
-  if (url) void prefetch(url)
-}
-
-// The sticky rail offsets by the real header height, which AppLayout publishes as a
-// CSS var (the header wraps taller in compact mode); 64px is the single-row fallback.
 const HEADER_VAR = 'var(--rp-header-h, 64px)'
 
-// The admin surface is a full-bleed console: a domain-grouped left rail (collapsible
-// to an icon strip, with the choice remembered) beside the active page. Grouping —
-// site / content / access / batch / integrations — replaces the old flat tab bar; each
-// leaf is its own /manage/{key} route. On a narrow viewport the rail stacks above the
-// content (expanded, full width) instead of crushing it. matchMedia is read directly
-// (not Grid), and the test shim reports desktop, so jsdom renders identically.
 export default function ManageLayout() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const loc = useLocation()
   const { token } = theme.useToken()
   const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(COLLAPSE_KEY) === '1'
-    } catch {
-      return false
-    }
+    try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
   })
-  const [narrow, setNarrow] = useState(() => {
-    try {
-      return window.matchMedia(NARROW_QUERY).matches
-    } catch {
-      return false
-    }
-  })
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const active = loc.pathname.split('/')[2] || 'site'
+  const [searchOpen, setSearchOpen] = useState(false)
+  const active = loc.pathname.split('/')[2] || 'overview'
+  const page = adminPage(active)
+  const group = ADMIN_GROUPS.find((entry) => entry.pages.some((item) => item.key === active))
+  const activeLabel = page ? t(page.label) : t('manage.overview')
 
   useEffect(() => {
-    let mq: MediaQueryList
-    try {
-      mq = window.matchMedia(NARROW_QUERY)
-    } catch {
-      return
-    }
+    const mq = window.matchMedia(NARROW_QUERY)
     const onChange = () => setNarrow(mq.matches)
-    mq.addEventListener?.('change', onChange)
-    return () => mq.removeEventListener?.('change', onChange)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
   }, [])
 
-  const toggle = () => {
-    setCollapsed((c) => {
-      const next = !c
-      try {
-        localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0')
-      } catch {
-        /* private mode / storage disabled — collapse just won't persist */
-      }
-      return next
-    })
-  }
-
-  // On a narrow viewport the rail is always expanded (it stacks above the content, so
-  // an icon-only strip in a full-width bar would look broken).
-  const railCollapsed = narrow ? false : collapsed
-
-  const items: MenuProps['items'] = [
-    {
-      type: 'group',
-      label: t('nav.group.site'),
-      children: [
-        { key: 'site', label: t('settings.general'), icon: <GlobalOutlined /> },
-        { key: 'announcement', label: t('nav.announcement'), icon: <NotificationOutlined /> },
-        { key: 'email', label: t('nav.email'), icon: <MailOutlined /> },
-        { key: 'links', label: t('nav.links'), icon: <LinkOutlined /> },
-      ],
-    },
-    {
-      type: 'group',
-      label: t('nav.group.content'),
-      children: [
-        { key: 'types', label: t('nav.types'), icon: <TagsOutlined /> },
-        { key: 'versions', label: t('nav.versions'), icon: <BranchesOutlined /> },
-        { key: 'forecast', label: t('nav.forecast'), icon: <FundProjectionScreenOutlined /> },
-      ],
-    },
-    {
-      type: 'group',
-      label: t('nav.group.access'),
-      children: [
-        { key: 'users', label: t('nav.users'), icon: <TeamOutlined /> },
-        { key: 'sso', label: t('nav.sso'), icon: <IdcardOutlined /> },
-        { key: 'security', label: t('nav.security'), icon: <LockOutlined /> },
-        { key: 'tokens', label: t('settings.tokens'), icon: <KeyOutlined /> },
-      ],
-    },
-    {
-      type: 'group',
-      label: t('nav.group.batch'),
-      children: [
-        { key: 'batch', label: t('nav.batchAdmin'), icon: <PlayCircleOutlined /> },
-        { key: 'runqueue', label: t('nav.runQueue'), icon: <ControlOutlined /> },
-        { key: 'rundefaults', label: t('nav.runDefaults'), icon: <SlidersOutlined /> },
-        { key: 'assistant', label: t('nav.chat'), icon: <MessageOutlined /> },
-      ],
-    },
-    {
-      type: 'group',
-      label: t('nav.group.integrations'),
-      children: [
-        { key: 'apps', label: t('nav.appsAdmin'), icon: <AppstoreAddOutlined /> },
-        { key: 'webhooks', label: t('nav.webhooks'), icon: <ApiOutlined /> },
-        { key: 'notifications', label: t('nav.notifications'), icon: <NotificationOutlined /> },
-        { key: 'apidoc', label: t('settings.apidoc'), icon: <FileTextOutlined /> },
-      ],
-    },
-    {
-      type: 'group',
-      label: t('nav.group.system'),
-      children: [
-        { key: 'quotes', label: t('nav.quoteAdmin'), icon: <LineChartOutlined /> },
-        { key: 'storage', label: t('nav.storage'), icon: <DatabaseOutlined /> },
-        { key: 'audit', label: t('nav.audit'), icon: <AuditOutlined /> },
-      ],
-    },
+  const toggle = () => setCollapsed((current) => {
+    const next = !current
+    try { localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0') } catch { /* Storage is optional. */ }
+    return next
+  })
+  const go = (path: string) => { navigate(path); setDrawerOpen(false) }
+  const railCollapsed = !narrow && collapsed
+  const menuItems: MenuProps['items'] = [
+    { key: 'overview', label: t('manage.overview'), icon: <HomeOutlined /> },
+    ...ADMIN_GROUPS.map((section) => ({
+      type: 'group' as const,
+      key: section.key,
+      label: t(section.label),
+      children: section.pages.map((entry) => ({
+        key: entry.key, label: t(entry.label), icon: entry.icon,
+        // Only cheap page-defining requests belong here, never statistics or market fetches.
+        onMouseEnter: () => { if (entry.warm) void prefetch(entry.warm) },
+      })),
+    })),
   ]
+  const menu = <Menu mode="inline" inlineCollapsed={railCollapsed} selectedKeys={[active]}
+    items={menuItems} onClick={({ key }) => go(`/manage/${key}`)}
+    style={{ border: 'none', background: 'transparent' }} />
 
-  // The nav menu, shared by the desktop rail and the mobile drawer. On mobile a click also
-  // closes the drawer (so it behaves like a page switch, not a persistent sidebar).
-  //
-  // Pointing at an item starts loading the page behind it, so by the time the click lands its
-  // configuration is usually already answered and it renders filled instead of spinning. Hover
-  // is the cheapest possible signal of intent — one request for the one page about to be opened,
-  // rather than warming an admin area most sessions never visit.
-  const menu = (
-    <Menu
-      mode="inline"
-      inlineCollapsed={railCollapsed}
-      selectedKeys={[active]}
-      onClick={({ key }) => {
-        navigate(`/manage/${key}`)
-        setDrawerOpen(false)
-      }}
-      items={items.map((g) =>
-        g && 'children' in g
-          ? { ...g, children: (g.children ?? []).map((c) => (c ? { ...c, onMouseEnter: () => warmPage(String(c.key)) } : c)) }
-          : g,
+  const searchButton = (
+    <Button icon={<SearchOutlined />} aria-label={t('manage.search')} onClick={() => setSearchOpen(true)}
+      block={!narrow} type={railCollapsed ? 'text' : 'default'}>
+      {!railCollapsed && t('manage.search')}
+    </Button>
+  )
+  const header = (
+    <header className="rp-admin-page-header">
+      <div>
+        <Typography.Text type="secondary" className="rp-admin-page-header__area">
+          {group ? t(group.label) : t('nav.manage')}
+        </Typography.Text>
+        <Typography.Title level={2}>{activeLabel}</Typography.Title>
+        <Typography.Paragraph type="secondary">
+          {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
+        </Typography.Paragraph>
+      </div>
+      {page && (
+        <nav aria-label={t('manage.related')} className="rp-admin-related">
+          <Typography.Text type="secondary">{t('manage.related')}</Typography.Text>
+          <Space wrap size={[4, 4]}>
+            {page.related.map((key) => {
+              const related = adminPage(key)
+              return related && <Button key={key} size="small" onClick={() => go(`/manage/${key}`)}>{t(related.label)}</Button>
+            })}
+          </Space>
+        </nav>
       )}
-      style={{ border: 'none', background: 'transparent' }}
-    />
+    </header>
+  )
+  const content = (
+    <div className="rp-admin-content" id="rp-admin-content">
+      {header}
+      <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
+        <Outlet />
+      </Suspense>
+    </div>
   )
 
-  // The label of the current leaf, for the mobile top bar (so you can see where you are
-  // without opening the drawer).
-  const leaves = items.flatMap((g) => (g && 'children' in g ? g.children ?? [] : []))
-  const activeLeaf = leaves.find((l) => l && 'key' in l && l.key === active)
-  const activeLabel = (activeLeaf && 'label' in activeLeaf ? (activeLeaf.label as string) : undefined) ?? t('nav.manage')
-
-  // Mobile: the grouped rail is too tall to stack above the content — fold it into a drawer
-  // opened from a slim top bar, so the active page is visible immediately.
-  if (narrow) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', minHeight: `calc(100dvh - ${HEADER_VAR})`, background: token.colorBgContainer }}>
-        <div
-          style={{
-            position: 'sticky',
-            top: HEADER_VAR,
-            zIndex: 5,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 12px',
-            background: token.colorBgContainer,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          }}
-        >
-          <Button icon={<MenuUnfoldOutlined />} onClick={() => setDrawerOpen(true)}>
-            {activeLabel}
-          </Button>
-        </div>
-        <Drawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          placement="left"
-          size={260}
-          title={t('nav.manage')}
-          styles={{ body: { padding: 8 } }}
-        >
-          {menu}
-        </Drawer>
-        <div style={{ flex: '1 1 auto', minWidth: 0, padding: 16 }}>
-          <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
-            <Outlet />
-          </Suspense>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: narrow ? 'column' : 'row',
-        alignItems: narrow ? 'stretch' : 'flex-start',
-        minHeight: narrow ? undefined : `calc(100dvh - ${HEADER_VAR})`,
-        background: token.colorBgContainer,
-      }}
-    >
-      <div
-        style={{
-          flex: narrow ? '0 0 auto' : `0 0 ${collapsed ? 80 : 236}px`,
-          width: narrow ? '100%' : collapsed ? 80 : 236,
-          display: 'flex',
-          flexDirection: 'column',
-          borderInlineEnd: narrow ? undefined : `1px solid ${token.colorBorderSecondary}`,
-          borderBottom: narrow ? `1px solid ${token.colorBorderSecondary}` : undefined,
-          position: narrow ? 'static' : 'sticky',
-          top: narrow ? undefined : HEADER_VAR,
-          height: narrow ? 'auto' : `calc(100dvh - ${HEADER_VAR})`,
-          transition: 'flex-basis .2s ease, width .2s ease',
-        }}
-      >
-        <div style={{ flex: '1 1 auto', overflowY: 'auto', overflowX: 'hidden', paddingTop: 8 }}>{menu}</div>
-        {!narrow && (
-          <div
-            style={{
-              flex: '0 0 auto',
-              borderTop: `1px solid ${token.colorBorderSecondary}`,
-              padding: 8,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              justifyContent: collapsed ? 'center' : 'space-between',
-            }}
-          >
-            <Button
-              type="text"
-              aria-label={t('nav.collapse')}
-              onClick={toggle}
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}
-            >
-              {!collapsed && <span style={{ marginInlineStart: 8 }}>{t('nav.collapse')}</span>}
-            </Button>
-            {!collapsed && <VersionLabel style={{ paddingInlineEnd: 4 }} />}
+    <div className={`rp-admin-shell${narrow ? ' rp-admin-shell--narrow' : ''}`}
+      style={{ minHeight: `calc(100dvh - ${HEADER_VAR})`, background: token.colorBgContainer }}>
+      <AdminSearch open={searchOpen} onClose={() => setSearchOpen(false)} onNavigate={go} />
+      {narrow ? (
+        <>
+          <div className="rp-admin-mobile-bar" style={{ top: HEADER_VAR, background: token.colorBgContainer }}>
+            <Button icon={<MenuUnfoldOutlined />} aria-label={t('nav.manage')} onClick={() => setDrawerOpen(true)}>{activeLabel}</Button>
+            {searchButton}
           </div>
-        )}
-      </div>
-      <div style={{ flex: '1 1 auto', minWidth: 0, padding: narrow ? '16px' : '20px 24px' }}>
-        <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
-          <Outlet />
-        </Suspense>
-      </div>
+          <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} placement="left" size={280}
+            title={t('nav.manage')} styles={{ body: { padding: 8 } }}>{menu}</Drawer>
+        </>
+      ) : (
+        <aside className="rp-admin-rail" aria-label={t('nav.manage')}
+          style={{ flexBasis: collapsed ? 80 : 236, width: collapsed ? 80 : 236,
+            top: HEADER_VAR, height: `calc(100dvh - ${HEADER_VAR})` }}>
+          <div className="rp-admin-rail__search">{searchButton}</div>
+          <div className="rp-admin-rail__menu">{menu}</div>
+          <div className="rp-admin-rail__footer" style={{ justifyContent: collapsed ? 'center' : 'space-between' }}>
+            <Button type="text" aria-label={t('nav.collapse')} onClick={toggle}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}>
+              {!collapsed && t('nav.collapse')}
+            </Button>
+            {!collapsed && <VersionLabel />}
+          </div>
+        </aside>
+      )}
+      {content}
     </div>
   )
 }

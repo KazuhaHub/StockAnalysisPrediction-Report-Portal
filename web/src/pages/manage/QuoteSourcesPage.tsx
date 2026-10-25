@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Card, InputNumber, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, Table, Tag, Typography } from 'antd'
 import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +8,8 @@ import LoadGate from '../../components/LoadGate'
 import StickyActionBar from '../../components/StickyActionBar'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
+import { usePendingSettings } from './AdminDraftBoundary'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -183,8 +185,15 @@ export default function QuoteSourcesPage() {
   // error, because the refresh behind it happened to fail, throws away the form the admin is reading.
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
+  const [acknowledged, setAcknowledged] = useState('')
+  const [section, setSection] = useState('sources')
+  const [savedState, setSavedState] = useState<QuoteAdminState | null>(null)
+  const editable = JSON.stringify({ sources: rows.map((r) => [r.source, r.enabled]), ttlOpen, ttlClosed, ttlIntraday, homeCards, homeCardsKnown, autoRefresh, autoRefreshKnown })
+  const dirty = !!acknowledged && editable !== acknowledged
+  usePendingSettings(dirty, saving)
 
-  const apply = (st: QuoteAdminState) => {
+  const apply = (st: QuoteAdminState, updateStats = true) => {
+    setSavedState(st)
     setLedger(typeof st.ledgerPrimary === 'string' && Array.isArray(st.ledgerChain) ? {
       ledgerPrimary: st.ledgerPrimary,
       ledgerChain: st.ledgerChain,
@@ -197,8 +206,10 @@ export default function QuoteSourcesPage() {
     // order off the array's order is one refactor away from calling sina the primary because 's'
     // sorts before 't'.
     setRows([...(st.sources ?? [])].sort((a, b) => seat(a) - seat(b)))
-    setCacheEntries(wireNumber(st.cacheEntries))
-    setCacheBytes(wireNumber(st.cacheBytes))
+    if (updateStats) {
+      setCacheEntries(wireNumber(st.cacheEntries))
+      setCacheBytes(wireNumber(st.cacheBytes))
+    }
     setTtlOpen(wireNumber(st.ttlOpenSecs))
     setTtlClosed(wireNumber(st.ttlClosedSecs))
     setTtlIntraday(wireNumber(st.ttlIntradaySecs))
@@ -221,6 +232,9 @@ export default function QuoteSourcesPage() {
     setHomeCards(st.homeCards === true)
     setAutoRefreshKnown(typeof st.autoRefresh === 'boolean')
     setAutoRefresh(st.autoRefresh === true)
+    setAcknowledged(JSON.stringify({ sources: [...(st.sources ?? [])].sort((a, b) => seat(a) - seat(b)).map((r) => [r.source, r.enabled]),
+      ttlOpen: wireNumber(st.ttlOpenSecs), ttlClosed: wireNumber(st.ttlClosedSecs), ttlIntraday: wireNumber(st.ttlIntradaySecs),
+      homeCards: st.homeCards === true, homeCardsKnown: typeof st.homeCards === 'boolean', autoRefresh: st.autoRefresh === true, autoRefreshKnown: typeof st.autoRefresh === 'boolean' }))
   }
 
   const load = () => {
@@ -319,13 +333,14 @@ export default function QuoteSourcesPage() {
 
   const clearCache = async () => {
     try {
-      const st = await api.post<QuoteAdminState>('/api/admin/quote/cache/clear')
+      const response = await api.post<QuoteAdminState>('/api/admin/quote/cache/clear')
       message.success(t('quoteAdmin.cleared'))
       // The occupancy beside the button is the only evidence the button did anything, so it is read
       // back rather than assumed to be zero: the cache refills the instant the next reader opens a
       // stock page, and a hard-coded 0 would be a number this page made up.
-      if (st && Array.isArray(st.sources)) apply(st)
-      else await load()
+      const st = response && Array.isArray(response.sources) ? response : await api.get<QuoteAdminState>('/api/admin/quote')
+      setCacheEntries(wireNumber(st.cacheEntries))
+      setCacheBytes(wireNumber(st.cacheBytes))
     } catch (e) {
       message.error(errText(e, t))
     }
@@ -537,6 +552,12 @@ export default function QuoteSourcesPage() {
           {t('quoteAdmin.title')}
         </Typography.Title>
 
+        <ConfigProvider componentDisabled={saving}>
+        <SettingsWorkspace active={section} onChange={setSection} sections={[
+          { key: 'sources', label: t('manage.quotes.sources') }, { key: 'cache', label: t('manage.quotes.cache') },
+        ]}>
+        <SettingsPanel section="sources">
+        <div className="rp-admin-list-page">
         <Card title={t('quoteAdmin.sources')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Alert type="info" showIcon title={t('quoteAdmin.whyNoUrl')} />
@@ -563,7 +584,7 @@ export default function QuoteSourcesPage() {
             <SortableWrapper
               ids={rows.map((r) => r.source)}
               onReorder={(order) =>
-                setRows(
+                !saving && setRows(
                   order
                     .map((k) => rows.find((r) => r.source === k))
                     .filter((r): r is QuoteAdminSource => !!r),
@@ -588,6 +609,10 @@ export default function QuoteSourcesPage() {
         </Card>
 
         {ledger ? <QuoteLedgerStatus state={ledger} sourceLabel={sourceLabel} stamp={stampOrNever} /> : null}
+        </div>
+        </SettingsPanel>
+        <SettingsPanel section="cache">
+        <div className="rp-admin-list-page">
         <Card title={t('quoteAdmin.cache')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {row(
@@ -656,7 +681,6 @@ export default function QuoteSourcesPage() {
             )}
           </div>
         </Card>
-
         {/* A disclosure, not a display preference, which is why it is a switch on this page rather
             than a default nobody was told about: with it on, every home page view sends the codes
             currently on screen to a third-party vendor. The hint says exactly that, in the open —
@@ -685,13 +709,23 @@ export default function QuoteSourcesPage() {
           </div>
         </Card>
 
+        </div>
+        </SettingsPanel>
+        </SettingsWorkspace>
+        </ConfigProvider>
         {/* One bar for the whole page, outside the cards: one POST carries the order, the three
             TTLs and both quote switches, so a Save button inside the cache card would be a button
             that saves more than the card it sits in says it does. */}
         <StickyActionBar>
+          <div className="rp-settings-save-bar">
+          <Typography.Text role="status" type={dirty ? 'warning' : 'secondary'}>{t(dirty ? 'manage.unsavedChanges' : 'manage.noChanges')}</Typography.Text>
+          <div>
+          <Button disabled={!dirty || saving} onClick={() => { if (savedState) apply(savedState, false) }}>{t('manage.discard')}</Button>
           <Button type="primary" onClick={save} loading={saving} aria-label={t('common.save')}>
             {t('common.save')}
           </Button>
+          </div>
+          </div>
         </StickyActionBar>
       </div>
     </LoadGate>

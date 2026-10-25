@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router'
 import BatchAdminPage, { TargetInputsPreview } from './BatchAdminPage'
 
 const putSpy = vi.fn((_url: string, _body: unknown) => Promise.resolve({ ok: true }))
@@ -52,9 +53,9 @@ describe('BatchAdminPage — targets / plugins sub-tabs', () => {
 
   it('renders both sub-tabs', async () => {
     const { container } = render(
-      <App>
+      <MemoryRouter><App>
         <BatchAdminPage />
-      </App>,
+      </App></MemoryRouter>,
     )
     expect(await screen.findByText('batch.admin.targets')).toBeTruthy()
     expect(await screen.findByText('batch.admin.advancedPlugins')).toBeTruthy()
@@ -91,9 +92,9 @@ describe('BatchAdminPage — targets / plugins sub-tabs', () => {
 
   it('edits a Dify target through the modal and saves via PUT', async () => {
     render(
-      <App>
+      <MemoryRouter><App>
         <BatchAdminPage />
-      </App>,
+      </App></MemoryRouter>,
     )
     // The target row renders with its Edit action.
     await screen.findByText('My workflow')

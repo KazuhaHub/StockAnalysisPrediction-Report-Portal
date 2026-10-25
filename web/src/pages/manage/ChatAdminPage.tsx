@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { App, Button, Card, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd'
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -9,6 +9,9 @@ import Markdown from '../../components/Markdown'
 import LoadGate from '../../components/LoadGate'
 import type { ChatTurn } from '../../api/types'
 import CompactNumberInput from '../../components/CompactNumberInput'
+import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsField from './SettingsField'
+import SettingsSaveBar from './SettingsSaveBar'
 
 // Assistant admin (docs/adr/0012-interactive-chat.md). Two independent controls:
 //  1. A concurrency ceiling on in-flight chat turns — chat is interactive, so it does NOT
@@ -42,6 +45,11 @@ export default function ChatAdminPage() {
   const [limit, setLimit] = useState(0)
   const [stream, setStream] = useState(true)
   const [turnTimeout, setTurnTimeout] = useState(20)
+  const values = { max_concurrent: limit, stream, turn_timeout_minutes: turnTimeout }
+  const [saved, setSaved] = useState<typeof values | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [section, setSection] = useState('settings')
+  const dirty = saved !== null && JSON.stringify(values) !== JSON.stringify(saved)
   const [turns, setTurns] = useState<ChatLiveTurn[]>([])
   // The three numbers above are useState defaults, and Save posts all three — so an admin who
   // arrives on a slow link could write "0 concurrent, streaming on, 20 minutes" over the real
@@ -71,6 +79,7 @@ export default function ChatAdminPage() {
           setLimit(r.max_concurrent ?? 0)
           setStream(r.stream !== false)
           setTurnTimeout(r.turn_timeout_minutes ?? 20)
+          setSaved({ max_concurrent: r.max_concurrent ?? 0, stream: r.stream !== false, turn_timeout_minutes: r.turn_timeout_minutes ?? 20 })
           seeded.current = true
         }
       })
@@ -97,8 +106,12 @@ export default function ChatAdminPage() {
   }, [auto])
 
   const save = async () => {
-    await api.post('/api/admin/chat/config', { max_concurrent: limit, stream, turn_timeout_minutes: turnTimeout })
-    message.success(t('common.saved'))
+    setSaving(true)
+    try {
+      await api.post('/api/admin/chat/config', values)
+      setSaved(values)
+      message.success(t('common.saved'))
+    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 
   // Open one user's conversation read-only: pull its messages from Dify (keyed by the owner, so the
@@ -163,35 +176,35 @@ export default function ChatAdminPage() {
   ]
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+    <>
+    <SettingsWorkspace active={section} onChange={setSection} sections={[
+      { key: 'settings', label: t('chatAdmin.limitCard') }, { key: 'live', label: t('chatAdmin.liveCard') },
+      { key: 'history', label: t('chatAdmin.convsCard') },
+    ]}>
+      <SettingsPanel section="settings">
       <Card title={t('chatAdmin.limitCard')}>
         <LoadGate loading={!liveLoaded && !cfgErr} error={liveLoaded ? undefined : cfgErr} onRetry={load} minHeight={180}>
-        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          <Space wrap>
-            <span style={{ display: 'inline-block', minWidth: 110 }}>{t('chatAdmin.limit')}</span>
+        <ConfigProvider componentDisabled={saving}>
+          <SettingsField label={t('chatAdmin.limit')} hint={t('chatAdmin.limitHint')}>
             <InputNumber min={0} max={100} value={limit} onChange={(v) => setLimit(v ?? 0)} />
-            <Typography.Text type="secondary">{t('chatAdmin.limitHint')}</Typography.Text>
-          </Space>
-          <Space wrap>
-            <span style={{ display: 'inline-block', minWidth: 110 }}>{t('chatAdmin.stream')}</span>
+          </SettingsField>
+          <SettingsField label={t('chatAdmin.stream')} hint={t('chatAdmin.streamHint')}>
             <Switch checked={stream} onChange={setStream} />
-            <Typography.Text type="secondary">{t('chatAdmin.streamHint')}</Typography.Text>
-          </Space>
-          <Space wrap>
-            <span style={{ display: 'inline-block', minWidth: 110 }}>{t('chatAdmin.turnTimeout')}</span>
+          </SettingsField>
+          <SettingsField label={t('chatAdmin.turnTimeout')} hint={t('chatAdmin.turnTimeoutHint')}>
             <CompactNumberInput min={1} max={120} value={turnTimeout} onChange={(v) => setTurnTimeout(v ?? 20)} after={t('chatAdmin.minutes')} />
-            <Typography.Text type="secondary">{t('chatAdmin.turnTimeoutHint')}</Typography.Text>
-          </Space>
-          <Button type="primary" onClick={save}>
-            {t('common.save')}
-          </Button>
-        </Space>
+          </SettingsField>
+        </ConfigProvider>
+        <SettingsSaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => {
+          if (saved) { setLimit(saved.max_concurrent); setStream(saved.stream); setTurnTimeout(saved.turn_timeout_minutes) }
+        }} />
         </LoadGate>
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="live">
       <Card
         title={
-          <Space>
+          <Space wrap>
             {t('chatAdmin.liveCard')}
             {/* No count until the first poll: "0 running" is a claim, and this tag is the only
                 place on the page that makes it in one glance. */}
@@ -208,12 +221,14 @@ export default function ChatAdminPage() {
           </Space>
         }
       >
+        {cfgErr && <Alert type="error" showIcon title={cfgErr} style={{ marginBottom: 12 }} />}
         <Table
           size="small"
           rowKey="id"
           columns={columns}
           dataSource={turns}
           pagination={false}
+          scroll={{ x: 560 }}
           loading={!liveLoaded && !cfgErr}
           locale={{
             emptyText: (
@@ -222,11 +237,12 @@ export default function ChatAdminPage() {
           }}
         />
       </Card>
-
+      </SettingsPanel>
+      <SettingsPanel section="history">
       <Card
         title={t('chatAdmin.convsCard')}
         extra={
-          <Space>
+          <Space wrap>
             <Input.Search allowClear placeholder={t('chatAdmin.searchConv')} value={convSearch} onChange={(e) => setConvSearch(e.target.value)} style={{ width: 200 }} />
             <Button size="small" icon={<ReloadOutlined />} onClick={loadConvs}>
               {t('nav.refresh')}
@@ -277,7 +293,8 @@ export default function ChatAdminPage() {
           ]}
         />
       </Card>
-
+      </SettingsPanel>
+    </SettingsWorkspace>
       <Drawer
         open={viewConv != null}
         onClose={() => setViewConv(null)}
@@ -328,6 +345,6 @@ export default function ChatAdminPage() {
           </Space>
         )}
       </Drawer>
-    </Space>
+    </>
   )
 }

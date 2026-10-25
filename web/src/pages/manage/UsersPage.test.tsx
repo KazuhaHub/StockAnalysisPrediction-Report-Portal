@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { App } from 'antd'
+import { App, ConfigProvider } from 'antd'
 import { MemoryRouter } from 'react-router'
 import UsersPage from './UsersPage'
 
@@ -25,6 +25,23 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('UsersPage — accounts / groups sub-tabs', () => {
+  it('keeps a pending OU edit until changing units is explicitly confirmed', async () => {
+    listing.groups = [
+      { id: 1, name: 'Default', is_default: true, members: 0, weight: 2 },
+      { id: 7, name: 'Research Desk', members: 3, weight: null },
+    ]
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={['/manage/users?tab=groups&ou=7']}><App><UsersPage /></App></MemoryRouter></ConfigProvider>)
+    const name = await screen.findByDisplayValue('Research Desk')
+    fireEvent.change(name, { target: { value: 'Draft desk' } })
+    fireEvent.click(within(screen.getByRole('tree')).getByText('Default'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'manage.stay' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect((screen.getByDisplayValue('Draft desk') as HTMLInputElement).value).toBe('Draft desk')
+    fireEvent.click(within(screen.getByRole('tree')).getByText('Default'))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'manage.leave' }))
+    await waitFor(() => expect(screen.queryByDisplayValue('Draft desk')).toBeNull())
+  })
   it('creates an ordinary OU beneath Default instead of creating another root', async () => {
     listing.groups = [{ id: 1, name: 'Default', is_default: true, members: 0, weight: 2 }]
     render(<MemoryRouter initialEntries={['/manage/users?tab=groups']}><App><UsersPage /></App></MemoryRouter>)
@@ -87,6 +104,23 @@ describe('UsersPage — accounts / groups sub-tabs', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByDisplayValue('Default')).toBeTruthy()
+  })
+
+  it('keeps the OU directory focused on structure instead of hosting feature policy editors', async () => {
+    listing.groups = [{ id: 1, name: 'Default', is_default: true, members: 0, weight: 2 }]
+    const { container } = render(
+      <MemoryRouter initialEntries={['/manage/users?tab=groups']}>
+        <App>
+          <UsersPage />
+        </App>
+      </MemoryRouter>,
+    )
+    await screen.findByDisplayValue('Default')
+    expect(container.querySelector('.rp-ou-console')).toBeTruthy()
+    expect(container.querySelector('.rp-ou-policy-grid')).toBeNull()
+    expect(container.querySelector('.rp-ou-global-settings')).toBeNull()
+    expect(screen.queryByText('ou.sectionSecurity')).toBeNull()
+    expect(screen.queryByText('users.urgentTitle')).toBeNull()
   })
 
   it('opens on the accounts tab when no tab is asked for', async () => {

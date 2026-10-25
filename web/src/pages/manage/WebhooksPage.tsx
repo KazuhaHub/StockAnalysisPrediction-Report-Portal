@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
+import useFormDraft from './useFormDraft'
 
 export default function WebhooksPage() {
   const { t } = useTranslation()
@@ -22,6 +23,9 @@ export default function WebhooksPage() {
   // table in place rather than swapping it for a spinner.
   const [loaded, setLoaded] = useState(false)
   const [loadErr, setLoadErr] = useState('')
+  const [search, setSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+  const draft = useFormDraft(form, open, saving, () => setOpen(false))
 
   const load = () => {
     setLoading(true)
@@ -45,10 +49,13 @@ export default function WebhooksPage() {
 
   const submit = async () => {
     const v = await form.validateFields()
-    await api.post('/api/admin/webhooks', { url: v.url, events: v.events, secret: v.secret || '' })
-    setOpen(false)
-    message.success(t('webhook.msgAdded'))
-    load()
+    setSaving(true)
+    try {
+      await api.post('/api/admin/webhooks', { url: v.url, events: v.events, secret: v.secret || '' })
+      setOpen(false)
+      message.success(t('webhook.msgAdded'))
+      await load()
+    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 
   const test = async (id: number) => {
@@ -125,13 +132,14 @@ export default function WebhooksPage() {
     >
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">{t('webhook.hint')}</Typography.Text>
+        <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
         <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={180} title={t('common.loadFailedContent')}>
-          <Table rowKey="id" size="small" dataSource={hooks} columns={cols} pagination={false} scroll={{ x: 'max-content' }} />
+          <Table rowKey="id" size="small" dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
         </LoadGate>
       </Space>
 
-      <Modal title={t('webhook.add')} open={open} onOk={submit} onCancel={() => setOpen(false)} destroyOnHidden>
-        <Form form={form} layout="vertical">
+      <Modal title={t('webhook.add')} open={open} onOk={submit} onCancel={draft.close} confirmLoading={saving} closable={!saving} maskClosable={!saving} destroyOnHidden>
+        <Form form={form} disabled={saving} layout="vertical">
           <Form.Item name="url" label={t('webhook.url')} rules={[{ required: true, message: t('webhook.required') }]}>
             <Input placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
           </Form.Item>
