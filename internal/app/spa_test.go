@@ -104,6 +104,25 @@ func TestSpaFallbackToIndexForUnknownRoute(t *testing.T) {
 	}
 }
 
+func TestSpaCSPAllowsConfiguredCaptchaProviders(t *testing.T) {
+	h := spaHandlerFS(testDist(), nil, "test")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, origin := range []string{
+		"https://challenges.cloudflare.com",
+		"https://www.google.com/recaptcha/",
+		"https://www.gstatic.com/recaptcha/",
+		"https://hcaptcha.com",
+		"https://*.hcaptcha.com",
+	} {
+		if !strings.Contains(csp, origin) {
+			t.Errorf("SPA CSP does not allow captcha origin %q: %s", origin, csp)
+		}
+	}
+}
+
 // /sw.js is served with the build version stamped into its cache name (so every deploy
 // ships a fresh SW) and marked no-cache. Non-token characters in the version are stripped.
 func TestSpaInjectsServiceWorkerVersion(t *testing.T) {
