@@ -189,6 +189,7 @@ export default function AppView() {
           // Match the theme surface (same token sent to the app as themePayload.colorBg), not a
           // fixed white — otherwise the iframe flashes white on open / bleeds white in dark mode.
           background: tk.colorBgContainer,
+          colorScheme: dark ? 'dark' : 'light',
         }}
       />
     </Space>
