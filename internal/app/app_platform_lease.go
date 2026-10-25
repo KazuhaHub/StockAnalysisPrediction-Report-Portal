@@ -106,6 +106,7 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 }
 
 type platformLeaseFacts struct {
+	runtimeID                               sql.NullString
 	lease                                   platformOperationLease
 	installationRevision, controlFence, now int64
 }
@@ -207,4 +208,87 @@ func platformLeaseCAS(result sql.Result, err error) error {
 		return errAppPlatformLeaseConflict
 	}
 	return nil
+}
+
+// loadPlatformBoundOperationLease locks the runtime binding before the shared
+// installation/operation lease checks. Callers must already own a transaction.
+func loadPlatformBoundOperationLease(e migExec, expected platformOperationLease) (platformLeaseFacts, error) {
+	var zero platformLeaseFacts
+	if !platformValidUUID(expected.id) || !platformValidUUID(expected.owner) {
+		return zero, errAppPlatformLeaseConflict
+	}
+	// Lock runtime before installation, matching review admission. SQLite's write
+	// intent serializes this transaction before any preliminary reads.
+	if e.s.driver != "postgres" {
+		if _, err := e.exec(`UPDATE app_platform_operations SET row_revision=row_revision WHERE id=?`, expected.id); err != nil {
+			return zero, err
+		}
+	}
+	var runtime sql.NullString
+	if err := e.queryRow(`SELECT i.runtime_id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id WHERE o.id=?`, expected.id).Scan(&runtime); err != nil {
+		return zero, platformLeaseReadError(err)
+	}
+	lock := ""
+	if e.s.driver == "postgres" {
+		lock = " FOR UPDATE"
+	}
+	if runtime.Valid {
+		var epoch string
+		if err := e.queryRow(`SELECT controller_epoch FROM app_platform_runtime_bindings WHERE id=?`+lock, runtime.String).Scan(&epoch); err != nil {
+			return zero, err
+		}
+		if epoch != expected.controllerEpoch {
+			return zero, errAppPlatformEffectConflict
+		}
+	}
+	facts, err := loadPlatformOperationLease(e, expected.id)
+	if err != nil {
+		return zero, err
+	}
+	if facts.lease != expected || expected.leaseUntilMS <= facts.now || expected.fence != facts.controlFence {
+		return zero, errAppPlatformLeaseConflict
+	}
+	var currentRuntime sql.NullString
+	if err := e.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`, expected.installationID).Scan(&currentRuntime); err != nil {
+		return zero, err
+	}
+	if runtime != currentRuntime || runtime.Valid != expected.snapshot.Managed {
+		return zero, errAppPlatformEffectConflict
+	}
+	facts.runtimeID = runtime
+	return facts, nil
+}
+
+// Recheck after all potentially blocking resource/review/effect locks. On
+// PostgreSQL the short final commit section holds the marker rows against a
+// concurrent pause/epoch change. Marker writers must not acquire resource locks
+// after updating these rows; coordinated restore remains an offline operation.
+func finalPlatformOperationLeaseCheck(e migExec, facts platformLeaseFacts) (int64, error) {
+	lock := ""
+	if e.s.driver == "postgres" {
+		lock = " FOR SHARE"
+	}
+	for _, setting := range []struct{ key, value string }{
+		{"app_platform_restore_paused", "0"},
+		{"app_platform_controller_epoch", facts.lease.controllerEpoch},
+	} {
+		var value string
+		if err := e.queryRow(`SELECT v FROM meta WHERE k=?`+lock, setting.key).Scan(&value); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, errAppPlatformControlPaused
+			}
+			return 0, err
+		}
+		if value != setting.value {
+			return 0, errAppPlatformControlPaused
+		}
+	}
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		return 0, err
+	}
+	if now < facts.now || now >= facts.lease.leaseUntilMS {
+		return 0, errAppPlatformLeaseConflict
+	}
+	return now, nil
 }

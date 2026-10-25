@@ -64,43 +64,14 @@ func (s *Store) preparePlatformEffect(expected platformOperationLease, intent pl
 	}
 	defer tx.Rollback()
 	e := migExec{s: s, ex: tx}
-	// Lock runtime before installation, matching review admission. SQLite's write
-	// intent serializes this transaction before any preliminary reads.
-	if s.driver != "postgres" {
-		if _, err := e.exec(`UPDATE app_platform_operations SET row_revision=row_revision WHERE id=?`, expected.id); err != nil {
-			return zero, err
-		}
-	}
-	var runtime sql.NullString
-	if err := e.queryRow(`SELECT i.runtime_id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id WHERE o.id=?`, expected.id).Scan(&runtime); err != nil {
-		return zero, platformLeaseReadError(err)
-	}
-	lock := ""
-	if s.driver == "postgres" {
-		lock = " FOR UPDATE"
-	}
-	if runtime.Valid {
-		var epoch string
-		if err := e.queryRow(`SELECT controller_epoch FROM app_platform_runtime_bindings WHERE id=?`+lock, runtime.String).Scan(&epoch); err != nil {
-			return zero, err
-		}
-		if epoch != expected.controllerEpoch {
-			return zero, errAppPlatformEffectConflict
-		}
-	}
-	facts, err := loadPlatformOperationLease(e, expected.id)
+	facts, err := loadPlatformBoundOperationLease(e, expected)
 	if err != nil {
 		return zero, err
 	}
-	if facts.lease != expected || expected.leaseUntilMS <= facts.now || expected.fence != facts.controlFence {
-		return zero, errAppPlatformLeaseConflict
-	}
-	var currentRuntime sql.NullString
-	if err := e.queryRow(`SELECT runtime_id FROM app_platform_installations WHERE id=?`, expected.installationID).Scan(&currentRuntime); err != nil {
-		return zero, err
-	}
-	if runtime != currentRuntime || runtime.Valid != expected.snapshot.Managed {
-		return zero, errAppPlatformEffectConflict
+	runtime := facts.runtimeID
+	lock := ""
+	if s.driver == "postgres" {
+		lock = " FOR UPDATE"
 	}
 	var result platformEffectRecord
 	var kind, digest, epoch string
@@ -114,12 +85,9 @@ func (s *Store) preparePlatformEffect(expected platformOperationLease, intent pl
 	if readErr != nil && !errors.Is(readErr, sql.ErrNoRows) {
 		return zero, readErr
 	}
-	now, err := platformDatabaseNow(e)
+	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
 		return zero, err
-	}
-	if now < facts.now || now >= expected.leaseUntilMS {
-		return zero, errAppPlatformLeaseConflict
 	}
 	err = readErr
 	if err == nil {
