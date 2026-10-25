@@ -183,7 +183,7 @@ jobs:
           cache: false
       - name: Race the concurrency packages
         if: matrix.shard == 1
-        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ 2>&1 | tee go-race-packages.txt
+        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
       # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
       # webhook delivery and chat gate are the paths a race detector can actually catch here. The
       # list is the top-level tests that pattern selects, dealt out exactly like go-race-full's.
