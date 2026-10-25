@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,50 @@ func TestQuoteProbeRecordRejectsManifestReplacement(t *testing.T) {
 }
 
 type quoteProbeFailWriter struct{}
+
+func TestQuoteProbeCustomTargetsAreBoundedAndDoNotWeakenRecordedPanel(t *testing.T) {
+	var called []quoteProbeTarget
+	source := quoteSource{name: "stub", fetchRange: func(_ context.Context, market, code, _, _ string) (*QuoteResp, error) {
+		called = append(called, quoteProbeTarget{Market: market, Code: code})
+		return &QuoteResp{Source: "stub", Market: market, Symbol: code, Bars: []QuoteBar{}}, nil
+	}}
+	dir := filepath.Join(t.TempDir(), "capture")
+	var output bytes.Buffer
+	args := []string{"capture", "--out", dir, "--from", "2026-10-22", "--to", "2026-10-23", "--sources", "stub", "--targets", "sh:000905,sz:000001"}
+	if err := quoteProbeCommand(context.Background(), args, &output, []quoteSource{source}, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []quoteProbeTarget{{Market: "sh", Code: "000905"}, {Market: "sz", Code: "000001"}}
+	var manifest quoteProbeManifest
+	if err := json.Unmarshal(output.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(called, want) || !reflect.DeepEqual(manifest.Targets, want) {
+		t.Fatalf("custom selection escaped: calls=%+v manifest=%+v", called, manifest.Targets)
+	}
+	manifestBody, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recordQuoteProbeReport(dir, quoteProbeComparisonReport{ManifestSHA256: quoteProbeSHA256(manifestBody)}); err == nil || !strings.Contains(err.Error(), "requires full fixed panel") {
+		t.Fatalf("custom subset bypassed fixed-panel gate: %v", err)
+	}
+	for _, targets := range []string{"sh:600081,sh:600081", "sh:600081,unknown:1", "sh:600081,../data", "sh:600081,sz:000001,"} {
+		called = nil
+		invalid := append([]string{}, args...)
+		invalid[2] = filepath.Join(t.TempDir(), "absent")
+		invalid[len(invalid)-1] = targets
+		if err := quoteProbeCommand(context.Background(), invalid, &output, []quoteSource{source}, nil); err == nil || len(called) != 0 {
+			t.Fatalf("invalid targets reached a source: %q %v %+v", targets, err, called)
+		}
+		if _, err := os.Stat(invalid[2]); !os.IsNotExist(err) {
+			t.Fatal("invalid request created capture output")
+		}
+	}
+	if err := quoteProbeCommand(context.Background(), append(args, "--suspended", "sz:000004"), &output, []quoteSource{source}, nil); err == nil {
+		t.Fatal("mixed fixed-panel extension and explicit selection")
+	}
+}
 
 func (quoteProbeFailWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 

@@ -861,6 +861,10 @@ func TestQuoteAPISingleFlightsConcurrentReaders(t *testing.T) {
 	if fresh != 1 {
 		t.Errorf("%d readers reported a fresh fetch, want exactly 1", fresh)
 	}
+	traffic := s.quotes.trafficSnapshot().Live
+	if traffic.Requests != readers || traffic.Completed != readers || traffic.Loads != 1 || traffic.CacheHits+traffic.Merged != readers-1 || traffic.Failures != 0 {
+		t.Fatalf("concurrent reader accounting: %+v", traffic)
+	}
 }
 
 // A failure is shared with the waiters too, rather than each of them starting its own retry against
@@ -2423,6 +2427,10 @@ func TestQuoteBatchSingleFlightsConcurrentPages(t *testing.T) {
 		if counts[i] != 3 {
 			t.Errorf("page %d got %d of 3 cards", i, counts[i])
 		}
+	}
+	traffic := s.quotes.trafficSnapshot().Batch
+	if traffic.Requests != readers || traffic.Completed != readers || traffic.Symbols != readers*3 || traffic.MissingSymbols != 0 || traffic.Loads != 1 {
+		t.Fatalf("concurrent batch accounting: %+v", traffic)
 	}
 }
 

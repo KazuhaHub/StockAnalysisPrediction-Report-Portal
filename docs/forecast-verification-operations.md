@@ -24,6 +24,105 @@ continues automatically. Dry mode requires another Evaluate now action, preferab
 
 See ADR 0043 for priority, cooldown and evidence lifetime boundaries.
 
+### Read the observation counters
+
+Use Refresh observations on `/manage/quotes` to fetch current counters without replacing an unsaved
+source order, TTL or rate policy. The display table separates live requests from the historical
+fallback endpoint. Fresh cache hits, shared-load joins and completed logical loads partition the
+finished single requests. Stale responses and failed requests are overlapping outcome counts,
+not additional requests. A historical fallback can generate one failed live request and one
+successful history request. Responses served entirely by a browser's HTTP cache never reach these
+server counters.
+
+Home-card batches count distinct symbols within each request. Their cache ratio is cached symbols
+divided by requested symbols, including missing symbols in the denominator. A logical load can
+make zero HTTP calls after admission deferral, or several during failover. Compare actual HTTP
+traffic with the separate per-vendor scheduler table, not with the logical-load count.
+
+Latency p95 values are bounded-histogram upper bounds over completed samples since process start,
+including failures. Display latency includes shared-load waiting; vendor latency covers dispatch
+through response-body close, excluding admission wait. Empty samples show a dash in the UI.
+Failure details count 403, 429, 5xx and connection errors; other HTTP failures remain in the total.
+Parser failures appear in the source-health record rather than being invented as HTTP failures.
+All counters reset on process restart and survive a display-cache purge. Save snapshots and their
+timestamps before restarting during an observation period.
+
+### Conservative rollout and trading-day acceptance
+
+The source checkout and green CI are pre-release evidence. They do not demonstrate production
+egress availability, deployment identity or a complete observed trading session.
+
+1. Record the candidate commit, image digest or verified archive checksum and the existing running
+   version. Confirm the configured database driver and retain a restorable pre-update backup using
+   the existing release runbook. This change does not alter the database shape.
+2. Inventory Dify, AKTools and other consumers sharing the public IP. The portal's limiter cannot
+   budget another process's traffic. Avoid overlapping bulk jobs during the initial check; retain
+   the initial per-source policy of 30 total and 6 background requests/minute.
+3. Probe from the actual deployment host with the candidate binary. Choose two completed trading
+   sessions rather than blindly reusing the dates below. A small explicit capture can check all
+   four benchmark indices and representative stocks without querying the full fixed panel:
+
+   ```bash
+   report-portal quote-probe capture \
+     --out /secure/evidence/sohu-initial \
+     --from 2026-10-22 --to 2026-10-23 \
+     --sources sohu \
+     --targets sh:000852,sh:000906,sh:000300,sh:000905,sh:600081,sz:000001
+   ```
+
+   The output directory must not exist. Inspect every record, both requested dates, code/namespace,
+   prices and volume units. `complete=true` means capture finished, not that every record passed.
+   The CLI does not open the application database or reuse display cache. Its process budget is
+   separate from a running portal's budget, so coordinate this brief probe with other traffic.
+   `--targets` replaces the fixed panel and cannot combine with `--suspended`. A smaller capture
+   cannot satisfy the unchanged full-panel `compare --record` gate or grant settlement authority.
+4. Deploy through the existing release path, verify the actual running version/digest and read
+   `/healthz` plus the authenticated quote/forecast state. Keep Sohu disabled until its egress probe
+   passes; enabling historical display still grants no settlement capability. Keep the evaluator's
+   existing mode. In dry mode, use one Evaluate now action and resume after `resume_at` when deferred.
+5. While that pass is pending, read a representative live quote, a history chart and a home page.
+   Record the source counters, display counters, original vendor timestamps and evaluator heartbeat.
+   Repeated warmed requests should increase cache hits without matching HTTP growth. Reader requests
+   must not sit behind new background admission; verify the five-second admission queue bound and
+   retained foreground capacity. Do not simulate a vendor outage by repeatedly hammering production.
+6. Observe at least one complete trading day, including the opening, midday pause, afternoon opening
+   and completed-close boundary. Capture observations at those boundaries and after a manual dry pass.
+   Track `pass.waiting_for_budget`, `resume_at`, reused bodies, `due_unsettled` and
+   `oldest_due_unsettled_minutes`. Pending work should progress when budget returns, without repeatedly
+   fetching already retained bodies or charging prediction attempts for admission deferrals.
+7. Accept only when the source dispatch spacing and last-minute counts respect configured budgets,
+   readers retain priority, source cooldown blocks requests until a single recovery probe, vendor
+   timestamps remain unmodified, historical rows remain explicitly non-live, and no evaluator error
+   or stale-valve failure is concealed by display fallback. Record actual evidence and limitations;
+   a quiet weekend or a handful of successful probes is not a full trading-day observation.
+
+If 403/429 errors recur, let the shared cooldown run and investigate other traffic on the same IP.
+Do not raise the limit or clear the cache to force recovery. Pause further manual evaluation when
+needed; source availability and ledger readiness remain separate checks. If rollback is needed,
+use the recorded previous image digest or verified binary with the existing deployment procedure.
+Disable the optional display source through the UI if its history quality is the issue. No database
+rollback or forced settlement is part of this change.
+
+For a manual Docker Compose deployment using the repository's service names, first complete the
+backup and identity checks above from the existing deployment directory. Add a temporary override
+with `services.report-portal.image` pinned to the **published candidate tag or digest**. The file
+names and loopback port below match the repository template; confirm them against the running
+deployment rather than replacing its Compose file or infrastructure settings.
+
+```bash
+docker compose -f docker-compose.yml -f compose.quote-candidate.yaml pull report-portal
+docker compose -f docker-compose.yml -f compose.quote-candidate.yaml up -d --no-deps report-portal
+docker compose -f docker-compose.yml -f compose.quote-candidate.yaml exec -T report-portal /app/report-portal version
+curl --fail --silent --show-error http://127.0.0.1:8790/healthz
+```
+
+After startup, run the bounded probe through `docker compose ... exec -T report-portal
+/app/report-portal quote-probe capture ...` to use the actual container's network and client.
+Use a new private directory under the existing `/app/data` mount for `--out`, retain its manifest
+and inspect every record. This CLI path does not open the database. Leave the historical source off
+until the actual-container probe passes. For rollback, pin the recorded previous immutable image
+reference in the same override and recreate only `report-portal`; verify its version and health.
+
 ### Degraded display and optional historical fallback
 
 A failed live refresh may display the last successful response for up to fifteen minutes after

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 export type VendorRatePolicy = { requestsPerMinute: number; backgroundPerMinute: number }
 export type VendorScheduleStatus = {
+  completed?: number; forbidden?: number; throttled?: number; serverErrors?: number; networkErrors?: number; p95Millis?: number
   requests: number; failures: number; deferred: number; requestsLastMinute: number
   queued: number; inFlight: number; oldestWaitMillis: number; waitMillis: number; durationMillis: number
   coolingUntil: string; probing: boolean
@@ -21,7 +22,7 @@ export default function VendorSchedulePanel({ policies, schedule, sources, sourc
     onChange({ ...policies, [source]: { ...policies[source], [field]: value } })
   }
   const columns = [
-    { title: t('quoteAdmin.source'), key: 'source', render: (_: unknown, source: string) => sourceLabel(source) },
+    { title: t('quoteAdmin.sources'), key: 'source', render: (_: unknown, source: string) => sourceLabel(source) },
     { title: t('quoteAdmin.traffic.total'), key: 'total', render: (_: unknown, source: string) => policies[source] ? <InputNumber
       min={2} max={60} precision={0} value={policies[source].requestsPerMinute}
       aria-label={`${sourceLabel(source)} ${t('quoteAdmin.traffic.total')}`}
@@ -33,6 +34,14 @@ export default function VendorSchedulePanel({ policies, schedule, sources, sourc
     ...(['requestsLastMinute', 'requests', 'failures', 'deferred', 'queued', 'inFlight', 'oldestWaitMillis'] as const).map((field) => ({
       title: t(`quoteAdmin.traffic.${field}`), key: field, render: (_: unknown, source: string) => schedule?.[source]?.[field] ?? '—',
     })),
+    { title: t('quoteAdmin.traffic.failureDetail'), key: 'failureDetail', render: (_: unknown, source: string) => {
+      const status = schedule?.[source]
+      return status?.forbidden === undefined ? '—' : t('quoteAdmin.traffic.failureCounts', { forbidden: status.forbidden, throttled: status.throttled, server: status.serverErrors, network: status.networkErrors })
+    } },
+    { title: t('quoteAdmin.display.p95'), key: 'p95', render: (_: unknown, source: string) => {
+      const status = schedule?.[source]
+      return status?.completed && status.p95Millis !== undefined ? `${status.p95Millis} ms` : '—'
+    } },
     { title: t('quoteAdmin.traffic.cooldown'), key: 'cooldown', render: (_: unknown, source: string) => {
       const status = schedule?.[source]
       if (!status) return '—'

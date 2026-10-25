@@ -814,6 +814,7 @@ type quoteCache struct {
 	bytes        int
 	health       map[string]*QuoteSourceHealth
 	ledgerHealth map[string]*QuoteSourceHealth
+	traffic      quoteTraffic
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight
@@ -1205,13 +1206,17 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 //
 // The returned *QuoteResp is SHARED with every other caller holding the same cache entry. Nothing
 // downstream may mutate it; the handler copies the struct before stamping Cached on it.
-func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, bool, time.Duration, error) {
+func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, code string, bars int, iv quoteInterval, win quoteWindow) (result *QuoteResp, cached bool, remaining time.Duration, resultErr error) {
 	// Refuse before lookup, flight creation or upstream work, even if a matching entry exists.
 	if iv.ledger() {
 		return nil, false, 0, errQuoteLedgerInterval
 	}
 	c.init()
 	cfg = cfg.orDefaults()
+	started := time.Now()
+	disposition := quoteRequestCache
+	c.startQuoteRequest(cfg.HistoryOnly)
+	defer func() { c.finishQuoteRequest(cfg.HistoryOnly, disposition, result, resultErr, time.Since(started)) }()
 	key := quoteCacheKey(market, code, bars, iv, win)
 	if cfg.HistoryOnly {
 		key = "history:" + key
@@ -1224,6 +1229,7 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	c.flightMu.Lock()
 	if fl := c.flights[key]; fl != nil {
 		c.flightMu.Unlock()
+		disposition = quoteRequestMerged
 		select {
 		case <-fl.done:
 		case <-ctx.Done():
@@ -1269,6 +1275,7 @@ func (c *quoteCache) fetchUnder(ctx context.Context, cfg quoteConfig, market, co
 	defer cancelLoad()
 
 	ttl := time.Duration(0)
+	disposition = quoteRequestLoad
 	// The interval is the CALLER's now rather than something worked out from the market here: the 1d
 	// and 5d ranges let a request choose one, so the same market and the same code can be two
 	// different questions. It travels into quoteCacheKey above for the same reason.
@@ -1325,6 +1332,10 @@ type quoteBatchEntry struct {
 // feed could do with one: the cards render without prices, which is exactly how they render today.
 func (c *quoteCache) fetchBatchUnder(ctx context.Context, cfg quoteConfig, targets []quoteTarget) map[string]quoteBatchEntry {
 	c.init()
+	started := time.Now()
+	c.mu.Lock()
+	c.traffic.Batch.Requests++
+	c.mu.Unlock()
 	cfg = cfg.orDefaults()
 	out := make(map[string]quoteBatchEntry, len(targets))
 	misses := make([]quoteTarget, 0, len(targets))
@@ -1334,12 +1345,15 @@ func (c *quoteCache) fetchBatchUnder(ctx context.Context, cfg quoteConfig, targe
 	// vendor's URL no matter who assembled the list, which is a promise about every caller this
 	// method will ever have rather than about the one it has today.
 	seen := make(map[string]bool, len(targets))
+	cachedSymbols := 0
+	defer func() { c.finishBatchRequest(len(seen), cachedSymbols, len(out), time.Since(started)) }()
 	for _, t := range targets {
 		if seen[t.Symbol] {
 			continue
 		}
 		seen[t.Symbol] = true
 		if resp, ttl, ok := c.snapshotForTTL(t.Market.id, t.Code); ok {
+			cachedSymbols++
 			out[t.Symbol] = quoteBatchEntry{resp: resp, cached: true, ttl: ttl}
 			continue
 		}
@@ -1373,6 +1387,7 @@ func (c *quoteCache) loadBatch(ctx context.Context, cfg quoteConfig, targets []q
 	c.flightMu.Lock()
 	if fl := c.flights[key]; fl != nil {
 		c.flightMu.Unlock()
+		c.recordBatchLoad(true)
 		select {
 		case <-fl.done:
 			return fl.many
@@ -1383,6 +1398,7 @@ func (c *quoteCache) loadBatch(ctx context.Context, cfg quoteConfig, targets []q
 	fl := &quoteFlight{done: make(chan struct{})}
 	c.flights[key] = fl
 	c.flightMu.Unlock()
+	c.recordBatchLoad(false)
 	// Detached for the same reason fetchUnder's load is: the leader is whichever tab arrived first,
 	// and its context dies the moment that tab navigates away — which would cancel the call every
 	// other waiter is still holding out for, and record a client disconnect against the vendor's

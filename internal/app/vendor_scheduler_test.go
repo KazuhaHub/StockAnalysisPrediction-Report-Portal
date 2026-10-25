@@ -40,6 +40,30 @@ func TestVendorSchedulerReservesCapacityAndDoesNotBankIdleTokens(t *testing.T) {
 	}
 }
 
+func TestVendorTrafficClassifiesActualFailuresAndBoundsLatency(t *testing.T) {
+	s := newVendorScheduler()
+	clock := time.Now()
+	s.now = func() time.Time { return clock }
+	for _, code := range []int{403, 429, 503, 404, 0, 200} {
+		clock = clock.Add(time.Hour)
+		done, err := s.acquire(context.Background(), "tencent", vendorForeground)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clock = clock.Add(100 * time.Millisecond)
+		var failure error
+		if code == 0 {
+			failure = errors.New("network down")
+		}
+		done(code, "", failure)
+		done(code, "", failure)
+	}
+	stats := s.snapshot()["tencent"]
+	if stats.Requests != 6 || stats.Completed != 6 || stats.Failures != 5 || stats.Forbidden != 1 || stats.Throttled != 1 || stats.ServerErrors != 1 || stats.NetworkErrors != 1 || stats.P95Millis != 100 {
+		t.Fatalf("actual-request accounting: %+v", stats)
+	}
+}
+
 func TestVendorSchedulerForegroundOvertakesHistoryAndCancellationRemovesWaiter(t *testing.T) {
 	s := newVendorScheduler()
 	clock := time.Now()

@@ -37,6 +37,7 @@ func quoteProbeCommand(ctx context.Context, args []string, output io.Writer, reg
 		to := flags.String("to", "", "inclusive YYYY-MM-DD window end")
 		sources := flags.String("sources", "tencent,sina,yahoo", "comma-separated compiled-in sources; measurement only")
 		suspended := flags.String("suspended", "", "additional suspended targets, market:code separated by commas; status is operator-supplied")
+		selection := flags.String("targets", "", "explicit market:code targets instead of the fixed panel; cannot combine with --suspended")
 		if err := flags.Parse(args[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil
@@ -47,6 +48,19 @@ func quoteProbeCommand(ctx context.Context, args []string, output io.Writer, reg
 			return fmt.Errorf("unexpected positional arguments")
 		}
 		targets := quoteProbeFixedPanel()
+		if *selection != "" {
+			if *suspended != "" {
+				return fmt.Errorf("--targets cannot combine with --suspended")
+			}
+			targets = nil
+			for _, value := range strings.Split(*selection, ",") {
+				market, code, ok := strings.Cut(strings.TrimSpace(value), ":")
+				if !ok {
+					return fmt.Errorf("targets require market:code")
+				}
+				targets = append(targets, quoteProbeTarget{Market: market, Code: code})
+			}
+		}
 		if *suspended != "" {
 			for _, value := range strings.Split(*suspended, ",") {
 				market, code, ok := strings.Cut(strings.TrimSpace(value), ":")
