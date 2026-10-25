@@ -32,6 +32,7 @@ reader, authentication or analysis queue down with it.
 | [06 Acceptance specification](06-acceptance.md) | Reproducible tests, failure injection, evidence and release gates |
 | [07 Developer and operator guide](07-handbook.md) | Concrete authoring, deployment, support and release workflows |
 | [08 Source inventory](08-source-inventory.md) | Verified legacy code locations, reuse boundaries and compatibility traps |
+| [09 Execution evidence](09-execution-log.md) | Actual implementation progress, verification and remaining work |
 
 Read the architecture and lifecycle before implementing an endpoint. Then take
 the next work package whose dependencies and decision gates are satisfied. Do not
@@ -134,6 +135,7 @@ market, no manual backend setup, restart recovery, an update with retained data,
 rejected permissions, a failed migration and recovery, a stopped/uninstalled app,
 and unaffected Portal business routes during app/runner outages.
 
-No checkbox below is completed by this plan. Work packages are initially **not
-started**. Source tests alone do not prove a production installation. Optional
+No checkbox below is completed by this plan. See the
+[execution register](09-execution-log.md) for subsequent work package state.
+Source tests alone do not prove a production installation. Optional
 credentials for a particular business app are separate from platform acceptance.

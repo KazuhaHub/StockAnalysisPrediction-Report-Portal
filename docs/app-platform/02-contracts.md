@@ -3,6 +3,18 @@
 Status: proposed v2 contracts. Names in this document are reserved design names,
 not callable endpoints. Freeze them at D3 after implementing parser fixtures.
 
+The initial Go parser and pure operation model are now implemented; see
+[execution evidence and limits](09-execution-log.md). They are internal development
+contracts, not an admitted package format, a released SDK or registered API.
+
+Provisional parser bounds are 128 KiB descriptor JSON, depth 24, 32 routes, 32
+readable data schemas, and backend declarations of 16..4096 MiB memory,
+25..4000 milli-CPU and 16..1024 PIDs. Actual effective quotas may be lower; parsing
+is not resource admission. Paths are bounded ASCII relative paths without encoded
+separators, traversal or normalization ambiguity. IDs use lowercase letter-first
+slugs up to 64 characters. The initial adapter declares linux/amd64 and/or
+linux/arm64 only. Review and freeze these limits at D3 before public publishing.
+
 ## 1. Version and identity rules
 
 Keep these separate: Portal release, runner protocol, package format, SDK version,

@@ -1,6 +1,7 @@
 # Ordered implementation work packages
 
-All packages below start **not started**. A proposed path is a suggestion for new
+The package specifications below describe required work; current state is tracked
+in [the execution register](09-execution-log.md). A proposed path is a suggestion for new
 source, not a claim that a file/endpoint exists. Implement one vertical slice per
 reviewable PR; do not combine a schema decision, runtime privilege, app migration
 and production rollout in one change.

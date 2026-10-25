@@ -1,0 +1,62 @@
+{
+  "format": "portal.app/v2",
+  "id": "notes-sample",
+  "version": "1.0.0-beta.1",
+  "publisher": "example-publisher",
+  "compatibility": {
+    "platform_api": ">=2.0.0 <3.0.0",
+    "runner_protocol": ">=1.0.0 <2.0.0"
+  },
+  "presentation": {
+    "name_key": "app.name",
+    "description_key": "app.description",
+    "entry": "index.html",
+    "locales": [
+      "en-US",
+      "zh-CN",
+      "zh-TW"
+    ],
+    "routes": [
+      {
+        "id": "home",
+        "path": "/",
+        "layout": "document"
+      }
+    ]
+  },
+  "frontend": {
+    "artifact": "ui.zip",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "capabilities": {
+    "required": [
+      "storage.files",
+      "tasks.schedule",
+      "background.run"
+    ],
+    "optional": [
+      "notifications.publish"
+    ]
+  },
+  "data": {
+    "schema": 1,
+    "readable_schemas": [
+      1
+    ],
+    "writes_on_startup": false
+  },
+  "backend": {
+    "kind": "oci",
+    "image": "ghcr.io/example/digest@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "platforms": [
+      "linux/amd64",
+      "linux/arm64"
+    ],
+    "protocol": "portal.backend/1",
+    "resources": {
+      "memory_mib": 256,
+      "cpu_millis": 500,
+      "pids": 64
+    }
+  }
+}
