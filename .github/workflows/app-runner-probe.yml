@@ -30,7 +30,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Inspect only the ephemeral worker daemon
+      - name: Verify runner contracts and inspect the ephemeral daemon
         shell: bash
         env:
           GOWORK: 'off'
@@ -41,5 +41,5 @@ jobs:
           probe_socket=$(readlink -f /var/run/docker.sock)
           test -S "$probe_socket"
           export PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket"
-          go test -p 2 -race -count=1 -v ./internal/apprunner/driver ./cmd/app-runner
+          go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
           go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
