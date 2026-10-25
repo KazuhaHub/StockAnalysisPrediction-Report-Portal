@@ -9,6 +9,9 @@ original fixtures. The parser hashes exact input bytes; test fixture compaction
 is only a helper for stable mutation targets. Signature verification must use the
 actual descriptor bytes, not that helper's serialization.
 
-The future SDK/schema validator must consume the same corpus before claiming
-cross-language compatibility. Successful parsing is not signature verification,
+`descriptor-corpus.json` is the shared 44-case Go/TypeScript corpus. Inputs are
+base64 bytes so malformed UTF-8 and duplicate raw keys survive JSON transport.
+Both repositories pin its exact-byte digest; `.gitattributes` forces LF checkout.
+The SDK tests consume the same corpus and acceptance results. Generated schema
+validation and broader parity coverage remain open. Successful parsing is not signature verification,
 compatibility evaluation, permission admission or platform acceptance.

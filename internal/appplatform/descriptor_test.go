@@ -3,6 +3,7 @@ package appplatform
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,43 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestSharedDescriptorCorpus(t *testing.T) {
+	raw, err := os.ReadFile("testdata/descriptor-corpus.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Format string `json:"format"`
+		Cases  []struct {
+			Name  string `json:"name"`
+			Input string `json:"input_base64"`
+			Valid bool   `json:"valid"`
+		} `json:"cases"`
+	}
+	sum := sha256.Sum256(raw)
+	if hex.EncodeToString(sum[:]) != "16128f031fd71d83429db6a4209f8cfb02e5209b7c4f76a202c5dda1a00d929e" {
+		t.Fatal("shared corpus revision differs from SDK")
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	if corpus.Format != "portal.descriptor.corpus/1" || len(corpus.Cases) != 44 {
+		t.Fatal("unexpected shared corpus")
+	}
+	for _, item := range corpus.Cases {
+		t.Run(item.Name, func(t *testing.T) {
+			input, err := base64.StdEncoding.Strict().DecodeString(item.Input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = ParseDescriptor(input)
+			if (err == nil) != item.Valid {
+				t.Fatalf("acceptance differs: valid=%v error=%v", item.Valid, err)
+			}
+		})
+	}
+}
 
 func descriptorFixture(t *testing.T, managed bool) []byte {
 	t.Helper()
