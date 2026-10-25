@@ -80,6 +80,7 @@ type forecastEvaluator struct {
 	drySample    []drySample
 	awaitingGate map[string]bool
 	ledgerPass   *ledgerTick
+	progress     *forecastFetchProgress
 }
 
 // loop is the ticker. Every minute it asks whether it should run at all, then whether anything is
@@ -123,6 +124,7 @@ func (e *forecastEvaluator) clock() time.Time {
 // deferred rather than scored against whatever the setting happens to be — the current setting is
 // never read here.
 func (e *forecastEvaluator) tick(s *Server) error {
+	e.prepareFetchProgress(s)
 	pass := &ledgerTick{}
 	e.ledgerPass = pass
 	defer func() {
@@ -132,8 +134,15 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		s.quotes.closeLedgerPass(pass)
 		e.ledgerPass = nil
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(withVendorPriority(context.Background(), vendorBackground), 2*time.Minute)
 	defer cancel()
+	defer func() {
+		// Retain successful evidence across admission deferrals and slice deadlines. Every other
+		// outcome ends the logical pass, so an ordinary later pass obtains fresh evidence.
+		if !errors.Is(ctx.Err(), context.DeadlineExceeded) && (e.progress == nil || !e.progress.waiting) {
+			e.progress = nil
+		}
+	}()
 
 	sets, err := s.st.ForecastSetsDue(e.clock(), predEvalBatch)
 	if err != nil {
@@ -200,6 +209,9 @@ func (e *forecastEvaluator) tick(s *Server) error {
 		// can tell a vendor outage from a wrong instrument from a broken calendar.
 		indexSeries, fault := e.benchCalendar(ctx, s, spec, need)
 		if fault != nil {
+			if e.waitForVendor(fault.err) {
+				return nil
+			}
 			log.Printf("forecast evaluator: benchmark %s: %v", spec.Code, fault.err)
 			for _, set := range need {
 				if err := ctx.Err(); err != nil {
@@ -223,7 +235,9 @@ func (e *forecastEvaluator) tick(s *Server) error {
 			}
 			stocks[i], stockErrs[i] = e.rangeBars(ctx, s, set.Market, set.Symbol,
 				shiftDays(set.MadeOn, -predReferenceLagDays), e.clock())
-			e.noteFetch(set.Market, set.Symbol, stocks[i].Source)
+			if e.waitForVendor(stockErrs[i]) {
+				return nil
+			}
 		}
 		valve := staleValve(stocks, stockErrs, completedSessions(indexSeries, e.clock()))
 		if e.stats != nil {
@@ -241,6 +255,9 @@ func (e *forecastEvaluator) tick(s *Server) error {
 				return nil
 			}
 			if err := e.evaluateSet(ctx, s, set, indexSeries, nil, stocks[i], stockErrs[i], valve); err != nil {
+				if e.waitForVendor(err) {
+					return nil
+				}
 				log.Printf("forecast evaluator: set %d: %v", set.SetID, err)
 			}
 		}
@@ -343,7 +360,6 @@ type benchFault struct {
 // bar is calendar_bad — three source-class faults with three distinct codes, never one `no_bar`.
 func (e *forecastEvaluator) benchCalendar(ctx context.Context, s *Server, spec benchSpec, sets []forecastWorkSet) (forecastSeries, *benchFault) {
 	series, err := e.indexCalendar(ctx, s, spec, sets)
-	e.noteFetch(spec.Market, spec.Sym, series.Source)
 	if err != nil {
 		// Do NOT overwrite the last known bar with an empty series: the stale-calendar check must
 		// keep seeing the age of the last body that arrived, not the moment a fetch failed.
@@ -648,12 +664,11 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 				last = d.due
 			}
 		}
-		fetch := e.adjust
-		if fetch == nil {
-			fetch = fetchTencentAdjustRatio
-		}
 		var aerr error
-		adj, aerr = fetch(ctx, set.Market, set.Symbol, baseDate, last)
+		adj, aerr = e.adjustedBars(ctx, set.Market, set.Symbol, baseDate, last)
+		if isVendorDeferred(aerr) {
+			return aerr
+		}
 		observation, _ := forecastCallResult(ctx, quoteSourceTencent, aerr)
 		e.ledgerPass.observe(observation)
 		if aerr != nil {
@@ -743,6 +758,16 @@ func containsDate(dates []string, date string) bool {
 // and the charts are using. The congestion control is kept — the upstream ceiling is shared with the
 // readers, so this loop cannot crowd them out.
 func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, code, from string, now time.Time) (forecastSeries, error) {
+	key := forecastReadKey(market, code, from, now.In(chinaZone).Format("2006-01-02"))
+	if e.progress != nil {
+		if series, ok := e.progress.series[key]; ok {
+			if e.stats != nil {
+				e.stats.ReusedBodies++
+				e.stats.Bodies++
+			}
+			return series, nil
+		}
+	}
 	var resp *QuoteResp
 	var err error
 	if e.fetch != nil {
@@ -763,16 +788,20 @@ func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, co
 			now.In(chinaZone).Format("2006-01-02"), pass)
 	}
 	if err != nil {
+		if !isVendorDeferred(err) {
+			e.noteFetch(market, code, "")
+		}
 		return forecastSeries{}, err
 	}
 	if resp == nil {
 		return forecastSeries{}, fmt.Errorf("no response")
 	}
-	out := forecastSeries{ExDates: resp.ExDates, Kind: resp.Kind,
+	out := forecastSeries{ExDates: resp.ExDates, Kind: resp.Kind, FetchedAt: now,
 		AsOf: resp.Snapshot.AsOf, Source: resp.BarsSource, Market: market, Code: code}
 	if out.Source == "" {
 		out.Source = resp.Source
 	}
+	e.noteFetch(market, code, out.Source)
 	// The newest bar is dropped unless the vendor's own stamp says its session has closed AND the
 	// wall clock agrees. A body with no stamp cannot vouch for a bar dated today; that bar is marked
 	// unverifiable rather than silently believed.
@@ -786,6 +815,9 @@ func (e *forecastEvaluator) rangeBars(ctx context.Context, s *Server, market, co
 		if unverifiable {
 			out.UnverifiableDate = resp.Bars[n-1].Date
 		}
+	}
+	if e.progress != nil {
+		e.progress.series[key] = out
 	}
 	return out, nil
 }
@@ -804,8 +836,9 @@ func ledgerFetchRefusal(err error) string {
 
 // forecastSeries is one fetched series with the extra facts the evaluator needs from the same call.
 type forecastSeries struct {
-	Bars    []QuoteBar
-	ExDates []string
+	FetchedAt time.Time
+	Bars      []QuoteBar
+	ExDates   []string
 	// Kind is the vendor's own instrument kind ("index"/"stock"), carried through so the benchmark
 	// leg can refuse a body that is not an index rather than score against it (F01).
 	Kind string

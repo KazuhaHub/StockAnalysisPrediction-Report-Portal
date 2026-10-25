@@ -22,6 +22,7 @@ package app
 // with typed-in fields already do.
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -139,6 +140,8 @@ func (s *Server) quoteAdminState() map[string]any {
 	cfg := s.quoteConfigLoad()
 	stats := s.quotes.stats()
 	out := map[string]any{
+		"ratePolicies": s.vendorPolicies(),
+		"schedule":     publicVendorScheduler.snapshot(),
 		"sources":      s.quoteSourceStatuses(cfg),
 		"cacheEntries": stats.Entries,
 		"cacheBytes":   stats.Bytes,
@@ -181,16 +184,25 @@ func (s *Server) apiAdminQuotesSave(w http.ResponseWriter, r *http.Request, user
 	// absent from the comma list is off. A separate `enabled` array would be a second way to say the
 	// same thing, and the two would be free to disagree.
 	var in struct {
-		Order           *string `json:"order"`
-		TTLOpenSecs     *int    `json:"ttlOpenSecs"`
-		TTLClosedSecs   *int    `json:"ttlClosedSecs"`
-		TTLIntradaySecs *int    `json:"ttlIntradaySecs"`
-		HomeCards       *bool   `json:"homeCards"`
-		AutoRefresh     *bool   `json:"autoRefresh"`
+		Order           *string                     `json:"order"`
+		TTLOpenSecs     *int                        `json:"ttlOpenSecs"`
+		TTLClosedSecs   *int                        `json:"ttlClosedSecs"`
+		TTLIntradaySecs *int                        `json:"ttlIntradaySecs"`
+		HomeCards       *bool                       `json:"homeCards"`
+		AutoRefresh     *bool                       `json:"autoRefresh"`
+		RatePolicies    map[string]vendorRatePolicy `json:"ratePolicies"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		jsonError(w, http.StatusBadRequest, "bad json")
 		return
+	}
+	policies := s.vendorPolicies()
+	for source, policy := range in.RatePolicies {
+		if _, known := policies[source]; !known || !validVendorRatePolicy(policy) {
+			jsonError(w, http.StatusBadRequest, "invalid vendor rate policy: total must be 2-60 requests per minute; background must be 1 to half the total")
+			return
+		}
+		policies[source] = policy
 	}
 	// Validated BEFORE anything is persisted, so a rejected order cannot leave a saved TTL behind it.
 	order := ""
@@ -212,6 +224,13 @@ func (s *Server) apiAdminQuotesSave(w http.ResponseWriter, r *http.Request, user
 		entry := AuditEntry{Actor: user, ActorOU: s.st.PrimaryGroupOf(user), IP: s.auditIP(r)}
 		if err := s.st.saveQuoteOrder(r.Context(), order, entry); err != nil {
 			jsonError(w, http.StatusInternalServerError, "could not save quote source order")
+			return
+		}
+	}
+	if in.RatePolicies != nil {
+		encoded, _ := json.Marshal(policies)
+		if err := s.st.SetSetting(setQuoteVendorRates, string(encoded)); err != nil {
+			jsonError(w, http.StatusInternalServerError, "could not save vendor rate policies")
 			return
 		}
 	}

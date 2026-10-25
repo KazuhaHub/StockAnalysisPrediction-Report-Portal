@@ -260,6 +260,9 @@ func (c *quoteCache) walkLedger(ctx context.Context, cfg quoteConfig, market, co
 			observation.Refusal = "missing_fetcher"
 		}
 		tick.observe(observation)
+		if isVendorDeferred(err) {
+			return nil, err
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

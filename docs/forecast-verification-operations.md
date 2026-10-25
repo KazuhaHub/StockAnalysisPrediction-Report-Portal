@@ -6,6 +6,24 @@ their signals are covered under "Reader surfaces".
 
 ## First response, in order
 
+### Public-source request scheduling
+
+`/manage/quotes` includes Request scheduling. Defaults are 30 actual HTTP requests/minute per
+source, of which background work may use 6. These are protective portal limits, not published
+vendor quotas. Redirects count separately and sibling source hosts share their budget. Configure
+limits there; no infrastructure config or database migration is needed.
+
+The panel's counters reset on restart. A cooldown is shared by display and evaluation; wait for
+the single recovery probe rather than repeatedly refreshing or clearing the cache. Traffic from
+other services or portal instances sharing the egress IP is not included.
+
+A heartbeat with `pass.waiting_for_budget` is deferred work, not a failed prediction. Successful
+reads are retained for the next slice while their policy/session scope remains valid. On mode
+continues automatically. Dry mode requires another Evaluate now action, preferably after
+`pass.resume_at` when present. Unfinished work is derived again from durable rows after restart.
+
+See ADR 0043 for priority, cooldown and evidence lifetime boundaries.
+
 1. Read the status card on `/manage/forecast` (mode, last pass, last error, the counters and
    `awaiting_gate`), and the Alerts card for the last delivery per channel. The heartbeat's
    per-benchmark bars and the `panics`/`stale_valve_tripped` flags are in

@@ -42,7 +42,13 @@ func (budget *quoteShadowHTTPBudget) RoundTrip(request *http.Request) (*http.Res
 	}
 	budget.used++
 	budget.mu.Unlock()
-	return budget.base.RoundTrip(request)
+	response, err := budget.base.RoundTrip(request)
+	if isVendorDeferred(err) {
+		budget.mu.Lock()
+		budget.used--
+		budget.mu.Unlock()
+	}
+	return response, err
 }
 
 func (budget *quoteShadowHTTPBudget) attempts() int {

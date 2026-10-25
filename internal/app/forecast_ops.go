@@ -76,10 +76,13 @@ func forecastMode(v string) string {
 
 // passStats is one pass, as the page and the watchdog read it.
 type passStats struct {
-	Kind       string `json:"kind"` // "tick" | "manual"
-	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at"`
-	Sets       int    `json:"sets"`
+	WaitingForBudget bool   `json:"waiting_for_budget,omitempty"`
+	ResumeAt         string `json:"resume_at,omitempty"`
+	ReusedBodies     int    `json:"reused_bodies,omitempty"`
+	Kind             string `json:"kind"` // "tick" | "manual"
+	StartedAt        string `json:"started_at"`
+	FinishedAt       string `json:"finished_at"`
+	Sets             int    `json:"sets"`
 	// Fetches counts vendor bodies by source|market|code, so an operator can see WHO answered the
 	// pass rather than only that it fetched.
 	Fetches map[string]int `json:"fetches"`
@@ -393,9 +396,13 @@ func (e *forecastEvaluator) noteBench(code string, series forecastSeries) {
 	if n := len(series.Bars); n > 0 {
 		last = series.Bars[n-1].Date
 	}
+	fetched := series.FetchedAt
+	if fetched.IsZero() {
+		fetched = e.clock()
+	}
 	e.bench[code] = benchStat{
 		LastBar:   last,
-		FetchedAt: e.clock().UTC().Format(time.RFC3339),
+		FetchedAt: fetched.UTC().Format(time.RFC3339),
 		Source:    series.Source,
 		Market:    series.Market,
 		Code:      code,

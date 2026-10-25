@@ -930,7 +930,7 @@ func TestQuoteUpstreamConcurrencyIsBounded(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			quoteGET(t, s, "/api/quote/60"+strconv.Itoa(1000+i))
+			quoteGET(t, s, "/api/quote/60"+strconv.Itoa(1000+i)+"?range=1d")
 		}(i)
 	}
 	for counting.n() < quoteUpstreamConcurrency {

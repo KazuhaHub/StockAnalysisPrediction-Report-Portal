@@ -669,6 +669,9 @@ export interface ForecastDiagnostics {
 }
 
 export interface ForecastPassStats {
+  waiting_for_budget?: boolean
+  resume_at?: string
+  reused_bodies?: number
   kind: 'tick' | 'manual'
   started_at: string
   finished_at: string

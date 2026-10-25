@@ -184,6 +184,8 @@ export default function ForecastEvaluatorStatus({
           />
         )}
         {hb?.pass.last_error && <Alert type="error" showIcon title={hb.pass.last_error} />}
+        {hb?.pass.waiting_for_budget && <Alert type="info" showIcon title={t('forecast.eval.waitingBudget')}
+          description={hb.pass.resume_at ? t('forecast.eval.resumeAt', { at: dayjs(hb.pass.resume_at).format('YYYY-MM-DD HH:mm:ss') }) : undefined} />}
 
         <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
           <Descriptions.Item label={t('forecast.eval.readiness.title')}>
