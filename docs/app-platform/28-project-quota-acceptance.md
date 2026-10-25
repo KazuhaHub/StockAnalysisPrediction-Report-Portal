@@ -1,7 +1,8 @@
 # Disposable Linux project-quota enforcement probe
 
-Status: native acceptance implementation under approved D1/D3/D4 development
-candidate A. Actual CI results must be inspected separately. This is a filesystem
+Status: native XFS workload acceptance passed under approved D1/D3/D4 development
+candidate A for the source recorded below. Later source revisions still require
+their own CI verification. This is a filesystem
 prerequisite for data preparation, not a production data provider, complete runtime
 profile or permission to activate an installation.
 
@@ -42,8 +43,10 @@ or caller-supplied path as a target. It changes neither `/etc/projects` nor
 `/etc/projid`; project paths/IDs are explicit on each acceptance command.
 
 The owned mount uses `prjquota,nodev,nosuid,noexec`. The script checks the actual
-mount source/type/options and project accounting/enforcement state. Every project
-has an 8 MiB byte hard limit and 128-inode hard limit. Private project folders
+mount source/type/options and project accounting/enforcement state. Each project initially
+has an 8 MiB byte hard limit and 128-inode hard limit. Separate final control
+steps raise only the exhausted byte project to 16 MiB and inode project to 256
+inodes, verifying that those limit changes reverse their earlier denials. Private project folders
 belong to synthetic UID/GID 10000 with mode 0700. Workloads run through `setpriv`
 with cleared supplementary groups and no-new-privileges; a root write is not used
 as the quota test workload.
@@ -54,16 +57,23 @@ production mounts, Portal database changes, enrolled runtime or app routes.
 ## Required real observations
 
 `scripts/acceptance/quota_workload.py` bounds time, bytes and file creation. A test
-counts only kernel `EDQUOT` as quota denial. Permission errors, global disk-full
-`ENOSPC`, short writes and unrelated failures cannot produce passing evidence.
+accepts only native EDQUOT/ENOSPC failures near the configured hard limit, with
+independent evidence that the underlying filesystem still has at least 64 MiB and
+1,024 inodes available. Permission errors, actual filesystem exhaustion, early
+allocation failures, short writes and unrelated errors cannot pass. XFS deliberately
+returns ENOSPC for project quota hard-limit failures; see the kernel's
+[project quota reservation error path](https://github.com/torvalds/linux/blob/master/fs/xfs/xfs_trans_dquot.c).
+The errno alone therefore never proves enforcement.
 
 | Workload | Required observation |
 | --- | --- |
-| Bytes | Actual unprivileged fallocate/write/fsync operations initially succeed, then hit EDQUOT within 8 MiB of allocated/written data |
-| Inodes | Create files under a nested inherited-project directory, then hit EDQUOT before exceeding 128 files |
+| Bytes | Actual unprivileged fallocate/write/fsync operations initially succeed, then hit the native quota denial near and within 8 MiB of allocated/written data |
+| Inodes | Create files under a nested inherited-project directory, then hit the native quota denial near and before exceeding 128 files |
 | Open/unlinked | Unlink a still-open file, continue allocating/writing/fsyncing through its FD, and still hit the byte hard quota |
 | Independent project | After each quota denial, a different project can write/fsync its own 1 MiB file |
 | Remount | Unmount/remount the same owned filesystem with project enforcement, then require the exhausted byte project to remain quota constrained |
+| Limit control | Keep the exhausted byte/inode files; raise only that same project's limit and require the formerly blocked allocation/create to succeed |
+| Closed unlinked FD | After the still-open unlinked-file denial, close the FD and require that same project to admit a fresh write under its unchanged limit |
 
 Each project uses a separate ID; independent writes cannot succeed by freeing the
 exhausted project's files first. Limits are small enough to distinguish project
@@ -80,7 +90,9 @@ The report is retained as a short-lived workflow artifact for review.
 
 ## Cleanup and refusal behavior
 
-Before unmount or detach, verify that the mount still identifies the owned loop
+If attach or mount acknowledgement is lost, discover the actual owned resource
+before cleanup; do not trust a local success boolean as absence. Treat failed
+inspection as unknown, not unmounted. Before unmount or detach, verify that the mount still identifies the owned loop
 and that the loop still points to this exact newly created image. Refuse cleanup
 of substituted devices or mounts. Unmount first, detach second, remove only the
 new temporary directory after both succeed. If a check or cleanup fails, do not
@@ -93,8 +105,12 @@ No caller-supplied success flag can set a runtime's execution readiness.
 
 ## Local and CI verification
 
+The unprivileged workload is copied to the root-owned dedicated temporary folder;
+it does not require the synthetic UID to traverse the runner's private home or
+checkout. Commands use a fixed tool path/environment, with bounded diagnostics.
+
 Local tests exercise refusal before mutation, substituted device/mount rejection,
-strict EDQUOT error classification and the fact that an ordinary unquotaed
+native-denial versus actual-filesystem-exhaustion classification and the fact that an ordinary unquotaed
 filesystem cannot pass the bounded inode workload. These are orchestration/error
 checks, not Linux hard-quota evidence:
 
@@ -113,3 +129,35 @@ admission/receipts, authenticated runner transport, restoration/writer exclusion
 quota-aware capacity reservation, container CPU/memory/PID/tmp/network tests and
 full static/managed installation acceptance. Ext4 and Linux arm64 remain unverified
 until they pass equivalent native cases. No production rollout is authorized here.
+
+
+## Recorded native evidence
+
+[Native workflow 40195675252](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40195675252)
+passed on 2026-10-25 UTC for implementation source
+`3661bad8e3d6e0de21e10b2cc78c85b1049e371b`, on Ubuntu 24.04 x86_64,
+kernel `6.17.0-1022-azure`, `mkfs.xfs` 6.6.0. The retained JSON reports:
+
+- Byte and open/unlinked-FD denial at 8,323,072 allocated/written bytes, under the
+  configured 8,388,608-byte project hard limit. Filesystem/project metadata and
+  reservation also consume quota; the limit is not an exact payload file size.
+- Nested-project inode denial after 126 regular files under a 128-inode limit.
+- Native ENOSPC with over 934 million bytes and over 524,000 inodes still available
+  on the underlying uncapped filesystem. Each independent project write succeeded.
+- An exhausted project remained constrained after remount. Raising the same byte
+  project to 16 MiB admitted another 1 MiB without deleting its original charge;
+  raising the same inode project to 256 admitted a new file. Closing the previously
+  unlinked FD released its charge and admitted a fresh write under unchanged limits.
+- Ownership-checked unmount/detach/directory cleanup completed, with
+  `execution_ready=false` throughout.
+
+The first native run exposed the synthetic UID's inability to traverse the
+checkout; the workload now lives in the dedicated root-owned fixture. The next
+run exposed the initial EDQUOT-only assumption. Kernel source and actual XFS
+behavior required the stricter capacity/independent-project/limit-change controls
+above, rather than accepting ENOSPC alone or mislabeling it EDQUOT.
+
+A follow-up cleanup guard also checks actual loop absence after detach before
+removing its image; its newer source needs its own workflow result. None of this
+promotes Portal's runtime compatibility report to execution readiness or completes
+P04/P05 acceptance.
