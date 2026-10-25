@@ -2190,15 +2190,8 @@ func fetchSinaQuote(ctx context.Context, market, code string, bars int) (*QuoteR
 	ctx, cancel := context.WithTimeout(ctx, quoteFetchTimeout)
 	defer cancel()
 
-	snapURL := fmt.Sprintf(quoteSinaSnapshotURL, sym)
-	line, err := vendorGetGBK(ctx, snapURL, quoteSinaReferer, quoteLineLimit)
+	resp, err := fetchSinaSnapshot(ctx, t)
 	if err != nil {
-		vendorLogf(snapURL, "quote snapshot fetch failed for %s: %v", sym, err)
-		return nil, err
-	}
-	resp, err := parseSinaSnapshot(market, code, line)
-	if err != nil {
-		vendorLogf(snapURL, "quote snapshot parse failed for %s: %v", sym, err)
 		return nil, err
 	}
 	if !quoteMarketHasDailyHistory(market) {
@@ -2221,6 +2214,22 @@ func fetchSinaQuote(ctx context.Context, market, code string, bars int) (*QuoteR
 	vendorLogf(klineURL, "quote history failed for %s: %v", sym, err)
 	resp.BarsUnavailable = quoteBarsSourceFailed
 	return resp, nil
+}
+
+func fetchSinaSnapshot(ctx context.Context, target quoteTarget) (*QuoteResp, error) {
+	rawURL := fmt.Sprintf(quoteSinaSnapshotURL, target.Symbol)
+	line, err := vendorGetGBK(ctx, rawURL, quoteSinaReferer, quoteLineLimit)
+	if err != nil {
+		if !isVendorDeferred(err) {
+			vendorLogf(rawURL, "quote snapshot fetch failed for %s: %v", target.Symbol, err)
+		}
+		return nil, err
+	}
+	response, err := parseSinaSnapshot(target.Market.id, target.Code, line)
+	if err != nil {
+		vendorLogf(rawURL, "quote snapshot parse failed for %s: %v", target.Symbol, err)
+	}
+	return response, err
 }
 
 // parseSinaSnapshot turns one `var hq_str_sh601899="…";` line into the snapshot half of a QuoteResp,

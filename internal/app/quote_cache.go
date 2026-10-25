@@ -815,6 +815,7 @@ type quoteCache struct {
 	health       map[string]*QuoteSourceHealth
 	ledgerHealth map[string]*QuoteSourceHealth
 	traffic      quoteTraffic
+	sinaProgress sinaRangeProgress
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight

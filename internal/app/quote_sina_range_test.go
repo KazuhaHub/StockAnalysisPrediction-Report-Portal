@@ -48,6 +48,18 @@ func TestSinaRangeFiltersByRowDate(t *testing.T) {
 	}
 }
 
+func TestSinaRangeKeepsAdmissionDeferralTyped(t *testing.T) {
+	ctx, calls := sinaRangeTestContext(t, readQuoteFixture(t, fixSinaKline), http.StatusOK)
+	client := *vendorHTTPClient(ctx)
+	scheduler := newVendorScheduler()
+	client.Transport = &vendorScheduledTransport{base: client.Transport, scheduler: scheduler}
+	ctx = context.WithValue(withVendorPriority(ctx, vendorShadow), quoteProbeClientKey{}, &client)
+	_, err := fetchSinaRange(ctx, "sh", "601899", "2026-06-15", "2026-06-18")
+	if !isVendorDeferred(err) || *calls != 1 {
+		t.Fatalf("history admission became a source failure: calls=%d err=%v", *calls, err)
+	}
+}
+
 func TestSinaKlineMustAgreeWithItsSnapshot(t *testing.T) {
 	original, err := parseSinaSnapshot("sh", "601899", string(readQuoteFixture(t, fixSinaSnap)))
 	if err != nil {
