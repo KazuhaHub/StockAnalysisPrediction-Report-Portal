@@ -224,6 +224,7 @@ func RunServer(cfgPath string) {
 	// The lockout is the same shape: a reader, so turning it on or off takes effect on the next
 	// attempt rather than at the next restart.
 	s.loginThr.lockout = s.loginLockout
+	publicVendorScheduler.configure(s.vendorPolicies())
 	s.names = LoadNames(config.DirOf(cfg.DBPath), st)
 	s.geo = newGeoService(config.DirOf(cfg.DBPath))
 	s.geo.st = st

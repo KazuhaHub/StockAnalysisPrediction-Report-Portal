@@ -47,7 +47,7 @@ const (
 // concentrated on a handful of hosts, which is precisely the shape that default is wrong for.
 var vendorClient = &http.Client{
 	Timeout: vendorClientTimeout,
-	Transport: &http.Transport{
+	Transport: &vendorScheduledTransport{scheduler: publicVendorScheduler, base: &http.Transport{
 		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          32,
@@ -55,7 +55,7 @@ var vendorClient = &http.Client{
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-	},
+	}},
 }
 
 // vendorGet GETs a vendor URL under ctx's deadline and returns at most limit bytes of the body.
@@ -68,6 +68,9 @@ func vendorGet(ctx context.Context, rawURL, referer string, limit int64) ([]byte
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
+	}
+	if source := vendorSourceForHost(req.URL.Hostname()); source != "" {
+		req = req.WithContext(context.WithValue(req.Context(), vendorOriginKey{}, source))
 	}
 	req.Header.Set("User-Agent", vendorUserAgent)
 	if referer != "" {

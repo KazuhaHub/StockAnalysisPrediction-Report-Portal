@@ -135,6 +135,16 @@ function renderPage() {
 }
 
 describe('QuoteSourcesPage', () => {
+  it('saves server-provided traffic limits and keeps other source policies intact', async () => {
+    const policies = { tencent: { requestsPerMinute: 30, backgroundPerMinute: 6 }, sina: { requestsPerMinute: 20, backgroundPerMinute: 2 } }
+    apiMock.get.mockResolvedValue({ ...structuredClone(state), ratePolicies: policies, schedule: {} })
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: 'quoteAdmin.traffic.title' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'tencent quoteAdmin.traffic.total' }), { target: { value: '24' } })
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ ratePolicies: { ...policies, tencent: { requestsPerMinute: 24, backgroundPerMinute: 6 } } })))
+  })
   it('clears cache occupancy without replacing an unsaved source order', async () => {
     const user = userEvent.setup()
     renderPage()

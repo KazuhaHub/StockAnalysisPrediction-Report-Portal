@@ -65,7 +65,7 @@ func (pass *forecastShadowPass) finish(s *Server, observations []forecastCallObs
 	if deadline <= 0 {
 		deadline = forecastShadowDeadline
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	ctx, cancel := context.WithTimeout(withVendorPriority(context.Background(), vendorShadow), deadline)
 	defer cancel()
 	ctx, budget := withQuoteShadowHTTPBudget(ctx)
 	if completed && pass.enabled {
@@ -202,6 +202,12 @@ func forecastCallResult(ctx context.Context, source string, err error) (forecast
 	observation := forecastCallObservation{Source: source, Calls: 1}
 	if err == nil {
 		return observation, ""
+	}
+	var deferred *vendorDeferredError
+	if errors.As(err, &deferred) {
+		observation.Calls = 0
+		observation.Refusal = deferred.Reason
+		return observation, deferred.Reason
 	}
 	if ctx.Err() != nil {
 		observation.Refusal = "cancelled"

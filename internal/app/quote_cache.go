@@ -687,6 +687,7 @@ func quoteParseOrder(raw string) (order []string, unknown string) {
 // cannot put the portal below a floor or above the ceiling. Same shape and same reason as
 // cleanupConfigLoad (ADR 0017).
 func (s *Server) quoteConfigLoad() quoteConfig {
+	publicVendorScheduler.configure(s.vendorPolicies())
 	cfg := quoteConfigDefault()
 	// Total by construction, like settingInt: these getters sit on the request path and have to
 	// answer for a Server with no store to ask. No configuration available reads as the shipped
@@ -816,7 +817,9 @@ type quoteCache struct {
 	// reading the vendor's own record rather than the scheduler's decision about it.
 	cooling map[string]*ledgerCooling
 
-	sem chan struct{} // the upstream concurrency ceiling
+	sem           chan struct{} // the upstream concurrency ceiling
+	historySem    chan struct{}
+	backgroundSem chan struct{}
 
 	// sources and now are seams, set before first use. A test substitutes a counting stub here
 	// rather than reaching for a package-level var, so two tests running concurrently under -race
@@ -836,6 +839,8 @@ func (c *quoteCache) init() {
 		c.health = make(map[string]*QuoteSourceHealth)
 		c.cooling = make(map[string]*ledgerCooling)
 		c.sem = make(chan struct{}, quoteUpstreamConcurrency)
+		c.historySem = make(chan struct{}, quoteUpstreamConcurrency-2)
+		c.backgroundSem = make(chan struct{}, 1)
 		if c.sources == nil {
 			c.sources = defaultQuoteSources()
 		}
@@ -953,10 +958,32 @@ func (c *quoteCache) removeLocked(element *list.Element) {
 // conversations actually in progress.
 func (c *quoteCache) acquire(ctx context.Context) (func(), error) {
 	c.init()
+	var reserved chan struct{}
+	switch vendorWorkPriority(ctx) {
+	case vendorHistory:
+		reserved = c.historySem
+	case vendorBackground, vendorShadow:
+		reserved = c.backgroundSem
+	}
+	if reserved != nil {
+		select {
+		case reserved <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	select {
 	case c.sem <- struct{}{}:
-		return func() { <-c.sem }, nil
+		return func() {
+			<-c.sem
+			if reserved != nil {
+				<-reserved
+			}
+		}, nil
 	case <-ctx.Done():
+		if reserved != nil {
+			<-reserved
+		}
 		return nil, ctx.Err()
 	}
 }
@@ -1086,6 +1113,9 @@ func (c *quoteCache) servableInterval(cfg quoteConfig, t quoteTarget, iv quoteIn
 // half of what sourcesFor answers on and only the caller knows which half it is asking for: a US
 // price and a US daily series are two different chains through the same source table.
 func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code string, bars int, iv quoteInterval, win quoteWindow) (*QuoteResp, error) {
+	if iv == quoteIntervalDaily || iv == quoteIntervalDailyRange {
+		ctx = withVendorPriority(ctx, vendorHistory)
+	}
 	// Re-resolved rather than passed in, because what the resolver needs is the whole target: the
 	// market row AND the code, the second of which decides whether a source has a symbol for this
 	// request at all. Every caller has one already — this is the same quoteTargetFor the handler ran
@@ -1116,7 +1146,7 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 			// state decides it rather than the error's text, because a vendor that blows through
 			// this feature's own eight-second budget also fails with context.DeadlineExceeded and
 			// that one IS the vendor's.
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && !isVendorDeferred(err) {
 				c.noteFailure(src.name, err)
 			}
 			if firstErr == nil {
@@ -1368,7 +1398,7 @@ func (c *quoteCache) loadBatchUncached(ctx context.Context, cfg quoteConfig, tar
 			// A cancelled context is this side giving up, not the vendor failing — the same rule
 			// load applies, and for the same reason: these counters are what an operator reads to
 			// decide whether a source is down.
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && !isVendorDeferred(err) {
 				c.noteFailure(src.name, err)
 			}
 		case len(got) == 0:

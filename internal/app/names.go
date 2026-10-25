@@ -152,7 +152,7 @@ func FetchAShareNames() (map[string]string, error) {
 			host := hosts[attempt%len(hosts)]
 			u := fmt.Sprintf("https://%s/api/qt/clist/get?pn=%d&pz=100&po=1&np=1"+
 				"&fltt=2&invt=2&fid=f12&fs=%s&fields=f12,f14", host, pn, fs)
-			ctx, cancel := context.WithTimeout(context.Background(), nameTablePageTimeout)
+			ctx, cancel := context.WithTimeout(withVendorPriority(context.Background(), vendorHistory), nameTablePageTimeout)
 			body, err := vendorGet(ctx, u, "https://quote.eastmoney.com/", maxNamePageBytes)
 			cancel()
 			if err != nil {
@@ -255,7 +255,7 @@ const (
 // silently: it goes to the rate-limited vendor log, so a vendor that has started refusing us leaves
 // a trace instead of looking indistinguishable from a stock that has no name.
 func httpGetGBK(url, referer string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), nameSourceTimeout)
+	ctx, cancel := context.WithTimeout(withVendorPriority(context.Background(), vendorHistory), nameSourceTimeout)
 	defer cancel()
 	body, err := vendorGetGBK(ctx, url, referer, maxNameBodyBytes)
 	if err != nil {

@@ -10,6 +10,7 @@ import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
 import { usePendingSettings } from './AdminDraftBoundary'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -77,6 +78,8 @@ type QuoteAdminSource = {
 }
 
 type QuoteAdminState = {
+  ratePolicies?: Record<string, VendorRatePolicy>
+  schedule?: Record<string, VendorScheduleStatus>
   sources: QuoteAdminSource[]
   cacheEntries: number
   cacheBytes: number
@@ -164,6 +167,8 @@ export default function QuoteSourcesPage() {
   const cancelConfirmation = useRef<(() => void) | null>(null)
 
   const [rows, setRows] = useState<QuoteAdminSource[]>([])
+  const [ratePolicies, setRatePolicies] = useState<Record<string, VendorRatePolicy> | null>(null)
+  const [schedule, setSchedule] = useState<Record<string, VendorScheduleStatus>>()
   const [cacheEntries, setCacheEntries] = useState(0)
   const [cacheBytes, setCacheBytes] = useState(0)
   const [ttlOpen, setTtlOpen] = useState(0)
@@ -188,11 +193,13 @@ export default function QuoteSourcesPage() {
   const [acknowledged, setAcknowledged] = useState('')
   const [section, setSection] = useState('sources')
   const [savedState, setSavedState] = useState<QuoteAdminState | null>(null)
-  const editable = JSON.stringify({ sources: rows.map((r) => [r.source, r.enabled]), ttlOpen, ttlClosed, ttlIntraday, homeCards, homeCardsKnown, autoRefresh, autoRefreshKnown })
+  const editable = JSON.stringify({ sources: rows.map((r) => [r.source, r.enabled]), ttlOpen, ttlClosed, ttlIntraday, homeCards, homeCardsKnown, autoRefresh, autoRefreshKnown, ratePolicies })
   const dirty = !!acknowledged && editable !== acknowledged
   usePendingSettings(dirty, saving)
 
   const apply = (st: QuoteAdminState, updateStats = true) => {
+    setRatePolicies(st.ratePolicies ?? null)
+    setSchedule(st.schedule)
     setSavedState(st)
     setLedger(typeof st.ledgerPrimary === 'string' && Array.isArray(st.ledgerChain) ? {
       ledgerPrimary: st.ledgerPrimary,
@@ -234,7 +241,7 @@ export default function QuoteSourcesPage() {
     setAutoRefresh(st.autoRefresh === true)
     setAcknowledged(JSON.stringify({ sources: [...(st.sources ?? [])].sort((a, b) => seat(a) - seat(b)).map((r) => [r.source, r.enabled]),
       ttlOpen: wireNumber(st.ttlOpenSecs), ttlClosed: wireNumber(st.ttlClosedSecs), ttlIntraday: wireNumber(st.ttlIntradaySecs),
-      homeCards: st.homeCards === true, homeCardsKnown: typeof st.homeCards === 'boolean', autoRefresh: st.autoRefresh === true, autoRefreshKnown: typeof st.autoRefresh === 'boolean' }))
+      homeCards: st.homeCards === true, homeCardsKnown: typeof st.homeCards === 'boolean', autoRefresh: st.autoRefresh === true, autoRefreshKnown: typeof st.autoRefresh === 'boolean', ratePolicies: st.ratePolicies ?? null }))
   }
 
   const load = () => {
@@ -297,6 +304,7 @@ export default function QuoteSourcesPage() {
     }
     if (homeCardsKnown) body.homeCards = homeCards
     if (autoRefreshKnown) body.autoRefresh = autoRefresh
+    if (ratePolicies !== null) body.ratePolicies = ratePolicies
     savePending.current = true
     try {
       if (ledger?.ledgerPrimary && !rows.some((r) => r.enabled && r.source === ledger.ledgerPrimary)) {
@@ -555,6 +563,7 @@ export default function QuoteSourcesPage() {
         <ConfigProvider componentDisabled={saving}>
         <SettingsWorkspace active={section} onChange={setSection} sections={[
           { key: 'sources', label: t('manage.quotes.sources') }, { key: 'cache', label: t('manage.quotes.cache') },
+          ...(ratePolicies ? [{ key: 'traffic', label: t('quoteAdmin.traffic.title') }] : []),
         ]}>
         <SettingsPanel section="sources">
         <div className="rp-admin-list-page">
@@ -611,6 +620,9 @@ export default function QuoteSourcesPage() {
         {ledger ? <QuoteLedgerStatus state={ledger} sourceLabel={sourceLabel} stamp={stampOrNever} /> : null}
         </div>
         </SettingsPanel>
+        {ratePolicies && <SettingsPanel section="traffic">
+          <VendorSchedulePanel policies={ratePolicies} schedule={schedule} sources={rows.map((source) => source.source)} sourceLabel={sourceLabel} onChange={setRatePolicies} />
+        </SettingsPanel>}
         <SettingsPanel section="cache">
         <div className="rp-admin-list-page">
         <Card title={t('quoteAdmin.cache')}>
