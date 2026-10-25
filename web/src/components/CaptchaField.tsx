@@ -152,7 +152,11 @@ export default function CaptchaField({
     // onChange is a fresh closure on every parent render; depending on it would refetch in a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, account, refresh])
-  useEffect(load, [load])
+  useEffect(() => {
+    load()
+    window.addEventListener('rp:connection-restored', load)
+    return () => window.removeEventListener('rp:connection-restored', load)
+  }, [load])
 
   if (!state?.required) return null
 
@@ -173,7 +177,7 @@ export default function CaptchaField({
   }
 
   return (
-    <Space.Compact style={{ width: '100%', marginBottom: 12 }}>
+    <div className="rp-captcha-field">
       <Input
         value={value.captcha_answer ?? ''}
         onChange={(e) => onChange({ captcha_id: state.captcha_id, captcha_answer: e.target.value })}
@@ -187,11 +191,11 @@ export default function CaptchaField({
           src={state.image}
           alt={t('captcha.alt')}
           {...clickable(load, t('captcha.refresh'))}
-          style={{ height: 32, cursor: 'pointer', borderRadius: 6 }}
+          className="rp-captcha-image"
           title={t('captcha.refresh')}
         />
       )}
-      <Button icon={<ReloadOutlined />} onClick={load} title={t('captcha.refresh')} />
-    </Space.Compact>
+      <Button type="text" icon={<ReloadOutlined />} onClick={load} aria-label={t('captcha.refresh')} title={t('captcha.refresh')} />
+    </div>
   )
 }

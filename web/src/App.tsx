@@ -8,6 +8,7 @@ import { FavoritesProvider } from './favorites'
 import { lazyRetry } from './lib/lazyRetry'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
+import ConnectionBoundary from './components/ConnectionBoundary'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import RegisterPage from './pages/RegisterPage'
@@ -100,13 +101,19 @@ function RequirePerm({ perm, children }: { perm: string; children: React.ReactNo
   return <>{children}</>
 }
 
+function PasswordResetRoute() {
+  const { search } = useLocation()
+  return new URLSearchParams(search).has('token') ? <ResetPasswordPage /> : <ForgotPage />
+}
+
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/reset" element={<ResetPasswordPage />} />
+      <Route path="/reset" element={<PasswordResetRoute />} />
       <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot" element={<ForgotPage />} />
+      <Route path="/forgot-password" element={<Navigate to="/reset" replace />} />
+      <Route path="/forgot" element={<Navigate to="/reset" replace />} />
       <Route path="/verify" element={<VerifyEmailPage />} />
       <Route
         element={
@@ -260,7 +267,7 @@ function Themed() {
               one of them: a render error anywhere below used to unmount the app and leave a blank
               page with nothing to act on. */}
           <ErrorBoundary>
-            <AppRoutes />
+            <ConnectionBoundary><AppRoutes /></ConnectionBoundary>
           </ErrorBoundary>
         </AuthProvider>
       </AntdApp>

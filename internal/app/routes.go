@@ -211,6 +211,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.public(mux, "POST /api/login", s.apiLogin)
 	s.sessionOptional(mux, "POST /api/logout", s.apiLogout)
 	// Public password reset (no session).
+	s.public(mux, "GET /api/password/config", s.apiPasswordRecoveryConfig)
 	s.public(mux, "POST /api/password/forgot", s.apiForgotPassword)
 	s.public(mux, "POST /api/password/reset", s.apiResetPassword)
 	s.session(mux, "GET /api/home", s.apiHome)
@@ -299,6 +300,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/types/restore-defaults", s.apiTypesRestoreDefaults)
 	s.admin(mux, "DELETE /api/admin/types/{name}", s.apiTypesDelete)
 	s.admin(mux, "POST /api/admin/kind-colors", s.apiKindColorSave)
+	s.admin(mux, "GET /api/admin/dashboard/layout", s.apiDashboardLayout)
+	s.admin(mux, "PUT /api/admin/dashboard/layout", s.apiDashboardLayoutSave)
+	s.admin(mux, "GET /api/admin/reports/overview", s.apiReportOverview)
 	s.admin(mux, "GET /api/admin/users", s.apiAdminUsers)
 	s.admin(mux, "POST /api/admin/users", s.apiUserAdd)
 	s.admin(mux, "POST /api/admin/users/bulk", s.apiUsersBulk)

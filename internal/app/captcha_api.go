@@ -213,7 +213,7 @@ func (s *Server) apiAdminSecurity(w http.ResponseWriter, r *http.Request, user s
 			"passkey_enroll": s.switchOn(setPasskeyEnroll, true),
 			"require_staff":  s.switchOn(setRequire2FAForStaff, false),
 		},
-		"recovery": map[string]any{"enabled": s.passwordRecoveryEnabled()},
+		"recovery": map[string]any{"enabled": s.passwordRecoveryEnabled(), "mode": s.passwordRecoveryMode()},
 		"lockout": map[string]any{
 			"enabled":      s.lockoutEnabled(),
 			"duration_min": int(s.lockoutDuration() / time.Minute),

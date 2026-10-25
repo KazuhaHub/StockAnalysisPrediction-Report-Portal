@@ -223,3 +223,22 @@ func TestTheGroupAPICarriesTheEnrolmentOverrides(t *testing.T) {
 		t.Error("clearing the override must restore the inherited answer")
 	}
 }
+
+func TestRecoveryModeRoundTripsAndRejectsInvalidMode(t *testing.T) {
+	s := limitsServer(t)
+	for _, mode := range []string{"hidden", "contact", "email"} {
+		if code := saveSecurity(t, s, `{"recovery":{"mode":"`+mode+`"}}`); code != http.StatusOK {
+			t.Fatalf("mode %s: %d", mode, code)
+		}
+		recovery := readSecurity(t, s)["recovery"].(map[string]any)
+		if recovery["mode"] != mode || recovery["enabled"] != (mode == "email") {
+			t.Fatalf("unexpected recovery: %+v", recovery)
+		}
+	}
+	if code := saveSecurity(t, s, `{"recovery":{"mode":"invalid"}}`); code != http.StatusBadRequest {
+		t.Fatalf("invalid mode accepted: %d", code)
+	}
+	if s.passwordRecoveryMode() != "email" {
+		t.Fatal("invalid request mutated recovery")
+	}
+}

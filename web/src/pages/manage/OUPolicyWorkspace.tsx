@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Alert, Tabs, Typography } from 'antd'
+import { Alert, Button, Typography } from 'antd'
+import { GlobalOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -10,47 +11,46 @@ import OrgUnitDetail, { type OUPolicySection } from './OrgUnitDetail'
 
 export type FeaturePolicySection = Exclude<OUPolicySection, 'directory'>
 
-/** Each feature owns its OU policy; the directory owns only structure and membership. */
-export default function OUPolicyWorkspace({ section }: { section: FeaturePolicySection }) {
+/** The persistent scope rail sits between primary navigation and the feature's editor. */
+export function PolicyPage({ section, children }: { section: FeaturePolicySection; children: ReactNode }) {
   const { t } = useTranslation()
   const [params, setParams] = useSearchParams()
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const load = () => {
-    setLoading(true); setError('')
+    setError('')
     return api.get<{ groups: UserGroupRow[] }>('/api/admin/groups')
       .then((result) => setGroups(result.groups ?? []))
       .catch((e) => setError(errText(e, t))).finally(() => setLoading(false))
   }
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const scoped = params.get('scope') === 'ou'
   const requested = params.get('ou')
   const selected = requested !== null ? groups.find((group) => group.id === Number(requested) && Number(requested) > 0) : groups.find((group) => group.is_default)
-  return <LoadGate loading={loading} error={error} onRetry={load}>
-    <Typography.Paragraph type="secondary">{t('ou.featureScopeHint')}</Typography.Paragraph>
-    <div className="rp-ou-console">
-      <OrgUnitPicker mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
-        selected={selected ? [selected.id] : []} onManage={() => {}}
-        onSelect={(ids) => {
-          if (!ids[0] || ids[0] === selected?.id) return
-          const next = new URLSearchParams(params)
-          next.set('scope', 'ou'); next.set('ou', String(ids[0])); setParams(next)
-        }} />
-      {selected ? <OrgUnitDetail key={`${section}:${selected.id}`} sections={[section]} group={selected} groups={groups}
-        onChanged={() => { void load() }} onDeleted={() => {}} /> : <Alert type="warning" showIcon title={t('ou.scopeMissing')} />}
+  const selectScope = (id?: number) => {
+    if ((id === undefined && !scoped) || (scoped && id !== undefined && id === selected?.id)) return
+    const next = new URLSearchParams(params)
+    next.set('scope', id === undefined ? 'global' : 'ou')
+    if (id !== undefined) next.set('ou', String(id))
+    if (next.toString() !== params.toString()) setParams(next)
+  }
+  return <div className="rp-policy-workspace" key={params.toString()}>
+    <aside className="rp-policy-scope" aria-label={t('ou.unitScope')}>
+      <Button icon={<GlobalOutlined />} block type={scoped ? 'text' : 'primary'}
+        aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{t('ou.globalScope')}</Button>
+      <LoadGate loading={loading} error={error} onRetry={load}>
+        <OrgUnitPicker mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
+          selected={scoped && selected ? [selected.id] : []} onManage={() => {}}
+          onSelect={(ids) => { if (ids[0]) selectScope(ids[0]) }} />
+      </LoadGate>
+      <Typography.Paragraph type="secondary">{t('ou.featureScopeHint')}</Typography.Paragraph>
+    </aside>
+    <div className="rp-policy-content">
+      {scoped ? <LoadGate loading={loading} error={error} onRetry={load}>
+        {selected ? <OrgUnitDetail key={`${section}:${selected.id}`} sections={[section]} group={selected} groups={groups}
+          onChanged={() => { void load() }} onDeleted={() => {}} /> : <Alert type="warning" showIcon title={t('ou.scopeMissing')} />}
+      </LoadGate> : children}
     </div>
-  </LoadGate>
-}
-
-export function PolicyPage({ section, children }: { section: FeaturePolicySection; children: ReactNode }) {
-  const { t } = useTranslation()
-  const [params, setParams] = useSearchParams()
-  return <Tabs key={params.toString()} activeKey={params.get('scope') === 'ou' ? 'ou' : 'global'}
-    onChange={(scope) => {
-      const next = new URLSearchParams(params)
-      next.set('scope', scope); setParams(next)
-    }} items={[
-      { key: 'global', label: t('ou.globalScope'), children },
-      { key: 'ou', label: t('ou.unitScope'), children: <OUPolicyWorkspace section={section} /> },
-    ]} />
+  </div>
 }

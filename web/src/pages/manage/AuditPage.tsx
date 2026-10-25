@@ -23,6 +23,7 @@ import {
   Typography,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useTableView } from '../../components/TableView'
 import { FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
@@ -281,6 +282,7 @@ export default function AuditPage() {
   const columns: ColumnsType<AuditEntry> = [
     {
       title: t('audit.at'),
+      key: 'at', minWidth: 120,
       dataIndex: 'at',
       width: 160,
       // The panel timezone, with the reader's own beneath it only when the two differ — an operator
@@ -308,6 +310,7 @@ export default function AuditPage() {
     },
     {
       title: t('audit.actor'),
+      key: 'actor', minWidth: 130,
       width: 170,
       render: (_, r) => (
         <Space orientation="vertical" size={0}>
@@ -347,6 +350,7 @@ export default function AuditPage() {
     },
     {
       title: t('audit.action'),
+      key: 'action', minWidth: 110,
       width: 135,
       render: (_, r) => <Tag color={ACTION_COLOR[r.action]}>{t(`audit.a.${r.action}`, r.action)}</Tag>,
     },
@@ -355,6 +359,7 @@ export default function AuditPage() {
       // the identifier the table happens to store. An unknown one stays as it is, which is how a
       // type this build has not been taught still reads.
       title: t('audit.target'),
+      key: 'target', minWidth: 110,
       width: 150,
       render: (_, r) => (
         <Typography.Text type="secondary">
@@ -364,6 +369,7 @@ export default function AuditPage() {
     },
     {
       title: t('audit.detail'),
+      key: 'summary', minWidth: 150,
       // Rendered, not dumped: somebody reading this column wants "who read what", not the field
       // list a serialiser produced. And it is the HEADLINE only — a run's parameters, a token's
       // expiry and everything else an identifier carries are behind the full-record button, because
@@ -376,6 +382,7 @@ export default function AuditPage() {
       // the scan; this serves the investigation — every field as stored, including the ones the
       // sentence drops for being uninformative, and the payload verbatim for pasting elsewhere.
       title: '',
+      key: 'details', minWidth: 44,
       width: 44,
       // Pinned: it is the last thing in the row and the first thing a narrow window pushes off the
       // right edge, which is exactly the control somebody reaches for when a cell looks wrong.
@@ -385,6 +392,7 @@ export default function AuditPage() {
       ),
     },
   ]
+  const tableView = useTableView('audit', columns, ['at', 'action', 'details'], { details: t('audit.details') })
 
   // On a phone every control takes the full width of its cell; on a desktop each keeps the width
   // its content needs, so the header row stays one line.
@@ -562,12 +570,14 @@ export default function AuditPage() {
 
   return (
     <Card
+      className="rp-audit-card"
       title={t('audit.title')}
       extra={
         mobile ? undefined : (
           <Space wrap>
             {narrowFilters}
             {search}
+            {tableView.controls}
           </Space>
         )
       }
@@ -607,24 +617,16 @@ export default function AuditPage() {
           size="small"
           loading={loading}
           dataSource={items}
-          columns={columns}
+          columns={tableView.columns}
+          className={tableView.className}
           // `fixed` is load-bearing, not a preference. Left on auto, the browser sizes the detail
           // column to its content — so ONE row carrying a machine snapshot (a run window, a nested
           // input) widened the column to thousands of pixels, squeezed every other column to its
           // minimum and turned the page into a horizontal scroller showing a wall of JSON. That is
           // the shape the raw column was already failing in.
           tableLayout="fixed"
-          // The minimum the table may be. Above it the table fills its container and the detail
-          // column takes whatever is left, so a wide screen loses nothing; below it the table
-          // scrolls, which is the honest answer — squeezing these columns is what produced the
-          // one-character-per-line wrap this page used to show.
-          //
-          // 1040 because of a 13" laptop. The manage layout keeps a ~200px sidebar, and a MacBook
-          // Air at a larger-text resolution leaves the content about 1080px. The widths above add to
-          // 704, so the detail column still gets 336 — and the full-record button, which is the last
-          // thing in the row and the first thing a wider minimum pushed off the right edge, stays on
-          // screen. It was 1200, which scrolled on exactly that machine.
-          scroll={{ x: 940 }}
+          // Fit to the visible columns' readable minimum; narrow views retain their card layout.
+          scroll={tableView.scroll}
           pagination={{
             current: page,
             pageSize,

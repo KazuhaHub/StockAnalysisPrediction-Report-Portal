@@ -8,6 +8,7 @@
 
 // The manage pages, keyed by their last path segment, using the very labels the left rail renders.
 const MANAGE: Record<string, string> = {
+  overview: 'manage.overview',
   site: 'settings.general',
   announcement: 'nav.announcement',
   email: 'nav.email',
@@ -20,14 +21,15 @@ const MANAGE: Record<string, string> = {
   security: 'nav.security',
   tokens: 'settings.tokens',
   batch: 'nav.batchAdmin',
-  runqueue: 'nav.runQueue',
+  runqueue: 'manage.label.runqueue',
   rundefaults: 'nav.runDefaults',
-  assistant: 'nav.chat',
+  assistant: 'manage.label.assistant',
   apps: 'nav.appsAdmin',
   webhooks: 'nav.webhooks',
   notifications: 'nav.notifications',
   apidoc: 'settings.apidoc',
   storage: 'nav.storage',
+  quotes: 'nav.quoteAdmin',
   audit: 'nav.audit',
 }
 
@@ -38,6 +40,7 @@ const EXACT: Record<string, string> = {
   '/login': '',
   '/reset': '',
   '/register': '',
+  '/forgot-password': '',
   '/forgot': '',
   '/verify': '',
   '/account': 'nav.account',

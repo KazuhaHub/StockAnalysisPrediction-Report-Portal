@@ -135,8 +135,8 @@ func TestForgotPasswordFailsClosedWithoutPublicURL(t *testing.T) {
 	sent := enableEmail(s)
 	s.st.SetSetting("public_url", "") // unset
 
-	if rec := postJSON(t, s.apiForgotPassword, `{"account":"kaz"}`); rec.Code != http.StatusOK {
-		t.Fatalf("forgot → %d, want 200", rec.Code)
+	if rec := postJSON(t, s.apiForgotPassword, `{"account":"kaz"}`); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("forgot → %d, want 503", rec.Code)
 	}
 	wantNoEmail(t, sent)
 }
@@ -241,4 +241,28 @@ func TestNotifyJobDone(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantNoEmail(t, sent)
+}
+
+func TestRecoveryModesAndBlankAccount(t *testing.T) {
+	s := batchServer(t)
+	rec := postJSON(t, s.apiForgotPassword, `{"account":"   "}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank account: %d", rec.Code)
+	}
+	for _, mode := range []string{"hidden", "contact", "email"} {
+		s.st.SetSetting("password_recovery_mode", mode)
+		config := httptest.NewRecorder()
+		s.apiPasswordRecoveryConfig(config, httptest.NewRequest("GET", "/api/password/config", nil))
+		if !strings.Contains(config.Body.String(), `"mode":"`+mode+`"`) {
+			t.Fatal(config.Body.String())
+		}
+		if s.passwordRecoveryEnabled() != (mode == "email") {
+			t.Fatalf("unexpected mode %s", mode)
+		}
+		if mode != "email" {
+			if got := postJSON(t, s.apiForgotPassword, `{"account":"someone"}`); got.Code != http.StatusForbidden {
+				t.Fatalf("disabled recovery: %d", got.Code)
+			}
+		}
+	}
 }

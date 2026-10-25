@@ -90,7 +90,7 @@ describe('the login-protection page', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
     const body = apiMock.post.mock.calls[0][1] as Record<string, any>
     expect(body.twofa).toEqual({ totp_enroll: true, passkey_enroll: true, require_staff: false })
-    expect(body.recovery).toEqual({ enabled: true })
+    expect(body.recovery).toEqual({ enabled: true, mode: 'email' })
     expect(body.lockout).toEqual({ enabled: false, duration_min: 30, scope: 'ip_account' })
   })
 

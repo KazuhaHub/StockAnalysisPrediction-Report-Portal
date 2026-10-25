@@ -11,7 +11,7 @@ describe('what the browser tab says', () => {
   })
 
   it('leaves the home page and the signed-out pages as the site name alone', () => {
-    for (const p of ['/', '/login', '/register', '/forgot', '/reset', '/verify']) {
+    for (const p of ['/', '/login', '/register', '/forgot-password', '/forgot', '/reset', '/verify']) {
       expect(pageTitle(routeTitle(p, t), '智研平台')).toBe('智研平台')
     }
   })
@@ -53,7 +53,7 @@ const appSource = Object.values(
 
 // Routes that are deliberately just the site name: home, and the pages you see before signing in
 // where the site's name is the only useful thing to say.
-const BARE = new Set(['/', '/login', '/register', '/forgot', '/reset', '/verify'])
+const BARE = new Set(['/', '/login', '/register', '/forgot-password', '/forgot', '/reset', '/verify'])
 // Never rendered: a back-compat redirect to /manage/site.
 const REDIRECT_ONLY = new Set(['settings'])
 

@@ -146,6 +146,67 @@ These are deliberate exceptions to a single page-wide draft, not new server beha
 - The Apps market remains an explicitly fetched catalogue. Local search does not contact the
   catalogue, install an app or broaden permissions.
 
+## Follow-up: dashboard and persistent workspaces
+
+- The overview now reads queue capacity and job counts, report counts, and evaluator
+  status from existing APIs. Each source has independent loading, failure, and update-time states.
+  Foreground snapshots refresh every 60 seconds and immediately on returning to the page;
+  hidden pages pause polling. The dashboard never starts an evaluator or vendor request.
+  Icon shortcuts link directly to frequently used features.
+- Primary navigation uses expandable groups with remembered expansion state. Feature-owned OU
+  settings use a persistent scope rail between primary navigation and the content editor. Global
+  settings remain accessible if the OU directory fails; unknown OU selections remain fail-closed.
+- The console owns a fixed viewport workspace. Settings panels scroll independently at a stable
+  height, so switching from a long SSO or forecast panel to a shorter panel cannot shrink the
+  document and clamp its scroll back to the top. Mounted fields retain drafts and validation.
+- Queue, account and audit tables share local column visibility, drag ordering, resizable widths and width-fitting preferences.
+  Fit mode uses the selected columns' readable minima rather than a fixed desktop scroll width;
+  text wraps, essential identifiers and actions remain available, and preferences can be reset.
+- Navigation has small rounded items without solid submenu blocks. Scroll tracks are transparent
+  and borderless throughout the portal, with thin rounded thumbs and a Firefox fallback.
+- Verification includes 157 frontend test files / 1,660 tests, typecheck, lint, production build,
+  and an embedded binary build. Browser checks cover SAML, OIDC, alerts, scope-change draft
+  protection, and desktop/mobile navigation and content sizing.
+
+- Dashboard readiness reminders have been removed: optional disabled services are not persistent
+  tasks. Summary cards and quick-access tiles use feature icons. Navigation and headings omit
+  redundant management/settings suffixes; account, target, queue and assistant names stay consistent.
+- Desktop right-side drawers use a 12px inset and corner radius, with mobile panels retaining the
+  available screen width. Editor height now accounts for the actual save bar instead of a fixed gap.
+- The overview includes seven-day report-date trends and report category counts, excluding
+  internal pipeline artifacts. The account-status chart and idle capacity track have been removed.
+- Dashboard blocks can be dragged directly on the canvas, resized to grid widths, hidden and
+  restored. The component catalog also turns any registered management page into a standalone
+  shortcut tile. Saving stores the shared layout in the existing metadata settings table, with an
+  optimistic revision check to prevent another administrator's changes from being overwritten.
+  Hidden blocks do not request their data. Mobile layouts adapt without changing the saved widths.
+- Scrolling content has a separate gutter; summary metrics and update footers align within a row.
+  The component-editing toolbar stays available while the canvas scrolls.
+- SSO network policy is presented separately from independent SAML/OIDC forms. The current page
+  supports one provider per protocol; both may be enabled and offered together when SSO sign-in
+  is allowed. Automatic redirect remains limited to one enabled entry.
+- Overview editing actions live in the page header. The component catalog is a responsive, wide
+  modal with three-column desktop previews, clearly marked sample data, and collapsible shortcut
+  categories sourced from the shared navigation registry. Report line, column, category bar and
+  category donut widgets are available; optional variants start hidden.
+- Account rows use a compact horizontal identity cell, wider name allocation, a narrower OU rail
+  and a reduced page header. SSO network policy is its own tab; provider forms use the full
+  workspace directly without repeated card borders or headings.
+- Numeric dashboard widgets expose selectable metrics, persisted and validated as part of the
+  shared layout. Report periods include yesterday, rolling 7/30/365 days and total counts, based on
+  report dates in the panel timezone. Queue and forecast cards expose their own metric catalogs.
+- The widget catalog separates numeric cards, charts and navigation. Navigation previews mirror
+  icon shortcuts and categorized page directories, rather than sharing placeholder chips. Summary
+  cards stretch within each grid row, keeping metric baselines and footers aligned.
+- Widget sizes use compact labels with width diagrams. Both content dragging and an explicit
+  handle work; toolbar inputs isolate only their own events. Layout edits fade within the content pane, with reduced-motion support. Mode changes
+  preserve the visible content anchor; dragging freezes the full block dimensions and reflows siblings.
+- Back-to-top includes a progress ring and tracks the active page/content scroller. Navigation rails
+  and overlays do not change its target; progress is clamped and uses the actual scrollable range.
+- Full frontend and Go suites, typecheck, lint, vet and embedded builds pass. Browser checks include
+  direct canvas dragging, standalone shortcut creation, size selection, global save/reload,
+  responsive layout and independent SSO forms.
+
 ## Organizational-unit reference
 
 The interaction follows Google Workspace's [organizational structure](https://knowledge.workspace.google.com/admin/users/advanced/how-the-organizational-structure-works)

@@ -64,8 +64,10 @@ export default function LoginPage() {
   const [captchaRound, setCaptchaRound] = useState(0)
   const [account, setAccount] = useState('')
   const [canRegister, setCanRegister] = useState(false)
+  const [recoveryMode, setRecoveryMode] = useState('hidden')
 
   useEffect(() => {
+    const load = () => {
     // Empty (or failing) means SSO is off, and the login page simply shows nothing extra.
     api
       .get<{ providers: SSOProviderInfo[]; login_mode?: string; local?: boolean; sso?: boolean }>(
@@ -108,10 +110,15 @@ export default function LoginPage() {
         )
       })
       .catch(() => {})
+    api.get<{ mode: string }>('/api/password/config').then(r => setRecoveryMode(r.mode ?? 'email')).catch(() => {})
     api
       .get<{ enabled: boolean }>('/api/register/config')
       .then((r) => setCanRegister(!!r.enabled))
       .catch(() => {})
+    }
+    load()
+    window.addEventListener('rp:connection-restored', load)
+    return () => window.removeEventListener('rp:connection-restored', load)
   }, [])
 
   // Force-SSO's navigation, gated on the auth state. A visitor who already holds a session — a
@@ -146,7 +153,7 @@ export default function LoginPage() {
     } catch (e) {
       // The pending token is single-use, so a wrong code means starting over rather than
       // retrying against the same challenge.
-      setErr(errText(e, t, 'login.error'))
+      setErr(errText(e, t))
       setTotpToken('')
       setTotpCode('')
     } finally {
@@ -173,7 +180,7 @@ export default function LoginPage() {
       // A dismissed browser prompt is a change of mind, not a failure worth an error banner — and
       // it must not clear the pending token, or the user would have to type their password again.
       if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError')) return
-      setErr(errText(e, t, 'login.error'))
+      setErr(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -190,7 +197,7 @@ export default function LoginPage() {
       }
       navigate('/')
     } catch (e) {
-      setErr(errText(e, t, 'login.error'))
+      setErr(errText(e, t))
       // A challenge is consumed on use, so any refusal must re-arm the field — and a portal in
       // after-failures mode starts asking for one exactly here, on the attempt that crossed it.
       setCaptchaRound((n) => n + 1)
@@ -348,10 +355,10 @@ export default function LoginPage() {
                 )}
               </Space>
             )}
-            {!totpToken && (
+            {!totpToken && recoveryMode !== 'hidden' && (
               <div style={{ textAlign: 'center', marginTop: -8 }}>
-                <Button type="link" size="small" onClick={() => navigate('/forgot')}>
-                  {t('login.forgot')}
+                <Button type="link" size="small" onClick={() => navigate('/reset')}>
+                  {t(recoveryMode === 'contact' ? 'login.contactAdmin' : 'login.forgot')}
                 </Button>
               </div>
             )}

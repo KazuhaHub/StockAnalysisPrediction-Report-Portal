@@ -39,6 +39,7 @@ describe('ManageLayout — grouped rail', () => {
     navigate.mockReset()
     prefetched.length = 0
     localStorage.removeItem(COLLAPSE_KEY)
+    localStorage.removeItem('rp.manage.sider.open')
     vi.stubEnv('VITE_BUILD_VERSION', 'v2026.38')
   })
   afterEach(() => vi.unstubAllEnvs())
@@ -52,21 +53,26 @@ describe('ManageLayout — grouped rail', () => {
       'nav.group.batch',
       'nav.group.integrations',
     ]) {
-      expect(within(screen.getByRole('menu')).getByText(header)).toBeTruthy()
+      expect(within(screen.getAllByRole('menu')[0]).getByText(header)).toBeTruthy()
     }
     expect(screen.queryByText('nav.group.maintenance')).toBeNull()
   })
 
   it('exposes the pages that used to be buried under Settings; legacy import is gone', () => {
     render(<ManageLayout />)
-    for (const leaf of ['settings.general', 'nav.announcement', 'settings.tokens', 'settings.apidoc']) {
-      expect(within(screen.getByRole('menu')).getByText(leaf)).toBeTruthy()
-    }
+    fireEvent.click(screen.getByText('nav.group.access'))
+    fireEvent.click(screen.getByText('nav.group.integrations'))
+    expect(screen.getByText('settings.apidoc')).toBeTruthy()
+    fireEvent.click(screen.getByText('nav.group.access'))
+    expect(screen.getByText('settings.tokens')).toBeTruthy()
+    fireEvent.click(within(screen.getAllByRole('menu')[0]).getByText('nav.group.site'))
+    for (const leaf of ['settings.general', 'nav.announcement']) expect(within(screen.getAllByRole('menu')[0]).getByText(leaf)).toBeTruthy()
     expect(screen.queryByText('settings.legacyTab')).toBeNull()
   })
 
   it('navigates to the sub-route when a menu item is clicked', () => {
     render(<ManageLayout />)
+    fireEvent.click(screen.getByText('nav.group.integrations'))
     fireEvent.click(screen.getByText('nav.webhooks'))
     expect(navigate).toHaveBeenCalledWith('/manage/webhooks')
   })
@@ -88,6 +94,7 @@ describe('ManageLayout — grouped rail', () => {
 
   it('has a 预测验证 entry in the content group', () => {
     render(<ManageLayout />)
+    fireEvent.click(screen.getByText('nav.group.content'))
     expect(screen.getByText('nav.forecast')).toBeTruthy()
     fireEvent.click(screen.getByText('nav.forecast'))
     expect(navigate).toHaveBeenCalledWith('/manage/forecast')
@@ -98,6 +105,7 @@ describe('ManageLayout — grouped rail', () => {
   // because a pointer crossed a menu label is exactly the kind of work a hover must never begin.
   it('warms only the settings GET when the forecast entry is hovered', () => {
     render(<ManageLayout />)
+    fireEvent.click(screen.getByText('nav.group.content'))
     fireEvent.mouseEnter(screen.getByText('nav.forecast'))
     expect(prefetched).toContain('/api/admin/forecast')
     expect(prefetched.filter((u) => u.includes('forecast'))).toEqual(['/api/admin/forecast'])
@@ -114,6 +122,9 @@ describe('ManageLayout — grouped rail', () => {
         quotes: 'nav.quoteAdmin',
         forecast: 'nav.forecast',
       }
+      const section = key === 'storage' || key === 'quotes' ? 'system' : key === 'batch' ? 'batch' : 'content'
+      const heading = screen.getByText(`nav.group.${section}`).closest('[role=menuitem]')!
+      if (heading.getAttribute('aria-expanded') !== 'true') fireEvent.click(screen.getByText(`nav.group.${section}`))
       fireEvent.mouseEnter(screen.getByText(labels[key]))
     }
     expect(prefetched.some((u) => u.includes('/cleanup/usage'))).toBe(false)
@@ -125,6 +136,20 @@ describe('ManageLayout — grouped rail', () => {
     expect(localStorage.getItem(COLLAPSE_KEY)).toBeNull()
     fireEvent.click(screen.getByText('nav.collapse'))
     expect(localStorage.getItem(COLLAPSE_KEY)).toBe('1')
+  })
+
+  it('opens one branch at a time and remembers the selected branch', () => {
+    render(<ManageLayout />)
+    const site = within(screen.getAllByRole('menu')[0]).getByText('nav.group.site').closest('[role=menuitem]')!
+    expect(site.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(screen.getByText('nav.group.integrations'))
+    expect(site.getAttribute('aria-expanded')).toBe('false')
+    expect(JSON.parse(localStorage.getItem('rp.manage.sider.open')!)).toEqual(['group.integrations'])
+    fireEvent.click(within(screen.getAllByRole('menu')[0]).getByText('nav.group.site'))
+    expect(site.getAttribute('aria-expanded')).toBe('true')
+    expect(JSON.parse(localStorage.getItem('rp.manage.sider.open')!)).toEqual(['group.site'])
+    fireEvent.click(within(screen.getAllByRole('menu')[0]).getByText('nav.group.site'))
+    expect(JSON.parse(localStorage.getItem('rp.manage.sider.open')!)).toEqual([])
   })
 
   // The console shows the same version label as the portal footer, and it is the loaded build's —

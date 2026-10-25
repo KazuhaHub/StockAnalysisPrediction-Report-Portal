@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import {
   ApiOutlined, AppstoreAddOutlined, AuditOutlined, BranchesOutlined, ControlOutlined,
   DatabaseOutlined, FileTextOutlined, FundProjectionScreenOutlined, GlobalOutlined,
-  IdcardOutlined, KeyOutlined, LineChartOutlined, LinkOutlined, LockOutlined, MailOutlined,
+  LoginOutlined, KeyOutlined, LineChartOutlined, LinkOutlined, LockOutlined, MailOutlined,
   MessageOutlined, NotificationOutlined, PlayCircleOutlined, SlidersOutlined, TagsOutlined, TeamOutlined,
 } from '@ant-design/icons'
 
@@ -28,15 +28,15 @@ export const ADMIN_GROUPS: { key: string; label: string; pages: AdminPage[] }[] 
   ] },
   { key: 'access', label: 'nav.group.access', pages: [
     { key: 'users', label: 'nav.users', icon: <TeamOutlined />, warm: '/api/admin/users', related: ['sso', 'security', 'versions'] },
-    { key: 'sso', label: 'nav.sso', icon: <IdcardOutlined />, warm: '/api/admin/sso/providers', related: ['users', 'security', 'site'] },
+    { key: 'sso', label: 'nav.sso', icon: <LoginOutlined />, warm: '/api/admin/sso/providers', related: ['users', 'security', 'site'] },
     { key: 'security', label: 'nav.security', icon: <LockOutlined />, warm: '/api/admin/security', related: ['sso', 'users', 'email'] },
     { key: 'tokens', label: 'settings.tokens', icon: <KeyOutlined />, warm: '/api/admin/tokens', related: ['apidoc', 'notifications', 'audit'] },
   ] },
   { key: 'batch', label: 'nav.group.batch', pages: [
     { key: 'batch', label: 'nav.batchAdmin', icon: <PlayCircleOutlined />, warm: '/api/admin/batch/targets', related: ['runqueue', 'rundefaults', 'users'] },
-    { key: 'runqueue', label: 'nav.runQueue', icon: <ControlOutlined />, warm: '/api/admin/batch/config', related: ['users', 'rundefaults', 'batch'] },
+    { key: 'runqueue', label: 'manage.label.runqueue', icon: <ControlOutlined />, warm: '/api/admin/batch/config', related: ['users', 'rundefaults', 'batch'] },
     { key: 'rundefaults', label: 'nav.runDefaults', icon: <SlidersOutlined />, warm: '/api/admin/batch/config', related: ['batch', 'runqueue', 'notifications'] },
-    { key: 'assistant', label: 'nav.chat', icon: <MessageOutlined />, warm: '/api/admin/chat/config', related: ['batch', 'users'] },
+    { key: 'assistant', label: 'manage.label.assistant', icon: <MessageOutlined />, warm: '/api/admin/chat/config', related: ['batch', 'users'] },
   ] },
   { key: 'integrations', label: 'nav.group.integrations', pages: [
     { key: 'apps', label: 'nav.appsAdmin', icon: <AppstoreAddOutlined />, related: ['links', 'tokens', 'apidoc'] },

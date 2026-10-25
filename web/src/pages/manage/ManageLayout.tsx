@@ -1,5 +1,5 @@
-import { Suspense, useEffect, useState } from 'react'
-import { Button, Drawer, Menu, Space, Spin, Typography, theme } from 'antd'
+import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Button, ConfigProvider, Drawer, Menu, Space, Spin, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import { HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
@@ -10,6 +10,7 @@ import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
+const OPEN_KEY = 'rp.manage.sider.open'
 const NARROW_QUERY = '(max-width: 767px)'
 const HEADER_VAR = 'var(--rp-header-h, 64px)'
 
@@ -28,6 +29,23 @@ export default function ManageLayout() {
   const page = adminPage(active)
   const group = ADMIN_GROUPS.find((entry) => entry.pages.some((item) => item.key === active))
   const activeLabel = page ? t(page.label) : t('manage.overview')
+  const [openKeys, setOpenKeys] = useState<string[]>(() => {
+    if (group) return [`group.${group.key}`]
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(OPEN_KEY) || 'null')
+      if (Array.isArray(stored)) return stored.filter((key): key is string => ADMIN_GROUPS.some(section => `group.${section.key}` === key)).slice(-1)
+    } catch { /* Storage is optional. */ }
+    return []
+  })
+  const rememberOpen = useCallback((keys: string[]) => {
+    setOpenKeys(keys)
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify(keys)) } catch { /* Storage is optional. */ }
+  }, [])
+  useEffect(() => {
+    if (group) {
+      rememberOpen([`group.${group.key}`])
+    }
+  }, [group, rememberOpen])
 
   useEffect(() => {
     const mq = window.matchMedia(NARROW_QUERY)
@@ -46,9 +64,9 @@ export default function ManageLayout() {
   const menuItems: MenuProps['items'] = [
     { key: 'overview', label: t('manage.overview'), icon: <HomeOutlined /> },
     ...ADMIN_GROUPS.map((section) => ({
-      type: 'group' as const,
-      key: section.key,
+      key: `group.${section.key}`,
       label: t(section.label),
+      icon: section.pages[0].icon,
       children: section.pages.map((entry) => ({
         key: entry.key, label: t(entry.label), icon: entry.icon,
         // Only cheap page-defining requests belong here, never statistics or market fetches.
@@ -56,9 +74,18 @@ export default function ManageLayout() {
       })),
     })),
   ]
-  const menu = <Menu mode="inline" inlineCollapsed={railCollapsed} selectedKeys={[active]}
-    items={menuItems} onClick={({ key }) => go(`/manage/${key}`)}
-    style={{ border: 'none', background: 'transparent' }} />
+  const menu = <ConfigProvider theme={{ components: { Menu: {
+    itemBg: 'transparent', subMenuItemBg: 'transparent', popupBg: token.colorBgContainer,
+    itemBorderRadius: 8,
+    itemSelectedBg: token.colorFillSecondary, itemSelectedColor: token.colorText,
+    subMenuItemSelectedColor: token.colorText, itemHoverBg: token.colorFillQuaternary,
+  } } }}><Menu className="rp-admin-menu" mode="inline" inlineCollapsed={railCollapsed} selectedKeys={[active]}
+    openKeys={railCollapsed ? undefined : openKeys} onOpenChange={(keys) => {
+      const opened = keys.find(key => !openKeys.includes(key))
+      rememberOpen(opened ? [opened] : keys)
+    }}
+    items={menuItems} onClick={({ key }) => { if (key === 'overview') rememberOpen([]); go(`/manage/${key}`) }}
+    style={{ border: 'none', background: 'transparent' }} /></ConfigProvider>
 
   const searchButton = (
     <Button icon={<SearchOutlined />} aria-label={t('manage.search')} onClick={() => setSearchOpen(true)}
@@ -77,6 +104,7 @@ export default function ManageLayout() {
           {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
         </Typography.Paragraph>
       </div>
+      {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
       {page && (
         <nav aria-label={t('manage.related')} className="rp-admin-related">
           <Typography.Text type="secondary">{t('manage.related')}</Typography.Text>
@@ -91,21 +119,23 @@ export default function ManageLayout() {
     </header>
   )
   const content = (
-    <div className="rp-admin-content" id="rp-admin-content">
+    <div className={`rp-admin-content${active === 'users' ? ' rp-admin-content--directory' : ''}`} id="rp-admin-content">
       {header}
+      <div className="rp-admin-page-body" key={loc.pathname}>
       <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
         <Outlet />
       </Suspense>
+      </div>
     </div>
   )
 
   return (
     <div className={`rp-admin-shell${narrow ? ' rp-admin-shell--narrow' : ''}`}
-      style={{ minHeight: `calc(100dvh - ${HEADER_VAR})`, background: token.colorBgContainer }}>
+      style={{ height: `calc(100dvh - ${HEADER_VAR})`, background: token.colorBgContainer }}>
       <AdminSearch open={searchOpen} onClose={() => setSearchOpen(false)} onNavigate={go} />
       {narrow ? (
         <>
-          <div className="rp-admin-mobile-bar" style={{ top: HEADER_VAR, background: token.colorBgContainer }}>
+          <div className="rp-admin-mobile-bar" style={{ background: token.colorBgContainer }}>
             <Button icon={<MenuUnfoldOutlined />} aria-label={t('nav.manage')} onClick={() => setDrawerOpen(true)}>{activeLabel}</Button>
             {searchButton}
           </div>
@@ -115,7 +145,7 @@ export default function ManageLayout() {
       ) : (
         <aside className="rp-admin-rail" aria-label={t('nav.manage')}
           style={{ flexBasis: collapsed ? 80 : 236, width: collapsed ? 80 : 236,
-            top: HEADER_VAR, height: `calc(100dvh - ${HEADER_VAR})` }}>
+            height: `calc(100dvh - ${HEADER_VAR})` }}>
           <div className="rp-admin-rail__search">{searchButton}</div>
           <div className="rp-admin-rail__menu">{menu}</div>
           <div className="rp-admin-rail__footer" style={{ justifyContent: collapsed ? 'center' : 'space-between' }}>

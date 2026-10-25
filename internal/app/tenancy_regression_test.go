@@ -223,6 +223,7 @@ func TestRecoveryCodeSurvivesConcurrentUse(t *testing.T) {
 // one would hand it a password the SSO login path then refuses anyway.
 func TestPasswordResetSkipsFederatedAccounts(t *testing.T) {
 	s := tenancyServer(t)
+	sent := enableEmail(s)
 	s.st.UpsertUser(User{Username: "ext", PasswordHash: "h", Role: "user", Email: "ext@acme.test"})
 	s.st.SetUserSource("ext", "jit", "acme")
 	u := s.st.GetUser("ext")
@@ -239,4 +240,5 @@ func TestPasswordResetSkipsFederatedAccounts(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("the response must stay a constant 200 so accounts cannot be enumerated, got %d", rec.Code)
 	}
+	wantNoEmail(t, sent)
 }

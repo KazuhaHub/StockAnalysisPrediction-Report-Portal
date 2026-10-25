@@ -46,12 +46,12 @@ describe('ForgotPage', () => {
   beforeEach(() => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()
-    apiMock.get.mockResolvedValue({
+    apiMock.get.mockImplementation((url: string) => Promise.resolve(url === '/api/password/config' ? { mode: 'email' } : {
       required: true,
       provider: 'image',
       captcha_id: 'c1',
       image: 'data:image/png;base64,x',
-    })
+    }))
     apiMock.post.mockResolvedValue({ ok: true })
   })
 
@@ -92,10 +92,36 @@ describe('ForgotPage', () => {
     await waitFor(() => expect(apiMock.get.mock.calls.length).toBeGreaterThan(1))
   })
 
-  it('still reports sent when the failure could reveal whether the account exists', async () => {
+  it('shows a server failure instead of claiming that an email was sent', async () => {
     renderPage()
     apiMock.post.mockRejectedValueOnce(new FakeApiError(500, 'boom'))
     await fill('4271')
-    expect(await screen.findByText('login.forgotSent')).toBeTruthy()
+    expect(await screen.findByText('common.error')).toBeTruthy()
+    expect(screen.queryByText('login.forgotSent')).toBeNull()
   })
+})
+
+it('rejects a blank or whitespace account before sending', async () => {
+  renderPage()
+  const input = await screen.findByPlaceholderText('login.forgotAccount')
+  fireEvent.change(input, { target: { value: '   ' } })
+  fireEvent.click(screen.getByText('login.forgotSend'))
+  expect(await screen.findByText('login.forgotRequired')).toBeTruthy()
+  expect(apiMock.post).not.toHaveBeenCalled()
+})
+
+it('shows a contact notice instead of a form when self-service recovery is disabled', async () => {
+  apiMock.get.mockResolvedValue({ mode: 'contact' })
+  renderPage()
+  expect(await screen.findByText('login.recoveryContact')).toBeTruthy()
+  expect(screen.queryByText('login.forgotSend')).toBeNull()
+})
+
+it('reloads recovery configuration after an initial connection failure', async () => {
+  apiMock.get.mockImplementation((url: string) => url === '/api/password/config' ? Promise.reject(new Error('offline')) : Promise.resolve({required:false}))
+  renderPage()
+  expect(await screen.findByText('common.error')).toBeTruthy()
+  apiMock.get.mockResolvedValue({mode:'email',required:false})
+  window.dispatchEvent(new Event('rp:connection-restored'))
+  expect(await screen.findByPlaceholderText('login.forgotAccount')).toBeTruthy()
 })
