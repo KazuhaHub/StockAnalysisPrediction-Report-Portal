@@ -10,7 +10,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | --- | --- | --- |
 | P00 | In progress | Source inventory and compatibility map complete; detailed runtime/trust decisions and physical storage approval remain |
 | P01 | Not started | Whole-flow shell/market/install prototypes and visible acceptance required |
-| P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; generated schemas, compatibility evaluator, signature policy and package inspector remain |
+| P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; bounded protocol/runtime compatibility evaluation implemented; generated schemas, signature policy and package inspector remain |
 | P03..P14 | Not started | Follow dependencies and approval gates; no durable schema, runner or production operation is implied by P02 |
 
 ## First contract implementation
@@ -85,8 +85,11 @@ on main. Implementation still requires its own review and exact-source CI.
 ## Next steps
 
 1. Add the v2 generated JSON Schema and expand shared Go/TypeScript refusal cases.
-2. Add the bounded compatibility evaluator and select/review publisher signature
-   verification with common vectors; keep parsing separate from admission.
+2. Select/review publisher signature verification with common vectors; keep
+   declaration parsing and compatibility separate from admission. The bounded
+   [compatibility evaluator](11-compatibility-contract.md) now checks semantic
+   protocol ranges, runtime availability, architecture and backend protocol.
+   It does not grant execution authority; SDK-side compatibility parity remains.
 3. Build the P01 whole-flow prototype against fake typed installation states.
 4. Prepare the concrete D2 storage specification for owner review before any DDL
    or runner journal implementation. Earlier Status schema approval does not apply.
