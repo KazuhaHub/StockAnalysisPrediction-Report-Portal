@@ -16,3 +16,5 @@ web/src/lib/bridge-v2.test.ts text eol=lf
 internal/appplatform/testdata/publisher-signatures.json text eol=lf
 internal/appplatform/contract/publisher-signature-v1.schema.json text eol=lf
 scripts/generate_publisher_signature_vectors.mjs text eol=lf
+internal/apprunner/control/testdata/commands.json text eol=lf
+scripts/generate_runner_command_vectors.mjs text eol=lf

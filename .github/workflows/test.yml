@@ -371,6 +371,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Publisher signature fixture reproducibility
         run: node scripts/generate_publisher_signature_vectors.mjs --check
+      - name: Runner command fixture reproducibility
+        run: node scripts/generate_runner_command_vectors.mjs --check
       - name: Install deps
         working-directory: web
         run: npm ci
