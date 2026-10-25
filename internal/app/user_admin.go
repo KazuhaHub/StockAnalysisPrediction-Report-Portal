@@ -231,6 +231,11 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	} else {
 		target = defaultID
 	}
+	platformImpacts, err := appPlatformPrincipalImpacts(owned, "", id)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	if target != 0 {
 		res, err := tx.Exec(s.bind(`UPDATE prediction_sets SET attributed_ou=? WHERE attributed_ou=?`), target, id)
 		if err != nil {
@@ -289,6 +294,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	if _, err := tx.Exec(s.bind(`DELETE FROM user_groups WHERE id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	if err := invalidateAppPlatformPrincipal(owned, platformImpacts); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
