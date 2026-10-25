@@ -7,10 +7,10 @@ import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import type { BatchQueueSummary, ForecastSettings } from '../../api/types'
 import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
-import { ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
+import { MetricChart, ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import DashboardLayoutEditor from './DashboardLayoutEditor'
-import { dashboardChartType, defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
+import { dashboardBlockKind, dashboardChartType, defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
 function useSnapshot<T>(url: string, revision: number, enabled = true) {
@@ -44,7 +44,7 @@ export default function AdminOverviewPage() {
     return () => { cancelled = true }
   }, [revision]) // eslint-disable-line react-hooks/exhaustive-deps
   const blocks = previewBlocks ?? layout?.blocks ?? []
-  const selected = (ids: string[]) => !!layout && blocks.some((block) => block.visible && ids.includes(block.id))
+  const selected = (ids: string[]) => !!layout && blocks.some((block) => block.visible && ids.includes(dashboardBlockKind(block.id)))
   const queue = useSnapshot<BatchQueueSummary>('/api/admin/batch/queue', revision, selected(['queue']))
   const reports = useSnapshot<ReportOverview>('/api/admin/reports/overview', revision, selected(['reports', 'trend', 'kinds', 'report-bars', 'report-donut']))
   const forecast = useSnapshot<ForecastSettings>('/api/admin/forecast', revision, selected(['forecast']))
@@ -80,7 +80,10 @@ export default function AdminOverviewPage() {
     const snapshot = block.id === 'reports' ? reports : block.id === 'queue' ? queue : forecast
     const data = snapshot.data as unknown as Record<string, number> | undefined
     const keys = block.metrics ?? DEFAULT_METRICS[block.id]
-    const metrics = <div className="rp-dashboard-metrics">{keys.map((key) => {
+    const metrics = block.display && block.display !== 'numbers' ? <MetricChart display={block.display} metrics={keys.flatMap(key => {
+      const definition = DASHBOARD_METRICS[block.id].find(item => item.key === key)
+      return definition && typeof data?.[key] === 'number' ? [{key, label:t(`manage.dashboard.${definition.label}`), count:data[key]}] : []
+    })} /> : <div className="rp-dashboard-metrics">{keys.map((key) => {
       const definition = DASHBOARD_METRICS[block.id].find((item) => item.key === key)
       return definition && <Statistic key={key} title={t(`manage.dashboard.${definition.label}`)} value={data?.[key] ?? '—'} />
     })}</div>
@@ -110,7 +113,8 @@ export default function AdminOverviewPage() {
   }
   return <div className="rp-dashboard">
     <DashboardLayoutEditor layout={layout} error={layoutError} onSaved={setLayout} onPreview={setPreviewBlocks}
-      renderBlock={(block) => {
+      renderBlock={(instance) => {
+        const block = {...instance, id: dashboardBlockKind(instance.id)}
         if (DASHBOARD_METRICS[block.id]) return renderMetrics(block)
         if (isDashboardChart(block.id)) {
           const config = block.chart ?? defaultDashboardChart()

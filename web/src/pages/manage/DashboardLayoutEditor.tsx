@@ -12,7 +12,7 @@ import { usePendingSettings } from './AdminDraftBoundary'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import { animateDashboardChange, animateDashboardModeChange } from './dashboardMotion'
 import { dashboardCollision, snapshotDashboardWidget } from './dashboardDrag'
-import { dashboardChartType, dashboardChartTypes, defaultDashboardChart, isDashboardChart, dashboardBlockLabel, dashboardBlockCategory, dashboardCatalog, defaultDashboardBlocks, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
+import { newDashboardInstanceID, dashboardBlockKind, dashboardChartType, dashboardChartTypes, defaultDashboardChart, isDashboardChart, dashboardBlockLabel, dashboardBlockCategory, dashboardCatalog, defaultDashboardBlocks, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 
 function SizeLabel({ width }: { width: DashboardBlock['width'] }) {
   const { t } = useTranslation()
@@ -30,7 +30,7 @@ function Widget({ block, editing, renderBlock, onResize, onRemove, onMetrics, dr
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging, isOver } = useSortable({ id: block.id, disabled: !editing })
   return <div ref={setNodeRef} {...(editing ? attributes : {})} {...(editing ? listeners : {})}
     role={editing ? 'group' : undefined} aria-label={editing ? t('manage.dashboard.moveBlock', { name }) : undefined}
-    className={`rp-dashboard-block rp-dashboard-width-${block.width} ${['reports', 'queue', 'forecast'].includes(block.id) ? 'rp-dashboard-summary' : ''} ${editing ? 'rp-dashboard-editable' : ''} ${isOver ? 'rp-dashboard-drop-target' : ''}`}
+    className={`rp-dashboard-block rp-dashboard-width-${block.width} ${['reports', 'queue', 'forecast'].includes(dashboardBlockKind(block.id)) ? 'rp-dashboard-summary' : ''} ${editing ? 'rp-dashboard-editable' : ''} ${isOver ? 'rp-dashboard-drop-target' : ''}`}
     data-dashboard-block={block.id} style={{ gridColumn: `span ${block.width}`, height: isDragging ? dragHeight : undefined, opacity: isDragging ? 0.3 : 1 } as React.CSSProperties}>
     {editing && <div className="rp-dashboard-widget-tools">
       <Button type="text" size="small" ref={setActivatorNodeRef} icon={<HolderOutlined />} {...attributes} {...listeners}
@@ -43,7 +43,7 @@ function Widget({ block, editing, renderBlock, onResize, onRemove, onMetrics, dr
         ...(block.id.startsWith('shortcut:') ? [{ value: 1, label: <SizeLabel width={1} /> }] : []),
         { value: 2, label: <SizeLabel width={2} /> }, { value: 3, label: <SizeLabel width={3} /> }, { value: 6, label: <SizeLabel width={6} /> },
       ]} />
-      {(DASHBOARD_METRICS[block.id] || isDashboardChart(block.id)) && <Button size="small" icon={<MoreOutlined />} title={customizeLabel} aria-label={customizeLabel} onClick={onMetrics} />}
+      {(DASHBOARD_METRICS[dashboardBlockKind(block.id)] || isDashboardChart(block.id)) && <Button size="small" icon={<MoreOutlined />} title={customizeLabel} aria-label={customizeLabel} onClick={onMetrics} />}
       <Button type="text" size="small" icon={<CloseOutlined />} aria-label={t('manage.dashboard.removeBlock', { name })} onClick={onRemove} />
       </div>
     </div>}
@@ -97,7 +97,7 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
   const [addedId, setAddedId] = useState<string | null>(null)
   const editing = base !== null
   const blocks = editing ? draft : layout?.blocks ?? defaultDashboardBlocks()
-  const visible = blocks.filter((block) => block.visible && dashboardCatalog().some((item) => item.id === block.id))
+  const visible = blocks.filter((block) => block.visible && dashboardCatalog().some((item) => item.id === dashboardBlockKind(block.id)))
   const dirty = editing && JSON.stringify(draft) !== JSON.stringify(base.blocks)
   usePendingSettings(dirty, saving)
   useEffect(() => { onPreview(editing ? draft : null) }, [draft, editing, onPreview])
@@ -125,6 +125,17 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
     try { const next = await api.put<DashboardLayout>('/api/admin/dashboard/layout', { blocks: draft, revision: base.revision }); onSaved(next); stop() }
     catch (e) { setSaveError(errText(e, t)) }
     finally { setSaving(false) }
+  }
+  const canAdd = (kind: string) => draft.length < 64 || draft.some(block => dashboardBlockKind(block.id) === kind && !block.visible)
+  const addBlock = (kind: string, width: DashboardBlock['width']) => {
+    if (!canAdd(kind)) return
+    const hidden = draft.find(block => dashboardBlockKind(block.id) === kind && !block.visible)
+    const id = hidden?.id ?? (draft.some(block => dashboardBlockKind(block.id) === kind) ? newDashboardInstanceID(kind) : kind)
+    animateDashboardChange(() => {
+      setDraft(previous => [...previous.filter(block => block.id !== id), {...hidden, id, width:hidden?.width ?? width, visible:true}])
+      setAddedId(id)
+      setPalette(false)
+    })
   }
   const blockName = (id: string | number) => t(dashboardBlockLabel(String(id)))
   return <>
@@ -190,7 +201,7 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
       {chartBlock && (() => {
         const config = draft.find(b => b.id === chartBlock)?.chart ?? defaultDashboardChart()
         const update = (change: Partial<typeof config>) => setDraft(previous => previous.map(b => b.id === chartBlock ? { ...b, chart: { ...config, ...change } } : b))
-        const series = chartBlock === 'trend' || chartBlock === 'report-bars'
+        const series = dashboardBlockKind(chartBlock) === 'trend' || dashboardBlockKind(chartBlock) === 'report-bars'
         return <Space orientation="vertical" size={18} style={{ width: '100%' }}>
           <Typography.Text type="secondary">{t('manage.dashboard.chartOptionsHint')}</Typography.Text>
           <div className="rp-dashboard-chart-field"><Typography.Text>{t('manage.dashboard.chartType')}</Typography.Text><Select aria-label={t('manage.dashboard.chartType')} value={dashboardChartType(chartBlock, config)} style={{ width: '100%' }} onChange={type => update({type})} options={dashboardChartTypes(chartBlock).map(value => ({ value, label: t(`manage.dashboard.chartType.${value}`) }))} /></div>
@@ -204,33 +215,30 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
         </Space>
       })()}
     </Modal>
-    <Modal open={!!metricBlock} title={t('manage.dashboard.metricPickerTitle')} onCancel={() => setMetricBlock(null)} footer={<Button type="primary" onClick={() => setMetricBlock(null)}>{t('common.done')}</Button>}>
-      <Typography.Paragraph type="secondary">{t('manage.dashboard.metricPickerHint')}</Typography.Paragraph>
-      <Space orientation="vertical" style={{ width: '100%' }}>{metricBlock && DASHBOARD_METRICS[metricBlock].map((definition) => {
-        const chosen = draft.find((block) => block.id === metricBlock)?.metrics ?? DEFAULT_METRICS[metricBlock]
+    <Modal open={!!metricBlock} title={t('manage.dashboard.blockOptions')} onCancel={() => setMetricBlock(null)} footer={<Button type="primary" onClick={() => setMetricBlock(null)}>{t('common.done')}</Button>}>
+      <Typography.Paragraph type="secondary">{t('manage.dashboard.blockOptionsHint')}</Typography.Paragraph>
+      {metricBlock && <div className="rp-dashboard-chart-field" style={{ marginBottom: 18 }}><Typography.Text>{t('manage.dashboard.chartType')}</Typography.Text><Select aria-label={t('manage.dashboard.chartType')} value={draft.find(b => b.id === metricBlock)?.display ?? 'numbers'} options={(['numbers','bar','column'] as const).map(value => ({value, label:t(`manage.dashboard.chartType.${value}`)}))} onChange={display => setDraft(previous => previous.map(b => b.id === metricBlock ? {...b, display} : b))} /></div>}
+      <Typography.Paragraph>{t('manage.dashboard.metricPickerTitle')}</Typography.Paragraph>
+      <Space orientation="vertical" style={{ width: '100%' }}>{metricBlock && DASHBOARD_METRICS[dashboardBlockKind(metricBlock)].map((definition) => {
+        const chosen = draft.find((block) => block.id === metricBlock)?.metrics ?? DEFAULT_METRICS[dashboardBlockKind(metricBlock)]
         return <Checkbox key={definition.key} checked={chosen.includes(definition.key)} disabled={chosen.length === 1 && chosen.includes(definition.key)} onChange={(event) => {
           animateDashboardChange(() => setDraft((previous) => previous.map((block) => block.id === metricBlock ? { ...block, metrics: event.target.checked ? [...chosen, definition.key] : chosen.filter((key) => key !== definition.key) } : block)))
         }}>{t(`manage.dashboard.${definition.label}`)}</Checkbox>
       })}</Space>
     </Modal>
     <Modal open={palette} title={t('manage.dashboard.addBlock')} onCancel={() => setPalette(false)} footer={null} width="min(1200px, calc(100vw - 48px))" centered className="rp-dashboard-catalog-modal" styles={{ body: { maxHeight: 'calc(100dvh - 180px)', overflow: 'auto', paddingInlineEnd: 12 } }}>
+      <Typography.Paragraph type="secondary">{t('manage.dashboard.repeatHint')}</Typography.Paragraph>
       <Input.Search aria-label={t('manage.dashboard.findBlock')} placeholder={t('manage.dashboard.findBlock')} value={search} onChange={(event) => setSearch(event.target.value)} />
       <Collapse className="rp-dashboard-palette-groups" items={[
         ...(['metrics','charts','features'] as const).map((category) => ({ key: category, label: t(`manage.dashboard.category.${category}`), children: <div className="rp-dashboard-preview-grid">{dashboardCatalog().filter((item) => !item.id.startsWith('shortcut:') && dashboardBlockCategory(item.id) === category && t(item.label).toLocaleLowerCase().includes(search.toLocaleLowerCase())).sort((a, b) => Number(!['trend','kinds','report-bars','report-donut'].includes(a.id)) - Number(!['trend','kinds','report-bars','report-donut'].includes(b.id))).map((item) => {
-          const added = draft.some((block) => block.id === item.id && block.visible)
           return <div className="rp-dashboard-catalog-card" key={item.id}>
             <DashboardWidgetPreview id={item.id} />
-            <Button block disabled={added} icon={<PlusOutlined />} onClick={() => {
-              animateDashboardChange(() => { setDraft((previous) => [...previous.filter((block) => block.id !== item.id), { ...previous.find((block) => block.id === item.id), id: item.id, width: previous.find((block) => block.id === item.id)?.width ?? item.width, visible: true }]); setAddedId(item.id); setPalette(false) })
-            }}>{t(item.label)}{added && ` · ${t('manage.dashboard.added')}`}</Button>
+            <Button block disabled={!canAdd(item.id)} icon={<PlusOutlined />} onClick={() => addBlock(item.id, item.width)}>{t(item.label)}</Button>
           </div>
         })}</div> })),
         ...ADMIN_GROUPS.filter((group) => !search || group.pages.some((page) => t(page.label).toLocaleLowerCase().includes(search.toLocaleLowerCase()))).map((group) => ({ key: group.key, label: `${t('manage.dashboard.shortcutBlocks')} · ${t(group.label)}`, children: <div className="rp-dashboard-shortcut-options">{group.pages.filter((page) => t(page.label).toLocaleLowerCase().includes(search.toLocaleLowerCase())).map((page) => {
           const id = `shortcut:${page.key}`
-          const added = draft.some((block) => block.id === id && block.visible)
-          return <Button key={id} disabled={added} icon={page.icon} onClick={() => {
-            animateDashboardChange(() => { setDraft((previous) => [...previous.filter((block) => block.id !== id), { ...previous.find((block) => block.id === id), id, width: previous.find((block) => block.id === id)?.width ?? 1, visible: true }]); setAddedId(id); setPalette(false) })
-          }}>{t(page.label)}{added && ` · ${t('manage.dashboard.added')}`}</Button>
+          return <Button key={id} disabled={!canAdd(id)} icon={page.icon} onClick={() => addBlock(id, 1)}>{t(page.label)}</Button>
         })}</div> })),
       ]} activeKey={search ? ['metrics','charts','features', ...ADMIN_GROUPS.map((group) => group.key)] : paletteGroups} onChange={(keys) => setPaletteGroups(Array.isArray(keys) ? keys : [keys])} />
     </Modal>

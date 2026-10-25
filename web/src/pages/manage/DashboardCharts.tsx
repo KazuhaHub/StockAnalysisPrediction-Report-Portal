@@ -127,3 +127,27 @@ export function ReportDonut({ kinds, config = defaultDashboardChart() }: { kinds
     {!total && <text x="239" y={center}>{t('manage.dashboard.noReports')}</text>}
   </svg><figcaption><Typography.Text type="secondary">{t('manage.dashboard.reportKindsHint')}</Typography.Text></figcaption></figure>
 }
+
+export function MetricChart({ metrics, display }: { metrics: { key: string; label: string; count: number }[]; display: 'bar' | 'column' }) {
+  const { t } = useTranslation()
+  const maximum = Math.max(1, ...metrics.map(item => item.count))
+  const horizontal = display === 'bar'
+  const height = Math.max(210, horizontal ? metrics.length * 30 + 20 : 210)
+  const top = (height - metrics.length * 30) / 2
+  return <figure className="rp-dashboard-chart"><svg viewBox={`0 0 480 ${height}`} role="img" aria-label={t('manage.dashboard.metricComparison')}>
+    <title>{metrics.map(item => `${item.label}: ${item.count}`).join(', ')}</title>
+    {metrics.map((item, index) => {
+      const step = 420 / Math.max(1, metrics.length)
+      const x = horizontal ? 170 : 30 + step * index
+      const y = horizontal ? top + index * 30 : 160 - item.count / maximum * 128
+      const width = horizontal ? item.count / maximum * 245 : Math.min(60, step * 0.65)
+      const markHeight = horizontal ? 20 : item.count / maximum * 128
+      return <ChartDatum key={item.key} label={item.label} count={item.count}>
+        <rect x={x} y={horizontal ? y : Math.min(y,148)} width={Math.max(12,width)} height={Math.max(12,markHeight)} fill="transparent" />
+        <rect className="rp-chart-mark" x={x} y={y} width={width} height={markHeight} rx="4" fill="var(--ant-color-primary)" />
+        <text x={horizontal ? 156 : x+width/2} y={horizontal ? y+15 : 188} textAnchor={horizontal ? 'end' : 'middle'}>{item.label.length > (horizontal ? 16 : 10) ? `${item.label.slice(0,horizontal ? 15 : 9)}…` : item.label}</text>
+        <text className="rp-chart-value" x={horizontal ? x+width+8 : x+width/2} y={horizontal ? y+15 : y-10} textAnchor={horizontal ? 'start' : 'middle'}>{item.count}</text>
+      </ChartDatum>
+    })}
+  </svg></figure>
+}

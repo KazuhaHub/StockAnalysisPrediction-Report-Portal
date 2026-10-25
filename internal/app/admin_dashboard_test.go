@@ -135,3 +135,31 @@ func TestDashboardChartTypeCompatibility(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardInstancesRetainIndependentOptions(t *testing.T) {
+	s := userAdminServer(t)
+	in := normalizedDashboard("")
+	in.Blocks = append(in.Blocks,
+		dashboardBlock{ID: "queue~123e4567-e89b-42d3-a456-426614174000", Visible: true, Width: 3, Metrics: []string{"waiting"}, Display: "bar"},
+		dashboardBlock{ID: "trend~123e4567-e89b-42d3-a456-426614174001", Visible: true, Width: 6, Chart: &dashboardChart{Type: "column", Range: 30, Interval: "day", TopN: 5}})
+	body, _ := json.Marshal(in)
+	rec := httptest.NewRecorder()
+	s.apiDashboardLayoutSave(rec, httptest.NewRequest(http.MethodPut, "/", strings.NewReader(string(body))), "admin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	got := normalizedDashboard(s.st.GetSetting(dashboardSetting, ""))
+	if len(got.Blocks) != len(in.Blocks) || got.Blocks[len(in.Blocks)-2].Display != "bar" || got.Blocks[len(in.Blocks)-1].Chart.Range != 30 {
+		t.Fatalf("instance options lost: %+v", got)
+	}
+	for _, b := range []dashboardBlock{
+		{ID: "queue~invalid", Width: 3, Visible: true},
+		{ID: "unknown~123e4567-e89b-42d3-a456-426614174000", Width: 3, Visible: true},
+		{ID: "queue", Width: 3, Visible: true, Display: "donut"},
+		{ID: "trend", Width: 3, Visible: true, Display: "bar"},
+	} {
+		if validDashboardBlock(b) {
+			t.Fatalf("invalid instance accepted: %+v", b)
+		}
+	}
+}

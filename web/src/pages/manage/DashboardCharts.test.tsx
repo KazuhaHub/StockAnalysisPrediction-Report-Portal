@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import { ReportBars, ReportDonut, ReportKinds, ReportTrend } from './DashboardCharts'
+import { MetricChart, ReportBars, ReportDonut, ReportKinds, ReportTrend } from './DashboardCharts'
 import { defaultDashboardChart } from './dashboardLayout'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, values?: Record<string, unknown>) => `${key}${values ? ` ${JSON.stringify(values)}` : ''}` }) }))
@@ -28,4 +28,14 @@ it('centers category bars and donut legends within their plot', () => {
   expect(Number(bar.getAttribute('y'))).toBeGreaterThan(80)
   rerender(<ReportDonut kinds={[{key:'A',count:3}]} />)
   expect(Number(container.querySelector('.rp-chart-datum rect')!.getAttribute('y'))).toBeGreaterThan(80)
+})
+
+it.each(['bar', 'column'] as const)('renders selected metrics as %s with exact counts and focus details', async display => {
+  const { container } = render(<MetricChart display={display} metrics={[{key:'running',label:'Active runs',count:3},{key:'waiting',label:'Waiting jobs',count:7}]} />)
+  expect(screen.getByRole('img').textContent).toContain('Active runs: 3, Waiting jobs: 7')
+  fireEvent.focus(container.querySelectorAll('.rp-chart-datum')[1])
+  const tooltip = await screen.findByRole('tooltip')
+  expect(tooltip.textContent).toContain('Waiting jobs')
+  expect(tooltip.textContent).toContain('"count":7')
+  expect(tooltip.textContent).not.toContain('tooltipShare')
 })

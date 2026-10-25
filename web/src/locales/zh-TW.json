@@ -2874,5 +2874,10 @@
   "manage.dashboard.chartType.donut": "環形圖",
   "manage.dashboard.chartType.line": "折線圖",
   "manage.dashboard.tooltipCount": "報告數量：{{count}}",
-  "manage.dashboard.tooltipShare": "佔比：{{percent}}%"
+  "manage.dashboard.tooltipShare": "佔比：{{percent}}%",
+  "manage.dashboard.blockOptions": "設定區塊",
+  "manage.dashboard.blockOptionsHint": "選擇顯示方式和指標。每份區塊獨立設定，隨全域版面一起儲存。",
+  "manage.dashboard.chartType.numbers": "數字",
+  "manage.dashboard.metricComparison": "指標比較",
+  "manage.dashboard.repeatHint": "同類區塊可以重複新增，用不同顯示方式或時間範圍進行比較。每份獨立設定，最多 64 個區塊。"
 }

@@ -2874,5 +2874,10 @@
   "manage.dashboard.chartType.donut": "Donut",
   "manage.dashboard.chartType.line": "Line",
   "manage.dashboard.tooltipCount": "Reports: {{count}}",
-  "manage.dashboard.tooltipShare": "Share: {{percent}}%"
+  "manage.dashboard.tooltipShare": "Share: {{percent}}%",
+  "manage.dashboard.blockOptions": "Configure block",
+  "manage.dashboard.blockOptionsHint": "Choose a presentation and the metrics for this block. Each copy is independent and saved with the global layout.",
+  "manage.dashboard.chartType.numbers": "Numbers",
+  "manage.dashboard.metricComparison": "Metric comparison",
+  "manage.dashboard.repeatHint": "Add the same block more than once to compare different presentations or periods. Each copy has its own options. Up to 64 blocks."
 }

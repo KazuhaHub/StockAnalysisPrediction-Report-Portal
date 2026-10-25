@@ -206,3 +206,29 @@ it.each([['trend', 'column', 'reportBars'], ['kinds', 'donut', 'reportDonut'], [
   render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
   await waitFor(() => expect(within(document.querySelector(`[data-dashboard-block="${id}"]`) as HTMLElement).getByRole('img', {name:`manage.dashboard.${image}`})).toBeTruthy())
 })
+
+it('adds repeated queue widgets with independent display, metrics and removal', async () => {
+  let saved: DashboardLayout | undefined
+  api.put.mockImplementation((_url:string, body:DashboardLayout) => { saved={...body,revision:'saved'}; return Promise.resolve(saved) })
+  render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
+  await waitFor(() => expect(screen.getByRole('button',{name:/manage.dashboard.customize/}).hasAttribute('disabled')).toBe(false))
+  fireEvent.click(screen.getByRole('button',{name:/manage.dashboard.customize/}))
+  fireEvent.click(screen.getByRole('button',{name:/manage.dashboard.addBlock/}))
+  fireEvent.click(screen.getByRole('button',{name:/queue.title/}))
+  const copies = Array.from(document.querySelectorAll<HTMLElement>('[data-dashboard-block]')).filter(el=>el.dataset.dashboardBlock?.startsWith('queue'))
+  expect(copies).toHaveLength(2)
+  const original = copies.find(el=>el.dataset.dashboardBlock==='queue')!
+  const copy = copies.find(el=>el!==original)!
+  fireEvent.click(within(copy).getByRole('button',{name:'manage.dashboard.chooseMetrics'}))
+  fireEvent.mouseDown(screen.getByRole('combobox',{name:'manage.dashboard.chartType'}))
+  fireEvent.click(await screen.findByText('manage.dashboard.chartType.bar',{selector:'.ant-select-item-option-content'}))
+  fireEvent.click(screen.getByRole('checkbox',{name:'manage.dashboard.running'}))
+  fireEvent.click(screen.getByRole('button',{name:'common.done'}))
+  expect(within(copy).getByRole('img',{name:'manage.dashboard.metricComparison'})).toBeTruthy()
+  expect(within(original).queryByRole('img',{name:'manage.dashboard.metricComparison'})).toBeNull()
+  fireEvent.click(within(original).getByRole('button',{name:'manage.dashboard.removeBlock'}))
+  expect(document.querySelector('[data-dashboard-block="queue"]')).toBeNull()
+  expect(document.querySelector(`[data-dashboard-block="${copy.dataset.dashboardBlock}"]`)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button',{name:'manage.dashboard.saveGlobal'}))
+  await waitFor(()=>expect(saved?.blocks.find(b=>b.id===copy.dataset.dashboardBlock)).toMatchObject({display:'bar',metrics:['waiting','scheduled'],visible:true}))
+})

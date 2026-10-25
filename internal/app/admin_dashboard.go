@@ -12,6 +12,7 @@ import (
 const dashboardSetting = "admin_dashboard_layout"
 
 type dashboardBlock struct {
+	Display string          `json:"display,omitempty"`
 	ID      string          `json:"id"`
 	Visible bool            `json:"visible"`
 	Width   int             `json:"width"`
@@ -28,14 +29,15 @@ type dashboardChart struct {
 }
 
 func validDashboardChart(b dashboardBlock) bool {
+	id := dashboardBlockKind(b.ID)
 	if b.Chart == nil {
 		return true
 	}
-	if b.ID != "trend" && b.ID != "report-bars" && b.ID != "kinds" && b.ID != "report-donut" {
+	if id != "trend" && id != "report-bars" && id != "kinds" && id != "report-donut" {
 		return false
 	}
 	c := b.Chart
-	series := b.ID == "trend" || b.ID == "report-bars"
+	series := id == "trend" || id == "report-bars"
 	if c.Type != "" && !((series && (c.Type == "line" || c.Type == "column")) || (!series && (c.Type == "bar" || c.Type == "donut"))) {
 		return false
 	}
@@ -77,7 +79,7 @@ func validDashboardMetrics(b dashboardBlock) bool {
 	if b.Metrics == nil {
 		return true
 	}
-	allowed := dashboardMetricKeys(b.ID)
+	allowed := dashboardMetricKeys(dashboardBlockKind(b.ID))
 	if len(b.Metrics) == 0 || len(b.Metrics) > len(allowed) {
 		return false
 	}
@@ -94,12 +96,27 @@ func validDashboardMetrics(b dashboardBlock) bool {
 	}
 	return true
 }
-func validDashboardBlock(b dashboardBlock) bool {
-	known := dashboardShortcutID.MatchString(b.ID)
-	for _, item := range dashboardDefaults() {
-		known = known || item.ID == b.ID
+
+var dashboardInstanceSuffix = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func dashboardBlockKind(id string) string {
+	kind, suffix, instance := strings.Cut(id, "~")
+	if instance && !dashboardInstanceSuffix.MatchString(suffix) {
+		return ""
 	}
-	return known && validDashboardChart(b) && validDashboardMetrics(b) && (b.Width == 2 || b.Width == 3 || b.Width == 6 || (b.Width == 1 && strings.HasPrefix(b.ID, "shortcut:")))
+	return kind
+}
+
+func validDashboardBlock(b dashboardBlock) bool {
+	id := dashboardBlockKind(b.ID)
+	if b.Display != "" && (len(dashboardMetricKeys(id)) == 0 || (b.Display != "numbers" && b.Display != "bar" && b.Display != "column")) {
+		return false
+	}
+	known := dashboardShortcutID.MatchString(id)
+	for _, item := range dashboardDefaults() {
+		known = known || item.ID == id
+	}
+	return known && validDashboardChart(b) && validDashboardMetrics(b) && (b.Width == 2 || b.Width == 3 || b.Width == 6 || (b.Width == 1 && strings.HasPrefix(id, "shortcut:")))
 }
 func normalizedDashboard(raw string) dashboardLayout {
 	out := dashboardLayout{Revision: dashboardRevision(raw)}
@@ -126,7 +143,7 @@ func (s *Server) apiDashboardLayout(w http.ResponseWriter, r *http.Request, user
 }
 func (s *Server) apiDashboardLayoutSave(w http.ResponseWriter, r *http.Request, user string) {
 	var in dashboardLayout
-	if err := readJSONLimit(r, &in, 8192); err != nil {
+	if err := readJSONLimit(r, &in, 32768); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid dashboard layout")
 		return
 	}
