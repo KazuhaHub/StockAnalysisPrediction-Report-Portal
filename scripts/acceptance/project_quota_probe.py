@@ -68,7 +68,7 @@ def owned_mount_present(mountpoint, loop):
 
 
 def discover_owned_loop(image):
-    data = json.loads(command("losetup", "--json", "--associated", str(image), "--output", "NAME,BACK-FILE"))
+    data = json.loads(command("losetup", "--json", "--list", "--associated", str(image), "--output", "NAME,BACK-FILE"))
     devices = data.get("loopdevices", [])
     if not devices:
         return None
@@ -139,6 +139,14 @@ def main(args):
         require_mount_owner(mountpoint, loop)
         run_workload("after-remount", folders["bytes"])
         report["remount_enforcement"] = True
+        # Keep the original exhausted files. A raised project limit, rather than
+        # cleanup or a newly selected filesystem, must reverse each denial.
+        command("xfs_quota", "-x", "-c", "limit -p bhard=16m ihard=128 4101", str(mountpoint))
+        run_workload("relaxed-bytes", folders["bytes"])
+        command("xfs_quota", "-x", "-c", "limit -p bhard=8m ihard=256 4102", str(mountpoint))
+        run_workload("relaxed-inodes", folders["inodes"])
+        run_workload("released-unlinked", folders["unlinked"])
+        report["same_project_limit_controls"] = True
     finally:
         # Never unmount, detach or delete a resource whose ownership changed.
         # On cleanup failure preserve it for this ephemeral worker's teardown.

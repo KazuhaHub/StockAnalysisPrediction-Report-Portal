@@ -11,9 +11,17 @@ LIMIT = 8 * 1024 * 1024
 CHUNK = 65536
 
 
-def require_edquot(error):
-    if not isinstance(error, OSError) or error.errno != errno.EDQUOT:
-        raise RuntimeError("expected kernel EDQUOT, not another write failure")
+def require_project_quota_error(error, folder):
+    # XFS intentionally maps project hard-limit failures to ENOSPC. The owned
+    # mount root has no project limit; never use the capped directory's statfs.
+    if not isinstance(error, OSError) or error.errno not in {errno.EDQUOT, errno.ENOSPC}:
+        raise RuntimeError("expected a native project quota denial")
+    free = os.statvfs(folder.parent)
+    free_bytes = free.f_bavail * free.f_frsize
+    if free_bytes < LIMIT * 8 or free.f_favail < 1024:
+        raise RuntimeError("filesystem exhaustion cannot count as quota enforcement")
+    return {"denial": errno.errorcode[error.errno], "filesystem_free_bytes": free_bytes,
+            "filesystem_free_inodes": free.f_favail}
 
 
 def fill_blocks(folder, unlinked=False, name="charged.data"):
@@ -22,8 +30,11 @@ def fill_blocks(folder, unlinked=False, name="charged.data"):
     except OSError as error:
         if name != "after-remount.data":
             raise
-        require_edquot(error)
-        return {"denial": "EDQUOT", "written_bytes": 0, "allocated_bytes": 0,
+        denial = require_project_quota_error(error, folder)
+        occupied = (folder / "charged.data").stat().st_blocks * 512
+        if not LIMIT - 1024 * 1024 <= occupied <= LIMIT:
+            raise RuntimeError("remount denial did not retain the previously charged file")
+        return {**denial, "written_bytes": 0, "allocated_bytes": occupied,
                 "creation_denied_after_remount": True}
     written = 0
     try:
@@ -37,13 +48,14 @@ def fill_blocks(folder, unlinked=False, name="charged.data"):
                 os.fsync(fd)
                 written += CHUNK
             except OSError as error:
-                require_edquot(error)
+                denial = require_project_quota_error(error, folder)
                 blocks = os.fstat(fd).st_blocks * 512
-                if blocks > LIMIT or written > LIMIT or (name != "after-remount.data" and written == 0):
-                    raise RuntimeError("allocated data exceeded project hard limit")
-                return {"denial": "EDQUOT", "written_bytes": written,
+                occupied = (folder / "charged.data").stat().st_blocks * 512 if name == "after-remount.data" else blocks
+                if blocks > LIMIT or written > LIMIT or occupied < LIMIT - 1024 * 1024:
+                    raise RuntimeError("quota denial did not occur near the configured hard byte limit")
+                return {**denial, "written_bytes": written,
                         "allocated_bytes": blocks, "unlinked_open": unlinked}
-        raise RuntimeError("byte writes reached bounded ceiling without EDQUOT")
+        raise RuntimeError("byte writes reached bounded ceiling without quota denial")
     finally:
         os.close(fd)
 
@@ -58,12 +70,12 @@ def fill_inodes(folder):
             os.close(fd)
             created += 1
         except OSError as error:
-            require_edquot(error)
-            if created > 128:
-                raise RuntimeError("created files exceeded inode hard limit")
-            return {"denial": "EDQUOT", "created_files": created,
+            denial = require_project_quota_error(error, folder)
+            if not 120 <= created <= 128:
+                raise RuntimeError("inode denial did not occur near the configured hard limit")
+            return {**denial, "created_files": created,
                     "inherited_nested_project": True}
-    raise RuntimeError("file creation reached bounded ceiling without EDQUOT")
+    raise RuntimeError("file creation reached bounded ceiling without quota denial")
 
 
 def healthy_write(folder, name):
@@ -77,7 +89,7 @@ def healthy_write(folder, name):
 def main(args):
     if sys.platform != "linux" or os.geteuid() != 10000 or os.getegid() != 10000 or os.getgroups():
         raise RuntimeError("workload requires the isolated unprivileged identity")
-    if len(args) != 2 or args[0] not in {"bytes", "inodes", "unlinked", "after-remount", "healthy-bytes", "healthy-inodes", "healthy-unlinked"}:
+    if len(args) != 2 or args[0] not in {"bytes", "inodes", "unlinked", "after-remount", "healthy-bytes", "healthy-inodes", "healthy-unlinked", "relaxed-bytes", "relaxed-inodes", "released-unlinked"}:
         raise RuntimeError("unknown bounded quota workload")
     signal.alarm(30)
     folder = Path(args[1])
@@ -86,7 +98,11 @@ def main(args):
     mode = args[0]
     if mode == "inodes":
         result = fill_inodes(folder)
-    elif mode.startswith("healthy-"):
+    elif mode == "relaxed-inodes":
+        fd = os.open(folder / "nested" / "relaxed-inode", os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        result = {"created_files": 1, "prior_denial_reversed_by_limit_change": True}
+    elif mode.startswith("healthy-") or mode in {"relaxed-bytes", "released-unlinked"}:
         result = healthy_write(folder, mode)
     else:
         result = fill_blocks(folder, unlinked=mode == "unlinked",

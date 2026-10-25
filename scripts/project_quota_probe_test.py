@@ -2,6 +2,7 @@ import errno
 import importlib.util
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -17,11 +18,18 @@ PROBE_SPEC.loader.exec_module(probe)
 
 
 class ProjectQuotaProbeTests(unittest.TestCase):
-    def test_only_kernel_quota_denial_counts(self):
-        workload.require_edquot(OSError(errno.EDQUOT, "quota"))
-        for error in [OSError(errno.ENOSPC, "disk full"), PermissionError(errno.EACCES, "permission"), RuntimeError("failure")]:
-            with self.assertRaisesRegex(RuntimeError, "expected kernel EDQUOT"):
-                workload.require_edquot(error)
+    def test_only_native_denials_with_real_filesystem_capacity_count(self):
+        ample = SimpleNamespace(f_bavail=100000, f_frsize=4096, f_favail=10000)
+        with patch.object(workload.os, "statvfs", return_value=ample):
+            for number in (errno.EDQUOT, errno.ENOSPC):
+                self.assertEqual(workload.require_project_quota_error(OSError(number, "quota"), Path("/owned/project"))["denial"], errno.errorcode[number])
+            for error in [PermissionError(errno.EACCES, "permission"), RuntimeError("failure")]:
+                with self.assertRaisesRegex(RuntimeError, "native project quota"):
+                    workload.require_project_quota_error(error, Path("/owned/project"))
+        for space in [SimpleNamespace(f_bavail=0, f_frsize=4096, f_favail=10000), SimpleNamespace(f_bavail=100000, f_frsize=4096, f_favail=0)]:
+            with patch.object(workload.os, "statvfs", return_value=space):
+                with self.assertRaisesRegex(RuntimeError, "filesystem exhaustion"):
+                    workload.require_project_quota_error(OSError(errno.ENOSPC, "disk full"), Path("/owned/project"))
 
     def test_opt_in_and_host_refuse_before_any_mutation(self):
         with patch.object(probe, "command") as command, patch.object(probe.tempfile, "mkdtemp") as temporary:
@@ -70,7 +78,7 @@ class ProjectQuotaProbeTests(unittest.TestCase):
 
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):
         with tempfile.TemporaryDirectory() as folder:
-            with self.assertRaisesRegex(RuntimeError, "without EDQUOT"):
+            with self.assertRaisesRegex(RuntimeError, "without quota denial"):
                 workload.fill_inodes(Path(folder))
 
 
