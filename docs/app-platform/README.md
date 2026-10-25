@@ -114,6 +114,11 @@ document. A restricted native widget renderer can be added later if needed.
 
 ## Decision gates
 
+The concrete D1/D3/D4 development candidate is
+[runtime and trust candidate A](18-runtime-and-trust-proposal.md). Its approval
+record is separate from the accepted initial D2 storage scope and from production
+rollout.
+
 | Gate | Required decision or evidence | Blocks |
 | --- | --- | --- |
 | D1 | Approve architecture, runtime threat model and one-time runner deployment | Privileged runner integration and production setup |
