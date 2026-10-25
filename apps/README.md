@@ -1,5 +1,11 @@
 # Downloadable apps
 
+The proposed next-generation platform is specified in the
+[application platform v2 delivery plan](../docs/app-platform/README.md).
+It covers complete packages, managed runtimes, seamless presentation and full
+lifecycle management. It is a proposal, not a replacement for the implemented
+legacy contracts documented below. No existing installation is changed by it.
+
 Runtime-installable, sandboxed iframe apps for the portal. See the design in
 [docs/adr/0003-downloadable-apps.md](../docs/adr/0003-downloadable-apps.md).
 
