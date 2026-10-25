@@ -40,6 +40,7 @@ func quoteServer(t *testing.T) *Server {
 func quoteMux(s *Server) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/quote/{symbol}", s.requireUserJSON(s.apiQuote))
+	mux.HandleFunc("GET /api/quote-history/{symbol}", s.requireUserJSON(s.apiQuoteHistory))
 	return mux
 }
 

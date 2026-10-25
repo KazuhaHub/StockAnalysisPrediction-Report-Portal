@@ -107,6 +107,14 @@ func quoteBarsForRange(rangeKey string) int { return quoteRangeFor(rangeKey).bar
 // way to reach the codes whose shape lies, 000001 being 上证指数 on Shanghai and 平安银行 on
 // Shenzhen. REPORTS remain A-share only; what widened here is quote VIEWING.
 func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
+	s.apiQuoteMode(w, r, false)
+}
+
+func (s *Server) apiQuoteHistory(w http.ResponseWriter, r *http.Request, _ string) {
+	s.apiQuoteMode(w, r, true)
+}
+
+func (s *Server) apiQuoteMode(w http.ResponseWriter, r *http.Request, historyOnly bool) {
 	target, err := quoteResolve(r.PathValue("symbol"))
 	if err != nil {
 		// quoteResolve is the URL-construction boundary — it is what refuses a code with a NUL in it
@@ -143,6 +151,7 @@ func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
 	// The operator's source order and TTLs, read per request so a save on the 行情 panel takes
 	// effect on the next page view rather than at the next restart.
 	cfg := s.quoteConfigLoad()
+	cfg.HistoryOnly = historyOnly
 	// What was ASKED FOR, then what can actually be SERVED. Both halves matter and they fail in
 	// opposite directions.
 	//
@@ -157,6 +166,13 @@ func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
 	// shape of gap. Answering "the quote sources are unreachable, please retry" about a gap no amount
 	// of retrying closes is a worse answer than the price plus an explicit empty chart.
 	iv := s.quotes.servableInterval(cfg, target, spec.interval)
+	if historyOnly {
+		iv = spec.interval
+		if iv != quoteIntervalDaily && iv != quoteIntervalDailyRange {
+			jsonErrorCode(w, http.StatusBadRequest, "quote_bad_range", "Historical fallback supports daily ranges only")
+			return
+		}
+	}
 
 	resp, cached, ttl, err := s.quotes.fetchUnder(r.Context(), cfg, market, code, spec.bars, iv, win)
 	if err != nil {
@@ -164,7 +180,7 @@ func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
 		// and not a warning. 503 rather than 502 or 500: nothing is wrong with the request and
 		// nothing is wrong with this server, the answer is simply not available right now, and that
 		// is the one thing worth telling the browser because it is the one that means "retry".
-		s.writeQuoteUnavailable(w, target, iv, cfg)
+		s.writeQuoteUnavailable(w, target, spec.interval, cfg)
 		return
 	}
 
@@ -176,6 +192,9 @@ func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
 	out.Cached = cached
 	out.Bars = quoteVisibleBars(iv, resp.Bars)
 	advice := quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, ttl, resp)
+	if out.Stale || out.HistoryOnly {
+		advice = quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, 0, nil)
+	}
 	out.RefreshAfterSecs = advice.RefreshAfterSecs
 	out.RefreshAt = advice.RefreshAt
 	if iv == quoteIntervalSnapshot {
@@ -207,6 +226,9 @@ func (s *Server) apiQuote(w http.ResponseWriter, r *http.Request, _ string) {
 	// almost five minutes longer than anything here intended. private, because the response went
 	// through a session cookie and has no business in a shared proxy's store.
 	w.Header().Set("Cache-Control", "private, max-age="+strconv.Itoa(quoteMaxAgeSeconds(ttl)))
+	if out.Stale {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
 	writeJSON(w, &out)
 }
 
@@ -219,6 +241,13 @@ func (s *Server) writeQuoteUnavailable(w http.ResponseWriter, target quoteTarget
 	body := map[string]any{
 		"error": "行情源暂时不可用，请稍后再试",
 		"code":  "quote_unavailable",
+	}
+	if !cfg.HistoryOnly && (iv == quoteIntervalDaily || iv == quoteIntervalDailyRange) {
+		history := cfg
+		history.HistoryOnly = true
+		if len(s.quotes.sourcesFor(history, target, iv)) > 0 {
+			body["historyAvailable"] = true
+		}
 	}
 	quoteAdviceMap(body, advice)
 	writeJSONStatus(w, http.StatusServiceUnavailable, body)

@@ -1475,6 +1475,10 @@ export interface QuoteSnapshot {
 }
 
 export interface QuoteResp {
+  /** Historical display only: no realtime snapshot or observation timestamp. */
+  historyOnly?: boolean
+  historyThrough?: string
+  stale?: boolean
   symbol: string
   /** The live name from the quote feed — not the name frozen onto a report at ingest. */
   name: string
@@ -1503,7 +1507,7 @@ export interface QuoteResp {
    * for a reader in China, which looks like a live quote rather than last night's.
    */
   tz: string
-  source: 'tencent' | 'sina'
+  source: 'tencent' | 'sina' | 'yahoo' | 'sohu'
   snapshot: QuoteSnapshot
   /** Oldest first. Always an array, never null. Empty when barsUnavailable is set. */
   bars: QuoteBar[]

@@ -1,4 +1,10 @@
 {
+  "quote.historyFallback": "Live quote unavailable. Showing prior-day history only; these prices are not live.",
+  "quote.historyClose": "Historical close",
+  "quote.historyThrough": "History through",
+  "quote.source.sohu": "Sohu",
+  "quoteAdmin.sohuNotice": "Historical daily charts only. Off by default. No live prices, intraday charts or forecast settlement. Today's rows are excluded because this source supplies dates without observation timestamps. Public web endpoint with no published availability or rate guarantee.",
+  "quote.stale": "Update unavailable. Showing the last successful quote at the timestamp below.",
   "quoteAdmin.traffic.title": "Request scheduling",
   "quoteAdmin.traffic.total": "Total requests/min",
   "quoteAdmin.traffic.background": "Background requests/min",

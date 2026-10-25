@@ -226,6 +226,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups", s.apiReaderForecastGroups)
 	s.sessionGated(mux, gateForecastScope, "GET /api/forecast/groups/members", s.apiReaderForecastGroupMembers)
 	s.session(mux, "GET /api/quote/{symbol}", s.apiQuote) // one symbol: live quote + its series; cached and single-flighted (quote_cache.go)
+	s.session(mux, "GET /api/quote-history/{symbol}", s.apiQuoteHistory)
 	// Many symbols at once, for the home feed's cards: ONE upstream call for a page of codes, the
 	// same cache as the line above, and per-symbol results so one bad code cannot blank the page.
 	// Behind a session for the same reason /api/quote is — it makes this server fetch on the

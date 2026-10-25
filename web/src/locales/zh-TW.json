@@ -1,4 +1,10 @@
 {
+  "quote.historyFallback": "即時行情暫不可用，目前僅顯示歷史日線，價格不是即時價格。",
+  "quote.historyClose": "歷史收盤價",
+  "quote.historyThrough": "歷史資料截至",
+  "quote.source.sohu": "搜狐",
+  "quoteAdmin.sohuNotice": "僅提供歷史日線圖表，預設關閉。不提供即時價格、分時圖或預測結算。來源只有日期，沒有行情時間戳，因此排除當天資料。公開網頁介面，未公布可用性保證或請求限額。",
+  "quote.stale": "行情更新暫時失敗，目前顯示最近一次成功資料，請留意下方行情時間。",
   "quoteAdmin.traffic.title": "請求調度",
   "quoteAdmin.traffic.total": "總請求數/分鐘",
   "quoteAdmin.traffic.background": "背景請求數/分鐘",
