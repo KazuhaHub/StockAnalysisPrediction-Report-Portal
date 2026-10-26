@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
 import { App as AntdApp, ConfigProvider, Spin, theme } from 'antd'
 import { PrefsProvider, usePrefs } from './prefs'
 import { AuthProvider, useAuth } from './auth'
@@ -8,7 +8,7 @@ import { FavoritesProvider } from './favorites'
 import { lazyRetry } from './lib/lazyRetry'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
-import ConnectionBoundary from './components/ConnectionBoundary'
+import ConnectionBoundary, { ConnectionContent, ConnectionNotice } from './components/ConnectionBoundary'
 import LoginPage from './pages/LoginPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import RegisterPage from './pages/RegisterPage'
@@ -110,12 +110,14 @@ function PasswordResetRoute() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/reset" element={<PasswordResetRoute />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot-password" element={<Navigate to="/reset" replace />} />
-      <Route path="/forgot" element={<Navigate to="/reset" replace />} />
-      <Route path="/verify" element={<VerifyEmailPage />} />
+      <Route element={<><ConnectionNotice /><ConnectionContent><Outlet /></ConnectionContent></>}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/reset" element={<PasswordResetRoute />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<Navigate to="/reset" replace />} />
+        <Route path="/forgot" element={<Navigate to="/reset" replace />} />
+        <Route path="/verify" element={<VerifyEmailPage />} />
+      </Route>
       <Route
         element={
           <Protected>

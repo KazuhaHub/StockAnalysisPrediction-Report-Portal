@@ -2840,6 +2840,7 @@
   "err.network_unavailable": "暫時無法連線，請檢查網路後重試。",
   "err.server_unavailable": "暫時無法存取，請稍後重試。",
   "connection.title": "暫時無法存取入口網站",
+  "connection.notice": "連線暫時中斷，目前頁面仍可檢視，正在嘗試重新連線。",
   "connection.retry": "重新連線",
   "login.forgotRequired": "請輸入使用者名稱或郵箱",
   "login.recoveryContact": "此門戶由管理員協助找回密碼，請聯絡管理員。",

@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } fr
 import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
 import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
+import { ConnectionContent, ConnectionNotice } from './ConnectionBoundary'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
 import { useReaderPrefs } from '../reader'
@@ -590,6 +591,7 @@ function AppShell() {
             </Button>
           </Popover>
         </Space>
+        <ConnectionNotice />
       </Header>
 
       {/* New-version banner: sticky right under the header, driven by the shared coordinator. The
@@ -643,7 +645,7 @@ function AppShell() {
             spinner immediately instead of freezing on the old page. A cached/prefetched route resolves
             synchronously, so this never flashes a spinner for an already-loaded page. */}
         <Suspense key={suspenseKey} fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
-          <Outlet />
+          <ConnectionContent><Outlet /></ConnectionContent>
         </Suspense>
       </Content>
 
