@@ -19,6 +19,12 @@ type platformLaunchAccess struct {
 }
 
 func (s *Server) inspectPlatformLaunchAccess(session platformActorSession, installationID string) (platformLaunchAccess, error) {
+	return s.withPlatformLaunchRead(session, installationID, nil)
+}
+
+// The optional private callback may only do bounded local reads. Its output must
+// remain buffered until this transaction's final session/key/epoch check commits.
+func (s *Server) withPlatformLaunchRead(session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest) error) (platformLaunchAccess, error) {
 	var zero platformLaunchAccess
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -123,6 +129,13 @@ func (s *Server) inspectPlatformLaunchAccess(session platformActorSession, insta
 	if err != nil || parsed.Manifest.Backend != nil || platformInstallRequirements(parsed.Manifest) != nil || int64(parsed.Manifest.Data.Schema) != dataFormat {
 		return zero, errAppPlatformLaunchUnavailable
 	}
+
+	binding := platformLaunchAccess{installationID: installationID, generation: strconv.FormatInt(generation, 10), policyRevision: strconv.FormatInt(policy, 10), entry: parsed.Manifest.Presentation.Entry, releaseSHA: releaseSHA, frontendSHA: parsed.Manifest.Frontend.SHA256}
+	if read != nil {
+		if err := read(e, binding, parsed.Manifest); err != nil {
+			return zero, err
+		}
+	}
 	// All row/trust locks and bounded ZIP inspection precede this clock sample.
 	// A reader session or signing key can expire while a lock is being acquired.
 	now, err = platformDatabaseNow(e)
@@ -143,7 +156,7 @@ func (s *Server) inspectPlatformLaunchAccess(session platformActorSession, insta
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
-	return platformLaunchAccess{installationID: installationID, generation: strconv.FormatInt(generation, 10), policyRevision: strconv.FormatInt(policy, 10), entry: parsed.Manifest.Presentation.Entry, releaseSHA: releaseSHA, frontendSHA: parsed.Manifest.Frontend.SHA256}, nil
+	return binding, nil
 }
 
 func platformLaunchAudience(e migExec, account platformActorAccount, installationID string) error {
