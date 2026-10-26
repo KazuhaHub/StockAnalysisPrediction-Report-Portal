@@ -3,6 +3,7 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,8 +16,8 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// Explicit loopback development fixture. The activation rows are test-only
-// coherent logical state, never an installer/provider or production bootstrap.
+// Explicit loopback development fixture. Its temporary app is installed through
+// the real no-data lifecycle; no production store or runtime is provisioned.
 func TestPlatformHTTPBrowserFixture(t *testing.T) {
 	directory := os.Getenv("APP_DOCUMENT_HTTP_FIXTURE_DIR")
 	stateFile := os.Getenv("APP_DOCUMENT_HTTP_STATE")
@@ -54,7 +55,7 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, reader, id := platformLaunchFixtureWithArchive(t, false, archive.Bytes())
+	s, reader, id := platformFrontendBrowserInstallFixture(t, archive.Bytes())
 	if zone := os.Getenv("APP_DOCUMENT_HTTP_NAMED_TIMEZONE"); zone != "" {
 		// Named timezone belongs only to this temporary fixture store.
 		if zone != "UTC" {
@@ -63,7 +64,6 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 		s.st.SetSetting("timezone", zone)
 	}
 
-	platformGrantLaunchUser(t, s, reader, id)
 	cookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -83,7 +83,7 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 		case "revoke-access":
 			_, err = s.st.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, id)
 		case "restore-access":
-			_, err = s.st.exec(`INSERT INTO app_platform_access_grants(id,installation_id,principal_type,username,account_created,account_generation,group_id,group_created,revision,created_ms,updated_ms) VALUES(?,?,'user',?,?,?,NULL,NULL,1,1,1) ON CONFLICT(id) DO NOTHING`, platformFixtureID(613), id, reader.username, reader.created, reader.generation)
+			_, err = s.st.exec(`INSERT INTO app_platform_access_grants(id,installation_id,principal_type,username,account_created,account_generation,group_id,group_created,revision,created_ms,updated_ms) VALUES(?,?,'user',?,?,?,NULL,NULL,1,1,1) ON CONFLICT DO NOTHING`, platformFixtureID(613), id, reader.username, reader.created, reader.generation)
 		case "revoke-session":
 			_, err = s.st.exec(`UPDATE user_sessions SET revoked=1 WHERE id=?`, reader.sessionID)
 		default:
@@ -129,4 +129,45 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 			t.Fatal("fixture operator did not stop the loopback server")
 		}
 	}
+}
+
+func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Server, platformActorSession, string) {
+	t.Helper()
+	s, actor, _ := platformInstallFixture(t, false)
+	reader := platformActivationReader(t, s, "frontend-browser-reader")
+	raw, _, _ := platformSignedReleaseFixture(t, "1.0.0-beta.2")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	manifest.Capabilities.Required = []string{}
+	manifest.Frontend.SHA256 = platformDigest(archive)
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.stagePlatformRelease(actor, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: reader.username}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := s.consumePlatformInstallReview(actor, review.ID, review.SHA256, platformFixtureID(963))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := newPlatformInstallScheduler(s, platformRuntimeEndpoint{}, platformFixtureID(964), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.tick(context.Background()); err != nil || w.currentStatus().code != "complete" {
+		t.Fatal("browser fixture frontend installation failed", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_runtime_bindings`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_data_namespaces`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects`) != 0 {
+		t.Fatal("browser fixture created runtime/data resources")
+	}
+	return s, reader, admitted.InstallationID
 }

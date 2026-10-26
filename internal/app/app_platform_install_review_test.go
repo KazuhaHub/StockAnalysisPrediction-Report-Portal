@@ -35,7 +35,7 @@ func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSessio
 }
 func testPlatformInstallReview(t *testing.T, pg bool) {
 	s, session, staged := platformInstallFixture(t, pg)
-	review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func testPlatformInstallReview(t *testing.T, pg bool) {
 	if _, err := s.consumePlatformInstallReview(session, review.ID, review.SHA256, platformFixtureID(201)); !errors.Is(err, errAppPlatformOperationConflict) {
 		t.Fatalf("consumed plan reused: %v", err)
 	}
-	if _, err := s.createPlatformInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
+	if _, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
 		t.Fatalf("existing install accepted: %v", err)
 	}
 	lease, err := s.st.claimPlatformOperation(commit.OperationID, platformFixtureID(202))
@@ -86,7 +86,7 @@ func testPlatformInstallStaleReview(t *testing.T, pg bool) {
 	for _, name := range []string{"expiry", "trust", "demotion", "json", "wrong_digest", "old_unfinished"} {
 		t.Run(name, func(t *testing.T) {
 			s, session, staged := platformInstallFixture(t, pg)
-			review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+			review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -122,7 +122,7 @@ func testPlatformInstallStaleReview(t *testing.T, pg bool) {
 }
 func testPlatformConcurrentInstallCommit(t *testing.T, pg bool) {
 	s, session, staged := platformInstallFixture(t, pg)
-	review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestPlatformInstallRequirements(t *testing.T) {
 
 func testPlatformInstallAtomicRollback(t *testing.T, pg bool) {
 	s, session, staged := platformInstallFixture(t, pg)
-	review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestPlatformInstallAtomicRollbackPostgres(t *testing.T) {
 
 func TestPostgresPlatformInstallReviewExpiryAfterAuditWait(t *testing.T) {
 	s, session, staged := platformInstallFixture(t, true)
-	review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestPostgresPlatformInstallReviewExpiryAfterAuditWait(t *testing.T) {
 
 func testPlatformInstallRemovedOperationFence(t *testing.T, pg bool) {
 	s, session, staged := platformInstallFixture(t, pg)
-	review, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,15 +323,15 @@ func testPlatformInstallRemovedOperationFence(t *testing.T, pg bool) {
 		t.Fatal(err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='removed',phase='removed' WHERE id=?`, commit.InstallationID)
-	if _, err := s.createPlatformInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
+	if _, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
 		t.Fatalf("tombstone hid unfinished operation: %v", err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='recovery_required',state_revision=2,completed_ms=1 WHERE id=?`, commit.OperationID)
-	if _, err := s.createPlatformInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
+	if _, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1); !errors.Is(err, errAppPlatformOperationConflict) {
 		t.Fatalf("tombstone hid unresolved recovery: %v", err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='failed' WHERE id=?`, commit.OperationID)
-	next, err := s.createPlatformInstallReview(session, staged.sha256, 1)
+	next, err := s.createPlatformNativeInstallReview(session, staged.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

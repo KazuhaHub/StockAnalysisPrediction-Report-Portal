@@ -264,7 +264,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1,revision=2,control_revision=?,verification_key_fingerprint=?,sealed_control_key=? WHERE id=?`, enrollment.ControlRevision, enrollment.Fingerprint, sealPrefix+ciphertext, runtime.id)
-	plan, err := s.createPlatformInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
+	plan, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullPlan, err := s.createPlatformInstallAudienceReview(session, fullRelease.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
+	fullPlan, err := s.createPlatformNativeInstallAudienceReview(session, fullRelease.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
 	if err != nil {
 		t.Fatal(err)
 	}

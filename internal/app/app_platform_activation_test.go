@@ -19,7 +19,7 @@ func platformActivationFixture(t *testing.T, pg bool, audience bool) (*Server, p
 	if audience {
 		targets = []platformAudienceTarget{{kind: "user", username: session.username}}
 	}
-	review, err := s.createPlatformInstallAudienceReview(session, release.sha256, 1, targets)
+	review, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func testPlatformStaticActivationOU(t *testing.T, pg bool) {
 	if _, err := s.st.SetPrimaryGroups([]string{reader.username}, child); err != nil {
 		t.Fatal(err)
 	}
-	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "ou", ouID: parent}})
+	review, err := s.createPlatformNativeInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "ou", ouID: parent}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestPlatformStaticActivationUnsupportedFrontendSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformNativeInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
 	if err != nil {
 		t.Fatal(err)
 	}

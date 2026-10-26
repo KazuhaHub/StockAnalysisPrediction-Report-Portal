@@ -17,6 +17,9 @@ type platformActivationResult struct {
 	snapshot                     appplatform.OperationSnapshot
 }
 type platformStaticCandidate struct {
+	frontendOnly                                                          bool
+	reviewSHA                                                             string
+	declaredSchema                                                        int
 	namespace, effectID, receiptSHA, releaseSHA, frontendSHA, documentSHA string
 	format                                                                int64
 	audience                                                              []platformInstallAudience
@@ -148,9 +151,16 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	dek, err := s.dek()
+	profile, err := s.st.platformInstallProfile(ctx, expected.id)
 	if err != nil {
 		return zero, err
+	}
+	var dek []byte
+	if profile == platformNativeInstallFormat {
+		dek, err = s.dek()
+		if err != nil {
+			return zero, err
+		}
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -164,11 +174,15 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if err := lockPlatformPublisherTrust(e); err != nil {
 		return zero, err
 	}
-	runtime, seed, err := s.platformDataRuntime(e, expected.controllerEpoch, dek)
-	if err != nil {
-		return zero, err
+	var runtime platformRuntimeRegistration
+	if profile == platformNativeInstallFormat {
+		var seed []byte
+		runtime, seed, err = s.platformDataRuntime(e, expected.controllerEpoch, dek)
+		clear(seed)
+		if err != nil {
+			return zero, err
+		}
 	}
-	clear(seed)
 	facts, err := loadPlatformBoundOperationLease(e, expected)
 	if err != nil {
 		return zero, err
@@ -183,7 +197,19 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if err := validatePlatformInstallAuthority(e, expected, trust, facts.now); err != nil {
 		return zero, err
 	}
-	candidate, err := loadPlatformStaticCandidate(e, expected, runtime, facts.now)
+	currentProfile, err := platformInstallProfileInTransaction(e, expected.id)
+	if err != nil {
+		return zero, err
+	}
+	if currentProfile != profile {
+		return zero, errAppPlatformStageEvidence
+	}
+	var candidate platformStaticCandidate
+	if profile == platformFrontendInstallFormat {
+		candidate, err = loadPlatformFrontendCandidate(e, expected, facts.now)
+	} else {
+		candidate, err = loadPlatformStaticCandidate(e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -206,10 +232,17 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 		DocumentSHA string `json:"document_sha256"`
 		AudienceSHA string `json:"audience_sha256"`
 	}{"portal.static-readiness/1-dev.1", expected.controllerEpoch, candidate.effectID, candidate.namespace, candidate.receiptSHA, candidate.frontendSHA, candidate.documentSHA, platformDigest(audienceJSON)})
+	if candidate.frontendOnly {
+		evidence = platformFrontendEvidence(candidate, expected.controllerEpoch, expected.installationID, platformDigest(audienceJSON))
+	}
+	var namespace any = candidate.namespace
+	if candidate.frontendOnly {
+		namespace = nil
+	}
 	if len(evidence) > 8192 {
 		return zero, errAppPlatformStageEvidence
 	}
-	if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms) VALUES(?,?,?,1,1,?,?,'active',?,?,?,?)`, activation, expected.installationID, candidate.releaseSHA, candidate.namespace, candidate.format, string(evidence), now, now, now); err != nil {
+	if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms) VALUES(?,?,?,1,1,?,?,'active',?,?,?,?)`, activation, expected.installationID, candidate.releaseSHA, namespace, candidate.format, string(evidence), now, now, now); err != nil {
 		return zero, err
 	}
 	if err := insertPlatformInitialAudience(e, expected.installationID, candidate.audience, now); err != nil {

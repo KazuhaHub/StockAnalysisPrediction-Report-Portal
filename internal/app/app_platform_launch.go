@@ -84,25 +84,32 @@ func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session plat
 	if err := platformLaunchAudience(e, account, installationID); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	var releaseSHA string
+	var releaseSHA, evidence string
 	var activationGeneration, activationPolicy, dataFormat int64
 	var namespace sql.NullString
 	var observed sql.NullInt64
-	if err := e.queryRow(`SELECT release_sha256,generation,policy_revision,data_namespace_id,data_format,observed_ms FROM app_platform_activations WHERE installation_id=? AND state='active'`+lock, installationID).
-		Scan(&releaseSHA, &activationGeneration, &activationPolicy, &namespace, &dataFormat, &observed); err != nil {
+	if err := e.queryRow(`SELECT release_sha256,generation,policy_revision,data_namespace_id,data_format,observed_ms,readiness_evidence FROM app_platform_activations WHERE installation_id=? AND state='active'`+lock, installationID).
+		Scan(&releaseSHA, &activationGeneration, &activationPolicy, &namespace, &dataFormat, &observed, &evidence); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if activationGeneration != generation || activationPolicy != policy || !namespace.Valid || !platformValidUUID(namespace.String) || !observed.Valid || observed.Int64 < 0 || !platformValidSHA(releaseSHA) {
+	if activationGeneration != generation || activationPolicy != policy || !observed.Valid || observed.Int64 < 0 || !platformValidSHA(releaseSHA) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	var owner sql.NullString
-	var namespaceState string
-	var namespaceFormat, writerFence int64
-	if err := e.queryRow(`SELECT owner_installation_id,state,data_format,writer_fence FROM app_platform_data_namespaces WHERE id=?`+lock, namespace.String).
-		Scan(&owner, &namespaceState, &namespaceFormat, &writerFence); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
-	}
-	if !owner.Valid || owner.String != installationID || namespaceState != "active" || namespaceFormat != dataFormat || writerFence < 1 {
+	if namespace.Valid {
+		if !platformValidUUID(namespace.String) {
+			return zero, errAppPlatformLaunchUnavailable
+		}
+		var owner sql.NullString
+		var namespaceState string
+		var namespaceFormat, writerFence int64
+		if err := e.queryRow(`SELECT owner_installation_id,state,data_format,writer_fence FROM app_platform_data_namespaces WHERE id=?`+lock, namespace.String).
+			Scan(&owner, &namespaceState, &namespaceFormat, &writerFence); err != nil {
+			return zero, errAppPlatformLaunchUnavailable
+		}
+		if !owner.Valid || owner.String != installationID || namespaceState != "active" || namespaceFormat != dataFormat || writerFence < 1 {
+			return zero, errAppPlatformLaunchUnavailable
+		}
+	} else if dataFormat != 0 || generation != 1 || policy != 1 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	var unsafe int
@@ -130,8 +137,18 @@ func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session plat
 		return zero, err
 	}
 	parsed, err := appplatform.ParseDescriptor(raw)
-	if err != nil || parsed.Manifest.Backend != nil || platformInstallRequirements(parsed.Manifest) != nil || int64(parsed.Manifest.Data.Schema) != dataFormat {
+	if err != nil || parsed.Manifest.Backend != nil || platformInstallRequirements(parsed.Manifest) != nil {
 		return zero, errAppPlatformLaunchUnavailable
+	}
+
+	if namespace.Valid {
+		if int64(parsed.Manifest.Data.Schema) != dataFormat {
+			return zero, errAppPlatformLaunchUnavailable
+		}
+	} else {
+		if err := verifyPlatformFrontendActivation(e, installationID, releaseSHA, epoch, observed.Int64, evidence, parsed.Manifest); err != nil {
+			return zero, err
+		}
 	}
 
 	binding := platformLaunchAccess{installationID: installationID, generation: strconv.FormatInt(generation, 10), policyRevision: strconv.FormatInt(policy, 10), entry: parsed.Manifest.Presentation.Entry, releaseSHA: releaseSHA, frontendSHA: parsed.Manifest.Frontend.SHA256}

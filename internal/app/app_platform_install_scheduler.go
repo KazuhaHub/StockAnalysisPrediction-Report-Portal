@@ -37,7 +37,8 @@ type platformInstallScheduler struct {
 }
 
 func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
-	if s == nil || s.st == nil || !platformValidUUID(worker) || interval < 50*time.Millisecond || interval > 30*time.Second || !filepath.IsAbs(endpoint.path) || filepath.Clean(endpoint.path) != endpoint.path || len(endpoint.path) > 107 || strings.ContainsAny(endpoint.path, "\x00\r\n") || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0) {
+	frontendOnly := endpoint == (platformRuntimeEndpoint{})
+	if s == nil || s.st == nil || !platformValidUUID(worker) || interval < 50*time.Millisecond || interval > 30*time.Second || (!frontendOnly && (!filepath.IsAbs(endpoint.path) || filepath.Clean(endpoint.path) != endpoint.path || len(endpoint.path) > 107 || strings.ContainsAny(endpoint.path, "\x00\r\n") || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0))) {
 		return nil, errAppPlatformRuntimeConflict
 	}
 	return &platformInstallScheduler{server: s, endpoint: endpoint, worker: worker, interval: interval, gate: make(chan struct{}, 1)}, nil
@@ -64,7 +65,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		return err
 	}
 	if w.active.id == "" {
-		selected, err := w.server.claimNextPlatformStaticInstall(ctx, w.worker)
+		var selected platformInstallSelection
+		var err error
+		if w.endpoint.path == "" {
+			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
+		} else {
+			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
+		}
 		if err != nil {
 			w.publish("worker_unavailable", "", "")
 			return err
@@ -129,11 +136,12 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	return nil
 }
 
-// serve is opt-in Linux infrastructure, never started by existing Portal startup.
+// serve is opt-in infrastructure, never started by existing Portal startup.
+// The no-data profile is portable; native execution requires the exact Linux UID.
 // It does not enroll a runner, create OS identities, release uncertain leases or
 // reclaim data effects. Cancellation waits for its current context-bound attempt.
 func (w *platformInstallScheduler) serve(ctx context.Context) error {
-	if runtime.GOOS != "linux" || uint32(os.Geteuid()) != w.endpoint.controllerUID || !w.started.CompareAndSwap(false, true) {
+	if (w.endpoint.path != "" && (runtime.GOOS != "linux" || uint32(os.Geteuid()) != w.endpoint.controllerUID)) || !w.started.CompareAndSwap(false, true) {
 		return errAppPlatformRuntimeConflict
 	}
 	timer := time.NewTimer(0)

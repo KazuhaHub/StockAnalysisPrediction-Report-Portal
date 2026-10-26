@@ -12,7 +12,7 @@ import (
 func platformInstallStageFixture(t *testing.T, pg bool) (*Server, platformActorSession, platformOperationLease) {
 	t.Helper()
 	s, session, release := platformInstallFixture(t, pg)
-	plan, err := s.createPlatformInstallReview(session, release.sha256, 1)
+	plan, err := s.createPlatformNativeInstallReview(session, release.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
