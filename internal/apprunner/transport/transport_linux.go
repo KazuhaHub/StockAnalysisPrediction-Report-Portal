@@ -245,6 +245,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	case enrollmentQueryMagic:
 		s.handleEnrollment(ctx, conn)
 		return
+	case dataReceiptQueryMagic:
+		s.handleDataReceipt(ctx, conn)
+		return
 	case requestMagic:
 	default:
 		return

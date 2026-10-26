@@ -422,3 +422,22 @@ independent. Receipt predecessor source
 6b359965de8b5cbd780985400a3328a0aedd7f1d passed main 40299103478, runner
 40299103353 and native 40299103357. Partial/absence recovery, takeover, controller
 receipt delivery, Portal stage completion and the full installer remain open.
+
+
+## Authenticated historical data receipt retrieval
+
+[The local receipt channel](52-authenticated-data-receipt-channel.md) adds an
+applied-only journal read and a separate nonce/request-bound message under the
+existing UID-authenticated endpoint. Canonical receipts must match current signed
+intent and unchanged observed resource identity. The opaque client observation
+retains controller and endpoint profile and refuses JSON authority. Admission
+acknowledgements remain distinct. The disposable workflow now tests actual normal
+and recovered receipts across root/non-root identities using the same journal,
+with group-only, signature and direct-journal denials. Source
+f3e77b540565d6fc678ec1be29f184bd4440d0ba passed native run 40304423554, including
+Linux transport race tests. Its downloaded report confirms all three new transport
+flags and existing native/cleanup evidence; main/daemon CI are independent.
+Recovery predecessor source
+a9a716b2a742720b503a0249118cdd5e3bf5f6f7 passed main 40301418154, runner
+40301418166 and native 40301418160. Portal command construction, receipt/stage CAS,
+writer/activation and the full market installation experience remain open.
