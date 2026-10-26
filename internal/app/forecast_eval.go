@@ -672,6 +672,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		observation, _ := forecastCallResult(ctx, quoteSourceTencent, aerr)
 		e.ledgerPass.observe(observation)
 		if aerr != nil {
+			log.Printf("forecast evaluator: set %d adjustment %s%s %s..%s: %v", set.SetID, set.Market, set.Symbol, baseDate, last, aerr)
 			// The adjustment check is part of the answer: the mark waits, it is never resolved
 			// without it (F10). A source failure, so no attempt is charged.
 			for _, d := range due {
@@ -723,6 +724,10 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 			continue
 		}
 		e.noteDueUnsettled(sch.Due, now)
+		if res.Refusal == "fetch_failed" && adjChecked {
+			log.Printf("forecast evaluator: set %d checkpoint %s adjustment %s%s missing required close: base=%s stock_bar=%s due=%s",
+				set.SetID, mark.Checkpoint, set.Market, set.Symbol, baseDate, res.BarDate, sch.Due)
+		}
 		// Finality only as the result of a failed attempt (V26): the mark must have failed enough
 		// times AND the fixed clock must have run out. A source failure never reaches this branch
 		// because it never increments attempts.

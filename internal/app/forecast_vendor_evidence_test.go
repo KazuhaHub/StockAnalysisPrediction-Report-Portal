@@ -34,7 +34,11 @@ func replayForecastAdjustmentBody(t *testing.T, market, code, from, to string, b
 	calls := 0
 	vendorClient = &http.Client{Transport: forecastVendorTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		want := market + code + ",day," + from + "," + to + "," + strconv.Itoa(quoteMaxBars) + ",qfq"
+		end, err := time.Parse(quoteWindowLayout, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := market + code + ",day," + from + "," + end.AddDate(0, 0, 1).Format(quoteWindowLayout) + "," + strconv.Itoa(quoteMaxBars) + ",qfq"
 		if r.Method != http.MethodGet || r.URL.Host != "web.ifzq.gtimg.cn" ||
 			r.URL.Path != "/appstock/app/fqkline/get" || r.URL.Query().Get("param") != want {
 			t.Errorf("unexpected adjustment request: %s %s", r.Method, r.URL)

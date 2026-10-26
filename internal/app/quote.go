@@ -1644,7 +1644,22 @@ func fetchTencentAdjustRatio(ctx context.Context, market, code, from, to string)
 	if err != nil {
 		return nil, err
 	}
-	rawURL := fmt.Sprintf(quoteTencentQfqRangeURL, sym, from, to, quoteMaxBars)
+	window, err := quoteParseWindow(from, to)
+	if err != nil {
+		return nil, err
+	}
+	if !window.bounded() {
+		return nil, errQuoteWindowHalfOpen
+	}
+	// A same-day qfq end can omit the completed end-session candle even while its
+	// snapshot is current. Request through the following civil day, then retain only
+	// the caller's inclusive window. This adds no request or settlement authority.
+	end, _ := time.Parse(quoteWindowLayout, window.to)
+	vendorEnd := end.AddDate(0, 0, 1).Format(quoteWindowLayout)
+	if _, err := time.Parse(quoteWindowLayout, vendorEnd); err != nil {
+		return nil, fmt.Errorf("quote: adjustment end exceeds supported dates: %w", err)
+	}
+	rawURL := fmt.Sprintf(quoteTencentQfqRangeURL, sym, window.from, vendorEnd, quoteMaxBars)
 	ctx, cancel := context.WithTimeout(ctx, quoteFetchTimeout)
 	defer cancel()
 	body, err := vendorGet(ctx, rawURL, quoteTencentReferer, quoteBodyLimit)
@@ -1659,7 +1674,9 @@ func fetchTencentAdjustRatio(ctx context.Context, market, code, from, to string)
 	}
 	out := make(map[string]int64, len(resp.Bars))
 	for _, b := range resp.Bars {
-		out[b.Date] = b.Close
+		if b.Date >= window.from && b.Date <= window.to {
+			out[b.Date] = b.Close
+		}
 	}
 	return out, nil
 }
