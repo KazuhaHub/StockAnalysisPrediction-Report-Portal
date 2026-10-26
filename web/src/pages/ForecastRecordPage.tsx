@@ -30,6 +30,7 @@ import {
 import { forecastLinkColor } from '../lib/forecastPresentation'
 import { useForecastRecord } from '../lib/useForecastRecord'
 import Quiet from '../components/forecast/Quiet'
+import ForecastReadableOverview from '../components/forecast/ForecastReadableOverview'
 
 // Forecast verification for readers: the record of what each report predicted against what
 // the market did (ADR 0029, ADR 0039).
@@ -266,6 +267,8 @@ export default function ForecastRecordPage() {
         if (groups.length === 0) return <Empty description={emptyText} />
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <ForecastReadableOverview key={`${query}:${identity}`} response={{ ...record.data, groups: shown }}
+              onOpen={(g, cp) => setDrawer({ g, cp, cell: g.cells[cp] })} />
             {!hasResult && (
               // A note, not an alert: the status line is the page's one announcement.
               <Alert type="info" showIcon role="note" title={emptyText} />
@@ -385,6 +388,8 @@ export default function ForecastRecordPage() {
       <ForecastMethodology />
 
       <ForecastCellDrawer
+        key={identity}
+        defaultPresentation="visual"
         open={drawer !== null}
         onClose={() => setDrawer(null)}
         mode={mode}
@@ -395,6 +400,7 @@ export default function ForecastRecordPage() {
         checkpoint={drawer?.cp ?? 'd5'}
         cell={drawer?.cell ?? null}
         rtype={view.rtype}
+        hideCounts={external && !populationOwn}
       />
     </div>
   )

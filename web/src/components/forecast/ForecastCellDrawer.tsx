@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Space, Table, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Drawer, Segmented, Space, Spin, Table, Tag, Typography, theme } from 'antd'
 import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -20,6 +20,7 @@ import ExploratoryTag from './ExploratoryTag'
 import ForecastRetentionNote from './ForecastRetentionNote'
 import Quiet from './Quiet'
 import WarnTag from './WarnTag'
+import ForecastVisibleResults from './ForecastVisibleResults'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
@@ -51,6 +52,8 @@ interface Props {
   cell: ForecastCell | null
   /** The report type the matrix was drawn for, when the reader chose one; absent is the default. */
   rtype?: string
+  hideCounts?: boolean
+  defaultPresentation?: 'visual' | 'table'
 }
 
 // One loaded list, tagged with the cell it belongs to. Anything tagged for another cell is never
@@ -62,6 +65,8 @@ interface Loaded {
   loading: boolean
   error: string
   errorAt: 'first' | 'more' | ''
+  scored: boolean
+  countsVisible: boolean
   /** The months a custom range lost to retention, as the first page said; later pages repeat it. */
   excluded: ForecastPurgedMonth[]
 }
@@ -70,7 +75,7 @@ interface Loaded {
 // the server; anything else is read as an unknown status, never echoed.
 const REASONS = ['pending_baseline', 'non_standard_horizon', 'missing_mark', 'pending', 'refused', 'refused_final', 'corp_action', 'unknown_mark_status']
 
-export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '' }: Props) {
+export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '', hideCounts = false, defaultPresentation = 'table' }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   // No cell (a caller that opens the list on its own) is the scored view, as it always was.
@@ -78,6 +83,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
   const key = JSON.stringify([mode, from, to, group, label, checkpoint, rtype, membership])
   const [stored, setStored] = useState<Loaded>()
   const [revision, setRevision] = useState(0)
+  const [presentation, setPresentation] = useState<string>(defaultPresentation)
   // The live request scope: replaced whenever the cell changes or the drawer closes, which retires
   // every request still in flight for the old one.
   const scope = useRef<{ live: boolean }>({ live: false })
@@ -102,15 +108,16 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     if (!open || !label) return
     const mine = { live: true }
     scope.current = mine
-    setStored({ key, members: [], next: '', loading: true, error: '', errorAt: '', excluded: [] })
+    setStored({ key, members: [], next: '', loading: true, error: '', errorAt: '', excluded: [], scored: false, countsVisible: false })
     request()
       .then((r) => {
         if (mine.live) {
-          setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '', excluded: r.excluded_months ?? [] })
+          setStored({ key, members: r.members ?? [], next: r.next_cursor ?? '', loading: false, error: '', errorAt: '', excluded: r.excluded_months ?? [],
+            scored: r.state === 'mature' && r.population !== 'all', countsVisible: r.n !== undefined })
         }
       })
       .catch((e) => {
-        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first', excluded: [] })
+        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first', excluded: [], scored: false, countsVisible: false })
       })
     return () => {
       mine.live = false
@@ -120,7 +127,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
   }, [open, key, revision])
 
   const current: Loaded =
-    stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '', excluded: [] }
+    stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '', excluded: [], scored: false, countsVisible: false }
 
   const more = () => {
     if (!current.next) return
@@ -129,7 +136,8 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
     request(current.next)
       .then((r) => {
         if (mine.live) {
-          setStored((s) => (s ? { ...s, members: [...s.members, ...(r.members ?? [])], next: r.next_cursor ?? '', loading: false } : s))
+          setStored((s) => (s ? { ...s, members: [...s.members, ...(r.members ?? [])], next: r.next_cursor ?? '', loading: false,
+            scored: s.scored && r.state === 'mature' && r.population !== 'all', countsVisible: s.countsVisible && r.n !== undefined } : s))
         }
       })
       .catch((e) => {
@@ -270,13 +278,19 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           </div>
         )}
 
-        {!membership && <MetricsTable cell={cell ?? { state: 'mature' }} mode={mode} />}
-        {!membership && cell && <SlicesTable cell={cell} mode={mode} />}
+        {!membership && <Segmented aria-label={t('forecast.readable.presentation')} value={presentation} onChange={setPresentation}
+          options={['visual', 'table'].map((value) => ({ value, label: t(`forecast.readable.${value}`) }))} />}
+        {!membership && presentation === 'table' && <MetricsTable cell={cell ?? { state: 'mature' }} mode={mode} />}
+        {!membership && presentation === 'table' && cell && <SlicesTable cell={cell} mode={mode} />}
+        {!membership && presentation === 'visual' && current.errorAt !== 'first' && (!current.loading || current.members.length > 0) && <ForecastVisibleResults
+          key={key} members={current.members} mature={cell?.state === 'mature' && current.scored} complete={!current.next}
+          hideCounts={hideCounts || cell?.n === undefined || !current.countsVisible} />}
 
         <div>
-          <Typography.Title level={5} style={{ marginTop: 0 }}>
+          {(membership || presentation === 'table') && <Typography.Title level={5} style={{ marginTop: 0 }}>
             {t('forecast.drawer.members')}
-          </Typography.Title>
+          </Typography.Title>}
+          {!membership && presentation === 'visual' && current.loading && <Spin />}
           {/* The list leaves out the months retention removed; the cell above it does not say so. */}
           {mode === 'custom' && current.excluded.length > 0 && (
             <div style={{ marginBottom: 8 }}>
@@ -292,7 +306,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
               action={<Button size="small" onClick={retry}>{t('common.retry')}</Button>}
             />
           )}
-          <ScrollRegion label={t('forecast.drawer.members')}>
+          {(membership || presentation === 'table') && <ScrollRegion label={t('forecast.drawer.members')}>
             <Table<ForecastMember>
               size="small"
               rowKey="set_id"
@@ -301,7 +315,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
               dataSource={current.members}
               columns={membership ? membershipColumns : scoredColumns}
             />
-          </ScrollRegion>
+          </ScrollRegion>}
           {current.next && (
             <div style={{ textAlign: 'center', marginTop: 12 }}>
               <Button onClick={more} loading={current.loading}>
