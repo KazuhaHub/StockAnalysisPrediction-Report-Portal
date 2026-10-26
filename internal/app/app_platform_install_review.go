@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -99,13 +100,17 @@ func (s *Server) createPlatformFrontendInstallReview(session platformActorSessio
 	return s.createPlatformInstallReviewForFormat(session, release, trustRevision, targets, platformFrontendInstallFormat)
 }
 func (s *Server) createPlatformInstallReviewForFormat(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget, format string) (platformRemovalReview, error) {
+	return s.createPlatformInstallReviewForFormatContext(context.Background(), session, release, trustRevision, targets, format)
+}
+
+func (s *Server) createPlatformInstallReviewForFormatContext(ctx context.Context, session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget, format string) (platformRemovalReview, error) {
 	if len(targets) > maxPlatformInstallAudience {
 		return platformRemovalReview{}, errAppPlatformPlanChanged
 	}
 	targets = append([]platformAudienceTarget(nil), targets...)
 
 	var result platformRemovalReview
-	err := s.withPlatformStagedRelease(session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
+	err := s.withPlatformStagedReleaseContext(ctx, session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
 		projection, err := platformLoadInstallProjection(e, verified, actor, control)
 		if err != nil {
 			return err
@@ -149,15 +154,24 @@ func (s *Server) createPlatformInstallReviewForFormat(session platformActorSessi
 }
 
 func (s *Server) consumePlatformInstallReview(session platformActorSession, planID, planSHA, key string) (platformRemovalCommit, error) {
+	return s.consumePlatformInstallReviewContext(context.Background(), session, planID, planSHA, key)
+}
+
+func (s *Server) consumePlatformInstallReviewContext(ctx context.Context, session platformActorSession, planID, planSHA, key string) (platformRemovalCommit, error) {
+	return s.consumePlatformInstallReviewForFormatContext(ctx, session, planID, planSHA, key, "")
+}
+
+func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Context, session platformActorSession, planID, planSHA, key, requiredFormat string) (platformRemovalCommit, error) {
 	var result platformRemovalCommit
-	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) {
+	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) || (requiredFormat != "" && requiredFormat != platformFrontendInstallFormat) {
 		return result, errAppPlatformPlanChanged
 	}
-	now, err := platformDatabaseNow(s.st.poolExec())
+	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
+	now, err := platformDatabaseNow(pool)
 	if err != nil {
 		return result, err
 	}
-	if _, err := platformReadActorAccount(s.st.poolExec(), session, now, false); err != nil {
+	if _, err := platformReadActorAccount(pool, session, now, false); err != nil {
 		return result, err
 	}
 	dek, err := s.dek()
@@ -166,14 +180,25 @@ func (s *Server) consumePlatformInstallReview(session platformActorSession, plan
 	}
 	request, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, planSHA})
 	requestDigest, keyDigest := platformDigest(request), platformIdempotencySHA(key)
-	err = s.withPlatformTrustActor(session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
+	err = s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
 		previous, exists, err := platformFindRemovalCommit(e, actor.scope, keyDigest, requestDigest)
 		if err != nil {
 			return err
 		}
 		if exists {
+			if requiredFormat != "" {
+				var raw string
+				if err := e.queryRow(`SELECT p.plan_json FROM app_platform_review_plans p JOIN app_platform_operations o ON o.review_plan_id=p.id WHERE o.id=?`, previous.OperationID).Scan(&raw); err != nil {
+					return err
+				}
+				var projection platformInstallProjection
+				if json.Unmarshal([]byte(raw), &projection) != nil || projection.Format != requiredFormat {
+					return errAppPlatformPlanChanged
+				}
+			}
 			result = previous
-			return nil
+			_, err = platformRefreshActor(e, session, actor, control)
+			return err
 		}
 		lock := ""
 		if e.s.driver == "postgres" {
@@ -216,6 +241,9 @@ func (s *Server) consumePlatformInstallReview(session platformActorSession, plan
 		}
 		var storedProjection platformInstallProjection
 		if json.Unmarshal([]byte(raw), &storedProjection) != nil {
+			return errAppPlatformPlanChanged
+		}
+		if requiredFormat != "" && storedProjection.Format != requiredFormat {
 			return errAppPlatformPlanChanged
 		}
 		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format); err != nil {

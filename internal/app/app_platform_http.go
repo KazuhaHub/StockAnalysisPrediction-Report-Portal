@@ -197,3 +197,18 @@ func (t platformContextTx) Query(q string, args ...any) (*sql.Rows, error) {
 func (t platformContextTx) QueryRow(q string, args ...any) *sql.Row {
 	return t.Tx.QueryRowContext(t.ctx, q, args...)
 }
+
+type platformContextPool struct {
+	*sql.DB
+	ctx context.Context
+}
+
+func (p platformContextPool) Exec(q string, args ...any) (sql.Result, error) {
+	return p.DB.ExecContext(p.ctx, q, args...)
+}
+func (p platformContextPool) Query(q string, args ...any) (*sql.Rows, error) {
+	return p.DB.QueryContext(p.ctx, q, args...)
+}
+func (p platformContextPool) QueryRow(q string, args ...any) *sql.Row {
+	return p.DB.QueryRowContext(p.ctx, q, args...)
+}

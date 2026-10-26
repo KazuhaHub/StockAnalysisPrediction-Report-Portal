@@ -467,6 +467,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 		s.admin(mux, method+" /api/admin/apps/{id}/backend", s.apiExtensionBackend)
 	}
 	s.public(mux, "GET /app-assets/{id}/{path...}", s.appAssets)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/plans", s.apiPlatformInstallPlan)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/operations", s.apiPlatformInstallCommit)
+	s.platformAdminRoute(mux, "GET /api/admin/app-platform/operations/{id}", s.apiPlatformOperationProgress)
 	// V2 documents remain session-only and inherit the enrolment wall. Response
 	// policy wraps that wall too, so authentication failures cannot be cached.
 	s.route(mux, "GET /api/app-platform/apps", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformApps)))

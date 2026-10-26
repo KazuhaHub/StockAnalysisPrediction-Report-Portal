@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -285,11 +286,21 @@ func loadPlatformPublisherTrust(e migExec) (appplatform.PublisherTrust, error) {
 // These callbacks perform database-only work. Retrying a rolled-back contention
 // failure must never repeat downloads, physical effects or external notifications.
 func (s *Server) withPlatformTrustTransaction(session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl) error) error {
+	return s.withPlatformTrustTransactionContext(context.Background(), session, fn)
+}
+
+func (s *Server) withPlatformTrustTransactionContext(ctx context.Context, session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl) error) error {
 	for attempt := 0; ; attempt++ {
-		err := s.withAppPlatformActor(session, false, fn)
+		err := s.withAppPlatformActorContext(ctx, session, false, fn)
 		if err == nil || !isContentionErr(err) || attempt == 5 {
 			return err
 		}
-		time.Sleep(time.Duration(10<<attempt) * time.Millisecond)
+		timer := time.NewTimer(time.Duration(10<<attempt) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }

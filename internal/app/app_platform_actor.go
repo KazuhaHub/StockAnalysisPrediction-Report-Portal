@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -127,26 +128,31 @@ func (s *Server) initializeAppPlatformControl(session platformActorSession) erro
 }
 
 func (s *Server) withAppPlatformActor(session platformActorSession, initialize bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
+	return s.withAppPlatformActorContext(context.Background(), session, initialize, fn)
+}
+
+func (s *Server) withAppPlatformActorContext(ctx context.Context, session platformActorSession, initialize bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
 	// Filter stale/non-admin proofs before lazy keyring creation. This unlocked
 	// read is only a precheck; the authoritative check is repeated under the
 	// shared principal-lifecycle lock below.
-	now, err := platformDatabaseNow(s.st.poolExec())
+	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
+	now, err := platformDatabaseNow(pool)
 	if err != nil {
 		return err
 	}
-	if _, err := platformReadActorAccount(s.st.poolExec(), session, now, false); err != nil {
+	if _, err := platformReadActorAccount(pool, session, now, false); err != nil {
 		return err
 	}
 	dek, err := s.dek()
 	if err != nil {
 		return err
 	}
-	tx, err := s.st.db.Begin()
+	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	e := migExec{s: s.st, ex: tx}
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	if err := lockOUMutation(e); err != nil {
 		return err
 	}
@@ -162,6 +168,7 @@ func (s *Server) withAppPlatformActor(session platformActorSession, initialize b
 	if err != nil {
 		return err
 	}
+	defer clear(seed)
 	facts, err := platformActorAuthority(e, account, seed)
 	if err != nil {
 		return err

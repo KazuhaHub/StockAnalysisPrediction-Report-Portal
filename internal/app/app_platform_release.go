@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -109,7 +110,11 @@ func platformStagedIdentity(verified appplatform.VerifiedPublisherDescriptor) pl
 // Shared admission boundary for future review/commit callbacks. They must write
 // their own intent inside this same transaction, not trust a prior returned value.
 func (s *Server) withPlatformTrustActor(session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error) error {
-	return s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	return s.withPlatformTrustActorContext(context.Background(), session, fn)
+}
+
+func (s *Server) withPlatformTrustActorContext(ctx context.Context, session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error) error {
+	return s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
@@ -129,10 +134,14 @@ func (s *Server) withPlatformTrustActor(session platformActorSession, fn func(mi
 // expected publisher revision to the transaction that saves reviewed intent.
 // Managed execution/compatibility, capabilities and data readiness remain gates.
 func (s *Server) withPlatformStagedRelease(session platformActorSession, sha string, expectedTrustRevision int64, fn func(migExec, platformActorFacts, platformActorControl, platformStagedRelease) error) error {
+	return s.withPlatformStagedReleaseContext(context.Background(), session, sha, expectedTrustRevision, fn)
+}
+
+func (s *Server) withPlatformStagedReleaseContext(ctx context.Context, session platformActorSession, sha string, expectedTrustRevision int64, fn func(migExec, platformActorFacts, platformActorControl, platformStagedRelease) error) error {
 	if !platformValidSHA(sha) || expectedTrustRevision <= 0 {
 		return errAppPlatformReleaseConflict
 	}
-	return s.withPlatformTrustActor(session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
+	return s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
 		verified, err := platformVerifyStoredRelease(e, sha, expectedTrustRevision, trust, control.nowMS)
 		if err != nil {
 			return err
