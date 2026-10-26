@@ -31,15 +31,15 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - name: Build native data and independent UAPI probes
-        run: |
-          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
-          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
-          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xfsprogs
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev
+      - name: Build native data and independent UAPI probes
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
+          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
       - name: Check refusal behavior without privileges
         run: python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
       - name: Enforce quotas only on the newly owned loopback image

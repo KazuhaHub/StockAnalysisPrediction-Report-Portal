@@ -26,6 +26,18 @@ func (r Request) valid() bool {
 	return namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.Bytes > 0 && r.Bytes%512 == 0 && r.Inodes > 0
 }
 
+// RootIdentity pins infrastructure configuration to one physical data root.
+// Device numbers are deliberately excluded because they can change on remount.
+// This is an observation, not installation authority or a durable binding.
+type RootIdentity struct {
+	FilesystemUUID string
+	Inode          uint64
+}
+
+func (r RootIdentity) valid() bool {
+	return r.Inode > 0 && namespaceID.MatchString(r.FilesystemUUID) && r.FilesystemUUID != "00000000-0000-0000-0000-000000000000"
+}
+
 // Observation is a current native snapshot, not a durable command receipt or
 // proof of journal admission, writer exclusion or container sandboxing.
 type Observation struct {

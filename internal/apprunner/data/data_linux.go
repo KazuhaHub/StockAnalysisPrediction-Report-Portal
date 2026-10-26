@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"sync"
@@ -17,12 +18,15 @@ import (
 // Linux UAPI linux/dqblk_xfs.h and linux/fs.h. This adapter deliberately supports
 // only the initial amd64/arm64 native ABI; it never invokes a shell or quota CLI.
 const (
-	quotaStatus    = ((uint32('X')<<8 | 8) << 8) | 2
-	quotaGet       = ((uint32('X')<<8 | 3) << 8) | 2
-	quotaSet       = ((uint32('X')<<8 | 4) << 8) | 2
-	getAttr        = 0x801c581f
-	setAttr        = 0x401c5820
-	projectInherit = 0x200
+	quotaStatus        = ((uint32('X')<<8 | 8) << 8) | 2
+	quotaGet           = ((uint32('X')<<8 | 3) << 8) | 2
+	quotaSet           = ((uint32('X')<<8 | 4) << 8) | 2
+	getAttr            = 0x801c581f
+	setAttr            = 0x401c5820
+	projectInherit     = 0x200
+	geometryGet        = 0x80705864
+	geometrySize       = 112
+	geometryUUIDOffset = 64
 )
 
 type Root struct {
@@ -120,8 +124,12 @@ func openRoot(input *os.File) (*Root, error) {
 	if err := enforcement(file); err != nil {
 		return nil, err
 	}
+	root := &Root{file: file, device: uint64(stat.Dev)}
+	if _, err := root.identity(context.Background()); err != nil {
+		return nil, err
+	}
 	ok = true
-	return &Root{file: file, device: uint64(stat.Dev)}, nil
+	return root, nil
 }
 func (r *Root) Close() error {
 	r.mu.Lock()
@@ -131,6 +139,71 @@ func (r *Root) Close() error {
 	}
 	r.closed = true
 	return r.file.Close()
+}
+
+// Identity reads from the pinned descriptor, never from a pathname lookup.
+func (r *Root) Identity(ctx context.Context) (RootIdentity, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.identity(ctx)
+}
+func (r *Root) identity(ctx context.Context) (RootIdentity, error) {
+	var zero RootIdentity
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	if r.closed {
+		return zero, ErrUnsafe
+	}
+	var stat unix.Stat_t
+	var fs unix.Statfs_t
+	if err := native(r.file, func(fd uintptr) error {
+		if err := unix.Fstat(int(fd), &stat); err != nil {
+			return err
+		}
+		return unix.Fstatfs(int(fd), &fs)
+	}); err != nil {
+		return zero, err
+	}
+	if uint64(stat.Dev) != r.device || stat.Ino == 0 || stat.Uid != 0 || stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Mode&07777 != 0700 || fs.Type != unix.XFS_SUPER_MAGIC || fs.Flags&(unix.ST_NODEV|unix.ST_NOSUID|unix.ST_NOEXEC) != (unix.ST_NODEV|unix.ST_NOSUID|unix.ST_NOEXEC) {
+		return zero, ErrUnsafe
+	}
+	attr, err := attributes(r.file)
+	if err != nil {
+		return zero, err
+	}
+	if binary.NativeEndian.Uint32(attr[12:16]) != 0 || binary.NativeEndian.Uint32(attr[:4])&projectInherit != 0 {
+		return zero, ErrUnsafe
+	}
+	if err := enforcement(r.file); err != nil {
+		return zero, err
+	}
+	geometry := make([]byte, geometrySize)
+	if err := ioctl(r.file, geometryGet, geometry); err != nil {
+		return zero, err
+	}
+	id := geometry[geometryUUIDOffset : geometryUUIDOffset+16]
+	result := RootIdentity{FilesystemUUID: fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]), Inode: stat.Ino}
+	if !result.valid() {
+		return zero, ErrUnsafe
+	}
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	return result, nil
+}
+func (r *Root) requireIdentity(ctx context.Context, expected RootIdentity) error {
+	if !expected.valid() {
+		return ErrUnsafe
+	}
+	actual, err := r.identity(ctx)
+	if err != nil {
+		return err
+	}
+	if actual != expected {
+		return ErrUnsafe
+	}
+	return nil
 }
 
 type limits struct{ bytes, inodes, usedBytes, usedInodes int64 }
@@ -218,19 +291,29 @@ func (r *Root) inspect(ctx context.Context, id string, project uint32) (Observat
 	}
 	return Observation{id, project, uint64(stat.Dev), stat.Ino, limit.bytes, limit.inodes, limit.usedBytes, limit.usedInodes, true}, nil
 }
-func (r *Root) Inspect(ctx context.Context, id string, project uint32) (Observation, error) {
+func (r *Root) Inspect(ctx context.Context, expected RootIdentity, id string, project uint32) (Observation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || !namespaceID.MatchString(id) || project == 0 {
 		return Observation{}, ErrUnsafe
 	}
-	return r.inspect(ctx, id, project)
+	if err := r.requireIdentity(ctx, expected); err != nil {
+		return Observation{}, err
+	}
+	observed, err := r.inspect(ctx, id, project)
+	if err != nil {
+		return Observation{}, err
+	}
+	if err := r.requireIdentity(ctx, expected); err != nil {
+		return Observation{}, err
+	}
+	return observed, nil
 }
 
 // Prepare accepts only a fresh externally reserved project/namespace. Any failure
 // after creation is uncertain and must be reconciled, never blindly retried or
 // recursively removed. This primitive grants no writer UID or mount access.
-func (r *Root) Prepare(ctx context.Context, request Request) (Observation, error) {
+func (r *Root) Prepare(ctx context.Context, expected RootIdentity, request Request) (Observation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var zero Observation
@@ -241,6 +324,9 @@ func (r *Root) Prepare(ctx context.Context, request Request) (Observation, error
 		return zero, err
 	}
 	if err := enforcement(r.file); err != nil {
+		return zero, err
+	}
+	if err := r.requireIdentity(ctx, expected); err != nil {
 		return zero, err
 	}
 	limit, err := readLimits(r.file, request.ProjectID)
@@ -300,6 +386,9 @@ func (r *Root) Prepare(ctx context.Context, request Request) (Observation, error
 	}
 	observed, err := r.inspect(ctx, request.NamespaceID, request.ProjectID)
 	if err != nil {
+		return incomplete(err)
+	}
+	if err := r.requireIdentity(ctx, expected); err != nil {
 		return incomplete(err)
 	}
 	if observed.ByteLimit != request.Bytes || observed.InodeLimit != request.Inodes {
