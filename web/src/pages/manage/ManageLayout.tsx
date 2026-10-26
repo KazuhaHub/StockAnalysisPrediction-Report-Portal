@@ -6,6 +6,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
 import VersionLabel from '../../components/VersionLabel'
+import { useSite } from '../../site'
 import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
@@ -16,6 +17,7 @@ const HEADER_VAR = 'var(--rp-header-h, 64px)'
 
 export default function ManageLayout() {
   const { t } = useTranslation()
+  const { settings } = useSite()
   const navigate = useNavigate()
   const loc = useLocation()
   const { token } = theme.useToken()
@@ -153,7 +155,7 @@ export default function ManageLayout() {
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}>
               {!collapsed && t('nav.collapse')}
             </Button>
-            {!collapsed && <VersionLabel />}
+            {!collapsed && settings.versionDisplay === 'footer' && <VersionLabel />}
           </div>
         </aside>
       )}

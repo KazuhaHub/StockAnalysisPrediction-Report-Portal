@@ -49,6 +49,7 @@ export default function OrgUnitPicker({
   mode = 'filter',
   onAdd,
   loading = false,
+  collapsible = true,
 }: {
   groups: UserGroupRow[]
   /** Accounts with no primary group; they belong to the Default OU by inheritance. */
@@ -66,6 +67,7 @@ export default function OrgUnitPicker({
   onAdd?: () => void
   /** The owner's groups request is still out. `groups` is [] because of that, not because this
    *  portal has none — and "No groups yet" is a claim about the directory. */
+  collapsible?: boolean
   loading?: boolean
 }) {
   const { t } = useTranslation()
@@ -176,7 +178,7 @@ export default function OrgUnitPicker({
         }}
       >
         <Typography.Text strong>{t('ou.title')}</Typography.Text>
-        <Tooltip title={t('ou.collapse')}>
+        {collapsible && <Tooltip title={t('ou.collapse')}>
           <Button
             type="text"
             size="small"
@@ -184,7 +186,7 @@ export default function OrgUnitPicker({
             aria-label={t('ou.collapse')}
             onClick={() => setCollapsed(true)}
           />
-        </Tooltip>
+        </Tooltip>}
       </Space>
 
       <Space orientation="vertical" size={10} style={{ padding: 12, width: '100%' }}>

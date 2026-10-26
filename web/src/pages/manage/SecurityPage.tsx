@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
+import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
@@ -334,7 +334,11 @@ function GlobalSecuritySettings() {
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           {recovery === 'email' && !emailOK && <Alert type="error" showIcon title={t('security.recoveryNeedsEmail')} />}
           <Row label={t('security.recoveryEnabled')} hint={t('security.recoveryEnabledHint')}>
-            <Select value={recovery} onChange={setRecovery} style={{ minWidth: 220 }} options={['hidden', 'contact', 'email'].map(value => ({ value, label: t(`security.recoveryMode.${value}`) }))} />
+            <Radio.Group aria-label={t('security.recoveryEnabled')} className="rp-security-recovery-options" value={recovery} onChange={event => setRecovery(event.target.value)}>
+              {['hidden', 'contact', 'email'].map(value => <Radio key={value} value={value}>
+                <span className="rp-security-recovery-label"><span>{t(`security.recoveryMode.${value}`)}</span><Typography.Text type="secondary">{t(`security.recoveryModeHint.${value}`)}</Typography.Text></span>
+              </Radio>)}
+            </Radio.Group>
           </Row>
         </Space>
       </Card>

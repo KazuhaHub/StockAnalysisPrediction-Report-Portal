@@ -364,6 +364,8 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/batch/plugins/import", s.apiBatchPluginImport)
 	s.admin(mux, "DELETE /api/admin/batch/plugins/{slug}", s.apiBatchPluginDelete)
 	s.admin(mux, "GET /api/admin/batch/config", s.apiBatchConfigGet)
+	s.admin(mux, "GET /api/admin/batch/defaults/{id}", s.apiRunDefaultsOU)
+	s.admin(mux, "PUT /api/admin/batch/defaults/{id}", s.apiRunDefaultsOU)
 	s.admin(mux, "POST /api/admin/batch/config", s.apiBatchConfigSave)
 	s.perm(mux, "GET /api/admin/batch/targets", PermRunBatch, s.apiBatchTargets)
 	s.admin(mux, "POST /api/admin/batch/targets", s.apiBatchTargetAdd)

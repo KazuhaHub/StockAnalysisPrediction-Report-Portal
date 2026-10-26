@@ -278,3 +278,19 @@ ends before it starts. `presetWindows` exposes the same lines one-per-window for
    presets editor, mobile layout, i18n (zh-CN / zh-TW / en, parity test).
 4. `go test ./...` + web typecheck/test/build; then `verify` the run→schedule→overrun matrix
    end-to-end.
+
+
+### Amendment: organizational unit form defaults
+
+Run form preferences can be overridden per organizational unit. Each field inherits
+from the nearest ancestor override, then the Default unit and global preferences.
+A null or absent override inherits; explicit zero and false retain their meaning.
+The existing metadata store holds one `run_defaults_ou:<id>` JSON value per unit;
+this does not alter the database baseline. Unit deletion removes its metadata in
+the same transaction.
+
+The member-facing preset response resolves the authenticated member's effective
+unit. The global batch configuration remains global. These are initial form values;
+execution permissions, queue governance and scheduling constraints remain enforced
+by their existing policies. The feature-owned scope rail exposes global and unit
+preferences on the run form defaults page.

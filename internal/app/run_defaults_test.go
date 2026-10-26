@@ -2,6 +2,8 @@ package app
 
 import (
 	"fmt"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -171,5 +173,99 @@ func TestRunShowPresetRuleRoundTrip(t *testing.T) {
 	post(t, srv.apiBatchConfigSave, `{"run_show_preset_rule":false}`)
 	if cfg := post(t, srv.apiBatchConfigGet, "{}"); cfg["run_show_preset_rule"] != false {
 		t.Errorf("show-rule did not turn back off: %v", cfg["run_show_preset_rule"])
+	}
+}
+
+func TestRunDefaultsOUInheritanceAndExplicitZero(t *testing.T) {
+	s := batchServer(t)
+	root := s.st.EnsureDefaultGroup()
+	parent, _ := s.st.CreateUserGroup("Operations", "", 0)
+	child, _ := s.st.CreateUserGroup("Research", "", 0)
+	s.st.SetGroupParent(parent, root)
+	s.st.SetGroupParent(child, parent)
+	s.setRunDefaultRetries(4)
+	if err := s.st.SetSetting(runDefaultsOUKey(parent), `{"run_default_retries":2,"run_default_idle":true}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetSetting(runDefaultsOUKey(child), `{"run_default_retries":0,"run_default_idle":false}`); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := s.st.loadOUPolicySnapshotFrom(s.st.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, inherited, sources, _, err := s.resolveRunDefaultsOU(snap.graph, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["run_default_retries"] != float64(0) || out["run_default_idle"] != false || inherited["run_default_retries"] != float64(2) || sources["run_default_retries"] != "Operations" {
+		t.Fatalf("resolution: %+v %+v %+v", out, inherited, sources)
+	}
+	s.st.SetSetting(runDefaultsOUKey(child), `{"run_default_retries":null}`)
+	out, _, _, _, err = s.resolveRunDefaultsOU(snap.graph, child)
+	if err != nil || out["run_default_retries"] != float64(2) || out["run_default_idle"] != true {
+		t.Fatalf("inheritance: %+v %v", out, err)
+	}
+}
+
+func TestRunDefaultsOUValidationAndCleanup(t *testing.T) {
+	s := batchServer(t)
+	id, err := s.st.CreateUserGroup("Research", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(body string, want int) {
+		t.Helper()
+		req := httptest.NewRequest("PUT", "/x", strings.NewReader(body))
+		req.SetPathValue("id", fmt.Sprint(id))
+		rec := httptest.NewRecorder()
+		s.apiRunDefaultsOU(rec, req, "admin")
+		if rec.Code != want {
+			t.Fatalf("status=%d want=%d body=%s", rec.Code, want, rec.Body.String())
+		}
+	}
+	request(`{"run_default_retries":3,"run_default_idle":false}`, 200)
+	saved := s.st.GetSetting(runDefaultsOUKey(id), "")
+	for _, body := range []string{`{"run_default_retries":6}`, `{"run_default_retries":1.5}`, `{"run_default_mode":"other"}`, `{"run_default_idle":"true"}`, `{"run_default_target_id":99999}`, `{"unknown":null}`, `null`} {
+		request(body, 400)
+		if got := s.st.GetSetting(runDefaultsOUKey(id), ""); got != saved {
+			t.Fatalf("invalid request changed defaults: %s", got)
+		}
+	}
+	if _, _, err := s.st.DeleteUserGroup(id); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.st.GetSetting(runDefaultsOUKey(id), "missing"); got != "missing" {
+		t.Fatalf("deleted OU retained defaults: %s", got)
+	}
+	request(`{}`, 404)
+}
+
+func TestRunPresetsUsesMemberOUDefaults(t *testing.T) {
+	s := batchServer(t)
+	root := s.st.EnsureDefaultGroup()
+	id, err := s.st.CreateUserGroup("Research", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetGroupParent(id, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetPrimaryGroup("admin", id); err != nil {
+		t.Fatal(err)
+	}
+	s.setRunDefaultRetries(4)
+	if err := s.st.SetSetting(runDefaultsOUKey(root), `{"run_default_retries":2}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetSetting(runDefaultsOUKey(id), `{"run_default_idle":true,"run_show_preset_rule":true}`); err != nil {
+		t.Fatal(err)
+	}
+	got := post(t, s.apiRunPresets, `{}`)
+	if got["default_retries"] != float64(2) || got["default_idle"] != true || got["show_preset_rule"] != true {
+		t.Fatalf("member defaults=%+v", got)
+	}
+	if s.runDefaultRetries() != 4 {
+		t.Fatal("OU defaults changed global configuration")
 	}
 }

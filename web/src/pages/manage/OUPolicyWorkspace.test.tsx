@@ -35,6 +35,17 @@ describe('Feature-owned organizational policy', () => {
     fireEvent.click(screen.getByRole('button', { name: /ou.globalScope/ }))
     expect(await screen.findByText('Global security controls')).toBeTruthy()
   })
+  it('collapses the whole scope rail and keeps both scope controls in one header', async () => {
+    mount('/manage/security')
+    await screen.findByRole('tree')
+    fireEvent.click(screen.getByRole('button', {name:'ou.collapse'}))
+    const expand = screen.getByRole('button', {name:'ou.expand'})
+    expect(expand.parentElement).toBe(screen.getByRole('button', {name:'ou.globalScope'}).parentElement)
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(expand.closest('.rp-policy-workspace--collapsed')).toBeTruthy()
+    fireEvent.click(expand)
+    expect(await screen.findByRole('tree')).toBeTruthy()
+  })
   it('does not hide global settings when the unit directory cannot be read', async () => {
     api.get.mockRejectedValue(new Error('Directory unavailable'))
     mount('/manage/security')

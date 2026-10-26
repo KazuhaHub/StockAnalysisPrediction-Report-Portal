@@ -3,6 +3,8 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import ManageLayout from './ManageLayout'
 
 const navigate = vi.fn()
+const siteState = vi.hoisted(() => ({ settings: {versionDisplay:'footer'} }))
+vi.mock('../../site', () => ({ useSite: () => siteState }))
 
 // The layout reads the active key off the path and navigates on menu click.
 vi.mock('react-router', () => ({
@@ -37,6 +39,7 @@ vi.mock('../../lib/prefetch', () => ({
 describe('ManageLayout — grouped rail', () => {
   beforeEach(() => {
     navigate.mockReset()
+    siteState.settings.versionDisplay = 'footer'
     prefetched.length = 0
     localStorage.removeItem(COLLAPSE_KEY)
     localStorage.removeItem('rp.manage.sider.open')
@@ -113,6 +116,14 @@ describe('ManageLayout — grouped rail', () => {
 
   // Every entry in the table is a cheap GET, so the rule the forecast case is a special case of:
   // nothing warmed on hover may be a measuring endpoint.
+  it('does not prefetch a nonexistent assistant configuration GET', () => {
+    render(<ManageLayout />)
+    fireEvent.click(screen.getByText('nav.group.batch'))
+    fireEvent.mouseEnter(screen.getByText('manage.label.assistant'))
+    expect(prefetched).not.toContain('/api/admin/chat/config')
+    expect(prefetched).not.toContain('/api/admin/chat/live')
+  })
+
   it('never warms a measuring endpoint from a hover', () => {
     render(<ManageLayout />)
     for (const key of ['storage', 'batch', 'quotes', 'forecast']) {
@@ -165,4 +176,12 @@ describe('ManageLayout — grouped rail', () => {
     // that: the footer keeps its entry point at every other width.
     expect(screen.queryByText('version.label:2026.38')).toBeNull()
   })
+})
+
+it.each(['header','hidden'])('does not duplicate or expose the version in the rail for %s placement', placement => {
+  siteState.settings.versionDisplay = placement
+  localStorage.removeItem(COLLAPSE_KEY)
+  const { container } = render(<ManageLayout />)
+  expect(container.querySelector('.rp-version-label')).toBeNull()
+  expect(screen.getByRole('button',{name:'manage.search'})).toBeTruthy()
 })

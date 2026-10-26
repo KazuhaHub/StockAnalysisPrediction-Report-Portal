@@ -2295,3 +2295,25 @@ body {
 .rp-captcha-field .ant-input { min-width: 0; flex: 1; border: 0; padding-inline: 0; background: transparent; box-shadow: none !important; }
 .rp-captcha-image { width: 96px; height: 32px; object-fit: contain; cursor: pointer; flex-shrink: 0; }
 .rp-captcha-field > .ant-btn { flex-shrink: 0; width: 32px; height: 32px; }
+
+.rp-dashboard-chart-field { display: flex; flex-direction: column; gap: 8px; }
+.rp-dashboard-chart-card { display: flex; flex-direction: column; }
+.rp-dashboard-chart-card .ant-card-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rp-dashboard-chart-card .rp-dashboard-chart { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rp-dashboard-chart-card .rp-dashboard-chart svg { flex: 1; min-height: 210px; }
+.rp-dashboard-chart figcaption { padding-top: 12px; }
+.rp-chart-datum { cursor: crosshair; outline: none; }
+.rp-chart-datum:hover .rp-chart-mark, .rp-chart-datum:focus .rp-chart-mark { filter: brightness(1.12); stroke: var(--ant-color-text); stroke-width: 1.5px; }
+
+.rp-security-recovery-options { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+.rp-security-recovery-options .ant-radio-wrapper { align-items: flex-start; margin-inline-end: 0; white-space: normal; }
+.rp-security-recovery-options .ant-radio { flex-shrink: 0; align-self: flex-start; margin-block-start: 3px; }
+.rp-security-recovery-label { display: flex; flex-direction: column; gap: 3px; line-height: 22px; overflow-wrap: anywhere; }
+.rp-security-recovery-label > .ant-typography { font-size: 12px; }
+
+.rp-policy-scope-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.rp-policy-scope-header > .ant-btn:first-child { flex: 1; min-width: 0; }
+.rp-policy-scope-header > .ant-btn:last-child { flex-shrink: 0; }
+.rp-policy-workspace--collapsed { grid-template-columns: 96px minmax(0, 1fr); gap: 16px; }
+.rp-policy-workspace--collapsed .rp-policy-scope-header > .ant-btn { flex: 0 0 32px; width: 32px; padding-inline: 0; }
+@media (max-width: 767px) { .rp-policy-workspace--collapsed { grid-template-columns: minmax(0, 1fr); } .rp-policy-scope-header { margin-bottom: 0; } }
