@@ -687,3 +687,33 @@ Online market UI predecessor
 No real trust enrollment, production
 configuration or public API/SDK freeze is included. Trust UI, signed publication,
 managed/full lifecycle and full platform acceptance remain open.
+
+## Publisher trust management interface
+
+[Publisher management UI](64-publisher-management-ui.md) adds the shared React/
+Ant Design management tab for explicit empty-platform initialization, default-
+disabled publisher registration, scope policy, key rotation and revocation. Each
+mutation has a separate review and acknowledgement; raw-key SHA-256 fingerprints
+and current publisher/key revisions bind the reviewed change. Local draft errors
+remain correctable, while uncertain saves require an explicit fresh trust read.
+Language changes cannot silently clear that lock. Account lifecycle checks discard
+late reads, previews and save results.
+
+A disposable loopback fixture with no initial control identity exercised the real
+page and HTTP handlers: initialization, disabled registration, fingerprint review,
+adding a second key and retaining the first at publisher revision 2. Three locales
+and shared theme switching were inspected through the browser plugin. The owned
+fixture listener and process were stopped. This is local functional evidence,
+not final D5 shell/mobile/screen-reader acceptance or production trust enrollment.
+
+Full local front-end regression passed 153 files / 1697 tests; subsequent added
+initialization, rotation and language-lock cases plus final guard changes passed
+45 focused UI/key/locale tests. Typecheck, lint and production web build passed;
+lint reports pre-existing warnings outside the new panel. Full local Go regression
+passed (application package 105.444 s, PostgreSQL integration cases skipped without
+a DSN); focused publisher HTTP/fixture checks passed (1.592 s). The unchanged
+publisher HTTP predecessor c9d9c404c55bce9c3f990f62b18f5c185da81db4 passed main
+CI 40401915455, native quota 40401915452 and daemon 40401915687. Real publisher
+onboarding, signed publication/acceptance hosting, managed backend execution,
+broker and full lifecycle/release acceptance remain open. No production channel,
+real credentials, Status migration or public SDK freeze is included.

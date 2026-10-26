@@ -19,7 +19,10 @@ PORTAL = Path(__file__).resolve().parents[1]
 WEB = PORTAL / "web"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--market", action="store_true", help="Include an owned synthetic TLS catalogue for market acceptance")
+parser.add_argument("--fresh", action="store_true", help="Start with no application control identity or publisher trust")
 args = parser.parse_args()
+if args.market and args.fresh:
+    parser.error("--fresh and --market are mutually exclusive")
 
 with tempfile.TemporaryDirectory(prefix="portal-install-browser-") as directory:
     target = Path(directory)
@@ -43,6 +46,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
     try:
         env = dict(os.environ, APP_INSTALL_HTTP_STATE=str(state_file), GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
         env["APP_INSTALL_HTTP_MARKET"] = "1" if args.market else ""
+        env["APP_INSTALL_HTTP_FRESH"] = "1" if args.fresh else ""
         # Never inherit a caller's integration-test database for this fixture.
         env.pop("TEST_POSTGRES_DSN", None)
         process = subprocess.Popen(["go", "test", "-count=1", "-timeout=17m", "./internal/app", "-run", "^TestPlatformManagementBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
