@@ -126,10 +126,28 @@ same-filesystem project-0 capacity FD. The unprivileged workload validates both
 identities/project IDs and uses fstatvfs on the uncapped FD, rather than weakening
 private-root permissions or counting capped statfs as filesystem exhaustion.
 Ten Python tests cover these input/capacity rules and existing refusal behavior.
-The corrected native run must be inspected before claiming enforcement.
+Corrected native source `0ae7c6a7bf0fdc8e1a3eb98ec1adbaa19c6c6561`
+passed [quota run 40278207342](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40278207342).
+The downloaded `project-quota-evidence.json` reports native Go preparation,
+unprivileged enforcement, reopen after remount, disabled-enforcement refusal and
+owned-resource cleanup as true. Both native byte/unlinked workloads denied near
+8 MiB (8,323,072 allocated/written bytes), and the native inode workload denied
+after 126 created files while an independent project still wrote 1 MiB. Capacity
+observations showed ample backing filesystem blocks/inodes, excluding full-device
+exhaustion. Native Go reopen/remount evidence here is fresh inspection; the
+original CLI-created exhausted project separately tests a post-remount write.
+Do not describe that as an additional native-project post-remount write test.
 
-Native acceptance and exact-source CI results must be inspected on the PR before
-claiming that this adapter actually enforces quotas. A cross-build is insufficient.
+Full local Go regression/build passed (app package 51.854 seconds; optional
+PostgreSQL cases were not enabled because no Portal DB behavior changed). Runner
+race tests, both Linux cross-build/vet targets, Go vet/staticcheck and workflow
+lint passed. Main exact-source CI remains separately required. This documentation
+records the native code hash rather than claiming a later documentation-only
+commit ran those native syscalls again.
+
+The inspected native report above supplies enforcement evidence for that exact
+code; a cross-build alone remains insufficient. Later native-code changes need
+fresh native evidence, and each PR head still needs its normal source CI.
 
 Remaining work: durable project allocation in the approved journal resources,
 signed effect/command execution claims, native ownership receipts, uncertainty

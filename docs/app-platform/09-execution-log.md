@@ -333,7 +333,9 @@ primitive for creating fresh sealed XFS namespaces and setting/observing project
 hard limits. It refuses reuse and preserves partial failure as uncertain without
 blind replay/deletion. The disposable quota workflow now includes independent C
 UAPI checks and native Go-created directory workloads/reopen/enforcement refusal.
-Exact-source native evidence must be inspected before marking that behavior
-verified. The primitive has no runtime/worker entry point; journal reservation,
+Native source `0ae7c6a7bf0fdc8e1a3eb98ec1adbaa19c6c6561` passed quota run
+40278207342; its downloaded report verifies real byte/inode/open-unlinked denials,
+fresh remount inspection, disabled-enforcement refusal and cleanup. The primitive
+has no runtime/worker entry point; journal reservation,
 execution claims/receipts, reconciliation and writer admission remain required.
 The display-metadata predecessor passed source CI run 40276186871.
