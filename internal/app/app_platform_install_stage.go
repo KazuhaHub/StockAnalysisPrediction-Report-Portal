@@ -89,7 +89,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err != nil || string(canonical) != raw {
 		return errAppPlatformStageEvidence
 	}
-	if p.Format != "portal.install-review/1-dev.1" || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI || p.DataQuotaBytes != 256<<20 {
+	if (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat) || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI {
 		return errAppPlatformStageEvidence
 	}
 	verified, err := platformVerifyStoredRelease(e, target.String, trustRevision, trust, now)
@@ -122,6 +122,11 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 		return err
 	}
 	expected := platformInstallProjection{Format: p.Format, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: append([]string{}, parsed.Manifest.Capabilities.Optional...), DataQuotaBytes: 256 << 20}
+	quota, err := platformInstallProfileQuota(p.Format, parsed.Manifest)
+	if err != nil || p.DataQuotaBytes != quota {
+		return errAppPlatformStageEvidence
+	}
+	expected.DataQuotaBytes = quota
 	if err := validatePlatformInstallAudience(e, p.Audience, now); err != nil {
 		return err
 	}
@@ -181,12 +186,18 @@ func (s *Store) advancePlatformInstallStaging(expected platformOperationLease) (
 	return s.advancePlatformInstallStagingContext(context.Background(), expected)
 }
 func (s *Store) advancePlatformInstallStagingContext(ctx context.Context, expected platformOperationLease) (platformOperationLease, error) {
+	return s.advancePlatformInstallLocalStage(ctx, expected, false)
+}
+func (s *Store) advancePlatformInstallLocalStage(ctx context.Context, expected platformOperationLease, frontendData bool) (platformOperationLease, error) {
 	var zero platformOperationLease
 	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 {
 		return zero, errAppPlatformStageEvidence
 	}
 	nextByStage := map[appplatform.Stage]appplatform.Stage{appplatform.StageQueued: appplatform.StageValidate, appplatform.StageValidate: appplatform.StageDownload, appplatform.StageDownload: appplatform.StageStage, appplatform.StageStage: appplatform.StagePrepareData}
 	next, ok := nextByStage[expected.snapshot.Stage]
+	if frontendData {
+		next, ok = appplatform.StageActivate, expected.snapshot.Stage == appplatform.StagePrepareData
+	}
 	if !ok {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -215,6 +226,11 @@ func (s *Store) advancePlatformInstallStagingContext(ctx context.Context, expect
 	}
 	if err := validatePlatformAdmittedInstall(e, expected, trust, facts.now); err != nil {
 		return zero, err
+	}
+	if frontendData {
+		if _, err := loadPlatformFrontendCandidate(e, expected, facts.now); err != nil {
+			return zero, err
+		}
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {

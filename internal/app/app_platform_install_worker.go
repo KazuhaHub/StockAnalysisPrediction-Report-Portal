@@ -31,7 +31,15 @@ func (s *Server) runPlatformStaticInstall(ctx context.Context, expected platform
 		case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage:
 			next, err = s.st.advancePlatformInstallStagingContext(ctx, result.lease)
 		case appplatform.StagePrepareData:
-			next, err = s.dispatchPlatformInstallData(ctx, result.lease, endpoint)
+			var profile string
+			profile, err = s.st.platformInstallProfile(ctx, result.lease.id)
+			if err == nil {
+				if profile == platformFrontendInstallFormat {
+					next, err = s.st.advancePlatformInstallLocalStage(ctx, result.lease, true)
+				} else {
+					next, err = s.dispatchPlatformInstallData(ctx, result.lease, endpoint)
+				}
+			}
 		case appplatform.StageActivate:
 			result.activation, err = s.activatePlatformStaticInstall(ctx, result.lease)
 			if err == nil {

@@ -13,7 +13,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; [shared structural schema/types/domains](21-descriptor-schema-implementation.md) implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); [exact-byte publisher verification](24-publisher-signature-verification.md) implemented in isolation; full semantic generation, [trust/staged-release transaction integration](25-trust-and-release-storage.md) implemented; full activation trust integration and complete envelope inspection remain |
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
-| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) and [signed data dispatch/bounded install driver](55-signed-data-dispatch-and-install-driver.md) and [opt-in background static scheduling](56-background-static-install-scheduler.md) implemented; startup wiring, explicit fenced recovery/takeover, runtime-free static data, complete static/managed installer and browser install flow remain |
+| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) and [signed data dispatch/bounded install driver](55-signed-data-dispatch-and-install-driver.md) and [opt-in background static scheduling](56-background-static-install-scheduler.md) and [runtime-free no-data frontend installation](57-runtime-free-frontend-installation.md) implemented; startup wiring, explicit fenced recovery/takeover, provider-backed static data, complete managed installer and browser market install flow remain |
 | P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; complete seamless shell, publisher metadata enforcement, sizing/navigation/drafts and full browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
@@ -538,3 +538,24 @@ Full local Go/PostgreSQL tests and focused race checks pass; main source CI
 68cb91971a472a99475cccaaa7f5c0a3ae326e35 passed main 40322270790, daemon 40322270597
 and native 40322270932. Fenced recovery approval/takeover, startup wiring, market
 HTTP/UI, managed lifecycle and the complete platform remain open.
+
+
+## Runtime-free frontend installation profile
+
+[Frontend installation without a runtime](57-runtime-free-frontend-installation.md)
+is now the generic static review default. An exact reviewed no-data format binds
+zero quota, no required provider capabilities and explicit app-use audience. Local
+prepare/activate transactions create no namespace/effect/runtime and use the
+approved nullable activation fields with typed integrity evidence. Protected reads
+verify this profile separately from real native namespace readiness. A portable
+empty-endpoint worker selects only these jobs; native acceptance uses explicitly
+named native review entry points with unchanged canonical bytes. Effect-free
+frontend activate stages can resume after expiry with a new fence. The loopback
+HTTP/SDK browser fixture now installs the actual frontend before serving it;
+English/Simplified/Traditional presentation and in-memory interaction were checked
+through the browser plugin. New profile checks preserve database cancellation
+errors after the existing wait regression exposed an incorrect error conversion.
+Final source checks/CI are pending their own results. Scheduler predecessor
+804fdc2a46ca095677c711f43dddbf7b2c173235 passed main 40327545213 and native 40327545246.
+Market HTTP/UI, provider-backed data/managed lifecycle and the complete platform
+remain open.

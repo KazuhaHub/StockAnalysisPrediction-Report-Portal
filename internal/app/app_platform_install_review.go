@@ -15,6 +15,8 @@ import (
 var errAppPlatformInstallUnavailable = errors.New("application installation requirements unavailable")
 
 const platformDevelopmentAPI = "2.0.0-dev.1"
+const platformNativeInstallFormat = "portal.install-review/1-dev.1"
+const platformFrontendInstallFormat = "portal.frontend-install-review/1-dev.1"
 
 type platformInstallProjection struct {
 	Format               string                    `json:"format"`
@@ -79,10 +81,24 @@ func platformLoadInstallProjection(e migExec, release platformStagedRelease, act
 	return platformInstallProjection{Format: "portal.install-review/1-dev.1", AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined, DataQuotaBytes: 256 << 20}, nil
 }
 
+// Generic static installation defaults to no application persistence. Native
+// development/storage acceptance uses the explicitly named separate entry point.
 func (s *Server) createPlatformInstallReview(session platformActorSession, release string, trustRevision int64) (platformRemovalReview, error) {
 	return s.createPlatformInstallAudienceReview(session, release, trustRevision, nil)
 }
 func (s *Server) createPlatformInstallAudienceReview(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget) (platformRemovalReview, error) {
+	return s.createPlatformFrontendInstallReview(session, release, trustRevision, targets)
+}
+func (s *Server) createPlatformNativeInstallReview(session platformActorSession, release string, trustRevision int64) (platformRemovalReview, error) {
+	return s.createPlatformNativeInstallAudienceReview(session, release, trustRevision, nil)
+}
+func (s *Server) createPlatformNativeInstallAudienceReview(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget) (platformRemovalReview, error) {
+	return s.createPlatformInstallReviewForFormat(session, release, trustRevision, targets, platformNativeInstallFormat)
+}
+func (s *Server) createPlatformFrontendInstallReview(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget) (platformRemovalReview, error) {
+	return s.createPlatformInstallReviewForFormat(session, release, trustRevision, targets, platformFrontendInstallFormat)
+}
+func (s *Server) createPlatformInstallReviewForFormat(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget, format string) (platformRemovalReview, error) {
 	if len(targets) > maxPlatformInstallAudience {
 		return platformRemovalReview{}, errAppPlatformPlanChanged
 	}
@@ -92,6 +108,9 @@ func (s *Server) createPlatformInstallAudienceReview(session platformActorSessio
 	err := s.withPlatformStagedRelease(session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
 		projection, err := platformLoadInstallProjection(e, verified, actor, control)
 		if err != nil {
+			return err
+		}
+		if err = platformSetInstallProjectionFormat(e, &projection, format); err != nil {
 			return err
 		}
 		projection.Audience, err = resolvePlatformInstallAudience(e, targets, control.nowMS)
@@ -198,6 +217,9 @@ func (s *Server) consumePlatformInstallReview(session platformActorSession, plan
 		var storedProjection platformInstallProjection
 		if json.Unmarshal([]byte(raw), &storedProjection) != nil {
 			return errAppPlatformPlanChanged
+		}
+		if err = platformSetInstallProjectionFormat(e, &projection, storedProjection.Format); err != nil {
+			return err
 		}
 		if err := validatePlatformInstallAudience(e, storedProjection.Audience, control.nowMS); err != nil {
 			return err

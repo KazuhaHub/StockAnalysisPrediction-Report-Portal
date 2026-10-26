@@ -20,13 +20,23 @@ type platformInstallSelection struct {
 // Only initial static installations belong to this worker. A query is a hint:
 // row/authority/lease eligibility is checked again under the usual lock order.
 func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
+	return s.claimNextPlatformInstallForFormat(ctx, worker, platformNativeInstallFormat)
+}
+func (s *Server) claimNextPlatformFrontendInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
+	return s.claimNextPlatformInstallForFormat(ctx, worker, platformFrontendInstallFormat)
+}
+func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, format string) (platformInstallSelection, error) {
 	var zero platformInstallSelection
-	if !platformValidUUID(worker) {
+	if !platformValidUUID(worker) || (format != platformNativeInstallFormat && format != platformFrontendInstallFormat) {
 		return zero, errAppPlatformLeaseConflict
 	}
-	dek, err := s.dek()
-	if err != nil {
-		return zero, err
+	var dek []byte
+	var err error
+	if format == platformNativeInstallFormat {
+		dek, err = s.dek()
+		if err != nil {
+			return zero, err
+		}
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -60,7 +70,7 @@ func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker stri
 	if err != nil {
 		return zero, err
 	}
-	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id WHERE o.action='install' AND o.managed=0 AND o.source_generation=0 AND o.target_generation=1 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','download','stage','prepare_data','activate') AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.phase='pending' AND i.desired_state='enabled' AND i.runtime_id IS NULL AND i.generation=1 AND i.controller_epoch=? AND o.controller_epoch=? ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch)
+	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.action='install' AND o.managed=0 AND o.source_generation=0 AND o.target_generation=1 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','download','stage','prepare_data','activate') AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.phase='pending' AND i.desired_state='enabled' AND i.runtime_id IS NULL AND i.generation=1 AND i.controller_epoch=? AND o.controller_epoch=? AND p.plan_json LIKE ? ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch, `{"format":"`+format+`",%`)
 	if err != nil {
 		return zero, err
 	}
@@ -83,8 +93,12 @@ func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker stri
 	}
 	// Lock the shared provider before installation/operation rows. No seed is
 	// retained by the selector; this is readiness/trust preflight, not dispatch.
-	_, seed, runtimeErr := s.platformDataRuntime(e, epoch, dek)
-	clear(seed)
+	var runtimeErr error
+	if format == platformNativeInstallFormat {
+		var seed []byte
+		_, seed, runtimeErr = s.platformDataRuntime(e, epoch, dek)
+		clear(seed)
+	}
 	if runtimeErr != nil && !errors.Is(runtimeErr, errAppPlatformRuntimeConflict) {
 		return zero, runtimeErr
 	}
@@ -111,11 +125,18 @@ func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker stri
 		if eligible != 1 {
 			continue
 		}
+		currentProfile, err := platformInstallProfileInTransaction(e, old.id)
+		if err != nil {
+			return zero, err
+		}
+		if currentProfile != format {
+			return zero, errAppPlatformStageEvidence
+		}
 		resources, err := platformInstallResourceCount(e, old.installationID)
 		if err != nil {
 			return zero, err
 		}
-		if resources > 0 || old.snapshot.Stage == appplatform.StageActivate {
+		if resources > 0 || (old.snapshot.Stage == appplatform.StageActivate && format == platformNativeInstallFormat) {
 			if err = finalizePlatformInstallForReview(e, facts, "install_lease_recovery_required", true); err != nil {
 				return zero, err
 			}
@@ -201,7 +222,11 @@ func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code 
 		return err
 	}
 	outcome, phase := appplatform.EffectsNone, "review_required"
-	if resources > 0 || lease.snapshot.Stage == appplatform.StageActivate {
+	profile, err := platformInstallProfileInTransaction(e, lease.id)
+	if err != nil {
+		return err
+	}
+	if resources > 0 || (lease.snapshot.Stage == appplatform.StageActivate && profile == platformNativeInstallFormat) {
 		outcome, phase = appplatform.EffectsUnknown, "recovery_required"
 	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)

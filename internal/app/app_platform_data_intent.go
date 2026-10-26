@@ -78,6 +78,13 @@ func (s *Server) platformDataRuntime(e migExec, epoch string, dek []byte) (platf
 }
 
 func platformDataCommand(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, namespace, effect string) (control.Command, error) {
+	profile, profileErr := platformInstallProfileInTransaction(e, lease.id)
+	if profileErr != nil {
+		return control.Command{}, profileErr
+	}
+	if profile != platformNativeInstallFormat {
+		return control.Command{}, errAppPlatformStageEvidence
+	}
 	var target string
 	var raw []byte
 	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, lease.id).Scan(&target, &raw)
@@ -194,6 +201,13 @@ func (s *Server) preparePlatformInstallData(ctx context.Context, expected platfo
 	}
 	if err := ctx.Err(); err != nil {
 		return zero, err
+	}
+	profile, err := s.st.platformInstallProfile(ctx, expected.id)
+	if err != nil {
+		return zero, err
+	}
+	if profile != platformNativeInstallFormat {
+		return zero, errAppPlatformStageEvidence
 	}
 	dek, err := s.dek()
 	if err != nil {

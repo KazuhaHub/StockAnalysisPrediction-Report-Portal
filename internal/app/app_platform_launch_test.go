@@ -38,7 +38,7 @@ func platformLaunchFixtureWithArchive(t *testing.T, pg bool, archive []byte) (*S
 		}
 	}
 
-	review, err := s.createPlatformInstallReview(session, release.sha256, 1)
+	review, err := s.createPlatformNativeInstallReview(session, release.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

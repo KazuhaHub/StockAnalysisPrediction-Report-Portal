@@ -18,7 +18,7 @@ func platformInstallQueueFixture(t *testing.T, pg bool) (*Server, platformActorS
 	if _, err = s.confirmPlatformObservedRuntime(actor, runtime, runtimeObservationFixture(runtime)); err != nil {
 		t.Fatal(err)
 	}
-	review, err := s.createPlatformInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	review, err := s.createPlatformNativeInstallAudienceReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
 	if err != nil {
 		t.Fatal(err)
 	}

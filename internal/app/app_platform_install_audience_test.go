@@ -19,7 +19,7 @@ func testPlatformInstallAudienceReview(t *testing.T, pg bool) {
 		}
 	})
 	targets := []platformAudienceTarget{{kind: "user", username: session.username}, {kind: "ou", ouID: group}}
-	review, err := s.createPlatformInstallAudienceReview(session, release.sha256, 1, targets)
+	review, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func testPlatformInstallAudienceRefusals(t *testing.T, pg bool) {
 				targets = []platformAudienceTarget{{kind: "user", username: "audience-life"}}
 			}
 			before := dumpOf(t, s.st)
-			review, err := s.createPlatformInstallAudienceReview(session, release.sha256, 1, targets)
+			review, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, targets)
 			switch kind {
 			case "deleted_user", "recreated_user", "inactive_user", "expired_user", "changed_ou":
 				if err != nil {
