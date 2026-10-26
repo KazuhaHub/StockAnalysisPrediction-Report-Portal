@@ -96,10 +96,11 @@ The operator can then enroll **only the public result** in the runner's explicit
 repository using the protected bootstrap procedure. No private key is transferred
 to a runner or app. The initial transport does not expose an enrollment method.
 
-Do not enable a row based on possession of public material. Confirmation must bind
-the actual OS-authenticated endpoint, durable runner deployment/key/epoch/revision,
-current control state and required native compatibility evidence. Enabling,
-restored-resource reconciliation, Portal lease-bound command production, stable
+Do not enable a row based on possession of public material. [The confirmation implementation](34-runtime-enrollment-confirmation.md) binds
+the actual OS-authenticated endpoint, durable runner deployment/key/epoch/revision
+and current control state. Its enabled flag confirms control identity only. Native
+compatibility evidence is still required before admitting/executing managed apps.
+Restored-resource reconciliation, Portal lease-bound command production, stable
 intent delivery and physical provider execution remain separate work. Static
 installations retain their no-runtime path; this does not require Docker for them.
 

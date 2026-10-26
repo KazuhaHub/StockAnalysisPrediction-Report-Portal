@@ -139,6 +139,8 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 			t.Fatalf("identity child %s (%d:%d): %v\n%s", action, uid, gid, err, out)
 		}
 	}
+	run(controllerTestUID, controllerTestGID, "probe", sig)
+	run(41002, controllerTestGID, "probe-refused", sig)
 	// A group member holding a real signed request still cannot admit it as Portal.
 	run(41002, controllerTestGID, "peer-refused", sig)
 	// Both an unrelated user and the right UID without the endpoint group must be
@@ -210,6 +212,19 @@ func TestControllerIdentityChild(t *testing.T) {
 		t.Skip("identity subprocess only")
 	}
 	path := os.Getenv("IDENTITY_SOCKET")
+	if action == "probe" || action == "probe-refused" {
+		obs, err := ObserveControllerEnrollment(context.Background(), path, uint32(os.Geteuid()), controllerTestGID)
+		if action == "probe-refused" {
+			if err == nil || !obs.ReceivedAt().IsZero() {
+				t.Fatal("wrong peer read enrollment")
+			}
+			return
+		}
+		if err != nil || !bytes.Equal(obs.Controller().PublicKey, observationFixture().PublicKey) {
+			t.Fatal("controller could not observe enrolled key")
+		}
+		return
+	}
 	if action == "impostor" {
 		listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 		if err != nil {

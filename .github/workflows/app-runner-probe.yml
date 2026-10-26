@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'internal/apprunner/**'
+      - 'internal/app/app_platform_runtime*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/secretbox*'
       - 'cmd/app-runner/**'
       - '.github/workflows/app-runner-probe.yml'
       - 'go.mod'
@@ -11,6 +14,9 @@ on:
     branches: [main]
     paths:
       - 'internal/apprunner/**'
+      - 'internal/app/app_platform_runtime*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/secretbox*'
       - 'cmd/app-runner/**'
       - '.github/workflows/app-runner-probe.yml'
       - 'go.mod'
@@ -59,3 +65,19 @@ jobs:
           go test -p 2 -race -c -o "$identity_binary" ./internal/apprunner/transport
           chmod 0500 "$identity_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_IDENTITY_ACCEPTANCE=1 "$identity_binary" -test.v -test.timeout=90s -test.run='^TestControllerIdentityAcceptance$'
+
+      - name: Verify Portal confirmation through the root endpoint
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          portal_binary=$(mktemp "$RUNNER_TEMP/portal-confirm.XXXXXXXX")
+          trap 'rm -f "$portal_binary"' EXIT
+          go test -p 2 -race -c -o "$portal_binary" ./internal/app
+          chmod 0500 "$portal_binary"
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'

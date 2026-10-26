@@ -166,3 +166,16 @@ and full repository
 [40247599835](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40247599835).
 Portal lease-bound command production, enrollment confirmation and physical
 lifecycle work remain open; initial registration does not enable those paths.
+
+## Live enrollment observation and initial control binding confirmation
+
+[Runtime confirmation](34-runtime-enrollment-confirmation.md) connects a bounded
+read-only nonce query over the authenticated local endpoint to the Portal's
+administrator/epoch/key checks and atomic initial binding/audit confirmation.
+Enabled means confirmed control identity; it does not admit a managed runtime or
+prove quota, isolation, capacity or resource readiness. Those gates remain required.
+Local both-driver tests cover stale proof/session after observed audit lock waits
+and rollback. Dedicated Linux acceptance exercises the actual non-root Portal
+entry point against a root journal/endpoint; verify final source CI before claiming
+that native result. Prior registration source `c985af4bda3b61eba6eb2b17c09410fc58260342`
+passed full [CI 40249657209](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40249657209).
