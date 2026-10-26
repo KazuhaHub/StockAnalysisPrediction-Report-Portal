@@ -57,6 +57,12 @@ func platformDatabaseNow(e migExec) (int64, error) {
 }
 
 func platformReadActorAccount(e migExec, session platformActorSession, now int64, locked bool) (platformActorAccount, error) {
+	return platformReadSessionAccount(e, session, now, locked, true)
+}
+
+// Launch readers use the same current account/session lifecycle checks without
+// inheriting management authority. Only the management wrapper requires admin.
+func platformReadSessionAccount(e migExec, session platformActorSession, now int64, locked, requireAdmin bool) (platformActorAccount, error) {
 	var account platformActorAccount
 	if session.username == "" || len(session.username) > 320 || len(session.created) > 64 || session.sessionID == "" || len(session.sessionID) > 128 || session.sessionRevision < 0 || session.generation < 0 || session.expires.IsZero() || session.expires.UnixMilli() <= now {
 		return account, errAppPlatformActorUnavailable
@@ -76,7 +82,7 @@ func platformReadActorAccount(e migExec, session platformActorSession, now int64
 		}
 		return account, err
 	}
-	if account.role != "admin" || active != 1 || account.created != session.created || account.sessionRevision != session.sessionRevision {
+	if (requireAdmin && account.role != "admin") || active != 1 || account.created != session.created || account.sessionRevision != session.sessionRevision {
 		return account, errAppPlatformActorUnavailable
 	}
 	generation, err := notificationAccountGeneration(e, session.username)
