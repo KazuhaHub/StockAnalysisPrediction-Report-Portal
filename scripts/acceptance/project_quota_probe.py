@@ -29,7 +29,7 @@ def command(*args):
 
 
 def require_disposable(args):
-    if args != ["--disposable-github-worker"] or sys.platform != "linux" or os.geteuid() != 0:
+    if not (args == ["--disposable-github-worker"] or (len(args)==5 and args[:2]==["--disposable-github-worker", "--native-binary"] and args[3]=="--abi-json" and Path(args[2]).is_absolute() and Path(args[4]).is_absolute())) or sys.platform != "linux" or os.geteuid() != 0:
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("probe refuses hosts outside a disposable GitHub-hosted worker")
@@ -115,15 +115,36 @@ def main(args):
             os.chown(folder, 10000, 10000)
             folder.chmod(0o700)
             folders[name] = folder
+        native_root = None
+        if len(args) == 5:
+            native_root = mountpoint / "native-data"
+            native_root.mkdir(mode=0o700)
+            native_env = dict(ENV, GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
+            native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
+                raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
+            report["native_go_data_prepared"] = True
         # The synthetic UID must not depend on traversing the runner's private
         # checkout/home. Keep the reviewed workload in the root-owned fixture.
         workload = root / "workload.py"
         workload.write_bytes(Path(__file__).with_name("quota_workload.py").read_bytes())
         workload.chmod(0o444)
 
-        def run_workload(mode, folder):
-            output = command("setpriv", "--reuid=10000", "--regid=10000", "--clear-groups",
-                             "--no-new-privs", "/usr/bin/python3", str(workload), mode, str(folder))
+        def run_workload(mode, folder, private=False):
+            if private:
+                directory_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                capacity_fd = os.open(mountpoint, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    result = subprocess.run(["setpriv", "--reuid=10000", "--regid=10000", "--clear-groups", "--no-new-privs", "/usr/bin/python3", str(workload), mode, "--private-fds", str(directory_fd), str(capacity_fd)], pass_fds=(directory_fd, capacity_fd), env=ENV, capture_output=True, text=True, timeout=45)
+                finally:
+                    os.close(directory_fd)
+                    os.close(capacity_fd)
+                if result.returncode:
+                    raise RuntimeError("native quota workload failed: " + result.stderr[-2048:])
+                output = result.stdout
+            else:
+                output = command("setpriv", "--reuid=10000", "--regid=10000", "--clear-groups",
+                                 "--no-new-privs", "/usr/bin/python3", str(workload), mode, str(folder))
             result = json.loads(output)
             if result.get("mode") != mode:
                 raise RuntimeError("unexpected workload result identity")
@@ -132,6 +153,18 @@ def main(args):
         for mode in ("bytes", "inodes", "unlinked"):
             run_workload(mode, folders[mode])
             run_workload("healthy-" + mode, folders["healthy"])
+        if native_root is not None:
+            native_folders = [native_root / f"00000000-0000-0000-0000-{i:012d}" for i in range(1,5)]
+            # Writer access is synthetic test setup, not part of Prepare. The
+            # provider leaves roots sealed until future journal/writer admission.
+            for folder in native_folders:
+                os.chown(folder, 10000, 10000)
+            for i, mode in enumerate(("bytes", "inodes", "unlinked")):
+                run_workload(mode, native_folders[i], private=True)
+                run_workload("healthy-"+mode, native_folders[3], private=True)
+            for folder in native_folders:
+                os.chown(folder, 0, 0)
+            report["native_go_unprivileged_enforcement"] = True
         require_loop_owner(loop, image)
         require_mount_owner(mountpoint, loop)
         command("umount", str(mountpoint))
@@ -139,6 +172,19 @@ def main(args):
         require_mount_owner(mountpoint, loop)
         run_workload("after-remount", folders["bytes"])
         report["remount_enforcement"] = True
+        if native_root is not None:
+            native_env["APP_DATA_NATIVE_PHASE"] = "inspect"
+            native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
+                raise RuntimeError("native data reopen inspection failed: " + (native.stdout+native.stderr)[-4096:])
+            report["native_go_reopen_after_remount"] = True
+            command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
+            native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
+            native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
+                raise RuntimeError("native data accepted disabled enforcement: " + (native.stdout+native.stderr)[-4096:])
+            command("xfs_quota", "-x", "-c", "enable -p", str(mountpoint))
+            report["native_go_detects_disabled_enforcement"] = True
         # Keep the original exhausted files. A raised project limit, rather than
         # cleanup or a newly selected filesystem, must reverse each denial.
         command("xfs_quota", "-x", "-c", "limit -p bhard=16m ihard=128 4101", str(mountpoint))
