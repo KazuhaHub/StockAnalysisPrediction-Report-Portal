@@ -582,3 +582,24 @@ Administrator plan/commit/
 progress HTTP/UI, remote marketplace publication, managed lifecycle and the
 complete platform remain open. This source work is not production deployment
 approval.
+
+## Administrator installation review/admission/progress HTTP
+
+[Installation management HTTP](59-installation-management-http.md) exposes the
+existing no-data review and idempotent admission repositories through three
+administrator/session/enrollment-protected routes. Exact bounded JSON, origin
+checks, shared foreground verification slots, request-bound SQL/backoff and
+format-specific admission prevent caller-supplied runtime instructions or native
+review bypass. Progress is read from durable SQL, remains inspectable during
+restore pause and exposes safe codes with three-locale messages. HTTP tests cover
+actual review/admission/background completion/launch, replay/conflict, role and
+enrollment gates, malformed inputs, stale audience, empty audience, native review
+refusal, pause/redaction and real canceled PostgreSQL advisory-lock waits.
+Local full Go/PostgreSQL regression passed (application package 158.082 s), as did
+focused SQLite/PostgreSQL management race checks (35.005 s), vet, staticcheck,
+Linux amd64 compilation and web
+locale tests/typecheck/lint/build. The exact dump cancellation assertion accounts
+for the shared authentication layer's legitimate initial session activity refresh.
+Predecessor service source 8e784be889fb11feb606667e46e2e31e5532fc31 passed main
+CI 40339290369 and native regression 40339290645. Catalogue management UI,
+publication, managed lifecycle and full platform acceptance remain open.
