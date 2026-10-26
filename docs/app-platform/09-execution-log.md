@@ -529,8 +529,12 @@ audited review/recovery state with cleared leases and preserved data/evidence.
 Lease writes now respect context and cannot renew an already expired original
 lease after blocking. Existing startup/configuration remains unchanged. Native
 acceptance now starts the actual service after admitting a second queued package,
-with no manual claim/driver call for it. Native acceptance for this source is
-pending its own workflow. Dispatch predecessor
+with no manual claim/driver call for it. Native acceptance for this source
+passed in run 40326048071 on source 616003ab97bf77e9e98e2599aa041c12454501c2.
+The downloaded report confirms actual background scheduling, protected document
+access, preceding dispatch/recovery and owned cleanup, retaining execution_ready=false.
+Full local Go/PostgreSQL tests and focused race checks pass; main source CI
+40326048047 also passed all configured checks. Dispatch predecessor
 68cb91971a472a99475cccaaa7f5c0a3ae326e35 passed main 40322270790, daemon 40322270597
 and native 40322270932. Fenced recovery approval/takeover, startup wiring, market
 HTTP/UI, managed lifecycle and the complete platform remain open.

@@ -166,3 +166,24 @@ HTTP plan/commit/progress surfaces, market UX, managed lifecycle, runtime-free
 static data, SDK/shell acceptance and production release gates remain required.
 No production credentials, Status migration, public SDK freeze or server beta
 configuration changes are part of this implementation.
+
+
+## Observed source evidence
+
+Source `616003ab97bf77e9e98e2599aa041c12454501c2` passed disposable native
+run [40326048071](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40326048071).
+Its downloaded report confirms `native_portal_background_install_scheduler`,
+queued-to-complete driver execution, signed dispatch, read-only recovery,
+activation/launch and owned cleanup. The background application actually reached
+protected document access without a manual claim/driver call for its operation.
+`execution_ready` remains false because managed runtime/full-platform gates are
+still outstanding.
+
+Local full Go tests with disposable PostgreSQL passed (application package
+160.415 seconds). Focused SQLite/PostgreSQL queue/scheduler/lease race checks,
+including late renewal and rollback/offline cases, passed. Staticcheck, vet,
+Linux amd64/arm64 cross-compilation, 12 Python acceptance checks and workflow lint
+passed. The same source also passed main CI
+[40326048047](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40326048047),
+including full Go/PostgreSQL tests, configured race shards, web checks, image
+smoke and workflow lint.
