@@ -106,8 +106,16 @@ python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
 ```
 
 Use this PR's Linux workflows for transport execution and native cross-UID proof.
-Cross-compilation is not native arm64 acceptance. Inspect exact-source CI and the
-downloaded native report before claiming the entire chain passes.
+Source `f3e77b540565d6fc678ec1be29f184bd4440d0ba` passed
+[native run 40304423554](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40304423554),
+including the Linux transport race suite. The downloaded report confirms normal
+and recovered cross-UID receipt transport, peer/signature/direct-journal denials,
+existing native preparation/recovery/quota checks and owned cleanup. Full local
+Go tests, journal race tests (72.243 seconds), cross-compilation, vet/staticcheck,
+shared vector/opaque JSON tests and twelve Python refusal tests pass. A negative
+overlay disabling exact command matching fails at the cross-command assertion.
+Main and daemon CI have independent status. Cross-compilation is not native arm64
+acceptance, and disposable native evidence is not production acceptance.
 
 The next controller integration must construct/sign an exact reviewed effect
 under the current lease, retrieve this opaque root-profile observation, recheck

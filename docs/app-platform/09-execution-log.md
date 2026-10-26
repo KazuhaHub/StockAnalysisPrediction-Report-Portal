@@ -433,8 +433,11 @@ intent and unchanged observed resource identity. The opaque client observation
 retains controller and endpoint profile and refuses JSON authority. Admission
 acknowledgements remain distinct. The disposable workflow now tests actual normal
 and recovered receipts across root/non-root identities using the same journal,
-with group-only, signature and direct-journal denials. This source's Linux CI and
-native evidence still require inspection. Recovery predecessor source
+with group-only, signature and direct-journal denials. Source
+f3e77b540565d6fc678ec1be29f184bd4440d0ba passed native run 40304423554, including
+Linux transport race tests. Its downloaded report confirms all three new transport
+flags and existing native/cleanup evidence; main/daemon CI are independent.
+Recovery predecessor source
 a9a716b2a742720b503a0249118cdd5e3bf5f6f7 passed main 40301418154, runner
 40301418166 and native 40301418160. Portal command construction, receipt/stage CAS,
 writer/activation and the full market installation experience remain open.
