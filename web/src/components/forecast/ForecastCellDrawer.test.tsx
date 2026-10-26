@@ -507,3 +507,26 @@ describe('ForecastCellDrawer months removed by retention', () => {
     expect(screen.getByText('forecast.drawer.excluded_title:{"n":2}')).toBeTruthy()
   })
 })
+
+
+describe('ForecastCellDrawer visual response gates', () => {
+  function visual(response: ForecastMembersResponse) {
+    getMock.mockResolvedValue(response)
+    render(<MemoryRouter><ForecastCellDrawer open onClose={() => undefined} mode="month" from="" to="" group="month" label="2026-09" checkpoint="d5" cell={{ state: 'mature', n: 36 }} defaultPresentation="visual" /></MemoryRouter>)
+  }
+
+  it('does not derive counts when the members response withholds them', async () => {
+    visual(page([member(1, 'agree')]))
+    await screen.findByText('600001')
+    expect(screen.queryByText('forecast.readable.group_returns')).toBeNull()
+    expect(screen.queryByText('forecast.readable.up_verdict')).toBeNull()
+  })
+
+  it('does not show scored cards from a response that is no longer mature', async () => {
+    visual(page([member(1, 'agree')], { state: 'small', n: 1 }))
+    await waitFor(() => expect(getMock).toHaveBeenCalledOnce())
+    await act(async () => {})
+    expect(screen.queryByText('600001')).toBeNull()
+    expect(screen.queryByText('forecast.readable.group_returns')).toBeNull()
+  })
+})

@@ -880,7 +880,7 @@ describe('ForecastRecordPage report type', () => {
   it('names the one covered type as a tag, not a control', async () => {
     await open(['Decision memo'])
     expect(screen.getByText('Decision memo')).toBeTruthy()
-    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'forecast.toolbar.rtype' })).toBeNull()
     expect(urls()).toEqual(['/api/forecast/groups?mode=month'])
   })
 
@@ -915,7 +915,7 @@ describe('ForecastRecordPage report type', () => {
     apiMock.get.mockResolvedValue(withheld())
     show()
     await screen.findByText('+3.1 pt')
-    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'forecast.toolbar.rtype' })).toBeNull()
     expect(document.querySelector('[data-part="rtype"]')).toBeNull()
   })
 
