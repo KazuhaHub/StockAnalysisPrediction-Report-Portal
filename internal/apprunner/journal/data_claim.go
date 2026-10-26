@@ -32,14 +32,16 @@ type dataClaimState struct {
 type DataAttempt struct{ Invoked bool }
 
 type dataClaimMarker struct {
-	Format          string `json:"format"`
-	ClaimID         string `json:"claim_id"`
-	EffectID        string `json:"effect_id"`
-	ResourceID      string `json:"resource_id"`
-	OwnershipSHA256 string `json:"ownership_sha256"`
-	AdmittedFence   string `json:"admitted_fence"`
-	ClaimedMS       string `json:"claimed_ms"`
-	ExpiresMS       string `json:"expires_ms"`
+	Format             string `json:"format"`
+	ClaimID            string `json:"claim_id"`
+	EffectID           string `json:"effect_id"`
+	ResourceID         string `json:"resource_id"`
+	OwnershipSHA256    string `json:"ownership_sha256"`
+	AdmittedFence      string `json:"admitted_fence"`
+	ClaimedMS          string `json:"claimed_ms"`
+	ExpiresMS          string `json:"expires_ms"`
+	RootFilesystemUUID string `json:"root_filesystem_uuid,omitempty"`
+	RootInode          string `json:"root_inode,omitempty"`
 }
 
 func dataClaimID() (string, error) {
@@ -87,7 +89,7 @@ func (s *Store) ClaimPrepareData(ctx context.Context, raw, signature []byte) (Da
 	if err != nil {
 		return zero, err
 	}
-	marker, err := json.Marshal(dataClaimMarker{"portal.runner.prepare-data-claim/1-dev.1", id, reservation.EffectID, reservation.ResourceID, reservation.OwnershipSHA256, strconv.FormatInt(reservation.ControlFence, 10), strconv.FormatInt(facts.now, 10), facts.command.ExpiresMS})
+	marker, err := json.Marshal(dataClaimMarker{"portal.runner.prepare-data-claim/1-dev.1", id, reservation.EffectID, reservation.ResourceID, reservation.OwnershipSHA256, strconv.FormatInt(reservation.ControlFence, 10), strconv.FormatInt(facts.now, 10), facts.command.ExpiresMS, "", ""})
 	if err != nil || len(marker) > 16384 {
 		return zero, ErrDataClaimUnavailable
 	}

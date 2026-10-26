@@ -29,7 +29,14 @@ def command(*args):
 
 
 def require_disposable(args):
-    if not (args == ["--disposable-github-worker"] or (len(args)==5 and args[:2]==["--disposable-github-worker", "--native-binary"] and args[3]=="--abi-json" and Path(args[2]).is_absolute() and Path(args[4]).is_absolute())) or sys.platform != "linux" or os.geteuid() != 0:
+    native_args = (
+        len(args) in (5, 7)
+        and args[:2] == ["--disposable-github-worker", "--native-binary"]
+        and args[3] == "--abi-json"
+        and Path(args[2]).is_absolute() and Path(args[4]).is_absolute()
+        and (len(args) == 5 or (args[5] == "--journal-binary" and Path(args[6]).is_absolute()))
+    )
+    if not (args == ["--disposable-github-worker"] or native_args) or sys.platform != "linux" or os.geteuid() != 0:
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("probe refuses hosts outside a disposable GitHub-hosted worker")
@@ -130,7 +137,7 @@ def main(args):
             folder.chmod(0o700)
             folders[name] = folder
         native_root = None
-        if len(args) == 5:
+        if len(args) in (5,7):
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
@@ -139,6 +146,25 @@ def main(args):
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
+        journal_root = None
+        if len(args) == 7:
+            journal_root = mountpoint / "journal-data"
+            journal_root.mkdir(mode=0o700)
+            # One control journal outside app data; no per-app database.
+            journal_control = root / "journal-control"
+            journal_control.mkdir(mode=0o700)
+            journal_inode = str(journal_root.stat().st_ino)
+
+            def run_journal(phase):
+                journal_env = dict(native_env, APP_DATA_NATIVE_PHASE=phase, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode)
+                result = subprocess.run([args[6], "-test.run=^TestNativeJournalDataExecution$", "-test.v", "-test.timeout=45s"], env=journal_env, capture_output=True, text=True, timeout=55)
+                if result.returncode or "--- PASS: TestNativeJournalDataExecution" not in result.stdout:
+                    raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
+
+            run_journal("prepare")
+            report["native_journal_physical_receipts"] = True
+            report["native_journal_root_history_binding"] = True
+            report["native_journal_settlement_failure_preserved_unknown"] = True
         # The synthetic UID must not depend on traversing the runner's private
         # checkout/home. Keep the reviewed workload in the root-owned fixture.
         workload = root / "workload.py"
@@ -193,6 +219,9 @@ def main(args):
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data reopen inspection failed: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_reopen_after_remount"] = True
+            if journal_root is not None:
+                run_journal("inspect")
+                report["native_journal_receipts_survive_remount"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
@@ -218,6 +247,9 @@ def main(args):
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data accepted replaced filesystem identity: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_rejects_changed_filesystem_uuid"] = True
+            if journal_root is not None:
+                run_journal("replaced")
+                report["native_journal_rejects_changed_filesystem_uuid"] = True
     finally:
         # Never unmount, detach or delete a resource whose ownership changed.
         # On cleanup failure preserve it for this ephemeral worker's teardown.
