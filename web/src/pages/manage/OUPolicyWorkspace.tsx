@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Typography } from 'antd'
-import { GlobalOutlined } from '@ant-design/icons'
+import { GlobalOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -12,9 +12,10 @@ import OrgUnitDetail, { type OUPolicySection } from './OrgUnitDetail'
 export type FeaturePolicySection = Exclude<OUPolicySection, 'directory'>
 
 /** The persistent scope rail sits between primary navigation and the feature's editor. */
-export function PolicyPage({ section, children }: { section: FeaturePolicySection; children: ReactNode }) {
+export function PolicyPage({ section, children, renderOU }: { section: FeaturePolicySection; children: ReactNode; renderOU?: (group: UserGroupRow, groups: UserGroupRow[]) => ReactNode }) {
   const { t } = useTranslation()
   const [params, setParams] = useSearchParams()
+  const [collapsed, setCollapsed] = useState(false)
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -35,20 +36,23 @@ export function PolicyPage({ section, children }: { section: FeaturePolicySectio
     if (id !== undefined) next.set('ou', String(id))
     if (next.toString() !== params.toString()) setParams(next)
   }
-  return <div className="rp-policy-workspace" key={params.toString()}>
+  return <div className={`rp-policy-workspace ${collapsed ? 'rp-policy-workspace--collapsed' : ''}`} key={params.toString()}>
     <aside className="rp-policy-scope" aria-label={t('ou.unitScope')}>
-      <Button icon={<GlobalOutlined />} block type={scoped ? 'text' : 'primary'}
-        aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{t('ou.globalScope')}</Button>
+      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={!collapsed} type={scoped ? 'text' : 'primary'}
+        aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{!collapsed && t('ou.globalScope')}</Button>
+      <Button icon={collapsed ? <RightOutlined /> : <LeftOutlined />} aria-label={t(collapsed ? 'ou.expand' : 'ou.collapse')} title={t(collapsed ? 'ou.expand' : 'ou.collapse')} onClick={() => setCollapsed(value => !value)} /></div>
+      {!collapsed && <>
       <LoadGate loading={loading} error={error} onRetry={load}>
-        <OrgUnitPicker mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
+        <OrgUnitPicker collapsible={false} mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
           selected={scoped && selected ? [selected.id] : []} onManage={() => {}}
           onSelect={(ids) => { if (ids[0]) selectScope(ids[0]) }} />
       </LoadGate>
       <Typography.Paragraph type="secondary">{t('ou.featureScopeHint')}</Typography.Paragraph>
+      </>}
     </aside>
     <div className="rp-policy-content">
       {scoped ? <LoadGate loading={loading} error={error} onRetry={load}>
-        {selected ? <OrgUnitDetail key={`${section}:${selected.id}`} sections={[section]} group={selected} groups={groups}
+        {selected ? renderOU ? renderOU(selected, groups) : <OrgUnitDetail key={`${section}:${selected.id}`} sections={[section]} group={selected} groups={groups}
           onChanged={() => { void load() }} onDeleted={() => {}} /> : <Alert type="warning" showIcon title={t('ou.scopeMissing')} />}
       </LoadGate> : children}
     </div>

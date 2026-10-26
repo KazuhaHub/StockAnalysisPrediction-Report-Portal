@@ -2882,5 +2882,7 @@
   "manage.dashboard.repeatHint": "Add the same block more than once to compare different presentations or periods. Each copy has its own options. Up to 64 blocks.",
   "security.recoveryModeHint.hidden": "Do not show password recovery on the sign-in page.",
   "security.recoveryModeHint.contact": "Show the recovery link with an administrator contact message; do not send reset emails.",
-  "security.recoveryModeHint.email": "Let users receive a password reset link by email."
+  "security.recoveryModeHint.email": "Let users receive a password reset link by email.",
+  "runDefaults.enabled": "On",
+  "runDefaults.disabled": "Off"
 }

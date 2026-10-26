@@ -2882,5 +2882,7 @@
   "manage.dashboard.repeatHint": "同類區塊可以重複新增，用不同顯示方式或時間範圍進行比較。每份獨立設定，最多 64 個區塊。",
   "security.recoveryModeHint.hidden": "登入頁不顯示密碼找回入口。",
   "security.recoveryModeHint.contact": "顯示找回入口，提示聯絡管理員，不寄送重設郵件。",
-  "security.recoveryModeHint.email": "允許使用者透過郵件接收密碼重設連結。"
+  "security.recoveryModeHint.email": "允許使用者透過郵件接收密碼重設連結。",
+  "runDefaults.enabled": "開啟",
+  "runDefaults.disabled": "關閉"
 }

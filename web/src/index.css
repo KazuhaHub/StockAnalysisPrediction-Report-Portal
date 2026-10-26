@@ -2310,3 +2310,10 @@ body {
 .rp-security-recovery-options .ant-radio { flex-shrink: 0; align-self: flex-start; margin-block-start: 3px; }
 .rp-security-recovery-label { display: flex; flex-direction: column; gap: 3px; line-height: 22px; overflow-wrap: anywhere; }
 .rp-security-recovery-label > .ant-typography { font-size: 12px; }
+
+.rp-policy-scope-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.rp-policy-scope-header > .ant-btn:first-child { flex: 1; min-width: 0; }
+.rp-policy-scope-header > .ant-btn:last-child { flex-shrink: 0; }
+.rp-policy-workspace--collapsed { grid-template-columns: 96px minmax(0, 1fr); gap: 16px; }
+.rp-policy-workspace--collapsed .rp-policy-scope-header > .ant-btn { flex: 0 0 32px; width: 32px; padding-inline: 0; }
+@media (max-width: 767px) { .rp-policy-workspace--collapsed { grid-template-columns: minmax(0, 1fr); } .rp-policy-scope-header { margin-bottom: 0; } }

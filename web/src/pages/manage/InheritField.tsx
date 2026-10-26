@@ -26,7 +26,7 @@ export default function InheritField({
   children,
 }: {
   label: string
-  hint?: string
+  hint?: ReactNode
   /** The resolved value if inherited, formatted for reading ("unlimited", "9-18", "50"). */
   inherited: string
   /** Where that value comes from — an OU name, or the system. */

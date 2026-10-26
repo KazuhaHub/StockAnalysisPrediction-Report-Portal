@@ -392,14 +392,23 @@ func (s *Server) apiRunPresets(w http.ResponseWriter, r *http.Request, user stri
 		out = append(out, runPresetJSON(p))
 	}
 	resp := map[string]any{"presets": out}
-	// The run-form defaults (run_defaults.go) ride along so the run dialog opens filled from one
-	// fetch: which workflow, which mode button, which window, idle, retries, notify.
-	for k, v := range s.runFormDefaultsJSON("default_") {
-		resp[k] = v
+	sub, snapshot, err := s.st.loadOUPolicySubject(user)
+	if err != nil {
+		jsonError(w, 500, "could not resolve run defaults")
+		return
 	}
-	// Not a default but a display choice: does the picker print a window's whole rule beside its
-	// name, or leave it to the info button (run_defaults.go).
-	resp["show_preset_rule"] = s.runShowPresetRule()
+	defaults, _, _, _, err := s.resolveRunDefaultsOU(snapshot.graph, sub.EffectiveOU)
+	if err != nil {
+		jsonError(w, 500, "could not resolve run defaults")
+		return
+	}
+	for k, v := range defaults {
+		if k == "run_show_preset_rule" {
+			resp["show_preset_rule"] = v
+		} else {
+			resp[strings.TrimPrefix(k, "run_")] = v
+		}
+	}
 	writeJSON(w, resp)
 }
 

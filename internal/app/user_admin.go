@@ -288,6 +288,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	if _, err := tx.Exec(s.bind(`UPDATE user_groups SET parent_id=? WHERE parent_id=?`), childParent, id); err != nil {
 		return 0, 0, err
 	}
+	if _, err := tx.Exec(s.bind(`DELETE FROM meta WHERE k=?`), runDefaultsOUKey(id)); err != nil {
+		return 0, 0, err
+	}
 	if _, err := tx.Exec(s.bind(`DELETE FROM user_groups WHERE id=?`), id); err != nil {
 		return 0, 0, err
 	}

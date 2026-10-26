@@ -15,17 +15,22 @@ const server = vi.hoisted(() => ({
   presets: [] as Array<Record<string, unknown>>,
   fail: false,
   posted: [] as Array<Record<string, unknown>>,
+  put: [] as Array<{url:string; body:Record<string,unknown>}>,
+  ou: {} as Record<string,unknown>,
 }))
 
 vi.mock('../../api/client', () => ({
   api: {
     get: (url: string) => {
+      if (url === '/api/admin/groups') return Promise.resolve({groups:[{id:1,name:'Default',is_default:true,members:0},{id:7,name:'Research',parent_id:1,members:1}]})
+      if (url.endsWith('/defaults/7')) return Promise.resolve(server.ou)
       if (server.hold) return new Promise(() => {})
       if (server.fail) return Promise.reject(new Error('offline'))
       if (url.endsWith('/config')) return Promise.resolve(server.config)
       if (url.endsWith('/targets')) return Promise.resolve({ targets: server.targets })
       return Promise.resolve({ presets: server.presets })
     },
+    put: (url:string, body:Record<string,unknown>) => {server.put.push({url,body}); return Promise.resolve(server.ou)},
     post: (_url: string, body: Record<string, unknown>) => {
       server.posted.push(body)
       return Promise.resolve({})
@@ -46,9 +51,9 @@ const target = (id: number, name: string, surfaces?: string[]) => ({
   ...(surfaces ? { surfaces } : {}),
 })
 
-const renderPage = () =>
+const renderPage = (entry = '/') =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[entry]}>
       <App>
         <RunDefaultsPage />
       </App>
@@ -62,6 +67,8 @@ beforeEach(() => {
   server.targets = []
   server.presets = []
   server.posted = []
+  server.put = []
+  server.ou = {effective:{run_default_retries:2},inherited:{run_default_retries:2},sources:{run_default_retries:"Default"},overrides:{}}
 })
 
 describe('RunDefaultsPage before its answers arrive', () => {
@@ -132,3 +139,21 @@ describe('RunDefaultsPage', () => {
     await waitFor(() => expect(screen.getByTitle('Daily（runDefaults.hiddenOnRun）')).toBeTruthy())
   })
 })
+
+ describe('OU run defaults', () => {
+  it('inherits defaults and saves an explicit zero only to the selected OU', async () => {
+    renderPage('/manage/rundefaults?scope=ou&ou=7')
+    await screen.findByText('runDefaults.workflow')
+    fireEvent.click(screen.getByRole('button', {name:'runDefaults.section.completion'}))
+    expect(screen.queryByRole('spinbutton')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', {name:'ou.override'})[0])
+    fireEvent.change(screen.getByRole('spinbutton'), {target:{value:'0'}})
+    fireEvent.click(screen.getByRole('button', {name:/common.save/}))
+    await waitFor(() => expect(server.put).toHaveLength(1))
+    expect(server.put[0]).toEqual({url:'/api/admin/batch/defaults/7',body:{
+      run_default_retries:0,run_default_idle:null,run_default_mode:null,run_default_target_id:null,
+      run_default_preset_id:null,run_default_notify:null,run_show_preset_rule:null,
+    }})
+    expect(server.posted).toHaveLength(0)
+  })
+ })
