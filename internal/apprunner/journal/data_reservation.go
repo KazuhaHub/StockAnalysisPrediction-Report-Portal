@@ -177,9 +177,16 @@ type dataCommandFacts struct {
 	authority      control.Authority
 	raw, signature []byte
 	now            int64
+	receipt        string
 }
 
 func (s *Store) beginDataCommand(ctx context.Context, raw, signature []byte, expectedState, expectedReceipt string) (*sql.Tx, dataCommandFacts, error) {
+	return s.beginDataCommandReceipt(ctx, raw, signature, expectedState, &expectedReceipt)
+}
+
+// A nil expected receipt permits only the recovery preflight to read an unknown
+// marker under current signed authority; it never skips ack/state/fence checks.
+func (s *Store) beginDataCommandReceipt(ctx context.Context, raw, signature []byte, expectedState string, expectedReceipt *string) (*sql.Tx, dataCommandFacts, error) {
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return nil, dataCommandFacts{}, control.ErrInvalidCommand
 	}
@@ -238,7 +245,7 @@ func (s *Store) beginDataCommand(ctx context.Context, raw, signature []byte, exp
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&receipt, &ack); err != nil {
 		return nil, dataCommandFacts{}, err
 	}
-	if receipt != expectedReceipt || ack.Valid {
+	if (expectedReceipt != nil && receipt != *expectedReceipt) || ack.Valid {
 		return nil, dataCommandFacts{}, ErrFenceReconciliation
 	}
 	var pending int
@@ -249,7 +256,7 @@ func (s *Store) beginDataCommand(ctx context.Context, raw, signature []byte, exp
 		return nil, dataCommandFacts{}, ErrFenceReconciliation
 	}
 	ok = true
-	return tx, dataCommandFacts{command: c, stored: stored, authority: authority, raw: raw, signature: signature, now: now}, nil
+	return tx, dataCommandFacts{command: c, stored: stored, authority: authority, raw: raw, signature: signature, now: now, receipt: receipt}, nil
 }
 func finalDataCommandCheck(ctx context.Context, facts dataCommandFacts) error {
 	if err := ctx.Err(); err != nil {

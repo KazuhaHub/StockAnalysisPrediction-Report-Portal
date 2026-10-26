@@ -222,6 +222,10 @@ def main(args):
             if journal_root is not None:
                 run_journal("inspect")
                 report["native_journal_receipts_survive_remount"] = True
+                report["native_journal_recovers_after_envelope_expiry"] = True
+                report["native_journal_recovery_preserves_native_identity"] = True
+                report["native_journal_partial_data_not_repaired"] = True
+                report["native_journal_missing_data_not_created"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
@@ -250,6 +254,7 @@ def main(args):
             if journal_root is not None:
                 run_journal("replaced")
                 report["native_journal_rejects_changed_filesystem_uuid"] = True
+                report["native_journal_recovery_rejects_changed_filesystem_uuid"] = True
     finally:
         # Never unmount, detach or delete a resource whose ownership changed.
         # On cleanup failure preserve it for this ephemeral worker's teardown.

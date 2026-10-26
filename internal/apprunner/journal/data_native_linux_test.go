@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
@@ -37,6 +38,27 @@ func nativeJournalClaim(t *testing.T, s *Store, slot int) DataClaim {
 	}
 	return claim
 }
+func nativeRecoveryEnvelope(t *testing.T, s *Store, slot int) ([]byte, []byte, dataClaimMarker) {
+	t.Helper()
+	c := nativeJournalCommand(t, slot)
+	var raw string
+	if err := s.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var marker dataClaimMarker
+	if !canonicalDataJSON(raw, &marker) || !validDataMarker(marker) {
+		t.Fatal("missing recovery claim")
+	}
+	claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)
+	for time.Now().UnixMilli() <= claimed {
+		time.Sleep(time.Millisecond)
+	}
+	now := time.Now().UnixMilli()
+	c.IssuedMS, c.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+29000, 10)
+	envelope, sig := signRunnerCommand(t, c)
+	return envelope, sig, marker
+}
+
 func TestNativeJournalDataExecution(t *testing.T) {
 	rootPath, journalPath := os.Getenv("APP_DATA_JOURNAL_ROOT"), os.Getenv("APP_DATA_JOURNAL_CONTROL")
 	if rootPath == "" {
@@ -75,6 +97,10 @@ func TestNativeJournalDataExecution(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(rootPath, nativeJournalCommand(t, 5).Payload.DataNamespaceID)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatal("changed filesystem created namespace")
 		}
+		renewed, sig, _ := nativeRecoveryEnvelope(t, s, 6)
+		if got, err := s.ReconcilePrepareData(ctx, renewed, sig, root, expected); !errors.Is(err, data.ErrUnsafe) || got != (DataPreparationReceipt{}) {
+			t.Fatal("recovery accepted changed filesystem", got, err)
+		}
 		return
 	case "inspect":
 		for _, slot := range []int{1, 3, 4} {
@@ -108,6 +134,101 @@ func TestNativeJournalDataExecution(t *testing.T) {
 		defer tx.Rollback()
 		if err := requireDataRootHistory(ctx, tx, expected); err != nil {
 			t.Fatal(err)
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+		// Cross the original envelope's expiry on real time before recovering.
+		_, _, original := nativeRecoveryEnvelope(t, s, 4)
+		expires, _ := strconv.ParseInt(original.ExpiresMS, 10, 64)
+		if delay := time.Until(time.UnixMilli(expires + 1)); delay > 0 {
+			time.Sleep(delay)
+		}
+		raw, sig, _ := nativeRecoveryEnvelope(t, s, 4)
+		before, err := root.Inspect(ctx, expected, original.ResourceID, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type outcome struct {
+			receipt DataPreparationReceipt
+			err     error
+		}
+		results := make(chan outcome, 2)
+		for range 2 {
+			go func() {
+				receipt, err := s.ReconcilePrepareData(ctx, raw, sig, root, expected)
+				results <- outcome{receipt, err}
+			}()
+		}
+		success := 0
+		for range 2 {
+			result := <-results
+			if result.err == nil {
+				success++
+				if result.receipt.Format != dataReconciledReceiptFormat || !validDataReceipt(result.receipt) || result.receipt.Claim != original || result.receipt.NamespaceInode != strconv.FormatUint(before.Inode, 10) {
+					t.Fatal("real recovery lost original/native identity", result.receipt)
+				}
+				observed, _ := strconv.ParseInt(result.receipt.ObservedMS, 10, 64)
+				if observed < expires {
+					t.Fatal("native fixture did not cross original expiry")
+				}
+			} else if result.receipt != (DataPreparationReceipt{}) {
+				t.Fatal("refused recovery returned receipt")
+			}
+		}
+		if success != 1 {
+			t.Fatal("concurrent recovery did not settle once", success)
+		}
+		after, err := root.Inspect(ctx, expected, original.ResourceID, 4)
+		if err != nil || before != after {
+			t.Fatal("read-only recovery changed native directory", before, after, err)
+		}
+		if _, err := s.ClaimPrepareData(ctx, raw, sig); err == nil {
+			t.Fatal("recovered effect re-claimed")
+		}
+		// Simulate interruption after mkdir and before quota/project assignment.
+		partial := nativeJournalClaim(t, s, 6)
+		partialPath := filepath.Join(rootPath, nativeJournalCommand(t, 6).Payload.DataNamespaceID)
+		_, err = s.RunPrepareDataOnce(ctx, partial, func(ctx context.Context, _ DataReservation, _ control.PrepareDataPayload) error {
+			if err := s.bindDataRoot(ctx, partial.state, expected); err != nil {
+				return err
+			}
+			return os.Mkdir(partialPath, 0700)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var partialBefore, partialAfter unix.Stat_t
+		if err := unix.Stat(partialPath, &partialBefore); err != nil {
+			t.Fatal(err)
+		}
+		partialRaw, partialSig, _ := nativeRecoveryEnvelope(t, s, 6)
+		if got, err := s.ReconcilePrepareData(ctx, partialRaw, partialSig, root, expected); err == nil || got != (DataPreparationReceipt{}) {
+			t.Fatal("partial namespace repaired by recovery")
+		}
+		if err := unix.Stat(partialPath, &partialAfter); err != nil || partialBefore.Ino != partialAfter.Ino || partialBefore.Mode != partialAfter.Mode {
+			t.Fatal("partial namespace replaced", err)
+		}
+		entries, err := os.ReadDir(partialPath)
+		if err != nil || len(entries) != 0 {
+			t.Fatal("partial namespace contents changed", err)
+		}
+		missing := nativeJournalClaim(t, s, 7)
+		_, err = s.RunPrepareDataOnce(ctx, missing, func(ctx context.Context, _ DataReservation, _ control.PrepareDataPayload) error {
+			return s.bindDataRoot(ctx, missing.state, expected)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		missingRaw, missingSig, _ := nativeRecoveryEnvelope(t, s, 7)
+		if got, err := s.ReconcilePrepareData(ctx, missingRaw, missingSig, root, expected); !errors.Is(err, os.ErrNotExist) || got != (DataPreparationReceipt{}) {
+			t.Fatal("absent namespace recreated", err)
+		}
+		if _, err := os.Lstat(filepath.Join(rootPath, nativeJournalCommand(t, 7).Payload.DataNamespaceID)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("recovery created absent namespace")
+		}
+		if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='applied'`) != 3 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='unknown'`) != 3 {
+			t.Fatal("recovery changed unrelated/partial states")
 		}
 		return
 	}
