@@ -153,8 +153,11 @@ func TestPlatformHTTPLaunchProvidesSignedLayoutAndConfiguredTimezone(t *testing.
 		ApplicationID string `json:"applicationId"`
 		Layout        string `json:"layout"`
 		TimeZone      string `json:"timeZone"`
+		Display       *struct {
+			Icon string `json:"icon"`
+		} `json:"display"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.ApplicationID != "notes-sample" || metadata.Layout != "document" || metadata.TimeZone != "Asia/Shanghai" {
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.ApplicationID != "notes-sample" || metadata.Layout != "document" || metadata.TimeZone != "Asia/Shanghai" || metadata.Display == nil || metadata.Display.Icon != "file-text" {
 		t.Fatalf("missing signed presentation facts: %s %v", response.Body.String(), err)
 	}
 }

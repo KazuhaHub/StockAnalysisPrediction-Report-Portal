@@ -14,7 +14,7 @@ var errAppPlatformLaunchUnavailable = errors.New("application launch is unavaila
 // A point-in-time logical access binding, not a bearer token or readiness proof.
 // Future launch/asset handlers must repeat this gate inside their serving boundary;
 // caching this value must never bypass current account, grant or trust checks.
-// No HTTP route is registered by this repository.
+// HTTP admission and response policy remain in the central route/handler layer.
 type platformLaunchAccess struct {
 	installationID, generation, policyRevision, entry, releaseSHA, frontendSHA string
 }

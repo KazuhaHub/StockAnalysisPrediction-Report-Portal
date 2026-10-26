@@ -79,3 +79,7 @@ test('unmount cancels the current pagination request', async () => {
   unmount()
   expect(signal?.aborted).toBe(true)
 })
+
+test('invalid display cannot pass the directory metadata boundary',()=>{
+ expect(parseAppDirectory({items:[{...item(),display:{icon:'appstore',texts:[]}}],nextCursor:''})).toBeNull()
+})

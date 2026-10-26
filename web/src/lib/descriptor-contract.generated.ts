@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "faed84e86443a6a622d2b02507b6ebd6f57bbc14bfd43a01289ae80bf27ddab2";
+export const DESCRIPTOR_SCHEMA_SHA256 = "be621e59c0f98681849c912bdcdb86bb1840f0b6facacec40ef3f21d00cbecc4";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -22,6 +22,7 @@ export interface Presentation {
  locales: ("en-US" | "zh-CN" | "zh-TW")[];
  routes: (Route)[];
  entry: string;
+ display?: AppDisplay | null;
 }
 export interface Route {
  id: string;
@@ -53,8 +54,19 @@ export interface DataCompatibility {
  readable_schemas: (number)[];
  writes_on_startup?: false | null;
 }
+export interface AppDisplay {
+ icon: "appstore" | "file-text" | "dashboard" | "calendar" | "bar-chart" | "cloud" | "tool" | "experiment";
+ texts: (AppDisplayText)[];
+}
+export interface AppDisplayText {
+ locale: "en-US" | "zh-CN" | "zh-TW";
+ name: string;
+ description: string;
+}
 export const DESCRIPTOR_LIMITS = {
   "MaxDescriptorBytes": 131072,
+  "MaxAppNameCharacters": 80,
+  "MaxAppDescriptionCharacters": 320,
   "maxDescriptorDepth": 24,
   "maxDescriptorRoutes": 32,
   "maxDescriptorReadableSchemas": 32,
@@ -103,6 +115,16 @@ export const DESCRIPTOR_LOCALES = [
   "zh-CN",
   "zh-TW"
 ] as const;
+export const DESCRIPTOR_DISPLAY_ICONS = [
+  "appstore",
+  "file-text",
+  "dashboard",
+  "calendar",
+  "bar-chart",
+  "cloud",
+  "tool",
+  "experiment"
+] as const;
 export const DESCRIPTOR_PLATFORMS = [
   "linux/amd64",
   "linux/arm64"
@@ -133,7 +155,8 @@ export const DESCRIPTOR_FIELDS = {
     "description_key",
     "locales",
     "routes",
-    "entry"
+    "entry",
+    "display"
   ],
   "Route": [
     "id",
@@ -164,5 +187,14 @@ export const DESCRIPTOR_FIELDS = {
     "schema",
     "readable_schemas",
     "writes_on_startup"
+  ],
+  "AppDisplay": [
+    "icon",
+    "texts"
+  ],
+  "AppDisplayText": [
+    "locale",
+    "name",
+    "description"
   ]
 } as const;

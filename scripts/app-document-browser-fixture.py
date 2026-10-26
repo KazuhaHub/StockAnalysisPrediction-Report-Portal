@@ -9,6 +9,7 @@ import time
 from urllib.parse import urlsplit
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import tempfile
@@ -141,7 +142,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></Pref
         if args.portal_http:
             env = dict(os.environ, APP_DOCUMENT_HTTP_FIXTURE_DIR=str(target), APP_DOCUMENT_HTTP_STATE=str(state_file), APP_DOCUMENT_HTTP_ORIGIN=origin, APP_DOCUMENT_HTTP_NAMED_TIMEZONE="UTC" if args.launch_page else "", GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
             log_file = (target / "portal-http.log").open("w+")
-            process = subprocess.Popen(["go", "test", "-count=1", "-timeout=25m", "./internal/app", "-run", "^TestPlatformHTTPBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(["go", "test", "-count=1", "-timeout=25m", "./internal/app", "-run", "^TestPlatformHTTPBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
             deadline = time.monotonic() + 240
             while True:
                 if process.poll() is not None or time.monotonic() > deadline:
@@ -166,7 +167,10 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></Pref
             try:
                 process.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                process.terminate()
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
                 process.wait(timeout=10)
             if process.returncode != 0:
                 log_file.seek(0)

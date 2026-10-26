@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,10 +16,11 @@ const platformDirectoryPageSize = 32
 var platformDirectoryAppID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 type platformAppDirectoryItem struct {
-	InstallationID string `json:"installationId"`
-	ApplicationID  string `json:"applicationId"`
-	State          string `json:"state"`
-	Openable       bool   `json:"openable"`
+	InstallationID string                  `json:"installationId"`
+	ApplicationID  string                  `json:"applicationId"`
+	State          string                  `json:"state"`
+	Openable       bool                    `json:"openable"`
+	Display        *appplatform.AppDisplay `json:"display,omitempty"`
 }
 type platformAppDirectory struct {
 	Items      []platformAppDirectoryItem `json:"items"`
@@ -49,6 +51,13 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	if err != nil {
 		return zero, err
 	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	trust, err := loadPlatformPublisherTrust(e)
+	if err != nil {
+		return zero, err
+	}
 	chain, err := platformAudienceChain(e, account)
 	if err != nil {
 		return zero, err
@@ -65,18 +74,18 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE OF i"
 	}
-	rows, err := e.query(`SELECT i.id,i.app_id,i.desired_state,i.phase,i.controller_epoch,i.runtime_id FROM app_platform_installations i WHERE i.id>? AND i.desired_state<>'removed' AND EXISTS(SELECT 1 FROM app_platform_access_grants g WHERE g.installation_id=i.id AND (`+strings.Join(principals, " OR ")+`)) ORDER BY i.id LIMIT 33`+lock, args...)
+	rows, err := e.query(`SELECT i.id,i.app_id,i.publisher_id,i.desired_state,i.phase,i.controller_epoch,i.runtime_id FROM app_platform_installations i WHERE i.id>? AND i.desired_state<>'removed' AND EXISTS(SELECT 1 FROM app_platform_access_grants g WHERE g.installation_id=i.id AND (`+strings.Join(principals, " OR ")+`)) ORDER BY i.id LIMIT 33`+lock, args...)
 	if err != nil {
 		return zero, err
 	}
 	type candidate struct {
-		id, app, desired, phase, epoch string
-		runtime                        sql.NullString
+		id, app, publisher, desired, phase, epoch string
+		runtime                                   sql.NullString
 	}
 	candidates := []candidate{}
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.app, &c.desired, &c.phase, &c.epoch, &c.runtime); err != nil {
+		if err := rows.Scan(&c.id, &c.app, &c.publisher, &c.desired, &c.phase, &c.epoch, &c.runtime); err != nil {
 			rows.Close()
 			return zero, err
 		}
@@ -97,6 +106,7 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		return zero, err
 	}
 	result := platformAppDirectory{Items: []platformAppDirectoryItem{}}
+	records := []*platformDisplayRecord{}
 	for i, c := range candidates {
 		if i == platformDirectoryPageSize {
 			result.NextCursor = result.Items[len(result.Items)-1].InstallationID
@@ -118,7 +128,26 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 			item.State = "installed"
 			item.Openable = true
 		}
+		record, err := platformReadDisplayRecord(e, c.id)
+		if err != nil {
+			return zero, err
+		}
+		records = append(records, record)
 		result.Items = append(result.Items, item)
+	}
+	// Parse/signature work precedes the final clock sample. Trust and release rows
+	// stay pinned, so only session/key time windows need a final lightweight check.
+	for i, record := range records {
+		if record == nil {
+			continue
+		}
+		display, valid := record.verified(trust, now, candidates[i].app, candidates[i].publisher)
+		if !valid {
+			result.Items[i].State = "attention"
+			result.Items[i].Openable = false
+		} else {
+			result.Items[i].Display = display
+		}
 	}
 	now, err = platformDatabaseNow(e)
 	if err != nil {
@@ -127,6 +156,13 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 	current, err := platformReadSessionAccount(e, session, now, true, false)
 	if err != nil || current != account {
 		return zero, errAppPlatformLaunchUnavailable
+	}
+	for i, record := range records {
+		if record != nil && !record.currentKeyTime(trust, now) {
+			result.Items[i].Display = nil
+			result.Items[i].State = "attention"
+			result.Items[i].Openable = false
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err

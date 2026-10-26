@@ -252,3 +252,89 @@ func TestPostgresPlatformDirectoryWaitRefusal(t *testing.T) {
 		})
 	}
 }
+
+func TestPlatformDirectorySignedDisplay(t *testing.T) {
+	s, reader, id := platformLaunchFixture(t, false)
+	platformGrantLaunchUser(t, s, reader, id)
+	page, err := s.listPlatformApps(context.Background(), reader, "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].Display == nil || page.Items[0].Display.Texts[1].Name != "笔记" {
+		t.Fatalf("signed display unavailable: %+v %v", page, err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_publisher_keys SET revoked_ms=1`)
+	page, err = s.listPlatformApps(context.Background(), reader, "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].Display != nil || page.Items[0].Openable || page.Items[0].State != "attention" {
+		t.Fatalf("revoked publisher retained display: %+v %v", page, err)
+	}
+}
+
+func TestPlatformDirectoryDisplayDoesNotInspectExecutable(t *testing.T) {
+	s, reader, id := platformLaunchFixture(t, false)
+	platformGrantLaunchUser(t, s, reader, id)
+	var content []byte
+	if err := s.st.queryRow(`SELECT content FROM app_platform_frontend_artifacts`).Scan(&content); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_frontend_artifacts SET content=?`, bytes.Repeat([]byte{'x'}, len(content)))
+	page, err := s.listPlatformApps(context.Background(), reader, "")
+	if err != nil || len(page.Items) != 1 || page.Items[0].Display == nil {
+		t.Fatalf("lightweight display read depended on executable archive: %+v %v", page, err)
+	}
+	if _, err := s.inspectPlatformLaunchAccess(reader, id); err == nil {
+		t.Fatal("display metadata bypassed executable integrity")
+	}
+}
+
+func TestPostgresPlatformDisplayKeyExpiryAfterWait(t *testing.T) {
+	s, reader, id := platformLaunchFixture(t, true)
+	platformGrantLaunchUser(t, s, reader, id)
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.UnixMilli(now + 3000).Truncate(time.Second)
+	mustExec(t, s.st, `UPDATE app_platform_publisher_keys SET not_after_ms=?`, deadline.UnixMilli())
+	holder, err := s.st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	if _, err := holder.Exec(`SELECT sha256 FROM app_platform_releases FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		page platformAppDirectory
+		err  error
+	}
+	done := make(chan outcome, 1)
+	go func() { page, err := s.listPlatformApps(context.Background(), reader, ""); done <- outcome{page, err} }()
+	blocked := false
+	limit := time.Now().Add(5 * time.Second)
+	for time.Now().Before(limit) {
+		var n int
+		if err := s.st.queryRow(`SELECT COUNT(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%FOR SHARE OF a,r%'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			blocked = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("display did not wait on release lock")
+	}
+	for time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-done:
+		if got.err != nil || len(got.page.Items) != 1 || got.page.Items[0].Display != nil || got.page.Items[0].Openable || got.page.Items[0].State != "attention" {
+			t.Fatalf("expired key retained signed display: %+v %v", got.page, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("display read did not return")
+	}
+}

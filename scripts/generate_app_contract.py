@@ -136,6 +136,8 @@ def render(raw):
 
     limits = {
         "MaxDescriptorBytes": schema["x-portal-parser-limits"]["bytes"],
+        "MaxAppNameCharacters": p("AppDisplayText", "name")["maxLength"],
+        "MaxAppDescriptionCharacters": p("AppDisplayText", "description")["maxLength"],
         "maxDescriptorDepth": schema["x-portal-parser-limits"]["depth"],
         "maxDescriptorRoutes": p("Presentation", "routes")["maxItems"],
         "maxDescriptorReadableSchemas": p("DataCompatibility", "readable_schemas")["maxItems"],
@@ -183,6 +185,7 @@ def render(raw):
     for go_name, ts_name, values in (
         ("descriptorKnownCapabilities", "DESCRIPTOR_CAPABILITIES", capabilities),
         ("descriptorLocaleNames", "DESCRIPTOR_LOCALES", p("Presentation", "locales")["items"]["enum"]),
+        ("descriptorDisplayIcons", "DESCRIPTOR_DISPLAY_ICONS", p("AppDisplay", "icon")["enum"]),
         ("descriptorPlatformNames", "DESCRIPTOR_PLATFORMS", p("Backend", "platforms")["items"]["enum"]),
         ("descriptorLayoutNames", "DESCRIPTOR_LAYOUTS", p("Route", "layout")["enum"]),
     ):

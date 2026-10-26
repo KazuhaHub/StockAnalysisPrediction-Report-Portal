@@ -40,3 +40,12 @@ test('unmount cancels the metadata fetch before late content can mount',async()=
  expect(options.signal?.aborted).toBe(false)
  view.unmount();expect(options.signal?.aborted).toBe(true);expect(frames).toHaveLength(0)
 })
+
+test('signed host title and frame label change language without another launch request',async()=>{
+ const display={icon:'file-text',texts:[{locale:'en-US',name:'Notes',description:'Personal notes'},{locale:'zh-CN',name:'笔记',description:'个人笔记'},{locale:'zh-TW',name:'筆記',description:'個人筆記'}]}
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,display}),{status:200})))
+ const view=render(page());await screen.findByRole('heading',{name:'笔记'})
+ expect(frames[frames.length-1].title).toBe('笔记')
+ prefs.lang='zh-TW';view.rerender(page());await screen.findByRole('heading',{name:'筆記'})
+ expect(frames[frames.length-1].title).toBe('筆記');expect(fetch).toHaveBeenCalledTimes(1)
+})
