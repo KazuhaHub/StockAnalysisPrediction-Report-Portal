@@ -760,3 +760,8 @@ credential, Status migration, SDK freeze or runtime-ready claim is included.
 The final private-plan check additionally validates canonical policy bytes and
 binds owner fields to labels before all adapter actions. Driver race regression
 passed in 1.452 s after this change; vet, staticcheck and Linux compilation passed.
+Native run 40406868559 failed before any container effect: the separately compiled
+acceptance binary ran from the repository root, while shared test descriptors use
+the normal Go package working directory. The workflow now enters the driver
+package before invocation. This is fixture wiring, not native policy evidence;
+the corrected revision still needs the real-daemon acceptance run.

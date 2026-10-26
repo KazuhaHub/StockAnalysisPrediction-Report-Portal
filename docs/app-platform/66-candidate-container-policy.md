@@ -124,3 +124,9 @@ Linux amd64 test compilation. A subsequent integrity check also binds the privat
 plan's owner fields to its canonical label/policy bytes before create, inspect or
 remove; its final driver race regression passed in 1.452 seconds, followed by
 vet, staticcheck and Linux compilation. Native CI remains a separate requirement.
+
+When running the separately compiled acceptance binary, set the working directory
+to `internal/apprunner/driver`, matching ordinary `go test` behavior. The initial
+CI invocation failed before Docker access because it used the repository root;
+workflow wiring now explicitly enters the package directory. No native acceptance
+is recorded from that failed invocation.
