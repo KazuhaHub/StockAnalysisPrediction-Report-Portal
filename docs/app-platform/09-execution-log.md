@@ -269,3 +269,16 @@ binding. Actual HTTP mux, cancellation and existing reader/route regressions cov
 the source; combining these exact handlers with the SDK in a browser and production
 shell remains required. Physical installer activation, sensitive broker/navigation
 policy, full shell UX and remaining platform acceptance are still open.
+
+## Actual HTTP plus SDK browser fixture
+
+[Loopback HTTP/SDK acceptance](42-http-sdk-browser-acceptance.md) combines actual
+Portal signed-session/route/database/release checks with the real frame and SDK
+root through a minimal development reverse proxy. Browser checks demonstrate
+startup, state-preserving locale change, refresh, grant revocation (old document
+and new launch 404), restored access, session revocation (401), and no session
+resurrection on refresh. Fixture controls and synthetic credentials exist only in
+a test binary/private temporary directory; activation rows remain explicit logical
+test state, not installer/provider readiness. Production shell, actual market
+install/activation, broader browser/UX and sensitive broker/navigation policy remain
+open. This evidence does not change server beta configuration or production data.

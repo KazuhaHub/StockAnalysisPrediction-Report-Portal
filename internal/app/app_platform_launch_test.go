@@ -2,17 +2,42 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 // This seeds a coherent activation fixture to exercise the read gate. It is not
 // an installer/provider completion path or proof of physical readiness.
 func platformLaunchFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
+	return platformLaunchFixtureWithArchive(t, pg, nil)
+}
+func platformLaunchFixtureWithArchive(t *testing.T, pg bool, archive []byte) (*Server, platformActorSession, string) {
 	t.Helper()
 	s, session, release := platformInstallFixture(t, pg)
+	if archive != nil {
+		raw, _, _ := platformSignedReleaseFixture(t, "1.0.0-beta.2")
+		var manifest appplatform.Manifest
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+		manifest.Capabilities.Required = []string{}
+		manifest.Frontend.SHA256 = platformDigest(archive)
+		raw, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		release, err = s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	review, err := s.createPlatformInstallReview(session, release.sha256, 1)
 	if err != nil {
 		t.Fatal(err)
