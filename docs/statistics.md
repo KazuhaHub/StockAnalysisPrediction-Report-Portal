@@ -17,6 +17,19 @@ Creation-date filters represent inclusive panel-timezone days. They are converte
 local wall-clock representation used by existing `created_at` values. Empty bounds include all
 stored dates. Records without a creation date are included only when the bounds allow them.
 
+## Charts
+
+The page opens with a chart and can switch to the paginated table. Automatic presentation uses
+horizontal bars for categorical dimensions and a line for report dates. Users can also choose
+columns, lines or donuts. Charts share the applied filters and do not read only the visible table
+page. The top 20 categorical groups are returned, and the remainder is combined as Other using the
+complete matching record count. Tooltips show counts and shares.
+
+Report dates support daily, monthly and yearly buckets, ordered chronologically. Dates without
+records are not filled. If more than 400 time buckets match, the page asks for a coarser interval or
+narrower dates instead of rendering a truncated series. CSV export always includes every matching
+group at the selected interval.
+
 ## Scale and export
 
 Group and filter in SQL. JSON returns at most 100 groups per page with record and group totals.

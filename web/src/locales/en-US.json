@@ -2930,5 +2930,22 @@
   "account.passkeyTab": "Passkeys",
   "account.sessionsTab": "Sessions",
   "err.statistics_query_invalid": "Check the statistics filters and try again.",
-  "err.statistics_unavailable": "Statistics could not be loaded. Try again later."
+  "err.statistics_unavailable": "Statistics could not be loaded. Try again later.",
+  "statistics.view": "View",
+  "statistics.chart": "Chart",
+  "statistics.table": "Table",
+  "statistics.chartType": "Chart type",
+  "statistics.chartType.auto": "Automatic",
+  "statistics.chartType.bar": "Horizontal bars",
+  "statistics.chartType.column": "Columns",
+  "statistics.chartType.line": "Line",
+  "statistics.chartType.donut": "Donut",
+  "statistics.interval": "Time interval",
+  "statistics.interval.day": "Daily",
+  "statistics.interval.month": "Monthly",
+  "statistics.interval.year": "Yearly",
+  "statistics.tooManyPoints": "Too many time points. Select a monthly or yearly interval, or narrow the date range.",
+  "statistics.categoryChartHint": "Shows the top 20 groups. Remaining groups are combined as Other; CSV includes every group.",
+  "statistics.dateChartHint": "Groups are displayed chronologically at the selected interval. Only dates with records are included.",
+  "statistics.noData": "No statistics match the current filters."
 }

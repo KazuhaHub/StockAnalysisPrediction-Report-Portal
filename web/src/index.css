@@ -2354,3 +2354,4 @@ body {
  .rp-account-page .rp-settings-workspace { height: auto !important; }
  .rp-account-page .rp-settings-content { overflow: visible; padding-inline-end: 0; }
 }
+.rp-statistics-page > .rp-admin-list-toolbar .ant-select { min-width: 160px; max-width: 100%; }

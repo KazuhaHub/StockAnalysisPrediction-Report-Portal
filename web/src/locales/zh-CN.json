@@ -2930,5 +2930,22 @@
   "account.passkeyTab": "通行密钥",
   "account.sessionsTab": "登录会话",
   "err.statistics_query_invalid": "请检查统计查询条件后重试。",
-  "err.statistics_unavailable": "暂时无法加载统计数据，请稍后重试。"
+  "err.statistics_unavailable": "暂时无法加载统计数据，请稍后重试。",
+  "statistics.view": "展示方式",
+  "statistics.chart": "图表",
+  "statistics.table": "表格",
+  "statistics.chartType": "图表类型",
+  "statistics.chartType.auto": "自动",
+  "statistics.chartType.bar": "条形图",
+  "statistics.chartType.column": "柱状图",
+  "statistics.chartType.line": "折线图",
+  "statistics.chartType.donut": "环形图",
+  "statistics.interval": "时间粒度",
+  "statistics.interval.day": "按日",
+  "statistics.interval.month": "按月",
+  "statistics.interval.year": "按年",
+  "statistics.tooManyPoints": "时间点过多，请改用按月或按年统计，或缩小日期范围。",
+  "statistics.categoryChartHint": "显示数量最多的前 20 个分组，其余合并为“其他”；CSV 包含全部分组。",
+  "statistics.dateChartHint": "按所选时间粒度顺序展示，仅包含有记录的日期。",
+  "statistics.noData": "当前查询条件下暂无统计数据。"
 }
