@@ -475,7 +475,11 @@ visibility boundary. Current actual OU ancestry remains the launch-time policy;
 there is no installer/admin bypass. Existing storage is reused without migration.
 The disposable Linux fixture is extended to perform actual activation and a
 protected document read after actual native preparation and receipt retrieval.
-Native evidence for this extension remains pending until its own run succeeds.
+Source 282ce732c45371967fb4085cb39462d36e89904c passed native run 40317472960;
+the downloaded report confirms actual activation/launch, preceding data-stage
+separation, existing recovery/quota checks and owned cleanup, while retaining
+execution_ready=false. Full local Go/PostgreSQL and targeted race checks pass;
+main source CI 40317472965 also passed with all configured race/web/image checks.
 Data-stage predecessor source 18892f88a18fdc44ee9036bd52b152f12994f4a8 passed
 main 40312440453, daemon 40312440434 and native 40312440473 (checked directly from
 PR #248). Initial static activation is one internal lifecycle step; market UI,

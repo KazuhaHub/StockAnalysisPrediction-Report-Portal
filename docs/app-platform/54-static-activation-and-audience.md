@@ -129,3 +129,21 @@ Sensitive capability-broker work must also resolve the existing sandbox
 self-navigation disclosure concern before such capabilities are exposed. No
 production runtime, real service credentials, Status migration, public SDK freeze
 or server beta configuration is changed here.
+
+
+## Observed source evidence
+
+Source `282ce732c45371967fb4085cb39462d36e89904c` passed disposable native
+run [40317472960](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40317472960).
+The downloaded project-quota report explicitly confirms
+`native_portal_static_activation_and_launch`, `native_portal_install_data_stage`,
+`native_portal_data_stage_not_activation`, the existing cross-UID/recovery/quota
+checks and `owned_resources_cleaned`. `execution_ready` remains false: the report
+does not establish the outstanding managed runtime or complete platform gates.
+Local full Go tests with disposable PostgreSQL passed (application package
+201.907 seconds). Targeted SQLite/PostgreSQL race checks, vet, staticcheck,
+Linux amd64/arm64 test cross-compilation, 12 Python acceptance-script checks and
+workflow lint passed. The same source also passed main CI
+[40317472965](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40317472965),
+including full Go/PostgreSQL, all configured race shards, web checks, image smoke
+and workflow lint.
