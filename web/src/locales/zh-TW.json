@@ -1,4 +1,5 @@
 {
+  "apps.v2Unavailable": "應用程式暫時無法使用，請檢查存取權限或聯絡管理員。",
   "apps.v2Loading": "正在載入應用程式…",
   "apps.v2Failed": "應用程式連線失敗，請重新開啟後重試。",
   "apps.v2Retry": "重新開啟應用程式",

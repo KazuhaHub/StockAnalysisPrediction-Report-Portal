@@ -18,7 +18,10 @@ PORTAL = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--apps-dir", required=True, type=Path)
 parser.add_argument("--portal-http", action="store_true", help="Use actual Portal HTTP/session/DB handlers in a disposable fixture")
+parser.add_argument("--launch-page", action="store_true", help="Exercise the actual AppViewV2 page with real Portal preferences")
 args = parser.parse_args()
+if args.launch_page and not args.portal_http:
+    parser.error("--launch-page requires --portal-http")
 apps = args.apps_dir.resolve()
 
 with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory:
@@ -114,10 +117,21 @@ async function check(){const r=await fetch(lastSource);setStatus('Document HTTP 
 useEffect(()=>{open()},[]);
 return <div style={{background:presentation.theme.colorBgLayout,color:presentation.theme.colorText,minHeight:'100vh'}}><h1>Portal HTTP and SDK fixture</h1><p role="status">{status}</p><button onClick={open}>Reopen app</button><button onClick={()=>setPresentation({...initial,locale:'zh-TW',timeZone:'Asia/Taipei'})}>Set traditional Chinese</button><button onClick={()=>setPresentation({...initial,locale:'en-US',timeZone:'UTC',theme:{...initial.theme,dark:false,colorBgLayout:'#ffffff',colorBg:'#ffffff',colorText:'#000000'}})}>Set English light</button><button onClick={()=>action('revoke-access')}>Revoke fixture access</button><button onClick={()=>action('restore-access')}>Restore fixture access</button><button onClick={()=>action('revoke-session')}>Revoke fixture session</button><button onClick={check} disabled={!lastSource}>Check last document</button>{launch&&<AppFrameV2 {...launch} title="SDK fixture" presentation={presentation} height={360}/>}</div>}
 createRoot(document.getElementById('host')!).render(<Fixture/>);''')
+    if args.launch_page:
+        host.write_text('''import {useEffect,useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {ConfigProvider,App as AntdApp,theme} from 'antd';
+import {MemoryRouter,Routes,Route} from 'react-router';
+import {PrefsProvider,usePrefs} from ''' + json.dumps(str(PORTAL / "web/src/prefs.tsx")) + ''';
+import AppViewV2 from ''' + json.dumps(str(PORTAL / "web/src/pages/AppViewV2.tsx")) + ''';
+function Host(){const prefs=usePrefs();const [path,setPath]=useState('');useEffect(()=>{fetch('/__fixture/info').then(r=>r.json()).then(info=>setPath('/apps/v2/'+info.launch.split('/')[4]))},[]);return <ConfigProvider locale={prefs.antd} theme={{algorithm:prefs.dark?theme.darkAlgorithm:theme.defaultAlgorithm}}><AntdApp><div style={{display:'flex',flexDirection:'column',height:'100dvh',background:prefs.dark?'#000':'#fff'}}><div><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle host theme</button></div>{path&&<MemoryRouter initialEntries={[path]}><Routes><Route path="/apps/v2/:installation" element={<AppViewV2/>}/><Route path="/apps" element={<div>Apps home</div>}/></Routes></MemoryRouter>}</div></AntdApp></ConfigProvider>}
+createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></PrefsProvider>);''')
     for name, source, filename in (("child", child, "app.js"), ("host", host, "host.js")):
         out = target / name
         config = target / f"{name}.config.mjs"
         aliases = {package: str(apps / "node_modules" / package) for package in ("react", "react-dom", "antd")}
+        if args.launch_page:
+            aliases["react-router"] = str(PORTAL / "web/node_modules/react-router")
         config.write_text("import {defineConfig} from 'vite';import react from '@vitejs/plugin-react';export default defineConfig({plugins:[react()],resolve:{alias:" + json.dumps(aliases) + "},define:{'process.env.NODE_ENV':JSON.stringify('production')},build:{target:'es2022',cssCodeSplit:false,outDir:" + json.dumps(str(out)) + ",lib:{entry:" + json.dumps(str(source)) + ",name:'PortalDocumentFixture',formats:['iife'],fileName:()=>" + json.dumps(filename) + ",cssFileName:'style'}}});")
         subprocess.run([str(apps / "node_modules/.bin/vite"), "build", "--config", str(config)], cwd=apps, check=True)
     process = None
@@ -125,7 +139,7 @@ createRoot(document.getElementById('host')!).render(<Fixture/>);''')
     state_file = target / "portal-state.json"
     try:
         if args.portal_http:
-            env = dict(os.environ, APP_DOCUMENT_HTTP_FIXTURE_DIR=str(target), APP_DOCUMENT_HTTP_STATE=str(state_file), APP_DOCUMENT_HTTP_ORIGIN=origin, GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
+            env = dict(os.environ, APP_DOCUMENT_HTTP_FIXTURE_DIR=str(target), APP_DOCUMENT_HTTP_STATE=str(state_file), APP_DOCUMENT_HTTP_ORIGIN=origin, APP_DOCUMENT_HTTP_NAMED_TIMEZONE="UTC" if args.launch_page else "", GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
             log_file = (target / "portal-http.log").open("w+")
             process = subprocess.Popen(["go", "test", "-count=1", "-timeout=25m", "./internal/app", "-run", "^TestPlatformHTTPBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT)
             deadline = time.monotonic() + 240

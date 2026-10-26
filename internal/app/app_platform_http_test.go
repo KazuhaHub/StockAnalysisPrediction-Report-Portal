@@ -144,3 +144,17 @@ func TestPlatformHTTPReaderPinsSignedSessionLifetime(t *testing.T) {
 		t.Fatal("old cookie inherited a mutable longer session lifetime")
 	}
 }
+
+func TestPlatformHTTPLaunchProvidesSignedLayoutAndConfiguredTimezone(t *testing.T) {
+	s, mux, _, id, cookie := platformHTTPFixture(t)
+	mustExec(t, s.st, `INSERT INTO meta(k,v) VALUES('timezone','Asia/Shanghai') ON CONFLICT(k) DO UPDATE SET v=excluded.v`)
+	response := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+id+"/launch", cookie, "")
+	var metadata struct {
+		ApplicationID string `json:"applicationId"`
+		Layout        string `json:"layout"`
+		TimeZone      string `json:"timeZone"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.ApplicationID != "notes-sample" || metadata.Layout != "document" || metadata.TimeZone != "Asia/Shanghai" {
+		t.Fatalf("missing signed presentation facts: %s %v", response.Body.String(), err)
+	}
+}

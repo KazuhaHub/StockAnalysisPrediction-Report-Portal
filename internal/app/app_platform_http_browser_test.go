@@ -55,6 +55,14 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, reader, id := platformLaunchFixtureWithArchive(t, false, archive.Bytes())
+	if zone := os.Getenv("APP_DOCUMENT_HTTP_NAMED_TIMEZONE"); zone != "" {
+		// Named timezone belongs only to this temporary fixture store.
+		if zone != "UTC" {
+			t.Fatal("fixture named timezone must be UTC")
+		}
+		s.st.SetSetting("timezone", zone)
+	}
+
 	platformGrantLaunchUser(t, s, reader, id)
 	cookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())
 	mux := http.NewServeMux()
