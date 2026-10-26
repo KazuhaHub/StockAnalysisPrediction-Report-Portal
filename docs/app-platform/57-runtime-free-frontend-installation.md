@@ -150,6 +150,9 @@ launch URL/document routes work. CSP stays opaque (`sandbox allow-scripts` witho
 allow-same-origin); response policy stays no-store/nosniff/no-referrer. Access
 revocation invalidates an old document URL. Administrators do not bypass an empty
 audience. Applications continue to use the shared host/SDK language and shell.
+The broader self-navigation/network acceptance described in
+[the sandbox document contract](40-self-contained-app-document.md) remains a
+separate release/broker gate; this profile does not complete SEC-04.
 
 ## Verification
 
@@ -196,3 +199,23 @@ provider-backed storage, managed execution, fenced recovery approvals, lifecycle
 updates/uninstall, SDK public freeze and release/adoption gates remain required.
 No production deployment, beta configuration, Status migration or root market
 catalogue is changed here.
+
+
+## Observed source evidence
+
+Source `b7733590f8265eae26d8ae32106dd2b755f52e57` passed main CI
+[40334056417](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40334056417),
+including the no-data repository/service/HTTP cases, PostgreSQL tests, configured
+race shards, web checks, image smoke and workflow lint. Local full Go tests passed
+(application package 224.932 seconds); focused frontend/cancellation race checks
+also passed after the context-error fix. Staticcheck, vet and Linux amd64/arm64
+compilation passed. Browser interaction evidence above used the new actual
+frontend install fixture and unchanged Apps SDK checkout.
+
+The same source passed native regression run
+[40334056329](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40334056329).
+Its downloaded report confirms the retained native background install,
+signed-dispatch/read-only-recovery and owned-cleanup flags, with execution_ready
+still false. That native report proves compatibility of the separate native
+profile; the runtime-free path is established by the frontend tests and actual
+loopback browser/HTTP sequence, not by a fictitious physical receipt.

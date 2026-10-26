@@ -555,7 +555,12 @@ HTTP/SDK browser fixture now installs the actual frontend before serving it;
 English/Simplified/Traditional presentation and in-memory interaction were checked
 through the browser plugin. New profile checks preserve database cancellation
 errors after the existing wait regression exposed an incorrect error conversion.
-Final source checks/CI are pending their own results. Scheduler predecessor
+Source b7733590f8265eae26d8ae32106dd2b755f52e57 passed main CI 40334056417 and
+native regression 40334056329. Local full Go/PostgreSQL and focused race/context
+checks passed; the downloaded native report confirms retained native behavior
+and owned cleanup with execution_ready=false. The no-data path is separately
+verified by repository/service/HTTP tests and the actual loopback browser sequence.
+Scheduler predecessor
 804fdc2a46ca095677c711f43dddbf7b2c173235 passed main 40327545213 and native 40327545246.
 Market HTTP/UI, provider-backed data/managed lifecycle and the complete platform
 remain open.
