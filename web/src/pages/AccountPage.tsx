@@ -23,6 +23,7 @@ import { formatReportDateTime } from '../lib/datetime'
 import SSOIcon from '../components/SSOIcon'
 import type { StepUpPolicy } from '../api/types'
 import { createCredential, passkeySupported } from '../lib/webauthn'
+import SettingsWorkspace, { SettingsPanel } from './manage/SettingsWorkspace'
 import LoginActivityPanel from '../components/LoginActivityPanel'
 import AccountSessionsPanel from '../components/AccountSessionsPanel'
 
@@ -47,6 +48,8 @@ export default function AccountPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, name, federated, totpEnabled, totpAllowed, passkeyCount, passkeyAllowed, mustEnroll, refresh } = useAuth()
+  const [section, setSection] = useState('password')
+  const [activitySection, setActivitySection] = useState('sessions')
   const [passkeys, setPasskeys] = useState<Passkey[]>([])
   const activeTab = location.pathname.endsWith('/login-activity') ? 'login-activity' : 'security'
 
@@ -61,7 +64,7 @@ export default function AccountPage() {
   }, [activeTab, loadPasskeys])
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 960 }}>
+    <div className="rp-account-page">
       <div>
         <Typography.Title level={3} style={{ marginBottom: 4 }}>
           {t('account.title')}
@@ -80,12 +83,14 @@ export default function AccountPage() {
       />
 
       {activeTab === 'login-activity' ? (
-        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-          <AccountSessionsPanel />
-          <LoginActivityPanel />
-        </Space>
+        <SettingsWorkspace active={activitySection} onChange={setActivitySection} sections={[
+          {key:'sessions',label:t('account.sessionsTab')},{key:'activity',label:t('account.loginActivityTab')},
+        ]}>
+          <SettingsPanel section="sessions"><AccountSessionsPanel /></SettingsPanel>
+          <SettingsPanel section="activity"><LoginActivityPanel /></SettingsPanel>
+        </SettingsWorkspace>
       ) : (
-        <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 760 }}>
+        <div className="rp-account-security">
           {federated && <Alert type="info" showIcon title={t('account.federatedNotice')} />}
           {/* Why the rest of the portal is refusing: an administrator required a second factor of this
               account. Without this the reader sees every page fail and no reason for it. */}
@@ -98,13 +103,18 @@ export default function AccountPage() {
             />
           )}
 
-          {!federated && <PasswordCard />}
+          <SettingsWorkspace active={federated ? 'passkeys' : !totpAllowed && !totpEnabled && section === 'totp' ? 'password' : section} onChange={setSection} sections={[
+            ...(!federated ? [{key:'password',label:t('account.passwordTab')}] : []),
+            ...(!federated && (totpAllowed || totpEnabled) ? [{key:'totp',label:t('account.totpTab')}] : []),
+            {key:'passkeys',label:t('account.passkeyTab')},
+          ]}>
+          {!federated && <SettingsPanel section="password"><PasswordCard /></SettingsPanel>}
           {/* Shown while the account MAY enrol, and also while it still has a factor to remove: an OU
               that withdraws enrolment must not strand an account inside the factor it already holds. */}
           {!federated && (totpAllowed || totpEnabled) && (
-            <TwoFactorCard enabled={totpEnabled} allowed={totpAllowed} onChange={refresh} />
+            <SettingsPanel section="totp"><TwoFactorCard enabled={totpEnabled} allowed={totpAllowed} onChange={refresh} /></SettingsPanel>
           )}
-          <PasskeyCard
+          <SettingsPanel section="passkeys"><PasskeyCard
             passkeys={passkeys}
             federated={federated}
             totpEnabled={totpEnabled}
@@ -114,10 +124,11 @@ export default function AccountPage() {
               loadPasskeys()
               refresh()
             }}
-          />
-        </Space>
+          /></SettingsPanel>
+          </SettingsWorkspace>
+        </div>
       )}
-    </Space>
+    </div>
   )
 }
 

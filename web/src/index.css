@@ -2329,3 +2329,28 @@ body {
 .rp-dashboard-data-scroll { max-height: 45dvh; overflow: auto; }
 .rp-dashboard-data-scroll thead { position: sticky; top: 0; background: var(--ant-color-bg-elevated); z-index: 1; }
 .rp-dashboard-data-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+
+.rp-batch-targets-table td { overflow-wrap: anywhere; }
+.rp-batch-targets-table .ant-space { max-width: 100%; }
+.rp-statistics-page { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.rp-statistics-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.rp-statistics-filters label { display: flex; flex: 1 1 160px; flex-direction: column; gap: 6px; min-width: 0; }
+.rp-statistics-filters label:nth-child(3) { flex-basis: 280px; }
+.rp-statistics-filters .ant-select, .rp-statistics-filters .ant-picker { width: 100%; }
+.rp-account-page { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; }
+.rp-account-security { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rp-account-page .rp-settings-workspace { grid-template-columns: 190px minmax(0, 1fr); }
+.rp-account-page .rp-settings-panel { max-width: none; }
+.rp-account-page .rp-settings-panel > .ant-card { border: 0; box-shadow: none; background: transparent; }
+.rp-account-page .rp-settings-panel > .ant-card > .ant-card-head { padding-inline: 0; }
+.rp-account-page .rp-settings-panel > .ant-card > .ant-card-body { padding: 20px 0; }
+.rp-account-page .ant-form { max-width: 640px; }
+.rp-account-page .rp-settings-panel .ant-card-head-title { white-space: normal; }
+@media (max-width: 767px) {
+ .rp-account-page .rp-settings-workspace { grid-template-columns: minmax(0, 1fr); }
+ .rp-statistics-filters label { flex-basis: 100%; }
+}
+@media (max-width: 767px) {
+ .rp-account-page .rp-settings-workspace { height: auto !important; }
+ .rp-account-page .rp-settings-content { overflow: visible; padding-inline-end: 0; }
+}

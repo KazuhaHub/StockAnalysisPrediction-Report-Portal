@@ -303,6 +303,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/dashboard/layout", s.apiDashboardLayout)
 	s.admin(mux, "PUT /api/admin/dashboard/layout", s.apiDashboardLayoutSave)
 	s.admin(mux, "GET /api/admin/reports/overview", s.apiReportOverview)
+	s.admin(mux, "GET /api/admin/statistics", s.apiStatistics)
 	s.admin(mux, "GET /api/admin/users", s.apiAdminUsers)
 	s.admin(mux, "POST /api/admin/users", s.apiUserAdd)
 	s.admin(mux, "POST /api/admin/users/bulk", s.apiUsersBulk)

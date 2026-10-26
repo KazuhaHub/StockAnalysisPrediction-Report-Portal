@@ -398,9 +398,9 @@ function GlobalExecutionTargets() {
     { key: 'sort', width: 44, align: 'center', render: () => <DragHandle label={t('common.reorder')} /> },
     {
       title: t('common.name'),
-      width: 220,
+      width: '26%',
       render: (_: unknown, tg: BatchTarget) => (
-        <Space size={6}>
+        <Space size={6} wrap>
           {tg.name}
           {difyModeTag(t, tg.mode)}
         </Space>
@@ -415,7 +415,7 @@ function GlobalExecutionTargets() {
     },
     {
       title: t('batch.admin.surfaces'),
-      width: 230,
+      width: '18%',
       render: (_: unknown, tg: BatchTarget) => {
         const list = tg.surfaces && tg.surfaces.length ? tg.surfaces : ALL_SURFACES
         // Only the surfaces this app kind can actually serve are worth showing: an agent
@@ -435,12 +435,12 @@ function GlobalExecutionTargets() {
         )
       },
     },
-    { title: t('batch.admin.createdAt'), dataIndex: 'created_at', width: 170 },
+    { title: t('batch.admin.createdAt'), dataIndex: 'created_at', width: '18%' },
     {
       title: t('batch.col.actions'),
-      width: 168,
+      width: 136,
       render: (_: unknown, tg: BatchTarget) => (
-        <Space size={4}>
+        <Space size={4} wrap>
           <Button size="small" icon={<EyeOutlined />} title={t('batch.admin.surfacesTitle')} onClick={() => openSurfaces(tg)} />
           {tg.plugin_slug === 'dify' && (
             <>
@@ -553,7 +553,7 @@ function GlobalExecutionTargets() {
                     pagination={false}
                     components={sortableTableComponents}
                     tableLayout="fixed"
-                    scroll={{ x: 1100 }}
+                    scroll={{ x: 640 }}
                   />
                 </SortableWrapper>
                 </LoadGate>

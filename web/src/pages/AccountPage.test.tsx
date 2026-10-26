@@ -278,3 +278,15 @@ describe('AccountPage', () => {
     await waitFor(() => expect(screen.getByText('YubiKey')).toBeTruthy())
   })
 })
+
+it('shows one security section at a time and preserves a password draft', async () => {
+  const {container}=renderPage()
+  const input=await screen.findByLabelText('account.currentPassword')
+  fireEvent.change(input,{target:{value:'unsaved-example'}})
+  fireEvent.click(screen.getByRole('button',{name:'account.totpTab'}))
+  expect(input.closest('section')?.hidden).toBe(true)
+  expect(screen.getByText('account.totpTitle').closest('section')?.hidden).toBe(false)
+  fireEvent.click(screen.getByRole('button',{name:'account.passwordTab'}))
+  expect((input as HTMLInputElement).value).toBe('unsaved-example')
+  expect(container.querySelector('.rp-account-page')).toBeTruthy()
+})
