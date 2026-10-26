@@ -2,7 +2,8 @@
 
 Status: internal P03/P04 development under approved D1/D3/D4 candidate A.
 This is a Linux-only, same-OS-user development transport, not a production
-controller endpoint or the completed application framework. No command-line flag,
+controller deployment or the completed application framework. The separate-UID
+internal profile is specified in [document 32](32-runner-controller-identity.md). No command-line flag,
 Portal startup hook, HTTP route or deployment configuration enables it. The
 production controller UID/group provisioning, physical providers and dispatch
 remain future work. No database shape or server beta setting changes.
@@ -33,9 +34,10 @@ These helpers are internal, experimental and not a stable SDK. All app processes
 must eventually have separate OS identities and no control-directory mount. A
 same-UID process can impersonate a local endpoint; SO_PEERCRED alone does not solve
 that. The signature still prevents it from manufacturing controller commands.
-The supplied same-user development directory/socket profile cannot yet connect a
-separately provisioned Portal service account to a root runner. Do not weaken the
-0700/0600 checks to deploy it; design and verify that operator bootstrap first.
+The supplied same-user directory/socket profile cannot connect a separately
+provisioned Portal service account to a root runner. Do not weaken its 0700/0600
+checks; use the explicitly configured, independently verified separate-UID profile
+in document 32 after the operator provisions its required identity/directory.
 
 ## Endpoint checks and ownership
 

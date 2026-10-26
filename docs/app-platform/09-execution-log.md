@@ -134,3 +134,17 @@ source `a719efcd30f5bd11506e2110660703411245140e` passed full test run
 and Linux daemon run
 [40245984401](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40245984401).
 Current transport Linux execution evidence must be checked on its own source CI.
+
+## Separate controller OS identity
+
+[Separate-UID transport](32-runner-controller-identity.md) adds an explicit root
+listener/non-root Portal profile with a dedicated group and exact 0750/0660
+ownership, preserving kernel UID checks and signed journal admission. It does not
+create system identities/directories or turn on a service. The disposable Linux
+workflow exercises actual distinct-UID children, including a same-group attacker
+holding valid signed bytes and an impostor with matching socket metadata. Verify
+that source CI before claiming OS acceptance. Previous private transport source
+`89c7c6d2b6624fc20d43460e9688c12c86886950` passed complete repository run
+[40246747001](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40246747001)
+and Linux race run
+[40246747041](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40246747041).
