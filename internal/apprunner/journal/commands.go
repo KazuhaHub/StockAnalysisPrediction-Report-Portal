@@ -67,27 +67,9 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 	c := verified.Command()
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
-	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
-	var incompatible int
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`, c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.DataNamespaceID, c.ControllerEpoch).Scan(&incompatible); err != nil {
+	floor, err := commandResourceFloor(ctx, tx, c)
+	if err != nil {
 		return zero, err
-	}
-	if incompatible != 0 {
-		return zero, ErrFenceReconciliation
-	}
-	var floor, generationFloor, writerFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0),COALESCE(MAX(generation),0) FROM (SELECT admitted_fence AS fence,target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence,generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor, &generationFloor); err != nil {
-		return zero, err
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.DataNamespaceID).Scan(&writerFloor); err != nil {
-		return zero, err
-	}
-	var foreignNamespace int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND installation_id<>?`, c.Payload.DataNamespaceID, c.InstallationID).Scan(&foreignNamespace); err != nil {
-		return zero, err
-	}
-	if fence < floor || generation < generationFloor || writer < writerFloor || foreignNamespace != 0 {
-		return zero, ErrCommandConflict
 	}
 	stored, err := loadAdmittedCommand(ctx, tx, c.EffectID)
 	var result CommandAdmission
@@ -128,4 +110,33 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 		return zero, err
 	}
 	return result, nil
+}
+
+// Admission and data reservation use the same durable command/resource floors.
+func commandResourceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (int64, error) {
+	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+	var incompatible int
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`, c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.DataNamespaceID, c.ControllerEpoch).Scan(&incompatible); err != nil {
+		return 0, err
+	}
+	if incompatible != 0 {
+		return 0, ErrFenceReconciliation
+	}
+	var floor, generationFloor, writerFloor int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0),COALESCE(MAX(generation),0) FROM (SELECT admitted_fence AS fence,target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence,generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor, &generationFloor); err != nil {
+		return 0, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.DataNamespaceID).Scan(&writerFloor); err != nil {
+		return 0, err
+	}
+	var foreignNamespace int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND installation_id<>?`, c.Payload.DataNamespaceID, c.InstallationID).Scan(&foreignNamespace); err != nil {
+		return 0, err
+	}
+	if fence < floor || generation < generationFloor || writer < writerFloor || foreignNamespace != 0 {
+		return 0, ErrCommandConflict
+	}
+	return floor, nil
 }

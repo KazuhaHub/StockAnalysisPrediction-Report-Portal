@@ -339,3 +339,17 @@ fresh remount inspection, disabled-enforcement refusal and cleanup. The primitiv
 has no runtime/worker entry point; journal reservation,
 execution claims/receipts, reconciliation and writer admission remain required.
 The display-metadata predecessor passed source CI run 40276186871.
+
+
+## Durable data resource reservations
+
+[Runner data reservations](47-data-resource-reservations.md) bind an already
+admitted current signed prepare-data command to one stable namespace/project
+resource row. Exact replay/reopen preserve the mapping; allocation is serialized,
+monotonic and retains absent/history IDs. Original command/resource floors and
+ownership identity are rechecked; no command is executed, observed or completed.
+Tests cover concurrency, renewal, corruption, expiry, rollback and capacity.
+The native data primitive predecessor passed main run 40278679685 and quota run
+40278679625. Connecting reservations to native work still requires durable
+execution claims, physical root/ownership verification, receipts and restart
+reconciliation before any writer or activation authority can be created.
