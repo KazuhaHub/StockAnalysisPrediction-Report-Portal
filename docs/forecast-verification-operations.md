@@ -264,6 +264,17 @@ items. There are six: `binary`, `population` (the ledger start is set), `dry_pas
    confirmation and is audited as `quote.order`); do not work around it.
 5. Switch to `1`. The change, the actor and the readiness list are audited (`forecast.auto`).
 
+### Diagnosing an incomplete adjustment window
+
+If a completed dry pass reports `fetch_failed` with healthy HTTP counters, inspect the evaluator
+logs before treating it as a transport outage. The adjustment-stage log names the set, checkpoint
+and required base/stock-bar dates when a successful adjusted response lacks a required close.
+Tencent can omit the current completed session from a qfq request ending on that same date even
+while its snapshot is current. The adjustment adapter requests through the following civil day
+and filters the parsed rows back to the original inclusive window; missing closes still refuse
+settlement, without charging a prediction attempt. Captured boundary evidence and replay limits
+are documented in `internal/app/testdata/quote/forecast-adjustment-boundary-evidence.md`.
+
 ### Scheduling a benchmark
 
 - Choose a code from the closed allowlist. The response's `effective_cohort` says when it applies.
