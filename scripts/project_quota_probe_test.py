@@ -89,6 +89,14 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             with patch.object(probe.sys, "platform", "linux"), patch.object(probe.os, "geteuid", return_value=0), patch.dict(probe.os.environ, {}, clear=True):
                 with self.assertRaisesRegex(RuntimeError, "outside a disposable"):
                     probe.main(["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json", "--journal-binary", "/tmp/journal", "--transport-binary", "/tmp/transport"])
+            portal_args=["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json", "--journal-binary", "/tmp/journal", "--transport-binary", "/tmp/transport", "--portal-binary", "/tmp/portal"]
+            with patch.object(probe.sys, "platform", "linux"), patch.object(probe.os, "geteuid", return_value=0), patch.dict(probe.os.environ, {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "outside a disposable"):
+                    probe.main(portal_args)
+            for position,value in [(9,"--wrong"),(10,"relative")]:
+                malformed=list(portal_args);malformed[position]=value
+                with self.assertRaises(RuntimeError):
+                    probe.main(malformed)
             command.assert_not_called()
             temporary.assert_not_called()
 

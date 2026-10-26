@@ -441,3 +441,20 @@ Recovery predecessor source
 a9a716b2a742720b503a0249118cdd5e3bf5f6f7 passed main 40301418154, runner
 40301418166 and native 40301418160. Portal command construction, receipt/stage CAS,
 writer/activation and the full market installation experience remain open.
+
+
+## Portal signed data intent and stage commit
+
+[Portal data preparation](53-portal-install-data-stage.md) creates a stable pending
+namespace/effect pair and signs the exact reviewed data intent with the existing
+sealed runtime key under the current lease. Static applications keep NULL backend
+runtime identity. The actual endpoint entry point reads opaque root-profile
+receipt evidence; the repository atomically applies namespace, effect and
+prepare_data-to-activate transition with late context/authority/proof checks.
+No application activation or access grant is implied. SQLite/PostgreSQL source
+checks and delayed-audit/cancellation cases cover transaction boundaries; the
+extended native workflow tests the real non-root Portal through XFS execution
+and receipt retrieval. This source's CI/native evidence still require inspection.
+Receipt-channel predecessor source 5244eb1d48d801577fe1336ce08b57879221a325 passed
+main 40305195824, runner 40305195850 and native 40305195814. Activation,
+automatic dispatch and complete market install experience remain open.
