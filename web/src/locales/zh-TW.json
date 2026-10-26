@@ -1,4 +1,7 @@
 {
+  "apps.v2Loading": "正在載入應用程式…",
+  "apps.v2Failed": "應用程式連線失敗，請重新開啟後重試。",
+  "apps.v2Retry": "重新開啟應用程式",
   "err.ou_policy_unavailable": "暫時無法讀取組織原則，請稍後重試。",
   "err.ou_has_members": "請先將此單位的成員移至明確選擇的目標單位，再刪除。",
   "err.ou_has_sso_references": "請先修改參照此單位的身分提供者預設設定和 SSO 分配規則，再刪除。",

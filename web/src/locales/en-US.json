@@ -1,4 +1,7 @@
 {
+  "apps.v2Loading": "Loading app…",
+  "apps.v2Failed": "The app could not connect. Reopen it to try again.",
+  "apps.v2Retry": "Reopen app",
   "err.ou_policy_unavailable": "The organizational policy is temporarily unavailable. Please try again.",
   "err.ou_has_members": "Move this unit's members to a destination you choose before deleting it.",
   "err.ou_has_sso_references": "Update the identity provider defaults and SSO rules referencing this unit before deleting it.",
