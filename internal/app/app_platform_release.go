@@ -23,6 +23,10 @@ type platformStagedRelease struct {
 // This stages immutable declaration/frontend bytes, not an admitted installation
 // or a verified OCI image. It never creates an operation or activates app routes.
 func (s *Server) stagePlatformRelease(session platformActorSession, descriptor, signature, frontend []byte) (platformStagedRelease, error) {
+	return s.stagePlatformReleaseContext(context.Background(), session, descriptor, signature, frontend)
+}
+
+func (s *Server) stagePlatformReleaseContext(ctx context.Context, session platformActorSession, descriptor, signature, frontend []byte) (platformStagedRelease, error) {
 	if len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes || len(signature) == 0 || len(signature) > appplatform.MaxDescriptorSignatureBytes || len(frontend) == 0 || len(frontend) > appplatform.MaxFrontendArchiveBytes {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
@@ -36,7 +40,7 @@ func (s *Server) stagePlatformRelease(session platformActorSession, descriptor, 
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
 	var result platformStagedRelease
-	err = s.withPlatformTrustActor(session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) (resultErr error) {
+	err = s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) (resultErr error) {
 		// All bytes/audits written by this callback roll back if authority expires
 		// while waiting for a later lock or doing bounded archive inspection.
 		defer func() {
@@ -109,10 +113,6 @@ func platformStagedIdentity(verified appplatform.VerifiedPublisherDescriptor) pl
 
 // Shared admission boundary for future review/commit callbacks. They must write
 // their own intent inside this same transaction, not trust a prior returned value.
-func (s *Server) withPlatformTrustActor(session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error) error {
-	return s.withPlatformTrustActorContext(context.Background(), session, fn)
-}
-
 func (s *Server) withPlatformTrustActorContext(ctx context.Context, session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error) error {
 	return s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {

@@ -41,7 +41,11 @@ func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handle
 				return
 			}
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), platformManagementTimeout)
+		timeout := platformManagementTimeout
+		if r.URL.Path == "/api/admin/app-platform/market/stage" {
+			timeout = 45 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
 		h(w, r.WithContext(ctx), user)
 	})))
