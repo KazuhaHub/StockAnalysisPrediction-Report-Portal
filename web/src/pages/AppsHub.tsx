@@ -8,6 +8,7 @@ import { useAuth } from '../auth'
 import { BUILTIN_APPS } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useAppDirectory } from '../lib/appDirectoryV2'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
 // permission; the registry lives in lib/builtinApps so the entry-button picker and shortcut router
@@ -18,11 +19,11 @@ const BUILTIN_ICONS: Record<string, ReactNode> = {
   recurring: <ClockCircleOutlined />,
 }
 
-function AppCard({ icon, title, desc, tag, onClick }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void }) {
+function AppCard({ icon, title, desc, tag, onClick, disabled = false }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void; disabled?: boolean }) {
   const { token } = theme.useToken()
   return (
     <Col xs={24} sm={12} lg={8}>
-      <Card hoverable {...clickable(onClick, title)} style={{ height: '100%' }}>
+      <Card hoverable={!disabled} {...(disabled ? { role: 'button', tabIndex: 0, 'aria-disabled': true, 'aria-label': title } : clickable(onClick, title))} style={{ height: '100%', opacity: disabled ? 0.65 : 1 }}>
         <Space align="start" size={16}>
           <span style={{ fontSize: 28, color: token.colorPrimary, lineHeight: 1 }}>{icon}</span>
           <div>
@@ -46,7 +47,8 @@ function AppCard({ icon, title, desc, tag, onClick }: { icon: ReactNode; title: 
 
 export default function AppsHub() {
   const { t } = useTranslation()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
+  const directory = useAppDirectory(user)
   const navigate = useNavigate()
   const [apps, setApps] = useState<AppSummary[]>([])
   // An account without the built-in apps' permission sees nothing but the installed list, so
@@ -71,7 +73,7 @@ export default function AppsHub() {
 
   // '' perm = everyone (matches shortcutPerm's registry contract; can('') is false, so guard on it).
   const builtins = BUILTIN_APPS.filter((a) => !a.perm || can(a.perm))
-  const isEmpty = builtins.length === 0 && apps.length === 0
+  const isEmpty = builtins.length === 0 && apps.length === 0 && directory.items.length === 0
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -90,12 +92,16 @@ export default function AppsHub() {
           action={<Button size="small" onClick={load}>{t('common.retry')}</Button>}
         />
       )}
-      {loading && builtins.length === 0 ? (
+      {directory.failed && (
+        <Alert type="warning" showIcon title={t('apps.v2ListUnavailable')}
+          action={<Button size="small" onClick={() => directory.load()}>{t('common.retry')}</Button>} />
+      )}
+      {(loading || directory.loading) && isEmpty ? (
         <div style={{ display: 'grid', justifyItems: 'center', gap: 12, minHeight: 200, alignContent: 'center' }}>
           <Spin size="large" />
           <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
         </div>
-      ) : isEmpty && !loading && !loadErr ? (
+      ) : isEmpty && !loading && !directory.loading && !loadErr && !directory.failed ? (
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>
@@ -109,6 +115,11 @@ export default function AppsHub() {
               onClick={() => navigate(a.to)}
             />
           ))}
+          {directory.items.map(a => (
+            <AppCard key={`v2:${a.installationId}`} icon={<AppstoreOutlined />} title={a.applicationId}
+              tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+              onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
+          ))}
           {apps.map((a) => (
             <AppCard
               key={a.id}
@@ -119,6 +130,9 @@ export default function AppsHub() {
             />
           ))}
         </Row>
+      )}
+      {directory.nextCursor && !directory.failed && (
+        <Button onClick={() => directory.load(directory.nextCursor)} loading={directory.loading}>{t('apps.v2LoadMore')}</Button>
       )}
     </Space>
   )

@@ -1,4 +1,10 @@
 {
+  "apps.v2ListUnavailable": "暂时无法读取已安装应用列表。",
+  "apps.v2LoadMore": "显示更多应用",
+  "apps.v2State.installed": "已安装",
+  "apps.v2State.pending": "尚未就绪",
+  "apps.v2State.disabled": "已停用",
+  "apps.v2State.attention": "暂不可用",
   "apps.v2Unavailable": "应用暂时不可用，请检查访问权限或联系管理员。",
   "apps.v2Loading": "正在加载应用…",
   "apps.v2Failed": "应用连接失败，请重新打开后重试。",

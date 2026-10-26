@@ -1,4 +1,10 @@
 {
+  "apps.v2ListUnavailable": "暫時無法讀取已安裝應用程式清單。",
+  "apps.v2LoadMore": "顯示更多應用程式",
+  "apps.v2State.installed": "已安裝",
+  "apps.v2State.pending": "尚未就緒",
+  "apps.v2State.disabled": "已停用",
+  "apps.v2State.attention": "暫時無法使用",
   "apps.v2Unavailable": "應用程式暫時無法使用，請檢查存取權限或聯絡管理員。",
   "apps.v2Loading": "正在載入應用程式…",
   "apps.v2Failed": "應用程式連線失敗，請重新開啟後重試。",

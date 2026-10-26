@@ -1,4 +1,10 @@
 {
+  "apps.v2ListUnavailable": "The installed app list is unavailable.",
+  "apps.v2LoadMore": "Show more apps",
+  "apps.v2State.installed": "Installed",
+  "apps.v2State.pending": "Not ready",
+  "apps.v2State.disabled": "Disabled",
+  "apps.v2State.attention": "Unavailable",
   "apps.v2Unavailable": "This app is unavailable. Check your access or contact an administrator.",
   "apps.v2Loading": "Loading app…",
   "apps.v2Failed": "The app could not connect. Reopen it to try again.",

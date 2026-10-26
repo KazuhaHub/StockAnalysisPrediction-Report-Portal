@@ -14,7 +14,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
 | P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md) implemented; actual provider admission, data/execution/activation and complete managed/static installer remain |
-| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md) and [current-reader launch inspection](38-launch-access-inspection.md) implemented without route registration; [verified buffered file read](39-verified-asset-read.md) implemented; browser asset transport, seamless shell, sizing/navigation/drafts and real-browser acceptance remain |
+| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; complete seamless shell, verified display names, sizing/navigation/drafts and full browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
 ## First contract implementation
@@ -295,3 +295,18 @@ and theme changes retaining child state and host Back navigation retiring the
 frame. Full local web regression passes 1648 cases and Go regression with disposable
 PostgreSQL passes; exact-source CI is still required. Existing legacy app routes and production/beta configuration are
 unchanged.
+
+
+## Audience-filtered app directory
+
+[Application discovery](44-app-directory.md) projects audience-filtered control
+records into the existing AppsHub. User/OU lifecycle and actual ancestry are
+checked on every page; filtering precedes the bounded keyset page limit and
+administrator role adds no audience bypass. Directory control-state hints do not
+replace fresh launch/package/trust checks or prove provider readiness. The client
+handles partial legacy/v2 failure, pagination, stale account responses and fixed
+translated errors. SQLite/PostgreSQL and React tests cover these paths, including
+real database lock-wait cancellation and session expiry. No actual market package,
+physical activation, production configuration or Status adoption is added. The
+launch-page predecessor passed exact-source CI run 40273040782; this slice needs
+its own source CI. Full P00–P14 delivery remains in progress.
