@@ -136,8 +136,10 @@ scripts, unsupported HTML/CSS, invalid archives, depth and repeated-expansion
 limits. The actual React/Ant SDK build also compiles through this path.
 
 Compiler race checks, vet, staticcheck, build and the real SDK fixture export
-passed locally. The full Go suite with disposable PostgreSQL is still running;
-exact-source CI is required for this new slice.
+passed locally. Full Go regression with disposable PostgreSQL passed (the app
+package took 373.774 seconds). Later raw-attribute hardening passed the complete
+compiler race suite and produced bytes identical to the browser-tested document.
+Exact-source CI is required for this new slice.
 
 Both database drivers check document reading, complete binding mismatch, grant
 revocation and unchanged durable dumps. PostgreSQL holds an actual release lock,
