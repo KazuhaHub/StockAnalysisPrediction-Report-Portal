@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -13,30 +14,34 @@ import (
 )
 
 const dataReceiptFormat = "portal.runner.prepare-data-receipt/1-dev.1"
+const dataReconciledReceiptFormat = "portal.runner.reconciled-data-receipt/1-dev.1"
 
 // DataPreparationReceipt is a historical native observation, not writer access,
 // current readiness, controller acknowledgement or Portal stage completion.
 // Numeric wire values are decimal strings to preserve integer precision.
 type DataPreparationReceipt struct {
-	Format          string          `json:"format"`
-	Claim           dataClaimMarker `json:"claim"`
-	DeploymentID    string          `json:"deployment_id"`
-	ControllerEpoch string          `json:"controller_epoch"`
-	ControlRevision string          `json:"control_revision"`
-	InstallationID  string          `json:"installation_id"`
-	PayloadSHA256   string          `json:"payload_sha256"`
-	ReleaseSHA256   string          `json:"release_sha256"`
-	DataFormat      string          `json:"data_format"`
-	Generation      string          `json:"generation"`
-	WriterFence     string          `json:"writer_fence"`
-	ProjectID       string          `json:"project_id"`
-	NamespaceInode  string          `json:"namespace_inode"`
-	Device          string          `json:"device"`
-	QuotaBytes      string          `json:"quota_bytes"`
-	QuotaInodes     string          `json:"quota_inodes"`
-	UsedBytes       string          `json:"used_bytes"`
-	UsedInodes      string          `json:"used_inodes"`
-	ObservedMS      string          `json:"observed_ms"`
+	Format                 string          `json:"format"`
+	Claim                  dataClaimMarker `json:"claim"`
+	DeploymentID           string          `json:"deployment_id"`
+	ControllerEpoch        string          `json:"controller_epoch"`
+	ControlRevision        string          `json:"control_revision"`
+	InstallationID         string          `json:"installation_id"`
+	PayloadSHA256          string          `json:"payload_sha256"`
+	ReleaseSHA256          string          `json:"release_sha256"`
+	DataFormat             string          `json:"data_format"`
+	Generation             string          `json:"generation"`
+	WriterFence            string          `json:"writer_fence"`
+	ProjectID              string          `json:"project_id"`
+	NamespaceInode         string          `json:"namespace_inode"`
+	Device                 string          `json:"device"`
+	QuotaBytes             string          `json:"quota_bytes"`
+	QuotaInodes            string          `json:"quota_inodes"`
+	UsedBytes              string          `json:"used_bytes"`
+	UsedInodes             string          `json:"used_inodes"`
+	ObservedMS             string          `json:"observed_ms"`
+	RecoveryEnvelopeSHA256 string          `json:"recovery_envelope_sha256,omitempty"`
+	RecoveryIssuedMS       string          `json:"recovery_issued_ms,omitempty"`
+	RecoveryExpiresMS      string          `json:"recovery_expires_ms,omitempty"`
 }
 
 func dataNumber(text string, positive bool) bool {
@@ -81,7 +86,7 @@ func markerRoot(m dataClaimMarker) data.RootIdentity {
 	return data.RootIdentity{FilesystemUUID: m.RootFilesystemUUID, Inode: inode}
 }
 func validDataReceipt(r DataPreparationReceipt) bool {
-	if r.Format != dataReceiptFormat || !validDataMarker(r.Claim) || !validDataRoot(markerRoot(r.Claim)) || !dataSHA(r.PayloadSHA256) || !dataSHA(r.ReleaseSHA256) {
+	if (r.Format != dataReceiptFormat && r.Format != dataReconciledReceiptFormat) || !validDataMarker(r.Claim) || !validDataRoot(markerRoot(r.Claim)) || !dataSHA(r.PayloadSHA256) || !dataSHA(r.ReleaseSHA256) {
 		return false
 	}
 	for _, id := range []string{r.DeploymentID, r.ControllerEpoch, r.InstallationID} {
@@ -107,7 +112,18 @@ func validDataReceipt(r DataPreparationReceipt) bool {
 	observed, _ := strconv.ParseInt(r.ObservedMS, 10, 64)
 	claimed, _ := strconv.ParseInt(r.Claim.ClaimedMS, 10, 64)
 	expires, _ := strconv.ParseInt(r.Claim.ExpiresMS, 10, 64)
-	return err == nil && project <= uint64(maxDataProjectID) && bytes%512 == 0 && observed >= claimed && observed < expires
+	if err != nil || project > uint64(maxDataProjectID) || bytes%512 != 0 || observed < claimed {
+		return false
+	}
+	if r.Format == dataReceiptFormat {
+		return observed < expires && r.RecoveryEnvelopeSHA256 == "" && r.RecoveryIssuedMS == "" && r.RecoveryExpiresMS == ""
+	}
+	if !dataSHA(r.RecoveryEnvelopeSHA256) || !dataNumber(r.RecoveryIssuedMS, false) || !dataNumber(r.RecoveryExpiresMS, true) {
+		return false
+	}
+	issued, _ := strconv.ParseInt(r.RecoveryIssuedMS, 10, 64)
+	recoveryExpires, _ := strconv.ParseInt(r.RecoveryExpiresMS, 10, 64)
+	return issued > claimed && recoveryExpires > issued && recoveryExpires-issued <= 30000 && observed >= issued && observed < recoveryExpires
 }
 
 // requireDataRootHistory derives the deployment-wide root from retained command
@@ -265,7 +281,13 @@ func (s *Store) settlePreparedData(ctx context.Context, live *dataClaimState, pi
 	if live == nil || live.owner != s || !live.used.Load() {
 		return zero, ErrDataClaimUnavailable
 	}
-	tx, facts, err := s.beginDataCommand(ctx, live.raw, live.signature, "unknown", live.marker)
+	return s.settleDataObservation(ctx, live.raw, live.signature, live.marker, pin, observed, false)
+}
+
+// Caller holds the execution gate and supplies a concrete native observation.
+func (s *Store) settleDataObservation(ctx context.Context, raw, signature []byte, expectedMarker string, pin data.RootIdentity, observed data.Observation, recovery bool) (DataPreparationReceipt, error) {
+	var zero DataPreparationReceipt
+	tx, facts, err := s.beginDataCommand(ctx, raw, signature, "unknown", expectedMarker)
 	if err != nil {
 		return zero, err
 	}
@@ -282,14 +304,24 @@ func (s *Store) settlePreparedData(ctx context.Context, live *dataClaimState, pi
 		return zero, err
 	}
 	var marker dataClaimMarker
-	if !canonicalDataJSON(live.marker, &marker) || !validDataMarker(marker) || markerRoot(marker) != pin {
+	if !canonicalDataJSON(expectedMarker, &marker) || !validDataMarker(marker) || markerRoot(marker) != pin {
 		return zero, ErrFenceReconciliation
 	}
 	c := facts.command
+	if marker.EffectID != c.EffectID || marker.ResourceID != reservation.ResourceID || marker.OwnershipSHA256 != reservation.OwnershipSHA256 || marker.AdmittedFence != c.InstallationFence {
+		return zero, ErrFenceReconciliation
+	}
+	if recovery && !freshDataRecovery(c, marker) {
+		return zero, ErrFenceReconciliation
+	}
 	if observed.NamespaceID != reservation.NamespaceID || observed.ProjectID != reservation.ProjectID || observed.ByteLimit <= 0 || observed.InodeLimit <= 0 || strconv.FormatInt(observed.ByteLimit, 10) != c.Payload.QuotaBytes || strconv.FormatInt(observed.InodeLimit, 10) != c.Payload.QuotaInodes || observed.Inode == 0 || observed.UsedBytes < 0 || observed.UsedInodes < 0 || !observed.Inherited {
 		return zero, ErrFenceReconciliation
 	}
 	receipt := DataPreparationReceipt{Format: dataReceiptFormat, Claim: marker, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, PayloadSHA256: c.PayloadSHA256, ReleaseSHA256: c.Payload.ReleaseSHA256, DataFormat: c.Payload.DataFormat, Generation: c.TargetGeneration, WriterFence: c.Payload.WriterFence, ProjectID: strconv.FormatUint(uint64(observed.ProjectID), 10), NamespaceInode: strconv.FormatUint(observed.Inode, 10), Device: strconv.FormatUint(observed.Device, 10), QuotaBytes: c.Payload.QuotaBytes, QuotaInodes: c.Payload.QuotaInodes, UsedBytes: strconv.FormatInt(observed.UsedBytes, 10), UsedInodes: strconv.FormatInt(observed.UsedInodes, 10), ObservedMS: strconv.FormatInt(facts.now, 10)}
+	if recovery {
+		digest := sha256.Sum256(facts.raw)
+		receipt.Format, receipt.RecoveryEnvelopeSHA256, receipt.RecoveryIssuedMS, receipt.RecoveryExpiresMS = dataReconciledReceiptFormat, hex.EncodeToString(digest[:]), c.IssuedMS, c.ExpiresMS
+	}
 	if !validDataReceipt(receipt) {
 		return zero, ErrFenceReconciliation
 	}
@@ -304,7 +336,7 @@ func (s *Store) settlePreparedData(ctx context.Context, live *dataClaimState, pi
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, ErrFenceReconciliation
 	}
-	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), facts.now, c.EffectID, live.marker)
+	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), facts.now, c.EffectID, expectedMarker)
 	if err != nil {
 		return zero, err
 	}

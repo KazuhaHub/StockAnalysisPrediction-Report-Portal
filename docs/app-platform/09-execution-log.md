@@ -404,3 +404,21 @@ Root-identity predecessor source
 8198a047cb6d50899da6ea94789be5155d2b9706 passed main 40297033484, runner
 40297033450 and native 40297033502. Recovery, controller receipt delivery, Portal
 stage completion, writer admission and the complete installer remain open.
+
+
+## Completed-data recovery under fresh authority
+
+[Inspection-only data recovery](51-data-preparation-reconciliation.md) checks a
+freshly signed envelope against retained unknown intent, observes the original
+sealed namespace and atomically records a recovered receipt. Original claim/root
+identity remains intact; expired original authority is not resurrected, and
+absent/partial namespaces are not recreated or repaired. The disposable native
+fixture now covers actual original-envelope expiry, concurrent settlement,
+unchanged physical identity and incomplete/absent refusal. Source
+1f4eb273f4ae821bdb7763b6f202980766bc5acf passed native run 40300992906; its
+downloaded report confirms all new recovery flags and owned cleanup. Full local
+Go/race checks and the freshness negative control pass; main/runner CI are
+independent. Receipt predecessor source
+6b359965de8b5cbd780985400a3328a0aedd7f1d passed main 40299103478, runner
+40299103353 and native 40299103357. Partial/absence recovery, takeover, controller
+receipt delivery, Portal stage completion and the full installer remain open.
