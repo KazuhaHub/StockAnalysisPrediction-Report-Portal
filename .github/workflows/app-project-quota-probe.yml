@@ -2,12 +2,18 @@ name: app project quota probe
 on:
   pull_request:
     paths:
+      - 'internal/apprunner/data/**'
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/acceptance/**'
       - 'scripts/project_quota_probe_test.py'
       - '.github/workflows/app-project-quota-probe.yml'
   push:
     branches: [main]
     paths:
+      - 'internal/apprunner/data/**'
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/acceptance/**'
       - 'scripts/project_quota_probe_test.py'
       - '.github/workflows/app-project-quota-probe.yml'
@@ -22,6 +28,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build native data and independent UAPI probes
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
+          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
@@ -32,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" | tee project-quota-evidence.json
       - name: Preserve redacted enforcement evidence
         uses: actions/upload-artifact@v7
         with:

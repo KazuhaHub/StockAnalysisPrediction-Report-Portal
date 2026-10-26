@@ -41,6 +41,21 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             command.assert_not_called()
             temporary.assert_not_called()
 
+    def test_native_binary_arguments_still_require_exact_disposable_opt_in(self):
+        with patch.object(probe, "command") as command, patch.object(probe.tempfile, "mkdtemp") as temporary:
+            for args in [
+                ["--native-binary", "/tmp/native"],
+                ["--disposable-github-worker", "--native-binary", "relative", "--abi-json", "/tmp/abi.json"],
+                ["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "relative"],
+            ]:
+                with self.assertRaises(RuntimeError):
+                    probe.main(args)
+            with patch.object(probe.sys, "platform", "linux"), patch.object(probe.os, "geteuid", return_value=0), patch.dict(probe.os.environ, {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "outside a disposable"):
+                    probe.main(["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json"])
+            command.assert_not_called()
+            temporary.assert_not_called()
+
     def test_substituted_loop_is_not_an_owned_resource(self):
         with patch.object(probe, "command", return_value='{"loopdevices":[{"name":"/dev/loop7","back-file":"/tmp/another-image"}]}'):
             with self.assertRaisesRegex(RuntimeError, "ownership"):
