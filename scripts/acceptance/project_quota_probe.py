@@ -30,12 +30,13 @@ def command(*args):
 
 def require_disposable(args):
     native_args = (
-        len(args) in (5, 7, 9)
+        len(args) in (5, 7, 9, 11)
         and args[:2] == ["--disposable-github-worker", "--native-binary"]
         and args[3] == "--abi-json"
         and Path(args[2]).is_absolute() and Path(args[4]).is_absolute()
         and (len(args) == 5 or (args[5] == "--journal-binary" and Path(args[6]).is_absolute()))
-        and (len(args) != 9 or (args[7] == "--transport-binary" and Path(args[8]).is_absolute()))
+        and (len(args) < 9 or (args[7] == "--transport-binary" and Path(args[8]).is_absolute()))
+        and (len(args) != 11 or (args[9] == "--portal-binary" and Path(args[10]).is_absolute()))
     )
     if not (args == ["--disposable-github-worker"] or native_args) or sys.platform != "linux" or os.geteuid() != 0:
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
@@ -138,7 +139,7 @@ def main(args):
             folder.chmod(0o700)
             folders[name] = folder
         native_root = None
-        if len(args) in (5,7,9):
+        if len(args) in (5,7,9,11):
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
@@ -148,7 +149,7 @@ def main(args):
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
         journal_root = None
-        if len(args) in (7,9):
+        if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"
             journal_root.mkdir(mode=0o700)
             # One control journal outside app data; no per-app database.
@@ -163,7 +164,7 @@ def main(args):
                     raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
 
             run_journal("prepare")
-            if len(args) == 9:
+            if len(args) in (9,11):
                 receipt_fixture = root / "receipt-channel"
                 receipt_fixture.mkdir(mode=0o755)
                 receipt_fixture.chmod(0o755)
@@ -241,9 +242,16 @@ def main(args):
                 report["native_journal_recovery_preserves_native_identity"] = True
                 report["native_journal_partial_data_not_repaired"] = True
                 report["native_journal_missing_data_not_created"] = True
-                if len(args) == 9:
+                if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True
+                if len(args) == 11:
+                    portal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_PORTAL_FIXTURE=str(receipt_fixture), APP_DATA_PORTAL_DESCRIPTOR=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors/static.json"))
+                    result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=60s"], env=portal_env, capture_output=True, text=True, timeout=60)
+                    if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
+                        raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
+                    report["native_portal_install_data_stage"] = True
+                    report["native_portal_data_stage_not_activation"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)

@@ -219,3 +219,20 @@ func Verify(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCo
 	}
 	return VerifiedCommand{command: command}, nil
 }
+
+// Sign encodes and signs an already constructed command under explicit authority.
+// It never grants a lease or admits an effect; callers must supply those durable checks.
+func Sign(command Command, key ed25519.PrivateKey, authority Authority, nowMS int64) ([]byte, []byte, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return nil, nil, ErrInvalidCommand
+	}
+	raw, err := json.Marshal(command)
+	if err != nil {
+		return nil, nil, ErrInvalidCommand
+	}
+	signature := ed25519.Sign(key, frame("portal.app/runner-command/v1", raw))
+	if _, err := Verify(raw, signature, authority, nowMS); err != nil {
+		return nil, nil, err
+	}
+	return raw, signature, nil
+}

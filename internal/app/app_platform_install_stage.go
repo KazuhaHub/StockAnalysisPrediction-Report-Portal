@@ -55,7 +55,7 @@ func platformInstallSponsor(e migExec, username sql.NullString, created string, 
 	return nil
 }
 
-func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {
+func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {
 	var planID, scope, requestSHA string
 	var sourceGeneration int64
 	if err := e.queryRow(`SELECT review_plan_id,actor_scope,request_sha256,source_generation FROM app_platform_operations WHERE id=?`, lease.id).Scan(&planID, &scope, &requestSHA, &sourceGeneration); err != nil {
@@ -152,6 +152,13 @@ func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, tr
 	}
 	if index != len(p.DeclinedCapabilities) {
 		return errAppPlatformStageEvidence
+	}
+	return nil
+}
+
+func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {
+	if err := validatePlatformInstallAuthority(e, lease, trust, now); err != nil {
+		return err
 	}
 	var resources int
 	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_data_namespaces WHERE owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?)`, lease.installationID, lease.installationID, lease.installationID, lease.id).Scan(&resources); err != nil {
