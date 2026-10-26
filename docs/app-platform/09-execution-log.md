@@ -626,3 +626,21 @@ were stopped after verification.
 Management API predecessor 96591a12068151c5916d8388739d3c1b46d18b27 passed main
 40341986266, daemon 40341986230 and native 40341986307. Remote marketplace
 publication, managed/full lifecycle and complete platform acceptance remain open.
+
+## Development catalogue and verified remote staging
+
+[Market fetch](61-development-market-fetch.md) adds a bounded provisional v2
+catalogue and administrator discovery/staging endpoints. The dedicated public
+HTTPS client strips deployment credentials, checks actual dial addresses and
+redirects, bounds bytes/time/status and respects cancellation. Staging selects an
+exact descriptor digest, refreshes current trust before artifact download and
+uses the existing context-bound atomic release repository after the full archive
+download. It adds no trust key, installation or app-use grant. Actual TLS tests
+cover tampering, trust changes, repeat staging, cancellation and transport/input/
+authority refusal. Full local Go/PostgreSQL regression passed (application package
+160.173 s); final market/catalogue race checks passed (application package 5.701 s,
+contract package 1.741 s), along with vet, staticcheck and Linux amd64 compilation.
+Installation UI predecessor bd93e252e0e73a06d0f8c3d67d64633f1f441987 passed main
+CI 40392383575. Online UI,
+publisher onboarding/publication, managed/full lifecycle and full platform release
+remain open; production configuration and the legacy Apps catalogue are unchanged.
