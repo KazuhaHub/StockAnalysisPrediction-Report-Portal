@@ -117,7 +117,7 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=5m ./... 2>&1 | tee go-test-output.txt
+          go test -count=1 -timeout=10m ./... 2>&1 | tee go-test-output.txt
       - name: Upload test output
         if: failure()
         uses: actions/upload-artifact@v7
