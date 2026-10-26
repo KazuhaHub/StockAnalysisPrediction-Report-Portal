@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Modal, theme, Typography } from 'antd'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Input, Modal, Pagination, Tooltip, theme, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { init, use as registerCharts, type EChartsType } from 'echarts/core'
 import { LineChart, BarChart, PieChart, type LineSeriesOption, type BarSeriesOption, type PieSeriesOption } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
 import type { EChartsOption } from 'echarts'
+import { createPortal } from 'react-dom'
+import { DownloadOutlined, TableOutlined } from '@ant-design/icons'
+import { downloadCSV } from '../../lib/csv'
+import { ChartHeaderTarget } from './DashboardChartCard'
+import { chartDataCSV } from './dashboardChartExport'
 
 registerCharts([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, SVGRenderer])
 export interface ChartRow { name: string; value: number }
@@ -25,7 +30,15 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   const { token } = theme.useToken()
   const { t } = useTranslation()
   const host = useRef<HTMLDivElement>(null)
-  const [dataOpen, setDataOpen] = useState(false)
+  const headerTarget = useContext(ChartHeaderTarget)
+  const [snapshot, setSnapshot] = useState<{rows: ChartRow[]; total?: number} | null>(null)
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const filtered = useMemo(() => (snapshot?.rows ?? []).filter(row => row.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [snapshot, query])
+  const headers = [t('manage.dashboard.dataLabel'), t('manage.dashboard.dataCount'), ...(snapshot?.total === undefined ? [] : [t('manage.dashboard.dataShare')])]
+  const openData = () => { setSnapshot({rows:rows.map(row => ({...row})), total}); setQuery(''); setPage(1) }
+  const dataButton = <Tooltip title={t('manage.dashboard.viewChartData')}><Button size="small" icon={<TableOutlined aria-hidden="true" />} aria-label={t('manage.dashboard.viewChartData')} onClick={openData} /></Tooltip>
   const refresh = useRef<() => void>(() => {})
   const pie = series.type === 'pie'
   const summary = rows.map(item => `${item.name}: ${item.value}`).join(', ')
@@ -97,15 +110,21 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
       <div ref={host} aria-hidden="true" className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40) : undefined }} />
     </div>
     {hint && <figcaption><Typography.Text type="secondary">{hint}</Typography.Text></figcaption>}
-    <div className="rp-dashboard-chart-data"><Button type="link" size="small" onClick={() => setDataOpen(true)}>{t('manage.dashboard.viewChartData')}</Button></div>
-    <Modal open={dataOpen} onCancel={() => setDataOpen(false)} footer={null} title={label} width={760}
+    {headerTarget && createPortal(dataButton, headerTarget)}
+    <Modal open={snapshot !== null} onCancel={() => setSnapshot(null)} footer={null} title={label} width={760}
       className="rp-dashboard-chart-data-modal" styles={{ body: { maxHeight: '65dvh', overflow: 'auto' } }}>
       {hint && <Typography.Paragraph type="secondary">{hint}</Typography.Paragraph>}
-      <table><caption className="rp-sr-only">{label}</caption>
-        <thead><tr><th scope="col">{t('manage.dashboard.dataLabel')}</th><th scope="col">{t('manage.dashboard.dataCount')}</th>{total !== undefined && <th scope="col">{t('manage.dashboard.dataShare')}</th>}</tr></thead>
-        <tbody>{rows.map((item,index) => <tr key={`${item.name}:${index}`}><th scope="row">{item.name}</th><td>{item.value}</td>{total !== undefined && <td>{total ? (item.value / total * 100).toFixed(1) : '0.0'}%</td>}</tr>)}</tbody>
-      </table>
-      {!rows.length && <Typography.Paragraph>{t('manage.dashboard.noReports')}</Typography.Paragraph>}
+      <div className="rp-dashboard-data-toolbar"><Input.Search allowClear value={query} placeholder={t('manage.dashboard.searchChartData')}
+        aria-label={t('manage.dashboard.searchChartData')} onChange={event => {setQuery(event.target.value); setPage(1)}} />
+        <Button icon={<DownloadOutlined aria-hidden="true" />} disabled={!filtered.length} onClick={() => downloadCSV(`chart-data-${new Date().toISOString().slice(0,10)}.csv`,chartDataCSV(headers,filtered,snapshot?.total))}>{t('manage.dashboard.downloadChartCSV')}</Button>
+      </div>
+      <Typography.Paragraph type="secondary">{t('manage.dashboard.chartExportHint')}</Typography.Paragraph>
+      <div className="rp-dashboard-data-scroll"><table><caption className="rp-sr-only">{label}</caption>
+        <thead><tr><th scope="col">{t('manage.dashboard.dataLabel')}</th><th scope="col">{t('manage.dashboard.dataCount')}</th>{snapshot?.total !== undefined && <th scope="col">{t('manage.dashboard.dataShare')}</th>}</tr></thead>
+        <tbody>{filtered.slice((page-1)*pageSize,page*pageSize).map((item,index) => <tr key={`${item.name}:${index}`}><th scope="row">{item.name}</th><td>{item.value}</td>{snapshot?.total !== undefined && <td>{snapshot.total ? (item.value / snapshot.total * 100).toFixed(1) : '0.0'}%</td>}</tr>)}</tbody>
+      </table></div>
+      <div className="rp-dashboard-data-pagination"><Typography.Text type="secondary">{t('manage.dashboard.chartDataRows',{count:filtered.length})}</Typography.Text><Pagination current={page} pageSize={pageSize} total={filtered.length} showSizeChanger pageSizeOptions={[25,50,100]} onChange={(next,size) => {setPage(size === pageSize ? next : 1); setPageSize(size)}} /></div>
+      {!filtered.length && <Typography.Paragraph>{t('manage.dashboard.noReports')}</Typography.Paragraph>}
     </Modal>
   </figure>
 }

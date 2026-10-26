@@ -63,7 +63,7 @@ export function csvToRows(text: string, keys: string[]): Record<string, string>[
 export function toCSV(headers: string[], rows: (string | number)[][]): string {
   const esc = (v: string | number) => {
     const s = String(v ?? '')
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
   return [headers, ...rows].map((r) => r.map(esc).join(',')).join('\n')
 }

@@ -2889,5 +2889,9 @@
   "manage.dashboard.dataLabel": "Item",
   "manage.dashboard.dataCount": "Count",
   "manage.dashboard.dataShare": "Share",
-  "err.quote_no_data": "No quote data found. Check the symbol or select another security."
+  "err.quote_no_data": "No quote data found. Check the symbol or select another security.",
+  "manage.dashboard.searchChartData": "Search chart data",
+  "manage.dashboard.downloadChartCSV": "Download CSV",
+  "manage.dashboard.chartExportHint": "Export the aggregated data in this view, including all pages.",
+  "manage.dashboard.chartDataRows": "{{count}} rows"
 }

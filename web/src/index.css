@@ -2316,10 +2316,16 @@ body {
 .rp-dashboard-echart-host svg { width: auto; height: auto; }
 .rp-dashboard-chart-card .rp-dashboard-echart-host svg { min-height: 0; }
 .rp-dashboard-chart-card .rp-dashboard-echart { gap: 8px; }
-.rp-dashboard-chart-data { font-size: 12px; color: var(--ant-color-text-secondary); }
 
 .rp-dashboard-chart-data-modal table { width: 100%; margin-top: 8px; border-collapse: collapse; }
 .rp-dashboard-chart-data-modal th, .rp-dashboard-chart-data-modal td { padding: 6px 8px; border-bottom: 1px solid var(--ant-color-border-secondary); text-align: start; overflow-wrap: anywhere; }
 .rp-dashboard-chart-data-modal td, .rp-dashboard-chart-data-modal th:not(:first-child) { text-align: end; }
 .rp-dashboard-example .rp-dashboard-echart-host { height: 160px; min-height: 160px !important; }
-.rp-dashboard-example .rp-dashboard-chart-data { display: none; }
+
+.rp-dashboard-chart-header-action { display: inline-flex; align-items: center; }
+.rp-dashboard-chart-header-action:empty { display: none; }
+.rp-dashboard-data-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.rp-dashboard-data-toolbar .ant-input-search { flex: 1; min-width: 180px; }
+.rp-dashboard-data-scroll { max-height: 45dvh; overflow: auto; }
+.rp-dashboard-data-scroll thead { position: sticky; top: 0; background: var(--ant-color-bg-elevated); z-index: 1; }
+.rp-dashboard-data-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }

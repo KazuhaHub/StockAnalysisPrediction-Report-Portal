@@ -2889,5 +2889,9 @@
   "manage.dashboard.dataLabel": "項目",
   "manage.dashboard.dataCount": "數量",
   "manage.dashboard.dataShare": "占比",
-  "err.quote_no_data": "未找到該證券的行情資料，請核對代碼或選擇其他證券。"
+  "err.quote_no_data": "未找到該證券的行情資料，請核對代碼或選擇其他證券。",
+  "manage.dashboard.searchChartData": "搜尋圖表資料",
+  "manage.dashboard.downloadChartCSV": "下載 CSV",
+  "manage.dashboard.chartExportHint": "匯出目前檢視的彙總資料，包含所有分頁。",
+  "manage.dashboard.chartDataRows": "共 {{count}} 列"
 }

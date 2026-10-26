@@ -10,6 +10,7 @@ import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluato
 import { MetricChart, ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import DashboardLayoutEditor from './DashboardLayoutEditor'
+import DashboardChartCard from './DashboardChartCard'
 import { dashboardBlockKind, dashboardChartType, defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
@@ -66,14 +67,14 @@ export default function AdminOverviewPage() {
   const status = forecast.data ? evaluatorStatus(forecast.data, now) : undefined
   const snapshotCard = (label: string, snapshot: { data?: unknown; error?: string; loading: boolean; at?: string }, children: ReactNode, path: string, icon: ReactNode, badge?: ReactNode) => (
     <section aria-label={t(label)}>
-      <Card size="small" title={<Space><span className="rp-dashboard-card-icon">{icon}</span>{t(label)}</Space>} loading={snapshot.loading && !snapshot.data}
+      <DashboardChartCard size="small" title={<Space><span className="rp-dashboard-card-icon">{icon}</span>{t(label)}</Space>} loading={snapshot.loading && !snapshot.data}
         extra={<Space>{badge}<Link aria-label={t('manage.dashboard.open', { name: t(label) })} to={path}><ArrowRightOutlined /></Link></Space>}>
         {snapshot.error && <Alert type="error" showIcon title={snapshot.error} />}
         {snapshot.data !== undefined && children}
         {snapshot.at && <Typography.Text type="secondary" className="rp-dashboard-updated">
           {t('manage.dashboard.updated', { time: dayjs(snapshot.at).format('HH:mm:ss') })}
         </Typography.Text>}
-      </Card>
+      </DashboardChartCard>
     </section>
   )
   const renderMetrics = (block: DashboardBlock) => {
@@ -121,9 +122,9 @@ export default function AdminOverviewPage() {
           const kinds = reports.data?.kind_periods?.[String(config.range)] ?? reports.data?.kinds ?? []
           const type = dashboardChartType(block.id, config)
           const title = block.id === 'trend' || block.id === 'report-bars' ? 'reportTrend' : 'reportKinds'
-          return <Card className="rp-dashboard-chart-card" size="small" title={t(`manage.dashboard.${title}`)} extra={<Tag>{t(`manage.dashboard.range.${config.range}`)}</Tag>} loading={reports.loading && !reports.data}>
+          return <DashboardChartCard className="rp-dashboard-chart-card" size="small" title={t(`manage.dashboard.${title}`)} extra={<Tag>{t(`manage.dashboard.range.${config.range}`)}</Tag>} loading={reports.loading && !reports.data}>
             {reports.data ? type === 'line' ? <ReportTrend days={reports.data.days} config={config} /> : type === 'column' ? <ReportBars days={reports.data.days} config={config} /> : type === 'bar' ? <ReportKinds kinds={kinds} config={config} /> : <ReportDonut kinds={kinds} config={config} /> : reports.error && <Alert type="error" title={reports.error} />}
-          </Card>
+          </DashboardChartCard>
         }
         if (block.id.startsWith('shortcut:')) {
           const page = adminPage(block.id.slice(9))
