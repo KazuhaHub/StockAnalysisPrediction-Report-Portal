@@ -717,3 +717,24 @@ CI 40401915455, native quota 40401915452 and daemon 40401915687. Real publisher
 onboarding, signed publication/acceptance hosting, managed backend execution,
 broker and full lifecycle/release acceptance remain open. No production channel,
 real credentials, Status migration or public SDK freeze is included.
+
+## Managed backend image inspection prerequisite
+
+[Immutable image inspection](65-managed-backend-image-inspection.md) binds a
+read-only safe Unix-socket Docker image observation to exact descriptor bytes,
+reviewed repository digest, native configuration ID and declared Linux platform.
+It rejects image-declared anonymous volumes, unsafe aliases/variants, oversized or
+malformed responses and canceled observations. Output excludes image environment,
+commands and daemon host paths. No pull, container creation/start or implicit
+execution authorization is added; runtime readiness remains unchanged.
+
+Local runner/control/data/journal/transport and CLI race regression passed
+(journal 62.842 s). After the final Docker Hub familiar-name matching change,
+driver race regression passed (1.368 s), as did vet, staticcheck and Linux
+amd64/arm64 test compilation. Real-daemon image inspection is added to the
+existing GitHub-hosted disposable daemon workflow; its execution result remains
+to be checked on this source revision. Local macOS checks do not prove Linux
+runtime behavior. The next integration still requires closed container actions,
+signed managed effects, ownership reconciliation, broker and full lifecycle.
+Production trust/runtime configuration, credentials, Status and beta settings
+are untouched.

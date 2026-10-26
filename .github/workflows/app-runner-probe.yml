@@ -47,6 +47,13 @@ jobs:
           probe_socket=$(readlink -f /var/run/docker.sock)
           test -S "$probe_socket"
           export PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket"
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          docker pull docker.io/library/busybox:1.37.0
+          probe_digest=$(docker image inspect docker.io/library/busybox:1.37.0 --format '{{index .RepoDigests 0}}')
+          test -n "$probe_digest"
+          probe_image="docker.io/library/busybox@${probe_digest##*@}"
+          export PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$probe_image"
           go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
           go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
 
