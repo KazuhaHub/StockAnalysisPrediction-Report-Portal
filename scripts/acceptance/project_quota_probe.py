@@ -132,7 +132,13 @@ def main(args):
 
         def run_workload(mode, folder, private=False):
             if private:
-                result = subprocess.run(["setpriv", "--reuid=10000", "--regid=10000", "--clear-groups", "--no-new-privs", "/usr/bin/python3", str(workload), mode, "."], cwd=folder, env=ENV, capture_output=True, text=True, timeout=45)
+                directory_fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                capacity_fd = os.open(mountpoint, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    result = subprocess.run(["setpriv", "--reuid=10000", "--regid=10000", "--clear-groups", "--no-new-privs", "/usr/bin/python3", str(workload), mode, "--private-fds", str(directory_fd), str(capacity_fd)], pass_fds=(directory_fd, capacity_fd), env=ENV, capture_output=True, text=True, timeout=45)
+                finally:
+                    os.close(directory_fd)
+                    os.close(capacity_fd)
                 if result.returncode:
                     raise RuntimeError("native quota workload failed: " + result.stderr[-2048:])
                 output = result.stdout

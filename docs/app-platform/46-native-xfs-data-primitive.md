@@ -104,7 +104,7 @@ one additional private data root on that owned mount. The Go fixture:
 The probe temporarily grants only synthetic UID/GID 10000 access to those test
 folders, after preparation. This is separate test setup, not provider behavior.
 It runs the existing real byte, inode and open/unlinked workloads from private
-working directories, with independent healthy-project writes and underlying
+file descriptors, with independent healthy-project writes and underlying
 filesystem capacity checks. It restores sealed root ownership for inspection.
 Disabling/re-enabling enforcement is confined to this newly owned fixture mount.
 All original quota/remount/control checks still run.
@@ -119,6 +119,15 @@ cleanup outcomes leave the owned resources for ephemeral-worker teardown.
 
 Local portable bounds tests, runner race suites, Python refusal tests and Linux
 amd64/arm64 cross-compilation/vet checks run without root filesystem mutation.
+The first native CI run (40277888295) passed Go preparation/UAPI checks but
+refused the workload's relative `.` path before performing native quota workloads.
+The harness now explicitly inherits a namespace directory FD and a separate
+same-filesystem project-0 capacity FD. The unprivileged workload validates both
+identities/project IDs and uses fstatvfs on the uncapped FD, rather than weakening
+private-root permissions or counting capped statfs as filesystem exhaustion.
+Ten Python tests cover these input/capacity rules and existing refusal behavior.
+The corrected native run must be inspected before claiming enforcement.
+
 Native acceptance and exact-source CI results must be inspected on the PR before
 claiming that this adapter actually enforces quotas. A cross-build is insufficient.
 

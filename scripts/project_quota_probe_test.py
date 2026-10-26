@@ -2,6 +2,8 @@ import errno
 import importlib.util
 from pathlib import Path
 import tempfile
+import stat
+import struct
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -40,6 +42,30 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                     probe.main(["--disposable-github-worker"])
             command.assert_not_called()
             temporary.assert_not_called()
+
+    def test_private_workload_requires_distinct_owned_same_filesystem_descriptors(self):
+        directory = SimpleNamespace(st_mode=stat.S_IFDIR, st_uid=10000, st_dev=7, st_ino=1)
+        capacity = SimpleNamespace(st_mode=stat.S_IFDIR, st_uid=0, st_dev=7, st_ino=2)
+        def project(fd, request, buffer, mutate):
+            struct.pack_into("=I", buffer, 12, 4201 if fd == 3 else 0)
+        with patch.object(workload.os, "fstat", side_effect=[directory, capacity]), patch.object(workload.fcntl, "ioctl", side_effect=project):
+            folder, fd = workload.private_directory(["--private-fds", "3", "4"])
+            self.assertEqual(str(folder), "/proc/self/fd/3")
+            self.assertEqual(fd, 4)
+        for args in [["--private-fds", "3", "3"], ["--private-fds", "03", "4"], ["--private-fds", "2", "4"]]:
+            with self.assertRaises(RuntimeError):
+                workload.private_directory(args)
+        capacity.st_dev = 8
+        with patch.object(workload.os, "fstat", side_effect=[directory, capacity]):
+            with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+                workload.private_directory(["--private-fds", "3", "4"])
+
+    def test_private_capacity_uses_uncapped_fd_not_capped_namespace_parent(self):
+        ample = SimpleNamespace(f_bavail=100000, f_frsize=4096, f_favail=10000)
+        with patch.object(workload.os, "fstatvfs", return_value=ample) as capacity, patch.object(workload.os, "statvfs") as by_path:
+            workload.require_project_quota_error(OSError(errno.ENOSPC, "quota"), Path("/proc/self/fd/3"), 4)
+            capacity.assert_called_once_with(4)
+            by_path.assert_not_called()
 
     def test_native_binary_arguments_still_require_exact_disposable_opt_in(self):
         with patch.object(probe, "command") as command, patch.object(probe.tempfile, "mkdtemp") as temporary:
