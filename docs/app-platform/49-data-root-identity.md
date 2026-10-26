@@ -82,8 +82,13 @@ of the Go observation. Native tests cover:
 
 Do not run the privileged workflow commands against a developer or production
 data disk. The report remains `execution_ready: false`. Cross-compilation of
-arm64 is not native arm64 enforcement evidence. The PR's source CI and downloaded
-native report must be inspected before claiming these native cases pass.
+arm64 is not native arm64 enforcement evidence. Source `0473cecac83120b3e402e196434a2d4b96e4fe73` passed
+[native run 40296737513](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40296737513).
+The downloaded report confirms identity checks, changed-UUID refusal, native
+preparation/unprivileged quota enforcement, remount inspection, disabled-
+enforcement refusal and owned cleanup. The root/path replacement and permission
+checks are assertions in the passing native Go phase. This is disposable amd64
+evidence; the broader main and daemon workflows have independent status.
 
 ## Remaining integration
 
