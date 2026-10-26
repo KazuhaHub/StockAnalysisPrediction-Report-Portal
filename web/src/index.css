@@ -2276,14 +2276,8 @@ body {
 .rp-dashboard-example-directory strong { display: block; margin-bottom: 6px; }
 .rp-dashboard-example-directory span { display: flex; align-items: center; gap: 5px; padding-block: 5px; color: var(--ant-color-text-secondary); }
 .rp-dashboard-example-directory b { margin-inline-start: auto; }
-.rp-scroll-top { position: fixed; inset-inline-end: 24px; inset-block-end: 24px; z-index: 90; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; background: var(--ant-color-bg-elevated); color: var(--ant-color-text); cursor: pointer; box-shadow: var(--ant-box-shadow-secondary); }
-.rp-scroll-top > svg { position: absolute; inset: 0; width: 48px; height: 48px; fill: none; stroke-width: 2; pointer-events: none; }
-.rp-scroll-top-track { stroke: var(--ant-color-border-secondary); }
-.rp-scroll-top-progress { stroke: var(--ant-color-primary); stroke-linecap: round; transition: stroke-dasharray 100ms linear; }
-.rp-scroll-top > .anticon { font-size: 22px; }
-.rp-scroll-top:hover { background: var(--ant-color-fill-secondary); }
-.rp-scroll-top:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) { .rp-scroll-top-progress { transition: none; } }
+.rp-scroll-top { inset-inline-end: 24px; inset-block-end: 24px; z-index: 90; }
+
 
 .rp-captcha-field { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 3px 4px 3px 10px; margin-bottom: 12px; border: 1px solid var(--ant-color-border); border-radius: 8px; background: var(--ant-color-bg-container); transition: border-color 180ms ease, box-shadow 180ms ease; }
 .rp-captcha-field:focus-within { border-color: var(--ant-color-primary); box-shadow: 0 0 0 2px var(--ant-color-primary-bg); }
