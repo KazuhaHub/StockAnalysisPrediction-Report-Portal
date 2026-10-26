@@ -127,7 +127,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(endpoint, "data.sock")
-	server, err := transport.ListenController(path, 41001, 41001, store)
+	server, err := transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,24 +183,6 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AdmitControlCommand(ctx, message.Raw, message.Signature); err != nil {
-		t.Fatal(err)
-	}
-	reservation, err := store.ReservePrepareData(ctx, message.Raw, message.Signature)
-	if err != nil {
-		t.Fatal(err)
-	}
-	claim, err := store.ClaimPrepareData(ctx, message.Raw, message.Signature)
-	if err != nil {
-		t.Fatal(err)
-	}
-	receipt, err := store.ExecutePrepareData(ctx, claim, root, pin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !receipt.MatchesCommand(verified.Command()) {
-		t.Fatal("Portal signed intent/native receipt differ")
-	}
 	if _, err := readyWriter.Write([]byte{1}); err != nil {
 		t.Fatal(err)
 	}
@@ -208,13 +190,24 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if err := child.Wait(); err != nil {
 		t.Fatalf("Portal data endpoint failed: %v\n%s", err, output.String())
 	}
+	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {
+		t.Fatal("child did not dispatch data execution", output.String())
+	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_ACTIVATE")) {
 		t.Fatal("child did not prove stage commit", output.String())
 	}
 	if !bytes.Contains(output.Bytes(), []byte("STATIC_ACTIVATION_READY")) {
 		t.Fatal("child did not prove activation/launch", output.String())
 	}
-	observed, err := root.Inspect(ctx, pin, reservation.NamespaceID, reservation.ProjectID)
+	receipt, err := store.ReadDataPreparationReceipt(ctx, message.Raw, message.Signature)
+	if err != nil || !receipt.MatchesCommand(verified.Command()) {
+		t.Fatal("dispatched receipt does not match original logical intent", err)
+	}
+	project, err := strconv.ParseUint(receipt.ProjectID, 10, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := root.Inspect(ctx, pin, verified.Command().Payload.DataNamespaceID, uint32(project))
 	if err != nil || strconv.FormatUint(observed.Inode, 10) != receipt.NamespaceInode || observed.ByteLimit != 256<<20 || observed.InodeLimit != 65536 {
 		t.Fatal("Portal stage lost native resource", err)
 	}
@@ -293,13 +286,22 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	public.Close()
 	var signal [1]byte
 	if _, err := io.ReadFull(ready, signal[:]); err != nil || signal[0] != 1 {
-		t.Fatal("native preparation not ready")
+		t.Fatal("runner endpoint not ready")
 	}
 	endpoint := platformRuntimeEndpoint{path: os.Getenv("PORTAL_DATA_SOCKET"), controllerUID: 41001, controllerGID: 41001}
-	next, err := s.completePlatformInstallData(context.Background(), lease, intent, endpoint)
+	next, err := s.dispatchPlatformInstallData(context.Background(), lease, endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
+	replayed, err := transport.PrepareControllerData(context.Background(), endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.authority)
+	if err != nil || !replayed.Receipt().MatchesCommand(intent.command) {
+		t.Fatal("applied dispatch replay missing", err)
+	}
+	readBack, err := transport.ReadControllerDataReceipt(context.Background(), endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.authority)
+	if err != nil || replayed.Receipt() != readBack.Receipt() {
+		t.Fatal("dispatch replay changed physical receipt", err)
+	}
+	t.Log("DATA_STAGE_DISPATCHED")
 	if next.snapshot.Stage != appplatform.StageActivate || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations`) != "activate" || scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces`) != "active" || scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects`) != "applied" {
 		t.Fatal("native proof did not commit data/effect/stage")
 	}
@@ -307,7 +309,8 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("data stage activated app or created backend")
 	}
 	t.Log("DATA_STAGE_ACTIVATE")
-	activated, err := s.activatePlatformStaticInstall(context.Background(), next)
+	run, err := s.runPlatformStaticInstall(context.Background(), next, endpoint)
+	activated := run.activation
 	if err != nil {
 		t.Fatal(err)
 	}

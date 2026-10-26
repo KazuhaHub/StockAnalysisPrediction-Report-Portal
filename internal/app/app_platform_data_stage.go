@@ -35,6 +35,26 @@ func (s *Server) completePlatformInstallData(ctx context.Context, expected platf
 	observation := platformDataObservation{receipt: proof.Receipt(), authority: proof.Controller(), endpoint: proof.Endpoint(), receivedAt: proof.ReceivedAt(), requestSHA: proof.RequestSHA256(), commandSHA: proof.CommandSHA256()}
 	return s.commitPlatformObservedData(ctx, expected, intent, endpoint, observation)
 }
+
+// dispatchPlatformInstallData persists/revalidates the exact intent before
+// requesting native execution. Uncertain responses retain this durable pair;
+// a later call can only reconcile its same identity under current authority.
+func (s *Server) dispatchPlatformInstallData(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	intent, err := s.preparePlatformInstallData(ctx, expected)
+	if err != nil {
+		return platformOperationLease{}, err
+	}
+	proof, err := platformPrepareData(ctx, endpoint, intent)
+	if err != nil {
+		return platformOperationLease{}, err
+	}
+	if err = ctx.Err(); err != nil {
+		return platformOperationLease{}, err
+	}
+	observation := platformDataObservation{receipt: proof.Receipt(), authority: proof.Controller(), endpoint: proof.Endpoint(), receivedAt: proof.ReceivedAt(), requestSHA: proof.RequestSHA256(), commandSHA: proof.CommandSHA256()}
+	return s.commitPlatformObservedData(ctx, expected, intent, endpoint, observation)
+}
+
 func validPlatformDataObservation(observation platformDataObservation, intent platformDataIntent, endpoint platformRuntimeEndpoint) bool {
 	age := time.Since(observation.receivedAt)
 	a, b := observation.authority, intent.authority

@@ -242,6 +242,7 @@ def main(args):
                 report["native_journal_recovery_preserves_native_identity"] = True
                 report["native_journal_partial_data_not_repaired"] = True
                 report["native_journal_missing_data_not_created"] = True
+                report["native_dispatch_recovers_without_reexecution"] = True
                 if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True
@@ -253,6 +254,7 @@ def main(args):
                     report["native_portal_install_data_stage"] = True
                     report["native_portal_data_stage_not_activation"] = True
                     report["native_portal_static_activation_and_launch"] = True
+                    report["native_portal_signed_data_dispatch"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)

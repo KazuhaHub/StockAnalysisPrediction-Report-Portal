@@ -13,7 +13,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; [shared structural schema/types/domains](21-descriptor-schema-implementation.md) implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); [exact-byte publisher verification](24-publisher-signature-verification.md) implemented in isolation; full semantic generation, [trust/staged-release transaction integration](25-trust-and-release-storage.md) implemented; full activation trust integration and complete envelope inspection remain |
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
-| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) implemented; automatic provider dispatch, runtime-free static data, complete static/managed installer and browser install flow remain |
+| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) and [signed data dispatch/bounded install driver](55-signed-data-dispatch-and-install-driver.md) implemented; daemon startup/operation selection/lease coordination, runtime-free static data, complete static/managed installer and browser install flow remain |
 | P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; complete seamless shell, publisher metadata enforcement, sizing/navigation/drafts and full browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
@@ -485,3 +485,21 @@ main 40312440453, daemon 40312440434 and native 40312440473 (checked directly fr
 PR #248). Initial static activation is one internal lifecycle step; market UI,
 automatic worker/dispatch, runtime-free static data, managed lifecycle and the
 complete application platform remain open.
+
+
+## Signed data execution request and bounded static installation
+
+[Signed data dispatch and install driver](55-signed-data-dispatch-and-install-driver.md)
+connect current journal state to concrete native execution, read-only recovery or
+unchanged applied receipt retrieval. An explicit opt-in root endpoint accepts a
+separate signed execution protocol; admission and read-only queries remain
+non-executing. Portal persists/revalidates intent before dispatch and uses the
+existing opaque-evidence commit boundary afterward. A bounded driver advances
+already-claimed initial static installs, replacing each exact lease token; stage
+SQL now supports context cancellation. The native fixtures now cover actual
+non-root Portal dispatch rather than manual root-side execution, unknown recovery,
+partial/absent refusal, applied replay and concurrent first requests. Native
+acceptance for this source is pending its own workflow result. Static activation
+predecessor 819ce451ace66174b8cea60645214a33fed1713b passed main 40318413527 and
+native 40318413393. Automatic polling/startup, market HTTP/UI, managed lifecycle
+and the complete platform remain open.

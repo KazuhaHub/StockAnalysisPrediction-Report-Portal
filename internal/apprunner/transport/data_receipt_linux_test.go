@@ -90,7 +90,13 @@ func TestReceiptChannelPrivateProof(t *testing.T) {
 	}
 }
 func TestReceiptChannelRejectsMalformedOrCrossCommandReply(t *testing.T) {
-	for _, mode := range []string{"nonce", "oversize", "truncated", "trailing", "invalid", "cross_command", "wrong_magic", "admission_ack", "future_observation"} {
+	testDataResponseRejectsMalformedReply(t, false)
+}
+func TestExecutionChannelRejectsMalformedOrCrossCommandReply(t *testing.T) {
+	testDataResponseRejectsMalformedReply(t, true)
+}
+func testDataResponseRejectsMalformedReply(t *testing.T, execute bool) {
+	for _, mode := range []string{"nonce", "oversize", "truncated", "trailing", "invalid", "cross_command", "wrong_magic", "admission_ack", "future_observation", "swapped_protocol"} {
 		t.Run(mode, func(t *testing.T) {
 			authority, _, raw, sig := receiptAuthority(t)
 			dir, err := os.MkdirTemp("/tmp", "receipt-bad-")
@@ -135,7 +141,18 @@ func TestReceiptChannelRejectsMalformedOrCrossCommandReply(t *testing.T) {
 					return
 				}
 				header := make([]byte, 44)
-				copy(header, dataReceiptReplyMagic)
+				if execute {
+					copy(header, dataExecutionReplyMagic)
+				} else {
+					copy(header, dataReceiptReplyMagic)
+				}
+				if mode == "swapped_protocol" {
+					if execute {
+						copy(header, dataReceiptReplyMagic)
+					} else {
+						copy(header, dataExecutionReplyMagic)
+					}
+				}
 				digest := sha256.Sum256(frame)
 				copy(header[8:40], digest[:])
 				binary.BigEndian.PutUint32(header[40:44], uint32(len(body)))
@@ -157,7 +174,7 @@ func TestReceiptChannelRejectsMalformedOrCrossCommandReply(t *testing.T) {
 				}
 				conn.Write(append(header, body...))
 			}()
-			proof, err := ReadDataReceipt(context.Background(), path, uint32(os.Geteuid()), raw, sig, authority)
+			proof, err := readDataResponse(context.Background(), path, privateProfile(uint32(os.Geteuid())), raw, sig, authority, execute)
 			if err == nil || !proof.ReceivedAt().IsZero() {
 				t.Fatal("bad reply minted proof", mode, err)
 			}
