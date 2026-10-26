@@ -12,7 +12,7 @@ import (
 )
 
 func TestStatisticsQueryValidation(t *testing.T) {
-	for _, raw := range []string{"dataset=secrets", "dataset=reports&group=password_hash", "dataset=reports&from=2026-02-30", "dataset=reports&from=2026-10-26&to=2026-10-25", "dataset=runs&group=kind"} {
+	for _, raw := range []string{"dataset=secrets", "dataset=reports&group=password_hash", "dataset=reports&from=2026-02-30", "dataset=reports&from=2026-10-26&to=2026-10-25", "dataset=runs&group=kind", "interval=quarter", "view=invalid"} {
 		if _, err := parseStatisticsQuery(httptest.NewRequest("GET", "/?"+raw, nil)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -118,5 +118,58 @@ func TestStatisticsBoundsPageSizeAndStreamsAllGroups(t *testing.T) {
 	rows, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(w.Body.String(), "\ufeff"))).ReadAll()
 	if err != nil || len(rows) != 126 {
 		t.Fatal(len(rows), err)
+	}
+}
+
+func TestStatisticsChartUsesAllGroupsInsteadOfTablePage(t *testing.T) {
+	st := newTestStore(t)
+	for i := 0; i < 25; i++ {
+		st.UpsertReport(Rep{Symbol: fmt.Sprint(i), RType: "analysis", Kind: fmt.Sprintf("K%02d", i), Date: "2026-10-25"})
+	}
+	w := httptest.NewRecorder()
+	(&Server{st: st}).apiStatistics(w, httptest.NewRequest("GET", "/?group=kind&view=chart&page=2&page_size=1", nil), "admin")
+	var data struct {
+		Items []statisticsRow `json:"items"`
+		Other int             `json:"other"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Items) != 20 || data.Items[0].Label != "K00" || data.Other != 5 {
+		t.Fatal(data)
+	}
+}
+func TestStatisticsDateChartUsesChronologicalBuckets(t *testing.T) {
+	st := newTestStore(t)
+	for _, r := range []Rep{{Symbol: "A", RType: "analysis", Date: "2026-01-03"}, {Symbol: "B", RType: "analysis", Date: "2026-01-04"}, {Symbol: "C", RType: "analysis", Date: "2026-02-01"}} {
+		st.UpsertReport(r)
+	}
+	w := httptest.NewRecorder()
+	(&Server{st: st}).apiStatistics(w, httptest.NewRequest("GET", "/?group=date&view=chart&interval=month", nil), "admin")
+	var data struct {
+		Items []statisticsRow `json:"items"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &data)
+	if len(data.Items) != 2 || data.Items[0].Label != "2026-01" || data.Items[0].Count != 2 {
+		t.Fatal(w.Body.String())
+	}
+}
+
+func TestStatisticsDoesNotDrawTruncatedTimeSeries(t *testing.T) {
+	st := newTestStore(t)
+	start, _ := time.Parse("2006-01-02", "2025-01-01")
+	for i := 0; i < 401; i++ {
+		st.UpsertReport(Rep{Symbol: "A", RType: "analysis", Date: start.AddDate(0, 0, i).Format("2006-01-02")})
+	}
+	w := httptest.NewRecorder()
+	(&Server{st: st}).apiStatistics(w, httptest.NewRequest("GET", "/?group=date&view=chart", nil), "admin")
+	var data struct {
+		Items   []statisticsRow `json:"items"`
+		TooMany bool            `json:"too_many_points"`
+		Total   int             `json:"total"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &data)
+	if !data.TooMany || len(data.Items) != 0 || data.Total != 401 {
+		t.Fatal(w.Body.String())
 	}
 }

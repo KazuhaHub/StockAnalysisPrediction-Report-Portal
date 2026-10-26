@@ -2930,5 +2930,22 @@
   "account.passkeyTab": "通行金鑰",
   "account.sessionsTab": "登入工作階段",
   "err.statistics_query_invalid": "請檢查統計查詢條件後重試。",
-  "err.statistics_unavailable": "暫時無法載入統計資料，請稍後重試。"
+  "err.statistics_unavailable": "暫時無法載入統計資料，請稍後重試。",
+  "statistics.view": "呈現方式",
+  "statistics.chart": "圖表",
+  "statistics.table": "表格",
+  "statistics.chartType": "圖表類型",
+  "statistics.chartType.auto": "自動",
+  "statistics.chartType.bar": "橫條圖",
+  "statistics.chartType.column": "直條圖",
+  "statistics.chartType.line": "折線圖",
+  "statistics.chartType.donut": "環形圖",
+  "statistics.interval": "時間粒度",
+  "statistics.interval.day": "依日",
+  "statistics.interval.month": "依月",
+  "statistics.interval.year": "依年",
+  "statistics.tooManyPoints": "時間點過多，請改用依月或依年統計，或縮小日期範圍。",
+  "statistics.categoryChartHint": "顯示數量最多的前 20 個分組，其餘合併為「其他」；CSV 包含全部分組。",
+  "statistics.dateChartHint": "依所選時間粒度順序呈現，僅包含有紀錄的日期。",
+  "statistics.noData": "目前查詢條件下暫無統計資料。"
 }

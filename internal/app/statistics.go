@@ -11,8 +11,8 @@ import (
 )
 
 type statisticsQuery struct {
-	dataset, group, from, to, search string
-	page, size                       int
+	dataset, group, from, to, search, interval string
+	page, size                                 int
 }
 type statisticsRow struct {
 	Label string `json:"label"`
@@ -63,6 +63,13 @@ func parseStatisticsQuery(r *http.Request) (statisticsQuery, error) {
 	if q.size > 100 {
 		q.size = 100
 	}
+	q.interval = v.Get("interval")
+	if q.interval != "" && q.interval != "day" && q.interval != "month" && q.interval != "year" {
+		return q, fmt.Errorf("invalid interval")
+	}
+	if v.Get("view") != "" && v.Get("view") != "chart" {
+		return q, fmt.Errorf("invalid view")
+	}
 	if f := v.Get("format"); f != "" && f != "csv" {
 		return q, fmt.Errorf("invalid format")
 	}
@@ -71,6 +78,14 @@ func parseStatisticsQuery(r *http.Request) (statisticsQuery, error) {
 func (q statisticsQuery) sql(loc *time.Location) (string, []any) {
 	table := map[string]string{"reports": "reports", "runs": "batch_jobs", "accounts": "users"}[q.dataset]
 	dimension := "COALESCE(" + statisticsDimensions[q.dataset][q.group] + ", '')"
+	if q.group == "date" {
+		if q.interval == "month" {
+			dimension = "SUBSTR(" + dimension + ", 1, 7)"
+		}
+		if q.interval == "year" {
+			dimension = "SUBSTR(" + dimension + ", 1, 4)"
+		}
+	}
 	predicates := []string{"1=1"}
 	args := []any{}
 	if q.dataset == "reports" {
@@ -155,7 +170,17 @@ func (s *Server) apiStatistics(w http.ResponseWriter, r *http.Request, user stri
 		jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
 		return
 	}
-	pageArgs := append(append([]any{}, args...), q.size, (q.page-1)*q.size)
+	chart := r.URL.Query().Get("view") == "chart"
+	tooMany := chart && q.group == "date" && total > 400
+	limit, offset := q.size, (q.page-1)*q.size
+	if chart {
+		limit, offset = 20, 0
+		if q.group == "date" {
+			limit = 400
+			ordered = base + " ORDER BY label ASC"
+		}
+	}
+	pageArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.st.db.QueryContext(ctx, s.st.bind(ordered+" LIMIT ? OFFSET ?"), pageArgs...)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
@@ -175,8 +200,18 @@ func (s *Server) apiStatistics(w http.ResponseWriter, r *http.Request, user stri
 		jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
 		return
 	}
+	var other int64
+	if chart && q.group != "date" {
+		other = records
+		for _, item := range items {
+			other -= item.Count
+		}
+	}
+	if tooMany {
+		items = []statisticsRow{}
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]any{"items": items, "total": total, "records": records, "page": q.page, "page_size": q.size, "today": time.Now().In(s.panelLocation()).Format("2006-01-02")})
+	writeJSON(w, map[string]any{"items": items, "other": other, "too_many_points": tooMany, "total": total, "records": records, "page": q.page, "page_size": q.size, "today": time.Now().In(s.panelLocation()).Format("2006-01-02")})
 }
 func firstStatisticsCharacter(value string) string {
 	value = strings.TrimLeft(value, " ")
