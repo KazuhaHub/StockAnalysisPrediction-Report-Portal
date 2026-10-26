@@ -14,7 +14,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
 | P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md) implemented; actual provider admission, data/execution/activation and complete managed/static installer remain |
-| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md) and [current-reader launch inspection](38-launch-access-inspection.md) implemented without route registration; immutable asset delivery, seamless shell, sizing/navigation/drafts and real-browser acceptance remain |
+| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md) and [current-reader launch inspection](38-launch-access-inspection.md) implemented without route registration; [verified buffered file read](39-verified-asset-read.md) implemented; browser asset transport, seamless shell, sizing/navigation/drafts and real-browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
 ## First contract implementation
@@ -227,3 +227,18 @@ point-in-time logical binding, not a token, resource readiness proof or asset
 serving route. Physical activation, immutable request-bound serving and full
 installer/shell acceptance remain required. Prior covered-host source passed
 [CI 40257791625](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40257791625).
+
+## Verified asset bytes under current authorization
+
+[Buffered file reading](39-verified-asset-read.md) checks the complete immutable
+archive and extracts an exact bounded member into an independent buffer. The
+Portal wrapper repeats current reader/OU/trust checks and compares all expected
+binding fields in the read transaction; it returns bytes only after the final
+session/key/epoch check and commit. Revocation invalidates earlier metadata.
+Actual PostgreSQL lock-wait expiry cases exercise the file-read wrapper, including
+discarding buffered content on failure. A leaky-error negative-control overlay
+makes both file-expiry tests fail; the normal wrapper discards the buffer. Full
+local Go regression, targeted race checks, vet, staticcheck and build pass. No HTTP asset route or browser transport
+is registered; sandbox/cookie/subresource delivery needs real integration before
+connecting the host. Installer completion, physical activation, broker enforcement
+and full platform acceptance remain open.
