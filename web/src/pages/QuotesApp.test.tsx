@@ -291,6 +291,15 @@ describe('QuotesApp', () => {
     expect(screen.getByText('NOTACODE')).toBeTruthy()
   })
 
+  it('shows a neutral no-data state without an outage retry', async () => {
+    renderApp()
+    await userEvent.type(box(), '000000{Enter}')
+    await waitFor(() => expect(pending).toHaveLength(1))
+    await act(async () => { pending[0].reject(new ApiError(404, 'No data', 'quote_no_data')) })
+    expect(await screen.findByText(dict['err.quote_no_data'])).toBeTruthy()
+    expect(screen.queryByText(dict['quote.retry'])).toBeNull()
+  })
+
   it('offers a retry for a source outage, and the button actually re-requests', async () => {
     renderApp()
     await userEvent.type(box(), '600519{Enter}')

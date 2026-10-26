@@ -8,6 +8,7 @@ package app
 // Tencent from our address, with our IP being the one that gets rate-limited or blocked.
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -176,6 +177,10 @@ func (s *Server) apiQuoteMode(w http.ResponseWriter, r *http.Request, historyOnl
 
 	resp, cached, ttl, err := s.quotes.fetchUnder(r.Context(), cfg, market, code, spec.bars, iv, win)
 	if err != nil {
+		if errors.Is(err, errQuoteNoData) {
+			jsonErrorCode(w, http.StatusNotFound, "quote_no_data", "No quote data was found for this symbol")
+			return
+		}
 		// Every source failed — transport, a non-2xx, or the drift gate, which counts as a failure
 		// and not a warning. 503 rather than 502 or 500: nothing is wrong with the request and
 		// nothing is wrong with this server, the answer is simply not available right now, and that

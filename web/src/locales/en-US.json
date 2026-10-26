@@ -2888,5 +2888,6 @@
   "manage.dashboard.viewChartData": "View chart data",
   "manage.dashboard.dataLabel": "Item",
   "manage.dashboard.dataCount": "Count",
-  "manage.dashboard.dataShare": "Share"
+  "manage.dashboard.dataShare": "Share",
+  "err.quote_no_data": "No quote data found. Check the symbol or select another security."
 }

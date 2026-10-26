@@ -1163,11 +1163,17 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 	defer release()
 
 	var firstErr error
+	empty := false
 	// Every source below has declared this pair and has a spelling for this code; one that has not is
 	// not called and above all is not blamed (sourcesFor).
 	for _, src := range c.sourcesFor(cfg, target, iv) {
 		resp, err := src.call(ctx, market, code, bars, iv, win)
 		if err != nil {
+			if errors.Is(err, errQuoteNoData) {
+				empty = true
+				c.noteSuccess(src.name)
+				continue
+			}
 			// A failure that arrives because THIS side stopped waiting is not the vendor's, and it
 			// must not land in the health counters: those are what an operator reads to decide
 			// whether a source is down. The detach below means an abandoned browser tab no longer
@@ -1191,6 +1197,9 @@ func (c *quoteCache) load(ctx context.Context, cfg quoteConfig, market, code str
 		return resp, nil
 	}
 	if firstErr == nil {
+		if empty {
+			return nil, errQuoteNoData
+		}
 		return nil, errQuoteNoSources
 	}
 	return nil, firstErr

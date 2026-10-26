@@ -807,6 +807,7 @@ const (
 )
 
 var (
+	errQuoteNoData     = errors.New("quote: source returned no data for the requested symbol")
 	errQuoteFieldCount = errors.New("quote: vendor sent fewer fields than the contract requires")
 	errQuoteCodeEcho   = errors.New("quote: vendor echoed a different symbol than the one requested")
 	errQuoteIdentity   = errors.New("quote: vendor percentage disagrees with its own last and prevClose")
@@ -1357,6 +1358,9 @@ func parseTencentDaily(market, code string, body []byte, bars int, adjusted bool
 // are in testdata/quote/. Writing the gate three times would mean three places for it to drift, and
 // the two later ones would be the ones nobody re-reads.
 func parseTencentQt(m *quoteMarket, code string, qt []string) (QuoteSnapshot, error) {
+	if len(qt) == 0 {
+		return QuoteSnapshot{}, errQuoteNoData
+	}
 	snap := QuoteSnapshot{Session: quoteSessionUnknown}
 	// (1) field count, before anything is read by index.
 	if err := quoteCheckFieldCount("tencent qt", len(qt), quoteTencentQtFields); err != nil {
@@ -2244,6 +2248,12 @@ func parseSinaSnapshot(market, code, raw string) (*QuoteResp, error) {
 	key, payload, err := quoteSinaLine(raw)
 	if err != nil {
 		return nil, err
+	}
+	if payload == "" {
+		if err := quoteCheckCodeEcho(sym, key); err != nil {
+			return nil, err
+		}
+		return nil, errQuoteNoData
 	}
 	fields := strings.Split(payload, ",")
 	// (1) field count.

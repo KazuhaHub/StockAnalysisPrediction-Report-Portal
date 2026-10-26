@@ -2888,5 +2888,6 @@
   "manage.dashboard.viewChartData": "檢視圖表資料",
   "manage.dashboard.dataLabel": "項目",
   "manage.dashboard.dataCount": "數量",
-  "manage.dashboard.dataShare": "占比"
+  "manage.dashboard.dataShare": "占比",
+  "err.quote_no_data": "未找到該證券的行情資料，請核對代碼或選擇其他證券。"
 }
