@@ -454,7 +454,10 @@ prepare_data-to-activate transition with late context/authority/proof checks.
 No application activation or access grant is implied. SQLite/PostgreSQL source
 checks and delayed-audit/cancellation cases cover transaction boundaries; the
 extended native workflow tests the real non-root Portal through XFS execution
-and receipt retrieval. This source's CI/native evidence still require inspection.
+and receipt retrieval. Source daf3f154fa1b65bc8d7fa2f89e7211783f8e87c8 passed
+native run 40311415337; its downloaded report confirms the actual Portal data
+stage chain without activation and owned cleanup. Full local Go/PostgreSQL and
+targeted race/delayed-audit checks pass; main/daemon CI are independent.
 Receipt-channel predecessor source 5244eb1d48d801577fe1336ce08b57879221a325 passed
 main 40305195824, runner 40305195850 and native 40305195814. Activation,
 automatic dispatch and complete market install experience remain open.

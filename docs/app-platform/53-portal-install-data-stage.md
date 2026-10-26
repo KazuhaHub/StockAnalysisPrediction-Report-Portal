@@ -135,9 +135,18 @@ GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go vet ./internal/app ./internal/a
 python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
 ```
 
-Inspect exact-source CI and downloaded native evidence before claiming the full
-Portal/native stage chain passes. A test binding bootstrap is not production
-bootstrap/rollout acceptance. No native arm64 claim follows from cross-compilation.
+Source `daf3f154fa1b65bc8d7fa2f89e7211783f8e87c8` passed
+[native run 40311415337](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40311415337).
+The downloaded report confirms native_portal_install_data_stage and
+native_portal_data_stage_not_activation, prior native receipt/recovery/quota
+checks, and owned cleanup. Full local Go tests with disposable PostgreSQL passed
+(application package 143.415 seconds); targeted SQLite/PostgreSQL race tests
+passed in 21.947 seconds, including actual delayed-audit expiry/cancellation.
+Vet/staticcheck, Linux amd64/arm64 cross-compilation and twelve Python refusal
+tests pass. A negative overlay removing the root-profile requirement fails at the
+private-profile stage assertion. Main/daemon CI have independent status. A test
+binding bootstrap is not production bootstrap/rollout acceptance. No native arm64
+claim follows from cross-compilation.
 
 ## Remaining work
 
