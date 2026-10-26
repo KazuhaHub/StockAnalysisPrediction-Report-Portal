@@ -765,3 +765,28 @@ acceptance binary ran from the repository root, while shared test descriptors us
 the normal Go package working directory. The workflow now enters the driver
 package before invocation. This is fixture wiring, not native policy evidence;
 the corrected revision still needs the real-daemon acceptance run.
+
+## Signed candidate command and journal admission
+
+[Candidate command admission](67-candidate-command-admission.md) defines a separate
+bounded Ed25519 signature/effect domain for start-candidate intent. It binds exact
+release, resource/namespace, generation, writer identity, platform and the closed
+sandbox profile without accepting paths, arbitrary Docker options or credentials.
+Stable framing and every immutable input have explicit tests; existing prepare-
+data wire bytes and its shared corpus remain unchanged.
+
+Candidate admission uses a private verified index projection with the existing
+atomic command/floor/replay path. It refuses stale/foreign ownership, changed
+logical effects, pending command conflicts and reuse/rebinding of resource IDs.
+Fresh admission records only intent, not a container or execution/write claim.
+No schema, production route or dispatcher changes are included.
+
+Full runner/CLI race regression passed (journal 64.403 s), focused final command/
+floor cases passed (journal 5.187 s), full control/profile race tests passed
+(1.360 s), and full local Go regression passed (application 66.808 s). Vet,
+staticcheck and Linux amd64 journal compilation passed. Container predecessor
+c1ac06701b4ccf60dfd5ed0c33612d7d72a7fa48 passed real daemon workflow 40407582383,
+including stopped candidate create/inspect/ownership-checked removal after the
+fixture working-directory correction. Durable candidate execution claims,
+physical pins/receipts, start/readiness/stop, automatic backend registration,
+broker and full platform lifecycle/release acceptance remain open.
