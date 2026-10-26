@@ -15,7 +15,7 @@ import (
 
 var errAppPlatformActorUnavailable = errors.New("current application administrator authority is unavailable")
 
-// A future management handler constructs this from authenticated session state,
+// Management handlers construct this from authenticated session state,
 // never from a request body or app bridge message. HTTP/session/enrollment and
 // CSRF gates remain required before invoking these internal repositories.
 type platformActorSession struct {
@@ -206,12 +206,11 @@ func platformControlIdentity(e migExec, dek []byte, initialize bool) ([]byte, st
 		return nil, "", err
 	}
 	if len(values) == 0 && initialize {
-		var records int
-		if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_installations)+(SELECT COUNT(*) FROM app_platform_review_plans)
-            +(SELECT COUNT(*) FROM app_platform_operations)+(SELECT COUNT(*) FROM app_platform_runtime_bindings)`).Scan(&records); err != nil {
+		history, err := platformControlHasHistory(e)
+		if err != nil {
 			return nil, "", err
 		}
-		if records != 0 {
+		if history {
 			return nil, "", errAppPlatformControlPaused
 		}
 		seed := make([]byte, 32)
@@ -242,6 +241,21 @@ func platformControlIdentity(e migExec, dek []byte, initialize bool) ([]byte, st
 		return nil, "", errAppPlatformControlPaused
 	}
 	return seed, epoch, nil
+}
+
+func platformControlHasHistory(e migExec) (bool, error) {
+	// Closed schema declarations only, never request-supplied SQL identifiers.
+	// Even retained/orphaned artifacts are evidence against fresh initialization.
+	for _, table := range platformSchemaTables() {
+		var exists bool
+		if err := e.queryRow(`SELECT EXISTS(SELECT 1 FROM ` + platformPrefix + table.name + ` LIMIT 1)`).Scan(&exists); err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func platformActorAuthority(e migExec, account platformActorAccount, seed []byte) (platformActorFacts, error) {

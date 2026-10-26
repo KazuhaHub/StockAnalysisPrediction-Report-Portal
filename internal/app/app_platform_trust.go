@@ -27,11 +27,15 @@ type platformPublisherTrustRevision struct {
 	revision, keyRevision int64
 }
 
-// Private administration repository. No request body, app bridge or startup
-// path can call this without a future authenticated management integration.
+// Private administration repository. The HTTP surface must supply current
+// administrator/session/enrollment/origin checks and exact typed inputs.
 func (s *Server) changePlatformPublisherTrust(session platformActorSession, change platformPublisherChange) (platformPublisherTrustRevision, error) {
+	return s.changePlatformPublisherTrustContext(context.Background(), session, change)
+}
+
+func (s *Server) changePlatformPublisherTrustContext(ctx context.Context, session platformActorSession, change platformPublisherChange) (platformPublisherTrustRevision, error) {
 	var result platformPublisherTrustRevision
-	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.withPlatformTrustTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
@@ -97,7 +101,8 @@ func (s *Server) changePlatformPublisherTrust(session platformActorSession, chan
 			}
 			if changedKey.RevokedMS != nil {
 				result = platformPublisherTrustRevision{publisherID: publisher.ID, keyID: changedKey.ID, revision: change.expectedRevision, keyRevision: change.expectedKeyRevision}
-				return nil
+				_, err = platformRefreshActor(e, session, actor, control)
+				return err
 			}
 			revoked := strconv.FormatInt(control.nowMS, 10)
 			changedKey.RevokedMS = &revoked
