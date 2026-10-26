@@ -203,7 +203,7 @@ func TestNativeJournalDataExecution(t *testing.T) {
 			t.Fatal(err)
 		}
 		partialRaw, partialSig, _ := nativeRecoveryEnvelope(t, s, 6)
-		if got, err := s.ReconcilePrepareData(ctx, partialRaw, partialSig, root, expected); err == nil || got != (DataPreparationReceipt{}) {
+		if got, err := s.DispatchPrepareData(ctx, partialRaw, partialSig, root, expected); err == nil || got != (DataPreparationReceipt{}) {
 			t.Fatal("partial namespace repaired by recovery")
 		}
 		if err := unix.Stat(partialPath, &partialAfter); err != nil || partialBefore.Ino != partialAfter.Ino || partialBefore.Mode != partialAfter.Mode {
@@ -221,7 +221,7 @@ func TestNativeJournalDataExecution(t *testing.T) {
 			t.Fatal(err)
 		}
 		missingRaw, missingSig, _ := nativeRecoveryEnvelope(t, s, 7)
-		if got, err := s.ReconcilePrepareData(ctx, missingRaw, missingSig, root, expected); !errors.Is(err, os.ErrNotExist) || got != (DataPreparationReceipt{}) {
+		if got, err := s.DispatchPrepareData(ctx, missingRaw, missingSig, root, expected); !errors.Is(err, os.ErrNotExist) || got != (DataPreparationReceipt{}) {
 			t.Fatal("absent namespace recreated", err)
 		}
 		if _, err := os.Lstat(filepath.Join(rootPath, nativeJournalCommand(t, 7).Payload.DataNamespaceID)); !errors.Is(err, os.ErrNotExist) {
@@ -229,6 +229,75 @@ func TestNativeJournalDataExecution(t *testing.T) {
 		}
 		if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='applied'`) != 3 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='unknown'`) != 3 {
 			t.Fatal("recovery changed unrelated/partial states")
+		}
+
+		// Simulate native completion followed by process loss before durable
+		// settlement. The dispatcher must recover by inspection, never Prepare.
+		uncertain := nativeJournalClaim(t, s, 8)
+		var completed data.Observation
+		_, err = s.RunPrepareDataOnce(ctx, uncertain, func(ctx context.Context, reservation DataReservation, _ control.PrepareDataPayload) error {
+			if err := s.bindDataRoot(ctx, uncertain.state, expected); err != nil {
+				return err
+			}
+			var err error
+			completed, err = root.Prepare(ctx, expected, data.Request{NamespaceID: reservation.NamespaceID, ProjectID: reservation.ProjectID, Bytes: 8 << 20, Inodes: 128})
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recoveryRaw, recoverySig, originalMarker := nativeRecoveryEnvelope(t, s, 8)
+		recovered, err := s.DispatchPrepareData(ctx, recoveryRaw, recoverySig, root, expected)
+		if err != nil || recovered.Format != dataReconciledReceiptFormat || recovered.Claim != originalMarker || recovered.NamespaceInode != strconv.FormatUint(completed.Inode, 10) {
+			t.Fatal("dispatcher did not inspect/recover completed unknown work", err)
+		}
+		repeated, err := s.DispatchPrepareData(ctx, recoveryRaw, recoverySig, root, expected)
+		if err != nil || repeated != recovered {
+			t.Fatal("dispatcher applied replay changed receipt", err)
+		}
+		observed, err := root.Inspect(ctx, expected, completed.NamespaceID, completed.ProjectID)
+		if err != nil || observed != completed {
+			t.Fatal("dispatcher recovery changed native identity", err)
+		}
+		if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='applied'`) != 4 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='unknown'`) != 3 {
+			t.Fatal("dispatch changed unrelated state")
+		}
+
+		// Simultaneous first requests may observe prepared, unknown or applied, but
+		// only one stable resource/receipt is allowed to emerge.
+		concurrentCommand := nativeJournalCommand(t, 9)
+		concurrentRaw, concurrentSig := signRunnerCommand(t, concurrentCommand)
+		concurrentResults := make(chan outcome, 3)
+		for range 3 {
+			go func() {
+				r, err := s.DispatchPrepareData(ctx, concurrentRaw, concurrentSig, root, expected)
+				concurrentResults <- outcome{r, err}
+			}()
+		}
+		successes := 0
+		var firstReceipt DataPreparationReceipt
+		for range 3 {
+			result := <-concurrentResults
+			if result.err == nil {
+				successes++
+				if firstReceipt == (DataPreparationReceipt{}) {
+					firstReceipt = result.receipt
+				} else if firstReceipt != result.receipt {
+					t.Fatal("concurrent dispatch returned distinct receipts")
+				}
+			} else if result.receipt != (DataPreparationReceipt{}) {
+				t.Fatal("failed dispatch returned receipt")
+			}
+		}
+		if successes < 1 {
+			t.Fatal("no concurrent dispatch completed")
+		}
+		retried, err := s.DispatchPrepareData(ctx, concurrentRaw, concurrentSig, root, expected)
+		if err != nil || retried != firstReceipt {
+			t.Fatal("concurrent dispatch retry changed identity", err)
+		}
+		if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+concurrentCommand.EffectID+`' AND state='applied'`) != 1 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+concurrentCommand.Payload.DataNamespaceID+`'`) != 1 {
+			t.Fatal("concurrent dispatch created multiple resources")
 		}
 		return
 	}

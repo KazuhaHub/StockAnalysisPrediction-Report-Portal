@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -177,6 +178,9 @@ func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, tr
 // Advances only database-resident verified artifact staging. Entry into
 // prepare_data is a request for the separate provider, never data-ready proof.
 func (s *Store) advancePlatformInstallStaging(expected platformOperationLease) (platformOperationLease, error) {
+	return s.advancePlatformInstallStagingContext(context.Background(), expected)
+}
+func (s *Store) advancePlatformInstallStagingContext(ctx context.Context, expected platformOperationLease) (platformOperationLease, error) {
 	var zero platformOperationLease
 	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 {
 		return zero, errAppPlatformStageEvidence
@@ -186,12 +190,12 @@ func (s *Store) advancePlatformInstallStaging(expected platformOperationLease) (
 	if !ok {
 		return zero, errAppPlatformStageEvidence
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return zero, err
 	}
 	defer tx.Rollback()
-	e := migExec{s: s, ex: tx}
+	e := migExec{s: s, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	if err := lockOUMutation(e); err != nil {
 		return zero, err
 	}

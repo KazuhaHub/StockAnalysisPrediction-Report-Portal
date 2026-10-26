@@ -10,3 +10,7 @@ import (
 func platformReadDataReceipt(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformDataIntent) (transport.DataReceiptObservation, error) {
 	return transport.ReadControllerDataReceipt(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.authority)
 }
+
+func platformPrepareData(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformDataIntent) (transport.DataReceiptObservation, error) {
+	return transport.PrepareControllerData(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.authority)
+}

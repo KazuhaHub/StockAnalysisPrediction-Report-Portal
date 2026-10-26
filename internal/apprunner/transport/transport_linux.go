@@ -44,6 +44,7 @@ type Server struct {
 	inode         os.FileInfo
 	controllerUID uint32
 	journal       admitter
+	dataExecution *dataExecutionProvider
 }
 
 type endpointProfile struct {
@@ -244,6 +245,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	switch string(header[:8]) {
 	case enrollmentQueryMagic:
 		s.handleEnrollment(ctx, conn)
+		return
+	case dataExecutionQueryMagic:
+		s.handleDataExecution(ctx, conn)
 		return
 	case dataReceiptQueryMagic:
 		s.handleDataReceipt(ctx, conn)

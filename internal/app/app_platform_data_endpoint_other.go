@@ -10,3 +10,7 @@ import (
 func platformReadDataReceipt(context.Context, platformRuntimeEndpoint, platformDataIntent) (transport.DataReceiptObservation, error) {
 	return transport.DataReceiptObservation{}, errAppPlatformRuntimeConflict
 }
+
+func platformPrepareData(context.Context, platformRuntimeEndpoint, platformDataIntent) (transport.DataReceiptObservation, error) {
+	return transport.DataReceiptObservation{}, errAppPlatformRuntimeConflict
+}

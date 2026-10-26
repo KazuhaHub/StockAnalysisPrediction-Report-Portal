@@ -29,12 +29,23 @@ type dataReceiptReader interface {
 }
 
 func (s *Server) handleDataReceipt(ctx context.Context, conn *net.UnixConn) {
+	s.handleDataResponse(ctx, conn, false)
+}
+
+func (s *Server) handleDataResponse(ctx context.Context, conn *net.UnixConn, execute bool) {
+	if execute && s.dataExecution == nil {
+		return
+	}
 	reader, ok := s.journal.(dataReceiptReader)
 	if !ok {
 		return
 	}
 	header := make([]byte, 44)
-	copy(header, dataReceiptQueryMagic)
+	queryMagic, replyMagic := dataReceiptQueryMagic, dataReceiptReplyMagic
+	if execute {
+		queryMagic, replyMagic = dataExecutionQueryMagic, dataExecutionReplyMagic
+	}
+	copy(header, queryMagic)
 	if _, err := io.ReadFull(conn, header[8:]); err != nil {
 		return
 	}
@@ -50,7 +61,13 @@ func (s *Server) handleDataReceipt(ctx context.Context, conn *net.UnixConn) {
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
 		return
 	}
-	receipt, err := reader.ReadDataPreparationReceipt(ctx, body[:size], body[size:])
+	var receipt journal.DataPreparationReceipt
+	var err error
+	if execute {
+		receipt, err = s.dataExecution.store.DispatchPrepareData(ctx, body[:size], body[size:], s.dataExecution.root, s.dataExecution.pin)
+	} else {
+		receipt, err = reader.ReadDataPreparationReceipt(ctx, body[:size], body[size:])
+	}
 	if err != nil {
 		return
 	}
@@ -65,7 +82,7 @@ func (s *Server) handleDataReceipt(ctx context.Context, conn *net.UnixConn) {
 	digest.Write(header)
 	digest.Write(body)
 	reply := make([]byte, 44, 44+len(encoded))
-	copy(reply, dataReceiptReplyMagic)
+	copy(reply, replyMagic)
 	copy(reply[8:40], digest.Sum(nil))
 	binary.BigEndian.PutUint32(reply[40:44], uint32(len(encoded)))
 	reply = append(reply, encoded...)
@@ -87,6 +104,10 @@ func ReadControllerDataReceipt(ctx context.Context, path string, controllerUID, 
 	return readDataReceipt(ctx, path, controllerProfile(controllerGID), raw, signature, authority)
 }
 func readDataReceipt(parent context.Context, path string, profile endpointProfile, raw, signature []byte, authority control.Authority) (DataReceiptObservation, error) {
+	return readDataResponse(parent, path, profile, raw, signature, authority, false)
+}
+
+func readDataResponse(parent context.Context, path string, profile endpointProfile, raw, signature []byte, authority control.Authority, execute bool) (DataReceiptObservation, error) {
 	var zero DataReceiptObservation
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 || len(authority.PublicKey) != 32 || parent.Err() != nil {
 		return zero, ErrDataReceiptObservation
@@ -109,7 +130,11 @@ func readDataReceipt(parent context.Context, path string, profile endpointProfil
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	frame := make([]byte, 44, 44+len(raw)+64)
-	copy(frame, dataReceiptQueryMagic)
+	queryMagic, replyMagic := dataReceiptQueryMagic, dataReceiptReplyMagic
+	if execute {
+		queryMagic, replyMagic = dataExecutionQueryMagic, dataExecutionReplyMagic
+	}
+	copy(frame, queryMagic)
 	if _, err := rand.Read(frame[8:40]); err != nil {
 		return zero, ErrDataReceiptObservation
 	}
@@ -128,7 +153,7 @@ func readDataReceipt(parent context.Context, path string, profile endpointProfil
 	}
 	expected := sha256.Sum256(frame)
 	size := binary.BigEndian.Uint32(header[40:44])
-	if string(header[:8]) != dataReceiptReplyMagic || !bytes.Equal(header[8:40], expected[:]) || size == 0 || size > maxDataReceiptBytes {
+	if string(header[:8]) != replyMagic || !bytes.Equal(header[8:40], expected[:]) || size == 0 || size > maxDataReceiptBytes {
 		return zero, ErrDataReceiptObservation
 	}
 	body := make([]byte, int(size))
