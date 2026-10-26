@@ -148,3 +148,21 @@ that source CI before claiming OS acceptance. Previous private transport source
 [40246747001](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40246747001)
 and Linux race run
 [40246747041](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40246747041).
+
+## Portal pending runtime signing identity
+
+[Initial runtime registration](33-portal-runtime-registration.md) fills the Portal
+half of explicit public-key enrollment using the approved runtime table and
+existing purpose-sealed DEK. Current administrator authority is checked before and
+after locks/audit, the binding remains disabled, and exact pending retries preserve
+one identity. Both-driver tests exercise audit rollback, actual restore refusal,
+rewrap/reopen/concurrency and expiry after an observed PostgreSQL audit lock wait.
+The public result explicitly enrolls into an isolated runner journal in a test;
+there is no startup/network enrollment or command dispatch.
+
+Separate-UID source `b32e50dfa5d2b1f5ec34058266161ea972b500b0` passed Linux runtime
+[40247599811](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40247599811)
+and full repository
+[40247599835](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40247599835).
+Portal lease-bound command production, enrollment confirmation and physical
+lifecycle work remain open; initial registration does not enable those paths.
