@@ -242,3 +242,18 @@ local Go regression, targeted race checks, vet, staticcheck and build pass. No H
 is registered; sandbox/cookie/subresource delivery needs real integration before
 connecting the host. Installer completion, physical activation, broker enforcement
 and full platform acceptance remain open.
+
+## Self-contained sandbox document
+
+[Document compiler and browser transport](40-self-contained-app-document.md)
+embeds verified local resources into one private derived HTML document with an
+opaque sandbox and CSP denying direct fetch/subresources. Self-navigation
+exfiltration remains an explicit unresolved architecture/acceptance requirement. The current-reader wrapper buffers all
+compilation before its final authorization/trust check. Actual Portal frame and
+Apps React/Ant SDK builds run together in a loopback browser fixture; changing
+host locale/timezone preserves app-local counter state. This is not a registered
+production HTTP path, public SDK freeze, full UX acceptance or installer readiness.
+Actual HTTP policy/budgets, compatibility review, physical activation and remaining
+platform work stay open. Prior source CI passed for launch access at
+`c271fb49711a7b8b664390cba2543592732d76ee` (run 40260967506) and verified assets at
+`c8e34a8137989468a916264faa851e672d3ebcad` (run 40261213274).
