@@ -1,0 +1,3 @@
+.portal-app-frame-v2 { position: relative; width: 100%; min-width: 0; border: 0; padding: 0; }
+.portal-app-frame-v2 > iframe { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; }
+.portal-app-frame-v2-cover { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; gap: 12px; background: inherit; color: inherit; }
