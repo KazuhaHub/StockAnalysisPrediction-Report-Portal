@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -338,5 +339,33 @@ func TestDataSettlementDatabaseWaitCancellation(t *testing.T) {
 	})
 	if err == nil || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE state='unknown'`) != 1 {
 		t.Fatal("canceled settlement changed state")
+	}
+}
+
+func TestDataRootBindingRefusesClockBeforeClaim(t *testing.T) {
+	s, _, raw, sig := reservedClaimFixture(t)
+	claim, err := s.ClaimPrepareData(context.Background(), raw, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var marker dataClaimMarker
+	if json.Unmarshal([]byte(claim.state.marker), &marker) != nil {
+		t.Fatal("fixture marker")
+	}
+	marker.ClaimedMS = strconv.FormatInt(time.Now().UnixMilli()+20000, 10)
+	encoded, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim.state.marker = string(encoded)
+	if _, err := s.db.Exec(`UPDATE runner_commands SET receipt_json=?`, claim.state.marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.bindDataRoot(context.Background(), claim.state, data.RootIdentity{FilesystemUUID: fixtureID(900), Inode: 10}); !errors.Is(err, ErrFenceReconciliation) {
+		t.Fatal("clock preceding claim authorized native root", err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT receipt_json FROM runner_commands`).Scan(&stored); err != nil || stored != string(encoded) {
+		t.Fatal("clock refusal changed marker", err)
 	}
 }

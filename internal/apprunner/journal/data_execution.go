@@ -184,6 +184,10 @@ func (s *Store) bindDataRoot(ctx context.Context, live *dataClaimState, pin data
 	if !canonicalDataJSON(live.marker, &marker) || !validDataMarker(marker) {
 		return ErrFenceReconciliation
 	}
+	claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)
+	if facts.now < claimed {
+		return ErrFenceReconciliation
+	}
 	marker.RootFilesystemUUID, marker.RootInode = pin.FilesystemUUID, strconv.FormatUint(pin.Inode, 10)
 	encoded, err := json.Marshal(marker)
 	if err != nil {

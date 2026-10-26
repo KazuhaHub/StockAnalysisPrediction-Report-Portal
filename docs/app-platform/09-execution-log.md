@@ -395,7 +395,12 @@ observation settle atomically afterward. Partial native or persistence failure
 retains unknown state and cannot reconstruct/replay the live handle. The
 extended disposable workflow exercises actual journal/native preparation,
 alternate-root refusal, failure after physical creation and remount history.
-Its source CI/report still require inspection. Root-identity predecessor source
+Source eb3f52d64b291def1de82b68c853bae2dbf1f145 passed native run
+40298739199; the downloaded report confirms physical receipts, root binding,
+uncertain settlement, remount history and changed-UUID refusal with cleanup.
+Full local Go tests and full journal race checks passed; subsequent clock-guard
+coverage passes targeted race tests. Main/runner CI have independent status.
+Root-identity predecessor source
 8198a047cb6d50899da6ea94789be5155d2b9706 passed main 40297033484, runner
 40297033450 and native 40297033502. Recovery, controller receipt delivery, Portal
 stage completion, writer admission and the complete installer remain open.

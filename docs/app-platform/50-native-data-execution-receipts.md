@@ -16,6 +16,7 @@ progress.
 5. The execution gate rechecks current command/resource authority and consumes
    the shared process-local handle. The callback's context is bounded by the
    original envelope expiry, including waits for root/native/journal access.
+   Binding refuses a wall clock earlier than the original claim timestamp.
 6. Observe the concrete native root and compare it with the expected pin.
 7. In a short transaction, recheck authority/resource/history and persist the
    physical UUID/inode in the existing claim marker. Commit before any mkdir or
@@ -127,8 +128,12 @@ handle cannot replay. After remount it checks physical identity/limits and
 historical receipts; unknown and applied effects cannot be re-claimed. Finally,
 after changing only the owned image UUID, a fresh signed claim with the old pin
 must refuse before creating a namespace. The previous native quota workloads and
-owned cleanup checks remain. Inspect this PR's native workflow/report before
-claiming these integration cases pass. No native arm64 or production acceptance
+owned cleanup checks remain. Source `eb3f52d64b291def1de82b68c853bae2dbf1f145`
+passed [native run 40298739199](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40298739199).
+The downloaded report confirms every new native_journal field plus existing quota
+checks and owned cleanup. A subsequent pre-mutation clock guard has targeted race
+coverage and requires its own source CI. A negative overlay removing root-history
+comparison fails at the root-rebind assertion, rather than a compile error. No native arm64 or production acceptance
 is implied by cross-compilation or disposable amd64 evidence.
 
 ## Next required integration
