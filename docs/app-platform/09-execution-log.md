@@ -13,7 +13,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P02 | In progress | Go/SDK declaration parsers, shared 44-case corpus and pure lifecycle transition model implemented; [shared structural schema/types/domains](21-descriptor-schema-implementation.md) implemented; frontend integrity inspector implemented; compatibility evaluator in [PR #190](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/190); [exact-byte publisher verification](24-publisher-signature-verification.md) implemented in isolation; full semantic generation, [trust/staged-release transaction integration](25-trust-and-release-storage.md) implemented; full activation trust integration and complete envelope inspection remain |
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
-| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md) implemented; actual provider admission, data/execution/activation and complete managed/static installer remain |
+| P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) implemented; automatic provider dispatch, runtime-free static data, complete static/managed installer and browser install flow remain |
 | P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; complete seamless shell, publisher metadata enforcement, sizing/navigation/drafts and full browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
@@ -461,3 +461,27 @@ targeted race/delayed-audit checks pass; main/daemon CI are independent.
 Receipt-channel predecessor source 5244eb1d48d801577fe1336ce08b57879221a325 passed
 main 40305195824, runner 40305195850 and native 40305195814. Activation,
 automatic dispatch and complete market install experience remain open.
+
+
+## Initial static activation and reviewed audience
+
+[Static activation and audience](54-static-activation-and-audience.md) binds
+explicit user/OU identity snapshots into the existing canonical install review.
+Review and admission grant nobody. The initial activate stage reconstructs the
+exact prepared namespace/effect and receipt, compiles the current frontend, then
+atomically commits activation, only the reviewed grants, ready state, completed
+operation and audit. Late lease/context/authority failures roll back the whole
+visibility boundary. Current actual OU ancestry remains the launch-time policy;
+there is no installer/admin bypass. Existing storage is reused without migration.
+The disposable Linux fixture is extended to perform actual activation and a
+protected document read after actual native preparation and receipt retrieval.
+Source 282ce732c45371967fb4085cb39462d36e89904c passed native run 40317472960;
+the downloaded report confirms actual activation/launch, preceding data-stage
+separation, existing recovery/quota checks and owned cleanup, while retaining
+execution_ready=false. Full local Go/PostgreSQL and targeted race checks pass;
+main source CI 40317472965 also passed with all configured race/web/image checks.
+Data-stage predecessor source 18892f88a18fdc44ee9036bd52b152f12994f4a8 passed
+main 40312440453, daemon 40312440434 and native 40312440473 (checked directly from
+PR #248). Initial static activation is one internal lifecycle step; market UI,
+automatic worker/dispatch, runtime-free static data, managed lifecycle and the
+complete application platform remain open.
