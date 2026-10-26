@@ -196,6 +196,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_ACTIVATE")) {
 		t.Fatal("child did not prove stage commit", output.String())
 	}
+	if !bytes.Contains(output.Bytes(), []byte("STATIC_SCHEDULER_COMPLETE")) {
+		t.Fatal("child did not automatically schedule queued installation", output.String())
+	}
 	if !bytes.Contains(output.Bytes(), []byte("STATIC_DRIVER_COMPLETE")) {
 		t.Fatal("child did not drive queued installation to completion", output.String())
 	}
@@ -358,14 +361,49 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullLease, err := s.st.claimPlatformOperation(fullAdmitted.OperationID, platformFixtureID(873))
-	if err != nil || fullLease.snapshot.Stage != appplatform.StageQueued {
-		t.Fatal("full driver did not begin queued", err)
+
+	scheduler, err := newPlatformInstallScheduler(s, endpoint, platformFixtureID(873), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
 	}
-	fullRun, err := s.runPlatformStaticInstall(context.Background(), fullLease, endpoint)
-	if err != nil || fullRun.lease.id != "" || fullRun.activation.snapshot.Stage != appplatform.StageComplete {
-		t.Fatal("full driver failed", err)
+	workerCtx, stopWorker := context.WithTimeout(context.Background(), 10*time.Second)
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- scheduler.serve(workerCtx) }()
+	workerStopped := false
+	defer func() {
+		stopWorker()
+		if !workerStopped {
+			if err := <-workerDone; err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		var stage string
+		if err := s.st.queryRow(`SELECT stage FROM app_platform_operations WHERE id=?`, fullAdmitted.OperationID).Scan(&stage); err != nil {
+			t.Fatal(err)
+		}
+		if stage == "complete" {
+			break
+		}
+		select {
+		case err := <-workerDone:
+			workerStopped = true
+			t.Fatal("background installer stopped before completion", err, scheduler.currentStatus())
+		case <-workerCtx.Done():
+			t.Fatal("background install timed out", scheduler.currentStatus())
+		case <-poll.C:
+		}
 	}
+	stopWorker()
+	if err := <-workerDone; err != nil {
+		workerStopped = true
+		t.Fatal(err)
+	}
+	workerStopped = true
+	t.Log("STATIC_SCHEDULER_COMPLETE")
 	fullAccess, err := s.inspectPlatformLaunchAccess(session, fullAdmitted.InstallationID)
 	if err != nil {
 		t.Fatal("full driver result not launchable", err)
