@@ -270,17 +270,29 @@ func finalDataCommandCheck(ctx context.Context, facts dataCommandFacts) error {
 	return err
 }
 func reservedDataResource(facts dataCommandFacts, existing *dataResource) (DataReservation, error) {
+	result, err := dataResourceIdentity(facts, existing)
+	if err != nil {
+		return DataReservation{}, err
+	}
+	if existing.observed != "unknown" || existing.revision != 1 || existing.observedMS.Valid || existing.created != existing.updated {
+		return DataReservation{}, ErrDataReservationConflict
+	}
+	return result, nil
+}
+
+// Common identity checks for initial reservations and already observed history.
+// State-specific callers must still check the exact observation/revision tuple.
+func dataResourceIdentity(facts dataCommandFacts, r *dataResource) (DataReservation, error) {
 	var zero DataReservation
-	if existing == nil {
+	if r == nil {
 		return zero, ErrDataReservationConflict
 	}
 	c, stored, now := facts.command, facts.stored, facts.now
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
 	result := DataReservation{ResourceID: c.Payload.DataNamespaceID, InstallationID: c.InstallationID, NamespaceID: c.Payload.DataNamespaceID, EffectID: c.EffectID, Generation: generation, ControlFence: stored.fence, WriterFence: writer}
-	r := existing
 	id, valid := dataProjectID(r.native)
-	if !valid || r.id != result.ResourceID || r.installation != result.InstallationID || !r.namespace.Valid || r.namespace.String != result.NamespaceID || r.kind != "volume" || !r.release.Valid || r.release.String != c.Payload.ReleaseSHA256 || r.generation != generation || r.epoch != c.ControllerEpoch || r.fence != stored.fence || r.writer != writer || r.desired != "present" || r.observed != "unknown" || r.ownership != dataOwnership(c, id) || r.revision != 1 || r.observedMS.Valid || r.created < 0 || r.created > now || r.created != r.updated {
+	if !valid || r.id != result.ResourceID || r.installation != result.InstallationID || !r.namespace.Valid || r.namespace.String != result.NamespaceID || r.kind != "volume" || !r.release.Valid || r.release.String != c.Payload.ReleaseSHA256 || r.generation != generation || r.epoch != c.ControllerEpoch || r.fence != stored.fence || r.writer != writer || r.desired != "present" || r.ownership != dataOwnership(c, id) || r.created < 0 || r.created > now || r.updated < r.created || r.updated > now {
 		return zero, ErrDataReservationConflict
 	}
 	result.ProjectID, result.Replayed = id, true

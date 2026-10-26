@@ -30,11 +30,12 @@ def command(*args):
 
 def require_disposable(args):
     native_args = (
-        len(args) in (5, 7)
+        len(args) in (5, 7, 9)
         and args[:2] == ["--disposable-github-worker", "--native-binary"]
         and args[3] == "--abi-json"
         and Path(args[2]).is_absolute() and Path(args[4]).is_absolute()
         and (len(args) == 5 or (args[5] == "--journal-binary" and Path(args[6]).is_absolute()))
+        and (len(args) != 9 or (args[7] == "--transport-binary" and Path(args[8]).is_absolute()))
     )
     if not (args == ["--disposable-github-worker"] or native_args) or sys.platform != "linux" or os.geteuid() != 0:
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
@@ -137,7 +138,7 @@ def main(args):
             folder.chmod(0o700)
             folders[name] = folder
         native_root = None
-        if len(args) in (5,7):
+        if len(args) in (5,7,9):
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
@@ -147,7 +148,7 @@ def main(args):
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
         journal_root = None
-        if len(args) == 7:
+        if len(args) in (7,9):
             journal_root = mountpoint / "journal-data"
             journal_root.mkdir(mode=0o700)
             # One control journal outside app data; no per-app database.
@@ -162,6 +163,20 @@ def main(args):
                     raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
 
             run_journal("prepare")
+            if len(args) == 9:
+                receipt_fixture = root / "receipt-channel"
+                receipt_fixture.mkdir(mode=0o755)
+                receipt_fixture.chmod(0o755)
+
+                def run_transport(phase):
+                    receipt_env = dict(native_env, APP_DATA_NATIVE_PHASE=phase, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_RECEIPT_FIXTURE=str(receipt_fixture))
+                    result = subprocess.run([args[8], "-test.run=^TestNativeReceiptTransport$", "-test.v", "-test.timeout=60s"], env=receipt_env, capture_output=True, text=True, timeout=60)
+                    if result.returncode or "--- PASS: TestNativeReceiptTransport" not in result.stdout:
+                        raise RuntimeError("native receipt transport " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
+
+                run_transport("prepared")
+                report["native_receipt_cross_uid_transport"] = True
+                report["native_receipt_peer_signature_and_journal_dac"] = True
             report["native_journal_physical_receipts"] = True
             report["native_journal_root_history_binding"] = True
             report["native_journal_settlement_failure_preserved_unknown"] = True
@@ -226,6 +241,9 @@ def main(args):
                 report["native_journal_recovery_preserves_native_identity"] = True
                 report["native_journal_partial_data_not_repaired"] = True
                 report["native_journal_missing_data_not_created"] = True
+                if len(args) == 9:
+                    run_transport("recovered")
+                    report["native_recovered_receipt_cross_uid_transport"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
