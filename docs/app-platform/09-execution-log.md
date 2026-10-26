@@ -179,3 +179,16 @@ and rollback. Dedicated Linux acceptance exercises the actual non-root Portal
 entry point against a root journal/endpoint; verify final source CI before claiming
 that native result. Prior registration source `c985af4bda3b61eba6eb2b17c09410fc58260342`
 passed full [CI 40249657209](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40249657209).
+
+## Runtime control revocation
+
+[Portal signing revocation](35-runtime-control-revocation.md) atomically disables
+the binding, discards its sealed signing seed and advances revisions with a current
+administrator audit. It preserves the public pin, does not claim physical stop or
+recall already signed envelopes, and cannot be undone by initial registration or
+confirmation. Both-driver tests cover audit rollback, concurrent/reopened exact
+retry, overflow and session expiry after an observed audit lock wait. The normal
+source retains the final actor refresh; an overlay removing it fails the expiry
+test. Prior confirmation source `5e476e7675df9d8044aa7d25a122fa1ad7716008` passed
+[full CI 40252177883](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40252177883)
+and [Linux live endpoint acceptance 40252177832](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40252177832).
