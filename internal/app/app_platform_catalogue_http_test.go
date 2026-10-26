@@ -13,13 +13,30 @@ func testPlatformStagedCatalogueHTTP(t *testing.T, pg bool) {
 	if got.Code != 200 || !strings.Contains(got.Body.String(), release) || !strings.Contains(got.Body.String(), `"installable":true`) {
 		t.Fatal("verified release missing", got.Code, got.Body.String())
 	}
+	for _, digest := range []string{release, strings.Repeat("f", 64)} {
+		got := sessionTestRequest(mux, "GET", "/api/admin/app-platform/releases?release_sha256="+digest, cookie, "")
+		var page struct {
+			Items []platformStagedSummary `json:"items"`
+			Next  string                  `json:"next_cursor"`
+		}
+		if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &page) != nil || page.Next != "" {
+			t.Fatal("exact release lookup failed", got.Code, got.Body.String())
+		}
+		want := 0
+		if digest == release {
+			want = 1
+		}
+		if len(page.Items) != want {
+			t.Fatal("exact lookup returned another release")
+		}
+	}
 	for _, kind := range []string{"user", "ou"} {
 		got = sessionTestRequest(mux, "GET", "/api/admin/app-platform/subjects?kind="+kind, cookie, "")
 		if got.Code != 200 || (kind == "user" && !strings.Contains(got.Body.String(), actor.username)) {
 			t.Fatal("audience choices unavailable", kind, got.Code, got.Body.String())
 		}
 	}
-	for _, path := range []string{"/api/admin/app-platform/releases?debug=1", "/api/admin/app-platform/releases?after=bad", "/api/admin/app-platform/subjects?kind=all", "/api/admin/app-platform/subjects?kind=user&kind=ou", "/api/admin/app-platform/subjects?kind=ou&after=01"} {
+	for _, path := range []string{"/api/admin/app-platform/releases?debug=1", "/api/admin/app-platform/releases?after=bad", "/api/admin/app-platform/releases?release_sha256=bad", "/api/admin/app-platform/releases?release_sha256=" + release + "&after=" + release, "/api/admin/app-platform/subjects?kind=all", "/api/admin/app-platform/subjects?kind=user&kind=ou", "/api/admin/app-platform/subjects?kind=ou&after=01"} {
 		if got := sessionTestRequest(mux, "GET", path, cookie, ""); got.Code != 400 {
 			t.Fatal("invalid list request accepted", path, got.Code)
 		}

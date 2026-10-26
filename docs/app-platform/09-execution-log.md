@@ -644,3 +644,25 @@ Installation UI predecessor bd93e252e0e73a06d0f8c3d67d64633f1f441987 passed main
 CI 40392383575. Online UI,
 publisher onboarding/publication, managed/full lifecycle and full platform release
 remain open; production configuration and the legacy Apps catalogue are unchanged.
+
+## Online market interface and exact verified release handoff
+
+[Online market UI](62-online-market-installation-ui.md) connects explicit remote
+discovery and verification/download to the existing audience/installation review.
+Catalogue hints stay visibly unverified; successful staging is followed by current
+signed metadata lookup by exact descriptor digest. A verified summary is pinned
+for immediate review even beyond the initial directory page. The market never
+POSTs installation plans/operations itself. Account/source object identities and
+busy ownership reject stale responses or conflicting confirmation work. Tests
+cover remote-to-review integration, failure, malformed verification claims,
+uncertain retry and account/source changes. An opt-in synthetic TLS browser fixture
+exercised actual discovery/staging/review/background completion/reload with three
+locales, using only the browser plugin. Full Go/PostgreSQL regression passed
+(application package 192.059 s), focused directory/market SQLite/PostgreSQL race
+checks passed (18.253 s), and full front-end regression passed 151 files / 1680
+tests after correcting the loading-exit timing in a retry test. Focused UI/locale
+checks passed 43 tests; typecheck, lint, web build, vet, staticcheck and Linux
+amd64 compilation passed. Market-fetch predecessor
+574473bf41f2ed12166530b5c506807dd8009289 passed main 40393799973 and native
+regression 40393799881. Publisher onboarding and signed publication/acceptance hosting,
+managed/full lifecycle and complete platform release remain open.
