@@ -1043,9 +1043,9 @@ func TestQuoteDriftFieldCount(t *testing.T) {
 
 	t.Run("an unknown symbol answers with an empty payload", func(t *testing.T) {
 		// Sina does not 404 a symbol it has never heard of; it sends the assignment with nothing in
-		// it, which splits into exactly one empty field.
-		if _, err := parseSinaSnapshot("sh", "601899", `var hq_str_sh601899="";`); !errors.Is(err, errQuoteFieldCount) {
-			t.Fatalf("got %v, want %v", err, errQuoteFieldCount)
+		// it. This is an empty result rather than a truncated vendor contract.
+		if _, err := parseSinaSnapshot("sh", "601899", `var hq_str_sh601899="";`); !errors.Is(err, errQuoteNoData) {
+			t.Fatalf("got %v, want %v", err, errQuoteNoData)
 		}
 	})
 }

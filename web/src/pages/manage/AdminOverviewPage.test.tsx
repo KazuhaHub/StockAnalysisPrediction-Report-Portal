@@ -56,7 +56,7 @@ it('charts report dates and categories, with no account chart, and handles empty
   api.get.mockImplementation((url: string) => Promise.resolve(url.endsWith('/dashboard/layout') ? { blocks: defaultDashboardBlocks(), revision: 'initial' } : url.endsWith('/reports/overview')
     ? { total: 0, today: 0, recent: 0, days: [], kinds: [] } : { mode: '0' }))
   render(<MemoryRouter><AdminOverviewPage /></MemoryRouter>)
-  expect(await screen.findByText('manage.dashboard.noReports')).toBeTruthy()
+  expect((await screen.findAllByText('manage.dashboard.noReports')).length).toBeGreaterThan(0)
 })
 
 it('includes newly registered navigation pages automatically in the full directory', async () => {

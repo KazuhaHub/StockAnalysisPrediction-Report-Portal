@@ -2884,5 +2884,14 @@
   "security.recoveryModeHint.contact": "Show the recovery link with an administrator contact message; do not send reset emails.",
   "security.recoveryModeHint.email": "Let users receive a password reset link by email.",
   "runDefaults.enabled": "On",
-  "runDefaults.disabled": "Off"
+  "runDefaults.disabled": "Off",
+  "manage.dashboard.viewChartData": "View chart data",
+  "manage.dashboard.dataLabel": "Item",
+  "manage.dashboard.dataCount": "Count",
+  "manage.dashboard.dataShare": "Share",
+  "err.quote_no_data": "No quote data found. Check the symbol or select another security.",
+  "manage.dashboard.searchChartData": "Search chart data",
+  "manage.dashboard.downloadChartCSV": "Download CSV",
+  "manage.dashboard.chartExportHint": "Export the aggregated data in this view, including all pages.",
+  "manage.dashboard.chartDataRows": "{{count}} rows"
 }

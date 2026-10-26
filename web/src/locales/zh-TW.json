@@ -2884,5 +2884,14 @@
   "security.recoveryModeHint.contact": "顯示找回入口，提示聯絡管理員，不寄送重設郵件。",
   "security.recoveryModeHint.email": "允許使用者透過郵件接收密碼重設連結。",
   "runDefaults.enabled": "開啟",
-  "runDefaults.disabled": "關閉"
+  "runDefaults.disabled": "關閉",
+  "manage.dashboard.viewChartData": "檢視圖表資料",
+  "manage.dashboard.dataLabel": "項目",
+  "manage.dashboard.dataCount": "數量",
+  "manage.dashboard.dataShare": "占比",
+  "err.quote_no_data": "未找到該證券的行情資料，請核對代碼或選擇其他證券。",
+  "manage.dashboard.searchChartData": "搜尋圖表資料",
+  "manage.dashboard.downloadChartCSV": "下載 CSV",
+  "manage.dashboard.chartExportHint": "匯出目前檢視的彙總資料，包含所有分頁。",
+  "manage.dashboard.chartDataRows": "共 {{count}} 列"
 }

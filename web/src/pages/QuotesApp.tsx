@@ -126,8 +126,8 @@ function viewportHeight(): number {
 
 // quote_bad_symbol is a REFUSAL — the code is not one of the shapes the endpoint's grammar accepts,
 // so the identical request is refused identically for as long as the page is open. Offering a retry
-// there sells a permanent refusal as a bad minute. Every other failure (quote_unavailable, and any
-// transport error that named no code at all) is worth one more try.
+// there sells a permanent refusal as a bad minute. A confirmed empty result is informational;
+// source and transport failures remain retryable.
 const BAD_SYMBOL = 'quote_bad_symbol'
 
 /** Everything the URL carries about what to draw. */
@@ -379,15 +379,14 @@ export default function QuotesApp() {
     const code = error instanceof ApiError ? error.code : undefined
     body = (
       <Result
-        // A refusal of what was typed is a warning; a source that could not answer is a failure of
-        // ours, not of the reader's, and gets the louder mark because it comes with an action.
-        status={code === BAD_SYMBOL ? 'warning' : 'error'}
+        // Invalid input is a warning, a valid empty result is informational, and an outage is retryable.
+        status={code === 'quote_no_data' ? 'info' : code === BAD_SYMBOL ? 'warning' : 'error'}
         title={errText(error, t, 'quote.unavailable')}
         // The code that was refused, verbatim. "Bad symbol" without it leaves the reader guessing
         // which of the things they typed the server could not read.
         subTitle={symbol}
         extra={
-          code === BAD_SYMBOL ? undefined : (
+          code === BAD_SYMBOL || code === 'quote_no_data' ? undefined : (
             <Button icon={<ReloadOutlined />} onClick={() => setNonce((n) => n + 1)}>
               {t('quote.retry')}
             </Button>
