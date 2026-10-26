@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import {
-  ApiOutlined, AppstoreAddOutlined, AuditOutlined, BranchesOutlined, ControlOutlined,
+  ApiOutlined, AppstoreAddOutlined, AuditOutlined, BarChartOutlined, BranchesOutlined, ControlOutlined,
   DatabaseOutlined, FileTextOutlined, FundProjectionScreenOutlined, GlobalOutlined,
   LoginOutlined, KeyOutlined, LineChartOutlined, LinkOutlined, LockOutlined, MailOutlined,
   MessageOutlined, NotificationOutlined, PlayCircleOutlined, SlidersOutlined, TagsOutlined, TeamOutlined,
@@ -45,6 +45,7 @@ export const ADMIN_GROUPS: { key: string; label: string; pages: AdminPage[] }[] 
     { key: 'apidoc', label: 'settings.apidoc', icon: <FileTextOutlined />, related: ['tokens', 'webhooks', 'apps'] },
   ] },
   { key: 'system', label: 'nav.group.system', pages: [
+    { key: 'statistics', label: 'statistics.title', icon: <BarChartOutlined />, related: ['types', 'runqueue', 'users'] },
     { key: 'quotes', label: 'nav.quoteAdmin', icon: <LineChartOutlined />, related: ['forecast', 'storage'] },
     { key: 'storage', label: 'nav.storage', icon: <DatabaseOutlined />, warm: '/api/admin/cleanup/config', related: ['notifications', 'audit', 'forecast'] },
     { key: 'audit', label: 'nav.audit', icon: <AuditOutlined />, related: ['security', 'storage'] },

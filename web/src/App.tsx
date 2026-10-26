@@ -28,6 +28,7 @@ const ReviewPage = lazyRetry(() => import('./pages/ReviewPage'))
 const ReportEditorPage = lazyRetry(() => import('./pages/ReportEditorPage'))
 const ManageLayout = lazyRetry(() => import('./pages/manage/ManageLayout'))
 const AdminDraftBoundary = lazyRetry(() => import('./pages/manage/AdminDraftBoundary'))
+const StatisticsPage = lazyRetry(() => import('./pages/manage/StatisticsPage'))
 const AdminOverviewPage = lazyRetry(() => import('./pages/manage/AdminOverviewPage'))
 const LinksPage = lazyRetry(() => import('./pages/manage/LinksPage'))
 const TypesPage = lazyRetry(() => import('./pages/manage/TypesPage'))
@@ -205,6 +206,7 @@ function AppRoutes() {
         >
           <Route index element={<Navigate to="overview" replace />} />
           <Route path="overview" element={<AdminOverviewPage />} />
+          <Route path="statistics" element={<StatisticsPage />} />
           <Route path="site" element={<SiteSettingsPage />} />
           <Route path="announcement" element={<AnnouncementPage />} />
           <Route path="email" element={<EmailPage />} />

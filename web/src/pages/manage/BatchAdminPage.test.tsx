@@ -66,6 +66,7 @@ describe('BatchAdminPage — targets / plugins sub-tabs', () => {
     const table = container.querySelector<HTMLTableElement>('.rp-batch-targets-table table')
     expect(table?.style.tableLayout).toBe('fixed')
     expect(table?.style.width).not.toBe('max-content')
+    expect(container.querySelector('.ant-table-content')?.innerHTML).not.toContain('1100px')
   })
 
   it('opens the complete input list from the final overflow chip', async () => {

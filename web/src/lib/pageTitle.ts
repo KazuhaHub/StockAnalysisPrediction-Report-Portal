@@ -9,6 +9,7 @@
 // The manage pages, keyed by their last path segment, using the very labels the left rail renders.
 const MANAGE: Record<string, string> = {
   overview: 'manage.overview',
+  statistics: 'statistics.title',
   site: 'settings.general',
   announcement: 'nav.announcement',
   email: 'nav.email',
