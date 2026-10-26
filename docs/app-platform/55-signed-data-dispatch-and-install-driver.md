@@ -175,9 +175,18 @@ Final local full Go tests with disposable PostgreSQL passed (application package
 212.343 seconds). Focused SQLite/PostgreSQL worker/staging/dispatch race tests,
 including in-flight context cancellation, passed. Vet, staticcheck, Linux
 amd64/arm64 cross-compilation, 12 acceptance-script checks and workflow lint
-passed. Main and daemon source CI have independent status.
+passed. The same source passed main CI
+[40320510835](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40320510835)
+and daemon CI
+[40320510816](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40320510816).
 
 
-A follow-up native fixture adds the full queued-to-complete second application.
-Its additional report flag is not established by run 40320510850; it requires a
-successful run of the follow-up source.
+Follow-up source `589b5aabec33c07c3ae663de54909288c27096e8` passed native
+run [40321680162](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40321680162).
+Its downloaded report additionally confirms
+`native_portal_static_driver_queued_to_complete` and all preceding dispatch,
+recovery, separate-data-stage, activation/launch and cleanup flags. The second
+application actually traversed queued through completion and protected document
+retrieval. Daemon run 40321680182 also passed. Main run 40321680160 has
+independent status; no main-CI result for this follow-up is implied by the native
+report. Production code is unchanged from the preceding fully verified source.

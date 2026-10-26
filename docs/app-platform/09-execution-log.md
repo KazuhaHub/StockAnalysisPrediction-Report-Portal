@@ -503,7 +503,16 @@ run 40320510850 passed on source 6e13be8466430603a515006d13dea5a8d6914756;
 the downloaded report confirms actual signed dispatch/recovery, activation/launch,
 partial/absent refusal and owned cleanup, with execution_ready=false. Final local
 full Go/PostgreSQL tests and focused worker/staging/dispatch race tests pass; main
-and daemon CI have independent status. Static activation
+CI 40320510835 and daemon CI 40320510816 also passed. Static activation
 predecessor 819ce451ace66174b8cea60645214a33fed1713b passed main 40318413527 and
 native 40318413393. Automatic polling/startup, market HTTP/UI, managed lifecycle
 and the complete platform remain open.
+
+
+The additional full-driver fixture source
+589b5aabec33c07c3ae663de54909288c27096e8 passed native run 40321680162 and daemon
+run 40321680182. Its downloaded report confirms actual queued-to-complete native
+installation and protected document access for a second independently signed
+application, as well as preceding dispatch/recovery/cleanup checks. Main run
+40321680160 has independent status; the follow-up changes only native acceptance
+and documentation, preserving the preceding production source.
