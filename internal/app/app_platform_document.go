@@ -1,13 +1,18 @@
 package app
 
+import "context"
+
 import "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 
 // The complete derived document stays private until current authorization and
-// trust have been rechecked after compilation. The future HTTP owner must send
-// its CSP and no-store policy; this repository registers no route.
+// trust have been rechecked after compilation. HTTP callers must send its CSP
+// and no-store policy; route registration stays in the central route table.
 func (s *Server) readPlatformLaunchDocument(session platformActorSession, expected platformLaunchAccess) (appplatform.FrontendDocument, error) {
+	return s.readPlatformLaunchDocumentContext(context.Background(), session, expected)
+}
+func (s *Server) readPlatformLaunchDocumentContext(ctx context.Context, session platformActorSession, expected platformLaunchAccess) (appplatform.FrontendDocument, error) {
 	var result appplatform.FrontendDocument
-	_, err := s.withPlatformLaunchRead(session, expected.installationID, func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
+	_, err := s.withPlatformLaunchReadContext(ctx, session, expected.installationID, func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
 		if current != expected {
 			return errAppPlatformLaunchUnavailable
 		}

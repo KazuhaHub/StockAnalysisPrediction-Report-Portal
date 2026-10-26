@@ -43,6 +43,7 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
 	mailExecMu            sync.Mutex
 	mailExec              *notification.Executor
