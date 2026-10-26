@@ -42,8 +42,9 @@ func platformManagementQuery(r *http.Request, keys ...string) (url.Values, error
 }
 
 func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Request, user string) {
-	q, err := platformManagementQuery(r, "after")
-	if err != nil || (q.Get("after") != "" && !platformValidSHA(q.Get("after"))) {
+	q, err := platformManagementQuery(r, "after", "release_sha256")
+	exact := q.Get("release_sha256")
+	if err != nil || (q.Get("after") != "" && !platformValidSHA(q.Get("after"))) || (exact != "" && (!platformValidSHA(exact) || q.Get("after") != "")) {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -57,7 +58,13 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 	err = s.withPlatformTrustActorContext(r.Context(), actor, func(e migExec, facts platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
 		// Only signed descriptor metadata: do not read/decompress archive content
 		// to render a directory. Full artifact verification remains in review.
-		rows, err := e.query(`SELECT sha256,app_id,publisher_id,verification_key_id,frontend_sha256,version,descriptor,signature,managed FROM app_platform_releases WHERE sha256>? ORDER BY sha256 LIMIT 33`, q.Get("after"))
+		query := `SELECT sha256,app_id,publisher_id,verification_key_id,frontend_sha256,version,descriptor,signature,managed FROM app_platform_releases WHERE sha256>? ORDER BY sha256 LIMIT 33`
+		cursor := q.Get("after")
+		if exact != "" {
+			query = `SELECT sha256,app_id,publisher_id,verification_key_id,frontend_sha256,version,descriptor,signature,managed FROM app_platform_releases WHERE sha256=?`
+			cursor = exact
+		}
+		rows, err := e.query(query, cursor)
 		if err != nil {
 			return err
 		}

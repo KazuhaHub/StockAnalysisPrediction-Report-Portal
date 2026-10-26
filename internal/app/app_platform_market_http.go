@@ -8,6 +8,12 @@ import (
 )
 
 func (s *Server) apiPlatformMarketCatalogue(w http.ResponseWriter, r *http.Request, user string) {
+	client := newPlatformMarketClient()
+	defer client.close()
+	s.apiPlatformMarketCatalogueClient(w, r, user, client)
+}
+
+func (s *Server) apiPlatformMarketCatalogueClient(w http.ResponseWriter, r *http.Request, user string, client *platformMarketClient) {
 	fields, err := platformManagementRead(w, r, "catalogue_url")
 	if err != nil {
 		platformManagementError(w, err)
@@ -35,8 +41,6 @@ func (s *Server) apiPlatformMarketCatalogue(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer releaseSlot()
-	client := newPlatformMarketClient()
-	defer client.close()
 	raw, err := client.fetch(r.Context(), address, appplatform.MaxCatalogueBytes)
 	if err != nil {
 		platformManagementError(w, err)
@@ -59,6 +63,12 @@ func (s *Server) apiPlatformMarketCatalogue(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) apiPlatformMarketStage(w http.ResponseWriter, r *http.Request, user string) {
+	client := newPlatformMarketClient()
+	defer client.close()
+	s.apiPlatformMarketStageClient(w, r, user, client)
+}
+
+func (s *Server) apiPlatformMarketStageClient(w http.ResponseWriter, r *http.Request, user string, client *platformMarketClient) {
 	fields, err := platformManagementRead(w, r, "catalogue_url", "release_sha256")
 	if err != nil {
 		platformManagementError(w, err)
@@ -80,8 +90,6 @@ func (s *Server) apiPlatformMarketStage(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	defer releaseSlot()
-	client := newPlatformMarketClient()
-	defer client.close()
 	result, err := s.fetchAndStagePlatformMarketRelease(r.Context(), actor, address, digest, client)
 	if err != nil {
 		platformManagementError(w, err)

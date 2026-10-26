@@ -6,10 +6,11 @@ import { api, ApiError, errText } from '../../api/client'
 import { useAuth } from '../../auth'
 import { usePrefs } from '../../prefs'
 import { appDisplayText } from '../../lib/appDisplayV2'
-import type { AppDisplay } from '../../lib/descriptor-contract.generated'
+import type { PlatformRelease } from '../../api/appPlatform'
+import AppPlatformMarketPanel from './AppPlatformMarketPanel'
 
 type Audience = { type: 'user'; username: string } | { type: 'ou'; group_id: string }
-type Release = { release_sha256: string; app_id: string; publisher_id: string; version: string; trust_revision: string; display?: AppDisplay; installable: boolean; reason?: string }
+type Release = PlatformRelease
 type Subject = { id: string; name: string }
 type Page<T> = { items: T[]; next_cursor: string }
 type Commit = { plan_id: string; plan_sha256: string; idempotency_key: string }
@@ -49,6 +50,8 @@ export default function AppPlatformInstallPanel() {
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [marketBusy, setMarketBusy] = useState(false)
+  const [marketRelease, setMarketRelease] = useState<Release | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [closed, setClosed] = useState(false)
   const [review, setReview] = useState<Review | null>(null)
@@ -66,7 +69,7 @@ export default function AppPlatformInstallPanel() {
     generation.current = epoch
     writing.current = false; setBusy(false); setDefinitive(false)
     setIntent(readIntent(storageKey))
-    setReview(null); setActionError(''); setSelected([]); setClosed(false)
+    setReview(null); setActionError(''); setSelected([]); setClosed(false); setMarketRelease(null); setMarketBusy(false)
     return () => { mounted.current = false; generation.current = epoch + 1 }
   }, [storageKey])
 
@@ -115,7 +118,7 @@ export default function AppPlatformInstallPanel() {
   }, [review])
 
   const loadMore = async (kind: 'release' | 'user' | 'ou') => {
-    if (writing.current || loading || loadError) return
+    if (writing.current || marketBusy || loading || loadError) return
     writing.current = true; setBusy(true); setActionError('')
     const account = user
     const epoch = generation.current
@@ -132,7 +135,7 @@ export default function AppPlatformInstallPanel() {
   }
 
   const preview = async (release: Release) => {
-    if (writing.current || intent) return
+    if (writing.current || marketBusy || intent) return
     writing.current = true; setBusy(true); setActionError('')
     const account = user
     const epoch = generation.current
@@ -146,7 +149,7 @@ export default function AppPlatformInstallPanel() {
   }
 
   const confirm = async () => {
-    if (writing.current || (!intent && (!review || expired))) return
+    if (writing.current || marketBusy || (!intent && (!review || expired))) return
     const request = intent ?? { plan_id: review!.plan_id, plan_sha256: review!.plan_sha256, idempotency_key: crypto.randomUUID() }
     writing.current = true; setBusy(true); setActionError('')
     const account = user
@@ -162,6 +165,7 @@ export default function AppPlatformInstallPanel() {
       sessionStorage.removeItem(storageKey)
       setIntent(null); setReview(null)
       setParams(p => { p.set('operation', result.operation_id); return p }, { replace: true })
+      setMarketRelease(null)
       setRefresh(v => v + 1)
     } catch (e) {
       if (live(account, epoch)) {
@@ -178,28 +182,30 @@ export default function AppPlatformInstallPanel() {
   const choices = [...users.map(u => ({ value: `user:${u.id}`, label: `${t('appPlatform.user')}: ${u.name} (${u.id})` })), ...groups.map(g => ({ value: `ou:${g.id}`, label: `${t('appPlatform.ou')}: ${g.name} (${g.id})` }))]
   const audienceLabel = (target: Audience) => target.type === 'user' ? `${t('appPlatform.user')}: ${target.username}` : `${t('appPlatform.ou')}: ${groups.find(g => g.id === target.group_id)?.name ?? target.group_id}`
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-    <Alert type="info" showIcon title={t('appPlatform.development')} description={t('appPlatform.stagedOnly')} />
-    {loadError && <Alert type="error" title={loadError} action={<Button disabled={busy} onClick={() => setRefresh(v => v + 1)}>{t('appPlatform.refresh')}</Button>} />}
+    <Alert type="info" showIcon title={t('appPlatform.development')} description={t('appPlatform.installPreview')} />
+    <AppPlatformMarketPanel disabled={busy || !!intent || !!review || loading} onReady={setMarketRelease} onBusyChange={setMarketBusy} />
+    <Typography.Title level={5}>{t('appMarket.verifiedReleases')}</Typography.Title>
+    {loadError && <Alert type="error" title={loadError} action={<Button disabled={busy || marketBusy} onClick={() => setRefresh(v => v + 1)}>{t('appPlatform.refresh')}</Button>} />}
     {actionError && <Alert type="error" title={actionError} />}
-    {intent && <Alert type="warning" title={t('appPlatform.uncertain')} action={<Space><Button loading={busy} onClick={() => void confirm()}>{t('appPlatform.retrySame')}</Button>{definitive && <Button disabled={busy} onClick={clearRejected}>{t('appPlatform.reviewAgain')}</Button>}</Space>} />}
+    {intent && <Alert type="warning" title={t('appPlatform.uncertain')} action={<Space><Button loading={busy} onClick={() => void confirm()}>{t('appPlatform.retrySame')}</Button>{definitive && <Button disabled={busy || marketBusy} onClick={clearRejected}>{t('appPlatform.reviewAgain')}</Button>}</Space>} />}
     {operation && <div aria-live="polite">
       <Typography.Title level={5}>{t('appPlatform.progress')}</Typography.Title>
       {progressError && <Alert type="error" title={progressError} />}
       {progress && <Alert type={progress.stage === 'complete' ? 'success' : progress.error_code ? 'error' : 'info'} title={t(`appPlatform.stage.${progress.stage}`, { defaultValue: progress.stage })} description={progress.control_paused ? t('err.app_platform_control_paused') : progress.error_code ? t(`err.${progress.error_code}`) : undefined} />}
-      <Space><Button disabled={busy} onClick={() => setRefresh(v => v + 1)}>{t('appPlatform.refresh')}</Button>{progress?.stage === 'complete' && <Link to="/apps">{t('appPlatform.goApps')}</Link>}</Space>
+      <Space><Button disabled={busy || marketBusy} onClick={() => setRefresh(v => v + 1)}>{t('appPlatform.refresh')}</Button>{progress?.stage === 'complete' && <Link to="/apps">{t('appPlatform.goApps')}</Link>}</Space>
     </div>}
     <Typography.Title level={5}>{t('appPlatform.audience')}</Typography.Title>
-    <Select mode="multiple" aria-label={t('appPlatform.audience')} placeholder={t('appPlatform.chooseAudience')} value={selected} options={choices} disabled={closed || busy || !!intent || loading || !!loadError} onChange={setSelected} optionFilterProp="label" maxCount={128} style={{ width: '100%' }} />
-    <Checkbox checked={closed} disabled={busy || !!intent} onChange={e => { setClosed(e.target.checked); setSelected([]) }}>{t('appPlatform.noAudience')}</Checkbox>
-    <Space>{userCursor && <Button disabled={busy || loading || !!loadError} onClick={() => void loadMore('user')}>{t('appPlatform.moreUsers')}</Button>}{groupCursor && <Button disabled={busy || loading || !!loadError} onClick={() => void loadMore('ou')}>{t('appPlatform.moreGroups')}</Button>}</Space>
-    <Table<Release> rowKey="release_sha256" loading={loading} dataSource={releases} pagination={false} locale={{ emptyText: <Empty description={loadError ? t('appPlatform.loadFailed') : t('appPlatform.noReleases')} /> }} columns={[
+    <Select mode="multiple" aria-label={t('appPlatform.audience')} placeholder={t('appPlatform.chooseAudience')} value={selected} options={choices} disabled={closed || busy || marketBusy || !!intent || loading || !!loadError} onChange={setSelected} optionFilterProp="label" maxCount={128} style={{ width: '100%' }} />
+    <Checkbox checked={closed} disabled={busy || marketBusy || !!intent} onChange={e => { setClosed(e.target.checked); setSelected([]) }}>{t('appPlatform.noAudience')}</Checkbox>
+    <Space>{userCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('user')}>{t('appPlatform.moreUsers')}</Button>}{groupCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('ou')}>{t('appPlatform.moreGroups')}</Button>}</Space>
+    <Table<Release> rowKey="release_sha256" loading={loading} dataSource={marketRelease ? [marketRelease, ...releases.filter(r => r.release_sha256 !== marketRelease.release_sha256)] : releases} pagination={false} locale={{ emptyText: <Empty description={loadError ? t('appPlatform.loadFailed') : t('appPlatform.noReleases')} /> }} columns={[
       { title: t('appPlatform.application'), render: (_, r) => { const copy = appDisplayText(r.app_id, r.display, lang); return <><Typography.Text strong>{copy.name}</Typography.Text><div>{copy.description}</div><Typography.Text type="secondary">{r.publisher_id} · {r.version}</Typography.Text></> } },
-      { title: t('appPlatform.action'), render: (_, r) => r.installable ? <Button disabled={loading || busy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r)}>{t('appPlatform.review')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
+      { title: t('appPlatform.action'), render: (_, r) => r.installable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r)}>{t('appPlatform.review')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
     ]} />
-    {releaseCursor && <Button disabled={busy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
+    {releaseCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
     <Modal open={!!review && !intent} title={t('appPlatform.confirmTitle')} confirmLoading={busy} okText={t('appPlatform.confirm')} cancelText={t('appPlatform.cancel')} okButtonProps={{ disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
       {review && <Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
-        { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, releases.find(r => r.release_sha256 === review.review.release_sha256)?.display, lang).name} · ${releases.find(r => r.release_sha256 === review.review.release_sha256)?.version ?? ''}` },
+        { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, [...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256)?.display, lang).name} · ${[...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256)?.version ?? ''}` },
         { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
         { key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') },
         { key: 'permissions', label: t('appPlatform.permissions'), children: review.review.declined_capabilities.length ? review.review.declined_capabilities.map(capability => t(`appPlatform.capability.${capability}`)).join('、') : t('appPlatform.noPermissions') },

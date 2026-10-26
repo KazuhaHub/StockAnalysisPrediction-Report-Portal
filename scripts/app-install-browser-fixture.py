@@ -3,6 +3,7 @@
 Loopback only. Uses synthetic administrator/publisher/session data; no production
 database, credentials, runtime or server configuration. Stop with Ctrl-C.
 """
+import argparse
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -16,6 +17,9 @@ from urllib.parse import urlsplit
 
 PORTAL = Path(__file__).resolve().parents[1]
 WEB = PORTAL / "web"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--market", action="store_true", help="Include an owned synthetic TLS catalogue for market acceptance")
+args = parser.parse_args()
 
 with tempfile.TemporaryDirectory(prefix="portal-install-browser-") as directory:
     target = Path(directory)
@@ -38,6 +42,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
     server = None
     try:
         env = dict(os.environ, APP_INSTALL_HTTP_STATE=str(state_file), GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
+        env["APP_INSTALL_HTTP_MARKET"] = "1" if args.market else ""
         # Never inherit a caller's integration-test database for this fixture.
         env.pop("TEST_POSTGRES_DSN", None)
         process = subprocess.Popen(["go", "test", "-count=1", "-timeout=17m", "./internal/app", "-run", "^TestPlatformManagementBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
@@ -107,6 +112,8 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         print(f"PROBE_URL=http://127.0.0.1:{server.server_port}/manage/apps", flush=True)
+        if args.market:
+            print("FIXTURE_CATALOGUE_URL=https://127.0.0.1/index.json", flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass
