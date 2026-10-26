@@ -43,6 +43,7 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
 	mailExecMu            sync.Mutex
@@ -272,6 +273,7 @@ func RunServer(cfgPath string) {
 	s.runForecastRepair()
 
 	stopNotifications := s.startNotificationRuntime()
+	stopAppInstalls := s.startPlatformFrontendInstallService()
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
 	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
@@ -302,7 +304,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopNotifications, s.stopTransactionalMail)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter
