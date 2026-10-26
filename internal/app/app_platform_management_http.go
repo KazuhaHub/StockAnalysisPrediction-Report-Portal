@@ -25,7 +25,8 @@ var errPlatformOperationMissing = errors.New("application operation not found")
 
 func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handler) {
 	s.route(mux, pattern, authAdmin, "", platformDocumentHeaders(s.requireAdminJSON(func(w http.ResponseWriter, r *http.Request, user string) {
-		if !platformHTTPPath(r) {
+		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects")
+		if !platformHTTPPath(r) && !(listPath && len(r.URL.RawQuery) <= 2048 && !r.URL.ForceQuery && r.URL.EscapedPath() == r.URL.Path) {
 			jsonErrorCode(w, 400, "app_platform_invalid_request", "invalid application management request")
 			return
 		}

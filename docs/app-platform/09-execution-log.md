@@ -603,3 +603,26 @@ for the shared authentication layer's legitimate initial session activity refres
 Predecessor service source 8e784be889fb11feb606667e46e2e31e5532fc31 passed main
 CI 40339290369 and native regression 40339290645. Catalogue management UI,
 publication, managed lifecycle and full platform acceptance remain open.
+
+## Installation confirmation UI and staged directories
+
+[Installation confirmation](60-installation-confirmation-ui.md) adds the new
+platform tab to existing application management, preserving the old page behind
+the legacy tab. Signed staged-release summaries and minimal paged user/OU choices
+support explicit audience selection, canonical review, a localized permission/data
+confirmation and durable operation observation after reload. A confirmed request
+identity is saved before transmission and retained for exact replay after an
+uncertain response. Account and directory lifecycle counters reject stale async
+responses; storage failure prevents transmission. Tests cover those behaviors
+and preserve legacy permission confirmation. Local full Go/PostgreSQL regression
+passed (application package 168.031 s), the full web run passed 1668 tests, and
+subsequent focused UI/locale checks passed 33 cases. Browser-plugin loopback checks
+exercised actual preview/confirm/background completion/refresh, cancel, empty
+audience and three-locale presentation. Native desktop control and production
+configuration were not used. Focused SQLite/PostgreSQL catalogue/management race
+checks passed (42.029 s), as did vet, staticcheck, web build and Linux amd64
+compilation. Owned browser fixture processes/listeners and disposable PostgreSQL
+were stopped after verification.
+Management API predecessor 96591a12068151c5916d8388739d3c1b46d18b27 passed main
+40341986266, daemon 40341986230 and native 40341986307. Remote marketplace
+publication, managed/full lifecycle and complete platform acceptance remain open.
