@@ -738,3 +738,30 @@ runtime behavior. The next integration still requires closed container actions,
 signed managed effects, ownership reconciliation, broker and full lifecycle.
 Production trust/runtime configuration, credentials, Status and beta settings
 are untouched.
+
+## Closed candidate container policy and adapter
+
+[Candidate container policy](66-candidate-container-policy.md) adds private typed
+create, native-ID observation and ownership-checked non-forced removal primitives.
+The policy fixes native image, non-root user, read-only root/data, private socket
+mounts, network denial, resource/log limits and disabled inherited health checks.
+Identity/fence/policy substitutions refuse, and uncertain create/delete effects
+are never automatically retried or adopted by name. These primitives are not
+wired into a production runner command dispatcher; signed resource admission,
+physical mount/quota pins, start/readiness and the active-writer transition remain.
+
+Local driver race tests passed (1.445 s), with vet, staticcheck and Linux amd64
+compilation passing. A new root-only GitHub-hosted disposable test creates an
+owned stopped fixture, inspects policy and removes it without forcing or deleting
+volumes; its actual CI result must still be checked. The image-inspection
+predecessor 446f8c369531e82121a7239579fdcbfffe8ebbe8 passed real daemon workflow
+40405086955 and full main CI 40405087018. No production configuration, schema,
+credential, Status migration, SDK freeze or runtime-ready claim is included.
+The final private-plan check additionally validates canonical policy bytes and
+binds owner fields to labels before all adapter actions. Driver race regression
+passed in 1.452 s after this change; vet, staticcheck and Linux compilation passed.
+Native run 40406868559 failed before any container effect: the separately compiled
+acceptance binary ran from the repository root, while shared test descriptors use
+the normal Go package working directory. The workflow now enters the driver
+package before invocation. This is fixture wiring, not native policy evidence;
+the corrected revision still needs the real-daemon acceptance run.
