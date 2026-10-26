@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"modernc.org/sqlite"
@@ -33,10 +34,13 @@ var (
 )
 
 type Store struct {
-	db        *sql.DB
-	release   func() error
-	closeOnce sync.Once
-	closeErr  error
+	db            *sql.DB
+	release       func() error
+	closeOnce     sync.Once
+	closeErr      error
+	closing       atomic.Bool
+	executionOnce sync.Once
+	executionGate chan struct{}
 }
 
 func init() {
@@ -141,7 +145,14 @@ func Open(directory string) (*Store, error) {
 }
 
 func (s *Store) Close() error {
-	s.closeOnce.Do(func() { s.closeErr = errors.Join(s.db.Close(), s.release()) })
+	s.closeOnce.Do(func() {
+		s.closing.Store(true)
+		// A live synchronous provider must settle before the journal owner lock can
+		// pass to another process. Uncertainty stays durable if settlement fails.
+		s.acquireDataExecution(context.Background())
+		defer s.releaseDataExecution()
+		s.closeErr = errors.Join(s.db.Close(), s.release())
+	})
 	return s.closeErr
 }
 

@@ -353,3 +353,18 @@ The native data primitive predecessor passed main run 40278679685 and quota run
 40278679625. Connecting reservations to native work still requires durable
 execution claims, physical root/ownership verification, receipts and restart
 reconciliation before any writer or activation authority can be created.
+
+
+## One-shot data execution claims
+
+[Durable execution claims](48-data-execution-claims.md) persist unknown state and a
+bounded claim marker before returning a private one-shot handle. Invocation
+rechecks current signed authority/resources and consumes shared process-local
+state; copied handles, expiry, callback error/panic and process reopen cannot
+create a second invocation. A cancelable execution gate holds journal ownership
+through synchronous work while allowing separate short SQL transactions. Close
+waits for active callbacks. This is an unwired infrastructure seam with synthetic
+callback tests, not a native receipt/recovery/activation implementation. The
+reservation predecessor passed main run 40289609568 and runner run 40289609569.
+Physical root binding, native execution integration, settlement/reconciliation,
+writer admission and complete installation remain open.
