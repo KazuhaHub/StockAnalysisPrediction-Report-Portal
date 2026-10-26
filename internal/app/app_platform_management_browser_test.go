@@ -18,7 +18,16 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	if stateFile == "" {
 		t.Skip("installation browser fixture not requested")
 	}
-	s, mux, actor, _, _ := platformManagementFixture(t, false)
+	var s *Server
+	var actor platformActorSession
+	var mux *http.ServeMux
+	if os.Getenv("APP_INSTALL_HTTP_FRESH") == "1" {
+		s, actor = platformActorTestServer(t, false)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
+	} else {
+		s, mux, actor, _, _ = platformManagementFixture(t, false)
+	}
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
