@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "faed84e86443a6a622d2b02507b6ebd6f57bbc14bfd43a01289ae80bf27ddab2"
+const descriptorContractSHA256 = "be621e59c0f98681849c912bdcdb86bb1840f0b6facacec40ef3f21d00cbecc4"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -22,11 +22,12 @@ type Compatibility struct {
 	RunnerProtocol string `json:"runner_protocol"`
 }
 type Presentation struct {
-	NameKey        string   `json:"name_key"`
-	DescriptionKey string   `json:"description_key"`
-	Locales        []string `json:"locales"`
-	Routes         []Route  `json:"routes"`
-	Entry          string   `json:"entry"`
+	NameKey        string      `json:"name_key"`
+	DescriptionKey string      `json:"description_key"`
+	Locales        []string    `json:"locales"`
+	Routes         []Route     `json:"routes"`
+	Entry          string      `json:"entry"`
+	Display        *AppDisplay `json:"display,omitempty"`
 }
 type Route struct {
 	ID     string `json:"id"`
@@ -58,8 +59,19 @@ type DataCompatibility struct {
 	ReadableSchemas []int `json:"readable_schemas"`
 	WritesOnStartup bool  `json:"writes_on_startup"`
 }
+type AppDisplay struct {
+	Icon  string           `json:"icon"`
+	Texts []AppDisplayText `json:"texts"`
+}
+type AppDisplayText struct {
+	Locale      string `json:"locale"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
 
 const MaxDescriptorBytes = 131072
+const MaxAppNameCharacters = 80
+const MaxAppDescriptionCharacters = 320
 const maxDescriptorDepth = 24
 const maxDescriptorRoutes = 32
 const maxDescriptorReadableSchemas = 32
@@ -88,5 +100,6 @@ var imagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-
 var pathPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 var descriptorKnownCapabilities = map[string]bool{"reports.read": true, "storage.files": true, "tasks.schedule": true, "events.subscribe": true, "notifications.publish": true, "network.http": true, "network.stream": true, "secrets.use": true, "secrets.read": true, "background.run": true, "files.export": true}
 var descriptorLocaleNames = map[string]bool{"en-US": true, "zh-CN": true, "zh-TW": true}
+var descriptorDisplayIcons = map[string]bool{"appstore": true, "file-text": true, "dashboard": true, "calendar": true, "bar-chart": true, "cloud": true, "tool": true, "experiment": true}
 var descriptorPlatformNames = map[string]bool{"linux/amd64": true, "linux/arm64": true}
 var descriptorLayoutNames = map[string]bool{"document": true, "viewport": true}

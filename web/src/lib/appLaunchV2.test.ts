@@ -5,3 +5,4 @@ function fixture(){const binding={installationId:id,generation:'9223372036854775
 test('exact counters and nested entry survive public launch metadata parsing',()=>{const value=fixture();expect(parseAppLaunchV2(value,id)).toEqual(value)})
 test.each(['0','01','+1','9223372036854775808','1e3'])('counter alias or overflow refuses %s',generation=>{const value=fixture();value.binding.generation=generation;expect(parseAppLaunchV2(value,id)).toBeNull()})
 test.each(['../index.html','./index.html','nested//index.html','%69ndex.html','index.html?x=1','index.html#x',''])('unsafe entry refuses %s',entry=>{const value=fixture();value.source=value.source.replace('nested/index.html',entry);expect(parseAppLaunchV2(value,id)).toBeNull()})
+test('invalid display cannot pass the launch metadata boundary',()=>{expect(parseAppLaunchV2({...fixture(),display:{icon:'https://evil.invalid/icon',texts:[]}},id)).toBeNull()})

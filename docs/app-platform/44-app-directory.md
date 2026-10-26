@@ -6,6 +6,10 @@ open its protected `/apps/v2/:installation` page without knowing an installation
 UUID. This is discovery over existing control records, not a completed installer,
 marketplace release, managed backend lifecycle or production rollout.
 
+Subsequent [signed display integration](45-signed-display-metadata.md) adds
+verified localized copy/icons without frontend archive reads. The description
+below records the initial directory slice.
+
 ## Server contract
 
 `GET /api/app-platform/apps` uses the central signed-session/enrolment wall,

@@ -106,6 +106,9 @@ func validManifest(m Manifest) bool {
 		return false
 	}
 	p := m.Presentation
+	if p.Display != nil && !validAppDisplay(*p.Display) {
+		return false
+	}
 	if !copyKeyPattern.MatchString(p.NameKey) || !copyKeyPattern.MatchString(p.DescriptionKey) || !safeRelativePath(p.Entry) ||
 		!uniqueMembers(p.Locales, descriptorLocaleNames) || len(p.Locales) != len(descriptorLocaleNames) || len(p.Routes) == 0 || len(p.Routes) > maxDescriptorRoutes {
 		return false

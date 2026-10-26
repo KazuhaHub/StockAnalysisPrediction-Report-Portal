@@ -38,6 +38,19 @@ func platformSignedReleaseFixture(t *testing.T, version string) (raw, signature,
 	raw = bytes.ReplaceAll(raw, []byte("example-publisher"), []byte("fixture-publisher"))
 	raw = bytes.ReplaceAll(raw, []byte(strings.Repeat("a", 64)), []byte(platformDigest(frontend)))
 	raw = bytes.ReplaceAll(raw, []byte("1.0.0-beta.1"), []byte(version))
+	var m appplatform.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Presentation.Display = &appplatform.AppDisplay{Icon: "file-text", Texts: []appplatform.AppDisplayText{
+		{Locale: "en-US", Name: "Notes", Description: "Personal notes"},
+		{Locale: "zh-CN", Name: "笔记", Description: "个人笔记"},
+		{Locale: "zh-TW", Name: "筆記", Description: "個人筆記"},
+	}}
+	raw, err = json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
 	signature = platformSignTestDescriptor(t, raw)
 	return
 }

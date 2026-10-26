@@ -4,6 +4,8 @@ import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined } from '@ant-
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
+import { usePrefs } from '../prefs'
+import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import { useAuth } from '../auth'
 import { BUILTIN_APPS } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
@@ -48,6 +50,7 @@ function AppCard({ icon, title, desc, tag, onClick, disabled = false }: { icon: 
 export default function AppsHub() {
   const { t } = useTranslation()
   const { can, user } = useAuth()
+  const { lang } = usePrefs()
   const directory = useAppDirectory(user)
   const navigate = useNavigate()
   const [apps, setApps] = useState<AppSummary[]>([])
@@ -115,11 +118,14 @@ export default function AppsHub() {
               onClick={() => navigate(a.to)}
             />
           ))}
-          {directory.items.map(a => (
-            <AppCard key={`v2:${a.installationId}`} icon={<AppstoreOutlined />} title={a.applicationId}
+          {directory.items.map(a => {
+            const copy = appDisplayText(a.applicationId, a.display, lang)
+            return (
+            <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
               tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
               onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
-          ))}
+            )
+          })}
           {apps.map((a) => (
             <AppCard
               key={a.id}

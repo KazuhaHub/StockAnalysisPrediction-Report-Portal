@@ -7,6 +7,7 @@ import { usePrefs } from '../prefs'
 import { api } from '../api/client'
 import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
+import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import AppFrameV2 from '../components/apps/AppFrameV2'
 
 export default function AppViewV2() {
@@ -69,11 +70,13 @@ function LaunchPage({ installation }: { installation: string }) {
     },
   }) : null
 
+  const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
+
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%', gap: 16 }}>
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>{t('apps.back')}</Button>
-        {launch && <Typography.Title level={4} style={{ margin: 0 }}>{launch.applicationId}</Typography.Title>}
+        {launch && <><AppDisplayIcon display={launch.display} /><Typography.Title level={4} style={{ margin: 0 }}>{copy?.name}</Typography.Title></>}
       </Space>
       {failed || (launch && !presentation) ? (
         <Alert type="error" showIcon title={t('apps.v2Unavailable')}
@@ -84,7 +87,7 @@ function LaunchPage({ installation }: { installation: string }) {
         </div>
       ) : (
         <div ref={panel} style={{ flex: 1, minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
-          <AppFrameV2 source={launch.source} title={launch.applicationId} binding={launch.binding}
+          <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
             capabilities={launch.capabilities} presentation={presentation!} height={height} />
         </div>
       )}
