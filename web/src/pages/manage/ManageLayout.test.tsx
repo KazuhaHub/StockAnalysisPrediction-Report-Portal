@@ -116,6 +116,14 @@ describe('ManageLayout — grouped rail', () => {
 
   // Every entry in the table is a cheap GET, so the rule the forecast case is a special case of:
   // nothing warmed on hover may be a measuring endpoint.
+  it('does not prefetch a nonexistent assistant configuration GET', () => {
+    render(<ManageLayout />)
+    fireEvent.click(screen.getByText('nav.group.batch'))
+    fireEvent.mouseEnter(screen.getByText('manage.label.assistant'))
+    expect(prefetched).not.toContain('/api/admin/chat/config')
+    expect(prefetched).not.toContain('/api/admin/chat/live')
+  })
+
   it('never warms a measuring endpoint from a hover', () => {
     render(<ManageLayout />)
     for (const key of ['storage', 'batch', 'quotes', 'forecast']) {

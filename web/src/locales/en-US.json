@@ -1259,7 +1259,7 @@
   "links.url": "URL",
   "login.error": "Wrong username or password",
   "login.expired": "Your session has ended. Please sign in again.",
-  "login.forgot": "Forgot password?",
+  "login.forgot": "Forgot password",
   "login.forgotAccount": "Username or email",
   "login.forgotHint": "Enter your username or email. If the account exists, we'll send a reset link.",
   "login.forgotSend": "Send reset link",

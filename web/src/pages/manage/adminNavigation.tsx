@@ -36,7 +36,7 @@ export const ADMIN_GROUPS: { key: string; label: string; pages: AdminPage[] }[] 
     { key: 'batch', label: 'nav.batchAdmin', icon: <PlayCircleOutlined />, warm: '/api/admin/batch/targets', related: ['runqueue', 'rundefaults', 'users'] },
     { key: 'runqueue', label: 'manage.label.runqueue', icon: <ControlOutlined />, warm: '/api/admin/batch/config', related: ['users', 'rundefaults', 'batch'] },
     { key: 'rundefaults', label: 'nav.runDefaults', icon: <SlidersOutlined />, warm: '/api/admin/batch/config', related: ['batch', 'runqueue', 'notifications'] },
-    { key: 'assistant', label: 'manage.label.assistant', icon: <MessageOutlined />, warm: '/api/admin/chat/config', related: ['batch', 'users'] },
+    { key: 'assistant', label: 'manage.label.assistant', icon: <MessageOutlined />, related: ['batch', 'users'] },
   ] },
   { key: 'integrations', label: 'nav.group.integrations', pages: [
     { key: 'apps', label: 'nav.appsAdmin', icon: <AppstoreAddOutlined />, related: ['links', 'tokens', 'apidoc'] },

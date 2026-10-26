@@ -1259,7 +1259,7 @@
   "links.url": "链接",
   "login.error": "用户名或密码错误",
   "login.expired": "登录已过期，请重新登录。",
-  "login.forgot": "忘记密码？",
+  "login.forgot": "忘记密码",
   "login.forgotAccount": "用户名或邮箱",
   "login.forgotHint": "输入用户名或邮箱；若账号存在，我们会发送重置链接。",
   "login.forgotSend": "发送重置链接",
