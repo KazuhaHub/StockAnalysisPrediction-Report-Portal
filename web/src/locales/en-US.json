@@ -1,4 +1,5 @@
 {
+  "apps.v2Unavailable": "This app is unavailable. Check your access or contact an administrator.",
   "apps.v2Loading": "Loading app…",
   "apps.v2Failed": "The app could not connect. Reopen it to try again.",
   "apps.v2Retry": "Reopen app",

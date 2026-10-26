@@ -61,6 +61,8 @@ function AppShell() {
   // below the header, has no page footer, and only its message thread scrolls — so there's
   // a single scrollbar, not one for the page plus one for the thread.
   const onChat = loc.pathname === '/chat'
+  const onAppV2 = loc.pathname.startsWith('/apps/v2/')
+  const boundedSurface = onChat || onAppV2
   // Mobile chat is a focused, messenger-like surface: collapse global navigation chrome so
   // the thread and composer get nearly the full viewport. Desktop keeps the full portal header.
   const chatFocus = compact && onChat
@@ -76,7 +78,7 @@ function AppShell() {
     if (p === '/apps') return [home, { label: t('nav.apps') }]
     if (p === '/apps/recurring') return [home, apps, { label: t('nav.recurring') }]
     if (p === '/apps/batch') return [home, apps, { label: t('nav.batch') }]
-    if (p.startsWith('/apps/x/')) return [home, apps]
+    if (p.startsWith('/apps/x/') || p.startsWith('/apps/v2/')) return [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
     if (p === '/notifications') return [home, { label: t('inbox.title') }]
     if (p === '/chat') return [home, { label: t('nav.chat') }]
@@ -225,7 +227,7 @@ function AppShell() {
   ]
 
   return (
-    <Layout style={{ minHeight: onChat ? undefined : '100vh', height: onChat ? '100dvh' : undefined, background: token.colorBgLayout }}>
+    <Layout style={{ minHeight: boundedSurface ? undefined : '100vh', height: boundedSurface ? '100dvh' : undefined, background: token.colorBgLayout }}>
       {user && <LoginActivityNotice user={user} />}
       <Header
         id="rp-app-header"
@@ -644,7 +646,7 @@ function AppShell() {
           width: '100%',
           margin: '0 auto',
           // Chat fills the remaining viewport height and owns its own (single) scroll.
-          ...(onChat ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
+          ...(boundedSurface ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
         }}
       >
         {/* Keyed by suspenseKey (above) so a cross-page navigation to a not-yet-loaded chunk shows the
@@ -671,7 +673,7 @@ function AppShell() {
           polls; the home list refetches on focus + interval), so no manual refresh.
           Not on chat: that page scrolls its own thread and auto-sticks to the newest
           message, and the float button would overlap the composer's send button. */}
-      {showTop && !onChat && (
+      {showTop && !boundedSurface && (
         <FloatButton
           icon={<VerticalAlignTopOutlined />}
           tooltip={t('nav.backTop')}
@@ -680,7 +682,7 @@ function AppShell() {
         />
       )}
 
-      {showFooter && !onManage && !onChat && (
+      {showFooter && !onManage && !boundedSurface && (
         <Footer style={{ textAlign: 'center', background: 'transparent', color: token.colorTextTertiary, fontSize: 12 }}>
           {/* One inline flow, deliberately not a flex row. Grouping the logo and the site name in
               an inline-flex box put the two halves of this line at different heights: an inline-flex

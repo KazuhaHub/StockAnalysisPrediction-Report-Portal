@@ -52,6 +52,7 @@ const ForecastRecordPage = lazyRetry(() => import('./pages/ForecastRecordPage'))
 const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
+const AppViewV2 = lazyRetry(() => import('./pages/AppViewV2'))
 const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
@@ -148,6 +149,7 @@ function AppRoutes() {
         <Route path="/apps" element={<AppsHub />} />
         <Route path="/notifications" element={<InboxPage />} />
         <Route path="/apps/x/:id" element={<AppView />} />
+        <Route path="/apps/v2/:installation" element={<AppViewV2 />} />
         {/* Quotes is ungated on purpose: it reads market data and nothing about this portal, and
             every signed-in user can already see a price on a reading page. Its `perm` in
             lib/builtinApps.ts is '' to match — that file's own note asks for the two to agree. */}

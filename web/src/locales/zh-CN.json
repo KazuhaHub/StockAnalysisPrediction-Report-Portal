@@ -1,4 +1,5 @@
 {
+  "apps.v2Unavailable": "应用暂时不可用，请检查访问权限或联系管理员。",
   "apps.v2Loading": "正在加载应用…",
   "apps.v2Failed": "应用连接失败，请重新打开后重试。",
   "apps.v2Retry": "重新打开应用",

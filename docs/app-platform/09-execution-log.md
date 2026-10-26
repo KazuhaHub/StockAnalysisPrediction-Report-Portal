@@ -282,3 +282,16 @@ a test binary/private temporary directory; activation rows remain explicit logic
 test state, not installer/provider readiness. Production shell, actual market
 install/activation, broader browser/UX and sensitive broker/navigation policy remain
 open. This evidence does not change server beta configuration or production data.
+
+## Portal v2 launch page
+
+[Authenticated launch page](43-app-launch-page.md) registers a protected v2 page,
+validates real launch metadata and follows the existing Portal preferences/Ant
+tokens. Pending metadata aborts on exit; invalid data never mounts content. The
+layout allocates remaining viewport height without an outer app card or separate
+language control. True document measurement, names/discovery, routing/drafts and
+full shell acceptance remain open. A real-page HTTP/SDK fixture verifies language
+and theme changes retaining child state and host Back navigation retiring the
+frame. Full local web regression passes 1648 cases and Go regression with disposable
+PostgreSQL passes; exact-source CI is still required. Existing legacy app routes and production/beta configuration are
+unchanged.

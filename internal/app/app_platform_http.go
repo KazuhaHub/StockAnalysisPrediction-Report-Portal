@@ -121,12 +121,29 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 	ctx, cancel := context.WithTimeout(r.Context(), platformDocumentTimeout)
 	defer cancel()
 	// Validate the complete current document profile before advertising its URL.
+	var applicationID, layout, timeZone string
 	binding, err := s.withPlatformLaunchReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
 		var archive []byte
 		if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, current.frontendSHA).Scan(&archive); err != nil {
 			return err
 		}
-		_, err := appplatform.BuildFrontendDocument(m, archive)
+		applicationID = m.ID
+		layout = m.Presentation.Routes[0].Layout
+		var zone sql.NullString
+		err := e.queryRow(`SELECT v FROM meta WHERE k='timezone'`).Scan(&zone)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		timeZone = zone.String
+		if timeZone == "" {
+			timeZone = time.Local.String()
+		}
+		// Local is an opaque process location, not a browser-recognized IANA name.
+		// An empty result stays explicitly unavailable to the host presentation layer.
+		if timeZone == "Local" {
+			timeZone = ""
+		}
+		_, err = appplatform.BuildFrontendDocument(m, archive)
 		return err
 	})
 	if err != nil || ctx.Err() != nil {
@@ -134,7 +151,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": []string{}})
+	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": []string{}, "applicationId": applicationID, "layout": layout, "timeZone": timeZone})
 }
 func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, user string) {
 	expected := platformLaunchAccess{installationID: r.PathValue("installation"), generation: r.PathValue("generation"), policyRevision: r.PathValue("policy"), releaseSHA: r.PathValue("release"), frontendSHA: r.PathValue("frontend"), entry: r.PathValue("entry")}

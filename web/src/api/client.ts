@@ -61,7 +61,7 @@ export function noteSessionLost(status: number, code?: string) {
   if (status === 401 && code === SESSION_GONE) sessionLost?.()
 }
 
-async function request<T>(method: string, url: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown, extraHeaders?: Record<string, string>, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { ...(extraHeaders ?? {}) }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const res = await fetch(url, {
@@ -69,6 +69,7 @@ async function request<T>(method: string, url: string, body?: unknown, extraHead
     headers: Object.keys(headers).length ? headers : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
+    ...(signal ? { signal } : {}),
   })
   const text = await res.text()
   let data: any = null
@@ -109,7 +110,7 @@ async function requestForm<T>(method: string, url: string, body: FormData): Prom
 }
 
 export const api = {
-  get: <T = any>(url: string) => request<T>('GET', url),
+  get: <T = any>(url: string, options?: {signal?: AbortSignal}) => request<T>('GET', url, undefined, undefined, options?.signal),
   post: <T = any>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
   put: <T = any>(url: string, body?: unknown) => request<T>('PUT', url, body ?? {}),
   // PATCH for a partial update — a review records a verdict on one field of one row, and PUT would
