@@ -142,10 +142,14 @@ uses `ListenDataController`; its non-root child dispatches execution, retries an
 applied request and reads the same receipt. The root parent no longer performs
 manual admission, reservation, claim or execution. Portal then commits data,
 proves that this alone did not activate/grant access, and finishes activation via
-the bounded driver before reading the protected document.
+the bounded driver before reading the protected document. A second independently
+signed application starts at queued and runs the entire bounded driver without
+manual intermediate advancement, then verifies completion/lease clearance and
+protected document access.
 
 The workflow report adds `native_dispatch_recovers_without_reexecution` and
-`native_portal_signed_data_dispatch` only after these fixtures pass. A local
+`native_portal_signed_data_dispatch`, plus
+`native_portal_static_driver_queued_to_complete`, only after these fixtures pass. A local
 cross-compile cannot establish native success; record the actual successful run
 and downloaded report separately. `execution_ready` must remain false until the
 remaining runtime/platform release gates pass.
@@ -155,3 +159,25 @@ selection and lease coordination, managed application lifecycle, runtime-free
 static data support, HTTP/review/market installation UX, SDK/shell acceptance and
 release gates. No production enrollment, credentials, Status migration, public SDK
 freeze or server beta setting is changed by this implementation.
+
+
+## Observed source evidence
+
+Source `6e13be8466430603a515006d13dea5a8d6914756` passed disposable native
+run [40320510850](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40320510850).
+The downloaded report confirms `native_dispatch_recovers_without_reexecution`,
+`native_portal_signed_data_dispatch`, the preceding activation/launch and
+separate-data-stage assertions, partial/absent refusal and owned cleanup. The
+workflow also passed the full Linux transport race suite, including malformed and
+swapped execution replies. `execution_ready` remains false.
+
+Final local full Go tests with disposable PostgreSQL passed (application package
+212.343 seconds). Focused SQLite/PostgreSQL worker/staging/dispatch race tests,
+including in-flight context cancellation, passed. Vet, staticcheck, Linux
+amd64/arm64 cross-compilation, 12 acceptance-script checks and workflow lint
+passed. Main and daemon source CI have independent status.
+
+
+A follow-up native fixture adds the full queued-to-complete second application.
+Its additional report flag is not established by run 40320510850; it requires a
+successful run of the follow-up source.

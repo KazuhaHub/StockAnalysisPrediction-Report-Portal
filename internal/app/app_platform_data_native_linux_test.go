@@ -196,6 +196,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_ACTIVATE")) {
 		t.Fatal("child did not prove stage commit", output.String())
 	}
+	if !bytes.Contains(output.Bytes(), []byte("STATIC_DRIVER_COMPLETE")) {
+		t.Fatal("child did not drive queued installation to completion", output.String())
+	}
 	if !bytes.Contains(output.Bytes(), []byte("STATIC_ACTIVATION_READY")) {
 		t.Fatal("child did not prove activation/launch", output.String())
 	}
@@ -329,4 +332,51 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("activation did not apply exact audience")
 	}
 	t.Log("STATIC_ACTIVATION_READY")
+	// A second signed package exercises the complete queued-to-complete driver
+	// through the actual root provider, with no manual intermediate advancement.
+	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.1")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.ID = "notes-driver"
+	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	manifest.Capabilities.Required = []string{}
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullRelease, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullPlan, err := s.createPlatformInstallAudienceReview(session, fullRelease.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullAdmitted, err := s.consumePlatformInstallReview(session, fullPlan.ID, fullPlan.SHA256, platformFixtureID(872))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullLease, err := s.st.claimPlatformOperation(fullAdmitted.OperationID, platformFixtureID(873))
+	if err != nil || fullLease.snapshot.Stage != appplatform.StageQueued {
+		t.Fatal("full driver did not begin queued", err)
+	}
+	fullRun, err := s.runPlatformStaticInstall(context.Background(), fullLease, endpoint)
+	if err != nil || fullRun.lease.id != "" || fullRun.activation.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("full driver failed", err)
+	}
+	fullAccess, err := s.inspectPlatformLaunchAccess(session, fullAdmitted.InstallationID)
+	if err != nil {
+		t.Fatal("full driver result not launchable", err)
+	}
+	fullDocument, err := s.readPlatformLaunchDocumentContext(context.Background(), session, fullAccess)
+	if err != nil || len(fullDocument.Content) == 0 {
+		t.Fatal("full driver document unavailable", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND stage='complete' AND completed_ms IS NOT NULL AND lease_owner IS NULL AND lease_until_ms IS NULL`, fullAdmitted.OperationID) != 1 {
+		t.Fatal("full driver retained lease or incomplete state")
+	}
+	t.Log("STATIC_DRIVER_COMPLETE")
+
 }

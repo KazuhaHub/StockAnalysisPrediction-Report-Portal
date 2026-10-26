@@ -499,7 +499,11 @@ already-claimed initial static installs, replacing each exact lease token; stage
 SQL now supports context cancellation. The native fixtures now cover actual
 non-root Portal dispatch rather than manual root-side execution, unknown recovery,
 partial/absent refusal, applied replay and concurrent first requests. Native
-acceptance for this source is pending its own workflow result. Static activation
+run 40320510850 passed on source 6e13be8466430603a515006d13dea5a8d6914756;
+the downloaded report confirms actual signed dispatch/recovery, activation/launch,
+partial/absent refusal and owned cleanup, with execution_ready=false. Final local
+full Go/PostgreSQL tests and focused worker/staging/dispatch race tests pass; main
+and daemon CI have independent status. Static activation
 predecessor 819ce451ace66174b8cea60645214a33fed1713b passed main 40318413527 and
 native 40318413393. Automatic polling/startup, market HTTP/UI, managed lifecycle
 and the complete platform remain open.
