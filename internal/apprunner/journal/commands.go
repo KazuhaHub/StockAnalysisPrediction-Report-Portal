@@ -41,6 +41,22 @@ func sameLogicalCommand(stored admittedCommand, c control.Command) bool {
 // acquiring journal write intent. It only persists a prepare-data intent. No
 // socket, resource mutation, receipt, or physical completion path is attached.
 func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) (CommandAdmission, error) {
+	return s.admitSignedCommand(ctx, raw, signature, func(raw, signature []byte, authority control.Authority, now int64) (verifiedAdmissionCommand, error) {
+		verified, err := control.Verify(raw, signature, authority, now)
+		return verifiedAdmissionCommand{identity: verified.Command()}, err
+	})
+}
+
+// The common identity is a private journal index projection, not a re-signed
+// command or physical execution token. Each verifier checks its complete wire
+// payload/signature domain before producing this projection.
+type verifiedAdmissionCommand struct {
+	identity            control.Command
+	containerResourceID string
+}
+type admissionVerifier func([]byte, []byte, control.Authority, int64) (verifiedAdmissionCommand, error)
+
+func (s *Store) admitSignedCommand(ctx context.Context, raw, signature []byte, verify admissionVerifier) (CommandAdmission, error) {
 	var zero CommandAdmission
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return zero, control.ErrInvalidCommand
@@ -60,11 +76,15 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 	}
 	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 	now := time.Now().UTC().UnixMilli()
-	verified, err := control.Verify(raw, signature, authority, now)
+	verified, err := verify(raw, signature, authority, now)
 	if err != nil {
 		return zero, err
 	}
-	c := verified.Command()
+	c := verified.identity
+	resourceExists, err := validateCandidateAdmissionResource(ctx, tx, verified)
+	if err != nil {
+		return zero, err
+	}
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	floor, err := commandResourceFloor(ctx, tx, c)
@@ -84,6 +104,9 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 		}
 		result = CommandAdmission{EffectID: stored.effectID, State: stored.state, AdmittedFence: stored.fence, CurrentFence: floor, Replayed: true}
 	} else if errors.Is(err, sql.ErrNoRows) {
+		if resourceExists {
+			return zero, ErrCommandConflict
+		}
 		var conflicts int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE (operation_id=? AND stage=? AND effect_number=?) OR (installation_id=? AND state IN ('prepared','unknown'))`, c.OperationID, c.Stage, c.EffectNumber, c.InstallationID).Scan(&conflicts); err != nil {
 			return zero, err
@@ -103,7 +126,7 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 	if finalNow < now {
 		return zero, control.ErrInvalidCommand
 	}
-	if _, err := control.Verify(raw, signature, authority, finalNow); err != nil {
+	if _, err := verify(raw, signature, authority, finalNow); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
