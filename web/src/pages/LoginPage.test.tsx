@@ -84,6 +84,15 @@ describe('LoginPage', () => {
     webauthnMock.passkeySupported.mockReturnValue(true)
   })
 
+  it('keeps the forgot-password label when recovery requires administrator assistance', async () => {
+    apiMock.get.mockImplementation((url: string) => Promise.resolve(
+      url === '/api/password/config' ? {mode:'contact'} : {providers:[],local:true,sso:false},
+    ))
+    renderLogin()
+    expect(await screen.findByRole('button', {name:'login.forgot'})).toBeTruthy()
+    expect(screen.queryByText('login.contactAdmin')).toBeNull()
+  })
+
   it('shows nothing extra when SSO is off', async () => {
     apiMock.get.mockResolvedValue({ providers: [] })
     renderLogin()

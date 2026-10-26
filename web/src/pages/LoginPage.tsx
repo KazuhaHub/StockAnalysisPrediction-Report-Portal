@@ -358,7 +358,7 @@ export default function LoginPage() {
             {!totpToken && recoveryMode !== 'hidden' && (
               <div style={{ textAlign: 'center', marginTop: -8 }}>
                 <Button type="link" size="small" onClick={() => navigate('/reset')}>
-                  {t(recoveryMode === 'contact' ? 'login.contactAdmin' : 'login.forgot')}
+                  {t('login.forgot')}
                 </Button>
               </div>
             )}
