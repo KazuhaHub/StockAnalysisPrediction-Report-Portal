@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"math"
@@ -49,20 +50,37 @@ func platformValidUUID(id string) bool {
 }
 
 func (s *Store) updatePlatformOperationLease(id, worker string, expected *platformOperationLease) (platformOperationLease, error) {
+	return s.updatePlatformOperationLeaseContext(context.Background(), id, worker, expected)
+}
+
+func (s *Store) updatePlatformOperationLeaseContext(ctx context.Context, id, worker string, expected *platformOperationLease) (platformOperationLease, error) {
 	var zero platformOperationLease
 	if !platformValidUUID(id) || !platformValidUUID(worker) {
 		return zero, errAppPlatformLeaseConflict
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return zero, err
 	}
 	defer tx.Rollback()
-	e := migExec{s: s, ex: tx}
+	e := migExec{s: s, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	facts, err := loadPlatformOperationLease(e, id)
 	if err != nil {
 		return zero, err
 	}
+	lease, err := writePlatformOperationLease(e, facts, worker, expected)
+	if err != nil {
+		return zero, err
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	return lease, nil
+}
+
+func writePlatformOperationLease(e migExec, facts platformLeaseFacts, worker string, expected *platformOperationLease) (platformOperationLease, error) {
+	var zero platformOperationLease
+	id := facts.lease.id
 	lease, installationRevision, controlFence, now := facts.lease, facts.installationRevision, facts.controlFence, facts.now
 	installation, epoch, stateRevision := lease.installationID, lease.controllerEpoch, int64(lease.snapshot.Revision)
 	if lease.rowRevision == math.MaxInt64 {
@@ -99,7 +117,11 @@ func (s *Store) updatePlatformOperationLease(id, worker string, expected *platfo
 	if err := platformLeaseCAS(result, err); err != nil {
 		return zero, err
 	}
-	if err := tx.Commit(); err != nil {
+	check := facts
+	if expected == nil {
+		check.lease = lease
+	}
+	if _, err := finalPlatformOperationLeaseCheck(e, check); err != nil {
 		return zero, err
 	}
 	return lease, nil
@@ -264,6 +286,17 @@ func loadPlatformBoundOperationLease(e migExec, expected platformOperationLease)
 // concurrent pause/epoch change. Marker writers must not acquire resource locks
 // after updating these rows; coordinated restore remains an offline operation.
 func finalPlatformOperationLeaseCheck(e migExec, facts platformLeaseFacts) (int64, error) {
+	now, err := platformOperationControlTime(e, facts)
+	if err != nil {
+		return 0, err
+	}
+	if now >= facts.lease.leaseUntilMS {
+		return 0, errAppPlatformLeaseConflict
+	}
+	return now, nil
+}
+
+func platformOperationControlTime(e migExec, facts platformLeaseFacts) (int64, error) {
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE"
@@ -287,7 +320,7 @@ func finalPlatformOperationLeaseCheck(e migExec, facts platformLeaseFacts) (int6
 	if err != nil {
 		return 0, err
 	}
-	if now < facts.now || now >= facts.lease.leaseUntilMS {
+	if now < facts.now {
 		return 0, errAppPlatformLeaseConflict
 	}
 	return now, nil

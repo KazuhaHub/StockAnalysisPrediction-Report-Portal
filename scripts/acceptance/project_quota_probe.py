@@ -256,6 +256,7 @@ def main(args):
                     report["native_portal_static_activation_and_launch"] = True
                     report["native_portal_signed_data_dispatch"] = True
                     report["native_portal_static_driver_queued_to_complete"] = True
+                    report["native_portal_background_install_scheduler"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
