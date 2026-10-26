@@ -16,17 +16,23 @@ export interface AppFrameV2Props {
   // Supplied by the host layout. Automatic document sizing is not implemented.
   height: number
 }
-function safeSource(source: string): boolean {
-  if (source.length > 2048 || !source.startsWith('/app-assets/') || /[\\\s?#]/.test(source)) return false
+function safeSource(source: string, binding: BridgeBinding): boolean {
+  if (source.length > 2048 || (!source.startsWith('/app-assets/') && !source.startsWith('/app-documents/')) || /[\\\s?#]/.test(source)) return false
   try {
     const url = new URL(source, window.location.origin)
     const decoded = decodeURIComponent(url.pathname)
+    if (source.startsWith('/app-documents/')) {
+      const parts = source.split('/')
+      if (parts.length < 8 || parts[2] !== binding.installationId || parts[3] !== binding.generation ||
+        parts[4] !== binding.policyRevision || parts[5] !== binding.releaseSha256 ||
+        !/^[a-f0-9]{64}$/.test(parts[6]) || decoded !== source) return false
+    }
     return url.origin === window.location.origin && url.pathname === source && !decoded.includes('//') && !decoded.includes('\\') && !/[\x00-\x20\x7f]/.test(decoded) && !decoded.split('/').some(part => part === '..' || part === '.')
   } catch { return false }
 }
 export default function AppFrameV2(props: AppFrameV2Props) {
   const { t } = useTranslation()
-  if (!safeSource(props.source) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
+  if (!safeSource(props.source, props.binding) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
     return <Alert type="error" showIcon title={t('apps.v2Failed')} />
   }
   const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort()])

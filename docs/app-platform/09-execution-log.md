@@ -257,3 +257,15 @@ Actual HTTP policy/budgets, compatibility review, physical activation and remain
 platform work stay open. Prior source CI passed for launch access at
 `c271fb49711a7b8b664390cba2543592732d76ee` (run 40260967506) and verified assets at
 `c8e34a8137989468a916264faa851e672d3ebcad` (run 40261213274).
+
+## Authorized launch/document HTTP surface
+
+[Session-backed document delivery](41-authorized-document-http.md) registers launch
+metadata and exact-version document responses through the central session/enrolment
+wall. A two-slot process budget and context-bound SQL executor bound compilation
+admission and lock waits; current authorization/trust rechecks still precede any
+content write. The experimental frame validates the new source against its bridge
+binding. Actual HTTP mux, cancellation and existing reader/route regressions cover
+the source; combining these exact handlers with the SDK in a browser and production
+shell remains required. Physical installer activation, sensitive broker/navigation
+policy, full shell UX and remaining platform acceptance are still open.

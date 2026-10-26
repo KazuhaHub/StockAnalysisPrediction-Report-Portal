@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strconv"
@@ -25,16 +26,19 @@ func (s *Server) inspectPlatformLaunchAccess(session platformActorSession, insta
 // The optional private callback may only do bounded local reads. Its output must
 // remain buffered until this transaction's final session/key/epoch check commits.
 func (s *Server) withPlatformLaunchRead(session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest) error) (platformLaunchAccess, error) {
+	return s.withPlatformLaunchReadContext(context.Background(), session, installationID, read)
+}
+func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest) error) (platformLaunchAccess, error) {
 	var zero platformLaunchAccess
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	tx, err := s.st.db.Begin()
+	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return zero, err
 	}
 	defer tx.Rollback()
-	e := migExec{s: s.st, ex: tx}
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	// Same ordering as lifecycle writers: principal -> trust -> installation.
 	if err := lockOUMutation(e); err != nil {
 		return zero, err

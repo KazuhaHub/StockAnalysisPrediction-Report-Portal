@@ -42,3 +42,11 @@ test('asset delivery has a bounded deadline even if iframe load never fires',()=
   const view=render(<AppFrameV2 {...props}/>);act(()=>vi.advanceTimersByTime(10000));expect(screen.queryByTitle('Fixture')).toBeNull();expect(screen.getByRole('alert')).toBeTruthy();view.unmount()
  }finally{vi.useRealTimers()}
 })
+
+test('private document URL must match the bridge activation binding',()=>{
+ const source=`/app-documents/${binding.installationId}/${binding.generation}/${binding.policyRevision}/${binding.releaseSha256}/${'b'.repeat(64)}/index.html`
+ const view=render(<AppFrameV2 {...props} source={source}/>)
+ expect(screen.getByTitle('Fixture').getAttribute('src')).toBe(source)
+ view.rerender(<AppFrameV2 {...props} source={source} binding={{...binding,generation:'2'}}/>)
+ expect(screen.queryByTitle('Fixture')).toBeNull()
+})
