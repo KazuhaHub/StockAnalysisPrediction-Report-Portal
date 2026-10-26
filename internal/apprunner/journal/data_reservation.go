@@ -130,69 +130,12 @@ func existingDataResource(ctx context.Context, tx *sql.Tx, c control.Command) (*
 // resource rows; uncertain/executed work must instead enter reconciliation.
 func (s *Store) ReservePrepareData(ctx context.Context, raw, signature []byte) (DataReservation, error) {
 	var zero DataReservation
-	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
-		return zero, control.ErrInvalidCommand
-	}
-	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, facts, err := s.beginDataCommand(ctx, raw, signature, "prepared", "{}")
 	if err != nil {
 		return zero, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
-		return zero, err
-	}
-	deployment, err := readControllerDeployment(ctx, tx)
-	if err != nil {
-		return zero, err
-	}
-	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
-	now := time.Now().UTC().UnixMilli()
-	verified, err := control.Verify(raw, signature, authority, now)
-	if err != nil {
-		return zero, err
-	}
-	c := verified.Command()
-	quotaBytes, _ := strconv.ParseInt(c.Payload.QuotaBytes, 10, 64)
-	if quotaBytes%512 != 0 {
-		return zero, ErrDataReservationConflict
-	}
-	stored, err := loadAdmittedCommand(ctx, tx, c.EffectID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return zero, ErrDataReservationConflict
-	}
-	if err != nil {
-		return zero, err
-	}
-	if !sameLogicalCommand(stored, c) {
-		return zero, ErrDataReservationConflict
-	}
-	if stored.state != "prepared" {
-		return zero, ErrFenceReconciliation
-	}
-	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
-	floor, err := commandResourceFloor(ctx, tx, c)
-	if err != nil {
-		return zero, err
-	}
-	if fence != stored.fence || floor != stored.fence {
-		return zero, ErrFenceReconciliation
-	}
-	var receipt string
-	var ack sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&receipt, &ack); err != nil {
-		return zero, err
-	}
-	if receipt != "{}" || ack.Valid {
-		return zero, ErrFenceReconciliation
-	}
-	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil {
-		return zero, err
-	}
-	if pending != 0 {
-		return zero, ErrFenceReconciliation
-	}
+	c, stored, now := facts.command, facts.stored, facts.now
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
 	result := DataReservation{ResourceID: c.Payload.DataNamespaceID, InstallationID: c.InstallationID, NamespaceID: c.Payload.DataNamespaceID, EffectID: c.EffectID, Generation: generation, ControlFence: stored.fence, WriterFence: writer}
@@ -201,13 +144,10 @@ func (s *Store) ReservePrepareData(ctx context.Context, raw, signature []byte) (
 		return zero, err
 	}
 	if existing != nil {
-		r := existing
-		id, valid := dataProjectID(r.native)
-		if !valid || r.id != result.ResourceID || r.installation != result.InstallationID || !r.namespace.Valid || r.namespace.String != result.NamespaceID || r.kind != "volume" || !r.release.Valid || r.release.String != c.Payload.ReleaseSHA256 || r.generation != generation || r.epoch != c.ControllerEpoch || r.fence != stored.fence || r.writer != writer || r.desired != "present" || r.observed != "unknown" || r.ownership != dataOwnership(c, id) || r.revision != 1 || r.observedMS.Valid || r.created < 0 || r.created > now || r.created != r.updated {
-			return zero, ErrDataReservationConflict
+		result, err = reservedDataResource(facts, existing)
+		if err != nil {
+			return zero, err
 		}
-		result.ProjectID, result.Replayed = id, true
-		result.OwnershipSHA256 = dataOwnership(c, id)
 	} else {
 		id, err := allocateDataProject(ctx, tx)
 		if err != nil {
@@ -220,15 +160,123 @@ func (s *Store) ReservePrepareData(ctx context.Context, raw, signature []byte) (
 			return zero, err
 		}
 	}
-	finalNow := time.Now().UTC().UnixMilli()
-	if finalNow < now {
-		return zero, control.ErrInvalidCommand
-	}
-	if _, err := control.Verify(raw, signature, authority, finalNow); err != nil {
+	if err := finalDataCommandCheck(ctx, facts); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
+	return result, nil
+}
+
+// These checks are shared by reservation, durable claiming and the one-shot
+// invocation gate. expectedReceipt is constructed only by this package.
+type dataCommandFacts struct {
+	command        control.Command
+	stored         admittedCommand
+	authority      control.Authority
+	raw, signature []byte
+	now            int64
+}
+
+func (s *Store) beginDataCommand(ctx context.Context, raw, signature []byte, expectedState, expectedReceipt string) (*sql.Tx, dataCommandFacts, error) {
+	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
+		return nil, dataCommandFacts{}, control.ErrInvalidCommand
+	}
+	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			tx.Rollback()
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
+	now := time.Now().UTC().UnixMilli()
+	verified, err := control.Verify(raw, signature, authority, now)
+	if err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	c := verified.Command()
+	quotaBytes, _ := strconv.ParseInt(c.Payload.QuotaBytes, 10, 64)
+	if quotaBytes%512 != 0 {
+		return nil, dataCommandFacts{}, ErrDataReservationConflict
+	}
+	stored, err := loadAdmittedCommand(ctx, tx, c.EffectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, dataCommandFacts{}, ErrDataReservationConflict
+	}
+	if err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	if !sameLogicalCommand(stored, c) {
+		return nil, dataCommandFacts{}, ErrDataReservationConflict
+	}
+	if stored.state != expectedState {
+		return nil, dataCommandFacts{}, ErrFenceReconciliation
+	}
+	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+	floor, err := commandResourceFloor(ctx, tx, c)
+	if err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	if fence != stored.fence || floor != stored.fence {
+		return nil, dataCommandFacts{}, ErrFenceReconciliation
+	}
+	var receipt string
+	var ack sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&receipt, &ack); err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	if receipt != expectedReceipt || ack.Valid {
+		return nil, dataCommandFacts{}, ErrFenceReconciliation
+	}
+	var pending int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil {
+		return nil, dataCommandFacts{}, err
+	}
+	if pending != 0 {
+		return nil, dataCommandFacts{}, ErrFenceReconciliation
+	}
+	ok = true
+	return tx, dataCommandFacts{command: c, stored: stored, authority: authority, raw: raw, signature: signature, now: now}, nil
+}
+func finalDataCommandCheck(ctx context.Context, facts dataCommandFacts) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UTC().UnixMilli()
+	if now < facts.now {
+		return control.ErrInvalidCommand
+	}
+	_, err := control.Verify(facts.raw, facts.signature, facts.authority, now)
+	return err
+}
+func reservedDataResource(facts dataCommandFacts, existing *dataResource) (DataReservation, error) {
+	var zero DataReservation
+	if existing == nil {
+		return zero, ErrDataReservationConflict
+	}
+	c, stored, now := facts.command, facts.stored, facts.now
+	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+	result := DataReservation{ResourceID: c.Payload.DataNamespaceID, InstallationID: c.InstallationID, NamespaceID: c.Payload.DataNamespaceID, EffectID: c.EffectID, Generation: generation, ControlFence: stored.fence, WriterFence: writer}
+	r := existing
+	id, valid := dataProjectID(r.native)
+	if !valid || r.id != result.ResourceID || r.installation != result.InstallationID || !r.namespace.Valid || r.namespace.String != result.NamespaceID || r.kind != "volume" || !r.release.Valid || r.release.String != c.Payload.ReleaseSHA256 || r.generation != generation || r.epoch != c.ControllerEpoch || r.fence != stored.fence || r.writer != writer || r.desired != "present" || r.observed != "unknown" || r.ownership != dataOwnership(c, id) || r.revision != 1 || r.observedMS.Valid || r.created < 0 || r.created > now || r.created != r.updated {
+		return zero, ErrDataReservationConflict
+	}
+	result.ProjectID, result.Replayed = id, true
+	result.OwnershipSHA256 = dataOwnership(c, id)
 	return result, nil
 }
