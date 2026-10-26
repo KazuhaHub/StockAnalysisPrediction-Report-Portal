@@ -121,6 +121,10 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 		return err
 	}
 	expected := platformInstallProjection{Format: p.Format, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: append([]string{}, parsed.Manifest.Capabilities.Optional...), DataQuotaBytes: 256 << 20}
+	if err := validatePlatformInstallAudience(e, p.Audience, now); err != nil {
+		return err
+	}
+	expected.Audience = p.Audience
 	slices.Sort(expected.DeclinedCapabilities)
 	expectedRaw, _ := json.Marshal(expected)
 	if string(expectedRaw) != raw {

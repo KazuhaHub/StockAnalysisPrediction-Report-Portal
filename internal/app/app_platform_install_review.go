@@ -17,18 +17,19 @@ var errAppPlatformInstallUnavailable = errors.New("application installation requ
 const platformDevelopmentAPI = "2.0.0-dev.1"
 
 type platformInstallProjection struct {
-	Format               string   `json:"format"`
-	AppID                string   `json:"app_id"`
-	PublisherID          string   `json:"publisher_id"`
-	ReleaseSHA256        string   `json:"release_sha256"`
-	TrustRevision        int64    `json:"trust_revision"`
-	KeyRevision          int64    `json:"key_revision"`
-	KeyID                string   `json:"key_id"`
-	ControllerEpoch      string   `json:"controller_epoch"`
-	ActorAuthority       string   `json:"actor_authority"`
-	PlatformAPI          string   `json:"platform_api"`
-	DeclinedCapabilities []string `json:"declined_capabilities"`
-	DataQuotaBytes       int64    `json:"data_quota_bytes"`
+	Format               string                    `json:"format"`
+	AppID                string                    `json:"app_id"`
+	PublisherID          string                    `json:"publisher_id"`
+	ReleaseSHA256        string                    `json:"release_sha256"`
+	TrustRevision        int64                     `json:"trust_revision"`
+	KeyRevision          int64                     `json:"key_revision"`
+	KeyID                string                    `json:"key_id"`
+	ControllerEpoch      string                    `json:"controller_epoch"`
+	ActorAuthority       string                    `json:"actor_authority"`
+	PlatformAPI          string                    `json:"platform_api"`
+	DeclinedCapabilities []string                  `json:"declined_capabilities"`
+	DataQuotaBytes       int64                     `json:"data_quota_bytes"`
+	Audience             []platformInstallAudience `json:"audience,omitempty"`
 }
 
 // Only an internal development protocol is assigned here; this is not Portal's
@@ -79,9 +80,21 @@ func platformLoadInstallProjection(e migExec, release platformStagedRelease, act
 }
 
 func (s *Server) createPlatformInstallReview(session platformActorSession, release string, trustRevision int64) (platformRemovalReview, error) {
+	return s.createPlatformInstallAudienceReview(session, release, trustRevision, nil)
+}
+func (s *Server) createPlatformInstallAudienceReview(session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget) (platformRemovalReview, error) {
+	if len(targets) > maxPlatformInstallAudience {
+		return platformRemovalReview{}, errAppPlatformPlanChanged
+	}
+	targets = append([]platformAudienceTarget(nil), targets...)
+
 	var result platformRemovalReview
 	err := s.withPlatformStagedRelease(session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
 		projection, err := platformLoadInstallProjection(e, verified, actor, control)
+		if err != nil {
+			return err
+		}
+		projection.Audience, err = resolvePlatformInstallAudience(e, targets, control.nowMS)
 		if err != nil {
 			return err
 		}
@@ -92,9 +105,15 @@ func (s *Server) createPlatformInstallReview(session platformActorSession, relea
 		if control.nowMS > math.MaxInt64-900000 {
 			return errAppPlatformPlanChanged
 		}
+		if err := validatePlatformInstallAudience(e, projection.Audience, control.nowMS); err != nil {
+			return err
+		}
 		raw, err := json.Marshal(projection)
 		if err != nil {
 			return err
+		}
+		if len(raw) > 65536 {
+			return errAppPlatformPlanChanged
 		}
 		id, err := platformNewUUID()
 		if err != nil {
@@ -176,6 +195,14 @@ func (s *Server) consumePlatformInstallReview(session platformActorSession, plan
 		if err != nil {
 			return err
 		}
+		var storedProjection platformInstallProjection
+		if json.Unmarshal([]byte(raw), &storedProjection) != nil {
+			return errAppPlatformPlanChanged
+		}
+		if err := validatePlatformInstallAudience(e, storedProjection.Audience, control.nowMS); err != nil {
+			return err
+		}
+		projection.Audience = storedProjection.Audience
 		current, err := json.Marshal(projection)
 		if err != nil {
 			return err
@@ -226,6 +253,9 @@ func (s *Server) consumePlatformInstallReview(session platformActorSession, plan
 		}
 		final, err := platformRefreshActor(e, session, actor, control)
 		if err != nil {
+			return err
+		}
+		if err := validatePlatformInstallAudience(e, projection.Audience, final.nowMS); err != nil {
 			return err
 		}
 		if expires <= final.nowMS {

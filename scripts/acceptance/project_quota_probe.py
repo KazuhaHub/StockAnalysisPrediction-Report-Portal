@@ -252,6 +252,7 @@ def main(args):
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
                     report["native_portal_install_data_stage"] = True
                     report["native_portal_data_stage_not_activation"] = True
+                    report["native_portal_static_activation_and_launch"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)

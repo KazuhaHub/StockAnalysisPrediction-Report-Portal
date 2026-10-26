@@ -211,6 +211,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_ACTIVATE")) {
 		t.Fatal("child did not prove stage commit", output.String())
 	}
+	if !bytes.Contains(output.Bytes(), []byte("STATIC_ACTIVATION_READY")) {
+		t.Fatal("child did not prove activation/launch", output.String())
+	}
 	observed, err := root.Inspect(ctx, pin, reservation.NamespaceID, reservation.ProjectID)
 	if err != nil || strconv.FormatUint(observed.Inode, 10) != receipt.NamespaceInode || observed.ByteLimit != 256<<20 || observed.InodeLimit != 65536 {
 		t.Fatal("Portal stage lost native resource", err)
@@ -262,7 +265,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1,revision=2,control_revision=?,verification_key_fingerprint=?,sealed_control_key=? WHERE id=?`, enrollment.ControlRevision, enrollment.Fingerprint, sealPrefix+ciphertext, runtime.id)
-	plan, err := s.createPlatformInstallReview(session, release.sha256, 1)
+	plan, err := s.createPlatformInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,4 +307,23 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("data stage activated app or created backend")
 	}
 	t.Log("DATA_STAGE_ACTIVATE")
+	activated, err := s.activatePlatformStaticInstall(context.Background(), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activated.snapshot.Stage != appplatform.StageComplete || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations`) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE completed_ms IS NOT NULL AND lease_owner IS NULL AND lease_until_ms IS NULL`) != 1 {
+		t.Fatal("static activation did not finish operation")
+	}
+	access, err := s.inspectPlatformLaunchAccess(session, lease.installationID)
+	if err != nil {
+		t.Fatal("reviewed audience cannot launch", err)
+	}
+	document, err := s.readPlatformLaunchDocumentContext(context.Background(), session, access)
+	if err != nil || len(document.Content) == 0 || document.DocumentSHA256 == "" {
+		t.Fatal("activated document cannot be served", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE principal_type='user' AND username=?`, session.username) != 1 {
+		t.Fatal("activation did not apply exact audience")
+	}
+	t.Log("STATIC_ACTIVATION_READY")
 }
