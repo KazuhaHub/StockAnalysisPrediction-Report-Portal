@@ -564,3 +564,21 @@ Scheduler predecessor
 804fdc2a46ca095677c711f43dddbf7b2c173235 passed main 40327545213 and native 40327545246.
 Market HTTP/UI, provider-backed data/managed lifecycle and the complete platform
 remain open.
+
+## Process-owned frontend installation service
+
+[Frontend service lifecycle](58-frontend-install-service-lifecycle.md) wires the
+portable no-data scheduler into Portal startup and bounded shutdown. One owner
+per Server supplies a random worker identity, concurrent start-once/stop/join
+and a fixed-message panic boundary. Startup does not initialize missing platform
+control, unpause a restored controller, claim native-data jobs, create native
+resources or change deployment configuration. Focused service tests exercise
+actual autonomous installation/launch, repeated concurrent ownership and stop,
+fresh/paused/native-only database immutability, new admission after idle and panic
+containment. Local full Go/PostgreSQL tests passed (application package 155.990 s),
+as did focused SQLite/PostgreSQL frontend race checks (4.882 s), vet, staticcheck
+and Linux amd64 compilation.
+Administrator plan/commit/
+progress HTTP/UI, remote marketplace publication, managed lifecycle and the
+complete platform remain open. This source work is not production deployment
+approval.

@@ -22,8 +22,8 @@ type platformInstallWorkerStatus struct {
 	attempts          int
 }
 
-// One explicitly owned service instance. No constructor or production startup
-// implicitly starts it; endpoint/worker identity come only from trusted bootstrap.
+// One explicitly owned service instance. Construction does not start it;
+// endpoint/worker identity come only from trusted bootstrap.
 type platformInstallScheduler struct {
 	server   *Server
 	endpoint platformRuntimeEndpoint
@@ -136,8 +136,8 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	return nil
 }
 
-// serve is opt-in infrastructure, never started by existing Portal startup.
-// The no-data profile is portable; native execution requires the exact Linux UID.
+// Portal startup owns the portable no-data service separately. Native execution
+// still requires explicit bootstrap and the exact Linux UID.
 // It does not enroll a runner, create OS identities, release uncertain leases or
 // reclaim data effects. Cancellation waits for its current context-bound attempt.
 func (w *platformInstallScheduler) serve(ctx context.Context) error {
