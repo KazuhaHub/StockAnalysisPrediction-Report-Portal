@@ -757,3 +757,6 @@ volumes; its actual CI result must still be checked. The image-inspection
 predecessor 446f8c369531e82121a7239579fdcbfffe8ebbe8 passed real daemon workflow
 40405086955 and full main CI 40405087018. No production configuration, schema,
 credential, Status migration, SDK freeze or runtime-ready claim is included.
+The final private-plan check additionally validates canonical policy bytes and
+binds owner fields to labels before all adapter actions. Driver race regression
+passed in 1.452 s after this change; vet, staticcheck and Linux compilation passed.

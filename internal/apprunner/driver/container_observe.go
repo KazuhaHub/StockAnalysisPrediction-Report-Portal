@@ -42,7 +42,7 @@ type containerForbiddenOptions struct {
 // A result here is only a fresh observation of an exact native resource. It is
 // not a grant to start it or acknowledgement of a journalled effect.
 func inspectCandidateContainerHTTP(ctx context.Context, client *http.Client, nativeID string, plan containerPlan) (string, error) {
-	if !containerSHA.MatchString(nativeID) || !validContainerOwner(plan.owner) || plan.bodySHA != containerHash(plan.body) {
+	if !containerSHA.MatchString(nativeID) || !validContainerPlan(plan) {
 		return "", ErrInvalidResponse
 	}
 	var expected containerCreate

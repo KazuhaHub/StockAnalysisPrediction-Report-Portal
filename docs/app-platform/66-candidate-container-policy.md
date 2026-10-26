@@ -118,3 +118,9 @@ physical root/socket/quota checks; then start/readiness/stop, automatic backend
 registration and active-writer transition. Connect these to the managed install
 worker and broker. Keep production enrollment, real credentials, Status migration,
 final SDK freeze and D5/D6 acceptance separate.
+
+Local validation passed driver race tests (1.445 seconds), vet, staticcheck and
+Linux amd64 test compilation. A subsequent integrity check also binds the private
+plan's owner fields to its canonical label/policy bytes before create, inspect or
+remove; its final driver race regression passed in 1.452 seconds, followed by
+vet, staticcheck and Linux compilation. Native CI remains a separate requirement.

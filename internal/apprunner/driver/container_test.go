@@ -135,7 +135,7 @@ func TestContainerPlanAndCreateRejectChangedInputs(t *testing.T) {
 			}
 		})
 	}
-	for _, mutate := range []func(*containerPlan){func(p *containerPlan) { p.body = append(p.body, ' ') }, func(p *containerPlan) { p.name = "foreign" }, func(p *containerPlan) { p.owner.InstallationID = "foreign" }} {
+	for _, mutate := range []func(*containerPlan){func(p *containerPlan) { p.body = append(p.body, ' ') }, func(p *containerPlan) { p.name = "foreign" }, func(p *containerPlan) { p.owner.InstallationID = "90000000-0000-4000-8000-000000000000" }} {
 		changed := containerFixture(t)
 		mutate(&changed)
 		calls := 0

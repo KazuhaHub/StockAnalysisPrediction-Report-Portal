@@ -114,6 +114,29 @@ func ownerContainerLabels(o containerOwner) map[string]string {
 	}
 }
 
+func validContainerPlan(plan containerPlan) bool {
+	if !validContainerOwner(plan.owner) || plan.name != "portal-app-"+plan.owner.ResourceID || len(plan.body) == 0 || len(plan.body) > 32768 || plan.bodySHA != containerHash(plan.body) {
+		return false
+	}
+	var request containerCreate
+	if json.Unmarshal(plan.body, &request) != nil {
+		return false
+	}
+	for name, value := range ownerContainerLabels(plan.owner) {
+		if request.Labels[name] != value {
+			return false
+		}
+	}
+	canonical, err := json.Marshal(request)
+	if err != nil || !bytes.Equal(canonical, plan.body) {
+		return false
+	}
+	policySHA := request.Labels[containerLabelPrefix+"policy-sha256"]
+	delete(request.Labels, containerLabelPrefix+"policy-sha256")
+	policy, err := json.Marshal(request)
+	return err == nil && policySHA == containerHash(policy)
+}
+
 // planCandidateContainer fixes the Docker create policy from a parsed descriptor
 // and inspected native image. All mount sources derive from infrastructure roots
 // and platform IDs, never manifest paths. Candidate data is read-only; only its
@@ -185,7 +208,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 // authority and pinned native mount/quota identities. A lost response never
 // retries or adopts a same-named container. No start/remove action is implicit.
 func createCandidateContainerHTTP(ctx context.Context, client *http.Client, plan containerPlan) (string, error) {
-	if !validContainerOwner(plan.owner) || plan.name != "portal-app-"+plan.owner.ResourceID || len(plan.body) == 0 || len(plan.body) > 32768 || plan.bodySHA != containerHash(plan.body) {
+	if !validContainerPlan(plan) {
 		return "", ErrInvalidResponse
 	}
 	if err := ctx.Err(); err != nil {
