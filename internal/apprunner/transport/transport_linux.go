@@ -238,7 +238,18 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	header := make([]byte, 12)
-	if _, err := io.ReadFull(conn, header); err != nil || string(header[:8]) != requestMagic {
+	if _, err := io.ReadFull(conn, header[:8]); err != nil {
+		return
+	}
+	switch string(header[:8]) {
+	case enrollmentQueryMagic:
+		s.handleEnrollment(ctx, conn)
+		return
+	case requestMagic:
+	default:
+		return
+	}
+	if _, err := io.ReadFull(conn, header[8:]); err != nil {
 		return
 	}
 	size := binary.BigEndian.Uint32(header[8:])
@@ -293,26 +304,13 @@ func exchangeProfile(parent context.Context, path string, profile endpointProfil
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 {
 		return ErrRefused
 	}
-	before, err := socketInfo(path, profile)
-	if err != nil {
-		return ErrUnsafeEndpoint
-	}
 	ctx, cancel := context.WithTimeout(parent, sessionTimeout)
 	defer cancel()
-	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	conn, err := connectEndpoint(ctx, path, profile)
 	if err != nil {
-		return ErrRefused
-	}
-	conn, ok := connection.(*net.UnixConn)
-	if !ok {
-		connection.Close()
-		return ErrUnsafeEndpoint
+		return err
 	}
 	defer conn.Close()
-	after, err := socketInfo(path, profile)
-	if err != nil || !os.SameFile(before, after) || !peerUID(conn, profile.owner) {
-		return ErrUnsafeEndpoint
-	}
 	deadline, _ := ctx.Deadline()
 	conn.SetDeadline(deadline)
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -337,4 +335,26 @@ func exchangeProfile(parent context.Context, path string, profile endpointProfil
 		return ErrRefused
 	}
 	return nil
+}
+
+func connectEndpoint(ctx context.Context, path string, profile endpointProfile) (*net.UnixConn, error) {
+	before, err := socketInfo(path, profile)
+	if err != nil {
+		return nil, ErrUnsafeEndpoint
+	}
+	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+	if err != nil {
+		return nil, ErrRefused
+	}
+	conn, ok := connection.(*net.UnixConn)
+	if !ok {
+		connection.Close()
+		return nil, ErrUnsafeEndpoint
+	}
+	after, err := socketInfo(path, profile)
+	if err != nil || !os.SameFile(before, after) || !peerUID(conn, profile.owner) {
+		conn.Close()
+		return nil, ErrUnsafeEndpoint
+	}
+	return conn, nil
 }
