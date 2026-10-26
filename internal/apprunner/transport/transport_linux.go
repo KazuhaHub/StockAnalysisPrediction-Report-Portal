@@ -33,8 +33,8 @@ type admitter interface {
 	AdmitControlCommand(context.Context, []byte, []byte) (journal.CommandAdmission, error)
 }
 
-// Server owns one private, same-OS-user development endpoint. A separate production
-// controller identity and its directory/group provisioning are not implemented.
+// Server owns one explicitly configured local endpoint. Separate controller
+// identity provisioning must be performed outside this service.
 // UID authentication supplements signatures; neither makes app processes trusted.
 type Server struct {
 	started       atomic.Bool
@@ -46,7 +46,25 @@ type Server struct {
 	journal       admitter
 }
 
-func safeParent(path string, owner uint32) bool {
+type endpointProfile struct {
+	owner      uint32
+	group      uint32
+	parentMode os.FileMode
+	socketMode os.FileMode
+	shared     bool
+}
+
+func privateProfile(owner uint32) endpointProfile {
+	return endpointProfile{owner: owner, parentMode: 0700, socketMode: 0600}
+}
+func controllerProfile(group uint32) endpointProfile {
+	return endpointProfile{owner: 0, group: group, parentMode: 0750, socketMode: 0660, shared: true}
+}
+func validController(uid, gid uint32) bool {
+	return uid != 0 && gid != 0 && uid != ^uint32(0) && gid != ^uint32(0)
+}
+
+func safeParent(path string, profile endpointProfile) bool {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 107 || strings.ContainsAny(path, "\x00\r\n") {
 		return false
 	}
@@ -65,10 +83,10 @@ func safeParent(path string, owner uint32) bool {
 			return false
 		}
 		if dir == parent {
-			if st.Uid != owner || info.Mode().Perm() != 0700 {
+			if st.Uid != profile.owner || info.Mode().Perm() != profile.parentMode || (profile.shared && st.Gid != profile.group) {
 				return false
 			}
-		} else if st.Uid != 0 && st.Uid != owner {
+		} else if st.Uid != 0 && st.Uid != profile.owner {
 			return false
 		}
 		if info.Mode().Perm()&0022 != 0 && !(st.Uid == 0 && info.Mode()&os.ModeSticky != 0) {
@@ -79,8 +97,8 @@ func safeParent(path string, owner uint32) bool {
 		}
 	}
 }
-func socketInfo(path string, owner uint32) (os.FileInfo, error) {
-	if !safeParent(path, owner) {
+func socketInfo(path string, profile endpointProfile) (os.FileInfo, error) {
+	if !safeParent(path, profile) {
 		return nil, ErrUnsafeEndpoint
 	}
 	info, err := os.Lstat(path)
@@ -88,7 +106,7 @@ func socketInfo(path string, owner uint32) (os.FileInfo, error) {
 		return nil, ErrUnsafeEndpoint
 	}
 	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0600 || st.Uid != owner || st.Nlink != 1 {
+	if !ok || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != profile.socketMode || st.Uid != profile.owner || (profile.shared && st.Gid != profile.group) || st.Nlink != 1 {
 		return nil, ErrUnsafeEndpoint
 	}
 	return info, nil
@@ -109,7 +127,22 @@ func peerUID(conn *net.UnixConn, uid uint32) bool {
 // Listen refuses pre-existing paths and never changes a parent directory, process
 // umask or trust record. The 0700 parent protects creation before socket chmod.
 func Listen(path string, controllerUID uint32, store admitter) (*Server, error) {
-	if store == nil || !safeParent(path, uint32(os.Geteuid())) {
+	return listenProfile(path, controllerUID, store, privateProfile(uint32(os.Geteuid())))
+}
+
+// ListenController requires a root runner, a non-root controller UID and dedicated
+// non-root endpoint GID. The existing parent must be root:GID 0750; only the socket
+// created here is set to root:GID 0660. Group membership is never authentication:
+// every connection must also match controllerUID and carry a valid signed intent.
+// No user/group/directory is created and no production startup hook calls this.
+func ListenController(path string, controllerUID, controllerGID uint32, store admitter) (*Server, error) {
+	if os.Geteuid() != 0 || !validController(controllerUID, controllerGID) {
+		return nil, ErrUnsafeEndpoint
+	}
+	return listenProfile(path, controllerUID, store, controllerProfile(controllerGID))
+}
+func listenProfile(path string, controllerUID uint32, store admitter, profile endpointProfile) (*Server, error) {
+	if store == nil || !safeParent(path, profile) {
 		return nil, ErrUnsafeEndpoint
 	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -133,11 +166,17 @@ func Listen(path string, controllerUID uint32, store admitter) (*Server, error) 
 		cleanup()
 		return nil, ErrUnsafeEndpoint
 	}
-	if err = os.Chmod(path, 0600); err != nil {
+	if profile.shared {
+		if err = os.Chown(path, 0, int(profile.group)); err != nil {
+			cleanup()
+			return nil, ErrUnsafeEndpoint
+		}
+	}
+	if err = os.Chmod(path, profile.socketMode); err != nil {
 		cleanup()
 		return nil, ErrUnsafeEndpoint
 	}
-	after, err := socketInfo(path, uint32(os.Geteuid()))
+	after, err := socketInfo(path, profile)
 	if err != nil || !os.SameFile(info, after) {
 		cleanup()
 		return nil, ErrUnsafeEndpoint
@@ -238,10 +277,23 @@ func requestFrame(raw, sig []byte) []byte {
 // follow a committed intent; callers must reconcile stable identity, not dispatch
 // or blindly retry. The response is local and not an independently signed receipt.
 func Exchange(parent context.Context, path string, runnerUID uint32, raw, sig []byte) error {
+	return exchangeProfile(parent, path, privateProfile(runnerUID), raw, sig)
+}
+
+// ExchangeController pins a root runner endpoint with the configured dedicated
+// GID and requires the caller to run as the configured non-root controller UID.
+// A matching path owner/group never replaces the server SO_PEERCRED check.
+func ExchangeController(parent context.Context, path string, controllerUID, controllerGID uint32, raw, sig []byte) error {
+	if !validController(controllerUID, controllerGID) || uint32(os.Geteuid()) != controllerUID {
+		return ErrUnsafeEndpoint
+	}
+	return exchangeProfile(parent, path, controllerProfile(controllerGID), raw, sig)
+}
+func exchangeProfile(parent context.Context, path string, profile endpointProfile, raw, sig []byte) error {
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 {
 		return ErrRefused
 	}
-	before, err := socketInfo(path, runnerUID)
+	before, err := socketInfo(path, profile)
 	if err != nil {
 		return ErrUnsafeEndpoint
 	}
@@ -257,8 +309,8 @@ func Exchange(parent context.Context, path string, runnerUID uint32, raw, sig []
 		return ErrUnsafeEndpoint
 	}
 	defer conn.Close()
-	after, err := socketInfo(path, runnerUID)
-	if err != nil || !os.SameFile(before, after) || !peerUID(conn, runnerUID) {
+	after, err := socketInfo(path, profile)
+	if err != nil || !os.SameFile(before, after) || !peerUID(conn, profile.owner) {
 		return ErrUnsafeEndpoint
 	}
 	deadline, _ := ctx.Deadline()

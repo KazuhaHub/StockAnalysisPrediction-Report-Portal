@@ -43,3 +43,19 @@ jobs:
           export PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket"
           go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
           go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
+
+      - name: Verify distinct controller and runner identities in isolation
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          identity_binary=$(mktemp "$RUNNER_TEMP/runner-identity.XXXXXXXX")
+          trap 'rm -f "$identity_binary"' EXIT
+          go test -p 2 -race -c -o "$identity_binary" ./internal/apprunner/transport
+          chmod 0500 "$identity_binary"
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_IDENTITY_ACCEPTANCE=1 "$identity_binary" -test.v -test.timeout=90s -test.run='^TestControllerIdentityAcceptance$'
