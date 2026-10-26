@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/journal/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/acceptance/**'
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/journal/**'
       - 'go.mod'
       - 'go.sum'
       - 'scripts/acceptance/**'
@@ -38,6 +40,7 @@ jobs:
       - name: Build native data and independent UAPI probes
         run: |
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
           cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
           "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
       - name: Check refusal behavior without privileges
@@ -46,7 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" | tee project-quota-evidence.json
       - name: Preserve redacted enforcement evidence
         uses: actions/upload-artifact@v7
         with:

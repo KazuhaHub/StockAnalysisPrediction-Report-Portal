@@ -73,12 +73,17 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                 ["--native-binary", "/tmp/native"],
                 ["--disposable-github-worker", "--native-binary", "relative", "--abi-json", "/tmp/abi.json"],
                 ["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "relative"],
+                ["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json", "--journal-binary", "relative"],
+                ["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json", "--unknown", "/tmp/journal"],
             ]:
                 with self.assertRaises(RuntimeError):
                     probe.main(args)
             with patch.object(probe.sys, "platform", "linux"), patch.object(probe.os, "geteuid", return_value=0), patch.dict(probe.os.environ, {}, clear=True):
                 with self.assertRaisesRegex(RuntimeError, "outside a disposable"):
                     probe.main(["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json"])
+            with patch.object(probe.sys, "platform", "linux"), patch.object(probe.os, "geteuid", return_value=0), patch.dict(probe.os.environ, {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "outside a disposable"):
+                    probe.main(["--disposable-github-worker", "--native-binary", "/tmp/native", "--abi-json", "/tmp/abi.json", "--journal-binary", "/tmp/journal"])
             command.assert_not_called()
             temporary.assert_not_called()
 

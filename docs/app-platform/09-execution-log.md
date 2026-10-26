@@ -384,3 +384,23 @@ remount, enforcement and cleanup. The execution-claim
 predecessor passed main run 40294014358 and runner run 40294014396. Durable root
 binding, concrete executor/receipts, reconciliation and full installation remain
 open; no production or server beta configuration changes.
+
+
+## Native data execution and receipts
+
+[Concrete native execution](50-native-data-execution-receipts.md) joins signed
+admission/reservation/one-shot claims to the pinned XFS provider. Physical root
+history is committed before mutation; a typed native receipt and resource
+observation settle atomically afterward. Partial native or persistence failure
+retains unknown state and cannot reconstruct/replay the live handle. The
+extended disposable workflow exercises actual journal/native preparation,
+alternate-root refusal, failure after physical creation and remount history.
+Source eb3f52d64b291def1de82b68c853bae2dbf1f145 passed native run
+40298739199; the downloaded report confirms physical receipts, root binding,
+uncertain settlement, remount history and changed-UUID refusal with cleanup.
+Full local Go tests and full journal race checks passed; subsequent clock-guard
+coverage passes targeted race tests. Main/runner CI have independent status.
+Root-identity predecessor source
+8198a047cb6d50899da6ea94789be5155d2b9706 passed main 40297033484, runner
+40297033450 and native 40297033502. Recovery, controller receipt delivery, Portal
+stage completion, writer admission and the complete installer remain open.
