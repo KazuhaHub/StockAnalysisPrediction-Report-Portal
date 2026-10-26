@@ -109,7 +109,14 @@ GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go vet ./internal/apprunner/journa
 python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
 ```
 
-Inspect this PR's exact source CI and downloaded native report before claiming
-these integration cases pass. Cross-compilation is not native arm64 evidence.
+Source `1f4eb273f4ae821bdb7763b6f202980766bc5acf` passed
+[native run 40300992906](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40300992906).
+Its downloaded report confirms real original-envelope expiry recovery, native
+identity retention, missing/partial refusal, changed-UUID refusal and owned
+cleanup. The native Go assertions include concurrent single settlement. Full
+local Go tests, journal race tests (67.905 seconds), vet/staticcheck, amd64/arm64
+test cross-compilation and twelve Python refusal tests pass. A negative overlay
+removing fresh-issue authorization fails at the old-execution-envelope assertion.
+Main/runner CI have independent status. Cross-compilation is not native arm64 evidence.
 Production privileges, real credentials, Status migration, server beta settings,
 controller receipt delivery and Portal stage completion remain outside this slice.
