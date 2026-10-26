@@ -368,3 +368,19 @@ callback tests, not a native receipt/recovery/activation implementation. The
 reservation predecessor passed main run 40289609568 and runner run 40289609569.
 Physical root binding, native execution integration, settlement/reconciliation,
 writer admission and complete installation remain open.
+
+
+## Physical data-root identity
+
+[Native root identity](49-data-root-identity.md) makes the filesystem UUID and
+root inode mandatory expectations for native prepare/inspect. Pinned-FD checks
+also revalidate private permissions, mount options and project enforcement.
+The disposable probe independently supplies the pin, measures the geometry ABI,
+checks path replacement and remount, and changes only its owned image UUID to
+exercise old-pin refusal. Local Go/race/vet, cross-compilation and twelve Python
+refusal tests pass. Source `0473cecac83120b3e402e196434a2d4b96e4fe73` passed
+native run 40296737513; its downloaded report confirms changed-UUID refusal,
+remount, enforcement and cleanup. The execution-claim
+predecessor passed main run 40294014358 and runner run 40294014396. Durable root
+binding, concrete executor/receipts, reconciliation and full installation remain
+open; no production or server beta configuration changes.

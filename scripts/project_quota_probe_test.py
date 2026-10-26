@@ -117,6 +117,23 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 probe.discover_owned_loop(Path("/tmp/owned-image"))
 
+    def test_uuid_replacement_refuses_foreign_loop_before_mutation(self):
+        with patch.object(probe, "require_loop_owner", side_effect=RuntimeError("foreign loop")), patch.object(probe, "command") as command:
+            with self.assertRaisesRegex(RuntimeError, "foreign loop"):
+                probe.replace_owned_uuid(Path("/tmp/owned/mount"), "/dev/loop7", Path("/tmp/owned/image"))
+            command.assert_not_called()
+
+    def test_uuid_replacement_requires_confirmed_unmount_and_rechecks_loop(self):
+        with patch.object(probe, "require_loop_owner") as owner, patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=True), patch.object(probe, "command") as command:
+            with self.assertRaisesRegex(RuntimeError, "remained mounted"):
+                probe.replace_owned_uuid(Path("/tmp/owned/mount"), "/dev/loop7", Path("/tmp/owned/image"))
+            command.assert_called_once_with("umount", "/tmp/owned/mount")
+            self.assertEqual(owner.call_count, 1)
+        with patch.object(probe, "require_loop_owner", side_effect=[None, RuntimeError("substituted loop")]), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command") as command:
+            with self.assertRaisesRegex(RuntimeError, "substituted loop"):
+                probe.replace_owned_uuid(Path("/tmp/owned/mount"), "/dev/loop7", Path("/tmp/owned/image"))
+            command.assert_called_once_with("umount", "/tmp/owned/mount")
+
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):
         with tempfile.TemporaryDirectory() as folder:
             with self.assertRaisesRegex(RuntimeError, "without quota denial"):

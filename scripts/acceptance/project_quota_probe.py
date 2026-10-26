@@ -33,7 +33,7 @@ def require_disposable(args):
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("probe refuses hosts outside a disposable GitHub-hosted worker")
-    for tool in ("losetup", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "setpriv", "python3"):
+    for tool in ("losetup", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "xfs_admin", "blkid", "setpriv", "python3"):
         if not shutil.which(tool, path=PATH):
             raise RuntimeError("missing explicit acceptance tool")
 
@@ -79,6 +79,20 @@ def discover_owned_loop(image):
     return loop
 
 
+def replace_owned_uuid(mountpoint, loop, image):
+    # Only the newly created image can be mutated, and only while unmounted.
+    require_loop_owner(loop, image)
+    require_mount_owner(mountpoint, loop)
+    command("umount", str(mountpoint))
+    if owned_mount_present(mountpoint, loop):
+        raise RuntimeError("owned filesystem remained mounted before UUID replacement")
+    require_loop_owner(loop, image)
+    command("xfs_admin", "-U", "generate", loop)
+    require_loop_owner(loop, image)
+    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
+    require_mount_owner(mountpoint, loop)
+
+
 def main(args):
     require_disposable(args)
     root = Path(tempfile.mkdtemp(prefix="portal-quota-acceptance-", dir="/tmp"))
@@ -119,11 +133,12 @@ def main(args):
         if len(args) == 5:
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
-            native_env = dict(ENV, GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
+            native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_data_prepared"] = True
+            report["native_go_root_identity_checked"] = True
         # The synthetic UID must not depend on traversing the runner's private
         # checkout/home. Keep the reviewed workload in the root-owned fixture.
         workload = root / "workload.py"
@@ -193,6 +208,16 @@ def main(args):
         run_workload("relaxed-inodes", folders["inodes"])
         run_workload("released-unlinked", folders["unlinked"])
         report["same_project_limit_controls"] = True
+        if native_root is not None:
+            replace_owned_uuid(mountpoint, loop, image)
+            changed_uuid = command("blkid", "-p", "-s", "UUID", "-o", "value", loop)
+            if changed_uuid == native_env["APP_DATA_NATIVE_UUID"]:
+                raise RuntimeError("owned UUID replacement did not take effect")
+            native_env["APP_DATA_NATIVE_PHASE"] = "replaced"
+            native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
+                raise RuntimeError("native data accepted replaced filesystem identity: " + (native.stdout+native.stderr)[-4096:])
+            report["native_go_rejects_changed_filesystem_uuid"] = True
     finally:
         # Never unmount, detach or delete a resource whose ownership changed.
         # On cleanup failure preserve it for this ephemeral worker's teardown.

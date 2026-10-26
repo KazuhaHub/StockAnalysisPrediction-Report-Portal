@@ -13,3 +13,19 @@ func TestRequestBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestRootIdentityBounds(t *testing.T) {
+	good := RootIdentity{FilesystemUUID: "01234567-89ab-cdef-0123-456789abcdef", Inode: 1}
+	if !good.valid() {
+		t.Fatal("valid root identity refused")
+	}
+	for _, bad := range []RootIdentity{
+		{}, {FilesystemUUID: good.FilesystemUUID}, {FilesystemUUID: "00000000-0000-0000-0000-000000000000", Inode: 1},
+		{FilesystemUUID: "01234567-89AB-cdef-0123-456789abcdef", Inode: 1},
+		{FilesystemUUID: "../root", Inode: 1},
+	} {
+		if bad.valid() {
+			t.Fatal("invalid physical root identity accepted", bad)
+		}
+	}
+}
