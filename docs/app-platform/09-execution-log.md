@@ -666,3 +666,24 @@ amd64 compilation passed. Market-fetch predecessor
 574473bf41f2ed12166530b5c506807dd8009289 passed main 40393799973 and native
 regression 40393799881. Publisher onboarding and signed publication/acceptance hosting,
 managed/full lifecycle and complete platform release remain open.
+
+## Publisher trust management HTTP
+
+[Publisher management](63-publisher-management-http.md) exposes explicit empty
+control initialization, public trust inspection and typed register/policy/add-key/
+revoke-key operations through current administrator/session/enrollment/origin
+boundaries. Revisions, exact nested inputs and final authority checks preserve
+the existing trust repository guarantees. Mutation/backoff now follow request
+context. Fresh reads create no keyring/control identity; initialization refuses
+partial/paused markers and any retained platform-table history, including a
+standalone artifact. HTTP tests cover rotation/revocation, stale policy, fresh/
+paused/orphaned state and refused unauthorized/malformed requests; blocked
+PostgreSQL read/write/initialize cancellation is exercised separately. Full local
+Go/PostgreSQL regression passed (application package 162.080 s), as did final
+SQLite/PostgreSQL publisher race checks (19.132 s), vet, staticcheck and Linux
+amd64 compilation. Owned disposable PostgreSQL was stopped after validation.
+Online market UI predecessor
+9840ebbce37194b2b52940233db2b370fcf954e2 passed main CI 40395583598.
+No real trust enrollment, production
+configuration or public API/SDK freeze is included. Trust UI, signed publication,
+managed/full lifecycle and full platform acceptance remain open.
