@@ -2884,5 +2884,9 @@
   "security.recoveryModeHint.contact": "显示找回入口，提示联系管理员，不发送重置邮件。",
   "security.recoveryModeHint.email": "允许用户通过邮件接收密码重置链接。",
   "runDefaults.enabled": "开启",
-  "runDefaults.disabled": "关闭"
+  "runDefaults.disabled": "关闭",
+  "manage.dashboard.viewChartData": "查看图表数据",
+  "manage.dashboard.dataLabel": "项目",
+  "manage.dashboard.dataCount": "数量",
+  "manage.dashboard.dataShare": "占比"
 }

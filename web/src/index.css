@@ -400,10 +400,6 @@ body {
 .rp-dashboard-metrics .ant-statistic-content { margin-top: auto; }
 .rp-dashboard-updated { display: block; margin-top: auto; padding-top: 12px; font-size: 12px; }
 .rp-dashboard-chart { margin: 0; }
-.rp-dashboard-chart svg { display: block; width: 100%; height: 210px; }
-.rp-dashboard-chart svg text { fill: var(--ant-color-text-secondary); font-size: 12px; }
-.rp-dashboard-chart .rp-chart-grid line { stroke: var(--ant-color-border-secondary); stroke-dasharray: 3 4; }
-.rp-dashboard-chart .rp-chart-value { fill: var(--ant-color-text); font-size: 16px; font-weight: 600; }
 .rp-dashboard-chart figcaption { text-align: center; font-size: 12px; }
 .rp-dashboard-card-icon { color: var(--ant-color-primary); }
 .rp-dashboard-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -2240,7 +2236,6 @@ body {
 .rp-dashboard-catalog-card { min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: 8px; padding: 10px; }
 .rp-dashboard-example { margin-bottom: 10px; min-height: 120px; }
 .rp-dashboard-example-label { display: block; font-size: 11px; color: var(--ant-color-text-tertiary); margin-bottom: 8px; }
-.rp-dashboard-example .rp-dashboard-chart svg { height: 130px; }
 .rp-dashboard-example .rp-dashboard-chart figcaption { display: none; }
 .rp-dashboard-example-metrics { display: flex; gap: 20px; padding: 24px 12px; }
 .rp-dashboard-example-metrics > div { display: flex; flex: 1; flex-direction: column; gap: 8px; color: var(--ant-color-text-secondary); }
@@ -2300,10 +2295,7 @@ body {
 .rp-dashboard-chart-card { display: flex; flex-direction: column; }
 .rp-dashboard-chart-card .ant-card-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .rp-dashboard-chart-card .rp-dashboard-chart { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.rp-dashboard-chart-card .rp-dashboard-chart svg { flex: 1; min-height: 210px; }
 .rp-dashboard-chart figcaption { padding-top: 12px; }
-.rp-chart-datum { cursor: crosshair; outline: none; }
-.rp-chart-datum:hover .rp-chart-mark, .rp-chart-datum:focus .rp-chart-mark { filter: brightness(1.12); stroke: var(--ant-color-text); stroke-width: 1.5px; }
 
 .rp-security-recovery-options { display: flex; flex-direction: column; gap: 14px; width: 100%; }
 .rp-security-recovery-options .ant-radio-wrapper { align-items: flex-start; margin-inline-end: 0; white-space: normal; }
@@ -2317,3 +2309,17 @@ body {
 .rp-policy-workspace--collapsed { grid-template-columns: 96px minmax(0, 1fr); gap: 16px; }
 .rp-policy-workspace--collapsed .rp-policy-scope-header > .ant-btn { flex: 0 0 32px; width: 32px; padding-inline: 0; }
 @media (max-width: 767px) { .rp-policy-workspace--collapsed { grid-template-columns: minmax(0, 1fr); } .rp-policy-scope-header { margin-bottom: 0; } }
+
+.rp-dashboard-echart { container-type: inline-size; }
+.rp-dashboard-chart-visual { width: 100%; min-width: 0; }
+.rp-dashboard-echart-host { width: 100%; height: clamp(220px, 46cqw, 340px); }
+.rp-dashboard-echart-host svg { width: auto; height: auto; }
+.rp-dashboard-chart-card .rp-dashboard-echart-host svg { min-height: 0; }
+.rp-dashboard-chart-card .rp-dashboard-echart { gap: 8px; }
+.rp-dashboard-chart-data { font-size: 12px; color: var(--ant-color-text-secondary); }
+
+.rp-dashboard-chart-data-modal table { width: 100%; margin-top: 8px; border-collapse: collapse; }
+.rp-dashboard-chart-data-modal th, .rp-dashboard-chart-data-modal td { padding: 6px 8px; border-bottom: 1px solid var(--ant-color-border-secondary); text-align: start; overflow-wrap: anywhere; }
+.rp-dashboard-chart-data-modal td, .rp-dashboard-chart-data-modal th:not(:first-child) { text-align: end; }
+.rp-dashboard-example .rp-dashboard-echart-host { height: 160px; min-height: 160px !important; }
+.rp-dashboard-example .rp-dashboard-chart-data { display: none; }
