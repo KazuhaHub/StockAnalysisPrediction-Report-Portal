@@ -87,9 +87,11 @@ jobs:
           candidate_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
           test -n "$candidate_image"
           candidate_socket=$(readlink -f /var/run/docker.sock)
-          echo "APP_CANDIDATE_NATIVE_BINARY=$RUNNER_TEMP/app-driver-native.test" >> "$GITHUB_ENV"
-          echo "APP_CANDIDATE_NATIVE_IMAGE=$candidate_image" >> "$GITHUB_ENV"
-          echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket" >> "$GITHUB_ENV"
+          {
+            echo "APP_CANDIDATE_NATIVE_BINARY=$RUNNER_TEMP/app-driver-native.test"
+            echo "APP_CANDIDATE_NATIVE_IMAGE=$candidate_image"
+            echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket"
+          } >> "$GITHUB_ENV"
       - name: Check refusal behavior without privileges
         run: python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
       - name: Enforce quotas only on the newly owned loopback image

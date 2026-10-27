@@ -895,3 +895,11 @@ vet/staticcheck plus amd64/arm64 compilation passed. Persistent preflight/receip
 binding, uncertain-effect recovery, readiness, registration, broker and full
 lifecycle/release remain open. Production/beta settings, credentials, Status and
 SDK freeze are untouched.
+Combined native runtime source 8ae37acf67ec813ab49c1f03926c91de807c8e30 passed
+quota workflow 40455635442, with native_candidate_quota_mount_start_once=true
+and owned_resources_cleaned=true in checked logs. Main workflow lint separately
+reported SC2129 on repeated GITHUB_ENV redirects; grouping the writes fixes that
+script style without changing driver behavior. Native success is not recorded as
+full main-CI, persisted receipt or application-readiness acceptance.
+The corrected workflow passed local actionlint v1.7.12 with ShellCheck, and native
+daemon workflow 40455635317 passed on the functional source as well.

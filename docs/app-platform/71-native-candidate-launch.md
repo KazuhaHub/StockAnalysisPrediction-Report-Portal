@@ -138,3 +138,23 @@ race tests passed in 1.642 seconds. The probe configuration/refusal suite passed
 compilation passed. New concrete quota-plus-process execution is Linux-only and
 still requires its actual disposable workflow result; portable skips are not
 recorded as native evidence.
+
+## Native combined execution evidence
+
+Functional source 8ae37acf67ec813ab49c1f03926c91de807c8e30 passed the actual
+combined quota workflow 40455635442. Its owned XFS report recorded
+native_candidate_quota_mount_start_once=true and owned_resources_cleaned=true.
+That key is set only after the exact native driver test passes, including actual
+quota/root checks, pinned launch, one-shot refusal, owned process cleanup and
+shared-provider close behavior. The existing enforcement, receipt transport and
+filesystem replacement/cleanup phases also passed.
+
+This is a native inert-process observation boundary, not persisted journal
+settlement or complete managed-app readiness. Main CI separately found a shell
+style issue in repeated GITHUB_ENV redirects; the workflow now groups those
+writes without changing the native functional source. That correction requires
+its own workflow lint check; no full main-CI success is inferred from native
+acceptance alone.
+The corrected workflow passed local actionlint v1.7.12, including ShellCheck.
+The same functional source also passed daemon workflow 40455635317. These native
+results are recorded by commit and workflow, independently of pending general CI.
