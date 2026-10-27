@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_data*'
@@ -30,6 +31,7 @@ on:
     branches: [main]
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_data*'
@@ -74,19 +76,27 @@ jobs:
       - name: Build native data and independent UAPI probes
         run: |
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-driver-native.test" ./internal/apprunner/driver
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-data-native.test" ./internal/app
           GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/transport
           cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
           "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
+          docker pull registry.k8s.io/pause:3.10
+          candidate_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
+          test -n "$candidate_image"
+          candidate_socket=$(readlink -f /var/run/docker.sock)
+          echo "APP_CANDIDATE_NATIVE_BINARY=$RUNNER_TEMP/app-driver-native.test" >> "$GITHUB_ENV"
+          echo "APP_CANDIDATE_NATIVE_IMAGE=$candidate_image" >> "$GITHUB_ENV"
+          echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket" >> "$GITHUB_ENV"
       - name: Check refusal behavior without privileges
         run: python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
       - name: Enforce quotas only on the newly owned loopback image
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
       - name: Preserve redacted enforcement evidence
         uses: actions/upload-artifact@v7
         with:

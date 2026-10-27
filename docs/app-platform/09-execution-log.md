@@ -872,3 +872,26 @@ refused running deletion, stopped, refused automatic restart and cleaned up;
 the mount-start refusal case, identity isolation and Portal endpoint checks also
 passed. Main CI was still running. This does not complete native claim receipts,
 application readiness or managed installation acceptance.
+
+## Concrete native candidate runtime and opaque observations
+
+[Native candidate launch](71-native-candidate-launch.md) combines current daemon
+profile, actual shared XFS quota/root inspection, immutable image verification,
+native mount pins and one-shot create/start into an infrastructure-only API.
+Its private live launch and running observation cannot be reconstructed through
+JSON; returned snapshots omit host paths and are historical metadata rather than
+current authority. The shared quota provider remains owned by its caller, with
+runtime close invalidating only owned launch pins. No production route, journal
+settlement, readiness, data-access/writer grant or activation is introduced.
+
+The disposable quota workflow now compiles the driver fixture, uses a public
+fixed repository digest, and runs native preparation/start/owned cleanup on a
+separate private root of its newly owned XFS loopback image. Opt-in, root/host and
+owned loop/mount boundaries remain; partial/relative/floating fixture input
+refuses. Actual native evidence remains pending the current revision's workflow.
+Local runner/CLI race regression passed (journal 69.319 s), final driver race
+passed (1.642 s), Python refusal/configuration tests passed (13 tests), and Linux
+vet/staticcheck plus amd64/arm64 compilation passed. Persistent preflight/receipt
+binding, uncertain-effect recovery, readiness, registration, broker and full
+lifecycle/release remain open. Production/beta settings, credentials, Status and
+SDK freeze are untouched.

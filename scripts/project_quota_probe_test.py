@@ -157,6 +157,18 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "without quota denial"):
                 workload.fill_inodes(Path(folder))
 
+class CandidateProbeConfigurationTests(unittest.TestCase):
+    def test_candidate_fixture_configuration_is_complete_and_closed(self):
+        with patch.dict(probe.os.environ, {}, clear=True):
+            self.assertIsNone(probe.candidate_configuration())
+        good = {"APP_CANDIDATE_NATIVE_BINARY": "/tmp/native-driver", "APP_CANDIDATE_NATIVE_IMAGE": "registry.k8s.io/pause@sha256:" + "a" * 64, "APP_CANDIDATE_DOCKER_SOCKET": "/run/docker.sock"}
+        with patch.dict(probe.os.environ, good, clear=True):
+            self.assertEqual(probe.candidate_configuration(), tuple(good.values()))
+        for changed in [{"APP_CANDIDATE_NATIVE_BINARY": "relative"}, {"APP_CANDIDATE_DOCKER_SOCKET": "relative"}, {"APP_CANDIDATE_NATIVE_IMAGE": "registry.k8s.io/pause:latest"}, {"APP_CANDIDATE_NATIVE_IMAGE": "other.invalid/pause@sha256:" + "a" * 64}, {"APP_CANDIDATE_NATIVE_BINARY": ""}]:
+            with patch.dict(probe.os.environ, dict(good, **changed), clear=True):
+                with self.assertRaisesRegex(RuntimeError, "explicit candidate"):
+                    probe.candidate_configuration()
+
 
 if __name__ == "__main__":
     unittest.main()
