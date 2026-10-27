@@ -24,3 +24,5 @@ func (*CandidateRuntime) PrepareCandidate(context.Context, CandidateLaunchReques
 func (*CandidateRuntime) StartCandidate(context.Context, CandidateLaunch) (CandidateRunningObservation, error) {
 	return CandidateRunningObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) CheckConfiguration(context.Context) error { return ErrUnsupported }

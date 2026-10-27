@@ -966,3 +966,25 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Candidate execution transport, Portal stage settlement, native reconciliation,
   readiness/writer access and managed registration/lifecycle remain. No schema or
   production/beta configuration changed.
+
+### Signed native candidate execution channel
+
+- Added an explicitly enabled root/controller execution endpoint backed only by
+  a configured concrete runtime/shared journal. The request carries exact managed
+  descriptor bytes bound by the current signed release digest; read-only endpoints
+  continue to refuse execution and no CLI listener starts automatically.
+- Added separate execution magic/full-frame binding and bounded 30-second execution
+  sessions after the existing authenticated header budget. Signed authority keeps
+  its own expiry; uncertain effects cannot be retried under replacement identities.
+- Added unit refusals and a real owned cross-UID fixture for actual first launch,
+  same-receipt/native-ID replay, read, unsigned/UID/group refusal, unknown no-create
+  and journal DAC denial. Functional source
+  `cdaebf713498b5137a6a11907054dc1cc8ae4b50` passed quota workflow 40460414731:
+  actual cross-UID start, same-native-ID replay and owned-resource cleanup keys
+  are true; Linux transport race checks passed in 4.418 s. Local full runner/CLI
+  race checks passed (journal 80.599 s), 13 Python tests and Linux vet/staticcheck
+  plus both architecture compilations passed.
+  See [execution channel details](75-candidate-execution-channel.md).
+- Portal stage integration, combined provisioning, native reconciliation, readiness,
+  writer/broker access and managed registration/lifecycle remain. No schema or
+  production/beta configuration changed.

@@ -37,14 +37,15 @@ type admitter interface {
 // identity provisioning must be performed outside this service.
 // UID authentication supplements signatures; neither makes app processes trusted.
 type Server struct {
-	started       atomic.Bool
-	closeOnce     sync.Once
-	listener      *net.UnixListener
-	path          string
-	inode         os.FileInfo
-	controllerUID uint32
-	journal       admitter
-	dataExecution *dataExecutionProvider
+	started            atomic.Bool
+	closeOnce          sync.Once
+	listener           *net.UnixListener
+	path               string
+	inode              os.FileInfo
+	controllerUID      uint32
+	journal            admitter
+	dataExecution      *dataExecutionProvider
+	candidateExecution *candidateExecutionProvider
 }
 
 type endpointProfile struct {
@@ -228,6 +229,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
+	started := time.Now()
 	// Authenticate the kernel peer before reading even the frame header.
 	if !peerUID(conn, s.controllerUID) {
 		return
@@ -243,6 +245,20 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case candidateExecutionQueryMagic:
+		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
+			return
+		}
+		cancel()
+		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(candidateExecutionTimeout))
+		defer executionCancel()
+		executionDeadline, _ := executionCtx.Deadline()
+		conn.SetDeadline(executionDeadline)
+		executionStop := context.AfterFunc(executionCtx, func() { conn.Close() })
+		defer executionStop()
+		s.handleCandidateExecution(executionCtx, conn)
+		return
+
 	case enrollmentQueryMagic:
 		s.handleEnrollment(ctx, conn)
 		return
