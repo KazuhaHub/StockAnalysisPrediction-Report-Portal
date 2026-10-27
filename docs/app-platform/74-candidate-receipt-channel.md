@@ -89,8 +89,17 @@ opening the runner journal directly. No second journal or publisher enrollment i
 created. Only explicit disposable Linux/root CI configuration enables this test.
 
 The script emits `native_candidate_receipt_cross_uid_and_journal_dac: true` only
-if that exact native fixture reports PASS. Extended native channel acceptance is
-pending its current-source workflow; document 73 alone cannot prove it.
+if that exact native fixture reports PASS. Functional source
+`9bc26d7e059e254e22a3cb16241038f8cc23c07b` passed quota workflow
+[40459053491](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40459053491).
+The completed enforcement log reports this cross-UID/DAC key, prior candidate
+restart/replay evidence and owned-resource cleanup as true. The workflow's Linux
+transport race suite passed in 4.388 s. `execution_ready` remains false; general
+CI and daemon checks are separate.
+
+Local full runner/CLI race checks passed (journal 78.377 s), public vector/copy
+checks passed, all 13 Python probe tests passed, and Linux vet, repository-pinned
+staticcheck and amd64/arm64 compilation passed.
 
 ## Remaining work
 

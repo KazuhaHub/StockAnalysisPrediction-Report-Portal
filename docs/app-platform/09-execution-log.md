@@ -956,8 +956,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   nested preflight pointer mutation; authority and receipt getters return copies.
 - Added public-vector/framing/refusal tests and an owned Linux fixture reading an
   actual shared-journal candidate receipt from a distinct controller UID, with
-  unsigned/unknown/UID/group refusal and direct-journal DAC denial. Native channel
-  acceptance is pending CI. See [channel details](74-candidate-receipt-channel.md).
+  unsigned/unknown/UID/group refusal and direct-journal DAC denial. Functional
+  source `9bc26d7e059e254e22a3cb16241038f8cc23c07b` passed quota workflow
+  40459053491: cross-UID/DAC, prior replay and owned-cleanup evidence are true;
+  Linux transport race checks passed in 4.388 s. Local full runner/CLI race
+  checks passed (journal 78.377 s), vector/copy and 13 Python tests passed, and
+  Linux vet/staticcheck plus both architecture compilations passed.
+  See [channel details](74-candidate-receipt-channel.md).
 - Candidate execution transport, Portal stage settlement, native reconciliation,
   readiness/writer access and managed registration/lifecycle remain. No schema or
   production/beta configuration changed.
