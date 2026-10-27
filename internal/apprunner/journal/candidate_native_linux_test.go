@@ -93,7 +93,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { s.Close() }()
 	socketRoot, err := os.MkdirTemp("/run", "portal-jrc-")
 	if err != nil {
 		t.Fatal(err)
@@ -150,15 +150,18 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := s.AdmitCandidateCommand(ctx, raw, sig); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.ReserveCandidate(ctx, raw, sig); err != nil {
-				t.Fatal(err)
-			}
-			claim, err := s.ClaimCandidate(ctx, raw, sig)
-			if err != nil {
-				t.Fatal(err)
+			var claim CandidateClaim
+			if slot == 1 {
+				if _, err := s.AdmitCandidateCommand(ctx, raw, sig); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.ReserveCandidate(ctx, raw, sig); err != nil {
+					t.Fatal(err)
+				}
+				claim, err = s.ClaimCandidate(ctx, raw, sig)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			t.Cleanup(func() {
 				id := candidateFixtureOwnedNative(t, socket, c)
@@ -172,7 +175,12 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			receipt, err := s.ExecuteCandidate(ctx, claim, native, descriptor)
+			var receipt CandidateRunningReceipt
+			if slot == 0 {
+				receipt, err = s.DispatchCandidate(ctx, raw, sig, native, descriptor)
+			} else {
+				receipt, err = s.ExecuteCandidate(ctx, claim, native, descriptor)
+			}
 			if slot == 0 {
 				if err != nil || !validCandidateReceipt(receipt) || receipt.Claim.Preflight == nil || receipt.Claim.Preflight.NamespaceInode != proof.NamespaceInode {
 					t.Fatal("real native candidate receipt", err)
@@ -193,6 +201,25 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 				var revision int
 				if err := s.db.QueryRow(`SELECT native_id,observed_state,revision FROM runner_resources WHERE id=?`, c.Payload.ResourceID).Scan(&nativeID, &observed, &revision); err != nil || nativeID != id || observed != "running" || revision != 2 {
 					t.Fatal("native resource/receipt not atomic", err)
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s, err = Open(journalPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				renewed := c
+				now := time.Now().UnixMilli()
+				renewed.IssuedMS, renewed.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+				renewedRaw, renewedSig := signJournalCandidate(t, renewed)
+				historical, err := s.ReadCandidateRunningReceipt(ctx, renewedRaw, renewedSig)
+				if err != nil || !sameCandidateReceipt(historical, receipt) {
+					t.Fatal("native receipt lost after restart/renewal", err)
+				}
+				replay, err := s.DispatchCandidate(ctx, renewedRaw, renewedSig, nil, descriptor)
+				if err != nil || !sameCandidateReceipt(replay, receipt) || candidateFixtureOwnedNative(t, socket, c) != id {
+					t.Fatal("applied dispatch reexecuted/changed native identity", err)
 				}
 			} else {
 				if err == nil || receipt.Format != "" {
@@ -215,6 +242,10 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 				}
 				if _, err := s.db.Exec(`DROP TRIGGER fixture_candidate_settlement_failure`); err != nil {
 					t.Fatal(err)
+				}
+				id := candidateFixtureOwnedNative(t, socket, c)
+				if replay, err := s.DispatchCandidate(ctx, raw, sig, native, descriptor); err == nil || replay.Format != "" || candidateFixtureOwnedNative(t, socket, c) != id {
+					t.Fatal("unknown dispatch repeated native effect", err)
 				}
 			}
 			if repeated, err := s.ExecuteCandidate(ctx, claim, native, descriptor); err == nil || repeated.Format != "" {

@@ -290,6 +290,8 @@ def main(args):
                         raise RuntimeError("native candidate journal failed: " + (result.stdout+result.stderr)[-4096:])
                     report["native_candidate_journal_running_receipt"] = True
                     report["native_candidate_journal_atomic_failure_unknown"] = True
+                    report["native_candidate_receipt_restart_renewal_replay"] = True
+                    report["native_candidate_unknown_dispatch_no_restart"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)

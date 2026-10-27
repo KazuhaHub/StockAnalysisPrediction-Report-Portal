@@ -925,3 +925,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   running evidence does not complete managed installation, readiness, writable
   data, broker, receipt transport/reconciliation or rollout. No schema or
   production/beta configuration changed.
+
+### Candidate historical receipt read and replay dispatch
+
+- Added current signed-authority historical reads with exact applied command,
+  resource, preflight, original fence, data receipt/root history and pending-work
+  checks. Renewed envelopes preserve the original native observation/receipt.
+- Added trusted first-attempt/applied dispatch. Applied retries return that
+  historical receipt without native IO; unknown work never reenters create/start.
+- Extended the owned Linux native fixture to dispatch the initial process,
+  reopen the journal, renew/read/replay its actual receipt and refuse unknown
+  dispatch after an actual effect and injected SQL failure. Extended acceptance
+  is pending CI; synthetic test rows validate journal reads only.
+- See [historical read/replay details](73-candidate-receipt-read-and-replay.md).
+  Receipt transport, unknown native reconciliation, readiness/writer access,
+  managed registration and full application installation remain. No schema or
+  production/beta configuration changed.
