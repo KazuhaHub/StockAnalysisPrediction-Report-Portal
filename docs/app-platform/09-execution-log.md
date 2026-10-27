@@ -820,3 +820,23 @@ lifecycle/release acceptance remain open. Production/beta settings, credentials,
 Status migration and SDK freeze remain untouched.
 Final-source full journal race regression, including all added cases, passed in
 73.029 s.
+
+## Native candidate directory identity pins
+
+[Native mount pins](69-native-candidate-mount-pins.md) retain Linux directory
+identities for the planned data/HTTP/broker sources and their root-owned ancestors.
+Component-wise no-symlink traversal and held/fresh identity comparisons refuse
+substitution, changed permissions or unexpected ownership. The private create
+wrapper validates before and after its single Docker request and holds pin
+lifetime across it. Post-effect substitution remains uncertain, not an automatic
+retry or readiness result. No native journal dispatcher, directory repair,
+quota claim, writer grant or data access transition is introduced.
+
+The existing disposable stopped-container acceptance uses these pins, and native
+negative cases cover source/parent/owner/mode/symlink substitution, closed pins,
+cancellation and before/after-create refusal. Local runner/CLI race regression
+passed (journal 68.584 s), along with Linux amd64/arm64 compilation and Linux-target
+vet/staticcheck. Actual native execution remains pending the current revision's
+CI; macOS checks do not substitute for it. Managed start/readiness, native claim
+receipts/reconciliation, backend registration, broker and full lifecycle remain
+open. Production credentials/configuration, beta settings and Status are untouched.
