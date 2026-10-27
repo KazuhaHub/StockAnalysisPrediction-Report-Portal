@@ -92,3 +92,15 @@ Portable runner/CLI race regression passed (journal 68.584 seconds). Linux
 amd64/arm64 driver compilation and Linux-target vet/staticcheck passed. New
 native mount cases are gated and have not been executed by these macOS checks;
 the corresponding disposable CI result remains required.
+
+## Native execution evidence
+
+Functional source 025da0abe51cbb2cc896b6d478fc3616bb3fee27 passed disposable
+Linux daemon workflow 40447371928. In its explicit root acceptance step, real
+stopped-container creation/inspection/ownership-checked cleanup passed, followed
+by all mount identity, substitution, unsafe-initial-state and before/after-create
+boundary cases. The ordinary unprivileged test phase skips gated native cases;
+those skips are not the evidence. The root step's PASS records were checked.
+The workflow also passed distinct controller/runner identity and Portal endpoint
+confirmation. This still proves neither application startup nor active data
+access/quota enforcement through a candidate execution claim.

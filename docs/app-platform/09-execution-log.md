@@ -840,3 +840,9 @@ vet/staticcheck. Actual native execution remains pending the current revision's
 CI; macOS checks do not substitute for it. Managed start/readiness, native claim
 receipts/reconciliation, backend registration, broker and full lifecycle remain
 open. Production credentials/configuration, beta settings and Status are untouched.
+Functional mount-pin source 025da0abe51cbb2cc896b6d478fc3616bb3fee27 subsequently
+passed disposable Linux workflow 40447371928. Its explicit root step actually ran
+and passed the real stopped-container fixture and all mount pin/negative/boundary
+cases; ordinary-phase gated skips were not counted as evidence. Identity isolation
+and Portal endpoint confirmation also passed. Full main CI was still running at
+this observation; native mount validation does not complete managed startup.
