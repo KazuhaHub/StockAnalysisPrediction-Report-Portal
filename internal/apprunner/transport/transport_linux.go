@@ -249,6 +249,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	case dataExecutionQueryMagic:
 		s.handleDataExecution(ctx, conn)
 		return
+	case candidateReceiptQueryMagic:
+		s.handleCandidateReceipt(ctx, conn)
+		return
 	case dataReceiptQueryMagic:
 		s.handleDataReceipt(ctx, conn)
 		return
