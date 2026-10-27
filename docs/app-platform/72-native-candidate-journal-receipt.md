@@ -1,6 +1,6 @@
 # Native candidate execution and durable receipts
 
-This continues P06/P07 after the concrete native runtime in document 71. It is
+This continues P04/P05 after the concrete native runtime in document 71. It is
 an infrastructure implementation, not a production dispatcher or app activation.
 No new table, column, side store or public SDK contract is introduced.
 
@@ -89,8 +89,17 @@ The test selector must actually report PASS before the script emits:
 - `native_candidate_journal_running_receipt: true`
 - `native_candidate_journal_atomic_failure_unknown: true`
 
-Native receipt acceptance is pending until the current source passes this
-workflow. Prior document 71 native-runtime evidence cannot substitute for it.
+The local runner/CLI race suite passed (journal 74.425 s), the focused candidate
+race suite passed (9.730 s), all 13 Python probe tests passed, and Linux vet,
+repository-pinned staticcheck 2026.2.1 and amd64/arm64 compilation passed.
+Functional source `cc799bf79c6f7be0e4ef0555509839ee75116212` passed disposable
+quota workflow [40457215632](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40457215632).
+Its completed enforcement log reports both native candidate journal keys above,
+`native_candidate_quota_mount_start_once: true` and
+`owned_resources_cleaned: true`. The script requires the exact native fixture's
+PASS marker before emitting these journal keys; a skipped fixture cannot pass.
+`execution_ready` remains false. General CI and daemon evidence are tracked
+separately; prior document 71 runtime evidence alone does not prove this composition.
 
 ## Remaining integration
 
