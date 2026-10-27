@@ -790,3 +790,33 @@ including stopped candidate create/inspect/ownership-checked removal after the
 fixture working-directory correction. Durable candidate execution claims,
 physical pins/receipts, start/readiness/stop, automatic backend registration,
 broker and full platform lifecycle/release acceptance remain open.
+
+## Candidate reservation and one-shot execution claims
+
+[Candidate execution claims](68-candidate-execution-claims.md) reserve a global
+container resource identity only after matching the exact prior applied data
+receipt and current candidate authority. Claiming durably changes prepared to
+unknown before returning a process-owned, unserializable handle. Copies share
+one atomic consumption bit and an envelope-bounded monotonic deadline. The
+trusted synchronous invocation gate rechecks authority, floors, resource, marker
+and data proof; Close waits for the provider to settle. Restart retains unknown
+intent but cannot recreate a first execution handle or replay it automatically.
+
+Volume lookup now permits a container row to share its data namespace while
+preserving volume/resource-ID collision checks. Added tests cover rollback,
+coexistence, mismatched data tuples, stale authority/resources, copied/concurrent
+handles, cancellation/expiry, owner restart and Close. No schema, production
+route/native dispatcher, physical mount pin, execution receipt, writer grant or
+readiness claim is introduced.
+
+Runner/CLI race regression passed (journal 66.113 s) before final added cases;
+focused final candidate race cases passed (4.888 s). Full local Go regression
+passed (application 65.049 s, journal 15.116 s); vet, staticcheck and Linux
+amd64/arm64 compilation passed. No local PostgreSQL DSN was used. Predecessor
+836c1ae5090e626367aa47b1f041dd76113df8f0 passed full main CI 40408711973,
+disposable daemon 40408711894 and hard quota 40408711972. Native claims/receipt/
+reconciliation, start/readiness/stop, backend registration, broker and complete
+lifecycle/release acceptance remain open. Production/beta settings, credentials,
+Status migration and SDK freeze remain untouched.
+Final-source full journal race regression, including all added cases, passed in
+73.029 s.

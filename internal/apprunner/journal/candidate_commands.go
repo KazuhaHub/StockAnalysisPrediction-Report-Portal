@@ -21,7 +21,7 @@ func (s *Store) AdmitCandidateCommand(ctx context.Context, raw, signature []byte
 		// Only fields consumed by journal indexing/floors are projected. The signed
 		// logical digest binds the complete candidate payload, including resource,
 		// platform and sandbox profile. This is never passed to prepare-data dispatch.
-		identity := control.Command{Format: c.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: c.Stage, EffectNumber: c.EffectNumber, EffectID: c.EffectID, Kind: c.Kind, InstallationFence: c.InstallationFence, PayloadSHA256: c.PayloadSHA256, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS, Payload: control.PrepareDataPayload{DataNamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, DataFormat: c.Payload.DataFormat, WriterFence: c.Payload.WriterFence}}
+		identity := candidateIndex(c)
 		return verifiedAdmissionCommand{identity: identity, containerResourceID: c.Payload.ResourceID}, nil
 	})
 }
@@ -46,4 +46,8 @@ func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verifie
 		return false, ErrCommandConflict
 	}
 	return true, nil
+}
+
+func candidateIndex(c control.CandidateCommand) control.Command {
+	return control.Command{Format: c.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: c.Stage, EffectNumber: c.EffectNumber, EffectID: c.EffectID, Kind: c.Kind, InstallationFence: c.InstallationFence, PayloadSHA256: c.PayloadSHA256, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS, Payload: control.PrepareDataPayload{DataNamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, DataFormat: c.Payload.DataFormat, WriterFence: c.Payload.WriterFence}}
 }
