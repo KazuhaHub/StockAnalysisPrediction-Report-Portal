@@ -33,6 +33,7 @@ type candidateFacts struct {
 	started        time.Time
 	data           DataPreparationReceipt
 	dataSHA        string
+	receipt        string
 }
 
 func candidateHash(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
@@ -48,6 +49,12 @@ func finalCandidateCheck(ctx context.Context, f candidateFacts) error {
 	return err
 }
 func (s *Store) beginCandidateCommand(ctx context.Context, raw, signature []byte, state, receipt string) (*sql.Tx, candidateFacts, error) {
+	return s.beginCandidateCommandReceipt(ctx, raw, signature, state, &receipt)
+}
+
+// A nil receipt allows an applied receipt read, without relaxing current signed
+// authority, acknowledgement, logical identity, original fences or data history.
+func (s *Store) beginCandidateCommandReceipt(ctx context.Context, raw, signature []byte, state string, receipt *string) (*sql.Tx, candidateFacts, error) {
 	var zero candidateFacts
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return nil, zero, ErrCandidateClaimUnavailable
@@ -102,7 +109,7 @@ func (s *Store) beginCandidateCommand(ctx context.Context, raw, signature []byte
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&current, &ack); err != nil {
 		return nil, zero, err
 	}
-	if current != receipt || ack.Valid {
+	if (receipt != nil && current != *receipt) || ack.Valid {
 		return nil, zero, ErrFenceReconciliation
 	}
 	var pending int
@@ -117,7 +124,7 @@ func (s *Store) beginCandidateCommand(ctx context.Context, raw, signature []byte
 		return nil, zero, err
 	}
 	ok = true
-	return tx, candidateFacts{command: c, stored: stored, authority: authority, raw: raw, signature: signature, now: now, started: started, data: proof, dataSHA: proofSHA}, nil
+	return tx, candidateFacts{command: c, stored: stored, authority: authority, raw: raw, signature: signature, now: now, started: started, data: proof, dataSHA: proofSHA, receipt: current}, nil
 }
 
 func candidateDataEvidence(ctx context.Context, tx *sql.Tx, c control.CandidateCommand, now int64) (DataPreparationReceipt, string, error) {
