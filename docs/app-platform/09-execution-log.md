@@ -903,3 +903,20 @@ script style without changing driver behavior. Native success is not recorded as
 full main-CI, persisted receipt or application-readiness acceptance.
 The corrected workflow passed local actionlint v1.7.12 with ShellCheck, and native
 daemon workflow 40455635317 passed on the functional source as well.
+
+### Native candidate journal execution and receipt binding
+
+- Added the concrete `ExecuteCandidate` composition: verified one-shot claim,
+  read-only native preflight, durable path-free binding before Docker mutation,
+  current authority/data recheck, opaque running observation and atomic native
+  resource/command receipt settlement. No success can be supplied through JSON.
+- Added versioned string-valued native evidence/receipt metadata, refusal tests
+  for changed authority/fence/data/mounts and SQL failures, and a real Linux
+  journal/XFS/Docker fixture in the existing owned quota workflow. The fixture
+  verifies a successful actual native ID and an injected post-effect SQL failure;
+  it never authorizes production cleanup or retries uncertain candidates.
+- See [execution and receipt details](72-native-candidate-journal-receipt.md).
+  Native acceptance for this new composition is pending CI. Historical process
+  running evidence does not complete managed installation, readiness, writable
+  data, broker, receipt transport/reconciliation or rollout. No schema or
+  production/beta configuration changed.

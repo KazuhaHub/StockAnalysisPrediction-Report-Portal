@@ -280,6 +280,16 @@ def main(args):
                     report["native_portal_signed_data_dispatch"] = True
                     report["native_portal_static_driver_queued_to_complete"] = True
                     report["native_portal_background_install_scheduler"] = True
+                if candidate:
+                    # Reuse the shared journal/provider after its restart tests.
+                    # Its monotonic project allocator avoids earlier fixture IDs.
+                    _, candidate_image, candidate_socket = candidate
+                    candidate_journal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_CANDIDATE_NATIVE_IMAGE=candidate_image, APP_CANDIDATE_DOCKER_SOCKET=candidate_socket)
+                    result = subprocess.run([args[6], "-test.run=^TestNativeJournalCandidateExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=candidate_journal_env, capture_output=True, text=True, timeout=70)
+                    if result.returncode or "--- PASS: TestNativeJournalCandidateExecution" not in result.stdout:
+                        raise RuntimeError("native candidate journal failed: " + (result.stdout+result.stderr)[-4096:])
+                    report["native_candidate_journal_running_receipt"] = True
+                    report["native_candidate_journal_atomic_failure_unknown"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
