@@ -106,7 +106,7 @@ type dataResource struct {
 }
 
 func existingDataResource(ctx context.Context, tx *sql.Tx, c control.Command) (*dataResource, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms FROM runner_resources WHERE id=? OR data_namespace_id=? OR (installation_id=? AND kind='volume') LIMIT 2`, c.Payload.DataNamespaceID, c.Payload.DataNamespaceID, c.InstallationID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms FROM runner_resources WHERE id=? OR (kind='volume' AND (data_namespace_id=? OR installation_id=?)) LIMIT 2`, c.Payload.DataNamespaceID, c.Payload.DataNamespaceID, c.InstallationID)
 	if err != nil {
 		return nil, err
 	}
