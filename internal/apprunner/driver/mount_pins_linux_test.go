@@ -220,3 +220,24 @@ func TestNativeCandidateMountPinsCreateBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeCandidateMountPinsStartBoundary(t *testing.T) {
+	plan, data, request := nativeMountFixture(t)
+	pins, err := pinCandidateMounts(context.Background(), plan, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pins.Close()
+	if err := os.Chmod(request.HostConfig.Mounts[0].Source, 0777); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	client := daemonClient(transportFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("unexpected daemon access")
+	}))
+	state, err := startPinnedCandidateHTTP(context.Background(), client, strings.Repeat("c", 64), plan, pins)
+	if err == nil || state != "" || calls != 0 {
+		t.Fatal("changed mount reached start", state, err, calls)
+	}
+}

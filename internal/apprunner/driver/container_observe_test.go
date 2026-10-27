@@ -26,11 +26,12 @@ func containerInspectFixture(t *testing.T, plan containerPlan) map[string]any {
 func TestContainerObservationRejectsOwnershipAndPolicySubstitution(t *testing.T) {
 	plan := containerFixture(t)
 	cases := map[string]func(map[string]any){
-		"native id": func(v map[string]any) { v["Id"] = strings.Repeat("d", 64) },
-		"name":      func(v map[string]any) { v["Name"] = "/other" },
-		"image":     func(v map[string]any) { v["Image"] = "sha256:" + strings.Repeat("d", 64) },
-		"root user": func(v map[string]any) { v["Config"].(map[string]any)["User"] = "0" },
-		"stdin":     func(v map[string]any) { v["Config"].(map[string]any)["OpenStdin"] = true },
+		"state alias": func(v map[string]any) { v["State"].(map[string]any)["running"] = true },
+		"native id":   func(v map[string]any) { v["Id"] = strings.Repeat("d", 64) },
+		"name":        func(v map[string]any) { v["Name"] = "/other" },
+		"image":       func(v map[string]any) { v["Image"] = "sha256:" + strings.Repeat("d", 64) },
+		"root user":   func(v map[string]any) { v["Config"].(map[string]any)["User"] = "0" },
+		"stdin":       func(v map[string]any) { v["Config"].(map[string]any)["OpenStdin"] = true },
 		"env": func(v map[string]any) {
 			v["Config"].(map[string]any)["Env"] = []string{"PORTAL_APP_HTTP_SOCKET=/other"}
 		},

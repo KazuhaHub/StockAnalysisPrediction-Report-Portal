@@ -69,12 +69,15 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$(uname -s)" = Linux
           probe_socket=$(readlink -f /var/run/docker.sock)
+          docker pull registry.k8s.io/pause:3.10
+          lifecycle_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
+          test -n "$lifecycle_image"
           container_binary=$(mktemp "$RUNNER_TEMP/container-policy.XXXXXXXX")
           trap 'rm -f "$container_binary"' EXIT
           go test -p 2 -race -c -o "$container_binary" ./internal/apprunner/driver
           chmod 0500 "$container_binary"
           cd internal/apprunner/driver
-          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket" PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE" "$container_binary" -test.v -test.timeout=90s -test.run='^(TestDockerAcceptanceCandidateContainer|TestNativeCandidateMountPins.*)$'
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket" PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE" PORTAL_APP_RUNNER_LIFECYCLE_IMAGE="$lifecycle_image" "$container_binary" -test.v -test.timeout=90s -test.run='^(TestDockerAcceptanceCandidate(Container|Lifecycle)|TestNativeCandidateMountPins.*)$'
 
       - name: Verify distinct controller and runner identities in isolation
         shell: bash

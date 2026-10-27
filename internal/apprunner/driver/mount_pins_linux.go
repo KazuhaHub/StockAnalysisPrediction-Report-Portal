@@ -223,3 +223,24 @@ func createPinnedCandidateHTTP(ctx context.Context, client *http.Client, plan co
 	}
 	return id, nil
 }
+
+// A live native pin set is required for initial start. The lock spans the
+// synchronous action and its observations; no root/path authority is invented.
+func startPinnedCandidateHTTP(ctx context.Context, client *http.Client, nativeID string, plan containerPlan, pins *candidateMountPins) (string, error) {
+	if pins == nil {
+		return "", ErrUnsafeSocket
+	}
+	pins.mu.Lock()
+	defer pins.mu.Unlock()
+	if err := pins.validateLocked(ctx, plan); err != nil {
+		return "", err
+	}
+	state, err := startCandidateContainerHTTP(ctx, client, nativeID, plan)
+	if err != nil {
+		return "", err
+	}
+	if err := pins.validateLocked(ctx, plan); err != nil {
+		return "", errors.Join(ErrContainerUncertain, err)
+	}
+	return state, nil
+}
