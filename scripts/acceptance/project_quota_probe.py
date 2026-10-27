@@ -102,8 +102,22 @@ def replace_owned_uuid(mountpoint, loop, image):
     require_mount_owner(mountpoint, loop)
 
 
+def candidate_configuration():
+    names = ("APP_CANDIDATE_NATIVE_BINARY", "APP_CANDIDATE_NATIVE_IMAGE", "APP_CANDIDATE_DOCKER_SOCKET")
+    values = tuple(os.environ.get(name, "") for name in names)
+    if not any(values):
+        return None
+    binary, image, socket = values
+    if not all(values) or not Path(binary).is_absolute() or not Path(socket).is_absolute() or not re.fullmatch(r"registry\.k8s\.io/pause@sha256:[a-f0-9]{64}", image):
+        raise RuntimeError("invalid explicit candidate fixture configuration")
+    return values
+
+
 def main(args):
     require_disposable(args)
+    candidate = candidate_configuration()
+    if candidate and len(args) not in (5, 7, 9, 11):
+        raise RuntimeError("candidate fixture requires native root acceptance")
     root = Path(tempfile.mkdtemp(prefix="portal-quota-acceptance-", dir="/tmp"))
     # Only synthetic fixture paths live here; permit the test UID to traverse.
     root.chmod(0o755)
@@ -148,6 +162,15 @@ def main(args):
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
+            if candidate:
+                candidate_root = mountpoint / "candidate-data"
+                candidate_root.mkdir(mode=0o700)
+                binary, candidate_image, candidate_socket = candidate
+                candidate_env = dict(native_env, APP_CANDIDATE_NATIVE_ROOT=str(candidate_root), APP_CANDIDATE_NATIVE_INODE=str(candidate_root.stat().st_ino), APP_CANDIDATE_NATIVE_IMAGE=candidate_image, APP_CANDIDATE_DOCKER_SOCKET=candidate_socket)
+                result = subprocess.run([binary, "-test.run=^TestNativeCandidateRuntime$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/driver", env=candidate_env, capture_output=True, text=True, timeout=70)
+                if result.returncode or "--- PASS: TestNativeCandidateRuntime" not in result.stdout:
+                    raise RuntimeError("native candidate runtime failed: " + (result.stdout+result.stderr)[-4096:])
+                report["native_candidate_quota_mount_start_once"] = True
         journal_root = None
         if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"
