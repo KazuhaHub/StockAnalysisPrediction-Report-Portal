@@ -300,6 +300,12 @@ def main(args):
                         if result.returncode or "--- PASS: TestNativeCandidateReceiptTransport" not in result.stdout:
                             raise RuntimeError("native candidate receipt channel failed: " + (result.stdout+result.stderr)[-4096:])
                         report["native_candidate_receipt_cross_uid_and_journal_dac"] = True
+                        candidate_execution_env = dict(candidate_journal_env, APP_CANDIDATE_EXECUTION_FIXTURE=str(candidate_receipt_fixture))
+                        result = subprocess.run([args[8], "-test.run=^TestNativeCandidateExecutionTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=candidate_execution_env, capture_output=True, text=True, timeout=70)
+                        if result.returncode or "--- PASS: TestNativeCandidateExecutionTransport" not in result.stdout:
+                            raise RuntimeError("native candidate execution channel failed: " + (result.stdout+result.stderr)[-4096:])
+                        report["native_candidate_execution_cross_uid_actual_start"] = True
+                        report["native_candidate_execution_replay_same_native_id"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)

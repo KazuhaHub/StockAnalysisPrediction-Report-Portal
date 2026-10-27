@@ -33,12 +33,18 @@ func (s *Server) handleCandidateReceipt(ctx context.Context, conn *net.UnixConn)
 }
 
 func (s *Server) handleCandidateResponse(ctx context.Context, conn *net.UnixConn) {
+	s.handleCandidateResponseMode(ctx, conn, false)
+}
+func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.UnixConn, execute bool) {
 	reader, ok := s.journal.(candidateReceiptReader)
 	if !ok {
 		return
 	}
 	header := make([]byte, 44)
 	queryMagic, replyMagic := candidateReceiptQueryMagic, candidateReceiptReplyMagic
+	if execute {
+		queryMagic, replyMagic = candidateExecutionQueryMagic, candidateExecutionReplyMagic
+	}
 	copy(header, queryMagic)
 	if _, err := io.ReadFull(conn, header[8:]); err != nil {
 		return
@@ -51,13 +57,25 @@ func (s *Server) handleCandidateResponse(ctx context.Context, conn *net.UnixConn
 	if _, err := io.ReadFull(conn, body); err != nil {
 		return
 	}
+	var descriptor []byte
+	if execute {
+		var err error
+		descriptor, err = readCandidateDescriptor(conn)
+		if err != nil || !validCandidateDescriptor(body[:size], descriptor) {
+			return
+		}
+	}
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
 		return
 	}
 	var receipt journal.CandidateRunningReceipt
 	var err error
-	receipt, err = reader.ReadCandidateRunningReceipt(ctx, body[:size], body[size:])
+	if execute {
+		receipt, err = s.candidateExecution.store.DispatchCandidate(ctx, body[:size], body[size:], s.candidateExecution.native, descriptor)
+	} else {
+		receipt, err = reader.ReadCandidateRunningReceipt(ctx, body[:size], body[size:])
+	}
 	if err != nil {
 		return
 	}
@@ -71,6 +89,9 @@ func (s *Server) handleCandidateResponse(ctx context.Context, conn *net.UnixConn
 	digest := sha256.New()
 	digest.Write(header)
 	digest.Write(body)
+	if execute {
+		digest.Write(candidateDescriptorFrame(descriptor))
+	}
 	reply := make([]byte, 44, 44+len(encoded))
 	copy(reply, replyMagic)
 	copy(reply[8:40], digest.Sum(nil))
@@ -98,17 +119,27 @@ func readCandidateReceipt(parent context.Context, path string, profile endpointP
 }
 
 func readCandidateResponse(parent context.Context, path string, profile endpointProfile, raw, signature []byte, authority control.Authority) (CandidateReceiptObservation, error) {
+	return readCandidateResponseMode(parent, path, profile, raw, signature, authority, nil, false)
+}
+func readCandidateResponseMode(parent context.Context, path string, profile endpointProfile, raw, signature []byte, authority control.Authority, descriptor []byte, execute bool) (CandidateReceiptObservation, error) {
 	var zero CandidateReceiptObservation
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 || len(authority.PublicKey) != 32 || parent.Err() != nil {
 		return zero, ErrCandidateReceiptObservation
 	}
-	raw, signature, authority.PublicKey = bytes.Clone(raw), bytes.Clone(signature), bytes.Clone(authority.PublicKey)
+	if execute && !validCandidateDescriptor(raw, descriptor) {
+		return zero, ErrCandidateReceiptObservation
+	}
+	raw, signature, authority.PublicKey, descriptor = bytes.Clone(raw), bytes.Clone(signature), bytes.Clone(authority.PublicKey), bytes.Clone(descriptor)
 	started := time.Now()
 	verified, err := control.VerifyCandidate(raw, signature, authority, started.UnixMilli())
 	if err != nil {
 		return zero, ErrCandidateReceiptObservation
 	}
-	ctx, cancel := context.WithTimeout(parent, sessionTimeout)
+	timeout := sessionTimeout
+	if execute {
+		timeout = candidateExecutionTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	conn, err := connectEndpoint(ctx, path, profile)
 	if err != nil {
@@ -121,6 +152,9 @@ func readCandidateResponse(parent context.Context, path string, profile endpoint
 	defer stop()
 	frame := make([]byte, 44, 44+len(raw)+64)
 	queryMagic, replyMagic := candidateReceiptQueryMagic, candidateReceiptReplyMagic
+	if execute {
+		queryMagic, replyMagic = candidateExecutionQueryMagic, candidateExecutionReplyMagic
+	}
 	copy(frame, queryMagic)
 	if _, err := rand.Read(frame[8:40]); err != nil {
 		return zero, ErrCandidateReceiptObservation
@@ -128,6 +162,9 @@ func readCandidateResponse(parent context.Context, path string, profile endpoint
 	binary.BigEndian.PutUint32(frame[40:44], uint32(len(raw)))
 	frame = append(frame, raw...)
 	frame = append(frame, signature...)
+	if execute {
+		frame = append(frame, candidateDescriptorFrame(descriptor)...)
+	}
 	if _, err := io.Copy(conn, bytes.NewReader(frame)); err != nil {
 		return zero, ErrCandidateReceiptObservation
 	}

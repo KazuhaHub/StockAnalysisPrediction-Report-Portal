@@ -28,11 +28,8 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
-func candidateNativeReceiptCommand(t *testing.T, e journal.ControllerEnrollment, slot int) ([]byte, []byte) {
+func nativeCandidateDescriptor(t *testing.T) []byte {
 	t.Helper()
-	_, c, _, _ := candidateReceiptAuthority(t)
-	c.DeploymentID, c.ControllerEpoch, c.ControlRevision = e.DeploymentID, e.ControllerEpoch, strconv.FormatInt(e.ControlRevision, 10)
-	c.InstallationID, c.OperationID, c.EffectID, c.Payload.ResourceID, c.Payload.DataNamespaceID = receiptNativeID(7100+slot*10), receiptNativeID(7101+slot*10), receiptNativeID(7104+slot*10), receiptNativeID(7105+slot*10), receiptNativeID(7103+slot*10)
 	descriptor, err := os.ReadFile("../../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +44,16 @@ func candidateNativeReceiptCommand(t *testing.T, e journal.ControllerEnrollment,
 	if err != nil {
 		t.Fatal(err)
 	}
+	return descriptor
+}
+
+func candidateNativeReceiptCommand(t *testing.T, e journal.ControllerEnrollment, slot int) ([]byte, []byte) {
+	t.Helper()
+	_, c, _, _ := candidateReceiptAuthority(t)
+	c.DeploymentID, c.ControllerEpoch, c.ControlRevision = e.DeploymentID, e.ControllerEpoch, strconv.FormatInt(e.ControlRevision, 10)
+	c.InstallationID, c.OperationID, c.EffectID, c.Payload.ResourceID, c.Payload.DataNamespaceID = receiptNativeID(7100+slot*10), receiptNativeID(7101+slot*10), receiptNativeID(7104+slot*10), receiptNativeID(7105+slot*10), receiptNativeID(7103+slot*10)
+	descriptor := nativeCandidateDescriptor(t)
+	var err error
 	sum := sha256.Sum256(descriptor)
 	c.Payload.ReleaseSHA256 = hex.EncodeToString(sum[:])
 	c.Payload.Platform = "linux/" + runtime.GOARCH
@@ -220,9 +227,19 @@ func TestNativeCandidateReceiptChild(t *testing.T) {
 		conn.SetDeadline(time.Now().Add(3 * time.Second))
 		frame := make([]byte, 44)
 		copy(frame, candidateReceiptQueryMagic)
+		if os.Getenv("RECEIPT_OPERATION") == "start" {
+			copy(frame, candidateExecutionQueryMagic)
+		}
 		binary.BigEndian.PutUint32(frame[40:44], uint32(len(raw)))
 		frame = append(frame, raw...)
 		frame = append(frame, sig...)
+		if os.Getenv("RECEIPT_OPERATION") == "start" {
+			descriptor, err := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_DESCRIPTOR"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame = append(frame, candidateDescriptorFrame(descriptor)...)
+		}
 		if n, err := io.Copy(conn, bytes.NewReader(frame)); err != nil || n != int64(len(frame)) {
 			t.Fatal(err)
 		}
@@ -233,7 +250,16 @@ func TestNativeCandidateReceiptChild(t *testing.T) {
 		}
 		return
 	}
-	proof, err := ReadControllerCandidateReceipt(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	var proof CandidateReceiptObservation
+	if os.Getenv("RECEIPT_OPERATION") == "start" {
+		descriptor, decodeErr := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_DESCRIPTOR"))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		proof, err = StartControllerCandidate(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority, descriptor)
+	} else {
+		proof, err = ReadControllerCandidateReceipt(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	}
 	if action != "accepted" {
 		if err == nil || !proof.ReceivedAt().IsZero() {
 			t.Fatal("unauthorized receipt received")

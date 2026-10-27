@@ -295,3 +295,31 @@ func (r *CandidateRuntime) cleanupCandidate(ctx context.Context, launch Candidat
 	}
 	return removeCandidateContainerHTTP(ctx, client, snapshot.NativeID, launch.state.plan)
 }
+
+// CheckConfiguration checks the borrowed provider and daemon availability only.
+// It grants no execution readiness, namespace access, writer lease or launch.
+func (r *CandidateRuntime) CheckConfiguration(ctx context.Context) error {
+	if r == nil {
+		return ErrUnsupported
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.root == nil || r.launches == nil {
+		return ErrUnsupported
+	}
+	actual, err := r.root.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	if actual != r.rootIdentity {
+		return ErrUnsafeSocket
+	}
+	report, err := InspectDaemon(ctx, r.socket)
+	if err != nil {
+		return err
+	}
+	if !report.MetadataCompatible {
+		return ErrUnsupported
+	}
+	return ctx.Err()
+}
