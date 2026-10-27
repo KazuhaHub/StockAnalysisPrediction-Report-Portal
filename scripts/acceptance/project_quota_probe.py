@@ -292,6 +292,14 @@ def main(args):
                     report["native_candidate_journal_atomic_failure_unknown"] = True
                     report["native_candidate_receipt_restart_renewal_replay"] = True
                     report["native_candidate_unknown_dispatch_no_restart"] = True
+                    if len(args) in (9, 11):
+                        candidate_receipt_fixture = root / "candidate-receipt"
+                        candidate_receipt_fixture.mkdir(mode=0o755)
+                        candidate_transport_env = dict(candidate_journal_env, APP_CANDIDATE_RECEIPT_FIXTURE=str(candidate_receipt_fixture))
+                        result = subprocess.run([args[8], "-test.run=^TestNativeCandidateReceiptTransport$", "-test.v", "-test.timeout=45s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=candidate_transport_env, capture_output=True, text=True, timeout=55)
+                        if result.returncode or "--- PASS: TestNativeCandidateReceiptTransport" not in result.stdout:
+                            raise RuntimeError("native candidate receipt channel failed: " + (result.stdout+result.stderr)[-4096:])
+                        report["native_candidate_receipt_cross_uid_and_journal_dac"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
