@@ -14,13 +14,19 @@ import (
 )
 
 func TestDockerAcceptanceCandidateContainer(t *testing.T) {
+	runDockerCandidateAcceptance(t, "PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE", false)
+}
+func TestDockerAcceptanceCandidateLifecycle(t *testing.T) {
+	runDockerCandidateAcceptance(t, "PORTAL_APP_RUNNER_LIFECYCLE_IMAGE", true)
+}
+func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start bool) {
 	if os.Getenv("PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE") != "1" {
 		t.Skip("explicit disposable container acceptance not enabled")
 	}
 	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Geteuid() != 0 {
 		t.Fatal("container acceptance requires root on a disposable GitHub-hosted Linux runner")
 	}
-	socket, reference := os.Getenv("PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET"), os.Getenv("PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE")
+	socket, reference := os.Getenv("PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET"), os.Getenv(imageEnvironment)
 	if socket == "" || reference == "" {
 		t.Fatal("explicit safe daemon and digest-pinned fixture image required")
 	}
@@ -62,7 +68,8 @@ func TestDockerAcceptanceCandidateContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	// These empty private mounts are disposable create/inspect fixtures, not
-	// quota/writer admission evidence. This test never starts the container.
+	// quota/writer admission evidence. Only the explicit lifecycle case starts
+	// the official inert fixture; no application health/data access is claimed.
 	for _, mount := range policy.HostConfig.Mounts {
 		if err := os.MkdirAll(mount.Source, 0700); err != nil {
 			t.Fatal(err)
@@ -99,6 +106,12 @@ func TestDockerAcceptanceCandidateContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		if start {
+			if _, err := stopCandidateContainerHTTP(context.Background(), client, nativeID, plan); err != nil {
+				t.Error("owned lifecycle stop requires reconciliation", err)
+				return
+			}
+		}
 		if err := removeCandidateContainerHTTP(context.Background(), client, nativeID, plan); err != nil {
 			t.Error("owned candidate cleanup requires reconciliation", err)
 		}
@@ -107,5 +120,23 @@ func TestDockerAcceptanceCandidateContainer(t *testing.T) {
 	if err != nil || state != "created" {
 		t.Fatalf("created container policy observation failed: %s %v", state, err)
 	}
-	t.Log("created and inspected an owned, stopped candidate with the closed container policy")
+	if start {
+		state, err = startPinnedCandidateHTTP(context.Background(), client, nativeID, plan, pins)
+		if err != nil || state != "running" {
+			t.Fatalf("candidate start observation: %s %v", state, err)
+		}
+		if err := removeCandidateContainerHTTP(context.Background(), client, nativeID, plan); err != ErrContainerConflict {
+			t.Fatalf("running candidate removal was not refused: %v", err)
+		}
+		state, err = stopCandidateContainerHTTP(context.Background(), client, nativeID, plan)
+		if err != nil || state != "exited" {
+			t.Fatalf("candidate stop observation: %s %v", state, err)
+		}
+		if _, err := startPinnedCandidateHTTP(context.Background(), client, nativeID, plan, pins); err != ErrContainerConflict {
+			t.Fatalf("exited candidate restarted without new authority: %v", err)
+		}
+		t.Log("owned candidate ran, refused removal while running, stopped and refused automatic restart")
+	} else {
+		t.Log("created and inspected an owned, stopped candidate with the closed container policy")
+	}
 }

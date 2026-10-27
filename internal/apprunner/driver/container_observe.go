@@ -18,10 +18,11 @@ type containerInspection struct {
 		Type, Source, Destination, Propagation string
 		RW                                     bool
 	}
-	State struct {
-		Status                            string
-		Running, Paused, Restarting, Dead bool
-	}
+	State json.RawMessage
+}
+type containerStateInspection struct {
+	Status                            string
+	Running, Paused, Restarting, Dead bool
 }
 type containerConfigInspection struct {
 	Image, User, Hostname, WorkingDir, StopSignal                                       string
@@ -42,6 +43,9 @@ type containerForbiddenOptions struct {
 // A result here is only a fresh observation of an exact native resource. It is
 // not a grant to start it or acknowledgement of a journalled effect.
 func inspectCandidateContainerHTTP(ctx context.Context, client *http.Client, nativeID string, plan containerPlan) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if !containerSHA.MatchString(nativeID) || !validContainerPlan(plan) {
 		return "", ErrInvalidResponse
 	}
@@ -148,14 +152,18 @@ func inspectCandidateContainerHTTP(ctx context.Context, client *http.Client, nat
 			return "", ErrContainerConflict
 		}
 	}
-	if actual.State.Paused || actual.State.Restarting || actual.State.Dead {
+	var state containerStateInspection
+	if !validProjection(actual.State, &state) || json.Unmarshal(actual.State, &state) != nil {
+		return "", ErrContainerConflict
+	}
+	if state.Paused || state.Restarting || state.Dead {
 		return "", ErrContainerUncertain
 	}
-	if (actual.State.Status == "created" || actual.State.Status == "exited") && !actual.State.Running || actual.State.Status == "running" && actual.State.Running {
+	if (state.Status == "created" || state.Status == "exited") && !state.Running || state.Status == "running" && state.Running {
 		if err := ctx.Err(); err != nil {
 			return "", errors.Join(ErrContainerUncertain, err)
 		}
-		return actual.State.Status, nil
+		return state.Status, nil
 	}
 	return "", ErrContainerUncertain
 }

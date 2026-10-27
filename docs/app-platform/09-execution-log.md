@@ -846,3 +846,29 @@ and passed the real stopped-container fixture and all mount pin/negative/boundar
 cases; ordinary-phase gated skips were not counted as evidence. Identity isolation
 and Portal endpoint confirmation also passed. Full main CI was still running at
 this observation; native mount validation does not complete managed startup.
+
+## Candidate native start and stop adapters
+
+[Candidate start/stop](70-candidate-start-stop.md) adds closed native-ID lifecycle
+actions with current owner/policy validation before and after possible effects.
+Initial start requires created state and live mount pins; exited processes are
+not silently restarted. Stop is fixed/bounded and returns an observation only
+when the owned process is confirmed exited. Lost acknowledgements and post-effect
+identity/state changes remain uncertain. Nested state aliases and already-
+canceled transport access now refuse explicitly.
+
+Portable lifecycle/refusal/uncertainty tests passed in the runner/CLI race suite
+(journal 70.173 s, driver 1.472 s); Linux-target vet/staticcheck and amd64/arm64
+compilation passed. A root-only disposable CI case uses the official digest-
+resolved Kubernetes pause fixture to verify actual running/stopped transitions,
+running-removal refusal and automatic-restart refusal. Its actual execution
+result is still required. No production dispatcher, native claim receipt,
+application health, data-access/writer grant or activation is included. Broker,
+registration and complete lifecycle/release acceptance remain open; production
+credentials, beta settings, Status and SDK freeze are untouched.
+Native lifecycle functional source 71105b28a04aebafe7965043661988aa00a7adb3 passed
+Linux workflow 40448345362. Actual root-step logs confirmed the inert process ran,
+refused running deletion, stopped, refused automatic restart and cleaned up;
+the mount-start refusal case, identity isolation and Portal endpoint checks also
+passed. Main CI was still running. This does not complete native claim receipts,
+application readiness or managed installation acceptance.
