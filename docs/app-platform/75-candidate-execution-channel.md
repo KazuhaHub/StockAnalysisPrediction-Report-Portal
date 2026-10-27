@@ -115,8 +115,16 @@ The probe emits these only after the exact native test reports PASS:
 - `native_candidate_execution_cross_uid_actual_start: true`
 - `native_candidate_execution_replay_same_native_id: true`
 
-Current-source native acceptance is pending CI. Earlier read-only or in-process
-native receipt evidence cannot substitute for this cross-UID launch path.
+Functional source `cdaebf713498b5137a6a11907054dc1cc8ae4b50` passed quota
+workflow [40460414731](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40460414731).
+The completed enforcement log reports both cross-UID execution/replay keys and
+owned-resource cleanup as true. Linux transport race checks passed in 4.418 s.
+`execution_ready` remains false; general CI and daemon checks are separate.
+
+Local full runner/CLI race checks passed (journal 80.599 s), all 13 Python probe
+tests passed, and Linux vet/repository-pinned staticcheck plus amd64/arm64 test
+compilation passed. These results do not complete Portal installation integration
+or prove readiness, writable data or production activation.
 
 ## Remaining work
 
