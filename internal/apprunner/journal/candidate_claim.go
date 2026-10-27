@@ -28,15 +28,17 @@ type candidateClaimState struct {
 	used           atomic.Bool
 }
 type candidateClaimMarker struct {
-	Format            string `json:"format"`
-	ClaimID           string `json:"claim_id"`
-	EffectID          string `json:"effect_id"`
-	ResourceID        string `json:"resource_id"`
-	OwnershipSHA256   string `json:"ownership_sha256"`
-	DataReceiptSHA256 string `json:"data_receipt_sha256"`
-	AdmittedFence     string `json:"admitted_fence"`
-	ClaimedMS         string `json:"claimed_ms"`
-	ExpiresMS         string `json:"expires_ms"`
+	Format            string                      `json:"format"`
+	ClaimID           string                      `json:"claim_id"`
+	EffectID          string                      `json:"effect_id"`
+	ResourceID        string                      `json:"resource_id"`
+	OwnershipSHA256   string                      `json:"ownership_sha256"`
+	DataReceiptSHA256 string                      `json:"data_receipt_sha256"`
+	AdmittedFence     string                      `json:"admitted_fence"`
+	ClaimedMS         string                      `json:"claimed_ms"`
+	ExpiresMS         string                      `json:"expires_ms"`
+	Preflight         *candidatePreflightEvidence `json:"preflight,omitempty"`
+	PreflightBoundMS  string                      `json:"preflight_bound_ms,omitempty"`
 }
 type CandidateAttempt struct{ Invoked bool }
 
@@ -127,7 +129,7 @@ func (s *Store) RunCandidateOnce(ctx context.Context, claim CandidateClaim, run 
 		return zero, err
 	}
 	var marker candidateClaimMarker
-	if !canonicalDataJSON(live.marker, &marker) || marker.Format != "portal.runner.candidate-claim/1-dev.1" || !enrollmentUUID.MatchString(marker.ClaimID) || marker.EffectID != f.command.EffectID || marker.ResourceID != reservation.ResourceID || marker.OwnershipSHA256 != reservation.OwnershipSHA256 || marker.DataReceiptSHA256 != f.dataSHA || marker.AdmittedFence != strconv.FormatInt(f.stored.fence, 10) || marker.ExpiresMS != f.command.ExpiresMS || !dataNumber(marker.ClaimedMS, false) {
+	if !canonicalDataJSON(live.marker, &marker) || !matchCandidateMarker(marker, f, reservation) || marker.Preflight != nil {
 		return zero, ErrCandidateClaimUnavailable
 	}
 	claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)
