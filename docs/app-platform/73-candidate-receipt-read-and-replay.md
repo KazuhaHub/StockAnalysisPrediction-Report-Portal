@@ -106,10 +106,16 @@ The probe emits the following only after that exact native test reports PASS:
 - `native_candidate_receipt_restart_renewal_replay: true`
 - `native_candidate_unknown_dispatch_no_restart: true`
 
-Acceptance for this extended native composition is pending its own CI evidence.
-Document 72's acceptance alone does not prove restart/replay dispatch. The same
-local runner/CLI race, Linux vet/staticcheck, cross-compilation and Python probe
-commands remain applicable. No browser or native screen automation is used.
+Functional source `3845330aaf787949683f73520dd122286e71ca2f` passed quota
+workflow [40458125760](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40458125760).
+The completed enforcement log reports both new restart/unknown-dispatch keys,
+the existing candidate running/atomic-failure keys and owned-resource cleanup as
+true. `execution_ready` remains false. General CI and daemon checks are separate.
+
+The local full runner/CLI race suite passed (journal 77.673 s), focused candidate
+race checks passed (15.778 s), all 13 Python probe tests passed, and Linux vet,
+repository-pinned staticcheck plus amd64/arm64 test compilation passed. No browser
+or native screen automation is used.
 
 ## Remaining work
 
