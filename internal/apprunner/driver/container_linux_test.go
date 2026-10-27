@@ -5,6 +5,7 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"golang.org/x/sys/unix"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -66,11 +67,34 @@ func TestDockerAcceptanceCandidateContainer(t *testing.T) {
 		if err := os.MkdirAll(mount.Source, 0700); err != nil {
 			t.Fatal(err)
 		}
+		if mount.Target == "/run/portal-app/http" {
+			if err := os.Chown(mount.Source, 65532, 65532); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if mount.Target == "/run/portal-app/broker" {
+			if err := os.Chmod(mount.Source, 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
+	var dataStat unix.Stat_t
+	if err := unix.Stat(policy.HostConfig.Mounts[0].Source, &dataStat); err != nil {
+		t.Fatal(err)
+	}
+	pins, err := pinCandidateMounts(context.Background(), plan, candidateDataPin{Device: uint64(dataStat.Dev), Inode: dataStat.Ino})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := pins.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, DialContext: dockerDialer(socket)}
 	defer transport.CloseIdleConnections()
 	client := daemonClient(transport)
-	nativeID, err := createCandidateContainerHTTP(context.Background(), client, plan)
+	nativeID, err := createPinnedCandidateHTTP(context.Background(), client, plan, pins)
 	if err != nil {
 		t.Fatal(err)
 	}
