@@ -866,3 +866,9 @@ result is still required. No production dispatcher, native claim receipt,
 application health, data-access/writer grant or activation is included. Broker,
 registration and complete lifecycle/release acceptance remain open; production
 credentials, beta settings, Status and SDK freeze are untouched.
+Native lifecycle functional source 71105b28a04aebafe7965043661988aa00a7adb3 passed
+Linux workflow 40448345362. Actual root-step logs confirmed the inert process ran,
+refused running deletion, stopped, refused automatic restart and cleaned up;
+the mount-start refusal case, identity isolation and Portal endpoint checks also
+passed. Main CI was still running. This does not complete native claim receipts,
+application readiness or managed installation acceptance.

@@ -103,3 +103,18 @@ Runner/control/data/driver/journal/transport and CLI race regression passed
 Linux amd64/arm64 test compilation passed. Native lifecycle and mount-start
 boundary execution remain pending the explicit disposable CI run; these local
 checks do not prove that a process actually started or stopped.
+
+## Actual native execution
+
+Functional source 71105b28a04aebafe7965043661988aa00a7adb3 passed disposable Linux
+workflow 40448345362. The explicit root step actually ran
+TestDockerAcceptanceCandidateLifecycle and recorded the process running,
+running-removal refusal, stopped state and automatic-restart refusal; its
+ownership-checked cleanup completed. TestNativeCandidateMountPinsStartBoundary
+also passed, confirming unsafe mount state makes no start request. Ordinary-phase
+skips are not counted as this evidence. Distinct controller/runner identity and
+Portal endpoint confirmation also passed in the same workflow.
+
+This native result is an inert fixture process lifecycle, not application health,
+quota enforcement through the claim, authenticated broker access or a complete
+managed installation. Full main CI was still running when this record was added.
