@@ -36,6 +36,27 @@ func validateDataWriterSource(ctx context.Context, tx *sql.Tx, v control.Verifie
 	return loadDataWriterSource(ctx, tx, v, now, nil)
 }
 func loadDataWriterSource(ctx context.Context, tx *sql.Tx, v control.VerifiedDataWriterCommand, now int64, written *DataWriterReceipt) (DataPreparationReceipt, error) {
+	proof, err := loadDataWriterSourceCore(ctx, tx, v, now, written)
+	if err != nil {
+		return DataPreparationReceipt{}, err
+	}
+	c, ref := v.Command(), v.Data()
+	var zero DataPreparationReceipt
+	var conflicts int
+	if err := tx.QueryRowContext(ctx, `SELECT
+ (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND effect_id<>?)+
+ (SELECT COUNT(*) FROM runner_resources WHERE id=? OR (data_namespace_id=? AND id<>?))`, ref.InstallationID, ref.EffectID, c.EffectID, c.ResourceID, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID).Scan(&conflicts); err != nil {
+		return zero, err
+	}
+	if conflicts != 0 {
+		return zero, ErrFenceReconciliation
+	}
+	return proof, nil
+}
+
+// Physical-source metadata is shared, but each consumer must independently
+// enforce its exact allowed command/resource history before returning evidence.
+func loadDataWriterSourceCore(ctx context.Context, tx *sql.Tx, v control.VerifiedDataWriterCommand, now int64, written *DataWriterReceipt) (DataPreparationReceipt, error) {
 	var zero DataPreparationReceipt
 	c, ref := v.Command(), v.Data()
 	stored, err := loadAdmittedCommand(ctx, tx, ref.EffectID)
@@ -85,15 +106,6 @@ func loadDataWriterSource(ctx context.Context, tx *sql.Tx, v control.VerifiedDat
 	}
 	if err := requireDataRootHistory(ctx, tx, markerRoot(proof.Claim)); err != nil {
 		return zero, err
-	}
-	var conflicts int
-	if err := tx.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND effect_id<>?)+
- (SELECT COUNT(*) FROM runner_resources WHERE id=? OR (data_namespace_id=? AND id<>?))`, ref.InstallationID, ref.EffectID, c.EffectID, c.ResourceID, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID).Scan(&conflicts); err != nil {
-		return zero, err
-	}
-	if conflicts != 0 {
-		return zero, ErrFenceReconciliation
 	}
 	return proof, nil
 }

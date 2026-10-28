@@ -1516,3 +1516,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   Go job 122811213418 after staticcheck passed. Initial recovery is implemented;
   writable candidate/start/fencing, managed activation, broker, SDK/shared shell,
   reference apps and full P00–P14 acceptance remain incomplete.
+
+- Added separately signed writable-candidate intent bound to the exact completed
+  writer receipt and its future container identity. Current nested authority,
+  original data ownership, revision-3 volume/time/policy evidence, durable floors
+  and exact three-command/no-container history are checked before prepared
+  admission and current metadata reads. Original execution and recovered writer
+  receipts are supported without relaxing legacy sealed/pre-start readers.
+  No execution handle, native container or readiness is created. Added fixed
+  independently reproduced digest/domain/renewal tests, SQLite drift/reopen/
+  current-key tests and actual-source disposable acceptance after both native
+  writer paths. See [writable candidate intent](96-writable-candidate-intent.md).
+  Native acceptance is pending. Reservation/one-shot execution, writable native
+  start/fencing, managed activation, broker, SDK/reference apps and full platform
+  acceptance remain. No schema, production, credential or beta changes.
