@@ -273,6 +273,7 @@ def main(args):
                     portal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_PORTAL_FIXTURE=str(receipt_fixture), APP_DATA_PORTAL_DESCRIPTOR=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors/static.json"))
                     if candidate:
                         portal_env["APP_CANDIDATE_DOCKER_SOCKET"] = candidate[2]
+                        portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = candidate[1]
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=60s"], env=portal_env, capture_output=True, text=True, timeout=60)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
