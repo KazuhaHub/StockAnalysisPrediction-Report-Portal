@@ -20,19 +20,20 @@ const platformNativeInstallFormat = "portal.install-review/1-dev.1"
 const platformFrontendInstallFormat = "portal.frontend-install-review/1-dev.1"
 
 type platformInstallProjection struct {
-	Format               string                    `json:"format"`
-	AppID                string                    `json:"app_id"`
-	PublisherID          string                    `json:"publisher_id"`
-	ReleaseSHA256        string                    `json:"release_sha256"`
-	TrustRevision        int64                     `json:"trust_revision"`
-	KeyRevision          int64                     `json:"key_revision"`
-	KeyID                string                    `json:"key_id"`
-	ControllerEpoch      string                    `json:"controller_epoch"`
-	ActorAuthority       string                    `json:"actor_authority"`
-	PlatformAPI          string                    `json:"platform_api"`
-	DeclinedCapabilities []string                  `json:"declined_capabilities"`
-	DataQuotaBytes       int64                     `json:"data_quota_bytes"`
-	Audience             []platformInstallAudience `json:"audience,omitempty"`
+	Format               string                        `json:"format"`
+	AppID                string                        `json:"app_id"`
+	PublisherID          string                        `json:"publisher_id"`
+	ReleaseSHA256        string                        `json:"release_sha256"`
+	TrustRevision        int64                         `json:"trust_revision"`
+	KeyRevision          int64                         `json:"key_revision"`
+	KeyID                string                        `json:"key_id"`
+	ControllerEpoch      string                        `json:"controller_epoch"`
+	ActorAuthority       string                        `json:"actor_authority"`
+	PlatformAPI          string                        `json:"platform_api"`
+	DeclinedCapabilities []string                      `json:"declined_capabilities"`
+	DataQuotaBytes       int64                         `json:"data_quota_bytes"`
+	Audience             []platformInstallAudience     `json:"audience,omitempty"`
+	Runtime              *platformManagedInstallTarget `json:"runtime,omitempty"`
 }
 
 // Only an internal development protocol is assigned here; this is not Portal's
@@ -59,7 +60,7 @@ func platformNoPriorInstall(e migExec, appID string) error {
 	return nil
 }
 
-func platformLoadInstallProjection(e migExec, release platformStagedRelease, actor platformActorFacts, control platformActorControl) (platformInstallProjection, error) {
+func platformLoadInstallProjectionForTarget(e migExec, release platformStagedRelease, actor platformActorFacts, control platformActorControl, format string, target *platformManagedInstallTarget) (platformInstallProjection, error) {
 	var raw []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release.sha256).Scan(&raw); err != nil {
 		return platformInstallProjection{}, err
@@ -68,18 +69,23 @@ func platformLoadInstallProjection(e migExec, release platformStagedRelease, act
 	if err != nil {
 		return platformInstallProjection{}, errAppPlatformPlanChanged
 	}
-	if err := platformInstallRequirements(parsed.Manifest); err != nil {
+	if err := installRequirementsForTarget(parsed.Manifest, format, target); err != nil {
 		return platformInstallProjection{}, err
 	}
 	if err := platformNoPriorInstall(e, parsed.Manifest.ID); err != nil {
 		return platformInstallProjection{}, err
+	}
+	if format == platformManagedInstallFormat {
+		if err := validateManagedInstallTarget(e, target, control.epoch); err != nil {
+			return platformInstallProjection{}, err
+		}
 	}
 	declined := slices.Clone(parsed.Manifest.Capabilities.Optional)
 	if declined == nil {
 		declined = []string{}
 	}
 	slices.Sort(declined)
-	return platformInstallProjection{Format: "portal.install-review/1-dev.1", AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined, DataQuotaBytes: 256 << 20}, nil
+	return platformInstallProjection{Format: format, Runtime: target, AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined, DataQuotaBytes: 256 << 20}, nil
 }
 
 // Generic static installation defaults to no application persistence. Native
@@ -104,6 +110,9 @@ func (s *Server) createPlatformInstallReviewForFormat(session platformActorSessi
 }
 
 func (s *Server) createPlatformInstallReviewForFormatContext(ctx context.Context, session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget, format string) (platformRemovalReview, error) {
+	return s.createPlatformInstallReviewWithRuntime(ctx, session, release, trustRevision, targets, format, nil, platformRuntimeEndpoint{})
+}
+func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, session platformActorSession, release string, trustRevision int64, targets []platformAudienceTarget, format string, facts *platformManagedRuntimeFacts, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
 	if len(targets) > maxPlatformInstallAudience {
 		return platformRemovalReview{}, errAppPlatformPlanChanged
 	}
@@ -111,7 +120,20 @@ func (s *Server) createPlatformInstallReviewForFormatContext(ctx context.Context
 
 	var result platformRemovalReview
 	err := s.withPlatformStagedReleaseContext(ctx, session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
-		projection, err := platformLoadInstallProjection(e, verified, actor, control)
+		var target *platformManagedInstallTarget
+		if format == platformManagedInstallFormat {
+			if facts == nil {
+				return errAppPlatformRuntimeConflict
+			}
+			var err error
+			target, err = managedInstallTarget(*facts, endpoint)
+			if err != nil {
+				return err
+			}
+		} else if facts != nil {
+			return errAppPlatformPlanChanged
+		}
+		projection, err := platformLoadInstallProjectionForTarget(e, verified, actor, control, format, target)
 		if err != nil {
 			return err
 		}
@@ -145,6 +167,9 @@ func (s *Server) createPlatformInstallReviewForFormatContext(ctx context.Context
 		}
 		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + 900000}
 		_, err = e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms) VALUES(?,NULL,?,?,'install',NULL,?,0,0,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`, id, projection.AppID, projection.PublisherID, release, trustRevision, control.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint, result.SHA256, result.JSON, result.ExpiresMS, control.nowMS, control.nowMS)
+		if err == nil && facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+			return errAppPlatformRuntimeConflict
+		}
 		return err
 	})
 	if err != nil {
@@ -162,8 +187,11 @@ func (s *Server) consumePlatformInstallReviewContext(ctx context.Context, sessio
 }
 
 func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Context, session platformActorSession, planID, planSHA, key, requiredFormat string) (platformRemovalCommit, error) {
+	return s.consumePlatformInstallReviewWithRuntime(ctx, session, planID, planSHA, key, requiredFormat, nil, platformRuntimeEndpoint{})
+}
+func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, session platformActorSession, planID, planSHA, key, requiredFormat string, facts *platformManagedRuntimeFacts, endpoint platformRuntimeEndpoint) (platformRemovalCommit, error) {
 	var result platformRemovalCommit
-	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) || (requiredFormat != "" && requiredFormat != platformFrontendInstallFormat) {
+	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) || (requiredFormat != "" && requiredFormat != platformFrontendInstallFormat && requiredFormat != platformManagedInstallFormat) {
 		return result, errAppPlatformPlanChanged
 	}
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
@@ -186,18 +214,34 @@ func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Contex
 			return err
 		}
 		if exists {
-			if requiredFormat != "" {
-				var raw string
-				if err := e.queryRow(`SELECT p.plan_json FROM app_platform_review_plans p JOIN app_platform_operations o ON o.review_plan_id=p.id WHERE o.id=?`, previous.OperationID).Scan(&raw); err != nil {
-					return err
-				}
-				var projection platformInstallProjection
-				if json.Unmarshal([]byte(raw), &projection) != nil || projection.Format != requiredFormat {
+			var original string
+			if err := e.queryRow(`SELECT p.plan_json FROM app_platform_review_plans p JOIN app_platform_operations o ON o.review_plan_id=p.id WHERE o.id=?`, previous.OperationID).Scan(&original); err != nil {
+				return err
+			}
+			var projection platformInstallProjection
+			if json.Unmarshal([]byte(original), &projection) != nil {
+				return errAppPlatformPlanChanged
+			}
+			if requiredFormat != "" && projection.Format != requiredFormat {
+				return errAppPlatformPlanChanged
+			}
+			if projection.Format == platformManagedInstallFormat {
+				if facts == nil || requiredFormat != platformManagedInstallFormat {
 					return errAppPlatformPlanChanged
+				}
+				target, err := managedInstallTarget(*facts, endpoint)
+				if err != nil || projection.Runtime == nil || *projection.Runtime != *target {
+					return errAppPlatformRuntimeConflict
+				}
+				if err := validateManagedInstallTarget(e, target, control.epoch); err != nil {
+					return err
 				}
 			}
 			result = previous
 			_, err = platformRefreshActor(e, session, actor, control)
+			if err == nil && facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+				return errAppPlatformRuntimeConflict
+			}
 			return err
 		}
 		lock := ""
@@ -235,13 +279,24 @@ func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Contex
 		if err != nil {
 			return err
 		}
-		projection, err := platformLoadInstallProjection(e, verified, actor, control)
-		if err != nil {
-			return err
-		}
 		var storedProjection platformInstallProjection
 		if json.Unmarshal([]byte(raw), &storedProjection) != nil {
 			return errAppPlatformPlanChanged
+		}
+		if storedProjection.Format == platformManagedInstallFormat {
+			if facts == nil || requiredFormat != platformManagedInstallFormat {
+				return errAppPlatformPlanChanged
+			}
+			target, err := managedInstallTarget(*facts, endpoint)
+			if err != nil || storedProjection.Runtime == nil || *storedProjection.Runtime != *target {
+				return errAppPlatformRuntimeConflict
+			}
+		} else if facts != nil {
+			return errAppPlatformPlanChanged
+		}
+		projection, err := platformLoadInstallProjectionForTarget(e, verified, actor, control, storedProjection.Format, storedProjection.Runtime)
+		if err != nil {
+			return err
 		}
 		if requiredFormat != "" && storedProjection.Format != requiredFormat {
 			return errAppPlatformPlanChanged
@@ -272,18 +327,19 @@ func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Contex
 		if _, err := rand.Read(seed); err != nil {
 			return err
 		}
+		defer clear(seed)
 		sealed, err := aesSeal(dek, seed, aad("app-platform", installationID))
 		if err != nil {
 			return err
 		}
-		if _, err = e.exec(`INSERT INTO app_platform_installations(id,app_id,publisher_id,runtime_id,desired_state,phase,generation,revision,policy_revision,control_fence,controller_epoch,sealed_identity_seed,created_ms,updated_ms) VALUES(?,?,?,NULL,'enabled','pending',1,1,1,0,?,?,?,?)`, installationID, appID, publisher, control.epoch, sealPrefix+sealed, control.nowMS, control.nowMS); err != nil {
+		if _, err = e.exec(`INSERT INTO app_platform_installations(id,app_id,publisher_id,runtime_id,desired_state,phase,generation,revision,policy_revision,control_fence,controller_epoch,sealed_identity_seed,created_ms,updated_ms) VALUES(?,?,?,?,'enabled','pending',1,1,1,0,?,?,?,?)`, installationID, appID, publisher, managedInstallRuntimeID(projection), control.epoch, sealPrefix+sealed, control.nowMS, control.nowMS); err != nil {
 			return err
 		}
 		updated, err := e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND expires_ms>? AND plan_sha256=?`, control.nowMS, control.nowMS, planID, control.nowMS, planSHA)
 		if err := platformLeaseCAS(updated, err); err != nil {
 			return err
 		}
-		if _, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,'install',0,0,1,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, operationID, installationID, planID, actor.scope, keyDigest, requestDigest, control.epoch, control.nowMS, control.nowMS); err != nil {
+		if _, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,'install',?,0,1,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, operationID, installationID, planID, actor.scope, keyDigest, requestDigest, platformManagedInstallFlag(projection), control.epoch, control.nowMS, control.nowMS); err != nil {
 			return err
 		}
 		for _, capability := range projection.DeclinedCapabilities {
@@ -310,6 +366,9 @@ func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Contex
 		}
 		if expires <= final.nowMS {
 			return errAppPlatformPlanExpired
+		}
+		if facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+			return errAppPlatformRuntimeConflict
 		}
 		result = platformRemovalCommit{OperationID: operationID, InstallationID: installationID, Generation: 1, Revision: 1, Stage: appplatform.StageQueued}
 		return nil

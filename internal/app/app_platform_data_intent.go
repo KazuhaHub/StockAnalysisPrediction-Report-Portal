@@ -82,7 +82,7 @@ func platformDataCommand(e migExec, lease platformOperationLease, runtime platfo
 	if profileErr != nil {
 		return control.Command{}, profileErr
 	}
-	if profile != platformNativeInstallFormat {
+	if profile != platformNativeInstallFormat && profile != platformManagedInstallFormat {
 		return control.Command{}, errAppPlatformStageEvidence
 	}
 	var target string
@@ -196,7 +196,7 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 // an endpoint, dispatches native work, marks data active or changes an app backend.
 func (s *Server) preparePlatformInstallData(ctx context.Context, expected platformOperationLease) (platformDataIntent, error) {
 	var zero platformDataIntent
-	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 || expected.snapshot.Stage != appplatform.StagePrepareData {
+	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Generation != 1 || expected.snapshot.Stage != appplatform.StagePrepareData {
 		return zero, errAppPlatformStageEvidence
 	}
 	if err := ctx.Err(); err != nil {
@@ -206,7 +206,7 @@ func (s *Server) preparePlatformInstallData(ctx context.Context, expected platfo
 	if err != nil {
 		return zero, err
 	}
-	if profile != platformNativeInstallFormat {
+	if profile != platformNativeInstallFormat && profile != platformManagedInstallFormat {
 		return zero, errAppPlatformStageEvidence
 	}
 	dek, err := s.dek()
@@ -240,6 +240,12 @@ func (s *Server) preparePlatformInstallData(ctx context.Context, expected platfo
 	}
 	if err := validatePlatformInstallAuthority(e, expected, trust, facts.now); err != nil {
 		return zero, err
+	}
+	if expected.snapshot.Managed {
+		target, err := platformManagedTargetForOperation(e, expected.id)
+		if err != nil || target.RuntimeID != runtime.id {
+			return zero, errAppPlatformRuntimeConflict
+		}
 	}
 	result, fresh, err := loadPlatformDataIntent(e, expected, runtime, facts.now, true)
 	if err != nil {

@@ -217,6 +217,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal("Portal did not validate managed profile", output.String())
 		}
 		t.Log("MANAGED_PROFILE_OBSERVED")
+		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_DATA_READY")) {
+			t.Fatal("Portal did not complete managed data stage", output.String())
+		}
+		t.Log("MANAGED_INSTALL_DATA_READY")
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {
 		t.Fatal("child did not dispatch data execution", output.String())
@@ -469,5 +473,8 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("full driver retained lease or incomplete state")
 	}
 	t.Log("STATIC_DRIVER_COMPLETE")
+	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
+		testNativePortalManagedInstallData(t, s, session, endpoint)
+	}
 
 }
