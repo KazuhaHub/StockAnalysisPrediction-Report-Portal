@@ -146,7 +146,30 @@ granted by this acceptance case.
 Local control/journal/transport race passed in 1.880/88.397/1.318s. Expanded focused
 writer race passed in 10.621s (control cache hit). Linux amd64/arm64 journal
 compilation, vet/default Linux staticcheck and all 14 Python probe tests passed.
-Fresh native workflow evidence remains pending.
+Platform regression also passed in 8.208s.
+
+Functional source `a612799f0c064e0d024684632b1fbe896fd3fa4a` passed both fresh
+native workflows:
+
+- Quota workflow 40679110373/job 122784962851 emitted
+  `native_writer_intent_and_claim_verified=true` using the actual prepared XFS
+  source, with unchanged sealed permissions and durable unknown writer intent.
+  Existing permission-transition, filtered writer/quota, current-viewer request
+  and owned-resource/registry cleanup flags also remain true. Linux control/
+  appplatform/transport/driver race passed in 1.542/1.582/5.365/2.946s.
+- Daemon workflow 40679110347/job 122784962964 passed the full runner race suite,
+  including expanded writer deadline/Close/concurrency/restart refusal tests
+  (journal 143.827s), and the existing native closed container/IPC/root-endpoint
+  gates. Runtime evidence is amd64; arm64 evidence here is compilation.
+- General workflow 40679110312 passed every app race shard and its aggregate,
+  web checks/tests, workflow lint and Docker smoke. Go job 122784963116 passed
+  staticcheck but retains the existing x/net v0.60.0 vulnerability gate failure
+  (GO-2026-6866/6860); the following non-race Test step was skipped. This is not
+  an all-green release.
+
+This completes the initial intent/claim/one-shot guard implementation and its
+actual-source acceptance. It does not complete native writer exclusion, physical
+write dispatch/settlement, active writer authority or the overall platform.
 
 ## Next implementation dependency
 
