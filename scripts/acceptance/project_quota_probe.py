@@ -316,6 +316,9 @@ def main(args):
                             if "MANAGED_BACKEND_REGISTRATION_MATERIAL" not in result.stdout:
                                 raise RuntimeError("Portal managed registration material was not prepared")
                             report["native_portal_managed_registration_material"] = True
+                            if "BACKEND_REGISTRATION_INTENT_ADMITTED" not in result.stdout:
+                                raise RuntimeError("actual candidate registration intent was not admitted")
+                            report["native_backend_registration_intent"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

@@ -189,6 +189,11 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if err != nil || !bytes.Equal(document, again) {
 			t.Fatal("registration retry changed key identity", err)
 		}
+		// Only the public document digest crosses this test boundary. The root
+		// fixture separately exercises signed intent admission, never key delivery.
+		if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "registration-digest"), []byte(platformDigest(document)), 0600); err != nil {
+			t.Fatal(err)
+		}
 		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, activated.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 {
 			t.Fatal("registration preparation granted authority")
 		}
