@@ -113,9 +113,9 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := store.DispatchPrepareData(ctx, prepareRaw, prepareSig, root, pin)
-	if err != nil {
-		t.Fatal(err)
+	var proof journal.DataPreparationReceipt
+	if _, err := os.Lstat(filepath.Join(rootPath, prepare.Payload.DataNamespaceID)); !os.IsNotExist(err) {
+		t.Fatal("fresh managed namespace already exists", err)
 	}
 	sockets, err := os.MkdirTemp("/run", "portal-cex-")
 	if err != nil {
@@ -181,7 +181,23 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(endpoint, "control.sock")
-	server, err := ListenCandidateController(ctx, path, controllerTestUID, controllerTestGID, store, native)
+	// These refuse before creating any endpoint, even with a real configured runtime.
+	badPin := pin
+	badPin.Inode++
+	for _, configuration := range []struct {
+		root *data.Root
+		pin  data.RootIdentity
+	}{{root, badPin}, {&data.Root{}, pin}} {
+		rejected, err := ListenManagedController(ctx, path, controllerTestUID, controllerTestGID, store, configuration.root, configuration.pin, native)
+		if err == nil {
+			rejected.Close()
+			t.Fatal("mismatched provider joined runtime")
+		}
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatal("mismatched provider created endpoint", err)
+		}
+	}
+	server, err := ListenManagedController(ctx, path, controllerTestUID, controllerTestGID, store, root, pin, native)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,6 +217,35 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 		}
 	}()
 	authorityJSON, _ := json.Marshal(authority)
+	runData := func() {
+		t.Helper()
+		childCtx, stop := context.WithTimeout(ctx, 20*time.Second)
+		defer stop()
+		cmd := exec.CommandContext(childCtx, binaryPath, "-test.run=^TestNativeReceiptChild$", "-test.timeout=15s")
+		cmd.Env = []string{"GOMAXPROCS=2", "APP_RECEIPT_CHILD=accepted", "RECEIPT_OPERATION=prepare", "RECEIPT_SOCKET=" + path, "RECEIPT_COMMAND=" + base64.RawStdEncoding.EncodeToString(prepareRaw), "RECEIPT_SIGNATURE=" + base64.RawStdEncoding.EncodeToString(prepareSig), "RECEIPT_AUTHORITY=" + base64.RawStdEncoding.EncodeToString(authorityJSON), "RECEIPT_INODE=" + proof.NamespaceInode, "RECEIPT_FORMAT=portal.runner.prepare-data-receipt/1-dev.1", "RECEIPT_JOURNAL=" + filepath.Join(journalPath, "journal.sqlite3")}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: controllerTestUID, Gid: controllerTestGID, Groups: []uint32{controllerTestGID}}}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("unified data preparation: %v\n%s", err, out)
+		}
+	}
+	runData()
+	proof, err = store.ReadDataPreparationReceipt(ctx, prepareRaw, prepareSig)
+	if err != nil {
+		t.Fatal("cross-UID data receipt missing", err)
+	}
+	project, err := strconv.ParseUint(proof.ProjectID, 10, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := root.Inspect(ctx, pin, prepare.Payload.DataNamespaceID, uint32(project))
+	if err != nil || proof.NamespaceInode != strconv.FormatUint(before.Inode, 10) {
+		t.Fatal("unified data receipt not native", err)
+	}
+	runData()
+	after, err := root.Inspect(ctx, pin, prepare.Payload.DataNamespaceID, uint32(project))
+	if err != nil || before != after {
+		t.Fatal("unified data replay changed namespace", err)
+	}
 	run := func(uid, gid uint32, action, operation string, command, signature []byte) {
 		t.Helper()
 		childCtx, stop := context.WithTimeout(ctx, 20*time.Second)
