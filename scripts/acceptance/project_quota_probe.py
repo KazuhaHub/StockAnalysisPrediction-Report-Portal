@@ -299,13 +299,14 @@ def main(args):
                 if ready_image:
                     writer_journal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_WRITER_NATIVE_IMAGE=ready_image, APP_CANDIDATE_DOCKER_SOCKET=candidate[2])
                     executed = subprocess.run([args[6], "-test.run=^TestNativeJournalDataWriterExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=writer_journal_env, capture_output=True, text=True, timeout=70)
-                    if executed.returncode or "NATIVE_JOURNAL_DATA_WRITER_EXECUTION_VERIFIED" not in executed.stdout or "NATIVE_WRITER_SETTLEMENT_FAILURE_PRESERVED_UNKNOWN" not in executed.stdout or "NATIVE_DATA_WRITER_RECOVERY_AFTER_EXPIRY_VERIFIED" not in executed.stdout or "NATIVE_WRITER_RECOVERY_WITHOUT_PERMISSION_MUTATION" not in executed.stdout or "NATIVE_WRITER_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED" not in executed.stdout:
+                    if executed.returncode or "NATIVE_JOURNAL_DATA_WRITER_EXECUTION_VERIFIED" not in executed.stdout or "NATIVE_WRITER_SETTLEMENT_FAILURE_PRESERVED_UNKNOWN" not in executed.stdout or "NATIVE_DATA_WRITER_RECOVERY_AFTER_EXPIRY_VERIFIED" not in executed.stdout or "NATIVE_WRITER_RECOVERY_WITHOUT_PERMISSION_MUTATION" not in executed.stdout or "NATIVE_WRITER_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED" not in executed.stdout or "NATIVE_WRITABLE_CANDIDATE_INTENT_ACTUAL_SOURCES_VERIFIED" not in executed.stdout:
                         raise RuntimeError("actual journal writer execution failed: " + (executed.stdout+executed.stderr)[-4096:])
                     report["native_journal_data_writer_execution_verified"] = True
                     report["native_writer_settlement_failure_preserves_unknown"] = True
                     report["native_data_writer_recovery_after_expiry_verified"] = True
                     report["native_writer_recovery_without_permission_mutation"] = True
                     report["native_writer_recovery_metadata_failure_retry_verified"] = True
+                    report["native_writable_candidate_intent_actual_sources_verified"] = True
                 if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True

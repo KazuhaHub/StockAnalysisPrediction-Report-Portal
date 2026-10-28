@@ -220,6 +220,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 				t.Fatal("actual recovered volume not settled")
 			}
 		}
+		exerciseNativeWritableCandidateIntent(t, ctx, s, writerRaw, writerSig, fixtureID(base+6))
 		if again, err := s.ExecuteDataWriter(ctx, claim, descriptor, native); err == nil || again != (DataWriterReceipt{}) {
 			t.Fatal("physical writer effect replayed")
 		}
@@ -235,4 +236,5 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 	t.Log("NATIVE_DATA_WRITER_RECOVERY_AFTER_EXPIRY_VERIFIED")
 	t.Log("NATIVE_WRITER_RECOVERY_WITHOUT_PERMISSION_MUTATION")
 	t.Log("NATIVE_WRITER_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED")
+	t.Log("NATIVE_WRITABLE_CANDIDATE_INTENT_ACTUAL_SOURCES_VERIFIED")
 }
