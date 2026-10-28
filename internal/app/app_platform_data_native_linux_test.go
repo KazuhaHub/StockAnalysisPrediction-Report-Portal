@@ -15,6 +15,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -156,12 +157,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
-	defer func() {
+	stopServer := sync.OnceFunc(func() {
 		cancel()
 		if err := <-done; err != nil {
 			t.Error(err)
 		}
-	}()
+	})
+	defer stopServer()
 	publicReader, publicWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -191,9 +193,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 		defer func() {
+			stopServer()
 			commandPath := filepath.Join(childData, "candidate-command.json")
 			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
-			server.Close()
 			if err := native.Close(); err != nil {
 				t.Error(err)
 			}

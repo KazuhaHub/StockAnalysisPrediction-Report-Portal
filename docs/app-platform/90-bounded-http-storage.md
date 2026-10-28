@@ -131,3 +131,12 @@ inventory, and the root-only test artifact could not execute as UID 65532. The
 dedicated array decoder/projection tests and isolated executable copy correct
 these integration errors. Those failed runs are not native acceptance evidence;
 fresh byte/inode, real-reference and owned-teardown runs remain mandatory.
+
+Source `ea621ec9e6439a1c23058bb299a9e8d6b0970769` passed daemon workflow
+40663359547/job 122731622827, including actual UID 65532 byte/inode refusal,
+trusted-marker protection, capacity/marker drift and owned mount cleanup. Its
+quota workflow 40663359566/job 122731622439 reached all real Portal registration,
+boot and current-viewer markers, but failed during fixture service shutdown:
+the listener was closed while Serve still had an uncancelled context. Teardown
+now uses one shared cancel-and-wait operation before native close/release; the
+production unsafe-endpoint check remains intact. A new full quota run is required.
