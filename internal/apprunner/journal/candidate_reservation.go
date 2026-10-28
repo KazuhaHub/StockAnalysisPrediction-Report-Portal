@@ -188,7 +188,10 @@ func candidateOwnership(f candidateFacts) string {
 	return candidateHash(raw)
 }
 func existingCandidateResource(ctx context.Context, tx *sql.Tx, c control.CandidateCommand) (*dataResource, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms FROM runner_resources WHERE id=? OR (kind='container' AND native_id=?) LIMIT 2`, c.Payload.ResourceID, candidatePendingPrefix+c.Payload.ResourceID)
+	return existingCandidateResourcePrefix(ctx, tx, c, candidatePendingPrefix)
+}
+func existingCandidateResourcePrefix(ctx context.Context, tx *sql.Tx, c control.CandidateCommand, prefix string) (*dataResource, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms FROM runner_resources WHERE id=? OR (kind='container' AND native_id=?) LIMIT 2`, c.Payload.ResourceID, prefix+c.Payload.ResourceID)
 	if err != nil {
 		return nil, err
 	}

@@ -20,6 +20,18 @@ type writableCandidateSource struct {
 // Later reservation/execution must define their own exact extended history;
 // this does not relax the old sealed candidate or pre-start writer readers.
 func loadWritableCandidateSource(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, now int64) (writableCandidateSource, error) {
+	source, err := loadWritableCandidateSourceCore(ctx, tx, v, now)
+	if err != nil {
+		return writableCandidateSource{}, err
+	}
+	if err := checkWritableCandidateHistory(ctx, tx, v, ""); err != nil {
+		return writableCandidateSource{}, err
+	}
+	return source, nil
+}
+
+// Each caller separately checks its allowed lifecycle/resource history.
+func loadWritableCandidateSourceCore(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, now int64) (writableCandidateSource, error) {
 	var zero writableCandidateSource
 	c, w, ref := v.Command(), v.Writer(), v.Writer().Data()
 	index := dataWriterIndex(w)
@@ -57,16 +69,26 @@ func loadWritableCandidateSource(ctx context.Context, tx *sql.Tx, v control.Veri
 	if !dataWriterReceiptMatches(receipt, dataWriterFacts{verified: w, source: source, now: now, fence: fence}) {
 		return zero, ErrFenceReconciliation
 	}
+	return writableCandidateSource{data: source, writer: receipt}, nil
+}
+
+// allowedResource must be empty, or the exact future container after the
+// reservation reader has independently verified every ownership/state field.
+func checkWritableCandidateHistory(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, allowedResource string) error {
+	c, w, ref := v.Command(), v.Writer(), v.Writer().Data()
+	if allowedResource != "" && allowedResource != w.Command().ResourceID {
+		return ErrFenceReconciliation
+	}
 	var conflicts int
 	if err := tx.QueryRowContext(ctx, `SELECT
  (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND effect_id<>? AND effect_id<>?)+
- (SELECT COUNT(*) FROM runner_resources WHERE id=? OR (data_namespace_id=? AND id<>?))`, ref.InstallationID, ref.EffectID, index.EffectID, c.EffectID, w.Command().ResourceID, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID).Scan(&conflicts); err != nil {
-		return zero, err
+ (SELECT COUNT(*) FROM runner_resources WHERE (id=? AND id<>?) OR (data_namespace_id=? AND id<>? AND id<>?))`, ref.InstallationID, ref.EffectID, w.Command().EffectID, c.EffectID, w.Command().ResourceID, allowedResource, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID, allowedResource).Scan(&conflicts); err != nil {
+		return err
 	}
 	if conflicts != 0 {
-		return zero, ErrFenceReconciliation
+		return ErrFenceReconciliation
 	}
-	return writableCandidateSource{data: source, writer: receipt}, nil
+	return nil
 }
 
 // AdmitWritableCandidateCommand persists separately authenticated start intent.

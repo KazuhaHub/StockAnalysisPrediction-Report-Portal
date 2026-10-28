@@ -1548,3 +1548,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   after staticcheck in Go job 122822991559. This closes initial intent/source
   binding only, not reservation, writable native execution, readiness/activation,
   SDK/reference apps or full P00–P14 acceptance. Production and beta unchanged.
+
+- Added exact writable candidate resource reservation, current prepared-resource
+  reads and process-local one-shot claims. Stable ownership binds original data/
+  writer receipt bytes and source tuple while allowing current-key prepared
+  renewal; higher fences and unknown restart/copy/JSON takeover refuse. Only the
+  independently validated pending resource extends the strict source history.
+  Unknown claim state commits before invocation, current authority/source/resource
+  is rechecked after IO, signed expiry/cancellation is bounded and Close waits
+  before releasing journal ownership. Callback success creates no running/ready
+  evidence. Added real SQLite/crypto concurrency/drift/renewal/deadline/Close
+  tests and actual XFS-source read-only invocation acceptance for both writer
+  receipt kinds. See [writable reservation and claims](97-writable-candidate-reservation-and-claims.md).
+  Native acceptance is pending. Concrete writable native preflight/start/opaque
+  settlement, readiness/registration/activation, broker, SDK/reference apps and
+  full platform acceptance remain incomplete. No schema or production/beta changes.
