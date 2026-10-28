@@ -66,7 +66,21 @@ func writableCandidateReference(ctx context.Context, client *http.Client, plan c
 // creates/starts/stops a process, or yields a live executable handle. The caller
 // must verify fresh recovery authority over the exact expired bound claim.
 func (r *CandidateRuntime) ObserveWritableCandidate(ctx context.Context, request WritableCandidateLaunchRequest, expected WritableCandidateLaunchSnapshot) (WritableCandidateRecoveryObservation, error) {
-	var zero WritableCandidateRecoveryObservation
+	observed, err := r.observeWritableCandidate(ctx, request, expected, "", nil)
+	if err != nil {
+		return WritableCandidateRecoveryObservation{}, err
+	}
+	result := WritableCandidateRecoveryObservation{valid: true, recoveryOnly: true, snapshot: observed}
+	if _, err := result.Snapshot(); err != nil {
+		return WritableCandidateRecoveryObservation{}, err
+	}
+	return result, nil
+}
+
+// Only trusted internal read-only probes run between the two complete native
+// checks. The callback is never exposed to apps, wire callers or the journal.
+func (r *CandidateRuntime) observeWritableCandidate(ctx context.Context, request WritableCandidateLaunchRequest, expected WritableCandidateLaunchSnapshot, nativeID string, probe func(context.Context) error) (WritableCandidateRunningSnapshot, error) {
+	var zero WritableCandidateRunningSnapshot
 	if r == nil || os.Geteuid() != 0 {
 		return zero, ErrUnsupported
 	}
@@ -74,7 +88,7 @@ func (r *CandidateRuntime) ObserveWritableCandidate(ctx context.Context, request
 	defer cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.root == nil || !validWritableCandidateRequest(request) || request.Platform != "linux/"+runtime.GOARCH || !validWritableCandidateSnapshot(expected) || expected.Binding != request.Binding || expected.Launch.Identity != request.Identity || expected.Launch.Data != request.Data || expected.Launch.Platform != request.Platform {
+	if r.closed || r.root == nil || (nativeID != "" && !containerSHA.MatchString(nativeID)) || !validWritableCandidateRequest(request) || request.Platform != "linux/"+runtime.GOARCH || !validWritableCandidateSnapshot(expected) || expected.Binding != request.Binding || expected.Launch.Identity != request.Identity || expected.Launch.Data != request.Data || expected.Launch.Platform != request.Platform {
 		return zero, ErrInvalidResponse
 	}
 	request.Descriptor = bytes.Clone(request.Descriptor)
@@ -113,9 +127,17 @@ func (r *CandidateRuntime) ObserveWritableCandidate(ctx context.Context, request
 	if err != nil {
 		return zero, err
 	}
+	if nativeID != "" && id != nativeID {
+		return zero, ErrContainerConflict
+	}
 	state, err := inspectCandidateContainerHTTP(ctx, client, id, plan)
 	if err != nil || state != "running" {
 		return zero, errors.Join(ErrContainerUncertain, err)
+	}
+	if probe != nil {
+		if err := probe(ctx); err != nil {
+			return zero, err
+		}
 	}
 	if err := pins.validate(ctx, plan); err != nil {
 		return zero, err
@@ -137,9 +159,5 @@ func (r *CandidateRuntime) ObserveWritableCandidate(ctx context.Context, request
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	observation := WritableCandidateRecoveryObservation{valid: true, recoveryOnly: true, snapshot: WritableCandidateRunningSnapshot{Launch: actual, NativeID: id, ObservedMS: time.Now().UnixMilli()}}
-	if _, err := observation.Snapshot(); err != nil {
-		return zero, err
-	}
-	return observation, nil
+	return WritableCandidateRunningSnapshot{Launch: actual, NativeID: id, ObservedMS: time.Now().UnixMilli()}, nil
 }
