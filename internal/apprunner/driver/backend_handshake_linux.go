@@ -32,37 +32,7 @@ func (r *CandidateRuntime) ExchangeCandidateHandshake(ctx context.Context, launc
 	if r.closed || s.closed || s.used || receipt.Launch != s.snapshot {
 		return zero, ErrContainerUncertain
 	}
-	check := func() error {
-		if err := s.pins.validate(ctx, s.plan); err != nil {
-			return err
-		}
-		if err := r.checkData(ctx, s.snapshot.Identity, s.snapshot.Data); err != nil {
-			return err
-		}
-		client, closeClient := r.client()
-		defer closeClient()
-		state, err := inspectCandidateContainerHTTP(ctx, client, receipt.NativeID, s.plan)
-		if err != nil || state != "running" {
-			return ErrContainerUncertain
-		}
-		path := filepath.Join(r.roots.Sockets, s.snapshot.Identity.InstallationID, s.snapshot.Identity.Generation, "broker")
-		parent := -1
-		for _, pin := range s.pins.dirs {
-			if pin.path == path {
-				parent = int(pin.file.Fd())
-				break
-			}
-		}
-		if parent < 0 {
-			return ErrUnsafeSocket
-		}
-		document, st, err := readBackendRegistrationFile(ctx, parent, receipt.BindingSHA256, 65532, 65532)
-		defer clear(document)
-		if err != nil || uint64(st.Dev) != receipt.Device || st.Ino != receipt.Inode || containerHash(document) != receipt.DocumentSHA256 {
-			return ErrUnsafeSocket
-		}
-		return ctx.Err()
-	}
+	check := func() error { return r.checkBackendBindingLocked(ctx, s, receipt) }
 	if err := check(); err != nil {
 		return zero, err
 	}
@@ -104,4 +74,38 @@ func exchangeBackendHandshake(ctx context.Context, path string, uid, gid uint32,
 		return "", ErrContainerUncertain
 	}
 	return appplatform.ParseBackendHandshakeAnswer(raw)
+}
+
+// Caller holds runtime and launch locks. Shared by read-only handshake and
+// explicit request forwarding so both enforce the same physical/file boundary.
+func (r *CandidateRuntime) checkBackendBindingLocked(ctx context.Context, s *candidateLaunchState, receipt BackendRegistrationSnapshot) error {
+	if err := s.pins.validate(ctx, s.plan); err != nil {
+		return err
+	}
+	if err := r.checkData(ctx, s.snapshot.Identity, s.snapshot.Data); err != nil {
+		return err
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	state, err := inspectCandidateContainerHTTP(ctx, client, receipt.NativeID, s.plan)
+	if err != nil || state != "running" {
+		return ErrContainerUncertain
+	}
+	path := filepath.Join(r.roots.Sockets, s.snapshot.Identity.InstallationID, s.snapshot.Identity.Generation, "broker")
+	parent := -1
+	for _, pin := range s.pins.dirs {
+		if pin.path == path {
+			parent = int(pin.file.Fd())
+			break
+		}
+	}
+	if parent < 0 {
+		return ErrUnsafeSocket
+	}
+	document, st, err := readBackendRegistrationFile(ctx, parent, receipt.BindingSHA256, 65532, 65532)
+	defer clear(document)
+	if err != nil || uint64(st.Dev) != receipt.Device || st.Ino != receipt.Inode || containerHash(document) != receipt.DocumentSHA256 {
+		return ErrUnsafeSocket
+	}
+	return ctx.Err()
 }
