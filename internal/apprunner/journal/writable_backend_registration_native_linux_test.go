@@ -152,6 +152,7 @@ func assertWritableRegistrationNativeDelivery(t *testing.T, s *Store, native *dr
 	if stamp != writableRegistrationFixtureStamp(t, path, document) {
 		t.Fatal("applied replay rewrote protected file")
 	}
+	assertWritableNativeHandshake(t, s, native, raw, sig, descriptor, document, sockets, recovered)
 	return s, native
 }
 func assertWritableRegistrationMissingFile(t *testing.T, s *Store, native *driver.CandidateRuntime, raw, descriptor, document []byte, sockets string) {
@@ -221,4 +222,6 @@ func assertWritableRegistrationNormalDelivery(t *testing.T, s *Store, native *dr
 	if stamp != writableRegistrationFixtureStamp(t, path, document) {
 		t.Fatal("normal replay rewrote file")
 	}
+	assertWritableNativeHandshake(t, s, native, raw, sig, descriptor, document, sockets, delivered)
+	assertWritableStoppedHandshake(t, s, native, raw, sig, descriptor, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), delivered)
 }
