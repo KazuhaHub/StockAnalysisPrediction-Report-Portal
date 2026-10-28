@@ -1744,3 +1744,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   viewer access or activation follows from file delivery. Controller transport,
   activation/worker, physical lifecycle, broker, SDK/reference apps and full
   P00–P14 acceptance remain. Production, credentials, Status and beta unchanged.
+
+- Added current writable backend handshake: exact applied original/recovered
+  delivery/source verification, fresh protected-file/native policy checks around
+  fixed private socket challenge exchange, opaque native evidence and current
+  postflight under owner exclusion. No durable mutation or activation. Added
+  parser/current-drift/refusal tests plus actual host MAC/challenge/boot checks,
+  same-content inode substitution refusal, row/file preservation and stopped
+  handshake refusal. See [writable backend handshake](104-writable-backend-handshake.md).
+  Native acceptance pending. Host/controller integration, viewer/activation/worker,
+  lifecycle, broker, SDK/reference apps and full acceptance remain incomplete.
+  Production, credentials, Status adoption and beta unchanged.
