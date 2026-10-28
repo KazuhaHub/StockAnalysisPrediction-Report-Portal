@@ -1066,9 +1066,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   symlink repair. Added directory refusals and real root/non-root Portal start,
   failed-settlement recovery, exact native replay and owned cleanup acceptance.
 - Local focused SQLite race passed (20.119 s), PostgreSQL race passed (15.318 s),
-  Linux compilation, vet/staticcheck and 13 Python tests passed. Native CI is
-  pending; no actual Portal candidate start is claimed until that run passes.
-  See [managed candidate details](79-managed-candidate-start.md).
+  Linux amd64/arm64 compilation, vet/staticcheck and 13 Python tests passed.
+  Runner/CLI race also passed (journal 81.723 s).
+- Functional source `441a26083fee4c7e30999015ece5bb024bf2c8c5` passed native
+  quota workflow 40613886646 (job 122572074822): actual non-root Portal candidate
+  start-to-probe, data-to-start and owned cleanup keys are true. Linux transport/
+  driver race passed in 4.540/1.492 s. General CI still fails the existing x/net
+  vulnerability gate. See [managed candidate details](79-managed-candidate-start.md).
 - Actual readiness/writer/broker/registration, image fetching, managed scheduling,
   bounded socket storage, reconciliation and full lifecycle/reference apps remain.
   No schema, production/beta, module versions or real credentials changed.

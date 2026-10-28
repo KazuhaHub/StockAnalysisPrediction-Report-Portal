@@ -112,8 +112,22 @@ The root parent independently checks the actual running container and every
 ownership label against the authenticated fixture command, matches its native ID
 to the journal receipt and deletes only that exact owned test container. The
 acceptance script requires `MANAGED_INSTALL_CANDIDATE_PROBE` before reporting
-`native_portal_managed_candidate_start_to_probe: true`. Native evidence is pending
-until the current functional source passes this workflow.
+`native_portal_managed_candidate_start_to_probe: true`.
+
+Functional source `441a26083fee4c7e30999015ece5bb024bf2c8c5` passed native quota
+workflow [40613886646](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40613886646),
+job 122572074822. Managed candidate start-to-probe, managed data-to-start and
+owned-resource cleanup are true in its completed enforcement log. Linux transport
+and driver race checks passed in 4.540/1.492 s; the latter includes actual Linux
+communication-directory creation/refusal tests.
+
+Local focused SQLite/PostgreSQL race passed in 20.119/15.318 s. Runner/CLI race
+passed (journal 81.723 s); Linux amd64/arm64 Portal test compilation,
+vet/staticcheck and 13 Python tests passed. General CI 40613886608 passed web
+checks/tests, workflow lint and Docker smoke. Its Go job failed at the existing
+x/net vulnerability gate, skipping its later non-race test step; general CI is
+not all green. The first app race shard and separate daemon workflow were still
+running at this evidence capture.
 
 This contributes partial LIFE-01/02/03 and RUN-03/07 coverage; it does not complete
 market installation, full isolation, all failure states or application readiness.
