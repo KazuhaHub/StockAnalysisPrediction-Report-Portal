@@ -115,8 +115,20 @@ Focused SQLite and PostgreSQL delivery race tests passed together (8.970 s).
 Broader SQLite candidate/data/delivery regressions passed (21.771 s), independent
 PostgreSQL candidate/data/delivery regressions passed (20.955 s), and runner/CLI
 race passed (journal 84.606 s). Linux compilation, vet/staticcheck, actionlint
-and 14 Python tests passed. Native workflow verification remains pending; SQL
-fixtures and compilation are not substituted for physical execution evidence.
+and 14 Python tests passed. Functional source
+`2070308728c1f2512b6ff3695a8975b7ba7522a5` passed native quota workflow
+[40623890666](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40623890666),
+job 122604109031: `native_portal_backend_delivery_committed`, protected RPC
+recovery and owned cleanup are true; exact registry cleanup passed. Linux
+transport/driver race passed in 4.816/1.604 s. This proves actual Portal durable
+preparation/signing, root/Portal failure recovery and receipt settlement; it does
+not prove backend key consumption, boot handshake, activation or normal scheduling.
+
+General CI 40623890673 completed with all three app race shards and aggregate,
+web checks/test shards, workflow lint and Docker smoke passing. Go job
+122604109724 passed build/vet/staticcheck and market validation, then failed the
+existing x/net v0.60.0 vulnerability gate (GO-2026-6866 and GO-2026-6860, reported
+fixed in v0.62.0), skipping its subsequent non-race Test step. CI is not all green.
 
 ## Remaining platform scope
 

@@ -1220,7 +1220,13 @@ daemon workflow 40455635317 passed on the functional source as well.
 - SQLite/PostgreSQL delivery race passed (8.970 s together); broader SQLite
   regressions passed (21.771 s), PostgreSQL regressions passed (20.955 s), runner/
   CLI race passed (journal 84.606 s). Linux compilation, vet/staticcheck,
-  actionlint and 14 Python tests passed. Native verification remains pending.
+  actionlint and 14 Python tests passed. Functional source
+  `2070308728c1f2512b6ff3695a8975b7ba7522a5` passed quota workflow 40623890666
+  (job 122604109031): actual Portal delivery effect settlement, RPC recovery and
+  owned cleanup keys are true; exact registry cleanup passed. Linux transport/
+  driver race passed in 4.816/1.604 s. General CI passed all app race shards/
+  aggregate, web checks/tests and Docker smoke, but retains the existing x/net
+  vulnerability gate failure and skipped non-race Test step.
 - See [Portal delivery effect](85-portal-backend-delivery-effect.md). Boot
   handshake, forwarding, broker/writer, managed activation/scheduling and the
   remaining full lifecycle/reference apps remain. No schema, production/beta,
