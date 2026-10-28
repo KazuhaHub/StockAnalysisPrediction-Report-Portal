@@ -123,7 +123,22 @@ passed (1.749/1.876 s), and Portal SQLite regressions passed (28.615 s). Linux
 compilation, vet/staticcheck, actionlint and 14 Python tests passed. The native
 workflow now directly runs control/appplatform race contracts and triggers on
 control edits, in addition to transport/driver and physical acceptance. Native
-workflow evidence is pending; synthetic replies do not prove physical execution.
+workflow
+[40635903047](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40635903047),
+job 122642689300, passed functional source
+`2224c1898da5b1f0afb2b7e840bc49fa35f94d21`: actual signed request relay,
+backend boot and owned cleanup keys are true; exact registry cleanup passed.
+The forged-MAC case uses an unseen nonce, independently excluding replay as its
+refusal cause. Linux control/appplatform/transport/driver race passed in
+1.342/1.476/5.011/1.827 s. These results prove actual native request/claim binding
+and refusal cases with synthetic viewer authority, not the current-user gateway
+or application activation.
+
+General CI 40635903055 passed web lint/type/build, workflow lint and Docker smoke.
+Go job 122642985897 passed build/vet/staticcheck and market validation, then failed
+the existing x/net v0.60.0 vulnerability gate (GO-2026-6866 and GO-2026-6860,
+reported fixed in v0.62.0), skipping the following non-race Test step. Other
+app/web test jobs were not all terminal at capture; CI is not all green.
 
 ## Remaining scope
 
