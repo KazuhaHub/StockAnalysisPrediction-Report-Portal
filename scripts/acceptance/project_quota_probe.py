@@ -207,6 +207,10 @@ def main(args):
                 result = subprocess.run([args[6], "-test.run=^TestNativeJournalDataExecution$", "-test.v", "-test.timeout=45s"], env=journal_env, capture_output=True, text=True, timeout=55)
                 if result.returncode or "--- PASS: TestNativeJournalDataExecution" not in result.stdout:
                     raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
+                if phase == "inspect":
+                    if "NATIVE_DATA_WRITER_INTENT_VERIFIED" not in result.stdout:
+                        raise RuntimeError("actual prepared-data writer admission/claim verification missing")
+                    report["native_writer_intent_and_claim_verified"] = True
 
             run_journal("prepare")
             if len(args) in (9,11):
