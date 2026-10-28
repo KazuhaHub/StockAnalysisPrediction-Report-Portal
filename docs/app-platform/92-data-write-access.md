@@ -141,8 +141,30 @@ uncertain container.
 
 ## Evidence and remaining work
 
-Implementation is pending native acceptance. Local build/test evidence cannot
-establish the actual permission, XFS or container boundary.
+Functional source `095983669d4ba177663a50e33832bef7f338ad5d` passed the required
+fresh native gates:
+
+- Quota workflow 40673687092/job 122766559793 passed the actual permission
+  transition/concurrency/reopen/partial-state checks and the actual filtered
+  application/XFS trial. `native_go_data_write_access_transition` and
+  `native_filtered_data_writer_verified` are true. Existing actual entrypoint,
+  current-viewer request and owned-resource/registry cleanup checks also passed.
+  Linux control/appplatform/transport/driver race passed in
+  1.455/1.638/5.348/2.889s.
+- Daemon workflow 40673687027/job 122766559138 passed the existing closed native
+  container lifecycle, mount pins, bounded IPC and identity/root-endpoint checks.
+- Local data/driver race passed (cache hits); Linux amd64/arm64 data/driver and
+  fixture compilation, Linux vet/default staticcheck, platform regression
+  (8.501s) and all 14 Python probe tests passed. Actual kernel/container evidence
+  here is Linux amd64; arm64 evidence is compilation.
+- General workflow 40673687144 passed all app race shards/aggregate, web checks/
+  tests, Docker smoke and workflow lint. Go job 122766559649 passed staticcheck
+  but failed the existing x/net v0.60.0 vulnerability gate (GO-2026-6866/6860),
+  skipping the following non-race Test step. This is not an all-green release.
+
+This completes the native permission-transition and isolated adversarial-trial
+implementation. It does not complete managed writer authorization or the overall
+application platform.
 
 Next: independently authenticated/journaled writer admission, namespace and
 process fencing, interruption/restart reconciliation, a production writable

@@ -1408,3 +1408,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   native writer exclusion, normal activation, broker and complete platform
   acceptance remain outstanding. No schema, production/beta, dependency/toolchain
   or credential change.
+
+- Data write-access functional source
+  `095983669d4ba177663a50e33832bef7f338ad5d` passed quota workflow
+  40673687092/job 122766559793 and daemon workflow 40673687027/job 122766559138.
+  Both `native_go_data_write_access_transition` and
+  `native_filtered_data_writer_verified` are true: physical transition/reopen/
+  refusal, actual app-owned attribute attacks, byte/inode refusal, independent
+  host project/inheritance checks, healthy sibling and owned teardown passed.
+  Existing entrypoint/current-viewer checks remain true. Linux control/
+  appplatform/transport/driver race passed in 1.455/1.638/5.348/2.889s; local
+  platform regression passed in 8.501s, dual-architecture compilation, Linux
+  vet/staticcheck and 14 Python probe tests passed. General CI passed app race
+  shards/aggregate and web/Docker/workflow jobs, retaining the existing x/net
+  vulnerability gate failure. This closes the physical primitive/trial, not
+  persistent writer admission/exclusion/revocation, normal activation/lifecycle,
+  SDK/reference apps or complete P00–P14 acceptance.
