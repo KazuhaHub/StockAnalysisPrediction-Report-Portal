@@ -1178,3 +1178,29 @@ daemon workflow 40455635317 passed on the functional source as well.
   Full managed activation, forwarding, broker/writer and remaining lifecycle/
   reference apps remain. No schema, production/beta, real credentials or module
   versions changed.
+
+### Protected controller registration RPC
+
+- Added a nonce/request-digest-bound private-document channel over the existing
+  protected root/non-root Unix endpoint. Public authority and size checks precede
+  private reads; only a concrete candidate provider can invoke the dispatcher.
+- Added opaque authenticated historical delivery observations and exact public
+  receipt/command matching. Private buffers are cleared; ordinary listeners
+  cannot dispatch registration or mint root provenance.
+- Replaced the native fixture's key-bearing pipe with real UID/GID-41001 RPC.
+  Parent coordination now contains public intent/events only. The fixture still
+  requires failed-settlement recovery, same inode and historical replay.
+- Linux framing tests and pure journal regressions cover malformed replies,
+  mismatched effects/documents, refusal, historical metadata and provenance.
+  Full local runner/CLI race passed (journal 84.888 s), focused journal race
+  passed (5.657 s); Linux amd64/arm64 compilation, vet/staticcheck and 14 Python
+  tests passed. Functional source `91ce4859c8dbe9d2a13ebb98c581f49bfa388f58`
+  passed native quota workflow 40622256803 (job 122598829955): actual protected
+  RPC recovery, same-file delivery recovery and owned cleanup keys are true;
+  exact registry cleanup passed. Linux transport/driver race passed in
+  4.530/1.438 s. General CI retains the existing x/net vulnerability gate failure,
+  skipping the subsequent non-race Test step.
+- See [registration channel](84-backend-registration-channel.md). Portal durable
+  effect/scheduler integration, boot handshake, forwarding, broker/writer,
+  activation and the remaining full platform scope are still outstanding.
+  No schema, production/beta, real credentials or module versions changed.
