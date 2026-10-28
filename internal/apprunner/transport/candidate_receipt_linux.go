@@ -36,6 +36,9 @@ func (s *Server) handleCandidateResponse(ctx context.Context, conn *net.UnixConn
 	s.handleCandidateResponseMode(ctx, conn, false)
 }
 func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.UnixConn, execute bool) {
+	s.handleCandidateResponseKind(ctx, conn, execute, false)
+}
+func (s *Server) handleCandidateResponseKind(ctx context.Context, conn *net.UnixConn, execute, readiness bool) {
 	reader, ok := s.journal.(candidateReceiptReader)
 	if !ok {
 		return
@@ -44,6 +47,12 @@ func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.Unix
 	queryMagic, replyMagic := candidateReceiptQueryMagic, candidateReceiptReplyMagic
 	if execute {
 		queryMagic, replyMagic = candidateExecutionQueryMagic, candidateExecutionReplyMagic
+	}
+	if readiness {
+		if s.candidateExecution == nil {
+			return
+		}
+		queryMagic, replyMagic = candidateReadinessQueryMagic, candidateReadinessReplyMagic
 	}
 	copy(header, queryMagic)
 	if _, err := io.ReadFull(conn, header[8:]); err != nil {
@@ -58,7 +67,7 @@ func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.Unix
 		return
 	}
 	var descriptor []byte
-	if execute {
+	if execute || readiness {
 		var err error
 		descriptor, err = readCandidateDescriptor(conn)
 		if err != nil || !validCandidateDescriptor(body[:size], descriptor) {
@@ -70,8 +79,18 @@ func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.Unix
 		return
 	}
 	var receipt journal.CandidateRunningReceipt
+	var encoded []byte
 	var err error
-	if execute {
+	if readiness {
+		var observed journal.CandidateReadiness
+		observed, err = s.candidateExecution.store.ObserveCandidateReadiness(ctx, body[:size], body[size:], s.candidateExecution.native, descriptor)
+		if err == nil {
+			encoded, err = json.Marshal(observed)
+		}
+		if err == nil {
+			_, err = journal.ParseCandidateReadiness(encoded)
+		}
+	} else if execute {
 		receipt, err = s.candidateExecution.store.DispatchCandidate(ctx, body[:size], body[size:], s.candidateExecution.native, descriptor)
 	} else {
 		receipt, err = reader.ReadCandidateRunningReceipt(ctx, body[:size], body[size:])
@@ -79,17 +98,19 @@ func (s *Server) handleCandidateResponseMode(ctx context.Context, conn *net.Unix
 	if err != nil {
 		return
 	}
-	encoded, err := json.Marshal(receipt)
-	if err != nil {
-		return
-	}
-	if _, err := journal.ParseCandidateRunningReceipt(encoded); err != nil {
-		return
+	if !readiness {
+		encoded, err = json.Marshal(receipt)
+		if err != nil {
+			return
+		}
+		if _, err := journal.ParseCandidateRunningReceipt(encoded); err != nil {
+			return
+		}
 	}
 	digest := sha256.New()
 	digest.Write(header)
 	digest.Write(body)
-	if execute {
+	if execute || readiness {
 		digest.Write(candidateDescriptorFrame(descriptor))
 	}
 	reply := make([]byte, 44, 44+len(encoded))

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -140,4 +141,28 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		t.Fatal("stale candidate stage dispatched")
 	}
 	t.Log("MANAGED_INSTALL_CANDIDATE_PROBE")
+	if os.Getenv("PORTAL_MANAGED_READY") == "1" {
+		var activated platformOperationLease
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			activated, err = s.probePlatformInstallCandidate(ctx, probe, endpoint)
+			if err == nil {
+				break
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatal("actual backend readiness", err)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if activated.snapshot.Stage != appplatform.StageActivate || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence<>'{}' AND observed_ms IS NOT NULL`, probe.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, probe.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, probe.installationID) != "pending" {
+			t.Fatal("readiness granted use or lost evidence")
+		}
+		if _, err := s.activatePlatformStaticInstall(ctx, activated); err == nil {
+			t.Fatal("readiness bypassed managed activation")
+		}
+		if _, err := s.probePlatformInstallCandidate(ctx, probe, endpoint); err == nil {
+			t.Fatal("stale readiness stage recommitted")
+		}
+		t.Log("MANAGED_INSTALL_READINESS")
+	}
 }

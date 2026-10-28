@@ -113,9 +113,22 @@ def candidate_configuration():
     return values
 
 
+def readiness_image_configuration():
+    image = os.environ.get("APP_READY_NATIVE_IMAGE", "")
+    if not image:
+        return None
+    match = re.fullmatch(r"localhost:([0-9]{1,5})/portal-ready-fixture@sha256:[a-f0-9]{64}", image)
+    if not match or not 1 <= int(match.group(1)) <= 65535:
+        raise RuntimeError("invalid owned readiness fixture image")
+    return image
+
+
 def main(args):
     require_disposable(args)
     candidate = candidate_configuration()
+    ready_image = readiness_image_configuration()
+    if ready_image and (not candidate or len(args) != 11):
+        raise RuntimeError("readiness fixture requires managed Portal acceptance")
     if candidate and len(args) not in (5, 7, 9, 11):
         raise RuntimeError("candidate fixture requires native root acceptance")
     root = Path(tempfile.mkdtemp(prefix="portal-quota-acceptance-", dir="/tmp"))
@@ -274,6 +287,9 @@ def main(args):
                     if candidate:
                         portal_env["APP_CANDIDATE_DOCKER_SOCKET"] = candidate[2]
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = candidate[1]
+                    if ready_image:
+                        portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
+                        portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=60s"], env=portal_env, capture_output=True, text=True, timeout=60)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
@@ -293,6 +309,10 @@ def main(args):
                         if "MANAGED_INSTALL_CANDIDATE_PROBE" not in result.stdout:
                             raise RuntimeError("Portal managed candidate start/probe did not execute")
                         report["native_portal_managed_candidate_start_to_probe"] = True
+                        if ready_image:
+                            if "MANAGED_INSTALL_READINESS" not in result.stdout:
+                                raise RuntimeError("Portal actual backend readiness did not execute")
+                            report["native_portal_managed_backend_readiness"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

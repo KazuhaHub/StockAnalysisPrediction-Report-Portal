@@ -9,6 +9,8 @@ on:
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_managed_*'
       - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
       - 'internal/app/app_platform_install_queue*'
@@ -39,6 +41,8 @@ on:
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_managed_*'
       - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
       - 'internal/app/app_platform_install_queue*'
@@ -98,11 +102,16 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Check refusal behavior without privileges
         run: python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
+      - name: Build owned readiness backend through disposable local registry
+        run: bash scripts/acceptance/ready_app/build-fixture.sh
       - name: Enforce quotas only on the newly owned loopback image
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+      - name: Remove only the owned readiness registry
+        if: always()
+        run: bash scripts/acceptance/ready_app/cleanup-fixture.sh
       - name: Preserve redacted enforcement evidence
         uses: actions/upload-artifact@v7
         with:

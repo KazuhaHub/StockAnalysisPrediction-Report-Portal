@@ -27,6 +27,9 @@ func (*CandidateRuntime) ProvisionCandidateSockets(context.Context, CandidateLau
 func (*CandidateRuntime) StartCandidate(context.Context, CandidateLaunch) (CandidateRunningObservation, error) {
 	return CandidateRunningObservation{}, ErrUnsupported
 }
+func (*CandidateRuntime) CheckCandidateReadiness(context.Context, CandidateLaunch, string, string) (CandidateReadinessObservation, error) {
+	return CandidateReadinessObservation{}, ErrUnsupported
+}
 
 func (*CandidateRuntime) CheckConfiguration(context.Context) error { return ErrUnsupported }
 

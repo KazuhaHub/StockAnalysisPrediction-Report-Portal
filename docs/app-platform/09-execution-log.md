@@ -1076,3 +1076,28 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Actual readiness/writer/broker/registration, image fetching, managed scheduling,
   bounded socket storage, reconciliation and full lifecycle/reference apps remain.
   No schema, production/beta, module versions or real credentials changed.
+
+### Fresh managed backend readiness
+
+- Added the provisional bounded credential-free HTTP-over-Unix readiness contract,
+  actual container/data/mount/policy checks before and after the app response,
+  private socket owner/inode/peer verification and bounded no-redirect probing.
+- Added current journal authority/history checks around native IO, a separate
+  nonce-bound root readiness channel and opaque observation, plus Portal signing
+  and transactional candidate evidence/probe-to-activate settlement. It does not
+  activate the app or create app-use/writer/broker/registration grants.
+- Added a source-built actual backend and an owned localhost-only test registry
+  for native acceptance. The fixture must pass the prior startup recovery checks
+  and observe readiness from the actual running app before emitting its marker.
+- Local SQLite race regression passed (17.293 s), PostgreSQL candidate/data race
+  passed (13.184 s), runner/CLI race passed (journal 80.724 s), Linux compilation,
+  vet/staticcheck, shellcheck/actionlint and 14 Python tests passed.
+- Functional source `f6a617e981a013c84da45e2f4d2f0c0284ed41ab` passed quota
+  workflow 40615945463 (job 122578517361): actual managed backend readiness,
+  candidate start and owned cleanup keys are true; exact registry cleanup passed.
+  Linux transport/driver race passed in 4.551/1.546 s, including private framing
+  and Unix HTTP checks. General CI retains its existing x/net vulnerability gate
+  failure. See [managed readiness details](80-managed-readiness.md).
+- Managed activation/registration/writer/broker, image fetching, bounded socket
+  storage, scheduling/startup, reconciliation and full lifecycle/reference apps
+  remain. No schema, production/beta, module versions or real credentials changed.
