@@ -125,6 +125,35 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	writerRequest := DataWriterRequest{Identity: request.Identity, Descriptor: raw, Platform: request.Platform, Data: request.Data, Binding: DataWriterBinding{EffectID: "00000000-0000-4000-8000-000000600006", ClaimID: "00000000-0000-4000-8000-000000600007", PayloadSHA256: containerHash([]byte("writer trial")), DataReceiptSHA256: containerHash([]byte("allocation trial"))}}
+	if _, err := native.ObserveDataWriter(ctx, writerRequest); err == nil {
+		t.Fatal("sealed data adopted by writer observation")
+	}
+	partialID := "00000000-0000-4000-8000-000000600008"
+	partial, err := root.Prepare(ctx, pin, data.Request{NamespaceID: partialID, ProjectID: 600008, Bytes: 8 << 20, Inodes: 128})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partialPath := filepath.Join(rootPath, partialID)
+	if err := os.Chown(partialPath, 0, 65532); err != nil {
+		t.Fatal(err)
+	}
+	partialRequest := writerRequest
+	partialRequest.Identity.NamespaceID = partialID
+	partialRequest.Data.ProjectID, partialRequest.Data.NamespaceInode = partial.ProjectID, partial.Inode
+	var partialBefore, partialAfter unix.Stat_t
+	if err := unix.Stat(partialPath, &partialBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.ObserveDataWriter(ctx, partialRequest); err == nil {
+		t.Fatal("partial permissions repaired/adopted")
+	}
+	if err := unix.Stat(partialPath, &partialAfter); err != nil {
+		t.Fatal(err)
+	}
+	if partialBefore.Mode != partialAfter.Mode || partialBefore.Gid != partialAfter.Gid || partialBefore.Ctim != partialAfter.Ctim {
+		t.Fatal("failed observation changed partial permissions")
+	}
+	t.Log("NATIVE_WRITER_RECOVERY_PARTIAL_PERMISSION_REFUSED")
 	launch, err := native.PrepareCandidate(ctx, request)
 	if err != nil {
 		t.Fatal(err)
@@ -168,6 +197,27 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	}
 	if _, err := native.EnableDataWriter(ctx, writerRequest); err == nil {
 		t.Fatal("native writer transition replayed/repaired")
+	}
+	nativeID, err = createCandidateContainerHTTP(ctx, client, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.ObserveDataWriter(ctx, writerRequest); err != ErrContainerConflict {
+		t.Fatal("stopped data reference did not exclude recovery", err)
+	}
+	if err := removeCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil {
+		t.Fatal(err)
+	}
+	nativeID = ""
+	recovered, err := native.ObserveDataWriter(ctx, writerRequest)
+	if err != nil {
+		t.Fatal("actual read-only writer observation", err)
+	}
+	if current, err := recovered.Snapshot(); err != nil || current.Binding != snapshot.Binding || current.Data != snapshot.Data || current.Identity != snapshot.Identity {
+		t.Fatal("writer observation lost binding", err)
+	}
+	if _, err := json.Marshal(recovered); err == nil {
+		t.Fatal("recovery proof serialized")
 	}
 	t.Log("NATIVE_DATA_WRITER_ADAPTER_VERIFIED")
 	checkGlobalSpace := func() {

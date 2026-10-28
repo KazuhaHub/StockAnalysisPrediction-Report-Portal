@@ -59,3 +59,16 @@ func TestDataWriterOpaqueEvidenceCannotBeDecoded(t *testing.T) {
 		t.Fatal("failed decoding retained writer authority")
 	}
 }
+
+func TestDataWriterRecoveryOpaqueEvidenceCannotBeDecoded(t *testing.T) {
+	var observation DataWriterRecoveryObservation
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("zero recovery proof accepted")
+	}
+	if err := json.Unmarshal([]byte(`{"valid":true}`), &observation); err == nil {
+		t.Fatal("decoded recovery authority")
+	}
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("failed decoding retained recovery authority")
+	}
+}

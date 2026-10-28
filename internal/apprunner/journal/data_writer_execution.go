@@ -3,6 +3,7 @@ package journal
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -34,15 +35,33 @@ type dataWriterNativeEvidence struct {
 // DataWriterReceipt is historical physical permission evidence. It is not an
 // active writer lease, a container-start permission or current app readiness.
 type DataWriterReceipt struct {
-	Format          string                   `json:"format"`
-	Claim           dataWriterClaimMarker    `json:"claim"`
-	ControlRevision string                   `json:"control_revision"`
-	Native          dataWriterNativeEvidence `json:"native"`
-	BindingSHA256   string                   `json:"binding_sha256"`
-	SettledMS       string                   `json:"settled_ms"`
+	Format                 string                   `json:"format"`
+	Claim                  dataWriterClaimMarker    `json:"claim"`
+	ControlRevision        string                   `json:"control_revision"`
+	Native                 dataWriterNativeEvidence `json:"native"`
+	BindingSHA256          string                   `json:"binding_sha256"`
+	SettledMS              string                   `json:"settled_ms"`
+	RecoveryEnvelopeSHA256 string                   `json:"recovery_envelope_sha256,omitempty"`
+	RecoveryIssuedMS       string                   `json:"recovery_issued_ms,omitempty"`
+	RecoveryExpiresMS      string                   `json:"recovery_expires_ms,omitempty"`
 }
 
+const dataWriterReceiptFormat = "portal.runner.data-writer-receipt/1-dev.1"
+const dataWriterRecoveredReceiptFormat = "portal.runner.reconciled-data-writer-receipt/1-dev.1"
+
 func dataWriterReceiptBinding(r DataWriterReceipt) string {
+	if r.Format == dataWriterRecoveredReceiptFormat {
+		raw, _ := json.Marshal(struct {
+			Purpose  string                   `json:"purpose"`
+			Claim    dataWriterClaimMarker    `json:"claim"`
+			Revision string                   `json:"control_revision"`
+			Native   dataWriterNativeEvidence `json:"native"`
+			Envelope string                   `json:"recovery_envelope_sha256"`
+			Issued   string                   `json:"recovery_issued_ms"`
+			Expires  string                   `json:"recovery_expires_ms"`
+		}{"portal.runner.reconciled-data-writer-binding/1-dev.1", r.Claim, r.ControlRevision, r.Native, r.RecoveryEnvelopeSHA256, r.RecoveryIssuedMS, r.RecoveryExpiresMS})
+		return candidateHash(raw)
+	}
 	raw, _ := json.Marshal(struct {
 		Purpose  string                   `json:"purpose"`
 		Claim    dataWriterClaimMarker    `json:"claim"`
@@ -54,7 +73,7 @@ func dataWriterReceiptBinding(r DataWriterReceipt) string {
 
 func ParseDataWriterReceipt(raw []byte) (DataWriterReceipt, error) {
 	var r DataWriterReceipt
-	if len(raw) == 0 || len(raw) > 16384 || !canonicalDataJSON(string(raw), &r) || r.Format != "portal.runner.data-writer-receipt/1-dev.1" || !validDataWriterReceipt(r) {
+	if len(raw) == 0 || len(raw) > 16384 || !canonicalDataJSON(string(raw), &r) || (r.Format != dataWriterReceiptFormat && r.Format != dataWriterRecoveredReceiptFormat) || !validDataWriterReceipt(r) {
 		return DataWriterReceipt{}, ErrFenceReconciliation
 	}
 	return r, nil
@@ -81,7 +100,22 @@ func validDataWriterReceipt(r DataWriterReceipt) bool {
 	expires, _ := strconv.ParseInt(m.ExpiresMS, 10, 64)
 	observed, _ := strconv.ParseInt(n.ObservedMS, 10, 64)
 	settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
-	return err == nil && project <= uint64(maxDataProjectID) && quota%512 == 0 && used <= quota && usedInodes <= inodes && expires > claimed && expires-claimed <= 30000 && observed >= claimed && observed < expires && settled >= observed && settled < expires && r.BindingSHA256 == dataWriterReceiptBinding(r)
+	if err != nil || project > uint64(maxDataProjectID) || quota%512 != 0 || used > quota || usedInodes > inodes || expires <= claimed || expires-claimed > 30000 || observed < claimed || settled < observed || r.BindingSHA256 != dataWriterReceiptBinding(r) {
+		return false
+	}
+	switch r.Format {
+	case dataWriterReceiptFormat:
+		return observed < expires && settled < expires && r.RecoveryEnvelopeSHA256 == "" && r.RecoveryIssuedMS == "" && r.RecoveryExpiresMS == ""
+	case dataWriterRecoveredReceiptFormat:
+		if !dataSHA(r.RecoveryEnvelopeSHA256) || !dataNumber(r.RecoveryIssuedMS, false) || !dataNumber(r.RecoveryExpiresMS, true) {
+			return false
+		}
+		issued, _ := strconv.ParseInt(r.RecoveryIssuedMS, 10, 64)
+		recoveryExpires, _ := strconv.ParseInt(r.RecoveryExpiresMS, 10, 64)
+		return issued > expires && recoveryExpires > issued && recoveryExpires-issued <= 30000 && observed >= issued && settled < recoveryExpires
+	default:
+		return false
+	}
 }
 
 func dataWriterNativeRequest(c control.DataWriterCommand, source DataPreparationReceipt, marker dataWriterClaimMarker, descriptor []byte) (driver.DataWriterRequest, error) {
@@ -202,8 +236,18 @@ func (s *Store) settleDataWriter(ctx context.Context, claim DataWriterClaim, des
 	if !validDataWriterReceipt(r) {
 		return zero, ErrFenceReconciliation
 	}
+	return s.commitDataWriterReceipt(ctx, tx, f, live.marker, r)
+}
+
+// Caller holds the Store execution gate and a freshly verified unknown transaction.
+func (s *Store) commitDataWriterReceipt(ctx context.Context, tx *sql.Tx, f dataWriterFacts, marker string, r DataWriterReceipt) (DataWriterReceipt, error) {
+	var zero DataWriterReceipt
+	if !validDataWriterReceipt(r) {
+		return zero, ErrFenceReconciliation
+	}
+	observed, _ := strconv.ParseInt(r.Native.ObservedMS, 10, 64)
 	ref := f.verified.Data()
-	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET revision=3,observed_ms=?,updated_ms=? WHERE id=? AND kind='volume' AND revision=2 AND desired_state='present' AND observed_state='present' AND control_fence=? AND writer_fence=?`, actual.ObservedMS, f.now, ref.Payload.DataNamespaceID, f.fence, ref.Payload.WriterFence)
+	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET revision=3,observed_ms=?,updated_ms=? WHERE id=? AND kind='volume' AND revision=2 AND desired_state='present' AND observed_state='present' AND control_fence=? AND writer_fence=?`, observed, f.now, ref.Payload.DataNamespaceID, f.fence, ref.Payload.WriterFence)
 	if err != nil {
 		return zero, err
 	}
@@ -211,7 +255,7 @@ func (s *Store) settleDataWriter(ctx context.Context, claim DataWriterClaim, des
 		return zero, ErrFenceReconciliation
 	}
 	encoded, _ := json.Marshal(r)
-	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), f.now, marker.EffectID, live.marker)
+	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), f.now, r.Claim.EffectID, marker)
 	if err != nil {
 		return zero, err
 	}
@@ -264,7 +308,7 @@ func (s *Store) ReadDataWriterReceipt(ctx context.Context, raw, signature []byte
 func dataWriterReceiptMatches(r DataWriterReceipt, f dataWriterFacts) bool {
 	c, ref := f.verified.Command(), f.verified.Data()
 	n, source := r.Native, f.source
-	grantRevision, _ := strconv.ParseInt(r.ControlRevision, 10, 64)
+	evidenceRevision, _ := strconv.ParseInt(r.ControlRevision, 10, 64)
 	sourceRevision, _ := strconv.ParseInt(source.ControlRevision, 10, 64)
 	currentRevision, _ := strconv.ParseInt(ref.ControlRevision, 10, 64)
 	settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
@@ -272,5 +316,5 @@ func dataWriterReceiptMatches(r DataWriterReceipt, f dataWriterFacts) bool {
 	claimTime, _ := strconv.ParseInt(r.Claim.ClaimedMS, 10, 64)
 	sourceTime, _ := strconv.ParseInt(source.ObservedMS, 10, 64)
 	root := markerRoot(source.Claim)
-	return validDataWriterReceipt(r) && r.Claim.EffectID == c.EffectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == c.DataReceiptSHA256 && r.Claim.ResourceID == c.ResourceID && r.Claim.AdmittedFence == ref.InstallationFence && grantRevision >= sourceRevision && grantRevision <= currentRevision && n.Platform == c.Platform && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.RootFilesystemUUID == root.FilesystemUUID && n.RootInode == strconv.FormatUint(root.Inode, 10) && n.ProjectID == source.ProjectID && n.Device == source.Device && n.NamespaceInode == source.NamespaceInode && n.QuotaBytes == source.QuotaBytes && n.QuotaInodes == source.QuotaInodes && claimTime >= sourceTime && observed <= f.now && settled <= f.now
+	return validDataWriterReceipt(r) && r.Claim.EffectID == c.EffectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == c.DataReceiptSHA256 && r.Claim.ResourceID == c.ResourceID && r.Claim.AdmittedFence == ref.InstallationFence && evidenceRevision >= sourceRevision && evidenceRevision <= currentRevision && n.Platform == c.Platform && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.RootFilesystemUUID == root.FilesystemUUID && n.RootInode == strconv.FormatUint(root.Inode, 10) && n.ProjectID == source.ProjectID && n.Device == source.Device && n.NamespaceInode == source.NamespaceInode && n.QuotaBytes == source.QuotaBytes && n.QuotaInodes == source.QuotaInodes && claimTime >= sourceTime && observed <= f.now && settled <= f.now
 }

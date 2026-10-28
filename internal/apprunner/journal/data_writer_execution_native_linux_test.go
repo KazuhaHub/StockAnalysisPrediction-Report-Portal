@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"golang.org/x/sys/unix"
 )
 
 func TestNativeJournalDataWriterExecution(t *testing.T) {
@@ -47,7 +48,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { s.Close() }()
 	sockets, err := os.MkdirTemp("/run", "portal-wexec-")
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer native.Close()
+	defer func() { native.Close() }()
 	raw, err := os.ReadFile("../../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +91,11 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 		}
 		writer := writerCommandFixture(t, sourceRaw, sourceSignature, source)
 		writer.EffectID, writer.ResourceID, writer.Platform = fixtureID(base+4), fixtureID(base+5), "linux/"+runtime.GOARCH
+		if i == 1 {
+			shortened := c
+			shortened.ExpiresMS = strconv.FormatInt(time.Now().UnixMilli()+2500, 10)
+			writer.DataRaw, writer.DataSignature = signRunnerCommand(t, shortened)
+		}
 		writerRaw, writerSig := signWriterFixture(t, writer)
 		if _, err := s.AdmitDataWriterCommand(ctx, writerRaw, writerSig); err != nil {
 			t.Fatal(err)
@@ -144,6 +150,75 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 			if _, err := s.ReadDataWriterReceipt(ctx, writerRaw, writerSig); err == nil {
 				t.Fatal("unknown writer reported applied")
 			}
+
+			if _, err := s.ReconcileDataWriter(ctx, writerRaw, writerSig, descriptor, native); err == nil {
+				t.Fatal("unexpired execution reference authorized recovery")
+			}
+			// Restart the journal and runtime after the ambiguous physical effect. The
+			// old live handle must not be reconstructed or used by this recovery.
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = Open(journalPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := native.Close(); err != nil {
+				t.Fatal(err)
+			}
+			native, err = driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var marker dataWriterClaimMarker
+			json.Unmarshal([]byte(claim.state.marker), &marker)
+			oldExpiry, _ := strconv.ParseInt(marker.ExpiresMS, 10, 64)
+			if remaining := time.Until(time.UnixMilli(oldExpiry + 1)); remaining > 0 {
+				time.Sleep(remaining)
+			}
+			var ref control.Command
+			json.Unmarshal(writer.DataRaw, &ref)
+			now := time.Now().UnixMilli()
+			ref.IssuedMS, ref.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+			writer.DataRaw, writer.DataSignature = signRunnerCommand(t, ref)
+			writerRaw, writerSig = signWriterFixture(t, writer)
+			path := filepath.Join(rootPath, c.Payload.DataNamespaceID)
+			var before, after unix.Stat_t
+			if err := unix.Stat(path, &before); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := s.db.Exec(`CREATE TRIGGER fixture_writer_recovery_failure BEFORE UPDATE ON runner_commands WHEN NEW.effect_id='` + writer.EffectID + `' AND NEW.state='applied' BEGIN SELECT RAISE(ABORT,'fixture recovery commit failure'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if result, err := s.ReconcileDataWriter(ctx, writerRaw, writerSig, descriptor, native); err == nil || result != (DataWriterReceipt{}) {
+				t.Fatal("failed recovery commit returned evidence")
+			}
+			if scalar(t, s.db, `SELECT revision FROM runner_resources WHERE id='`+c.Payload.DataNamespaceID+`'`) != 2 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+writer.EffectID+`' AND state='unknown'`) != 1 {
+				t.Fatal("failed recovery committed half its state")
+			}
+			if _, err := s.db.Exec(`DROP TRIGGER fixture_writer_recovery_failure`); err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := s.ReconcileDataWriter(ctx, writerRaw, writerSig, descriptor, native)
+			if err != nil || recovered.Format != dataWriterRecoveredReceiptFormat || recovered.Claim != marker || recovered.RecoveryEnvelopeSHA256 != candidateHash(writerRaw) {
+				t.Fatal("actual observation-only recovery", err)
+			}
+			if err := unix.Stat(path, &after); err != nil {
+				t.Fatal(err)
+			}
+			if before.Ino != after.Ino || before.Mode != after.Mode || before.Gid != after.Gid || before.Ctim != after.Ctim {
+				t.Fatal("recovery repeated native permission mutation")
+			}
+			if got, err := s.ReadDataWriterReceipt(ctx, writerRaw, writerSig); err != nil || got != recovered {
+				t.Fatal("actual recovered receipt unavailable", err)
+			}
+			if _, err := s.ReconcileDataWriter(ctx, writerRaw, writerSig, descriptor, native); err == nil {
+				t.Fatal("applied recovery reexecuted")
+			}
+			if scalar(t, s.db, `SELECT revision FROM runner_resources WHERE id='`+c.Payload.DataNamespaceID+`'`) != 3 {
+				t.Fatal("actual recovered volume not settled")
+			}
 		}
 		if again, err := s.ExecuteDataWriter(ctx, claim, descriptor, native); err == nil || again != (DataWriterReceipt{}) {
 			t.Fatal("physical writer effect replayed")
@@ -157,4 +232,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 	}
 	t.Log("NATIVE_JOURNAL_DATA_WRITER_EXECUTION_VERIFIED")
 	t.Log("NATIVE_WRITER_SETTLEMENT_FAILURE_PRESERVED_UNKNOWN")
+	t.Log("NATIVE_DATA_WRITER_RECOVERY_AFTER_EXPIRY_VERIFIED")
+	t.Log("NATIVE_WRITER_RECOVERY_WITHOUT_PERMISSION_MUTATION")
+	t.Log("NATIVE_WRITER_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED")
 }

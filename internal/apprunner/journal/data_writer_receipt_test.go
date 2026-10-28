@@ -151,9 +151,9 @@ func TestDataWriterHistoricalReceiptCurrentKeyKeepsGrantRevision(t *testing.T) {
 	}
 }
 
-func TestDataWriterCallbackCannotSettleOpaqueEvidence(t *testing.T) {
+func syntheticWriterExecutionFixture(t *testing.T) (*Store, []byte, []byte, []byte) {
+	t.Helper()
 	s, _ := enrolledCommandStore(t)
-	defer s.Close()
 	descriptor, err := os.ReadFile("../../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -189,6 +189,12 @@ func TestDataWriterCallbackCannotSettleOpaqueEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	writerRaw, writerSig := signWriterFixture(t, writerCommandFixture(t, source, sig, proof))
+	return s, writerRaw, writerSig, descriptor
+}
+
+func TestDataWriterCallbackCannotSettleOpaqueEvidence(t *testing.T) {
+	s, writerRaw, writerSig, descriptor := syntheticWriterExecutionFixture(t)
+	defer s.Close()
 	if _, err := s.AdmitDataWriterCommand(context.Background(), writerRaw, writerSig); err != nil {
 		t.Fatal(err)
 	}
