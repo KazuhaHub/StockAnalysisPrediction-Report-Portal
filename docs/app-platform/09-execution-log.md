@@ -1322,3 +1322,16 @@ daemon workflow 40455635317 passed on the functional source as well.
   Normal activation/root acknowledgement lifetime, broker/writer, bounded socket
   storage, full lifecycle, SDK/reference-app and production acceptance remain.
   No schema, dependency, production/beta or real-credential changes.
+
+- Functional source `a23114a9f4dc5d6eb6cafbad77c0a6980b0bedee` passed native
+  workflow 40640341083/job 122656764332: current-viewer and independently signed
+  request relay verification plus owned-resource/registry cleanup succeeded.
+  Linux control/appplatform/transport/driver race passed in
+  1.430/1.675/5.420/2.025s. The first native run correctly failed a missing child
+  evidence forwarding marker; parent and outer probe now both require it. The
+  final envelope binding check also passed local request race (2.685s), and
+  Linux arm64 compilation passed. General workflow 40640341091 retains the
+  existing x/net GO-2026-6866/6860 vulnerability failure, not an all-green release.
+  The real native fixture's write is an in-memory execution counter; filesystem
+  writer authorization, normal managed activation and remaining release gates
+  are not claimed complete.

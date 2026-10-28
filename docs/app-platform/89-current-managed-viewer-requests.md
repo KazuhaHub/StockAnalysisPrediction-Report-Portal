@@ -110,6 +110,8 @@ withheld as uncertain; a newly dispatched write must be refused, and the actual
 app execution counter must prove neither was retried. The probe requires the
 `MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED` marker. This remains a development
 fixture, not a managed activation implementation or browser acceptance.
+The fixture write changes its in-memory counter only; it does not prove durable
+application storage or filesystem writer authorization.
 
 Local verification with Go 1.26.10, `GOWORK=off`, `GOMAXPROCS=2`, `-p 2`:
 
@@ -135,6 +137,18 @@ from local compilation or the prior phase. Phase 88's functional source
 40637673431/job 122648283789, including owned-resource and registry cleanup.
 Its general CI finished with only the existing x/net govulncheck failure
 (GO-2026-6866/6860 at v0.60.0); the following non-race Test step was skipped.
+
+This phase's functional source `a23114a9f4dc5d6eb6cafbad77c0a6980b0bedee`
+passed native workflow 40640341083/job 122656764332. Both
+`native_current_viewer_request_verified` and `native_backend_request_relay_verified`
+are true, as is `owned_resources_cleaned`; the exact owned registry cleanup step
+also succeeded. Linux control/appplatform/transport/driver race tests passed in
+1.430/1.675/5.420/2.025s. The final request-envelope binding check separately passed
+a local request race run (2.685s), and Linux arm64 test-binary compilation passed.
+General workflow 40640341091 completed with the same existing x/net gate failure
+in job 122656765019; the following non-race Test step was skipped. Separate app
+race shards and aggregate, web lint/type/build/tests, workflow lint and Docker
+smoke jobs passed. The dependency gate still blocks a clean release.
 
 Normal activation must still establish actual current boot/health/writer and
 broker authority and resolve the root command acknowledgement lifetime deliberately:
