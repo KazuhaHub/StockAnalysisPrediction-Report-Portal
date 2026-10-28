@@ -140,3 +140,28 @@ boot and current-viewer markers, but failed during fixture service shutdown:
 the listener was closed while Serve still had an uncancelled context. Teardown
 now uses one shared cancel-and-wait operation before native close/release; the
 production unsafe-endpoint check remains intact. A new full quota run is required.
+
+Functional source `7cc47936761fabc2d733704e8cdb040f4caec655` passed both fresh
+native gates:
+
+- Daemon workflow 40664832166/job 122736587767 passed the actual UID 65532
+  byte/inode exhaustion, trusted-marker protection, limit/identity drift,
+  unmarked-directory refusal and owned container/mount cleanup cases.
+- Quota workflow 40664832058/job 122736587721 passed actual candidate execution,
+  real Docker reference exclusion, registration/boot/current-viewer request
+  verification and complete owned-resource/registry cleanup. The evidence keys
+  `native_current_viewer_request_verified`, `native_backend_request_relay_verified`
+  and `owned_resources_cleaned` are true. Linux control/appplatform/transport/
+  driver race passed in 1.323/1.450/5.223/1.894s.
+- Linux arm64 driver test-binary compilation also passed. Final local driver/
+  transport race passed in 1.594/1.627s; the broader platform regression passed
+  in 8.097s.
+- General workflow 40664832078 passed app race shards/aggregate, web checks/tests,
+  workflow lint and Docker smoke. Its Go job 122736588223 retains the existing
+  x/net v0.60.0 vulnerability gate failure (GO-2026-6866/6860), with the following
+  non-race Test step skipped. This is not an all-green release.
+
+This closes the private HTTP storage-boundary implementation/acceptance task.
+Normal app lifecycle, writer/broker authority, activation/scheduling, SDK/reference
+apps and the overall P00–P14 acceptance remain incomplete; no production readiness
+or overall platform completion is inferred from these gates.

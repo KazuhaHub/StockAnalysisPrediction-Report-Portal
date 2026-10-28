@@ -1352,3 +1352,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   See [bounded HTTP storage](90-bounded-http-storage.md). Normal lifecycle,
   broker/writer, activation, SDK and full acceptance remain. No production/beta,
   schema, dependency/toolchain or credential changes.
+
+- Bounded IPC functional source `7cc47936761fabc2d733704e8cdb040f4caec655`
+  passed daemon workflow 40664832166/job 122736587767 and quota workflow
+  40664832058/job 122736587721. Actual UID 65532 byte/inode exhaustion,
+  trusted-marker protection, capacity/identity drift refusal, live Docker
+  reference exclusion and complete owned-resource/registry cleanup succeeded.
+  Existing native current-viewer/relay checks remain true. Linux control/
+  appplatform/transport/driver race passed in 1.323/1.450/5.223/1.894s; arm64
+  compilation passed. The initial array-decoder/probe-execution and fixture
+  shutdown-order failures were corrected without relaxing ownership, limit or
+  unsafe-endpoint checks. General workflow 40664832078 passed separate app
+  race/web/Docker jobs but retains the existing x/net vulnerability gate failure.
+  The overall application framework, normal lifecycle, broker/writer, activation
+  and SDK/reference-app acceptance remain incomplete.
