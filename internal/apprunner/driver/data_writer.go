@@ -48,8 +48,28 @@ func (o *DataWriterObservation) UnmarshalJSON([]byte) error {
 	return ErrDataWriterUncertain
 }
 func (o DataWriterObservation) Snapshot() (DataWriterSnapshot, error) {
-	s := o.snapshot
-	if !o.valid || !validDataWriterBinding(s.Binding) || !validContainerOwner(candidateOwner(s.Identity)) || s.Profile != DataWriterSandboxProfile || candidateSeccompError != nil || s.SeccompSHA256 != containerHash([]byte(candidateSeccompOption)) || !nativeImageID.MatchString(s.ImageID) || (s.Platform != "linux/amd64" && s.Platform != "linux/arm64") || s.Data.NamespaceInode == 0 || s.Data.ProjectID == 0 || s.Data.Root.Inode == 0 || !containerUUID.MatchString(s.Data.Root.FilesystemUUID) || s.Data.Root.FilesystemUUID == "00000000-0000-0000-0000-000000000000" || s.Data.QuotaBytes <= 0 || s.Data.QuotaBytes%512 != 0 || s.Data.QuotaInodes <= 0 || s.UsedBytes < 0 || s.UsedBytes > s.Data.QuotaBytes || s.UsedInodes < 0 || s.UsedInodes > s.Data.QuotaInodes || s.ObservedMS < 0 {
+	return dataWriterSnapshot(o.snapshot, o.valid)
+}
+
+// DataWriterRecoveryObservation is observation-only evidence. It cannot be used
+// to settle a live permission execution, or be reconstructed from JSON.
+type DataWriterRecoveryObservation struct {
+	snapshot DataWriterSnapshot
+	valid    bool
+}
+
+func (DataWriterRecoveryObservation) MarshalJSON() ([]byte, error) {
+	return nil, ErrDataWriterUncertain
+}
+func (o *DataWriterRecoveryObservation) UnmarshalJSON([]byte) error {
+	*o = DataWriterRecoveryObservation{}
+	return ErrDataWriterUncertain
+}
+func (o DataWriterRecoveryObservation) Snapshot() (DataWriterSnapshot, error) {
+	return dataWriterSnapshot(o.snapshot, o.valid)
+}
+func dataWriterSnapshot(s DataWriterSnapshot, valid bool) (DataWriterSnapshot, error) {
+	if !valid || !validDataWriterBinding(s.Binding) || !validContainerOwner(candidateOwner(s.Identity)) || s.Profile != DataWriterSandboxProfile || candidateSeccompError != nil || s.SeccompSHA256 != containerHash([]byte(candidateSeccompOption)) || !nativeImageID.MatchString(s.ImageID) || (s.Platform != "linux/amd64" && s.Platform != "linux/arm64") || s.Data.NamespaceInode == 0 || s.Data.ProjectID == 0 || s.Data.Root.Inode == 0 || !containerUUID.MatchString(s.Data.Root.FilesystemUUID) || s.Data.Root.FilesystemUUID == "00000000-0000-0000-0000-000000000000" || s.Data.QuotaBytes <= 0 || s.Data.QuotaBytes%512 != 0 || s.Data.QuotaInodes <= 0 || s.UsedBytes < 0 || s.UsedBytes > s.Data.QuotaBytes || s.UsedInodes < 0 || s.UsedInodes > s.Data.QuotaInodes || s.ObservedMS < 0 {
 		return DataWriterSnapshot{}, ErrDataWriterUncertain
 	}
 	return s, nil

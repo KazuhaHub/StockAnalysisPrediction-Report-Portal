@@ -1485,3 +1485,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   This closes initial physical dispatch and historical receipt settlement only;
   unknown writer recovery, writable candidate/fencing, managed activation,
   broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
+
+- Added observation-only recovery for an expired unknown initial writer effect.
+  A fresh current signed reference authorizes only a concrete native observer;
+  it cannot repeat permissions, reconstruct claims or repair partial data.
+  Recovery uses separate opaque proof and a distinct receipt format/window,
+  preserves the original marker, rechecks authority/source after native IO and
+  atomically settles both journal records. Current-key historical reads preserve
+  recovery evidence. Extended disposable tests cover restart/expiry, partial
+  permission refusal and retry after an injected recovery commit failure with
+  unchanged native inode/mode/group/ctime. See
+  [writer observation recovery](95-writer-observation-recovery.md). Native
+  acceptance remains pending; writable candidate/start/fencing, managed activation,
+  broker, SDK/reference apps and full platform acceptance are still incomplete.
+  No new schema, production, real credentials or server beta changes.

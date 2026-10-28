@@ -144,10 +144,13 @@ func (s *Store) beginDataWriter(ctx context.Context, raw, signature []byte, stat
 }
 
 func dataWriterMarkerMatches(m dataWriterClaimMarker, f dataWriterFacts) bool {
-	c, ref := f.verified.Command(), f.verified.Data()
+	return dataWriterMarkerIdentityMatches(m, f) && m.ExpiresMS == f.verified.Data().ExpiresMS
+}
+func dataWriterMarkerIdentityMatches(m dataWriterClaimMarker, f dataWriterFacts) bool {
+	c := f.verified.Command()
 	claimed, err := strconv.ParseInt(m.ClaimedMS, 10, 64)
 	expires, expiresErr := strconv.ParseInt(m.ExpiresMS, 10, 64)
-	return m.Format == "portal.runner.data-writer-claim/1-dev.1" && enrollmentUUID.MatchString(m.ClaimID) && m.ClaimID != "00000000-0000-0000-0000-000000000000" && m.EffectID == c.EffectID && m.PayloadSHA256 == c.PayloadSHA256 && m.DataReceiptSHA256 == c.DataReceiptSHA256 && m.ResourceID == c.ResourceID && m.AdmittedFence == strconv.FormatInt(f.fence, 10) && dataNumber(m.ClaimedMS, false) && err == nil && expiresErr == nil && claimed <= f.now && expires > claimed && expires-claimed <= 30000 && m.ExpiresMS == ref.ExpiresMS
+	return m.Format == "portal.runner.data-writer-claim/1-dev.1" && enrollmentUUID.MatchString(m.ClaimID) && m.ClaimID != "00000000-0000-0000-0000-000000000000" && m.EffectID == c.EffectID && m.PayloadSHA256 == c.PayloadSHA256 && m.DataReceiptSHA256 == c.DataReceiptSHA256 && m.ResourceID == c.ResourceID && m.AdmittedFence == strconv.FormatInt(f.fence, 10) && dataNumber(m.ClaimedMS, false) && dataNumber(m.ExpiresMS, true) && err == nil && expiresErr == nil && claimed <= f.now && expires > claimed && expires-claimed <= 30000
 }
 
 // ClaimDataWriter records uncertainty before issuing a process-local one-shot
