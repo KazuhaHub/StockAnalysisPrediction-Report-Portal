@@ -176,7 +176,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData}
 	if managed {
-		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1")
+		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1", "PORTAL_MANAGED_IMAGE="+os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"))
+		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
+		defer checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
@@ -221,6 +223,17 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal("Portal did not complete managed data stage", output.String())
 		}
 		t.Log("MANAGED_INSTALL_DATA_READY")
+		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_CANDIDATE_PROBE")) {
+			t.Fatal("Portal did not settle actual native candidate", output.String())
+		}
+		candidatePath := filepath.Join(childData, "candidate-command.json")
+		nativeID := checkPlatformFixtureCandidate(t, candidatePath, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), false)
+		message := readPlatformFixtureCandidate(t, candidatePath, authority)
+		proof, err := store.ReadCandidateRunningReceipt(ctx, message.Raw, message.Signature)
+		if err != nil || nativeID == "" || proof.NativeID != nativeID {
+			t.Fatal("Portal candidate lost actual native identity", err)
+		}
+		t.Log("MANAGED_INSTALL_CANDIDATE_PROBE")
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {
 		t.Fatal("child did not dispatch data execution", output.String())

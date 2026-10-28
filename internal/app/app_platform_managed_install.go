@@ -96,17 +96,17 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 	}
 	return p.Runtime, nil
 }
-func (s *Server) checkPlatformManagedDataRoot(ctx context.Context, lease platformOperationLease, intent platformDataIntent, endpoint platformRuntimeEndpoint) error {
+func (s *Server) checkPlatformManagedRuntimeRoot(ctx context.Context, lease platformOperationLease, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
 	target, err := platformManagedTargetForOperation(pool, lease.id)
 	if err != nil {
 		return err
 	}
-	observed, err := platformReadManagedRuntime(ctx, endpoint, intent.authority)
+	observed, err := platformReadManagedRuntime(ctx, endpoint, authority)
 	if err != nil {
 		return err
 	}
-	actual, err := managedInstallTarget(platformManagedRuntimeFacts{runtime: intent.runtime, observation: observed}, endpoint)
+	actual, err := managedInstallTarget(platformManagedRuntimeFacts{runtime: runtime, observation: observed}, endpoint)
 	if err != nil {
 		return err
 	}
