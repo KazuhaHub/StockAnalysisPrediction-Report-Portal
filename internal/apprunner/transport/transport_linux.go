@@ -245,6 +245,19 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case backendRegistrationQueryMagic:
+		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
+			return
+		}
+		cancel()
+		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(candidateExecutionTimeout))
+		defer executionCancel()
+		executionDeadline, _ := executionCtx.Deadline()
+		conn.SetDeadline(executionDeadline)
+		executionStop := context.AfterFunc(executionCtx, func() { conn.Close() })
+		defer executionStop()
+		s.handleBackendRegistration(executionCtx, conn)
+		return
 	case candidateReadinessQueryMagic:
 		s.handleCandidateResponseKind(ctx, conn, false, true)
 		return

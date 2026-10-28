@@ -189,28 +189,10 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if err != nil || !bytes.Equal(document, again) {
 			t.Fatal("registration retry changed key identity", err)
 		}
-		// The fixture uses an inherited one-way pipe for private bytes, never
-		// stdout, environment, a journal row or a plaintext staging file. This
-		// test-only transport does not claim the production RPC is implemented.
-		private := os.NewFile(5, "private-registration-fixture")
-		if private == nil {
-			t.Fatal("private fixture pipe unavailable")
-		}
-		if n, err := private.Write(document); err != nil || n != len(document) {
-			private.Close()
-			t.Fatal("private fixture transfer failed")
-		}
-		private.Close()
-		if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "registration-descriptor.json"), raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-		// Only the public digest is kept as a separate comparison artifact.
-		if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "registration-digest"), []byte(platformDigest(document)), 0600); err != nil {
-			t.Fatal(err)
-		}
 		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, activated.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 {
 			t.Fatal("registration preparation granted authority")
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
+		testNativeRegistrationRPC(t, endpoint, intent, raw, document)
 	}
 }

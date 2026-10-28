@@ -390,3 +390,17 @@ func (s *Store) ReadBackendRegistrationReceipt(ctx context.Context, raw, signatu
 	}
 	return receipt, nil
 }
+
+// MatchesCommand compares historical public metadata with exact signed logical
+// intent. It verifies neither a signature nor a current native file/boot.
+func (r BackendRegistrationReceipt) MatchesCommand(c control.BackendRegistrationCommand) bool {
+	encoded, err := json.Marshal(r)
+	if err != nil {
+		return false
+	}
+	if _, err := ParseBackendRegistrationReceipt(encoded); err != nil {
+		return false
+	}
+	digest, err := control.BackendRegistrationLogicalDigest(c)
+	return err == nil && digest == c.PayloadSHA256 && r.Claim.EffectID == c.EffectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DocumentSHA256 == c.DocumentSHA256
+}

@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -175,12 +174,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	defer readyReader.Close()
 	defer readyWriter.Close()
-	privateReader, privateWriter, err := os.Pipe()
+	registrationReader, registrationWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer privateReader.Close()
-	defer privateWriter.Close()
+	defer registrationReader.Close()
+	defer registrationWriter.Close()
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=30s")
 	child.Dir = work
@@ -193,7 +192,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 		defer checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
 	}
-	child.ExtraFiles = []*os.File{publicWriter, readyReader, privateWriter}
+	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
 	var output bytes.Buffer
 	child.Stdout = &output
@@ -209,7 +208,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}()
 	publicWriter.Close()
 	readyReader.Close()
-	privateWriter.Close()
+	registrationWriter.Close()
 	var message struct{ Raw, Signature []byte }
 	decoder := json.NewDecoder(io.LimitReader(publicReader, 131073))
 	decoder.DisallowUnknownFields()
@@ -224,9 +223,16 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if _, err := readyWriter.Write([]byte{1}); err != nil {
 		t.Fatal(err)
 	}
+	var checkRegistrationRPC func()
+	if managed && os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
+		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, managedSocketRoot, authority, store)
+	}
 	readyWriter.Close()
 	if err := child.Wait(); err != nil {
 		t.Fatalf("Portal data endpoint failed: %v\n%s", err, output.String())
+	}
+	if checkRegistrationRPC != nil {
+		checkRegistrationRPC()
 	}
 	if managed {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
@@ -257,85 +263,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not prepare current managed registration material", output.String())
 			}
 			t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
-			documentSHA, err := os.ReadFile(filepath.Join(childData, "registration-digest"))
-			if err != nil || !platformValidSHA(string(documentSHA)) {
-				t.Fatal("registration public digest unavailable", err)
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_RPC")) {
+				t.Fatal("Portal did not use protected registration RPC")
 			}
-			effectID, err := platformNewUUID()
-			if err != nil {
-				t.Fatal(err)
-			}
-			command := control.BackendRegistrationCommand{Format: control.BackendRegistrationFormat, EffectID: effectID, CandidateRaw: message.Raw, CandidateSignature: message.Signature, DocumentSHA256: string(documentSHA)}
-			command.PayloadSHA256, err = control.BackendRegistrationLogicalDigest(command)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fixtureKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
-			raw, signature, err := control.SignBackendRegistration(command, fixtureKey, authority, time.Now().UnixMilli())
-			clear(fixtureKey)
-			if err != nil {
-				t.Fatal("fixture registration authorization", err)
-			}
-			admitted, err := store.AdmitBackendRegistrationCommand(ctx, raw, signature)
-			if err != nil || admitted.State != "prepared" || admitted.Replayed {
-				t.Fatal("actual candidate registration intent", err)
-			}
-			replayed, err := store.AdmitBackendRegistrationCommand(ctx, raw, signature)
-			if err != nil || !replayed.Replayed || replayed.EffectID != admitted.EffectID {
-				t.Fatal("registration intent replay", err)
-			}
-			t.Log("BACKEND_REGISTRATION_INTENT_ADMITTED")
-			document, err := io.ReadAll(io.LimitReader(privateReader, 4097))
-			defer clear(document)
-			if err != nil || len(document) == 0 || len(document) > 4096 || platformDigest(document) != string(documentSHA) {
-				t.Fatal("private registration fixture transfer invalid")
-			}
-			registrationDescriptor, err := os.ReadFile(filepath.Join(childData, "registration-descriptor.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Fail only journal settlement, after the native file has been
-			// published. Retrying must observe it, not repeat the file write.
-			probe, err := sql.Open("sqlite", filepath.Join(os.Getenv("APP_DATA_JOURNAL_CONTROL"), "journal.sqlite3"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer probe.Close()
-			if _, err := probe.Exec(`CREATE TRIGGER registration_delivery_fixture_failure BEFORE UPDATE OF state ON runner_commands WHEN NEW.stage='activate' AND NEW.state='applied' BEGIN SELECT RAISE(ABORT,'registration fixture settlement failure'); END`); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native); err == nil {
-				t.Fatal("fixture settlement failure did not preserve uncertainty")
-			}
-			var candidate control.CandidateCommand
-			if err := json.Unmarshal(message.Raw, &candidate); err != nil {
-				t.Fatal(err)
-			}
-			registrationPath := filepath.Join(managedSocketRoot, candidate.InstallationID, candidate.TargetGeneration, "broker", "registration.json")
-			before, err := os.Lstat(registrationPath)
-			if err != nil || before.Mode().Perm() != 0400 {
-				t.Fatal("native registration publication missing", err)
-			}
-			var state string
-			if err := probe.QueryRow(`SELECT state FROM runner_commands WHERE effect_id=?`, effectID).Scan(&state); err != nil || state != "unknown" {
-				t.Fatal("native delivery failure lost uncertainty", err)
-			}
-			if _, err := probe.Exec(`DROP TRIGGER registration_delivery_fixture_failure`); err != nil {
-				t.Fatal(err)
-			}
-			delivered, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native)
-			if err != nil || delivered.Claim.DocumentSHA256 != string(documentSHA) || delivered.Claim.NativeID != nativeID {
-				t.Fatal("native delivery reconciliation", err)
-			}
-			after, err := os.Lstat(registrationPath)
-			if err != nil || !os.SameFile(before, after) {
-				t.Fatal("native registration retry replaced file", err)
-			}
-			historical, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native)
-			if err != nil || historical != delivered {
-				t.Fatal("native delivery historical replay", err)
-			}
-			t.Log("BACKEND_REGISTRATION_DELIVERY_RECONCILED")
 
 		}
 	}

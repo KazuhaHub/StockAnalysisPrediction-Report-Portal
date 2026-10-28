@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -117,5 +118,46 @@ func TestBackendRegistrationReceiptParsing(t *testing.T) {
 		if _, err := ParseBackendRegistrationReceipt(bad); err == nil {
 			t.Fatal("invalid receipt accepted")
 		}
+	}
+}
+
+func TestBackendRegistrationReceiptMatchesExactIntent(t *testing.T) {
+	s, ref, sig, _ := appliedCandidateReceiptFixture(t)
+	defer s.Close()
+	raw, signature := signBackendRegistrationFixture(t, ref, sig, fixtureID(960), strings.Repeat("c", 64))
+	if _, err := s.AdmitBackendRegistrationCommand(context.Background(), raw, signature); err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.claimBackendRegistration(context.Background(), raw, signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c control.BackendRegistrationCommand
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	r := BackendRegistrationReceipt{Format: registrationReceiptFormat, Claim: m, BindingSHA256: registrationBinding(m), Device: "1", Inode: "2", ObservedMS: m.ClaimedMS, SettledMS: m.ClaimedMS}
+	if !r.MatchesCommand(c) {
+		t.Fatal("exact historical metadata did not match")
+	}
+	for _, mode := range []string{"effect", "document", "payload", "binding", "inode"} {
+		t.Run(mode, func(t *testing.T) {
+			changed := r
+			switch mode {
+			case "effect":
+				changed.Claim.EffectID = fixtureID(961)
+			case "document":
+				changed.Claim.DocumentSHA256 = strings.Repeat("d", 64)
+			case "payload":
+				changed.Claim.PayloadSHA256 = strings.Repeat("e", 64)
+			case "binding":
+				changed.BindingSHA256 = strings.Repeat("f", 64)
+			case "inode":
+				changed.Inode = "0"
+			}
+			if changed.MatchesCommand(c) {
+				t.Fatal("changed receipt matched", mode)
+			}
+		})
 	}
 }

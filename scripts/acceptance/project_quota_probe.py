@@ -322,6 +322,9 @@ def main(args):
                             if "BACKEND_REGISTRATION_DELIVERY_RECONCILED" not in result.stdout:
                                 raise RuntimeError("native backend registration delivery recovery missing")
                             report["native_backend_registration_delivery_reconciled"] = True
+                            if "BACKEND_REGISTRATION_RPC_RECONCILED" not in result.stdout:
+                                raise RuntimeError("protected registration RPC recovery missing")
+                            report["native_backend_registration_rpc_reconciled"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.
