@@ -56,6 +56,7 @@ type verifiedAdmissionCommand struct {
 	registrationReference control.CandidateCommand
 	dataWriter            *control.VerifiedDataWriterCommand
 	writableCandidate     *control.VerifiedWritableCandidateCommand
+	writableRegistration  *control.VerifiedWritableBackendRegistrationCommand
 }
 type admissionVerifier func([]byte, []byte, control.Authority, int64) (verifiedAdmissionCommand, error)
 
@@ -94,7 +95,7 @@ func (s *Store) admitSignedCommand(ctx context.Context, raw, signature []byte, v
 			return zero, err
 		}
 	}
-	resourceExists, err := validateCandidateAdmissionResource(ctx, tx, verified)
+	resourceExists, err := validateCandidateAdmissionResource(ctx, tx, verified, authority, now)
 	if err != nil {
 		return zero, err
 	}
