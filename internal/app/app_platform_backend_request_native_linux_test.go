@@ -84,6 +84,12 @@ func testNativeBackendRequestRelay(t *testing.T, endpoint platformRuntimeEndpoin
 	if json.Unmarshal(claimsRaw, &claims) != nil {
 		t.Fatal("fixture assertion unavailable")
 	}
+	// Use an unseen nonce so refusal must not be satisfied by the replay
+	// rejection already exercised above.
+	claims.RequestID, err = platformNewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
 	claims.BodyDigest = platformDigest(changedBody)
 	claims.Viewer.Role = "admin"
 	claimsRaw, _ = json.Marshal(claims)
