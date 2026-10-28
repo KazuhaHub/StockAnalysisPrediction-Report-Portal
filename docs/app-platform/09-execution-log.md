@@ -1455,3 +1455,33 @@ daemon workflow 40455635317 passed on the functional source as well.
   This closes intent/claim guarding only. Native process exclusion, physical
   dispatch/opaque settlement, writable candidate/recovery, broker/activation and
   complete SDK/reference-app/P00–P14 acceptance remain incomplete.
+
+- Connected the initial signed one-shot writer claim to a concrete native driver
+  and atomic historical receipt settlement. Actual stopped/live Docker mount
+  references and local launch pins exclude permission changes; protected path,
+  allocation/image/platform/seccomp identities are rechecked around native IO.
+  Success advances volume revision 2->3 and writer unknown->applied together,
+  preserving original ownership. A current-authority historical reader supports
+  renewal without rewriting the original grant; it does not permit candidate
+  start. Added actual XFS/journal success and post-permission SQLite-failure
+  acceptance, plus the existing filtered writer trial through the native adapter.
+  See [writer execution and receipts](94-writer-execution-and-receipts.md).
+  Native acceptance is pending. Writable candidate/recovery/fencing, managed
+  activation, broker, SDK/reference apps and full platform acceptance remain.
+  No schema, production, dependency/toolchain, credential or beta changes.
+
+- Writer execution functional source `6713550ddc88d20d415233261b7e9d16c1650167`
+  passed quota workflow 40684569991/job 122803511112 and daemon workflow
+  40684569825/job 122803510721. Actual stopped-container exclusion, native
+  journal writer settlement and post-permission commit-failure preservation are
+  verified; filtered quota/current-viewer/owned-cleanup evidence remains true.
+  Linux control/appplatform/transport/driver race passed in
+  1.368/1.393/4.794/2.390s; full daemon journal race passed in 105.228s.
+  Local full runner race, focused writer race (14.739s), platform regression
+  (10.757s), Linux dual-architecture compilation, vet/staticcheck and 14 Python
+  probe tests passed. General workflow 40684570082 passed all app race shards
+  and aggregate, web/Docker/workflow checks; its Go job 122803511906 retains the
+  existing x/net vulnerability gate failure after passing staticcheck.
+  This closes initial physical dispatch and historical receipt settlement only;
+  unknown writer recovery, writable candidate/fencing, managed activation,
+  broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.

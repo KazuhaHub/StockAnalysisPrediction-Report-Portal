@@ -50,6 +50,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	owner.NamespaceID = "00000000-0000-4000-8000-000000600002"
 	owner.InstallationID = "00000000-0000-4000-8000-000000600004"
 	owner.ResourceID = "00000000-0000-4000-8000-000000600005"
+	owner.WriterFence = "1"
 	allocation, err := root.Prepare(ctx, pin, data.Request{NamespaceID: owner.NamespaceID, ProjectID: 600002, Bytes: 8 << 20, Inodes: 128})
 	if err != nil {
 		t.Fatal(err)
@@ -115,10 +116,60 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		}
 		storageReleased = true
 	})
-	writeAccess, err := root.EnableWriteAccess(ctx, pin, allocation)
-	if err != nil || writeAccess.Namespace.Inode != allocation.Inode {
-		t.Fatal("physical write-access transition", err)
+	image, err := InspectBackendImage(ctx, native.socket, raw, owner.ReleaseSHA256)
+	if err != nil {
+		t.Fatal(err)
 	}
+	plan, err = planCandidateContainer(raw, image, owner, native.roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writerRequest := DataWriterRequest{Identity: request.Identity, Descriptor: raw, Platform: request.Platform, Data: request.Data, Binding: DataWriterBinding{EffectID: "00000000-0000-4000-8000-000000600006", ClaimID: "00000000-0000-4000-8000-000000600007", PayloadSHA256: containerHash([]byte("writer trial")), DataReceiptSHA256: containerHash([]byte("allocation trial"))}}
+	launch, err := native.PrepareCandidate(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.EnableDataWriter(ctx, writerRequest); err != ErrContainerConflict {
+		launch.Close()
+		t.Fatal("live namespace pin did not exclude writer", err)
+	}
+	launch.Close()
+	nativeID, err = createCandidateContainerHTTP(ctx, client, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, conflict := other.EnableDataWriter(ctx, writerRequest)
+	other.Close()
+	if conflict != ErrContainerConflict {
+		t.Fatal("actual stopped container reference did not exclude writer", conflict)
+	}
+	sealed, err := root.Inspect(ctx, pin, allocation.NamespaceID, allocation.ProjectID)
+	if err != nil || sealed != allocation {
+		t.Fatal("refused writer changed sealed namespace", err)
+	}
+	if err := removeCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil {
+		t.Fatal(err)
+	}
+	nativeID = ""
+	observation, err := native.EnableDataWriter(ctx, writerRequest)
+	if err != nil {
+		t.Fatal("concrete writer transition", err)
+	}
+	snapshot, err := observation.Snapshot()
+	if err != nil || snapshot.Binding != writerRequest.Binding || snapshot.Identity != request.Identity || snapshot.Data != request.Data || snapshot.Profile != DataWriterSandboxProfile {
+		t.Fatal("opaque native writer evidence", err)
+	}
+	if _, err := json.Marshal(observation); err == nil {
+		t.Fatal("native writer evidence serialized into authority")
+	}
+	if _, err := native.EnableDataWriter(ctx, writerRequest); err == nil {
+		t.Fatal("native writer transition replayed/repaired")
+	}
+	t.Log("NATIVE_DATA_WRITER_ADAPTER_VERIFIED")
 	checkGlobalSpace := func() {
 		t.Helper()
 		var fs unix.Statfs_t
@@ -132,14 +183,6 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if launch, err := native.PrepareCandidate(ctx, request); err == nil {
 		launch.Close()
 		t.Fatal("production candidate accepted write-access namespace")
-	}
-	image, err := InspectBackendImage(ctx, native.socket, raw, owner.ReleaseSHA256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err = planCandidateContainer(raw, image, owner, native.roots)
-	if err != nil {
-		t.Fatal(err)
 	}
 	var policy containerCreate
 	if json.Unmarshal(plan.body, &policy) != nil || !policy.HostConfig.Mounts[0].ReadOnly {
