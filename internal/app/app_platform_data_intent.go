@@ -78,7 +78,18 @@ func (s *Server) platformDataRuntime(e migExec, epoch string, dek []byte) (platf
 }
 
 func platformDataCommand(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, namespace, effect string) (control.Command, error) {
-	profile, profileErr := platformInstallProfileInTransaction(e, lease.id)
+	return platformDataCommandForSource(e, platformManagedSource{operationID: lease.id, installationID: lease.installationID, epoch: lease.controllerEpoch, generation: lease.snapshot.Generation, fence: lease.fence}, runtime, namespace, effect)
+}
+
+// A source tuple selects historical bytes. It is not a worker lease or grant.
+type platformManagedSource struct {
+	operationID, installationID, epoch string
+	generation                         uint64
+	fence                              int64
+}
+
+func platformDataCommandForSource(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, namespace, effect string) (control.Command, error) {
+	profile, profileErr := platformInstallProfileInTransaction(e, source.operationID)
 	if profileErr != nil {
 		return control.Command{}, profileErr
 	}
@@ -87,7 +98,7 @@ func platformDataCommand(e migExec, lease platformOperationLease, runtime platfo
 	}
 	var target string
 	var raw []byte
-	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, lease.id).Scan(&target, &raw)
+	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, source.operationID).Scan(&target, &raw)
 	if err != nil {
 		return control.Command{}, err
 	}
@@ -95,7 +106,7 @@ func platformDataCommand(e migExec, lease platformOperationLease, runtime platfo
 	if err != nil {
 		return control.Command{}, errAppPlatformStageEvidence
 	}
-	c := control.Command{Format: control.Format, DeploymentID: runtime.deploymentID, ControllerEpoch: lease.controllerEpoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: lease.installationID, OperationID: lease.id, TargetGeneration: strconv.FormatUint(lease.snapshot.Generation, 10), Stage: "prepare_data", EffectNumber: "1", EffectID: effect, Kind: "prepare-data", InstallationFence: strconv.FormatInt(lease.fence, 10), Payload: control.PrepareDataPayload{DataNamespaceID: namespace, ReleaseSHA256: target, DataFormat: strconv.Itoa(parsed.Manifest.Data.Schema), QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
+	c := control.Command{Format: control.Format, DeploymentID: runtime.deploymentID, ControllerEpoch: source.epoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: source.installationID, OperationID: source.operationID, TargetGeneration: strconv.FormatUint(source.generation, 10), Stage: "prepare_data", EffectNumber: "1", EffectID: effect, Kind: "prepare-data", InstallationFence: strconv.FormatInt(source.fence, 10), Payload: control.PrepareDataPayload{DataNamespaceID: namespace, ReleaseSHA256: target, DataFormat: strconv.Itoa(parsed.Manifest.Data.Schema), QuotaBytes: "268435456", QuotaInodes: "65536", WriterFence: "1"}}
 	c.PayloadSHA256, err = control.LogicalDigest(c)
 	return c, err
 }

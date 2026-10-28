@@ -1301,3 +1301,24 @@ daemon workflow 40455635317 passed on the functional source as well.
   writer, bounded socket storage, activation/scheduling and full lifecycle/SDK/
   reference-app acceptance remain. Production, beta, dependencies and schemas
   are unchanged.
+
+- Connected a private current-viewer managed request path to the native relay.
+  A completed operation selects immutable source history through an explicit
+  source tuple, without manufacturing or renewing a worker lease. Admission
+  validates current sessions, actual OU/user audience, current policy/trust and
+  runtime plus the exact three applied source effects. It keeps mutable audience
+  policy separate from the original bootstrap policy/key/document. The host
+  obtains a fresh actual boot challenge, repeats current admission before signing,
+  forwards once, and repeats admission before releasing the buffered response.
+  Post-dispatch failure is outcome-uncertain with no automatic retry. Public
+  managed launch/activation remain closed. Related SQLite race passed (20.211s),
+  PostgreSQL race passed (13.384s), broader local platform regression passed
+  (8.125s); Linux amd64 compilation, vet/default Linux staticcheck and 14 Python
+  tests passed. The dedicated PG cluster is stopped. Native acceptance now
+  requires actual current-viewer writes, audience-only policy change, post-IO
+  revocation/result suppression and a physical execution counter; its complete/
+  active Portal rows are explicitly seeded, not a normal activator. See
+  [current managed viewer requests](89-current-managed-viewer-requests.md).
+  Normal activation/root acknowledgement lifetime, broker/writer, bounded socket
+  storage, full lifecycle, SDK/reference-app and production acceptance remain.
+  No schema, dependency, production/beta or real-credential changes.

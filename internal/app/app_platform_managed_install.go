@@ -97,8 +97,12 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 	return p.Runtime, nil
 }
 func (s *Server) checkPlatformManagedRuntimeRoot(ctx context.Context, lease platformOperationLease, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
+	return s.checkPlatformManagedOperationRoot(ctx, lease.id, runtime, authority, endpoint)
+}
+
+func (s *Server) checkPlatformManagedOperationRoot(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
-	target, err := platformManagedTargetForOperation(pool, lease.id)
+	target, err := platformManagedTargetForOperation(pool, operation)
 	if err != nil {
 		return err
 	}

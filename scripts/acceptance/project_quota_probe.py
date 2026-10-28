@@ -334,6 +334,9 @@ def main(args):
                             if "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED" not in result.stdout:
                                 raise RuntimeError("signed backend request relay missing")
                             report["native_backend_request_relay_verified"] = True
+                            if "MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED" not in result.stdout:
+                                raise RuntimeError("current Portal viewer native request gating missing")
+                            report["native_current_viewer_request_verified"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

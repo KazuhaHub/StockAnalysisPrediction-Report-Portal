@@ -37,27 +37,10 @@ func (s *Server) platformViewerIdentity(e migExec, account platformActorAccount,
 	for _, ou := range chain {
 		ous = append(ous, appplatform.ViewerOUIdentity{ID: ou.id, Created: ou.created})
 	}
-	// A reader must never lazily create/repair the keyring. Read the durable pair
-	// from this transaction rather than trusting a previously cached data key.
-	stored, err := readStoredKeyring(e)
-	if err != nil || !stored.exists {
-		return zero, errAppPlatformLaunchUnavailable
-	}
-	salt, err := base64.StdEncoding.DecodeString(stored.salt)
-	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
-	}
-	kek, err := s.kek(salt)
-	defer clear(kek)
-	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
-	}
-	// openStoredKeyring can rewrap under a previous configured key. This read
-	// boundary intentionally does not invoke that mutating recovery path.
-	dek, err := aesOpen(kek, stored.wrapped, []byte("dek"))
+	dek, err := s.readPlatformDEK(e)
 	defer clear(dek)
 	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, err
 	}
 	var sealed string
 	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=? AND app_id=?`, installationID, appID).Scan(&sealed); err != nil || !strings.HasPrefix(sealed, sealPrefix) {
@@ -69,4 +52,30 @@ func (s *Server) platformViewerIdentity(e migExec, account platformActorAccount,
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	return appplatform.DeriveViewerIdentity(appID, installationID, seed, appplatform.ViewerAccountIdentity{Name: account.username, Created: account.created, Generation: account.generation, SessionRevision: account.sessionRevision, Role: account.role}, ous)
+}
+
+// Never initialize, repair or rewrap keyring rows while admitting a reader.
+// The returned key is an owned buffer that the caller must clear.
+func (s *Server) readPlatformDEK(e migExec) ([]byte, error) {
+	stored, err := readStoredKeyring(e)
+	if err != nil || !stored.exists {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	salt, err := base64.StdEncoding.DecodeString(stored.salt)
+	if err != nil {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	kek, err := s.kek(salt)
+	defer clear(kek)
+	if err != nil {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	// openStoredKeyring can rewrap under a previous configured key. This read
+	// boundary intentionally does not invoke that mutating recovery path.
+	dek, err := aesOpen(kek, stored.wrapped, []byte("dek"))
+	if err != nil {
+		clear(dek)
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	return dek, nil
 }
