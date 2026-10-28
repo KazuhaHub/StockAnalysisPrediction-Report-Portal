@@ -259,6 +259,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		s.handleCandidateExecution(executionCtx, conn)
 		return
 
+	case managedRuntimeQueryMagic:
+		s.handleManagedRuntime(ctx, conn)
+		return
 	case enrollmentQueryMagic:
 		s.handleEnrollment(ctx, conn)
 		return

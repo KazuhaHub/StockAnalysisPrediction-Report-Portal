@@ -79,3 +79,10 @@ func candidateSnapshotHash(value any) string {
 	raw, _ := json.Marshal(value)
 	return containerHash(raw)
 }
+
+// RuntimeConfiguration is current infrastructure metadata, not execution or
+// application-readiness authority. Only concrete configuration inspection fills it.
+type RuntimeConfiguration struct {
+	Platform, SandboxProfile string
+	Root                     data.RootIdentity
+}
