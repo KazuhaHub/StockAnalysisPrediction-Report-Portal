@@ -23,6 +23,7 @@ type platformCandidateIntent struct {
 	data                       journal.DataPreparationReceipt
 	dataSHA                    string
 	running                    journal.CandidateRunningReceipt
+	readiness                  journal.CandidateReadiness
 }
 
 // The only candidate resource is the existing candidate activation row. Its
@@ -105,7 +106,16 @@ func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, r
 		if err != nil {
 			return zero, false, err
 		}
-		if !platformValidUUID(result.resourceID) || storedRelease != release || generation != 1 || policy != 1 || storedNamespace != namespace || storedFormat != format || state != "candidate" || readiness != "{}" || observedAt.Valid || created < 0 || updated != created || updated > now {
+		if !platformValidUUID(result.resourceID) || storedRelease != release || generation != 1 || policy != 1 || storedNamespace != namespace || storedFormat != format || state != "candidate" || created < 0 || updated < created || updated > now {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		if applied && lease.snapshot.Stage == appplatform.StageActivate {
+			result.readiness, err = journal.ParseCandidateReadiness([]byte(readiness))
+			observed, parseErr := strconv.ParseInt(result.readiness.ObservedMS, 10, 64)
+			if err != nil || parseErr != nil || !observedAt.Valid || observedAt.Int64 != observed || observed > now || now-observed > 3000 || updated < observed {
+				return zero, false, errAppPlatformStageEvidence
+			}
+		} else if readiness != "{}" || observedAt.Valid || updated != created {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		var kind, digest, runtimeID string
@@ -138,6 +148,13 @@ func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, r
 	result.command = c
 	if applied && (!result.running.MatchesCommand(c) || result.running.Claim.DataReceiptSHA256 != result.dataSHA) {
 		return zero, false, errAppPlatformStageEvidence
+	}
+	if applied && lease.snapshot.Stage == appplatform.StageActivate {
+		encoded, _ := json.Marshal(result.running)
+		r := result.readiness
+		if r.PayloadSHA256 != c.PayloadSHA256 || r.RunningReceiptSHA256 != platformDigest(encoded) || r.NativeID != result.running.NativeID || r.DataFormat != c.Payload.DataFormat {
+			return zero, false, errAppPlatformStageEvidence
+		}
 	}
 	if fresh {
 		if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms) VALUES(?,?,?,1,1,?,?,'candidate','{}',NULL,?,?)`, result.resourceID, lease.installationID, release, namespace, format, now, now); err != nil {
