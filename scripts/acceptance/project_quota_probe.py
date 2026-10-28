@@ -309,6 +309,12 @@ def main(args):
                     report["native_writer_recovery_metadata_failure_retry_verified"] = True
                     report["native_writable_candidate_intent_actual_sources_verified"] = True
                     report["native_writable_candidate_claim_actual_sources_verified"] = True
+                    started = subprocess.run([args[6], "-test.run=^TestNativeJournalWritableCandidateExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=writer_journal_env, capture_output=True, text=True, timeout=70)
+                    if started.returncode or "NATIVE_WRITABLE_JOURNAL_PROCESS_SETTLEMENT_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_PROCESS_COMMIT_FAILURE_PRESERVES_UNKNOWN" not in started.stdout or "NATIVE_WRITABLE_PREFLIGHT_COMMIT_PRECEDES_PROCESS" not in started.stdout:
+                        raise RuntimeError("actual writable journal process settlement failed: " + (started.stdout+started.stderr)[-4096:])
+                    report["native_writable_journal_process_settlement_verified"] = True
+                    report["native_writable_process_commit_failure_preserves_unknown"] = True
+                    report["native_writable_preflight_commit_precedes_process"] = True
                 if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True

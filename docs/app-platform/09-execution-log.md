@@ -1612,3 +1612,16 @@ daemon workflow 40455635317 passed on the functional source as well.
   fixture bindings, not current journal authorization or a full app installation.
   Journal preflight binding/process settlement/history/recovery, activation,
   SDK/reference apps and full acceptance remain. Production and beta unchanged.
+
+- Connected current writable claims to concrete native execution: opaque live
+  preflight is durably bound before create/start, current authorization is
+  rechecked immediately before IO, guarded postflight preserves immutable
+  source/claim/resource facts, and opaque actual process evidence atomically
+  settles running resource plus applied receipt. Added current historical reads
+  preserving original claim/key/times across current-key renewal, with strict
+  exact running-resource history. Added disposable actual process success,
+  post-start receipt failure and preflight-commit-before-process cases. See
+  [writable running receipts](99-writable-running-receipts.md). Native acceptance
+  is pending. Unknown-start observation recovery, readiness/registration/
+  activation, broker, SDK/reference apps and full acceptance remain incomplete.
+  No schema, production, credential, dependency/toolchain or beta changes.

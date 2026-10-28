@@ -19,6 +19,7 @@ type writableCandidateClaimState struct {
 	marker         string
 	deadline       time.Time
 	used           atomic.Bool
+	bound          *writableCandidatePreflightEvidence
 }
 
 func (WritableCandidateClaim) MarshalJSON() ([]byte, error) {
@@ -30,26 +31,45 @@ func (c *WritableCandidateClaim) UnmarshalJSON([]byte) error {
 }
 
 type writableCandidateClaimMarker struct {
-	Format              string `json:"format"`
-	ClaimID             string `json:"claim_id"`
-	EffectID            string `json:"effect_id"`
-	ResourceID          string `json:"resource_id"`
-	PayloadSHA256       string `json:"payload_sha256"`
-	OwnershipSHA256     string `json:"ownership_sha256"`
-	DataReceiptSHA256   string `json:"data_receipt_sha256"`
-	WriterReceiptSHA256 string `json:"writer_receipt_sha256"`
-	ControlRevision     string `json:"control_revision"`
-	AdmittedFence       string `json:"admitted_fence"`
-	SandboxProfile      string `json:"sandbox_profile"`
-	ClaimedMS           string `json:"claimed_ms"`
-	ExpiresMS           string `json:"expires_ms"`
+	Format              string                              `json:"format"`
+	ClaimID             string                              `json:"claim_id"`
+	EffectID            string                              `json:"effect_id"`
+	ResourceID          string                              `json:"resource_id"`
+	PayloadSHA256       string                              `json:"payload_sha256"`
+	OwnershipSHA256     string                              `json:"ownership_sha256"`
+	DataReceiptSHA256   string                              `json:"data_receipt_sha256"`
+	WriterReceiptSHA256 string                              `json:"writer_receipt_sha256"`
+	ControlRevision     string                              `json:"control_revision"`
+	AdmittedFence       string                              `json:"admitted_fence"`
+	SandboxProfile      string                              `json:"sandbox_profile"`
+	ClaimedMS           string                              `json:"claimed_ms"`
+	ExpiresMS           string                              `json:"expires_ms"`
+	Preflight           *writableCandidatePreflightEvidence `json:"preflight,omitempty"`
+	PreflightBoundMS    string                              `json:"preflight_bound_ms,omitempty"`
 }
 
 func writableCandidateMarkerMatches(m writableCandidateClaimMarker, f writableCandidateFacts) bool {
 	c := f.verified.Index()
+	return writableCandidateMarkerIdentityMatches(m, f) && m.ControlRevision == c.ControlRevision && m.ExpiresMS == c.ExpiresMS
+}
+func writableCandidateMarkerIdentityMatches(m writableCandidateClaimMarker, f writableCandidateFacts) bool {
+	c := f.verified.Index()
 	claimed, _ := strconv.ParseInt(m.ClaimedMS, 10, 64)
 	expires, _ := strconv.ParseInt(m.ExpiresMS, 10, 64)
-	return m.Format == "portal.runner.writable-candidate-claim/1-dev.1" && enrollmentUUID.MatchString(m.ClaimID) && m.ClaimID != "00000000-0000-0000-0000-000000000000" && m.EffectID == c.EffectID && m.ResourceID == c.Payload.ResourceID && m.PayloadSHA256 == c.PayloadSHA256 && m.OwnershipSHA256 == writableCandidateOwnership(f) && m.DataReceiptSHA256 == f.verified.Writer().Command().DataReceiptSHA256 && m.WriterReceiptSHA256 == f.verified.Command().WriterReceiptSHA256 && m.ControlRevision == c.ControlRevision && m.AdmittedFence == strconv.FormatInt(f.stored.fence, 10) && m.SandboxProfile == control.WritableCandidateSandboxProfile && dataNumber(m.ClaimedMS, false) && dataNumber(m.ExpiresMS, true) && claimed >= f.created && claimed <= f.now && expires > claimed && expires-claimed <= 30000 && m.ExpiresMS == c.ExpiresMS
+	revision, _ := strconv.ParseInt(m.ControlRevision, 10, 64)
+	sourceRevision, _ := strconv.ParseInt(f.source.writer.ControlRevision, 10, 64)
+	currentRevision, _ := strconv.ParseInt(c.ControlRevision, 10, 64)
+	if m.Format != "portal.runner.writable-candidate-claim/1-dev.1" || !enrollmentUUID.MatchString(m.ClaimID) || m.ClaimID == "00000000-0000-0000-0000-000000000000" || m.EffectID != c.EffectID || m.ResourceID != c.Payload.ResourceID || m.PayloadSHA256 != c.PayloadSHA256 || m.OwnershipSHA256 != writableCandidateOwnership(f) || m.DataReceiptSHA256 != f.verified.Writer().Command().DataReceiptSHA256 || m.WriterReceiptSHA256 != f.verified.Command().WriterReceiptSHA256 || !dataNumber(m.ControlRevision, true) || revision < sourceRevision || revision > currentRevision || m.AdmittedFence != strconv.FormatInt(f.stored.fence, 10) || m.SandboxProfile != control.WritableCandidateSandboxProfile || !dataNumber(m.ClaimedMS, false) || !dataNumber(m.ExpiresMS, true) || claimed < f.created || claimed > f.now || expires <= claimed || expires-claimed > 30000 {
+		return false
+	}
+	if m.Preflight == nil {
+		return m.PreflightBoundMS == ""
+	}
+	if !dataNumber(m.PreflightBoundMS, false) || !writablePreflightMatches(*m.Preflight, f, m) {
+		return false
+	}
+	bound, _ := strconv.ParseInt(m.PreflightBoundMS, 10, 64)
+	return bound >= claimed && bound < expires && bound <= f.now
 }
 
 // ClaimWritableCandidate commits unknown intent before returning a live handle.
@@ -115,7 +135,8 @@ type WritableCandidatePlan struct {
 // callback, never application-supplied code. Callbacks must honor cancellation,
 // return only when IO stops, and not close/reenter the Store, alter its durable
 // claim/resource or settle the command. Success alone leaves unknown state;
-// actual native preflight/binding and opaque process settlement remain separate.
+// ExecuteWritableCandidate alone uses the private typed preflight binder during
+// its callback and settles opaque process evidence after this guard succeeds.
 func (s *Store) RunWritableCandidateOnce(ctx context.Context, claim WritableCandidateClaim, run func(context.Context, WritableCandidatePlan) error) (WritableCandidateAttempt, error) {
 	var zero WritableCandidateAttempt
 	live := claim.state
@@ -141,6 +162,10 @@ func (s *Store) RunWritableCandidateOnce(ctx context.Context, claim WritableCand
 	if err := finalWritableCandidateCheck(ctx, f); err != nil {
 		return zero, err
 	}
+	var original writableCandidateClaimMarker
+	if !canonicalDataJSON(live.marker, &original) || original.Preflight != nil || live.bound != nil {
+		return zero, ErrFenceReconciliation
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
@@ -159,7 +184,11 @@ func (s *Store) RunWritableCandidateOnce(ctx context.Context, claim WritableCand
 		return attempt, errors.Join(ErrWritableCandidateUncertain, runErr, err)
 	}
 	defer post.Rollback()
-	if after.now < f.now || after.source != f.source || after.resource == nil || *after.resource != *f.resource || after.created != f.created || after.updated != f.updated {
+	if after.now < f.now || after.source != f.source || after.resource == nil || *after.resource != *f.resource || after.created != f.created {
+		return attempt, errors.Join(ErrWritableCandidateUncertain, runErr, ErrFenceReconciliation)
+	}
+	var current writableCandidateClaimMarker
+	if !canonicalDataJSON(after.receipt, &current) || writableMarkerCore(current) != writableMarkerCore(original) || (current.Preflight == nil) != (live.bound == nil) || (current.Preflight != nil && *current.Preflight != *live.bound) {
 		return attempt, errors.Join(ErrWritableCandidateUncertain, runErr, ErrFenceReconciliation)
 	}
 	if err := finalWritableCandidateCheck(bounded, after); err != nil {
