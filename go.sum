@@ -1,7 +1,7 @@
 github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a h1:Ulsql9QkXAyn5msTL21mDlD53G+s3WrDYLzIj0v/xug=
 github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a/go.mod h1:nKsohoVbRr768/uQCwJTGV0Mq7g9mzJCyx1g92UwwP4=
-github.com/KazuhaHub/authcore v0.6.1 h1:nilDf8Of4DnL3MdNNrz4iY6HOTclVRBwc+CiN4FjdKk=
-github.com/KazuhaHub/authcore v0.6.1/go.mod h1:DZoOd2YYIDnc4E87so+mEFVTG2rryj2JBhei9eJBgYg=
+github.com/KazuhaHub/authcore v0.6.2 h1:2BEmJk1LO6a0anWC1VhO2iugmn+/i+3yoPNnJm46L9g=
+github.com/KazuhaHub/authcore v0.6.2/go.mod h1:DZoOd2YYIDnc4E87so+mEFVTG2rryj2JBhei9eJBgYg=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/beevik/etree v1.7.0 h1:xjBk9O4p4x7D1YajePjfLzdaFC4/uYUENA7P0pv6gXA=
