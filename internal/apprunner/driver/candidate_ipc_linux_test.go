@@ -216,3 +216,39 @@ func TestNativeCandidateMountPinsIPCRefusesUnmarkedDirectory(t *testing.T) {
 		t.Fatal("cancelled provision created a directory")
 	}
 }
+
+func TestCandidateIPCReferencesResolveAliases(t *testing.T) {
+	root := t.TempDir()
+	ipc := filepath.Join(root, "owned", "http")
+	if err := os.MkdirAll(filepath.Join(ipc, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(filepath.Dir(ipc), alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{ipc, filepath.Dir(ipc), alias, alias + "/", filepath.Join(ipc, "child"), "/"} {
+		if used, err := candidateIPCReferenced(ipc, source); err != nil || !used {
+			t.Fatal("mount reference alias missed", err)
+		}
+	}
+	if used, err := candidateIPCReferenced(ipc, filepath.Join(root, "missing")); err == nil || used {
+		t.Fatal("unresolved inventory silently treated as no reference")
+	}
+	if used, err := candidateIPCReferenced(ipc, ""); err != nil || used {
+		t.Fatal("empty tmpfs source treated as host bind")
+	}
+}
+
+func TestCandidateIPCInventoryCannotOmitBindSources(t *testing.T) {
+	for _, raw := range []string{"", `{}`, `[{"Type":"bind"}]`, `[{"Type":"volume","Source":"relative"}]`, `[{"Type":"unknown","Source":"/run"}]`, `[{"Type":"tmpfs","Source":"/run"}]`} {
+		if _, err := candidateIPCMountSources([]byte(raw)); err == nil {
+			t.Fatal("incomplete inventory admitted", raw)
+		}
+	}
+	for _, raw := range []string{`null`, `[]`, `[{"Type":"tmpfs","Source":""}]`, `[{"Type":"bind","Source":"/run"}]`} {
+		if _, err := candidateIPCMountSources([]byte(raw)); err != nil {
+			t.Fatal("valid projected mount inventory refused", err)
+		}
+	}
+}

@@ -189,10 +189,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	client, closeClient := r.client()
 	defer closeClient()
 	var containers []struct {
-		ID     string `json:"Id"`
-		Mounts []struct {
-			Source string `json:"Source"`
-		} `json:"Mounts"`
+		ID     string          `json:"Id"`
+		Mounts json.RawMessage `json:"Mounts"`
 	}
 	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/json?all=1", &containers); err != nil {
 		return err
@@ -204,8 +202,16 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 		if !containerSHA.MatchString(container.ID) {
 			return ErrInvalidResponse
 		}
-		for _, mount := range container.Mounts {
-			if mount.Source == path || (mount.Source != "" && (strings.HasPrefix(path, mount.Source+"/") || strings.HasPrefix(mount.Source, path+"/") || mount.Source == "/")) {
+		sources, err := candidateIPCMountSources(container.Mounts)
+		if err != nil {
+			return err
+		}
+		for _, source := range sources {
+			referenced, err := candidateIPCReferenced(path, source)
+			if err != nil {
+				return err
+			}
+			if referenced {
 				return ErrContainerConflict
 			}
 		}
@@ -225,4 +231,48 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	}
 	defer unix.Close(parent)
 	return releaseCandidateHTTPStorage(ctx, parent, path, identity)
+}
+
+func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, ErrInvalidResponse
+	}
+	var mounts []struct {
+		Type   string  `json:"Type"`
+		Source *string `json:"Source"`
+	}
+	if json.Unmarshal(raw, &mounts) != nil {
+		return nil, ErrInvalidResponse
+	}
+	sources := make([]string, 0, len(mounts))
+	for _, m := range mounts {
+		switch m.Type {
+		case "bind", "volume":
+			if m.Source == nil || !filepath.IsAbs(*m.Source) {
+				return nil, ErrInvalidResponse
+			}
+			sources = append(sources, *m.Source)
+		case "tmpfs":
+			if m.Source != nil && *m.Source != "" {
+				return nil, ErrInvalidResponse
+			}
+		default:
+			return nil, ErrInvalidResponse
+		}
+	}
+	return sources, nil
+}
+
+func candidateIPCReferenced(path, source string) (bool, error) {
+	if source == "" {
+		return false, nil
+	}
+	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
+		return false, ErrInvalidResponse
+	}
+	canonical, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return false, ErrUnavailable
+	}
+	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil
 }
