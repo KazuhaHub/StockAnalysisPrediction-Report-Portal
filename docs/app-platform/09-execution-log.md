@@ -1639,3 +1639,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   full daemon crash/relaunch and unknown-process observation recovery remain
   unfinished, as do writable readiness/registration/activation, broker, SDK,
   reference apps and full release acceptance. No production or beta changes.
+
+- Added observation-only writable start recovery under fresh signed authority
+  after original claim expiry. The separate opaque native path rebuilds/pins
+  exact original preflight, requires one full-policy-matching running container,
+  repeats all-container reference checks and never provisions/starts/repairs.
+  Current settlement preserves original claim while atomically recording a
+  separate-window recovered process receipt/resource. Added strict historical
+  parser/state/refusal tests and actual owner reopen/metadata-failure retry/
+  unchanged native start identity acceptance. See
+  [writable start recovery](100-writable-start-recovery.md). Native acceptance
+  is pending; readiness/registration/activation, SDK/reference apps, lifecycle
+  and complete release acceptance remain incomplete. No production/beta changes.

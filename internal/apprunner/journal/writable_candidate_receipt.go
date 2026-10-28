@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strconv"
 
@@ -12,16 +13,20 @@ import (
 // Historical process evidence only. No readiness, registration, active writer
 // lease, acknowledgement or native mutation follows from parsing/reading it.
 type WritableCandidateRunningReceipt struct {
-	Format           string                       `json:"format"`
-	Claim            writableCandidateClaimMarker `json:"claim"`
-	NativeID         string                       `json:"native_id"`
-	NativeObservedMS string                       `json:"native_observed_ms"`
-	SettledMS        string                       `json:"settled_ms"`
+	Format                  string                       `json:"format"`
+	Claim                   writableCandidateClaimMarker `json:"claim"`
+	NativeID                string                       `json:"native_id"`
+	NativeObservedMS        string                       `json:"native_observed_ms"`
+	SettledMS               string                       `json:"settled_ms"`
+	RecoveryEnvelopeSHA256  string                       `json:"recovery_envelope_sha256,omitempty"`
+	RecoveryControlRevision string                       `json:"recovery_control_revision,omitempty"`
+	RecoveryIssuedMS        string                       `json:"recovery_issued_ms,omitempty"`
+	RecoveryExpiresMS       string                       `json:"recovery_expires_ms,omitempty"`
 }
 
 func validWritableRunningReceipt(r WritableCandidateRunningReceipt) bool {
 	m := r.Claim
-	if r.Format != writableRunningFormat || m.Format != "portal.runner.writable-candidate-claim/1-dev.1" || m.SandboxProfile != control.WritableCandidateSandboxProfile || m.Preflight == nil || !validWritablePreflight(*m.Preflight) || !dataSHA(r.NativeID) {
+	if (r.Format != writableRunningFormat && r.Format != writableRecoveredRunningFormat) || m.Format != "portal.runner.writable-candidate-claim/1-dev.1" || m.SandboxProfile != control.WritableCandidateSandboxProfile || m.Preflight == nil || !validWritablePreflight(*m.Preflight) || !dataSHA(r.NativeID) {
 		return false
 	}
 	for _, id := range []string{m.ClaimID, m.EffectID, m.ResourceID} {
@@ -49,7 +54,20 @@ func validWritableRunningReceipt(r WritableCandidateRunningReceipt) bool {
 	bound, _ := strconv.ParseInt(m.PreflightBoundMS, 10, 64)
 	observed, _ := strconv.ParseInt(r.NativeObservedMS, 10, 64)
 	settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
-	return expires > claimed && expires-claimed <= 30000 && bound >= claimed && observed >= bound && settled >= observed && settled < expires
+	if expires <= claimed || expires-claimed > 30000 || bound < claimed || bound >= expires || observed < bound || settled < observed {
+		return false
+	}
+	if r.Format == writableRunningFormat {
+		return settled < expires && r.RecoveryEnvelopeSHA256 == "" && r.RecoveryControlRevision == "" && r.RecoveryIssuedMS == "" && r.RecoveryExpiresMS == ""
+	}
+	if !dataSHA(r.RecoveryEnvelopeSHA256) || !dataNumber(r.RecoveryControlRevision, true) || !dataNumber(r.RecoveryIssuedMS, false) || !dataNumber(r.RecoveryExpiresMS, true) {
+		return false
+	}
+	revision, _ := strconv.ParseInt(r.RecoveryControlRevision, 10, 64)
+	originalRevision, _ := strconv.ParseInt(m.ControlRevision, 10, 64)
+	issued, _ := strconv.ParseInt(r.RecoveryIssuedMS, 10, 64)
+	recoveryExpires, _ := strconv.ParseInt(r.RecoveryExpiresMS, 10, 64)
+	return revision >= originalRevision && issued > expires && recoveryExpires > issued && recoveryExpires-issued <= 30000 && observed >= issued && settled < recoveryExpires
 }
 func ParseWritableCandidateRunningReceipt(raw []byte) (WritableCandidateRunningReceipt, error) {
 	var zero WritableCandidateRunningReceipt
@@ -61,6 +79,13 @@ func ParseWritableCandidateRunningReceipt(raw []byte) (WritableCandidateRunningR
 }
 func runningWritableCandidateResource(f writableCandidateFacts, r *dataResource, receipt WritableCandidateRunningReceipt) error {
 	c := f.verified.Index()
+	if receipt.Format == writableRecoveredRunningFormat {
+		revision, _ := strconv.ParseInt(receipt.RecoveryControlRevision, 10, 64)
+		current, _ := strconv.ParseInt(c.ControlRevision, 10, 64)
+		if revision > current {
+			return ErrFenceReconciliation
+		}
+	}
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
 	claimed, _ := strconv.ParseInt(receipt.Claim.ClaimedMS, 10, 64)
@@ -141,8 +166,19 @@ func (s *Store) settleWritableCandidateRunning(ctx context.Context, claim Writab
 	if !validWritableRunningReceipt(r) {
 		return zero, ErrFenceReconciliation
 	}
+	return s.commitWritableCandidateRunning(ctx, tx, f, live.marker, r)
+}
+
+// Caller owns the execution gate and exact current unknown transaction; only
+// concrete execution/recovery evidence validated by the private callers enters.
+func (s *Store) commitWritableCandidateRunning(ctx context.Context, tx *sql.Tx, f writableCandidateFacts, marker string, r WritableCandidateRunningReceipt) (WritableCandidateRunningReceipt, error) {
+	var zero WritableCandidateRunningReceipt
+	if !validWritableRunningReceipt(r) || r.SettledMS != strconv.FormatInt(f.now, 10) {
+		return zero, ErrFenceReconciliation
+	}
+	observed, _ := strconv.ParseInt(r.NativeObservedMS, 10, 64)
 	c := f.verified.Index()
-	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET native_id=?,observed_state='running',revision=2,observed_ms=?,updated_ms=? WHERE id=? AND kind='container' AND native_id=? AND revision=1 AND observed_state='unknown' AND observed_ms IS NULL AND ownership_sha256=?`, r.NativeID, actual.ObservedMS, f.now, c.Payload.ResourceID, writableCandidatePendingPrefix+c.Payload.ResourceID, writableCandidateOwnership(f))
+	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET native_id=?,observed_state='running',revision=2,observed_ms=?,updated_ms=? WHERE id=? AND kind='container' AND native_id=? AND revision=1 AND observed_state='unknown' AND observed_ms IS NULL AND ownership_sha256=?`, r.NativeID, observed, f.now, c.Payload.ResourceID, writableCandidatePendingPrefix+c.Payload.ResourceID, writableCandidateOwnership(f))
 	if err != nil {
 		return zero, err
 	}
@@ -150,7 +186,7 @@ func (s *Store) settleWritableCandidateRunning(ctx context.Context, claim Writab
 		return zero, ErrFenceReconciliation
 	}
 	encoded, _ := json.Marshal(r)
-	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), f.now, c.EffectID, live.marker)
+	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), f.now, c.EffectID, marker)
 	if err != nil {
 		return zero, err
 	}

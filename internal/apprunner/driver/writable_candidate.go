@@ -39,6 +39,28 @@ type WritableCandidateRunningObservation struct {
 	valid    bool
 }
 
+// Observation-only recovery evidence cannot supply a live start result or be
+// reconstructed from a durable snapshot. It grants no executable launch handle.
+type WritableCandidateRecoveryObservation struct {
+	snapshot     WritableCandidateRunningSnapshot
+	valid        bool
+	recoveryOnly bool
+}
+
+func (WritableCandidateRecoveryObservation) MarshalJSON() ([]byte, error) {
+	return nil, ErrContainerUncertain
+}
+func (o *WritableCandidateRecoveryObservation) UnmarshalJSON([]byte) error {
+	*o = WritableCandidateRecoveryObservation{}
+	return ErrContainerUncertain
+}
+func (o WritableCandidateRecoveryObservation) Snapshot() (WritableCandidateRunningSnapshot, error) {
+	if !o.recoveryOnly {
+		return WritableCandidateRunningSnapshot{}, ErrContainerUncertain
+	}
+	return (WritableCandidateRunningObservation{snapshot: o.snapshot, valid: o.valid}).Snapshot()
+}
+
 func (WritableCandidateRunningObservation) MarshalJSON() ([]byte, error) {
 	return nil, ErrContainerUncertain
 }

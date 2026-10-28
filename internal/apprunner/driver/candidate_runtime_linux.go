@@ -184,48 +184,11 @@ func (r *CandidateRuntime) prepareCandidateProfile(ctx context.Context, request 
 	if err != nil {
 		return zero, err
 	}
-	pins, err := pinCandidateMounts(ctx, plan, candidateDataPin{Device: request.Data.Device, Inode: request.Data.NamespaceInode})
+	pins, snapshot, err := r.pinCandidatePreflight(ctx, request, image, plan)
 	if err != nil {
 		return zero, err
 	}
-	fail := func(err error) (CandidateLaunch, error) { pins.Close(); return zero, err }
-	// A configured pathname must resolve to the same root that the native quota
-	// provider holds, not merely to a directory with a matching child basename.
-	type directory struct {
-		Device, Inode  uint64
-		UID, GID, Mode uint32
-	}
-	metadata := map[string]directory{}
-	foundRoot := false
-	for _, p := range pins.dirs {
-		if p.path == r.roots.Data {
-			if p.stat.Ino != r.rootIdentity.Inode || uint64(p.stat.Dev) != request.Data.Device {
-				return fail(ErrUnsafeSocket)
-			}
-			foundRoot = true
-		}
-	}
-	if !foundRoot {
-		return fail(ErrUnsafeSocket)
-	}
-	var body containerCreate
-	if json.Unmarshal(plan.body, &body) != nil {
-		return fail(ErrInvalidResponse)
-	}
-	for _, mount := range body.HostConfig.Mounts {
-		for _, p := range pins.dirs {
-			if p.path == mount.Source {
-				metadata[mount.Target] = directory{Device: uint64(p.stat.Dev), Inode: p.stat.Ino, UID: p.stat.Uid, GID: p.stat.Gid, Mode: p.stat.Mode & 07777}
-			}
-		}
-	}
-	if len(metadata) != 3 {
-		return fail(ErrUnsafeSocket)
-	}
-	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, writable != nil); err != nil {
-		return fail(err)
-	}
-	state := &candidateLaunchState{owner: r, plan: plan, pins: pins, snapshot: CandidateLaunchSnapshot{Identity: request.Identity, ImageID: image.ImageID, Platform: image.Platform, PolicySHA256: plan.bodySHA, MountsSHA256: candidateSnapshotHash(metadata), Data: request.Data}}
+	state := &candidateLaunchState{owner: r, plan: plan, pins: pins, snapshot: snapshot}
 	r.launches[state] = struct{}{}
 	return CandidateLaunch{state: state}, nil
 }
@@ -367,4 +330,54 @@ func (r *CandidateRuntime) checkConfigurationLocked(ctx context.Context) error {
 		return ErrUnsupported
 	}
 	return ctx.Err()
+}
+
+// Caller holds runtime mutex. Pin/read only; no Docker create/start or storage
+// provisioning. Recovery and first execution use identical physical projection.
+func (r *CandidateRuntime) pinCandidatePreflight(ctx context.Context, request CandidateLaunchRequest, image BackendImageInspection, plan containerPlan) (*candidateMountPins, CandidateLaunchSnapshot, error) {
+	pins, err := pinCandidateMounts(ctx, plan, candidateDataPin{Device: request.Data.Device, Inode: request.Data.NamespaceInode})
+	if err != nil {
+		return nil, CandidateLaunchSnapshot{}, err
+	}
+	fail := func(err error) (*candidateMountPins, CandidateLaunchSnapshot, error) {
+		pins.Close()
+		return nil, CandidateLaunchSnapshot{}, err
+	}
+	// A configured pathname must resolve to the same root that the native quota
+	// provider holds, not merely to a directory with a matching child basename.
+	type directory struct {
+		Device, Inode  uint64
+		UID, GID, Mode uint32
+	}
+	metadata := map[string]directory{}
+	foundRoot := false
+	for _, p := range pins.dirs {
+		if p.path == r.roots.Data {
+			if p.stat.Ino != r.rootIdentity.Inode || uint64(p.stat.Dev) != request.Data.Device {
+				return fail(ErrUnsafeSocket)
+			}
+			foundRoot = true
+		}
+	}
+	if !foundRoot {
+		return fail(ErrUnsafeSocket)
+	}
+	var body containerCreate
+	if json.Unmarshal(plan.body, &body) != nil {
+		return fail(ErrInvalidResponse)
+	}
+	for _, mount := range body.HostConfig.Mounts {
+		for _, p := range pins.dirs {
+			if p.path == mount.Source {
+				metadata[mount.Target] = directory{Device: uint64(p.stat.Dev), Inode: p.stat.Ino, UID: p.stat.Uid, GID: p.stat.Gid, Mode: p.stat.Mode & 07777}
+			}
+		}
+	}
+	if len(metadata) != 3 {
+		return fail(ErrUnsafeSocket)
+	}
+	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, plan.writable != nil); err != nil {
+		return fail(err)
+	}
+	return pins, CandidateLaunchSnapshot{Identity: request.Identity, ImageID: image.ImageID, Platform: image.Platform, PolicySHA256: plan.bodySHA, MountsSHA256: candidateSnapshotHash(metadata), Data: request.Data}, nil
 }
