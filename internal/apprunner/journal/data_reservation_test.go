@@ -414,6 +414,10 @@ func TestDataReservationCapacityBoundary(t *testing.T) {
 	c.OperationID = fixtureID(761)
 	c.EffectID = fixtureID(762)
 	c.Payload.DataNamespaceID = fixtureID(763)
+	// The full ledger scan can consume the preceding envelope's short window.
+	// This independent next request needs fresh authority of its own.
+	c.IssuedMS = strconv.FormatInt(time.Now().UnixMilli(), 10)
+	c.ExpiresMS = strconv.FormatInt(time.Now().UnixMilli()+29000, 10)
 	raw, sig = signRunnerCommand(t, c)
 	if _, err := s.AdmitControlCommand(context.Background(), raw, sig); err != nil {
 		t.Fatal(err)

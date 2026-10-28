@@ -69,9 +69,12 @@ func reservedWritableCandidate(f writableCandidateFacts, r *dataResource) (Writa
 	return WritableCandidateReservation{ResourceID: r.id, InstallationID: r.installation, NamespaceID: r.namespace.String, EffectID: c.EffectID, OwnershipSHA256: r.ownership, DataReceiptSHA256: f.verified.Writer().Command().DataReceiptSHA256, WriterReceiptSHA256: f.verified.Command().WriterReceiptSHA256, Generation: generation, ControlFence: r.fence, WriterFence: r.writer, Replayed: true}, nil
 }
 
-// An exact current prepared/unknown view, with at most its independently
-// validated pending container. It does not admit a running/guessed resource.
+// Exact current view. Pending and applied resources use separate strict
+// validators. Only recovery may inspect an original expired unknown marker.
 func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byte, state string, receipt *string) (*sql.Tx, writableCandidateFacts, error) {
+	return s.beginWritableCandidateView(ctx, raw, signature, state, receipt, false)
+}
+func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature []byte, state string, receipt *string, recovery bool) (*sql.Tx, writableCandidateFacts, error) {
 	var zero writableCandidateFacts
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return nil, zero, ErrWritableCandidateClaimUnavailable
@@ -176,7 +179,11 @@ func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byt
 	}
 	if state == "unknown" {
 		var marker writableCandidateClaimMarker
-		if resource == nil || !canonicalDataJSON(current, &marker) || !writableCandidateMarkerMatches(marker, f) {
+		matches := canonicalDataJSON(current, &marker) && writableCandidateMarkerMatches(marker, f)
+		if recovery {
+			matches = canonicalDataJSON(current, &marker) && writableCandidateMarkerIdentityMatches(marker, f) && marker.Preflight != nil
+		}
+		if resource == nil || !matches {
 			return nil, zero, ErrFenceReconciliation
 		}
 		claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)

@@ -1639,3 +1639,30 @@ daemon workflow 40455635317 passed on the functional source as well.
   full daemon crash/relaunch and unknown-process observation recovery remain
   unfinished, as do writable readiness/registration/activation, broker, SDK,
   reference apps and full release acceptance. No production or beta changes.
+
+- Added observation-only writable start recovery under fresh signed authority
+  after original claim expiry. The separate opaque native path rebuilds/pins
+  exact original preflight, requires one full-policy-matching running container,
+  repeats all-container reference checks and never provisions/starts/repairs.
+  Current settlement preserves original claim while atomically recording a
+  separate-window recovered process receipt/resource. Added strict historical
+  parser/state/refusal tests and actual owner reopen/metadata-failure retry/
+  unchanged native start identity acceptance. See
+  [writable start recovery](100-writable-start-recovery.md). Native acceptance
+  is pending; readiness/registration/activation, SDK/reference apps, lifecycle
+  and complete release acceptance remain incomplete. No production/beta changes.
+
+- Writable start recovery source `f836718daa5107c7fe692d7442ab0f38a5d3c221`
+  passed quota workflow 40767469240/job 123095373863 and daemon workflow
+  40767469270/job 123095504935. Actual post-start unknown recovery after owner
+  reopen/expiry, metadata-failure atomic rollback and observation retry all
+  passed with unchanged native ID/creation/start/restart identity and original
+  claim/preflight. Full Linux journal race passed in 164.928s; local full runner
+  race journal 159.193s, expanded writable race, platform regression, dual-arch
+  builds, vet/staticcheck and Python14 passed. General workflow 40767469054
+  passed app race shards, web and Docker checks, retaining existing x/net gate
+  failures in Go job 123095584809. The inventory fixture's overly long temporary
+  socket path was shortened without changing production limits. This is owner
+  object reopen, not full daemon crash/relaunch. Writable readiness/registration/
+  activation, broker, SDK/reference apps, physical lifecycle and full P00–P14
+  acceptance remain incomplete. Production, Status adoption and beta unchanged.

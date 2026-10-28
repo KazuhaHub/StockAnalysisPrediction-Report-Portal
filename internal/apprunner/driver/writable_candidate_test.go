@@ -88,3 +88,22 @@ func TestWritableNativeHandlesAndObservationsRefuseJSON(t *testing.T) {
 		t.Fatal("decode retained authority")
 	}
 }
+
+func TestWritableRecoveryObservationCannotBeDecoded(t *testing.T) {
+	var observation WritableCandidateRecoveryObservation
+	if reflect.TypeOf(observation).ConvertibleTo(reflect.TypeOf(WritableCandidateRunningObservation{})) {
+		t.Fatal("recovery proof convertible to live execution authority")
+	}
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("zero recovery native authority")
+	}
+	if _, err := json.Marshal(observation); err == nil {
+		t.Fatal("recovery native authority serialized")
+	}
+	if err := json.Unmarshal([]byte(`{"valid":true}`), &observation); err == nil {
+		t.Fatal("recovery native authority decoded")
+	}
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("failed decoding retained recovery authority")
+	}
+}

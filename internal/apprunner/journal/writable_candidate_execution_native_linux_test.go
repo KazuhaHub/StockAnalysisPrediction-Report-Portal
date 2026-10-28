@@ -98,7 +98,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer native.Close()
+	defer func() { native.Close() }()
 	raw, err := os.ReadFile("../../appplatform/testdata/descriptors/managed.json")
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +144,12 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 			}
 			c := writableIntentFixture(t, writerRaw, writerSig, written)
 			c.EffectID = fixtureID(base + 6)
+			if slot == 1 {
+				now := time.Now().UnixMilli()
+				prepare.IssuedMS, prepare.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+5000, 10)
+				writer.DataRaw, writer.DataSignature = signRunnerCommand(t, prepare)
+				c.WriterRaw, c.WriterSignature = signWriterFixture(t, writer)
+			}
 			raw, sig := signWritableIntent(t, c)
 			if _, err := s.AdmitWritableCandidateCommand(ctx, raw, sig); err != nil {
 				t.Fatal(err)
@@ -242,6 +248,69 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if _, err := s.ReadWritableCandidateRunningReceipt(ctx, raw, sig); err == nil {
 					t.Fatal("unknown start read as applied")
 				}
+
+				// Lose process-local handles while retaining the actual process.
+				// Reopen both owners, wait out the original deadline, and use a
+				// fresh signed observation envelope. No old claim is resumed.
+				id := writableFixtureOwnedNative(t, socket, index, m)
+				if _, err := s.ReconcileWritableCandidate(ctx, raw, sig, descriptor, native); err == nil {
+					t.Fatal("live claim recovered")
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := native.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s, err = Open(journalPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				native, err = driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expires, _ := strconv.ParseInt(m.ExpiresMS, 10, 64)
+				if delay := time.Until(time.UnixMilli(expires + 1)); delay > 0 {
+					time.Sleep(delay)
+				}
+				now := time.Now().UnixMilli()
+				prepare.IssuedMS, prepare.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+				writer.DataRaw, writer.DataSignature = signRunnerCommand(t, prepare)
+				c.WriterRaw, c.WriterSignature = signWriterFixture(t, writer)
+				fresh, freshSig := signWritableIntent(t, c)
+				beforeNative := candidateFixtureDocker(t, socket, "container", "inspect", "--format", "{{.Id}} {{.Created}} {{.State.StartedAt}} {{.RestartCount}}", id)
+				if _, err := s.db.Exec(`CREATE TRIGGER fixture_writable_recovery_failure BEFORE UPDATE ON runner_commands WHEN NEW.effect_id='` + c.EffectID + `' AND NEW.state='applied' BEGIN SELECT RAISE(ABORT,'fixture writable recovery failure');END`); err != nil {
+					t.Fatal(err)
+				}
+				if r, err := s.ReconcileWritableCandidate(ctx, fresh, freshSig, descriptor, native); err == nil || !strings.Contains(err.Error(), "fixture writable recovery failure") || r.Format != "" {
+					t.Fatal("recovery failure bypassed", err)
+				}
+				if scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+writer.ResourceID+`' AND revision=1 AND observed_state='unknown' AND observed_ms IS NULL`) != 1 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+c.EffectID+`' AND state='unknown'`) != 1 {
+					t.Fatal("recovery failure left half a result")
+				}
+				if _, err := s.db.Exec(`DROP TRIGGER fixture_writable_recovery_failure`); err != nil {
+					t.Fatal(err)
+				}
+				recovered, err := s.ReconcileWritableCandidate(ctx, fresh, freshSig, descriptor, native)
+				if err != nil || recovered.Format != writableRecoveredRunningFormat || recovered.NativeID != id || recovered.RecoveryEnvelopeSHA256 != candidateHash(fresh) {
+					t.Fatal("actual observation recovery", err)
+				}
+				originalClaim, _ := json.Marshal(m)
+				recoveredClaim, _ := json.Marshal(recovered.Claim)
+				if string(originalClaim) != string(recoveredClaim) {
+					t.Fatal("recovery rewrote original claim/preflight")
+				}
+				afterNative := candidateFixtureDocker(t, socket, "container", "inspect", "--format", "{{.Id}} {{.Created}} {{.State.StartedAt}} {{.RestartCount}}", id)
+				if string(beforeNative) != string(afterNative) {
+					t.Fatal("observation recovery restarted/replaced process")
+				}
+				if got, err := s.ReadWritableCandidateRunningReceipt(ctx, fresh, freshSig); err != nil || !sameWritableReceipt(got, recovered) {
+					t.Fatal("recovered historical read", err)
+				}
+				if _, err := s.ReconcileWritableCandidate(ctx, fresh, freshSig, descriptor, native); err == nil {
+					t.Fatal("applied recovery repeated")
+				}
 			}
 			if slot == 2 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_preflight_failure`); dropErr != nil {
@@ -273,4 +342,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	t.Log("NATIVE_WRITABLE_JOURNAL_PROCESS_SETTLEMENT_VERIFIED")
 	t.Log("NATIVE_WRITABLE_PROCESS_COMMIT_FAILURE_PRESERVES_UNKNOWN")
 	t.Log("NATIVE_WRITABLE_PREFLIGHT_COMMIT_PRECEDES_PROCESS")
+	t.Log("NATIVE_WRITABLE_START_RECOVERY_AFTER_EXPIRY_VERIFIED")
+	t.Log("NATIVE_WRITABLE_RECOVERY_WITHOUT_PROCESS_RESTART")
+	t.Log("NATIVE_WRITABLE_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED")
 }
