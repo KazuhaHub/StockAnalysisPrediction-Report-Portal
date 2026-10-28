@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -228,15 +229,46 @@ func TestCandidateIPCReferencesResolveAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, source := range []string{ipc, filepath.Dir(ipc), alias, alias + "/", filepath.Join(ipc, "child"), "/"} {
-		if used, err := candidateIPCReferenced(ipc, source); err != nil || !used {
+		if used, err := candidateIPCReferenced(context.Background(), ipc, source); err != nil || !used {
 			t.Fatal("mount reference alias missed", err)
 		}
 	}
-	if used, err := candidateIPCReferenced(ipc, filepath.Join(root, "missing")); err == nil || used {
+	if used, err := candidateIPCReferenced(context.Background(), ipc, filepath.Join(root, "missing")); err == nil || used {
 		t.Fatal("unresolved inventory silently treated as no reference")
 	}
-	if used, err := candidateIPCReferenced(ipc, ""); err != nil || used {
+	if used, err := candidateIPCReferenced(context.Background(), ipc, ""); err != nil || used {
 		t.Fatal("empty tmpfs source treated as host bind")
+	}
+}
+
+func TestCandidateIPCResolverDoesNotRestartTimedOutWork(t *testing.T) {
+	blocked := make(chan struct{})
+	entered := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() {
+		_, err := resolveCandidateIPCSource(ctx, "fixture", func(string) (string, error) { close(entered); <-blocked; return "/fixture", nil })
+		finished <- err
+	}()
+	<-entered
+	cancel()
+	if err := <-finished; !errors.Is(err, context.Canceled) {
+		close(blocked)
+		t.Fatal("caller cancellation ignored", err)
+	}
+	second, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	called := false
+	_, err := resolveCandidateIPCSource(second, "second", func(string) (string, error) { called = true; return "", nil })
+	if !errors.Is(err, context.DeadlineExceeded) || called {
+		close(blocked)
+		t.Fatal("timed-out native lookup was restarted", err)
+	}
+	close(blocked)
+	third, done := context.WithTimeout(context.Background(), time.Second)
+	defer done()
+	if path, err := resolveCandidateIPCSource(third, "third", func(string) (string, error) { return "/third", nil }); err != nil || path != "/third" {
+		t.Fatal("slot did not recover after work completed", err)
 	}
 }
 

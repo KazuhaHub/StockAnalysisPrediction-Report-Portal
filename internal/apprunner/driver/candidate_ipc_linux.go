@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -165,10 +166,19 @@ func releaseCandidateHTTPStorage(ctx context.Context, parent int, path string, i
 	if unix.Fstat(fd, &st) != nil || !safeMountDirectory(st, true, 0, 0, 0700) || !candidateIPCMarkerMatches(fd, identity, "base") {
 		return ErrUnsafeSocket
 	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrContainerUncertain, err)
+	}
 	if err := unix.Unlinkat(parent, "http", unix.AT_REMOVEDIR); err != nil {
 		return errors.Join(ErrContainerUncertain, err)
 	}
-	return unix.Fsync(parent)
+	if err := unix.Fsync(parent); err != nil {
+		return errors.Join(ErrContainerUncertain, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrContainerUncertain, err)
+	}
+	return nil
 }
 
 // Explicit quiescent cleanup, not a lifecycle authorization. Remove the owned
@@ -178,6 +188,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	if r == nil || os.Geteuid() != 0 || !validContainerOwner(candidateOwner(identity)) {
 		return ErrUnsupported
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for launch := range r.launches {
@@ -207,7 +219,7 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 			return err
 		}
 		for _, source := range sources {
-			referenced, err := candidateIPCReferenced(path, source)
+			referenced, err := candidateIPCReferenced(ctx, path, source)
 			if err != nil {
 				return err
 			}
@@ -263,16 +275,53 @@ func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 	return sources, nil
 }
 
-func candidateIPCReferenced(path, source string) (bool, error) {
+func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
 	if source == "" {
 		return false, nil
 	}
 	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
 		return false, ErrInvalidResponse
 	}
-	canonical, err := filepath.EvalSymlinks(source)
+	canonical, err := resolveCandidateIPCSource(ctx, source, filepath.EvalSymlinks)
 	if err != nil {
 		return false, ErrUnavailable
 	}
 	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil
+}
+
+// A filesystem lookup may block on an unrelated host volume. Keep at most one
+// lookup in flight process-wide and stop waiting at the cleanup deadline. A
+// timed-out lookup retains the slot until it actually returns; retries cannot
+// spawn an unbounded set of blocked native threads.
+var candidateIPCResolverSlot = make(chan struct{}, 1)
+
+func resolveCandidateIPCSource(ctx context.Context, source string, resolve func(string) (string, error)) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	select {
+	case candidateIPCResolverSlot <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		<-candidateIPCResolverSlot
+		return "", err
+	}
+	type result struct {
+		path string
+		err  error
+	}
+	ready := make(chan result, 1)
+	go func() {
+		path, err := resolve(source)
+		<-candidateIPCResolverSlot
+		ready <- result{path, err}
+	}()
+	select {
+	case r := <-ready:
+		return r.path, r.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
