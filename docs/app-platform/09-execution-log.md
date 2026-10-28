@@ -1770,3 +1770,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   pairing/access. Viewer forwarding, activation/worker, physical lifecycle,
   broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
   Production, real credentials, Status, SDK freeze and beta unchanged.
+
+- Added separately framed authenticated writable controller handshake transport,
+  exact expected delivery/native/challenge correlation, bounded current signature
+  checks and opaque endpoint/authority/receipt-time proof. Readonly listeners and
+  old protocol remain separate. Added portable nested fixture/proof tests and
+  Linux frame/freshness/binding/readonly refusal cases. See
+  [writable handshake transport](105-writable-handshake-transport.md).
+  Added disposable actual new writable backend plus non-root controller/root
+  listener handshake, independent host MAC/boot verification and UID/group
+  denial acceptance. Fresh Linux/native results pending; full lifecycle transport
+  and current Portal boot consumer/viewer/activation remain unfinished. No
+  production/beta changes or SDK freeze.

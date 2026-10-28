@@ -331,6 +331,13 @@ def main(args):
                     report["native_writable_handshake_file_replacement_refused"] = True
                     report["native_writable_handshake_preserves_journal"] = True
                     report["native_writable_stopped_handshake_refused"] = True
+                    if len(args) in (9, 11):
+                        handshake_env = dict(writer_journal_env, APP_WRITABLE_HANDSHAKE_TRANSPORT="1", APP_CANDIDATE_NATIVE_IMAGE=ready_image)
+                        handshake = subprocess.run([args[8], "-test.run=^TestNativeWritableHandshakeTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=handshake_env, capture_output=True, text=True, timeout=70)
+                        if handshake.returncode or "NATIVE_WRITABLE_HANDSHAKE_CROSS_UID_VERIFIED" not in handshake.stdout or "NATIVE_WRITABLE_HANDSHAKE_CONTROLLER_PEER_DENIAL_VERIFIED" not in handshake.stdout:
+                            raise RuntimeError("native writable handshake transport failed: " + (handshake.stdout+handshake.stderr)[-4096:])
+                        report["native_writable_handshake_cross_uid_verified"] = True
+                        report["native_writable_handshake_controller_peer_denial_verified"] = True
                 if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True
