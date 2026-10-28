@@ -1368,7 +1368,7 @@ daemon workflow 40455635317 passed on the functional source as well.
   and SDK/reference-app acceptance remain incomplete.
 
 - Added an explicit frozen Moby-based seccomp profile to the closed candidate
-  policy, narrowing unrestricted ioctl access to four exact terminal/socket
+  policy, narrowing unrestricted ioctl access to five exact terminal/socket
   requests while preserving the other upstream rules. Container observation
   refuses missing/unconfined/broadened options. The actual ready fixture must
   verify entrypoint identity, NoNewPrivs, zero effective capabilities, seccomp

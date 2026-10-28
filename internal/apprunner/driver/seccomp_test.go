@@ -21,7 +21,7 @@ func TestCandidateSeccompPreservesFrozenBaseExceptIOCTL(t *testing.T) {
 	baseRules, derivedRules := base["syscalls"].([]any), derived["syscalls"].([]any)
 	delete(base, "syscalls")
 	delete(derived, "syscalls")
-	if !reflect.DeepEqual(base, derived) || len(derivedRules) != len(baseRules)+4 {
+	if !reflect.DeepEqual(base, derived) || len(derivedRules) != len(baseRules)+5 {
 		t.Fatal("non-ioctl default policy changed")
 	}
 	for i, raw := range baseRules {
@@ -37,7 +37,7 @@ func TestCandidateSeccompPreservesFrozenBaseExceptIOCTL(t *testing.T) {
 			t.Fatalf("upstream syscall rule %d broadened/changed", i)
 		}
 	}
-	for i, request := range []uint64{0x5401, 0x5413, 0x541b, 0x5421} {
+	for i, request := range []uint64{0x5401, 0x5410, 0x5413, 0x541b, 0x5421} {
 		expected := map[string]any{
 			"names": []any{"ioctl"}, "action": "SCMP_ACT_ALLOW",
 			"args": []any{map[string]any{"index": float64(1), "value": float64(request), "op": "SCMP_CMP_EQ"}},

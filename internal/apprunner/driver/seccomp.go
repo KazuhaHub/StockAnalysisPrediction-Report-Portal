@@ -50,10 +50,12 @@ func buildCandidateSeccomp(base []byte) (string, error) {
 	if replaced != 1 {
 		return "", ErrInvalidResponse
 	}
-	// TCGETS, TIOCGWINSZ, FIONREAD and FIONBIO have identical request values on
+	// TCGETS, TIOCSPGRP, TIOCGWINSZ, FIONREAD and FIONBIO have identical values on
 	// the supported Linux amd64/arm64 ABIs. No pointer contents are trusted or
 	// interpreted by this filter; the kernel still checks the descriptor/argument.
-	for _, request := range []uint64{0x5401, 0x5413, 0x541b, 0x5421} {
+	// Docker init calls TIOCSPGRP even for a non-TTY stdin, requiring ENOTTY
+	// from the kernel rather than a seccomp EPERM before executing the image.
+	for _, request := range []uint64{0x5401, 0x5410, 0x5413, 0x541b, 0x5421} {
 		raw, _ := json.Marshal(seccompIOCTLRule{[]string{"ioctl"}, "SCMP_ACT_ALLOW", []seccompArgument{{1, request, "SCMP_CMP_EQ"}}})
 		var rule map[string]json.RawMessage
 		if json.Unmarshal(raw, &rule) != nil {

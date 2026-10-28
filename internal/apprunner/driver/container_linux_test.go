@@ -143,6 +143,7 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 	if start {
 		state, err = startPinnedCandidateHTTP(context.Background(), client, nativeID, plan, pins)
 		if err != nil || state != "running" {
+			logDisposableCandidateFailure(t, client, nativeID)
 			t.Fatalf("candidate start observation: %s %v", state, err)
 		}
 		if err := removeCandidateContainerHTTP(context.Background(), client, nativeID, plan); err != ErrContainerConflict {
@@ -158,5 +159,40 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 		t.Log("owned candidate ran, refused removal while running, stopped and refused automatic restart")
 	} else {
 		t.Log("created and inspected an owned, stopped candidate with the closed container policy")
+	}
+}
+
+// Observe only the exact owned disposable fixture after a failed start. This
+// never retries start or repairs policy; no production container uses this path.
+func logDisposableCandidateFailure(t *testing.T, client *http.Client, nativeID string) {
+	t.Helper()
+	if !containerSHA.MatchString(nativeID) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	var diagnostic struct {
+		State struct {
+			Status, Error string
+			ExitCode      int
+		}
+	}
+	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/"+nativeID+"/json", &diagnostic); err != nil {
+		t.Log("disposable candidate failure state unavailable", err)
+		return
+	}
+	t.Logf("disposable candidate state=%s exit=%d error=%.2048q", diagnostic.State.Status, diagnostic.State.ExitCode, diagnostic.State.Error)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://app-runner-docker.invalid/v"+APIVersion+"/containers/"+nativeID+"/logs?stdout=true&stderr=true&tail=10", nil)
+	if err != nil {
+		return
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		t.Logf("disposable candidate output: %q", raw)
 	}
 }

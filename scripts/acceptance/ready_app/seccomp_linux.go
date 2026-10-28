@@ -35,7 +35,7 @@ func verifyFixtureSeccomp() error {
 			return fmt.Errorf("ioctl %#x reached descriptor lookup: %v", request, errno)
 		}
 	}
-	for _, request := range []uintptr{0x5401, 0x5413, 0x541b, 0x5421} {
+	for _, request := range []uintptr{0x5401, 0x5410, 0x5413, 0x541b, 0x5421} {
 		_, _, errno := unix.Syscall(unix.SYS_IOCTL, ^uintptr(0), request, 0)
 		if errno != unix.EBADF {
 			return fmt.Errorf("allowed ioctl %#x unavailable: %v", request, errno)
