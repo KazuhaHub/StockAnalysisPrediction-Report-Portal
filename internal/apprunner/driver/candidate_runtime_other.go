@@ -21,6 +21,9 @@ func (CandidateLaunch) Snapshot() (CandidateLaunchSnapshot, error) {
 func (*CandidateRuntime) PrepareCandidate(context.Context, CandidateLaunchRequest) (CandidateLaunch, error) {
 	return CandidateLaunch{}, ErrUnsupported
 }
+func (*CandidateRuntime) ProvisionCandidateSockets(context.Context, CandidateLaunchRequest) error {
+	return ErrUnsupported
+}
 func (*CandidateRuntime) StartCandidate(context.Context, CandidateLaunch) (CandidateRunningObservation, error) {
 	return CandidateRunningObservation{}, ErrUnsupported
 }

@@ -8,6 +8,7 @@ on:
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
       - 'internal/app/app_platform_install_queue*'
@@ -37,6 +38,7 @@ on:
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
       - 'internal/app/app_platform_install_queue*'
@@ -82,7 +84,7 @@ jobs:
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-data-native.test" ./internal/app
-          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/transport
+          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/transport ./internal/apprunner/driver
           cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
           "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
           docker pull registry.k8s.io/pause:3.10

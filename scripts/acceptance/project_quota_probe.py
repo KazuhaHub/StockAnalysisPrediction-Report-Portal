@@ -289,6 +289,9 @@ def main(args):
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True
+                        if "MANAGED_INSTALL_CANDIDATE_PROBE" not in result.stdout:
+                            raise RuntimeError("Portal managed candidate start/probe did not execute")
+                        report["native_portal_managed_candidate_start_to_probe"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

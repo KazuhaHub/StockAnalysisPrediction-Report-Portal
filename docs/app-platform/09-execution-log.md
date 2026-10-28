@@ -1052,3 +1052,23 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Signed candidate intent/start/probe, staging/startup, managed scheduling,
   reconciliation, writer/broker/registration and complete lifecycle/reference-app
   acceptance remain. No schema, production/beta or real credentials changed.
+
+### Managed candidate startup and receipt recovery
+
+- Added a stable candidate activation/effect intent using existing approved tables,
+  validated applied data history and current reviewed runtime/admin/publisher/
+  lease authority. Initial managed start signatures remain lease-bounded.
+- Added concrete dispatch, opaque native-receipt settlement to `probe` and a
+  receipt-only recovery path. Candidate readiness remains unobserved and no app
+  access is granted by a running process.
+- The native runner provisions fixed communication directories after durable
+  claiming using protected descriptor-relative paths, exact ownership and no
+  symlink repair. Added directory refusals and real root/non-root Portal start,
+  failed-settlement recovery, exact native replay and owned cleanup acceptance.
+- Local focused SQLite race passed (20.119 s), PostgreSQL race passed (15.318 s),
+  Linux compilation, vet/staticcheck and 13 Python tests passed. Native CI is
+  pending; no actual Portal candidate start is claimed until that run passes.
+  See [managed candidate details](79-managed-candidate-start.md).
+- Actual readiness/writer/broker/registration, image fetching, managed scheduling,
+  bounded socket storage, reconciliation and full lifecycle/reference apps remain.
+  No schema, production/beta, module versions or real credentials changed.

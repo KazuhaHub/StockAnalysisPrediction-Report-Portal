@@ -186,6 +186,9 @@ func (s *Store) ExecuteCandidate(ctx context.Context, claim CandidateClaim, nati
 		if err != nil {
 			return err
 		}
+		if err := native.ProvisionCandidateSockets(ctx, request); err != nil {
+			return err
+		}
 		launch, err := native.PrepareCandidate(ctx, request)
 		if err != nil {
 			return err

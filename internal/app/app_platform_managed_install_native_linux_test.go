@@ -5,6 +5,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -20,6 +22,15 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		t.Fatal(err)
 	}
 	raw, archive := platformManagedReleaseFixture(t, facts.observation.Profile().Platform)
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	release, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
 	if err != nil {
 		t.Fatal(err)
@@ -91,4 +102,42 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		t.Fatal("stale managed lease repeated data settlement")
 	}
 	t.Log("MANAGED_INSTALL_DATA_READY")
+	intent, err := s.preparePlatformInstallCandidate(ctx, next)
+	if err != nil {
+		t.Fatal("managed candidate intent", err)
+	}
+	public, _ := json.Marshal(struct{ Raw, Signature []byte }{intent.raw, intent.signature})
+	if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "candidate-command.json"), public, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Force Portal settlement to roll back after the root runner has actually
+	// started the process. The retry must read that original native result.
+	mustExec(t, s.st, `CREATE TRIGGER candidate_settlement_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.operation_stage' AND NEW.target_id='`+next.id+`' AND json_extract(NEW.detail,'$.stage')='probe' BEGIN SELECT RAISE(ABORT,'candidate settlement fixture'); END`)
+	if _, err := s.dispatchPlatformInstallCandidate(ctx, next, endpoint); err == nil {
+		t.Fatal("candidate settlement failure not exercised")
+	}
+	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, next.id) != "start" || scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, next.id) != "prepared" {
+		t.Fatal("failed candidate settlement partially committed")
+	}
+	mustExec(t, s.st, `DROP TRIGGER candidate_settlement_failure`)
+	probe, err := s.completePlatformInstallCandidate(ctx, next, endpoint)
+	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
+		t.Fatal("candidate receipt recovery", err)
+	}
+	proof, err := platformStartCandidate(ctx, endpoint, intent)
+	if err != nil {
+		t.Fatal("native candidate replay", err)
+	}
+	stored := scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, next.id)
+	encoded, _ := json.Marshal(proof.Receipt())
+	if string(encoded) != stored {
+		t.Fatal("candidate replay replaced original native observation")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND readiness_evidence='{}' AND observed_ms IS NULL`, next.installationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, next.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, next.installationID) != "pending" {
+		t.Fatal("candidate start became readiness or access")
+	}
+	if _, err := s.dispatchPlatformInstallCandidate(ctx, next, endpoint); err == nil {
+		t.Fatal("stale candidate stage dispatched")
+	}
+	t.Log("MANAGED_INSTALL_CANDIDATE_PROBE")
 }

@@ -45,7 +45,7 @@ func (s *Server) dispatchPlatformInstallData(ctx context.Context, expected platf
 		return platformOperationLease{}, err
 	}
 	if expected.snapshot.Managed {
-		if err := s.checkPlatformManagedDataRoot(ctx, expected, intent, endpoint); err != nil {
+		if err := s.checkPlatformManagedRuntimeRoot(ctx, expected, intent.runtime, intent.authority, endpoint); err != nil {
 			return platformOperationLease{}, err
 		}
 	}
