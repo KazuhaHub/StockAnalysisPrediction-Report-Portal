@@ -1379,3 +1379,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   Writable data, broker/writer authority, normal activation/lifecycle, SDK and
   overall acceptance remain incomplete. No production/beta, schema, dependency,
   toolchain or credential changes.
+
+- Candidate syscall functional source `f494b754103eb98708ddaf45065331ea95165b37`
+  passed daemon workflow 40668996531/job 122750687854 and quota workflow
+  40668996631/job 122750688073. Actual entrypoint filesystem/compat ioctl refusal,
+  the five admitted terminal/socket requests, NoNewPrivs/capability checks,
+  io_uring refusal and existing readiness/registration/boot/current-viewer/owned
+  teardown all passed. The initial policy omitted the exact TIOCSPGRP request
+  that container init needs on non-TTY stdin; adding that request fixed startup
+  without opening filesystem setters. Linux control/appplatform/transport/driver
+  race passed in 1.440/1.607/5.384/2.928s, local final driver/transport race in
+  2.091/1.568s, and final arm64 compilation and Linux vet/staticcheck passed.
+  General CI passed all app race shards/aggregate and web/Docker/workflow checks,
+  but retains the existing x/net vulnerability gate failure. This closes
+  this runtime boundary only; writer/broker, automatic activation/lifecycle,
+  SDK/reference apps and complete P00–P14 acceptance remain outstanding.

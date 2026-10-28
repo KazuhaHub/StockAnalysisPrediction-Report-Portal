@@ -79,10 +79,10 @@ probe emits `native_candidate_seccomp_entrypoint_verified=true` only when that
 chain succeeds. Native readiness, registration, boot, current-viewer requests and
 owned resource cleanup must still pass; a static JSON inspection is insufficient.
 
-At implementation time local driver/transport race passed (2.244s/1.738s).
-Linux amd64/arm64 fixture and driver test-binary builds passed. Platform
-regression passed in 7.994s; vet and default Linux staticcheck passed. Both native
-workflows are pending; this document does not assert native enforcement yet.
+Local driver/transport race passed initially in 2.244s/1.738s and after the init
+compatibility fix in 2.091s/1.568s. Linux amd64/arm64 fixture and driver test-binary
+builds passed, including final arm64 source compilation. Platform regression
+passed in 7.994s; Linux vet and default Linux staticcheck passed.
 
 Initial native runs 40667492092/job 122745577047 and 40667491834/job
 122745576233 failed at candidate startup; these are not accepted enforcement
@@ -91,8 +91,29 @@ results. A diagnostic-only rerun also failed. Tini v0.19.0 unconditionally calls
 EPERM as fatal:
 https://github.com/krallin/tini/blob/v0.19.0/src/tini.c#L149-L177
 The initial four-request policy omitted TIOCSPGRP. Add only that exact terminal
-request; preserve non-TTY creation and all filesystem-attribute refusals. Fresh
-native entrypoint and full request/cleanup acceptance remain required.
+request; preserve non-TTY creation and all filesystem-attribute refusals.
+
+Functional source `f494b754103eb98708ddaf45065331ea95165b37` passed both fresh
+Linux amd64 native gates:
+
+- Daemon workflow 40668996531/job 122750687854 passed actual closed candidate
+  create/start/stop, running-container removal refusal, automatic restart refusal,
+  bounded IPC byte/inode enforcement, marker protection and drift rejection.
+- Quota workflow 40668996631/job 122750688073 passed actual backend entrypoint
+  seccomp verification, readiness, registration, boot and current-viewer requests.
+  `native_candidate_seccomp_entrypoint_verified`,
+  `native_backend_request_relay_verified`, `native_current_viewer_request_verified`
+  and `owned_resources_cleaned` are true; exact owned registry cleanup passed.
+  Linux control/appplatform/transport/driver race passed in
+  1.440/1.607/5.384/2.928s. These checks prove the actual syscall and execution
+  boundary on the disposable amd64 runtime; arm64 evidence here is compilation.
+- General workflow 40668996528 passed web checks/tests, workflow lint and Docker
+  image smoke, all three app race shards and their aggregate. Its Go job 122750688034 passed staticcheck but failed the existing
+  x/net v0.60.0 vulnerability gate (GO-2026-6866/6860); its following non-race
+  Test step was skipped. This is not an all-green release.
+
+This closes the syscall-boundary implementation/acceptance task. It grants no
+writer, broker or public activation authority and is not full platform acceptance.
 
 ## Still required
 
