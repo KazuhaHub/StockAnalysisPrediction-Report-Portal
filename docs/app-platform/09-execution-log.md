@@ -1703,3 +1703,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   acceptance pending. Physical private-file delivery/recovery, handshake/viewer,
   activation/worker, SDK/reference apps and full acceptance remain incomplete.
   No production, credential, schema, dependency/toolchain or beta changes.
+
+- Writable registration intent source `c88ea3d0f675491014bec06e09d032524137ab43`
+  passed quota workflow 40771960021/job 123111204192 and daemon workflow
+  40771959992/job 123111205032. Exact original/reconciled native source intent,
+  in-memory synthetic document validation, replay and changed receipt refusal
+  passed alongside existing writer/start/recovery/readiness and owned cleanup.
+  Full Linux journal race passed in 205.284s; local journal race 140.336s,
+  focused protocol/source/current-key tests, platform regression, dual-arch
+  builds, vet/staticcheck and Python14 passed. General workflow 40771960020
+  passed app race shards/aggregate, web and Docker checks, retaining existing
+  x/net gate failures in Go job 123111206787. No private registration file was
+  delivered; physical delivery/recovery, handshake/viewer, activation/worker,
+  broker, SDK/reference apps, lifecycle and full P00–P14 acceptance remain.
+  Production, real credentials, Status adoption, SDK freeze and beta unchanged.

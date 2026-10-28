@@ -130,8 +130,28 @@ existing actual writer/start/recovery/readiness and owned cleanup checks.
 Focused registration/legacy registration journal race passed in 12.795s and the
 expanded current-key registration test run in 8.991s. Platform regression passed
 in 8.253s. Linux amd64/arm64 journal builds, vet, Linux staticcheck and all 14
-Python probe tests passed. Full runner race and actual native acceptance are
-pending. These tests do
+Python probe tests passed. Full local runner race passed (control 1.827s,
+journal 140.336s, transport 1.368s; data/driver cached).
+
+Functional source `c88ea3d0f675491014bec06e09d032524137ab43` passed quota
+workflow 40771960021/job 123111204192. Actual normal/reconciled source intent,
+in-memory document binding, replay and changed receipt refusal passed; the new
+registration intent flag and existing writable writer/start/recovery/readiness/
+owned cleanup flags are true. Linux control/appplatform/transport/driver race
+passed in 1.963/1.611/5.409/3.083s.
+
+Daemon workflow 40771959992/job 123111205032 passed full Linux journal race in
+205.284s, followed by actual native policy/IPC, distinct identities and Portal
+root endpoint acceptance. These verify the new intent source scope without
+enabling protected writable registration delivery or production dispatch.
+
+General workflow 40771960020 passed all app race shards/aggregate, web test
+shards, web lint/typecheck/build, workflow lint and Docker image/smoke checks.
+Go job 123111206787 passed build/vet/staticcheck, then failed the existing
+`golang.org/x/net@v0.60.0` vulnerability gate (GO-2026-6866/GO-2026-6860), so its
+subsequent ordinary test did not run. This change does not modify dependencies.
+
+These tests do
 not prove protected file delivery, app consumption, handshake, full daemon crash/
 relaunch, marketplace installation, active viewer access or completed installation.
 
