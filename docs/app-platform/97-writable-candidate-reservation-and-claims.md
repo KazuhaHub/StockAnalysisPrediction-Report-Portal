@@ -148,8 +148,22 @@ invocation. The parent requires
 Local full runner race passed (journal 127.626s, transport 1.527s; other packages
 cache hits). Expanded writable-contract race passed in 17.748s and platform
 regression in 9.778s. Linux amd64/arm64 compilation, vet/default Linux staticcheck
-and all 14 Python probe tests passed. Native results will be recorded after the
-functional run. Reopening Store
+and all 14 Python probe tests passed. Functional source `62eb67278c259b39359ea6867b6d0765bc044890` passed quota workflow
+40694331237/job 122836964588. The new actual-source claim flag is true after both
+native writer receipt kinds. The read-only callback retains unchanged XFS
+allocation and unknown/pending journal facts; repeated claims/invocations refuse.
+Existing writable-intent/writer/recovery/filtered-quota/current-viewer/owned-cleanup
+evidence remains true; fixture registry cleanup passed. Linux control/appplatform/
+transport/driver race passed in 1.448/1.396/4.854/2.461s. Actual execution evidence
+is amd64; arm64 is compilation only.
+
+Daemon workflow 40694331553/job 122836965353 passed the full runner race suite
+(journal 179.838s), native closed-container/IPC checks and Portal confirmation
+through the root endpoint. General workflow 40694331560 passed all three app
+race shards and aggregate, web checks/tests, workflow lint and Docker smoke.
+Go job 122836966930 passed staticcheck but retains the existing x/net v0.60.0
+vulnerability gate failure (GO-2026-6866/6860); its following non-race Test step
+was skipped. This is not an all-green release. Reopening Store
 objects is not a daemon kill/relaunch test. Actual writable process startup and
 full process lifecycle acceptance remain required. No production, credentials,
 Status migration, server beta, dependency or toolchain changes are included.
