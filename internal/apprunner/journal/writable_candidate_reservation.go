@@ -104,78 +104,90 @@ func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature [
 	if err != nil {
 		return nil, zero, err
 	}
+	f, err := loadWritableCandidateFacts(ctx, tx, v, a, raw, signature, state, receipt, recovery, now, started, nil)
+	if err != nil {
+		return nil, zero, err
+	}
+	ok = true
+	return tx, f, nil
+}
+
+// Caller owns a current write-intent transaction and verified signed reference.
+// Registration history is exempt only through its separately verified scope.
+func loadWritableCandidateFacts(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, a control.Authority, raw, signature []byte, state string, receipt *string, recovery bool, now int64, started time.Time, registration *control.VerifiedWritableBackendRegistrationCommand) (writableCandidateFacts, error) {
+	var zero writableCandidateFacts
 	c := v.Index()
 	index := candidateIndex(c)
 	stored, err := loadAdmittedCommand(ctx, tx, c.EffectID)
 	if err != nil {
-		return nil, zero, err
+		return zero, err
 	}
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
 	floor, err := commandResourceFloor(ctx, tx, index)
 	if err != nil || !sameLogicalCommand(stored, index) || stored.state != state || stored.fence != fence || floor != fence {
-		return nil, zero, ErrFenceReconciliation
+		return zero, ErrFenceReconciliation
 	}
 	var current string
 	var ack sql.NullInt64
 	var created, updated int64
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms,created_ms,updated_ms FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&current, &ack, &created, &updated); err != nil {
-		return nil, zero, err
+		return zero, err
 	}
 	if ack.Valid || (receipt != nil && *receipt != current) || created < 0 || updated < created || updated > now {
-		return nil, zero, ErrFenceReconciliation
+		return zero, ErrFenceReconciliation
 	}
 	switch state {
 	case "prepared":
 		if current != "{}" || updated != created {
-			return nil, zero, ErrFenceReconciliation
+			return zero, ErrFenceReconciliation
 		}
 	case "unknown": // Marker validation follows exact source/resource validation.
 	case "applied":
 		r, err := ParseWritableCandidateRunningReceipt([]byte(current))
 		if err != nil {
-			return nil, zero, err
+			return zero, err
 		}
 		settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
 		if updated != settled {
-			return nil, zero, ErrFenceReconciliation
+			return zero, ErrFenceReconciliation
 		}
 	default:
-		return nil, zero, ErrFenceReconciliation
+		return zero, ErrFenceReconciliation
 	}
 	source, err := loadWritableCandidateSourceCore(ctx, tx, v, now)
 	if err != nil {
-		return nil, zero, err
+		return zero, err
 	}
 	settled, _ := strconv.ParseInt(source.writer.SettledMS, 10, 64)
 	if created < settled {
-		return nil, zero, ErrFenceReconciliation
+		return zero, ErrFenceReconciliation
 	}
 	f := writableCandidateFacts{verified: v, stored: stored, authority: a, raw: raw, signature: signature, source: source, receipt: current, created: created, updated: updated, now: now, started: started}
 	resource, err := existingCandidateResourcePrefix(ctx, tx, c, writableCandidatePendingPrefix)
 	if err != nil {
-		return nil, zero, err
+		return zero, err
 	}
 	allowed := ""
 	if resource != nil {
 		if state == "applied" {
 			r, err := ParseWritableCandidateRunningReceipt([]byte(current))
 			if err != nil {
-				return nil, zero, err
+				return zero, err
 			}
 			if err := runningWritableCandidateResource(f, resource, r); err != nil {
-				return nil, zero, err
+				return zero, err
 			}
 		} else if _, err := reservedWritableCandidate(f, resource); err != nil {
-			return nil, zero, err
+			return zero, err
 		}
 		allowed = resource.id
 	}
-	if err := checkWritableCandidateHistory(ctx, tx, v, allowed); err != nil {
-		return nil, zero, err
+	if err := checkWritableCandidateHistoryForRegistration(ctx, tx, v, allowed, registration, now); err != nil {
+		return zero, err
 	}
 	f.resource = resource
 	if state == "applied" && resource == nil {
-		return nil, zero, ErrFenceReconciliation
+		return zero, ErrFenceReconciliation
 	}
 	if state == "unknown" {
 		var marker writableCandidateClaimMarker
@@ -184,7 +196,7 @@ func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature [
 			matches = canonicalDataJSON(current, &marker) && writableCandidateMarkerIdentityMatches(marker, f) && marker.Preflight != nil
 		}
 		if resource == nil || !matches {
-			return nil, zero, ErrFenceReconciliation
+			return zero, ErrFenceReconciliation
 		}
 		claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)
 		expectedUpdated := claimed
@@ -192,14 +204,13 @@ func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature [
 			expectedUpdated, _ = strconv.ParseInt(marker.PreflightBoundMS, 10, 64)
 		}
 		if updated != expectedUpdated || claimed < resource.created {
-			return nil, zero, ErrFenceReconciliation
+			return zero, ErrFenceReconciliation
 		}
 	}
 	if err := finalWritableCandidateCheck(ctx, f); err != nil {
-		return nil, zero, err
+		return zero, err
 	}
-	ok = true
-	return tx, f, nil
+	return f, nil
 }
 
 func (s *Store) ReserveWritableCandidate(ctx context.Context, raw, signature []byte) (WritableCandidateReservation, error) {

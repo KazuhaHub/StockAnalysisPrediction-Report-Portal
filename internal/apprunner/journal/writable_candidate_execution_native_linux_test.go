@@ -3,6 +3,7 @@
 package journal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -131,6 +132,67 @@ func assertWritableFixtureReadiness(t *testing.T, s *Store, native *driver.Candi
 	}
 	if before != writableFixtureJournalSnapshot(t, s) {
 		t.Fatal("readiness changed durable state")
+	}
+}
+
+// Actual-source intent test only: secrets stay in disposable memory and no
+// registration file is delivered by this helper.
+func assertWritableFixtureRegistrationIntent(t *testing.T, s *Store, raw, sig, descriptor []byte, r WritableCandidateRunningReceipt, effect string) {
+	t.Helper()
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arow, err := s.ControllerDeployment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := control.Authority{DeploymentID: arow.DeploymentID, ControllerEpoch: arow.ControllerEpoch, ControlRevision: arow.ControlRevision, PublicKey: arow.PublicKey, Fingerprint: arow.Fingerprint}
+	ref, err := control.VerifyWritableCandidate(raw, sig, a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := ref.Index()
+	reg, err := appplatform.NewBackendRegistration(appplatform.BackendIdentity{AppID: parsed.Manifest.ID, DeploymentID: index.DeploymentID, ControllerEpoch: index.ControllerEpoch, InstallationID: index.InstallationID, Generation: "1", PolicyRevision: "1", ReleaseSHA256: parsed.SHA256}, bytes.Repeat([]byte{29}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+	document, err := reg.Document()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(document)
+	encoded, _ := json.Marshal(r)
+	c := control.WritableBackendRegistrationCommand{Format: control.WritableBackendRegistrationFormat, EffectID: effect, CandidateRaw: raw, CandidateSignature: sig, RunningReceiptSHA256: candidateHash(encoded), DocumentSHA256: candidateHash(document)}
+	signed, signature := signWritableRegistrationFixture(t, c)
+	v, err := control.VerifyWritableBackendRegistration(signed, signature, a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked, err := control.ValidateWritableBackendRegistrationDocument(v, descriptor, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked.Close()
+	if _, err := s.AdmitWritableBackendRegistrationCommand(context.Background(), signed, signature); err != nil {
+		t.Fatal("actual writable registration intent", err)
+	}
+	view, err := s.ReadWritableBackendRegistrationIntent(context.Background(), signed, signature)
+	if err != nil || view.NativeID != r.NativeID || view.RunningReceiptSHA256 != c.RunningReceiptSHA256 || view.DocumentSHA256 != c.DocumentSHA256 {
+		t.Fatal("actual registration source view", err)
+	}
+	if replay, err := s.AdmitWritableBackendRegistrationCommand(context.Background(), signed, signature); err != nil || !replay.Replayed {
+		t.Fatal("actual registration intent replay", err)
+	}
+	bad := c
+	bad.RunningReceiptSHA256 = strings.Repeat("f", 64)
+	badRaw, badSig := signWritableRegistrationFixture(t, bad)
+	if _, err := s.AdmitWritableBackendRegistrationCommand(context.Background(), badRaw, badSig); err == nil {
+		t.Fatal("different actual process receipt admitted")
+	}
+	if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+effect+`' AND state='prepared' AND receipt_json='{}' AND ack_attempted_ms IS NULL`) != 1 {
+		t.Fatal("intent delivered or stored private registration")
 	}
 }
 
@@ -315,6 +377,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if before != writableFixtureJournalSnapshot(t, s) {
 					t.Fatal("stopped readiness changed durable records")
 				}
+				assertWritableFixtureRegistrationIntent(t, s, renewed, renewedSig, descriptor, receipt, fixtureID(base+7))
 			} else if slot == 1 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_settlement_failure`); dropErr != nil {
 					t.Fatal(dropErr)
@@ -401,6 +464,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 					t.Fatal("applied recovery repeated")
 				}
 				assertWritableFixtureReadiness(t, s, native, fresh, freshSig, descriptor, recovered)
+				assertWritableFixtureRegistrationIntent(t, s, fresh, freshSig, descriptor, recovered, fixtureID(base+7))
 			}
 			if slot == 2 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_preflight_failure`); dropErr != nil {
@@ -439,4 +503,5 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	t.Log("NATIVE_WRITABLE_RECOVERED_READINESS_VERIFIED")
 	t.Log("NATIVE_WRITABLE_READINESS_PRESERVES_JOURNAL")
 	t.Log("NATIVE_WRITABLE_STOPPED_READINESS_REFUSED")
+	t.Log("NATIVE_WRITABLE_REGISTRATION_INTENT_ACTUAL_SOURCES_VERIFIED")
 }

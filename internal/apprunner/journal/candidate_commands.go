@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
@@ -26,11 +27,17 @@ func (s *Store) AdmitCandidateCommand(ctx context.Context, raw, signature []byte
 	})
 }
 
-func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verified verifiedAdmissionCommand) (bool, error) {
+func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verified verifiedAdmissionCommand, authority control.Authority, now int64) (bool, error) {
 	if verified.containerResourceID == "" {
 		return false, nil
 	}
 	c := verified.identity
+	if verified.writableRegistration != nil {
+		if _, _, err := loadWritableRegistrationSource(ctx, tx, *verified.writableRegistration, authority, now, time.UnixMilli(now)); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	var count, conflicts int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE id=?`, verified.containerResourceID).Scan(&count); err != nil {

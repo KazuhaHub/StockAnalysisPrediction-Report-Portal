@@ -126,12 +126,18 @@ func SignBackendRegistration(c BackendRegistrationCommand, key ed25519.PrivateKe
 // parse is not native file delivery, current health or a registration receipt.
 func ValidateBackendRegistrationDocument(v VerifiedBackendRegistrationCommand, descriptor, document []byte) (appplatform.BackendRegistration, error) {
 	var zero appplatform.BackendRegistration
-	c := v.candidate
-	if v.command.Format != BackendRegistrationFormat || len(document) == 0 || len(document) > 4096 {
+	if v.command.Format != BackendRegistrationFormat {
+		return zero, ErrInvalidCommand
+	}
+	return validateBackendRegistrationDocument(v.candidate, v.command.DocumentSHA256, descriptor, document)
+}
+func validateBackendRegistrationDocument(c CandidateCommand, documentSHA string, descriptor, document []byte) (appplatform.BackendRegistration, error) {
+	var zero appplatform.BackendRegistration
+	if len(document) == 0 || len(document) > 4096 {
 		return zero, ErrInvalidCommand
 	}
 	sum := sha256.Sum256(document)
-	if hex.EncodeToString(sum[:]) != v.command.DocumentSHA256 {
+	if hex.EncodeToString(sum[:]) != documentSHA {
 		return zero, ErrInvalidCommand
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
