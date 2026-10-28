@@ -1194,7 +1194,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   mismatched effects/documents, refusal, historical metadata and provenance.
   Full local runner/CLI race passed (journal 84.888 s), focused journal race
   passed (5.657 s); Linux amd64/arm64 compilation, vet/staticcheck and 14 Python
-  tests passed. Linux framing/native verification remains pending.
+  tests passed. Functional source `91ce4859c8dbe9d2a13ebb98c581f49bfa388f58`
+  passed native quota workflow 40622256803 (job 122598829955): actual protected
+  RPC recovery, same-file delivery recovery and owned cleanup keys are true;
+  exact registry cleanup passed. Linux transport/driver race passed in
+  4.530/1.438 s. General CI retains the existing x/net vulnerability gate failure,
+  skipping the subsequent non-race Test step.
 - See [registration channel](84-backend-registration-channel.md). Portal durable
   effect/scheduler integration, boot handshake, forwarding, broker/writer,
   activation and the remaining full platform scope are still outstanding.

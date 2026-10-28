@@ -98,8 +98,20 @@ and opaque observation serialization. Mock frames test parsing only and retain
 private-profile provenance. Pure journal tests compare exact and changed receipts.
 Full local runner/CLI race passed (journal 84.888 s); focused registration
 journal race passed (5.657 s). Linux amd64/arm64 compilation, vet/staticcheck
-and 14 Python tests passed. Linux-only framing/native tests remain pending;
-cross-compilation is not substituted for a real root/non-root result.
+and 14 Python tests passed. Functional source
+`91ce4859c8dbe9d2a13ebb98c581f49bfa388f58` passed native quota workflow
+[40622256803](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40622256803),
+job 122598829955: protected registration RPC recovery, same-file delivery
+recovery and owned cleanup keys are true; exact registry cleanup passed. Linux
+transport/driver race passed in 4.530/1.438 s, including the Linux framing tests.
+These results prove actual non-root/root channel delivery/recovery with a sample
+controller command, not Portal effect/scheduler orchestration or backend handshake.
+
+General CI 40622256794 passed web checks/test shards, workflow lint and Docker
+smoke. Its Go job 122598829947 passed build/vet/staticcheck and market validation,
+then failed the existing x/net v0.60.0 vulnerability gate (GO-2026-6866 and
+GO-2026-6860, reported fixed in v0.62.0), skipping the following non-race Test
+step. App race jobs were not all terminal at capture; general CI is not all green.
 
 After Portal durable delivery orchestration, add real backend boot handshake,
 current viewer/OU-bound forwarding, default-deny provider/broker and writer
