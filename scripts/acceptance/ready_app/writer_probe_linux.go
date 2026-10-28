@@ -12,6 +12,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Detect only the fixed writable fixture mount profile. This lets the real
+// closed builder run the probe without adding any test-selected environment.
+func fixtureHasWritableData() bool {
+	var st unix.Stat_t
+	return unix.Stat("/data", &st) == nil && st.Uid == 0 && st.Gid == 65532 && st.Mode&07777 == 02770
+}
+
 // Only the disposable writer fixture enables this before readiness. It never
 // accepts paths, limits, syscall requests or writer authority from a viewer.
 func verifyFixtureWritableData() error {

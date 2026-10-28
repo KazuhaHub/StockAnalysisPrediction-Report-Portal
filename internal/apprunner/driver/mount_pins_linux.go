@@ -109,6 +109,9 @@ func pinCandidateMounts(ctx context.Context, plan containerPlan, data candidateD
 		switch mount.Target {
 		case "/data":
 			mode = 0700
+			if plan.writable != nil {
+				gid, mode = 65532, 02770
+			}
 		case "/run/portal-app/http":
 			uid, gid, mode = 65532, 65532, 0700
 		case "/run/portal-app/broker":

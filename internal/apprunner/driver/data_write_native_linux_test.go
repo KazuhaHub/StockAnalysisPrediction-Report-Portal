@@ -228,34 +228,74 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		}
 	}
 	checkGlobalSpace()
-	// The production candidate route must remain sealed/read-only. This test
-	// does not smuggle a writable launch into an admitted candidate command.
+	// The legacy candidate route must remain sealed/read-only. Writable
+	// execution uses the separately typed closed builder and native handle.
 	if launch, err := native.PrepareCandidate(ctx, request); err == nil {
 		launch.Close()
 		t.Fatal("production candidate accepted write-access namespace")
 	}
-	var policy containerCreate
-	if json.Unmarshal(plan.body, &policy) != nil || !policy.HostConfig.Mounts[0].ReadOnly {
-		t.Fatal("production builder opened data writes")
+
+	binding := writableBindingFixture()
+	binding.EffectID = "00000000-0000-4000-8000-000000600009"
+	binding.ClaimID = "00000000-0000-4000-8000-000000600010"
+	writableRequest := WritableCandidateLaunchRequest{CandidateLaunchRequest: request, Binding: binding}
+	if err := native.ProvisionWritableCandidateSockets(ctx, writableRequest); err != nil {
+		t.Fatal("writable socket provision", err)
 	}
-	// Explicit test-only physical trial: alter just data RW and the fixture
-	// startup probe flag. All syscall/identity/network/resource constraints stay
-	// fixed and native inspection must match the exact derived test policy.
-	policy.HostConfig.Mounts[0].ReadOnly = false
-	policy.Env = append(policy.Env, "PORTAL_APP_WRITER_PROBE=1")
-	delete(policy.Labels, containerLabelPrefix+"policy-sha256")
-	encoded, _ := json.Marshal(policy)
-	policy.Labels[containerLabelPrefix+"policy-sha256"] = containerHash(encoded)
-	plan.body, _ = json.Marshal(policy)
-	plan.bodySHA = containerHash(plan.body)
+	writableLaunch, err := native.PrepareWritableCandidate(ctx, writableRequest)
+	if err != nil {
+		t.Fatal("native writable preflight", err)
+	}
+	defer writableLaunch.Close()
+	preflight, err := writableLaunch.Snapshot()
+	if err != nil || preflight.Binding != binding || preflight.SandboxProfile != WritableCandidateSandboxProfile || preflight.Launch.Data != request.Data {
+		t.Fatal("native writable preflight binding", err)
+	}
+	if _, err := native.StartCandidate(ctx, writableLaunch.launch); err == nil {
+		t.Fatal("legacy start consumed writable handle")
+	}
+	if _, err := native.PrepareWritableCandidate(ctx, writableRequest); err != ErrContainerConflict {
+		t.Fatal("duplicate local writable pins", err)
+	}
+	// Introduce an actual stopped reference after preflight. The first possible
+	// effect must still be refused by the fresh inventory immediately at Start.
 	nativeID, err = createCandidateContainerHTTP(ctx, client, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state, err := startCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil || state != "running" {
-		logDisposableCandidateFailure(t, client, nativeID)
-		t.Fatal("physical writer fixture start", state, err)
+	if _, err := native.StartWritableCandidate(ctx, writableLaunch); err != ErrContainerConflict {
+		t.Fatal("late stopped reference bypassed writable start", err)
 	}
+	if err := removeCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil {
+		t.Fatal(err)
+	}
+	nativeID = ""
+	observed, err := native.StartWritableCandidate(ctx, writableLaunch)
+	if err != nil {
+		t.Fatal("concrete writable start", err)
+	}
+	running, err := observed.Snapshot()
+	if err != nil || running.Launch != preflight {
+		t.Fatal("opaque writable running evidence", err)
+	}
+	nativeID = running.NativeID
+	plan = writableLaunch.launch.state.plan
+	if _, err := json.Marshal(observed); err == nil {
+		t.Fatal("writable process authority serialized")
+	}
+	if _, err := native.StartWritableCandidate(ctx, writableLaunch); err == nil {
+		t.Fatal("native writable start repeated")
+	}
+	other, err = OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, conflict = other.PrepareWritableCandidate(ctx, writableRequest)
+	other.Close()
+	if conflict != ErrContainerConflict {
+		t.Fatal("actual running mount did not exclude writable preflight", conflict)
+	}
+	t.Log("NATIVE_WRITABLE_CANDIDATE_DRIVER_START_VERIFIED")
 	socket := filepath.Join(sockets, owner.InstallationID, owner.Generation, "http", "app.sock")
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -321,6 +361,10 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		t.Fatal("sibling project affected", err)
 	}
 	checkGlobalSpace()
+	if err := native.cleanupWritableCandidate(ctx, writableLaunch, observed); err != nil {
+		t.Fatal("typed owned writable cleanup", err)
+	}
+	nativeID = ""
 	t.Log("NATIVE_FILTERED_DATA_WRITER_VERIFIED")
 }
 
