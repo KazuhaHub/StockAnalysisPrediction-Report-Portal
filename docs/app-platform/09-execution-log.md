@@ -1666,3 +1666,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   object reopen, not full daemon crash/relaunch. Writable readiness/registration/
   activation, broker, SDK/reference apps, physical lifecycle and full P00–P14
   acceptance remain incomplete. Production, Status adoption and beta unchanged.
+
+- Added current writable backend readiness: strict applied source preparation,
+  original/recovered receipt binding, opaque actual native/private socket probe
+  under repeated full policy/quota/reference checks, owner gate and current
+  postflight before transient result. No process/storage/journal mutation or
+  activation. Added parser and postflight drift/refusal tests plus actual normal/
+  recovered readiness, unknown/stopped refusal, mismatched process/schema and
+  exact durable-row preservation checks. See
+  [writable readiness](101-writable-readiness.md). Native acceptance pending;
+  automatic registration/handshake/viewer, activation/worker, SDK/reference apps,
+  lifecycle and full acceptance remain. Production and beta unchanged.

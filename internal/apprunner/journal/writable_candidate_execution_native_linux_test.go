@@ -60,6 +60,80 @@ func writableFixtureOwnedNative(t *testing.T, socket string, c control.Candidate
 	}
 	return ids[0]
 }
+
+// Compare all durable control/resource rows; never print their contents.
+func writableFixtureJournalSnapshot(t *testing.T, s *Store) string {
+	t.Helper()
+	snapshot := map[string][][]any{}
+	for _, table := range []string{"runner_deployment", "runner_commands", "runner_resources"} {
+		rows, err := s.db.Query(`SELECT * FROM ` + table + ` ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			values := make([]any, len(columns))
+			pointers := make([]any, len(columns))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			snapshot[table] = append(snapshot[table], values)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return candidateHash(encoded)
+}
+func assertWritableFixtureReadiness(t *testing.T, s *Store, native *driver.CandidateRuntime, raw, sig, descriptor []byte, r WritableCandidateRunningReceipt) {
+	t.Helper()
+	before := writableFixtureJournalSnapshot(t, s)
+	deadline := time.Now().Add(5 * time.Second)
+	var ready WritableCandidateReadiness
+	var err error
+	for {
+		ready, err = s.ObserveWritableCandidateReadiness(context.Background(), raw, sig, native, descriptor)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("actual writable readiness", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	encoded, _ := json.Marshal(r)
+	if ready.Format != writableCandidateReadinessFormat || ready.NativeID != r.NativeID || ready.RunningReceiptSHA256 != candidateHash(encoded) || ready.PayloadSHA256 != r.Claim.PayloadSHA256 || ready.Protocol != "portal.backend/1" || ready.DataFormat != "1" {
+		t.Fatal("readiness lost exact process/source binding")
+	}
+	p, err := s.prepareWritableCandidateReadiness(context.Background(), raw, sig, descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := native.CheckWritableCandidateReadiness(context.Background(), p.request, p.expected, r.NativeID, "2"); err == nil {
+		t.Fatal("mismatched backend data format accepted")
+	}
+	if _, err := native.CheckWritableCandidateReadiness(context.Background(), p.request, p.expected, strings.Repeat("f", 64), "1"); err == nil {
+		t.Fatal("different native process probed")
+	}
+	if before != writableFixtureJournalSnapshot(t, s) {
+		t.Fatal("readiness changed durable state")
+	}
+}
+
 func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	image := os.Getenv("APP_WRITER_NATIVE_IMAGE")
 	if image == "" {
@@ -208,6 +282,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if id == "" || id != receipt.NativeID {
 					t.Fatal("writable receipt does not identify actual process")
 				}
+				assertWritableFixtureReadiness(t, s, native, raw, sig, descriptor, receipt)
 				if got, err := s.ReadWritableCandidateRunningReceipt(ctx, raw, sig); err != nil || !sameWritableReceipt(got, receipt) {
 					t.Fatal("actual process historical read", err)
 				}
@@ -229,6 +304,17 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+writer.ResourceID+`' AND native_id='`+id+`' AND revision=2 AND observed_state='running' AND observed_ms IS NOT NULL`) != 1 {
 					t.Fatal("actual process/resource not atomic")
 				}
+				before := writableFixtureJournalSnapshot(t, s)
+				candidateFixtureDocker(t, socket, "container", "stop", "--time", "10", id)
+				if got, err := s.ObserveWritableCandidateReadiness(ctx, renewed, renewedSig, native, descriptor); err == nil || got.Format != "" {
+					t.Fatal("stopped process reported ready")
+				}
+				if strings.TrimSpace(string(candidateFixtureDocker(t, socket, "container", "inspect", "--format", "{{.State.Running}}", id))) != "false" {
+					t.Fatal("readiness restarted stopped process")
+				}
+				if before != writableFixtureJournalSnapshot(t, s) {
+					t.Fatal("stopped readiness changed durable records")
+				}
 			} else if slot == 1 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_settlement_failure`); dropErr != nil {
 					t.Fatal(dropErr)
@@ -247,6 +333,9 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				}
 				if _, err := s.ReadWritableCandidateRunningReceipt(ctx, raw, sig); err == nil {
 					t.Fatal("unknown start read as applied")
+				}
+				if ready, err := s.ObserveWritableCandidateReadiness(ctx, raw, sig, native, descriptor); err == nil || ready.Format != "" {
+					t.Fatal("unknown native start reported ready")
 				}
 
 				// Lose process-local handles while retaining the actual process.
@@ -311,6 +400,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if _, err := s.ReconcileWritableCandidate(ctx, fresh, freshSig, descriptor, native); err == nil {
 					t.Fatal("applied recovery repeated")
 				}
+				assertWritableFixtureReadiness(t, s, native, fresh, freshSig, descriptor, recovered)
 			}
 			if slot == 2 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_preflight_failure`); dropErr != nil {
@@ -345,4 +435,8 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	t.Log("NATIVE_WRITABLE_START_RECOVERY_AFTER_EXPIRY_VERIFIED")
 	t.Log("NATIVE_WRITABLE_RECOVERY_WITHOUT_PROCESS_RESTART")
 	t.Log("NATIVE_WRITABLE_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED")
+	t.Log("NATIVE_WRITABLE_CURRENT_READINESS_VERIFIED")
+	t.Log("NATIVE_WRITABLE_RECOVERED_READINESS_VERIFIED")
+	t.Log("NATIVE_WRITABLE_READINESS_PRESERVES_JOURNAL")
+	t.Log("NATIVE_WRITABLE_STOPPED_READINESS_REFUSED")
 }

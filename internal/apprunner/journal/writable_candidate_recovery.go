@@ -35,14 +35,9 @@ func (s *Store) prepareWritableCandidateRecovery(ctx context.Context, raw, signa
 	if !canonicalDataJSON(f.receipt, &m) || !writableCandidateRecoveryFresh(m, f) {
 		return zero, ErrFenceReconciliation
 	}
-	request, err := writableNativeRequest(f, m, descriptor)
+	request, expected, err := writableCandidateExpectedSnapshot(f, m, descriptor)
 	if err != nil {
 		return zero, err
-	}
-	p := m.Preflight
-	expected := driver.WritableCandidateLaunchSnapshot{Launch: driver.CandidateLaunchSnapshot{Identity: request.Identity, Data: request.Data, Platform: request.Platform, ImageID: p.Native.ImageID, PolicySHA256: p.Native.PolicySHA256, MountsSHA256: p.Native.MountsSHA256}, Binding: request.Binding, SandboxProfile: m.SandboxProfile, SeccompSHA256: p.SeccompSHA256}
-	if !writableSnapshotMatches(expected, f, m) || writablePreflight(expected) != *p {
-		return zero, ErrFenceReconciliation
 	}
 	if err := finalWritableCandidateCheck(ctx, f); err != nil {
 		return zero, err
@@ -115,4 +110,22 @@ func (s *Store) settleRecoveredWritableCandidate(ctx context.Context, before wri
 	c := f.verified.Index()
 	r := WritableCandidateRunningReceipt{Format: writableRecoveredRunningFormat, Claim: before.marker, NativeID: actual.NativeID, NativeObservedMS: strconv.FormatInt(actual.ObservedMS, 10), SettledMS: strconv.FormatInt(f.now, 10), RecoveryEnvelopeSHA256: candidateHash(f.raw), RecoveryControlRevision: c.ControlRevision, RecoveryIssuedMS: c.IssuedMS, RecoveryExpiresMS: c.ExpiresMS}
 	return s.commitWritableCandidateRunning(ctx, tx, f, f.receipt, r)
+}
+
+// Reconstruct only an expected read-only snapshot from current source facts and
+// persisted preflight. The result is comparison metadata, never a live handle.
+func writableCandidateExpectedSnapshot(f writableCandidateFacts, m writableCandidateClaimMarker, descriptor []byte) (driver.WritableCandidateLaunchRequest, driver.WritableCandidateLaunchSnapshot, error) {
+	if m.Preflight == nil {
+		return driver.WritableCandidateLaunchRequest{}, driver.WritableCandidateLaunchSnapshot{}, ErrFenceReconciliation
+	}
+	request, err := writableNativeRequest(f, m, descriptor)
+	if err != nil {
+		return driver.WritableCandidateLaunchRequest{}, driver.WritableCandidateLaunchSnapshot{}, err
+	}
+	p := m.Preflight
+	expected := driver.WritableCandidateLaunchSnapshot{Launch: driver.CandidateLaunchSnapshot{Identity: request.Identity, Data: request.Data, Platform: request.Platform, ImageID: p.Native.ImageID, PolicySHA256: p.Native.PolicySHA256, MountsSHA256: p.Native.MountsSHA256}, Binding: request.Binding, SandboxProfile: m.SandboxProfile, SeccompSHA256: p.SeccompSHA256}
+	if !writableSnapshotMatches(expected, f, m) || writablePreflight(expected) != *p {
+		return driver.WritableCandidateLaunchRequest{}, driver.WritableCandidateLaunchSnapshot{}, ErrFenceReconciliation
+	}
+	return request, expected, nil
 }

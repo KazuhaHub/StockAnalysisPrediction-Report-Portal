@@ -19,3 +19,6 @@ func (*CandidateRuntime) StartWritableCandidate(context.Context, WritableCandida
 func (*CandidateRuntime) ObserveWritableCandidate(context.Context, WritableCandidateLaunchRequest, WritableCandidateLaunchSnapshot) (WritableCandidateRecoveryObservation, error) {
 	return WritableCandidateRecoveryObservation{}, ErrUnsupported
 }
+func (*CandidateRuntime) CheckWritableCandidateReadiness(context.Context, WritableCandidateLaunchRequest, WritableCandidateLaunchSnapshot, string, string) (WritableCandidateReadinessObservation, error) {
+	return WritableCandidateReadinessObservation{}, ErrUnsupported
+}
