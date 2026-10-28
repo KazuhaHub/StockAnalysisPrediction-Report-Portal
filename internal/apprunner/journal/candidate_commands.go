@@ -37,6 +37,9 @@ func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verifie
 		return false, err
 	}
 	if count == 0 {
+		if verified.registrationReference.Format != "" {
+			return false, ErrCommandConflict
+		}
 		return false, nil
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE id=? AND (kind<>'container' OR installation_id<>? OR controller_epoch<>? OR data_namespace_id IS NULL OR data_namespace_id<>? OR release_sha256 IS NULL OR release_sha256<>? OR generation<>?)`, verified.containerResourceID, c.InstallationID, c.ControllerEpoch, c.Payload.DataNamespaceID, c.Payload.ReleaseSHA256, generation).Scan(&conflicts); err != nil {
@@ -44,6 +47,14 @@ func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verifie
 	}
 	if conflicts != 0 {
 		return false, ErrCommandConflict
+	}
+	if verified.registrationReference.Format != "" {
+		if err := validateBackendRegistrationSource(ctx, tx, verified.registrationReference); err != nil {
+			return false, err
+		}
+		// Registration deliberately targets this existing exact candidate. Initial
+		// candidate admission still refuses reusing an already-owned resource.
+		return false, nil
 	}
 	return true, nil
 }

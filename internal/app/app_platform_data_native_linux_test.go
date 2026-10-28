@@ -246,6 +246,34 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not prepare current managed registration material", output.String())
 			}
 			t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
+			documentSHA, err := os.ReadFile(filepath.Join(childData, "registration-digest"))
+			if err != nil || !platformValidSHA(string(documentSHA)) {
+				t.Fatal("registration public digest unavailable", err)
+			}
+			effectID, err := platformNewUUID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := control.BackendRegistrationCommand{Format: control.BackendRegistrationFormat, EffectID: effectID, CandidateRaw: message.Raw, CandidateSignature: message.Signature, DocumentSHA256: string(documentSHA)}
+			command.PayloadSHA256, err = control.BackendRegistrationLogicalDigest(command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixtureKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
+			raw, signature, err := control.SignBackendRegistration(command, fixtureKey, authority, time.Now().UnixMilli())
+			clear(fixtureKey)
+			if err != nil {
+				t.Fatal("fixture registration authorization", err)
+			}
+			admitted, err := store.AdmitBackendRegistrationCommand(ctx, raw, signature)
+			if err != nil || admitted.State != "prepared" || admitted.Replayed {
+				t.Fatal("actual candidate registration intent", err)
+			}
+			replayed, err := store.AdmitBackendRegistrationCommand(ctx, raw, signature)
+			if err != nil || !replayed.Replayed || replayed.EffectID != admitted.EffectID {
+				t.Fatal("registration intent replay", err)
+			}
+			t.Log("BACKEND_REGISTRATION_INTENT_ADMITTED")
 		}
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {

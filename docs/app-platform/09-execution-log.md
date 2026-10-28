@@ -1126,3 +1126,27 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Signed root delivery/boot handshake, request forwarding/current viewer authority,
   broker/writer and activation plus remaining full lifecycle/reference apps remain.
   No schema, production/beta, module versions or real credentials changed.
+
+### Backend registration delivery authorization and intent
+
+- Added a separate signed registration command bound to the existing candidate
+  effect and private document digest. Private document validation checks the
+  exact managed tuple and descriptor without storing a key in journal commands.
+- Added transactional prepared intent admission against matching applied source
+  history and present/running native resource metadata. Exact replay is accepted;
+  source changes, uncertain history and effect-slot conflicts are refused.
+- Added native fixture admission/replay after actual ready-backend material
+  preparation. This is sample authorization by the root test controller, not
+  automatic Portal key delivery or completed backend registration.
+- Local focused control/journal race and full runner/CLI race passed (journal
+  79.356 s); Linux amd64/arm64 compilation, vet/staticcheck and 14 Python tests
+  passed. Functional source `c011d25e58d0ab28ec745f3375a3d79cdc66189f`
+  passed native quota workflow 40619597258 (job 122590125633): actual candidate
+  registration intent, backend readiness and owned cleanup keys are true; exact
+  registry cleanup passed. Linux transport/driver race passed in 4.482/1.481 s.
+  General CI still fails the existing x/net vulnerability gate, skipping the
+  subsequent non-race Test step.
+- See [registration command details](82-backend-registration-command.md).
+  Protected file delivery, boot handshake, forwarding/current viewer authority,
+  broker/writer and activation plus the remaining platform scope still remain.
+  No schema, production/beta, real credentials or module versions changed.

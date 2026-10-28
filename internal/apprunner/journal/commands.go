@@ -51,8 +51,9 @@ func (s *Store) AdmitControlCommand(ctx context.Context, raw, signature []byte) 
 // command or physical execution token. Each verifier checks its complete wire
 // payload/signature domain before producing this projection.
 type verifiedAdmissionCommand struct {
-	identity            control.Command
-	containerResourceID string
+	identity              control.Command
+	containerResourceID   string
+	registrationReference control.CandidateCommand
 }
 type admissionVerifier func([]byte, []byte, control.Authority, int64) (verifiedAdmissionCommand, error)
 
