@@ -24,7 +24,14 @@ const candidateReadinessReplyMagic = "PRKS0001"
 
 func ProbeControllerCandidate(ctx context.Context, path string, uid, gid uint32, raw, signature []byte, a control.Authority, descriptor []byte) (CandidateReadinessObservation, error) {
 	var zero CandidateReadinessObservation
-	if !validController(uid, gid) || uint32(os.Geteuid()) != uid || !validCandidateDescriptor(raw, descriptor) || len(signature) != 64 {
+	if !validController(uid, gid) || uint32(os.Geteuid()) != uid {
+		return zero, driver.ErrCandidateNotReady
+	}
+	return probeCandidateReadinessFrame(ctx, path, controllerProfile(gid), raw, signature, a, descriptor)
+}
+func probeCandidateReadinessFrame(ctx context.Context, path string, profile endpointProfile, raw, signature []byte, a control.Authority, descriptor []byte) (CandidateReadinessObservation, error) {
+	var zero CandidateReadinessObservation
+	if !validCandidateDescriptor(raw, descriptor) || len(signature) != 64 {
 		return zero, driver.ErrCandidateNotReady
 	}
 	raw, signature, descriptor, a.PublicKey = bytes.Clone(raw), bytes.Clone(signature), bytes.Clone(descriptor), bytes.Clone(a.PublicKey)
@@ -35,7 +42,6 @@ func ProbeControllerCandidate(ctx context.Context, path string, uid, gid uint32,
 	}
 	ctx, cancel := context.WithTimeout(ctx, sessionTimeout)
 	defer cancel()
-	profile := controllerProfile(gid)
 	conn, err := connectEndpoint(ctx, path, profile)
 	if err != nil {
 		return zero, err
@@ -87,5 +93,5 @@ func ProbeControllerCandidate(ctx context.Context, path string, uid, gid uint32,
 		return zero, driver.ErrCandidateNotReady
 	}
 	commandSHA := sha256.Sum256(raw)
-	return CandidateReadinessObservation{readiness: r, authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: 0, ControllerUID: uid, ControllerGID: gid, RootController: true}, receivedAt: received, commandSHA: hex.EncodeToString(commandSHA[:])}, nil
+	return CandidateReadinessObservation{readiness: r, authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: profile.owner, ControllerUID: uint32(os.Geteuid()), ControllerGID: profile.group, RootController: profile.shared}, receivedAt: received, commandSHA: hex.EncodeToString(commandSHA[:])}, nil
 }
