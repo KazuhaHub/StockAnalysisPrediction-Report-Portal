@@ -111,7 +111,22 @@ the application until the bounded fixture deadline. It must persist readiness an
 reach `activate` with candidate/pending/no use grants, reject static activation
 and reject a stale repeat. The parent requires `MANAGED_INSTALL_READINESS`; only
 a passing parent test permits `native_portal_managed_backend_readiness: true`.
-Native workflow evidence is pending until this functional source passes.
+Functional source `f6a617e981a013c84da45e2f4d2f0c0284ed41ab` passed quota
+workflow [40615945463](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40615945463),
+job 122578517361. Its completed enforcement log reports actual managed backend
+readiness, candidate start-to-probe and owned-resource cleanup as true. The exact
+owned registry cleanup step also succeeded. Linux transport/driver race passed
+in 4.551/1.546 s, including the private framing/freshness/refusal and Unix HTTP
+checks. Private-profile framing success does not become a root observation.
+
+Local SQLite race passed in 17.293 s; PostgreSQL candidate/data race in 13.184 s;
+runner/CLI race passed (journal 80.724 s). Linux amd64/arm64 compilation,
+vet/staticcheck, shellcheck/actionlint and all 14 Python tests passed. General
+CI 40615945412 passed web checks/tests, workflow lint and Docker smoke, but its
+Go job failed at govulncheck on existing x/net v0.60.0 (GO-2026-6866 and
+GO-2026-6860, reported fixed in v0.62.0), skipping its later non-race test step.
+App race shards 1/3 and the separate daemon run were still active at capture;
+general CI is not all green.
 
 This is partial RUN-04 and LIFE-02/03 coverage. It does not complete crash-loop
 control, continuous health, full isolation or the entire installation lifecycle.

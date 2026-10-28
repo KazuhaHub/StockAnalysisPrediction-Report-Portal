@@ -1091,9 +1091,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   and observe readiness from the actual running app before emitting its marker.
 - Local SQLite race regression passed (17.293 s), PostgreSQL candidate/data race
   passed (13.184 s), runner/CLI race passed (journal 80.724 s), Linux compilation,
-  vet/staticcheck, shellcheck and 14 Python tests passed. Native acceptance is
-  pending; actual backend readiness is not claimed yet. See
-  [managed readiness details](80-managed-readiness.md).
+  vet/staticcheck, shellcheck/actionlint and 14 Python tests passed.
+- Functional source `f6a617e981a013c84da45e2f4d2f0c0284ed41ab` passed quota
+  workflow 40615945463 (job 122578517361): actual managed backend readiness,
+  candidate start and owned cleanup keys are true; exact registry cleanup passed.
+  Linux transport/driver race passed in 4.551/1.546 s, including private framing
+  and Unix HTTP checks. General CI retains its existing x/net vulnerability gate
+  failure. See [managed readiness details](80-managed-readiness.md).
 - Managed activation/registration/writer/broker, image fetching, bounded socket
   storage, scheduling/startup, reconciliation and full lifecycle/reference apps
   remain. No schema, production/beta, module versions or real credentials changed.
