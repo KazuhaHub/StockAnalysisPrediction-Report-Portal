@@ -70,6 +70,12 @@ the candidate integration. Existing static scheduling is unchanged.
 
 ## Verification
 
+Acceptance coverage is incremental: PKG-05/06 cover runtime compatibility and
+review target changes; RUN-02 covers missing/disabled runtime refusal; LIFE-01
+covers managed admission replay, and LIFE-03 covers pending/no-traffic behavior
+through data preparation. These are partial case contributions, not completion
+of market installation, all failure stages or the complete acceptance matrix.
+
 Common tests refuse missing opaque proof, invalid or changed runtime identity/
 epoch/revisions/fingerprint, disabled binding, invalid platform/root/inode/sandbox
 and missing required capability providers. Metadata validation runs on SQLite and
@@ -86,9 +92,22 @@ Only a passing parent test permits the script to emit
 `native_portal_managed_install_data_to_start: true`.
 
 The sample backend digest is syntactic fixture input: this test does not pull or
-start that image. Native workflow evidence is pending until this functional
-source passes. Local results are recorded in the execution log. Passing this
-phase cannot establish candidate startup, health or usable application access.
+start that image. Functional source
+`2ffa6ef7e11933863623611e5f31ae2973d92c3b` passed native quota workflow
+[40612418406](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40612418406),
+job 122566896200. Its log reports authenticated Portal profile, managed data-to-
+start and owned-resource cleanup as true. Linux transport race checks passed in
+4.475 s. SQLite/PostgreSQL focused race regressions passed in 19.656/19.663 s;
+managed common tests passed in 2.711 s. Linux architecture compilation, local
+vet/staticcheck and 13 Python tests also passed.
+
+General CI 40612418512 passed web checks/tests, workflow lint and Docker smoke,
+but its Go job failed at govulncheck on existing `golang.org/x/net v0.60.0`
+(GO-2026-6866 and GO-2026-6860, fixed version reported as v0.62.0); the subsequent
+non-race test step was skipped. The first app race shard was still running at
+this evidence capture. No module version is changed here and general CI is not
+all green. Passing the native phase cannot establish candidate startup, health
+or usable application access.
 
 ## Remaining integration
 
