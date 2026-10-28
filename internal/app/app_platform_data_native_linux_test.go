@@ -263,6 +263,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not prepare current managed registration material", output.String())
 			}
 			t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_DELIVERY_COMMITTED")) {
+				t.Fatal("Portal did not settle durable delivery")
+			}
+			t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
 			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_RPC")) {
 				t.Fatal("Portal did not use protected registration RPC")
 			}

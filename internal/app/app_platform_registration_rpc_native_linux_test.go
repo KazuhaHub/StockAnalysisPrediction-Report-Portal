@@ -3,9 +3,7 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -16,7 +14,6 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 type registrationRPCFixtureEnvelope struct{ Raw, Signature []byte }
@@ -82,24 +79,27 @@ func observeNativeRegistrationRPCFixture(t *testing.T, ctx context.Context, read
 	}
 }
 
-func testNativeRegistrationRPC(t *testing.T, endpoint platformRuntimeEndpoint, intent platformCandidateIntent, descriptor, document []byte) {
+func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint, expectedDigest string) {
 	t.Helper()
-	id, err := platformNewUUID()
+	ctx := context.Background()
+	intent, err := s.preparePlatformBackendDelivery(ctx, lease)
+	if err != nil {
+		t.Fatal("Portal delivery preparation", err)
+	}
+	defer intent.registration.Close()
+	if intent.command.DocumentSHA256 != expectedDigest || intent.applied {
+		t.Fatal("Portal preparation changed registration material")
+	}
+	again, err := s.preparePlatformBackendDelivery(ctx, lease)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := control.BackendRegistrationCommand{Format: control.BackendRegistrationFormat, EffectID: id, CandidateRaw: intent.raw, CandidateSignature: intent.signature, DocumentSHA256: platformDigest(document)}
-	c.PayloadSHA256, err = control.BackendRegistrationLogicalDigest(c)
-	if err != nil {
-		t.Fatal(err)
+	defer again.registration.Close()
+	if again.command.EffectID != intent.command.EffectID || again.command.PayloadSHA256 != intent.command.PayloadSHA256 {
+		t.Fatal("Portal replaced prepared delivery")
 	}
-	// This is a sample controller intent. Portal operation-effect persistence and
-	// normal scheduler integration are deliberately not fabricated by this fixture.
-	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
-	defer clear(key)
-	raw, sig, err := control.SignBackendRegistration(c, key, intent.authority, time.Now().UnixMilli())
-	if err != nil {
-		t.Fatal(err)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 {
+		t.Fatal("Portal did not persist the single delivery intent")
 	}
 	public := os.NewFile(5, "public-registration-coordination")
 	ready := os.NewFile(4, "registration-ready")
@@ -107,31 +107,66 @@ func testNativeRegistrationRPC(t *testing.T, endpoint platformRuntimeEndpoint, i
 		t.Fatal("public coordination pipe unavailable")
 	}
 	defer public.Close()
-	if err := json.NewEncoder(public).Encode(registrationRPCFixtureEnvelope{Raw: raw, Signature: sig}); err != nil {
+	if err := json.NewEncoder(public).Encode(registrationRPCFixtureEnvelope{Raw: intent.raw, Signature: intent.signature}); err != nil {
 		t.Fatal(err)
 	}
 	var signal [1]byte
 	if _, err := io.ReadFull(ready, signal[:]); err != nil || signal[0] != 2 {
 		t.Fatal("registration failure fixture not ready")
 	}
-	proof, err := transport.DeliverControllerRegistration(context.Background(), endpoint.path, endpoint.controllerUID, endpoint.controllerGID, raw, sig, intent.authority, descriptor, document)
+	if err := s.checkPlatformManagedRuntimeRoot(ctx, lease, intent.candidate.runtime, intent.candidate.authority, endpoint); err != nil {
+		t.Fatal(err)
+	}
+	proof, err := platformDeliverBackendRegistration(ctx, endpoint, intent)
 	if err == nil || !proof.ReceivedAt().IsZero() {
 		t.Fatal("failed root settlement minted RPC proof")
 	}
+	mustExec(t, s.st, `CREATE TRIGGER portal_delivery_fixture_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.backend_delivery' BEGIN SELECT RAISE(ABORT,'Portal delivery fixture failure'); END`)
 	if err := json.NewEncoder(public).Encode(struct{ Published bool }{true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.ReadFull(ready, signal[:]); err != nil || signal[0] != 3 {
 		t.Fatal("registration retry fixture not ready")
 	}
-	proof, err = transport.DeliverControllerRegistration(context.Background(), endpoint.path, endpoint.controllerUID, endpoint.controllerGID, raw, sig, intent.authority, descriptor, document)
-	if err != nil || !proof.Endpoint().RootController || proof.Endpoint().RunnerUID != 0 || proof.Endpoint().ControllerUID != 41001 || proof.Endpoint().ControllerGID != 41001 || proof.Endpoint().Path != endpoint.path || !proof.Receipt().MatchesCommand(c) || proof.CommandSHA256() != platformDigest(raw) {
-		t.Fatal("root registration RPC recovery", err)
+	if _, err := s.dispatchPlatformBackendDelivery(ctx, lease, endpoint); err == nil {
+		t.Fatal("Portal settlement failure did not roll back")
 	}
-	receipt := proof.Receipt()
-	historical, err := transport.DeliverControllerRegistration(context.Background(), endpoint.path, endpoint.controllerUID, endpoint.controllerGID, raw, sig, intent.authority, descriptor, document)
-	if err != nil || historical.Receipt() != receipt {
-		t.Fatal("registration RPC historical replay", err)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate' AND state='prepared' AND observed_fence=0 AND receipt_json='{}'`, lease.id) != 1 || scalar[int64](t, s.st, `SELECT row_revision FROM app_platform_operations WHERE id=?`, lease.id) != lease.rowRevision {
+		t.Fatal("Portal lost original retry intent")
 	}
+	mustExec(t, s.st, `DROP TRIGGER portal_delivery_fixture_failure`)
+	committed, err := s.dispatchPlatformBackendDelivery(ctx, lease, endpoint)
+	if err != nil || committed.rowRevision != lease.rowRevision+1 || committed.snapshot.Stage != lease.snapshot.Stage || committed.snapshot.Revision != lease.snapshot.Revision {
+		t.Fatal("Portal delivery recovery", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate' AND state='applied' AND observed_fence=admitted_fence AND receipt_json<>'{}'`, lease.id) != 1 {
+		t.Fatal("Portal did not retain verified delivery receipt")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" {
+		t.Fatal("delivery activated application")
+	}
+	if old, err := s.preparePlatformBackendDelivery(ctx, lease); err == nil {
+		old.registration.Close()
+		t.Fatal("stale Portal lease reused after settlement")
+	}
+	replay, err := s.dispatchPlatformBackendDelivery(ctx, committed, endpoint)
+	if err != nil || replay.rowRevision != committed.rowRevision {
+		t.Fatal("Portal delivery historical replay changed lease", err)
+	}
+	observed, err := s.preparePlatformBackendDelivery(ctx, committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer observed.registration.Close()
+	proof, err = platformDeliverBackendRegistration(ctx, endpoint, observed)
+	if err != nil || !validPlatformBackendDeliveryObservation(proof, observed, endpoint) || !observed.applied || proof.Receipt() != observed.receipt {
+		t.Fatal("Portal retained delivery differs from root", err)
+	}
+	mustExec(t, s.st, `UPDATE meta SET v='1' WHERE k='app_platform_restore_paused'`)
+	if _, err := s.commitPlatformBackendDelivery(ctx, committed, observed, endpoint, proof); err == nil {
+		t.Fatal("restore pause accepted delivery settlement")
+	}
+	mustExec(t, s.st, `UPDATE meta SET v='0' WHERE k='app_platform_restore_paused'`)
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
+	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
 }

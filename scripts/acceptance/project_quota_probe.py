@@ -325,6 +325,9 @@ def main(args):
                             if "BACKEND_REGISTRATION_RPC_RECONCILED" not in result.stdout:
                                 raise RuntimeError("protected registration RPC recovery missing")
                             report["native_backend_registration_rpc_reconciled"] = True
+                            if "MANAGED_BACKEND_DELIVERY_COMMITTED" not in result.stdout:
+                                raise RuntimeError("Portal delivery effect settlement recovery missing")
+                            report["native_portal_backend_delivery_committed"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.
