@@ -141,8 +141,20 @@ claim current journal authorization or a full installation from that alone.
 Local full runner race passed (journal 120.159s, transport 1.893s; other packages
 cache hits). Driver race passed in 2.296s and platform regression in 8.063s.
 Vet/default Linux staticcheck, Linux amd64/arm64 driver and fixture builds and
-all 14 Python probe tests passed. Native evidence will be recorded after the
-functional run. No production,
+all 14 Python probe tests passed. Functional source `32101df7fc7414212cbadf302ef9b178d76c95b2` passed quota workflow
+40757095906/job 123058818615. The typed native start flag is true together with
+actual filtered quota/attribute/root-owner protection, current viewer and owned
+resource cleanup evidence. Fixture registry cleanup also passed. Linux control/
+appplatform/transport/driver race passed in 1.757/1.628/5.424/3.027s. Actual native
+execution is amd64; arm64 evidence is compilation only.
+
+Daemon workflow 40757095659/job 123058818067 passed the full runner race suite
+(journal 178.210s), native closed-container/IPC checks and Portal confirmation
+through the root endpoint. General workflow 40757095413 passed all three app
+race shards and aggregate, web checks/tests, workflow lint and Docker smoke.
+Go job 123058818707 passed staticcheck but retains the existing x/net v0.60.0
+vulnerability gate failure (GO-2026-6866/6860); its following non-race Test step
+was skipped. This is not an all-green release. No production,
 credentials, Status migration, server beta, schema, dependency/toolchain or public
 SDK changes are included.
 
