@@ -1245,8 +1245,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   wrong-key refusal, different-challenge replay refusal and unchanged SQL state.
 - Local appplatform/runner/CLI race passed (journal 88.439 s); SQLite regressions
   passed (20.251 s), PostgreSQL regressions passed (16.922 s); Linux compilation,
-  vet/staticcheck, actionlint and 14 Python tests passed. Native verification is
-  pending. Fixed a synthetic fixture clock boundary and passed 30 repeat cases.
+  vet/staticcheck, actionlint and 14 Python tests passed. Fixed a synthetic
+  fixture clock boundary and passed 30 repeat cases. Functional source
+  `107d944e7296d1bc4336ead25b6f1f4d671fbb3a` passed quota workflow 40632718683
+  (job 122632590592): actual backend boot, durable delivery and owned cleanup
+  keys are true; exact registry cleanup passed. Linux transport/driver race
+  passed in 4.551/1.500 s. General CI retains its existing x/net vulnerability
+  gate failure and skipped following non-race Test step.
 - See [managed boot handshake](86-managed-backend-boot-handshake.md). Forwarding,
   broker/writer, activation/scheduling and remaining full lifecycle/reference apps
   remain. No schema, production/beta, real credentials or module versions changed.

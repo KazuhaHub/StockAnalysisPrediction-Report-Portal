@@ -115,7 +115,20 @@ regressions passed (20.251 s), independent PostgreSQL regressions passed
 (16.922 s). Linux compilation, vet/staticcheck, actionlint and 14 Python tests
 passed. A synthetic fixture timestamp now uses the database clock to avoid a
 SQLite millisecond-rounding boundary; 30 repeated affected cases passed. Native
-workflow evidence remains pending. Local SQL tests do not prove deployed boot.
+workflow
+[40632718683](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40632718683),
+job 122632590592, passed functional source
+`107d944e7296d1bc4336ead25b6f1f4d671fbb3a`: actual Portal backend boot,
+durable delivery and owned cleanup keys are true; exact registry cleanup passed.
+Linux transport/driver race passed in 4.551/1.500 s. This proves actual protected
+file consumption, challenge/answer verification and refusal cases against the
+running backend fixture, not managed activation, health or viewer/provider access.
+
+General CI 40632718681 passed web checks/test shards, workflow lint and Docker
+smoke. Go job 122632591536 passed build/vet/staticcheck and market validation,
+then failed the existing x/net v0.60.0 vulnerability gate (GO-2026-6866 and
+GO-2026-6860, reported fixed in v0.62.0), skipping the following non-race Test
+step. App race jobs were not all terminal at capture; general CI is not all green.
 
 ## Remaining full platform work
 
