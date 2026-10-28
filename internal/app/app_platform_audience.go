@@ -46,9 +46,10 @@ func platformAudienceChain(e migExec, account platformActorAccount) ([]platformA
 	result := make([]platformAudienceOU, 0, len(chain))
 	for _, id := range chain {
 		created := snapshot.graph.nodes[id].created
-		if created != "" {
-			result = append(result, platformAudienceOU{id, created})
+		if created == "" {
+			return nil, errAppPlatformLaunchUnavailable
 		}
+		result = append(result, platformAudienceOU{id, created})
 	}
 	return result, nil
 }

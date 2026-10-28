@@ -1282,3 +1282,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   Current session/OU/grant gating and stable identities, broker/writer, activation/
   scheduling and remaining full lifecycle/reference apps remain. No schema,
   production/beta, real credentials or module versions changed.
+
+- Added stable app-scoped viewer identity and a private current-viewer read
+  adapter using the existing full launch transaction. Installation ID/identity
+  seed define the namespace; backend generation/key/boot and audience-policy
+  changes do not rotate subjects/OUs. Live roles/sessions and actual OU ancestry
+  remain current; recreated principals get different identities. Incomplete OU
+  creation identities now fail closed rather than being silently omitted.
+  Reads use the durable keyring in the same transaction without lazy creation,
+  previous-key rewrap or cached-key fallback, and return no facts on final gate
+  failure. No managed admission or browser request endpoint is enabled.
+  Related SQLite race tests passed (appplatform 1.223s/app 21.259s), PostgreSQL
+  race tests passed (14.467s), exact-64-OU contract race passed (1.281s), and the
+  broader platform regression passed (appplatform 1.244s/app 8.382s). Vet,
+  Linux/default staticcheck and actionlint passed; the isolated PG cluster was
+  stopped. See [stable viewer identity](88-stable-viewer-identity.md) for exact
+  scope and next integration. Active managed authority reconstruction, broker/
+  writer, bounded socket storage, activation/scheduling and full lifecycle/SDK/
+  reference-app acceptance remain. Production, beta, dependencies and schemas
+  are unchanged.
