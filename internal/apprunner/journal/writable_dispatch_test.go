@@ -67,3 +67,22 @@ func TestWriterDispatchCannotRepeatUnknownAttempt(t *testing.T) {
 		t.Fatal("unknown claim changed")
 	}
 }
+
+func TestWriterDispatchReplaysCompletedHistoryWithoutFirstAdmission(t *testing.T) {
+	s, raw, sig, descriptor := syntheticWriterExecutionFixture(t)
+	if _, err := s.AdmitDataWriterCommand(context.Background(), raw, sig); err != nil {
+		t.Fatal(err)
+	}
+	receipt := syntheticSettleWriterReceipt(t, s, raw, sig)
+	// Admission deliberately keeps the sealed/pre-start source contract.
+	if _, err := s.AdmitDataWriterCommand(context.Background(), raw, sig); err == nil {
+		t.Fatal("first admission accepted written source")
+	}
+	replay, err := s.DispatchDataWriter(context.Background(), raw, sig, descriptor, &driver.CandidateRuntime{})
+	if err != nil || replay != receipt {
+		t.Fatal("completed writer replay", err)
+	}
+	if scalar(t, s.db, `SELECT revision FROM runner_resources WHERE kind='volume'`) != 3 {
+		t.Fatal("replay changed writer metadata")
+	}
+}

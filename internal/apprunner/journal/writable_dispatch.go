@@ -31,6 +31,11 @@ func (s *Store) DispatchDataWriter(ctx context.Context, raw, signature, descript
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != v.Data().Payload.ReleaseSHA256 {
 		return zero, ErrFenceReconciliation
 	}
+	// First-admission source checks intentionally require sealed data. Completed
+	// writer replay must use the separate strict revision-3 historical reader.
+	if receipt, err := s.ReadDataWriterReceipt(ctx, raw, signature); err == nil {
+		return receipt, nil
+	}
 	admitted, err := s.AdmitDataWriterCommand(ctx, raw, signature)
 	if err != nil {
 		return zero, err
@@ -72,6 +77,18 @@ func (s *Store) DispatchWritableCandidate(ctx context.Context, raw, signature, d
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != v.Index().Payload.ReleaseSHA256 {
 		return zero, ErrFenceReconciliation
+	}
+	// Existing running/reserved history has its own strict current validators;
+	// never weaken first admission to accept a later lifecycle resource shape.
+	if receipt, err := s.ReadWritableCandidateRunningReceipt(ctx, raw, signature); err == nil {
+		return receipt, nil
+	}
+	if _, err := s.ReadWritableCandidateReservation(ctx, raw, signature); err == nil {
+		claim, err := s.ClaimWritableCandidate(ctx, raw, signature)
+		if err != nil {
+			return zero, err
+		}
+		return s.ExecuteWritableCandidate(ctx, claim, native, descriptor)
 	}
 	admitted, err := s.AdmitWritableCandidateCommand(ctx, raw, signature)
 	if err != nil {
