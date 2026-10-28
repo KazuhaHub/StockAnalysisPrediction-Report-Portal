@@ -1797,3 +1797,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   lifecycle transport, Portal boot/viewer/activation/worker, physical lifecycle,
   broker, SDK/reference apps and full P00–P14 acceptance remain unfinished.
   Production, real credentials, Status, SDK freeze and beta unchanged.
+
+- Added closed writable lifecycle controller RPC for writer execution/read/recovery,
+  candidate start/read/recovery/readiness and protected registration delivery/read.
+  Added first-attempt journal dispatch that refuses unknown writer/start work,
+  independent command-domain validation, bounded correlated canonical replies and
+  opaque typed provenance. See [writable lifecycle transport](106-writable-lifecycle-transport.md).
+  New disposable non-root child/root listener test drives actual writer/start/
+  readiness/delivery, historical reads and identical applied replays before host
+  handshake verification. Fresh Linux acceptance pending; Portal integration,
+  activation/worker and remaining full platform acceptance are not yet complete.
+  Production, credentials, Status, SDK freeze and beta unchanged.

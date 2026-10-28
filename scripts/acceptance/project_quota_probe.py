@@ -338,6 +338,12 @@ def main(args):
                             raise RuntimeError("native writable handshake transport failed: " + (handshake.stdout+handshake.stderr)[-4096:])
                         report["native_writable_handshake_cross_uid_verified"] = True
                         report["native_writable_handshake_controller_peer_denial_verified"] = True
+                        lifecycle_env = dict(writer_journal_env, APP_WRITABLE_LIFECYCLE_TRANSPORT="1", APP_CANDIDATE_NATIVE_IMAGE=ready_image)
+                        lifecycle = subprocess.run([args[8], "-test.run=^TestNativeWritableLifecycleTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=lifecycle_env, capture_output=True, text=True, timeout=70)
+                        if lifecycle.returncode or "NATIVE_WRITABLE_LIFECYCLE_CROSS_UID_VERIFIED" not in lifecycle.stdout or "NATIVE_WRITABLE_LIFECYCLE_IDEMPOTENT_REPLAYS_VERIFIED" not in lifecycle.stdout:
+                            raise RuntimeError("native writable lifecycle transport failed: " + (lifecycle.stdout+lifecycle.stderr)[-4096:])
+                        report["native_writable_lifecycle_cross_uid_verified"] = True
+                        report["native_writable_lifecycle_idempotent_replays_verified"] = True
                 if len(args) in (9,11):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True
