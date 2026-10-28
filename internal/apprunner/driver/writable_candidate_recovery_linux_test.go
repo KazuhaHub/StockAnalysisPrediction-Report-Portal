@@ -17,7 +17,13 @@ func TestWritableRecoveryInventoryRequiresUniquePrivateReference(t *testing.T) {
 	raw, digest, reference := managedImageFixture(t)
 	owner := containerFixture(t).owner
 	owner.WriterFence = "1"
-	root := t.TempDir()
+	// The complete Unix socket path, including the installation UUID, must fit
+	// the production 107-byte bound. Test names make t.TempDir paths too long.
+	root, err := os.MkdirTemp("/tmp", "portal-wr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
 	plan, err := planWritableCandidateContainer(raw, BackendImageInspection{ReleaseSHA256: digest, Reference: reference, ImageID: "sha256:" + strings.Repeat("b", 64), Platform: "linux/amd64"}, owner, containerRoots{Data: filepath.Join(root, "data"), Sockets: filepath.Join(root, "sockets")}, writableBindingFixture())
 	if err != nil {
 		t.Fatal(err)
