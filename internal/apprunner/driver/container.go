@@ -26,6 +26,7 @@ var (
 )
 
 const containerLabelPrefix = "org.portal.app."
+const candidateIPCProfile = "tmpfs-16m-1024/v1-dev"
 
 type containerOwner struct {
 	DeploymentID, ControllerEpoch, InstallationID, OperationID, ResourceID, NamespaceID string
@@ -111,6 +112,7 @@ func ownerContainerLabels(o containerOwner) map[string]string {
 		containerLabelPrefix + "installation": o.InstallationID, containerLabelPrefix + "operation": o.OperationID, containerLabelPrefix + "resource": o.ResourceID,
 		containerLabelPrefix + "namespace": o.NamespaceID, containerLabelPrefix + "release": o.ReleaseSHA256, containerLabelPrefix + "generation": o.Generation,
 		containerLabelPrefix + "control-fence": o.ControlFence, containerLabelPrefix + "writer-fence": o.WriterFence,
+		containerLabelPrefix + "ipc-profile": candidateIPCProfile,
 	}
 }
 

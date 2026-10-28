@@ -50,6 +50,12 @@ func nativeMountFixture(t *testing.T) (containerPlan, candidateDataPin, containe
 	}
 	var data candidateDataPin
 	for _, mount := range request.HostConfig.Mounts {
+		if mount.Target == "/run/portal-app/http" {
+			if err := os.MkdirAll(filepath.Dir(mount.Source), 0700); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(mount.Source, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -60,17 +66,34 @@ func nativeMountFixture(t *testing.T) (containerPlan, candidateDataPin, containe
 				t.Fatal(err)
 			}
 			data = candidateDataPin{Device: uint64(st.Dev), Inode: st.Ino}
-		case "/run/portal-app/http":
-			if err := os.Chown(mount.Source, 65532, 65532); err != nil {
-				t.Fatal(err)
-			}
 		case "/run/portal-app/broker":
 			if err := os.Chmod(mount.Source, 0755); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
+	provisionNativeIPCFixture(t, request.HostConfig.Mounts[1].Source, CandidateIdentity(plan.owner))
 	return plan, data, request
+}
+
+func provisionNativeIPCFixture(t *testing.T, path string, identity CandidateIdentity) {
+	t.Helper()
+	requireMountAcceptance(t)
+	parent, err := unix.Open(filepath.Dir(path), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(parent)
+	if err := provisionCandidateHTTPStorage(context.Background(), parent, identity); err != nil {
+		t.Fatal("bounded IPC provision", err)
+	}
+	sockets := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	t.Cleanup(func() {
+		r := &CandidateRuntime{socket: os.Getenv("PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET"), roots: containerRoots{Sockets: sockets}}
+		if err := r.ReleaseCandidateHTTPStorage(context.Background(), identity); err != nil {
+			t.Error("bounded IPC release", err)
+		}
+	})
 }
 func TestNativeCandidateMountPins(t *testing.T) {
 	plan, data, request := nativeMountFixture(t)
@@ -155,6 +178,11 @@ func TestNativeCandidateMountPinsRefuseUnsafeInitialState(t *testing.T) {
 			case "data proof":
 				data.Inode++
 			case "http owner":
+				t.Cleanup(func() {
+					if err := os.Chown(request.HostConfig.Mounts[1].Source, 65532, 65532); err != nil {
+						t.Error(err)
+					}
+				})
 				if err := os.Chown(request.HostConfig.Mounts[1].Source, 0, 0); err != nil {
 					t.Fatal(err)
 				}

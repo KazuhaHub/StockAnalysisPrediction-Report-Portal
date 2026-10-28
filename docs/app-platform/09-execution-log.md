@@ -1335,3 +1335,20 @@ daemon workflow 40455635317 passed on the functional source as well.
   The real native fixture's write is an in-memory execution counter; filesystem
   writer authorization, normal managed activation and remaining release gates
   are not claimed complete.
+
+- Added independently bounded tmpfs storage for the private HTTP socket directory:
+  16 MiB data blocks, 1024 inodes, nodev/nosuid/noexec, private propagation and
+  exact trusted base/mount ownership records. Candidate provisioning, all mount
+  pin checks and the Docker policy label enforce this boundary; existing plain
+  or foreign directories are refused without repair. Explicit quiescent release
+  requires no local pins and no Docker mount references, then uses ordinary
+  unmount and removes only the matching empty owned underlay. Native fixtures
+  now exercise this lifecycle and require actual unprivileged byte/inode refusal,
+  trusted-marker protection, limit/identity drift rejection, live-container
+  cleanup exclusion and owned teardown. Local driver/transport/journal race
+  passed (1.663s/cache hit/85.263s), platform regression passed (8.097s), Linux
+  amd64 compilation and vet/default Linux staticcheck passed. These checks do
+  not establish native enforcement; that remains pending its own CI evidence.
+  See [bounded HTTP storage](90-bounded-http-storage.md). Normal lifecycle,
+  broker/writer, activation, SDK and full acceptance remain. No production/beta,
+  schema, dependency/toolchain or credential changes.

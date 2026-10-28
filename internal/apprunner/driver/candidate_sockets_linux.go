@@ -58,16 +58,13 @@ func (r *CandidateRuntime) ProvisionCandidateSockets(ctx context.Context, reques
 		return err
 	}
 	defer unix.Close(generation)
-	for _, leaf := range []struct {
-		name     string
-		uid, gid int
-		mode     uint32
-	}{{"http", 65532, 65532, 0700}, {"broker", 0, 0, 0755}} {
-		fd, err := ensureCandidateSocketDirectory(ctx, generation, leaf.name, leaf.uid, leaf.gid, leaf.mode)
-		if err != nil {
-			return err
-		}
-		unix.Close(fd)
+	broker, err := ensureCandidateSocketDirectory(ctx, generation, "broker", 0, 0, 0755)
+	if err != nil {
+		return err
+	}
+	unix.Close(broker)
+	if err := provisionCandidateHTTPStorage(ctx, generation, request.Identity); err != nil {
+		return err
 	}
 	return ctx.Err()
 }
