@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,11 +202,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	path := filepath.Join(r.roots.Sockets, identity.InstallationID, identity.Generation, "http")
 	client, closeClient := r.client()
 	defer closeClient()
-	var containers []struct {
-		ID     string          `json:"Id"`
-		Mounts json.RawMessage `json:"Mounts"`
-	}
-	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/json?all=1", &containers); err != nil {
+	containers, err := readCandidateIPCInventory(ctx, client)
+	if err != nil {
 		return err
 	}
 	if containers == nil {
@@ -245,19 +244,75 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	return releaseCandidateHTTPStorage(ctx, parent, path, identity)
 }
 
+type candidateIPCContainer struct {
+	ID     string          `json:"Id"`
+	Mounts json.RawMessage `json:"Mounts"`
+}
+
+// The general daemon decoder deliberately accepts object projections only.
+// Keep that contract intact and validate each object of this bounded array.
+func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]candidateIPCContainer, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://app-runner-docker.invalid/v"+APIVersion+"/containers/json?all=1", nil)
+	if err != nil {
+		return nil, ErrInvalidResponse
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, ErrUnavailable
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	defer clear(raw)
+	if err != nil || ctx.Err() != nil {
+		return nil, ErrUnavailable
+	}
+	if len(raw) > maxResponseBytes {
+		return nil, ErrInvalidResponse
+	}
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil || entries == nil {
+		return nil, ErrInvalidResponse
+	}
+	defer func() {
+		for _, entry := range entries {
+			clear(entry)
+		}
+	}()
+	result := make([]candidateIPCContainer, 0, len(entries))
+	for _, entry := range entries {
+		var container candidateIPCContainer
+		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil || !containerSHA.MatchString(container.ID) {
+			return nil, ErrInvalidResponse
+		}
+		if _, err := candidateIPCMountSources(container.Mounts); err != nil {
+			return nil, err
+		}
+		result = append(result, container)
+	}
+	return result, nil
+}
+
 func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
 		return nil, ErrInvalidResponse
 	}
-	var mounts []struct {
-		Type   string  `json:"Type"`
-		Source *string `json:"Source"`
-	}
+	var mounts []json.RawMessage
 	if json.Unmarshal(raw, &mounts) != nil {
 		return nil, ErrInvalidResponse
 	}
 	sources := make([]string, 0, len(mounts))
-	for _, m := range mounts {
+	for _, entry := range mounts {
+		var m struct {
+			Type   string  `json:"Type"`
+			Source *string `json:"Source"`
+		}
+		if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
+			return nil, ErrInvalidResponse
+		}
 		switch m.Type {
 		case "bind", "volume":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {

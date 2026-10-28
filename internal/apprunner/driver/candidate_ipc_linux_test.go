@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,11 +48,9 @@ func TestNativeCandidateMountPinsBoundedIPC(t *testing.T) {
 	if err := provisionCandidateHTTPStorage(context.Background(), parent, foreign); err == nil {
 		t.Fatal("foreign storage was repaired/replaced")
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	binary := candidateIPCProbeExecutable(t)
 	child := exec.Command(binary, "-test.run=^TestCandidateIPCUnprivilegedChild$", "-test.v", "-test.timeout=20s")
+	child.Dir = filepath.Dir(binary)
 	child.Env = []string{"PORTAL_APP_IPC_CHILD=1", "GOMAXPROCS=2", "GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=github-hosted"}
 	child.ExtraFiles = []*os.File{file}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65532, Gid: 65532, Groups: []uint32{65532}}}
@@ -62,6 +62,48 @@ func TestNativeCandidateMountPinsBoundedIPC(t *testing.T) {
 		t.Fatal("app changed trusted IPC storage metadata", err)
 	}
 	t.Log("bounded IPC storage enforced bytes/inodes for UID 65532 and protected its trusted identity")
+}
+
+// Keep the original root-only acceptance artifact unchanged. Publish only this
+// bounded, root-owned, unwritable execution copy for the explicit UID 65532 child.
+func candidateIPCProbeExecutable(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/run", "portal-ipc-child-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Error(err)
+		}
+	})
+	source, err := os.Open("/proc/self/exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	info, err := source.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > 128<<20 {
+		t.Fatal("unexpected acceptance executable", err)
+	}
+	path := filepath.Join(dir, "ipc-probe")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, copyErr := io.Copy(file, io.LimitReader(source, info.Size()+1))
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if copyErr != nil || syncErr != nil || closeErr != nil || n != info.Size() {
+		t.Fatal("incomplete acceptance executable copy", copyErr, syncErr, closeErr)
+	}
+	if err := os.Chmod(path, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestCandidateIPCUnprivilegedChild(t *testing.T) {
@@ -105,7 +147,7 @@ func TestCandidateIPCUnprivilegedChild(t *testing.T) {
 	if !errors.Is(err, unix.ENOSPC) && !errors.Is(err, unix.EDQUOT) {
 		t.Fatal("byte limit was not enforced", written, err)
 	}
-	if written <= 0 || written > int(candidateIPCBytes) {
+	if written < int(candidateIPCBytes)-len(buffer) || written > int(candidateIPCBytes) {
 		t.Fatal("byte quota escaped", written)
 	}
 	if err := unix.Unlinkat(fd, "byte-probe", 0); err != nil {
@@ -125,7 +167,7 @@ func TestCandidateIPCUnprivilegedChild(t *testing.T) {
 	if !errors.Is(err, unix.ENOSPC) && !errors.Is(err, unix.EDQUOT) {
 		t.Fatal("inode limit was not enforced", created, err)
 	}
-	if created < 1 || created >= int(candidateIPCInodes) {
+	if created < int(candidateIPCInodes)-8 || created >= int(candidateIPCInodes) {
 		t.Fatal("inode quota escaped", created)
 	}
 	for i := 0; i < created; i++ {
@@ -281,6 +323,40 @@ func TestCandidateIPCInventoryCannotOmitBindSources(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`, `[{"Type":"tmpfs","Source":""}]`, `[{"Type":"bind","Source":"/run"}]`} {
 		if _, err := candidateIPCMountSources([]byte(raw)); err != nil {
 			t.Fatal("valid projected mount inventory refused", err)
+		}
+	}
+}
+
+func TestCandidateIPCInventoryArrayProjection(t *testing.T) {
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+		count int
+	}{
+		{`[]`, true, 0},
+		{`[{"Id":"` + id + `","Mounts":[],"Command":"ignored-private-field"}]`, true, 1},
+		{`null`, false, 0},
+		{`{}`, false, 0},
+		{`[{"Id":"` + id + `"}]`, false, 0},
+		{`[{"id":"` + id + `","Mounts":[]}]`, false, 0},
+		{`[{"Id":"` + id + `","Id":"` + id + `","Mounts":[]}]`, false, 0},
+		{`[{"Id":"` + id + `","Mounts":[{"type":"bind","Source":"/run"}]}]`, false, 0},
+		{`[]` + strings.Repeat(" ", maxResponseBytes), false, 0},
+	} {
+		client := daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != "GET" || r.URL.Path != "/v"+APIVersion+"/containers/json" || r.URL.Query().Get("all") != "1" {
+				t.Fatal("unbounded/incorrect inventory request")
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tc.raw)), Header: make(http.Header)}, nil
+		}))
+		items, err := readCandidateIPCInventory(context.Background(), client)
+		if tc.valid {
+			if err != nil || len(items) != tc.count {
+				t.Fatal("valid inventory refused", err)
+			}
+		} else if err == nil || items != nil {
+			t.Fatal("ambiguous inventory admitted")
 		}
 	}
 }

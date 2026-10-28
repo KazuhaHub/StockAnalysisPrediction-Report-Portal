@@ -82,6 +82,16 @@ Those operations still need current journal/fence authority, truthful resource
 settlement and recovery handling. Its bounded inventory can refuse cleanup on a
 large or uncertain host rather than assume there are no references.
 
+Inventory uses a dedicated bounded array decoder, preserving the general daemon
+reader's object-only contract. Each container and mount projection rejects
+duplicates, case aliases and missing bind sources. Host bind aliases are resolved
+conservatively; unresolved sources refuse cleanup. Resolver waits honor the cleanup
+deadline with at most one native filesystem lookup in flight process-wide. Timed-out
+work keeps its slot until it actually returns, so retries cannot accumulate blocked
+threads. This is a point-in-time check under the caller's lifecycle exclusion;
+unapproved host-administrator rebinding/retargeting of runtime-private paths is
+outside the admitted profile and must be quiesced before cleanup.
+
 ## Verification
 
 Disposable native fixtures use the same provision/validation/release paths. Their
@@ -99,6 +109,11 @@ or trusted markers under the root fixture and require pinned validation to fail;
 an unmarked plain directory is neither adopted nor released. Cancellation before
 creation must leave no directory.
 
+The UID probe executes a bounded, root-owned, unwritable copy in an owned `/run`
+directory; the original root-only acceptance artifact stays unchanged. Only the
+owned HTTP directory FD is handed to that child, and the execution copy is removed
+after it exits.
+
 Actual native candidate acceptance also checks that live pins prevent release,
 and that a second runtime instance with no local pins still refuses cleanup while
 the real Docker container references the mount. These tests are evidence only
@@ -109,3 +124,10 @@ journal race passed (driver 1.663s, transport cache hit, journal 85.263s). Linux
 amd64 driver and Portal test binaries compiled; vet and Linux/default staticcheck
 passed. Native byte/inode enforcement and cleanup remain pending their own CI
 evidence. No server beta, dependency/toolchain, credential or database changes.
+
+Initial native runs 40660999840/job 122723699610 and 40660999937/job 122723699587
+failed acceptance: cleanup reused an object-only JSON reader for Docker's array
+inventory, and the root-only test artifact could not execute as UID 65532. The
+dedicated array decoder/projection tests and isolated executable copy correct
+these integration errors. Those failed runs are not native acceptance evidence;
+fresh byte/inode, real-reference and owned-teardown runs remain mandatory.
