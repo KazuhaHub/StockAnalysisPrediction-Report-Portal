@@ -242,6 +242,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not observe actual backend readiness", output.String())
 			}
 			t.Log("MANAGED_INSTALL_READINESS")
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_MATERIAL")) {
+				t.Fatal("Portal did not prepare current managed registration material", output.String())
+			}
+			t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 		}
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {

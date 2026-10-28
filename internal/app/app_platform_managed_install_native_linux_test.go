@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -164,5 +165,33 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			t.Fatal("stale readiness stage recommitted")
 		}
 		t.Log("MANAGED_INSTALL_READINESS")
+		registration, err := s.preparePlatformBackendRegistration(ctx, activated)
+		if err != nil {
+			t.Fatal("managed registration material", err)
+		}
+		defer registration.Close()
+		metadata, err := registration.Metadata()
+		if err != nil || metadata.Identity.InstallationID != activated.installationID || metadata.Identity.ReleaseSHA256 != intent.command.Payload.ReleaseSHA256 {
+			t.Fatal("registration lost managed tuple", err)
+		}
+		document, err := registration.Document()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer clear(document)
+		retry, err := s.preparePlatformBackendRegistration(ctx, activated)
+		if err != nil {
+			t.Fatal("registration retry", err)
+		}
+		defer retry.Close()
+		again, err := retry.Document()
+		defer clear(again)
+		if err != nil || !bytes.Equal(document, again) {
+			t.Fatal("registration retry changed key identity", err)
+		}
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, activated.id) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 {
+			t.Fatal("registration preparation granted authority")
+		}
+		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 	}
 }

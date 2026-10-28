@@ -1101,3 +1101,24 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Managed activation/registration/writer/broker, image fetching, bounded socket
   storage, scheduling/startup, reconciliation and full lifecycle/reference apps
   remain. No schema, production/beta, module versions or real credentials changed.
+
+### Managed backend instance identity and registration preparation
+
+- Bound the existing backend handshake/request protocol's opaque instance to
+  deployment/epoch/installation/generation/policy/release. Derived a separate
+  per-instance backend key from the existing sealed installation seed; no runner
+  key or stable identity seed enters the protected bootstrap document.
+- Added a redacted, non-serializable live registration handle with explicit bounded
+  document export/parser and shared close/clear semantics. Shared protocol tests
+  prove handshake/request interoperability, tuple separation and replay/refusal.
+- Added current private Portal preparation after exact recent root readiness,
+  current lease/admin/publisher/runtime/data/start validation. It creates no file,
+  delivery effect, app-use grant or actual backend registration. Native fixture
+  now requires stable material preparation after actual backend readiness.
+- Focused SQLite race passed (6.731 s), pure backend protocol/registration tests
+  passed; Linux compilation, vet/staticcheck and 14 Python tests passed. PostgreSQL
+  shared candidate/data regression and actual native preparation are being checked.
+  See [managed backend identity](81-managed-backend-identity.md).
+- Signed root delivery/boot handshake, request forwarding/current viewer authority,
+  broker/writer and activation plus remaining full lifecycle/reference apps remain.
+  No schema, production/beta, module versions or real credentials changed.
