@@ -446,5 +446,5 @@ func TestNativeWritableLifecycleChild(t *testing.T) {
 	if err != nil {
 		t.Fatal("typed receipt", err)
 	}
-	t.Log("LIFECYCLE_RECEIPT=" + base64.RawStdEncoding.EncodeToString([]byte(proof.body)))
+	println("LIFECYCLE_RECEIPT=" + base64.RawStdEncoding.EncodeToString([]byte(proof.body)))
 }
