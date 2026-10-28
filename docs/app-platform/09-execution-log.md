@@ -1424,3 +1424,34 @@ daemon workflow 40455635317 passed on the functional source as well.
   vulnerability gate failure. This closes the physical primitive/trial, not
   persistent writer admission/exclusion/revocation, normal activation/lifecycle,
   SDK/reference apps or complete P00–P14 acceptance.
+
+- Added a separately signed initial writer intent bound to the exact applied
+  data receipt and future resource, persisted in existing prepare_data/2 activate
+  records. Current trust/source/floor/history checks refuse takeover, rebound
+  receipts/resources and recorded old containers. Durable prepared->unknown
+  claims produce nonserializable one-shot owner handles, bounded to signed
+  expiry; post-IO rechecks, restart/copy refusal and Close serialization preserve
+  uncertainty. Callback success grants no permission or applied receipt. Real
+  SQLite/crypto tests passed; the disposable native test now requires the actual
+  XFS source and unchanged sealed data through admission/claim. See
+  [writer intent and claim](93-writer-intent-and-claim.md). Local full control/
+  journal/transport race passed (1.880/88.397/1.318s), focused writer race passed
+  in 10.621s, Linux dual-architecture compilation, vet/staticcheck and 14 Python
+  probe tests passed. Native acceptance remains pending. Actual writer exclusion,
+  physical dispatch/settlement, writable candidate/recovery, broker/activation,
+  SDK/reference apps and full acceptance remain. No schema or production/beta,
+  dependency/toolchain or credential changes.
+
+- Writer intent functional source `a612799f0c064e0d024684632b1fbe896fd3fa4a`
+  passed quota workflow 40679110373/job 122784962851 and daemon workflow
+  40679110347/job 122784962964. Actual XFS source admission/claim/one-shot
+  verification passed with sealed data unchanged and unknown intent preserved;
+  `native_writer_intent_and_claim_verified` is true. Existing physical writer
+  trial/current-viewer/owned-cleanup flags remain true. Linux control/appplatform/
+  transport/driver race passed in 1.542/1.582/5.365/2.946s; the full daemon runner
+  suite passed (journal 143.827s), including deadline and Close checks. Local
+  platform regression passed in 8.208s. General app race aggregate, web/Docker/
+  workflow checks passed; the existing x/net vulnerability gate still fails.
+  This closes intent/claim guarding only. Native process exclusion, physical
+  dispatch/opaque settlement, writable candidate/recovery, broker/activation and
+  complete SDK/reference-app/P00–P14 acceptance remain incomplete.

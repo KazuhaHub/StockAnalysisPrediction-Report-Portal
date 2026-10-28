@@ -54,6 +54,7 @@ type verifiedAdmissionCommand struct {
 	identity              control.Command
 	containerResourceID   string
 	registrationReference control.CandidateCommand
+	dataWriter            *control.VerifiedDataWriterCommand
 }
 type admissionVerifier func([]byte, []byte, control.Authority, int64) (verifiedAdmissionCommand, error)
 
@@ -82,6 +83,11 @@ func (s *Store) admitSignedCommand(ctx context.Context, raw, signature []byte, v
 		return zero, err
 	}
 	c := verified.identity
+	if verified.dataWriter != nil {
+		if _, err := validateDataWriterSource(ctx, tx, *verified.dataWriter, now); err != nil {
+			return zero, err
+		}
+	}
 	resourceExists, err := validateCandidateAdmissionResource(ctx, tx, verified)
 	if err != nil {
 		return zero, err

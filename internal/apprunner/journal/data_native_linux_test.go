@@ -299,6 +299,7 @@ func TestNativeJournalDataExecution(t *testing.T) {
 		if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+concurrentCommand.EffectID+`' AND state='applied'`) != 1 || scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+concurrentCommand.Payload.DataNamespaceID+`'`) != 1 {
 			t.Fatal("concurrent dispatch created multiple resources")
 		}
+		exerciseNativeDataWriterIntent(t, s, root, expected, concurrentRaw, concurrentSig, firstReceipt)
 		return
 	}
 	if _, _, err := s.EnrollController(ctx, enrollmentFixture(30)); err != nil {
