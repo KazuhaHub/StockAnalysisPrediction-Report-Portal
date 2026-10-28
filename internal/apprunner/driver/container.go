@@ -112,7 +112,8 @@ func ownerContainerLabels(o containerOwner) map[string]string {
 		containerLabelPrefix + "installation": o.InstallationID, containerLabelPrefix + "operation": o.OperationID, containerLabelPrefix + "resource": o.ResourceID,
 		containerLabelPrefix + "namespace": o.NamespaceID, containerLabelPrefix + "release": o.ReleaseSHA256, containerLabelPrefix + "generation": o.Generation,
 		containerLabelPrefix + "control-fence": o.ControlFence, containerLabelPrefix + "writer-fence": o.WriterFence,
-		containerLabelPrefix + "ipc-profile": candidateIPCProfile,
+		containerLabelPrefix + "ipc-profile":     candidateIPCProfile,
+		containerLabelPrefix + "seccomp-profile": candidateSeccompProfile,
 	}
 }
 
@@ -146,7 +147,7 @@ func validContainerPlan(plan containerPlan) bool {
 func planCandidateContainer(raw []byte, image BackendImageInspection, owner containerOwner, roots containerRoots) (containerPlan, error) {
 	empty := containerPlan{}
 	parsed, err := appplatform.ParseDescriptor(raw)
-	if err != nil || parsed.Manifest.Backend == nil || !validContainerOwner(owner) || parsed.SHA256 != owner.ReleaseSHA256 || image.ReleaseSHA256 != owner.ReleaseSHA256 || image.Reference != parsed.Manifest.Backend.Image || !nativeImageID.MatchString(image.ImageID) {
+	if candidateSeccompError != nil || err != nil || parsed.Manifest.Backend == nil || !validContainerOwner(owner) || parsed.SHA256 != owner.ReleaseSHA256 || image.ReleaseSHA256 != owner.ReleaseSHA256 || image.Reference != parsed.Manifest.Backend.Image || !nativeImageID.MatchString(image.ImageID) {
 		return empty, ErrInvalidResponse
 	}
 	declared := false
@@ -171,7 +172,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	h.NetworkMode = "none"
 	h.ReadonlyRootfs = true
 	h.CapDrop = []string{"ALL"}
-	h.SecurityOpt = []string{"no-new-privileges:true"}
+	h.SecurityOpt = []string{"no-new-privileges:true", candidateSeccompOption}
 	h.Memory = int64(limits.MemoryMiB) << 20
 	h.MemorySwap = h.Memory
 	h.NanoCpus = int64(limits.CPUMillis) * 1000000

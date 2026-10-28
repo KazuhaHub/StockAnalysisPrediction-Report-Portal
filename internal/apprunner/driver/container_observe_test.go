@@ -41,7 +41,16 @@ func TestContainerObservationRejectsOwnershipAndPolicySubstitution(t *testing.T)
 		"unowned label": func(v map[string]any) {
 			v["Config"].(map[string]any)["Labels"].(map[string]any)[containerLabelPrefix+"extra"] = "foreign"
 		},
-		"network":    func(v map[string]any) { v["HostConfig"].(map[string]any)["NetworkMode"] = "host" },
+		"network": func(v map[string]any) { v["HostConfig"].(map[string]any)["NetworkMode"] = "host" },
+		"seccomp missing": func(v map[string]any) {
+			v["HostConfig"].(map[string]any)["SecurityOpt"] = []string{"no-new-privileges:true"}
+		},
+		"seccomp unconfined": func(v map[string]any) {
+			v["HostConfig"].(map[string]any)["SecurityOpt"] = []string{"no-new-privileges:true", "seccomp=unconfined"}
+		},
+		"seccomp broadened": func(v map[string]any) {
+			v["HostConfig"].(map[string]any)["SecurityOpt"] = []string{"no-new-privileges:true", strings.Replace(candidateSeccompOption, "SCMP_CMP_EQ", "SCMP_CMP_NE", 1)}
+		},
 		"privileged": func(v map[string]any) { v["HostConfig"].(map[string]any)["Privileged"] = true },
 		"capability": func(v map[string]any) { v["HostConfig"].(map[string]any)["CapAdd"] = []string{"SYS_ADMIN"} },
 		"host port": func(v map[string]any) {
