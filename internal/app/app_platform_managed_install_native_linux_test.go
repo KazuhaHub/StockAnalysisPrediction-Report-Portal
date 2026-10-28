@@ -193,6 +193,6 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			t.Fatal("registration preparation granted authority")
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
-		testNativeRegistrationRPC(t, endpoint, intent, raw, document)
+		testNativeRegistrationRPC(t, s, activated, endpoint, platformDigest(document))
 	}
 }

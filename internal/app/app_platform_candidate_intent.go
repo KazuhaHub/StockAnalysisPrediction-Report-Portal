@@ -32,6 +32,16 @@ func loadPlatformCandidateIntent(e migExec, lease platformOperationLease, runtim
 	return loadPlatformCandidateIntentState(e, lease, runtime, now, create, false)
 }
 func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create, applied bool) (platformCandidateIntent, bool, error) {
+	return loadPlatformCandidateIntentMode(e, lease, runtime, now, create, applied, false)
+}
+
+// Registration is the sole initial-install continuation allowed to have a third
+// effect. Its caller separately validates the exact activate effect/digest/receipt.
+// Persisted intent permits reconciliation without calling old health evidence fresh.
+func loadPlatformRegistrationCandidate(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCandidateIntent, bool, error) {
+	return loadPlatformCandidateIntentMode(e, lease, runtime, now, false, true, true)
+}
+func loadPlatformCandidateIntentMode(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create, applied, registration bool) (platformCandidateIntent, bool, error) {
 	var zero, result platformCandidateIntent
 	target, err := platformManagedTargetForOperation(e, lease.id)
 	if err != nil || target.RuntimeID != runtime.id {
@@ -96,8 +106,17 @@ func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, r
 			return zero, false, err
 		}
 	} else {
-		if candidates != 1 || effects != 2 {
+		if candidates != 1 || (effects != 2 && !(registration && effects == 3)) {
 			return zero, false, errAppPlatformStageEvidence
+		}
+		if registration && effects == 3 {
+			var deliveries int
+			if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate' AND effect_number=1 AND kind='activate' AND runtime_id=? AND controller_epoch=? AND admitted_fence=?`, lease.id, runtime.id, lease.controllerEpoch, lease.fence).Scan(&deliveries); err != nil {
+				return zero, false, err
+			}
+			if deliveries != 1 {
+				return zero, false, errAppPlatformStageEvidence
+			}
 		}
 		var storedRelease, storedNamespace, readiness string
 		var generation, policy, storedFormat int64
@@ -112,7 +131,7 @@ func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, r
 		if applied && lease.snapshot.Stage == appplatform.StageActivate {
 			result.readiness, err = journal.ParseCandidateReadiness([]byte(readiness))
 			observed, parseErr := strconv.ParseInt(result.readiness.ObservedMS, 10, 64)
-			if err != nil || parseErr != nil || !observedAt.Valid || observedAt.Int64 != observed || observed > now || now-observed > 3000 || updated < observed {
+			if err != nil || parseErr != nil || !observedAt.Valid || observedAt.Int64 != observed || observed > now || (now-observed > 3000 && !(registration && effects == 3)) || updated < observed {
 				return zero, false, errAppPlatformStageEvidence
 			}
 		} else if readiness != "{}" || observedAt.Valid || updated != created {

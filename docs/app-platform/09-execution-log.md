@@ -1204,3 +1204,30 @@ daemon workflow 40455635317 passed on the functional source as well.
   effect/scheduler integration, boot handshake, forwarding, broker/writer,
   activation and the remaining full platform scope are still outstanding.
   No schema, production/beta, real credentials or module versions changed.
+
+### Portal durable backend registration delivery
+
+- Added the third initial managed effect in the existing activate slot. Portal
+  derives material from its sealed installation seed, signs with its sealed
+  runtime controller key and retains the same effect/digest on envelope renewal.
+- Added fresh first-intent readiness and exact historical source checks, a narrow
+  old-health reconciliation path for already persisted delivery, root endpoint/
+  observation validation and transactional public receipt settlement. Operation
+  row revision advances; activation/grants remain unchanged.
+- Native fixture now uses actual Portal preparation/signing instead of sample
+  authorization. It requires both root settlement failure and Portal late audit
+  failure recovery, same inode, exact receipt, stale-lease refusal and replay.
+- SQLite/PostgreSQL delivery race passed (8.970 s together); broader SQLite
+  regressions passed (21.771 s), PostgreSQL regressions passed (20.955 s), runner/
+  CLI race passed (journal 84.606 s). Linux compilation, vet/staticcheck,
+  actionlint and 14 Python tests passed. Functional source
+  `2070308728c1f2512b6ff3695a8975b7ba7522a5` passed quota workflow 40623890666
+  (job 122604109031): actual Portal delivery effect settlement, RPC recovery and
+  owned cleanup keys are true; exact registry cleanup passed. Linux transport/
+  driver race passed in 4.816/1.604 s. General CI passed all app race shards/
+  aggregate, web checks/tests and Docker smoke, but retains the existing x/net
+  vulnerability gate failure and skipped non-race Test step.
+- See [Portal delivery effect](85-portal-backend-delivery-effect.md). Boot
+  handshake, forwarding, broker/writer, managed activation/scheduling and the
+  remaining full lifecycle/reference apps remain. No schema, production/beta,
+  real credentials or module versions changed.

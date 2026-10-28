@@ -52,23 +52,7 @@ func (s *Server) preparePlatformBackendRegistration(ctx context.Context, expecte
 	if err != nil {
 		return zero, err
 	}
-	parsed, err := appplatform.ParseDescriptor(candidate.descriptor)
-	if err != nil {
-		return zero, errAppPlatformStageEvidence
-	}
-	var sealed string
-	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=?`, expected.installationID).Scan(&sealed); err != nil {
-		return zero, err
-	}
-	if !strings.HasPrefix(sealed, sealPrefix) {
-		return zero, errAppPlatformStageEvidence
-	}
-	seed, err := aesOpen(dek, strings.TrimPrefix(sealed, sealPrefix), aad("app-platform", expected.installationID))
-	defer clear(seed)
-	if err != nil || len(seed) != 32 {
-		return zero, errAppPlatformStageEvidence
-	}
-	registration, err := appplatform.NewBackendRegistration(appplatform.BackendIdentity{AppID: parsed.Manifest.ID, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, InstallationID: expected.installationID, Generation: strconv.FormatUint(expected.snapshot.Generation, 10), PolicyRevision: "1", ReleaseSHA256: candidate.command.Payload.ReleaseSHA256}, seed)
+	registration, err := platformBackendRegistrationMaterial(e, expected, runtime, candidate, dek)
 	if err != nil {
 		return zero, err
 	}
@@ -95,5 +79,32 @@ func (s *Server) preparePlatformBackendRegistration(ctx context.Context, expecte
 		return zero, err
 	}
 	failed = false
+	return registration, nil
+}
+
+// Caller holds current operation/runtime/publisher authority in its transaction.
+func platformBackendRegistrationMaterial(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, candidate platformCandidateIntent, dek []byte) (appplatform.BackendRegistration, error) {
+	var zero appplatform.BackendRegistration
+	parsed, err := appplatform.ParseDescriptor(candidate.descriptor)
+	if err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	var sealed string
+	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=?`, expected.installationID).Scan(&sealed); err != nil {
+		return zero, err
+	}
+	if !strings.HasPrefix(sealed, sealPrefix) {
+		return zero, errAppPlatformStageEvidence
+	}
+	seed, err := aesOpen(dek, strings.TrimPrefix(sealed, sealPrefix), aad("app-platform", expected.installationID))
+	defer clear(seed)
+	if err != nil || len(seed) != 32 {
+		return zero, errAppPlatformStageEvidence
+	}
+	registration, err := appplatform.NewBackendRegistration(appplatform.BackendIdentity{AppID: parsed.Manifest.ID, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, InstallationID: expected.installationID, Generation: strconv.FormatUint(expected.snapshot.Generation, 10), PolicyRevision: "1", ReleaseSHA256: candidate.command.Payload.ReleaseSHA256}, seed)
+	if err != nil {
+		return zero, err
+	}
+
 	return registration, nil
 }
