@@ -245,6 +245,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case candidateReadinessQueryMagic:
+		s.handleCandidateResponseKind(ctx, conn, false, true)
+		return
 	case candidateExecutionQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return

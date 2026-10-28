@@ -20,6 +20,19 @@ PROBE_SPEC.loader.exec_module(probe)
 
 
 class ProjectQuotaProbeTests(unittest.TestCase):
+    def test_readiness_image_requires_owned_loopback_digest(self):
+        valid = "localhost:53001/portal-ready-fixture@sha256:" + "a" * 64
+        with patch.dict(probe.os.environ, {"APP_READY_NATIVE_IMAGE": valid}, clear=True):
+            self.assertEqual(probe.readiness_image_configuration(), valid)
+        for image in ["registry.example/app@sha256:" + "a" * 64,
+                      "localhost:0/portal-ready-fixture@sha256:" + "a" * 64,
+                      "localhost:65536/portal-ready-fixture@sha256:" + "a" * 64,
+                      "localhost:53001/other@sha256:" + "a" * 64,
+                      "localhost:53001/portal-ready-fixture:latest"]:
+            with patch.dict(probe.os.environ, {"APP_READY_NATIVE_IMAGE": image}, clear=True):
+                with self.assertRaises(RuntimeError):
+                    probe.readiness_image_configuration()
+
     def test_only_native_denials_with_real_filesystem_capacity_count(self):
         ample = SimpleNamespace(f_bavail=100000, f_frsize=4096, f_favail=10000)
         with patch.object(workload.os, "statvfs", return_value=ample):

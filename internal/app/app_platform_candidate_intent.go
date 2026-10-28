@@ -22,11 +22,15 @@ type platformCandidateIntent struct {
 	raw, signature, descriptor []byte
 	data                       journal.DataPreparationReceipt
 	dataSHA                    string
+	running                    journal.CandidateRunningReceipt
 }
 
 // The only candidate resource is the existing candidate activation row. Its
 // presence records intent, never readiness or live application access.
 func loadPlatformCandidateIntent(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create bool) (platformCandidateIntent, bool, error) {
+	return loadPlatformCandidateIntentState(e, lease, runtime, now, create, false)
+}
+func loadPlatformCandidateIntentState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create, applied bool) (platformCandidateIntent, bool, error) {
 	var zero, result platformCandidateIntent
 	target, err := platformManagedTargetForOperation(e, lease.id)
 	if err != nil || target.RuntimeID != runtime.id {
@@ -79,7 +83,7 @@ func loadPlatformCandidateIntent(e migExec, lease platformOperationLease, runtim
 	}
 	fresh := candidates == 0 && effects == 1
 	if fresh {
-		if !create {
+		if !create || applied {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		result.resourceID, err = platformNewUUID()
@@ -109,7 +113,19 @@ func loadPlatformCandidateIntent(e migExec, lease platformOperationLease, runtim
 		if err != nil {
 			return zero, false, err
 		}
-		if !platformValidUUID(result.effectID) || kind != "start-candidate" || runtimeID != runtime.id || epoch != lease.controllerEpoch || admitted != lease.fence || observed != 0 || state != "prepared" || receipt != "{}" || created < 0 || updated != created || updated > now {
+		if !platformValidUUID(result.effectID) || kind != "start-candidate" || runtimeID != runtime.id || epoch != lease.controllerEpoch || admitted != lease.fence || created < 0 || updated < created || updated > now {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		if applied {
+			if observed != lease.fence || state != "applied" {
+				return zero, false, errAppPlatformStageEvidence
+			}
+			result.running, err = journal.ParseCandidateRunningReceipt([]byte(receipt))
+			encoded, _ := json.Marshal(result.running)
+			if err != nil || string(encoded) != receipt {
+				return zero, false, errAppPlatformStageEvidence
+			}
+		} else if observed != 0 || state != "prepared" || receipt != "{}" || updated != created {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		result.command.PayloadSHA256 = digest
@@ -120,6 +136,9 @@ func loadPlatformCandidateIntent(e migExec, lease platformOperationLease, runtim
 		return zero, false, errAppPlatformStageEvidence
 	}
 	result.command = c
+	if applied && (!result.running.MatchesCommand(c) || result.running.Claim.DataReceiptSHA256 != result.dataSHA) {
+		return zero, false, errAppPlatformStageEvidence
+	}
 	if fresh {
 		if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms) VALUES(?,?,?,1,1,?,?,'candidate','{}',NULL,?,?)`, result.resourceID, lease.installationID, release, namespace, format, now, now); err != nil {
 			return zero, false, err
@@ -140,8 +159,18 @@ func validPlatformCandidateStage(lease platformOperationLease) bool {
 // Preparing intent does no native IO. Repeated calls retain the same resource,
 // effect and logical digest. Takeover/partial/unknown records require recovery.
 func (s *Server) preparePlatformInstallCandidate(ctx context.Context, expected platformOperationLease) (platformCandidateIntent, error) {
+	return s.preparePlatformCandidateIntent(ctx, expected, false)
+}
+func (s *Server) preparePlatformCandidateProbe(ctx context.Context, expected platformOperationLease) (platformCandidateIntent, error) {
+	return s.preparePlatformCandidateIntent(ctx, expected, true)
+}
+func (s *Server) preparePlatformCandidateIntent(ctx context.Context, expected platformOperationLease, probe bool) (platformCandidateIntent, error) {
 	var zero platformCandidateIntent
-	if !validPlatformCandidateStage(expected) {
+	valid := validPlatformCandidateStage(expected)
+	if probe {
+		valid = validPlatformReadinessStage(expected)
+	}
+	if !valid {
 		return zero, errAppPlatformStageEvidence
 	}
 	dek, err := s.dek()
@@ -176,7 +205,7 @@ func (s *Server) preparePlatformInstallCandidate(ctx context.Context, expected p
 	if err := validatePlatformInstallAuthority(e, expected, trust, facts.now); err != nil {
 		return zero, err
 	}
-	result, fresh, err := loadPlatformCandidateIntent(e, expected, runtime, facts.now, true)
+	result, fresh, err := loadPlatformCandidateIntentState(e, expected, runtime, facts.now, !probe, probe)
 	if err != nil {
 		return zero, err
 	}
@@ -196,7 +225,7 @@ func (s *Server) preparePlatformInstallCandidate(ctx context.Context, expected p
 	if err := validatePlatformInstallAuthority(e, expected, trust, now); err != nil {
 		return zero, err
 	}
-	if _, _, err := loadPlatformCandidateIntent(e, expected, runtime, now, false); err != nil {
+	if _, _, err := loadPlatformCandidateIntentState(e, expected, runtime, now, false, probe); err != nil {
 		return zero, err
 	}
 	issued := time.Now().UnixMilli()

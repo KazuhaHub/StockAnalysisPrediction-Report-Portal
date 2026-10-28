@@ -1076,3 +1076,24 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Actual readiness/writer/broker/registration, image fetching, managed scheduling,
   bounded socket storage, reconciliation and full lifecycle/reference apps remain.
   No schema, production/beta, module versions or real credentials changed.
+
+### Fresh managed backend readiness
+
+- Added the provisional bounded credential-free HTTP-over-Unix readiness contract,
+  actual container/data/mount/policy checks before and after the app response,
+  private socket owner/inode/peer verification and bounded no-redirect probing.
+- Added current journal authority/history checks around native IO, a separate
+  nonce-bound root readiness channel and opaque observation, plus Portal signing
+  and transactional candidate evidence/probe-to-activate settlement. It does not
+  activate the app or create app-use/writer/broker/registration grants.
+- Added a source-built actual backend and an owned localhost-only test registry
+  for native acceptance. The fixture must pass the prior startup recovery checks
+  and observe readiness from the actual running app before emitting its marker.
+- Local SQLite race regression passed (17.293 s), PostgreSQL candidate/data race
+  passed (13.184 s), runner/CLI race passed (journal 80.724 s), Linux compilation,
+  vet/staticcheck, shellcheck and 14 Python tests passed. Native acceptance is
+  pending; actual backend readiness is not claimed yet. See
+  [managed readiness details](80-managed-readiness.md).
+- Managed activation/registration/writer/broker, image fetching, bounded socket
+  storage, scheduling/startup, reconciliation and full lifecycle/reference apps
+  remain. No schema, production/beta, module versions or real credentials changed.
