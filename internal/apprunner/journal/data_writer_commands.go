@@ -33,6 +33,9 @@ func (s *Store) AdmitDataWriterCommand(ctx context.Context, raw, signature []byt
 // checks journal facts only; actual Docker/process exclusion is still mandatory
 // at a later physical adapter. Do not use it as a historical active-writer read.
 func validateDataWriterSource(ctx context.Context, tx *sql.Tx, v control.VerifiedDataWriterCommand, now int64) (DataPreparationReceipt, error) {
+	return loadDataWriterSource(ctx, tx, v, now, nil)
+}
+func loadDataWriterSource(ctx context.Context, tx *sql.Tx, v control.VerifiedDataWriterCommand, now int64, written *DataWriterReceipt) (DataPreparationReceipt, error) {
 	var zero DataPreparationReceipt
 	c, ref := v.Command(), v.Data()
 	stored, err := loadAdmittedCommand(ctx, tx, ref.EffectID)
@@ -71,7 +74,13 @@ func validateDataWriterSource(ctx context.Context, tx *sql.Tx, v control.Verifie
 		return zero, err
 	}
 	observed, _ := strconv.ParseInt(proof.ObservedMS, 10, 64)
-	if resource.observed != "present" || resource.revision != 2 || !resource.observedMS.Valid || resource.observedMS.Int64 != observed || resource.updated != observed || created < 0 || created > observed || updated != observed || observed > now || proof.ProjectID != strconv.FormatUint(uint64(reservation.ProjectID), 10) {
+	revision, resourceObserved, resourceUpdated := int64(2), observed, observed
+	if written != nil {
+		revision = 3
+		resourceObserved, _ = strconv.ParseInt(written.Native.ObservedMS, 10, 64)
+		resourceUpdated, _ = strconv.ParseInt(written.SettledMS, 10, 64)
+	}
+	if resource.observed != "present" || resource.revision != revision || !resource.observedMS.Valid || resource.observedMS.Int64 != resourceObserved || resource.updated != resourceUpdated || created < 0 || created > observed || updated != observed || observed > now || proof.ProjectID != strconv.FormatUint(uint64(reservation.ProjectID), 10) {
 		return zero, ErrFenceReconciliation
 	}
 	if err := requireDataRootHistory(ctx, tx, markerRoot(proof.Claim)); err != nil {

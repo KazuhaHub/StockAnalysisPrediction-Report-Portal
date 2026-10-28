@@ -202,30 +202,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 	path := filepath.Join(r.roots.Sockets, identity.InstallationID, identity.Generation, "http")
 	client, closeClient := r.client()
 	defer closeClient()
-	containers, err := readCandidateIPCInventory(ctx, client)
-	if err != nil {
+	if err := requireNoContainerMountReferences(ctx, client, path); err != nil {
 		return err
-	}
-	if containers == nil {
-		return ErrInvalidResponse
-	}
-	for _, container := range containers {
-		if !containerSHA.MatchString(container.ID) {
-			return ErrInvalidResponse
-		}
-		sources, err := candidateIPCMountSources(container.Mounts)
-		if err != nil {
-			return err
-		}
-		for _, source := range sources {
-			referenced, err := candidateIPCReferenced(ctx, path, source)
-			if err != nil {
-				return err
-			}
-			if referenced {
-				return ErrContainerConflict
-			}
-		}
 	}
 	pins, err := openMountDirectory(filepath.Dir(path), 0, 0, 0700)
 	if err != nil {

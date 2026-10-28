@@ -1455,3 +1455,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   This closes intent/claim guarding only. Native process exclusion, physical
   dispatch/opaque settlement, writable candidate/recovery, broker/activation and
   complete SDK/reference-app/P00–P14 acceptance remain incomplete.
+
+- Connected the initial signed one-shot writer claim to a concrete native driver
+  and atomic historical receipt settlement. Actual stopped/live Docker mount
+  references and local launch pins exclude permission changes; protected path,
+  allocation/image/platform/seccomp identities are rechecked around native IO.
+  Success advances volume revision 2->3 and writer unknown->applied together,
+  preserving original ownership. A current-authority historical reader supports
+  renewal without rewriting the original grant; it does not permit candidate
+  start. Added actual XFS/journal success and post-permission SQLite-failure
+  acceptance, plus the existing filtered writer trial through the native adapter.
+  See [writer execution and receipts](94-writer-execution-and-receipts.md).
+  Native acceptance is pending. Writable candidate/recovery/fencing, managed
+  activation, broker, SDK/reference apps and full platform acceptance remain.
+  No schema, production, dependency/toolchain, credential or beta changes.

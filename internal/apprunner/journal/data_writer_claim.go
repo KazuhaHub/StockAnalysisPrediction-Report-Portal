@@ -102,13 +102,36 @@ func (s *Store) beginDataWriter(ctx context.Context, raw, signature []byte, stat
 	}
 	var current string
 	var ack sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms FROM runner_commands WHERE effect_id=?`, index.EffectID).Scan(&current, &ack); err != nil {
+	var ownCreated, ownUpdated int64
+	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms,created_ms,updated_ms FROM runner_commands WHERE effect_id=?`, index.EffectID).Scan(&current, &ack, &ownCreated, &ownUpdated); err != nil {
 		return nil, zero, err
 	}
-	if ack.Valid || (receipt != nil && current != *receipt) {
+	if ack.Valid || (receipt != nil && current != *receipt) || ownCreated < 0 || ownUpdated < ownCreated || ownUpdated > now {
 		return nil, zero, ErrFenceReconciliation
 	}
-	source, err := validateDataWriterSource(ctx, tx, v, now)
+	var written *DataWriterReceipt
+	if state == "applied" {
+		parsed, err := ParseDataWriterReceipt([]byte(current))
+		if err != nil {
+			return nil, zero, err
+		}
+		written = &parsed
+		settled, _ := strconv.ParseInt(parsed.SettledMS, 10, 64)
+		claimed, _ := strconv.ParseInt(parsed.Claim.ClaimedMS, 10, 64)
+		if ownUpdated != settled || ownCreated > claimed {
+			return nil, zero, ErrFenceReconciliation
+		}
+	} else if state == "unknown" {
+		var m dataWriterClaimMarker
+		if !canonicalDataJSON(current, &m) {
+			return nil, zero, ErrFenceReconciliation
+		}
+		claimed, err := strconv.ParseInt(m.ClaimedMS, 10, 64)
+		if err != nil || ownUpdated != claimed || ownCreated > claimed {
+			return nil, zero, ErrFenceReconciliation
+		}
+	}
+	source, err := loadDataWriterSource(ctx, tx, v, now, written)
 	if err != nil {
 		return nil, zero, err
 	}
