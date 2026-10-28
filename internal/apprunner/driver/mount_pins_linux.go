@@ -121,6 +121,11 @@ func pinCandidateMounts(ctx context.Context, plan containerPlan, data candidateD
 			return fail(err)
 		}
 		pins.dirs = append(pins.dirs, dirs...)
+		if mount.Target == "/run/portal-app/http" {
+			if err := validateCandidateHTTPStorage(int(dirs[len(dirs)-1].file.Fd()), CandidateIdentity(plan.owner), true); err != nil {
+				return fail(err)
+			}
+		}
 		if mount.Target == "/data" {
 			st := dirs[len(dirs)-1].stat
 			if st.Ino != data.Inode || uint64(st.Dev) != data.Device {
@@ -175,6 +180,11 @@ func (p *candidateMountPins) validateLocked(ctx context.Context, plan containerP
 		var held unix.Stat_t
 		if unix.Fstat(int(pin.file.Fd()), &held) != nil || !mountStatEqual(held, pin.stat) {
 			return ErrUnsafeSocket
+		}
+		if pin.uid == 65532 && pin.gid == 65532 && pin.mode == 0700 {
+			if err := validateCandidateHTTPStorage(int(pin.file.Fd()), CandidateIdentity(plan.owner), true); err != nil {
+				return err
+			}
 		}
 		if pin.path == "/" {
 			continue

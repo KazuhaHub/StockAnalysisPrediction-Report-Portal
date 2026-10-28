@@ -71,13 +71,14 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 	// quota/writer admission evidence. Only the explicit lifecycle case starts
 	// the official inert fixture; no application health/data access is claimed.
 	for _, mount := range policy.HostConfig.Mounts {
-		if err := os.MkdirAll(mount.Source, 0700); err != nil {
-			t.Fatal(err)
-		}
 		if mount.Target == "/run/portal-app/http" {
-			if err := os.Chown(mount.Source, 65532, 65532); err != nil {
+			if err := os.MkdirAll(filepath.Dir(mount.Source), 0700); err != nil {
 				t.Fatal(err)
 			}
+			continue
+		}
+		if err := os.MkdirAll(mount.Source, 0700); err != nil {
+			t.Fatal(err)
 		}
 		if mount.Target == "/run/portal-app/broker" {
 			if err := os.Chmod(mount.Source, 0755); err != nil {
@@ -85,6 +86,7 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 			}
 		}
 	}
+	provisionNativeIPCFixture(t, policy.HostConfig.Mounts[1].Source, CandidateIdentity(owner))
 	var dataStat unix.Stat_t
 	if err := unix.Stat(policy.HostConfig.Mounts[0].Source, &dataStat); err != nil {
 		t.Fatal(err)

@@ -122,19 +122,6 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sockets)
-	for _, name := range []string{"http", "broker"} {
-		path := filepath.Join(sockets, c.InstallationID, c.TargetGeneration, name)
-		if err := os.MkdirAll(path, 0700); err != nil {
-			t.Fatal(err)
-		}
-		if name == "http" {
-			if err := os.Chown(path, 65532, 65532); err != nil {
-				t.Fatal(err)
-			}
-		} else if err := os.Chmod(path, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
 	native, err := driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
 	if err != nil {
 		t.Fatal(err)
@@ -214,6 +201,10 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 		if id := executionFixtureOwnedID(t, socket, c); id != "" {
 			executionFixtureDocker(t, socket, "container", "stop", "--time", "10", id)
 			executionFixtureDocker(t, socket, "container", "rm", id)
+		}
+		identity := driver.CandidateIdentity{DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID, ResourceID: c.Payload.ResourceID, NamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, Generation: c.TargetGeneration, ControlFence: c.InstallationFence, WriterFence: c.Payload.WriterFence}
+		if err := native.ReleaseCandidateHTTPStorage(context.Background(), identity); err != nil {
+			t.Error("owned IPC cleanup", err)
 		}
 	}()
 	authorityJSON, _ := json.Marshal(authority)

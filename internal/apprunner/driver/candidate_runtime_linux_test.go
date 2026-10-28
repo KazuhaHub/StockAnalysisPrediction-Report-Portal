@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"testing"
@@ -70,27 +69,25 @@ func TestNativeCandidateRuntime(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	for _, name := range []string{"http", "broker"} {
-		path := filepath.Join(socketRoot, owner.InstallationID, owner.Generation, name)
-		if err := os.MkdirAll(path, 0700); err != nil {
-			t.Fatal(err)
-		}
-		if name == "http" {
-			if err := os.Chown(path, 65532, 65532); err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			if err := os.Chmod(path, 0755); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+
 	native, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer native.Close()
 	request := CandidateLaunchRequest{Descriptor: raw, Platform: "linux/" + runtime.GOARCH, Identity: CandidateIdentity(owner), Data: CandidateDataEvidence{Root: pin, ProjectID: observed.ProjectID, Device: observed.Device, NamespaceInode: observed.Inode, QuotaBytes: observed.ByteLimit, QuotaInodes: observed.InodeLimit}}
+	if err := native.ProvisionCandidateSockets(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := native.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := native.ReleaseCandidateHTTPStorage(context.Background(), request.Identity); err != nil {
+			t.Error("owned IPC cleanup", err)
+		}
+	})
+
 	wrong := request
 	wrong.Data.NamespaceInode++
 	if launch, err := native.PrepareCandidate(context.Background(), wrong); err == nil {
@@ -125,6 +122,20 @@ func TestNativeCandidateRuntime(t *testing.T) {
 	}
 	if _, err := native.StartCandidate(context.Background(), launch); err == nil {
 		t.Fatal("native launch handle replayed")
+	}
+	if err := native.ReleaseCandidateHTTPStorage(context.Background(), request.Identity); err != ErrContainerConflict {
+		t.Fatal("live native pins did not block IPC cleanup", err)
+	}
+	other, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.ReleaseCandidateHTTPStorage(context.Background(), request.Identity); err != ErrContainerConflict {
+		other.Close()
+		t.Fatal("Docker mount reference did not block IPC cleanup", err)
+	}
+	if err := other.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if err := native.cleanupCandidate(context.Background(), launch, running); err != nil {
 		t.Fatal(err)

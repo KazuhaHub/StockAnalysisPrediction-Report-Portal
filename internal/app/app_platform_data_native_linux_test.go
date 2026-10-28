@@ -15,6 +15,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -156,12 +157,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx) }()
-	defer func() {
+	stopServer := sync.OnceFunc(func() {
 		cancel()
 		if err := <-done; err != nil {
 			t.Error(err)
 		}
-	}()
+	})
+	defer stopServer()
 	publicReader, publicWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +192,26 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			child.Env = append(child.Env, "PORTAL_MANAGED_READY=1")
 		}
 		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
-		defer checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+		defer func() {
+			stopServer()
+			commandPath := filepath.Join(childData, "candidate-command.json")
+			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			if err := native.Close(); err != nil {
+				t.Error(err)
+			}
+			if _, err := os.Stat(commandPath); err == nil {
+				message := readPlatformFixtureCandidate(t, commandPath, fixtureAuthority)
+				var c control.CandidateCommand
+				if json.Unmarshal(message.Raw, &c) != nil {
+					t.Error("invalid owned IPC fixture command")
+					return
+				}
+				identity := driver.CandidateIdentity{DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID, ResourceID: c.Payload.ResourceID, NamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, Generation: c.TargetGeneration, ControlFence: c.InstallationFence, WriterFence: c.Payload.WriterFence}
+				if err := native.ReleaseCandidateHTTPStorage(context.Background(), identity); err != nil {
+					t.Error("owned IPC cleanup", err)
+				}
+			}
+		}()
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}

@@ -24,6 +24,9 @@ func (*CandidateRuntime) PrepareCandidate(context.Context, CandidateLaunchReques
 func (*CandidateRuntime) ProvisionCandidateSockets(context.Context, CandidateLaunchRequest) error {
 	return ErrUnsupported
 }
+func (*CandidateRuntime) ReleaseCandidateHTTPStorage(context.Context, CandidateIdentity) error {
+	return ErrUnsupported
+}
 func (*CandidateRuntime) StartCandidate(context.Context, CandidateLaunch) (CandidateRunningObservation, error) {
 	return CandidateRunningObservation{}, ErrUnsupported
 }
