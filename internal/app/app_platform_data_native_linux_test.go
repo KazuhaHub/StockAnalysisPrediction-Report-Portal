@@ -267,6 +267,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not settle durable delivery")
 			}
 			t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_BOOT_VERIFIED")) {
+				t.Fatal("Portal did not verify actual backend boot")
+			}
+			t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
 			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_RPC")) {
 				t.Fatal("Portal did not use protected registration RPC")
 			}

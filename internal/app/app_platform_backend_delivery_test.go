@@ -34,7 +34,12 @@ func platformBackendDeliveryFixture(t *testing.T, pg bool) (*Server, platformOpe
 		t.Fatal(err)
 	}
 	c, d := intent.command, intent.data
-	now := time.Now().UnixMilli()
+	// Use the same database clock as the ledger; SQLite millisecond rounding
+	// can otherwise place a just-created row ahead of the host-clock fixture.
+	now, err := platformDatabaseNow(migExec{s: s.st, ex: s.st.db})
+	if err != nil {
+		t.Fatal(err)
+	}
 	r.DeploymentID, r.ControllerEpoch, r.ControlRevision, r.InstallationID, r.OperationID = c.DeploymentID, c.ControllerEpoch, c.ControlRevision, c.InstallationID, c.OperationID
 	r.Generation, r.WriterFence, r.PayloadSHA256, r.ReleaseSHA256, r.DataNamespaceID, r.DataFormat = c.TargetGeneration, c.Payload.WriterFence, c.PayloadSHA256, c.Payload.ReleaseSHA256, c.Payload.DataNamespaceID, c.Payload.DataFormat
 	r.Claim.ClaimID, r.Claim.EffectID, r.Claim.ResourceID, r.Claim.DataReceiptSHA256, r.Claim.AdmittedFence = platformFixtureID(9991), c.EffectID, c.Payload.ResourceID, intent.dataSHA, c.InstallationFence

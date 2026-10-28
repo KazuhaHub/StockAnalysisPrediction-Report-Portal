@@ -245,6 +245,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case backendHandshakeQueryMagic:
+		s.handleBackendHandshake(ctx, conn)
+		return
 	case backendRegistrationQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return

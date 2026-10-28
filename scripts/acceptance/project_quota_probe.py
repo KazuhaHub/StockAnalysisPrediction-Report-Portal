@@ -328,6 +328,9 @@ def main(args):
                             if "MANAGED_BACKEND_DELIVERY_COMMITTED" not in result.stdout:
                                 raise RuntimeError("Portal delivery effect settlement recovery missing")
                             report["native_portal_backend_delivery_committed"] = True
+                            if "MANAGED_BACKEND_BOOT_VERIFIED" not in result.stdout:
+                                raise RuntimeError("actual backend boot handshake missing")
+                            report["native_portal_backend_boot_verified"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

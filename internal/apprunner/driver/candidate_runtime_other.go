@@ -47,3 +47,7 @@ func (*CandidateRuntime) DeliverCandidateRegistration(context.Context, Candidate
 func (*CandidateRuntime) ObserveCandidateRegistration(context.Context, CandidateLaunch, string, string, []byte) (BackendRegistrationObservation, error) {
 	return BackendRegistrationObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) ExchangeCandidateHandshake(context.Context, CandidateLaunch, BackendRegistrationSnapshot, string) (BackendHandshakeObservation, error) {
+	return BackendHandshakeObservation{}, ErrUnsupported
+}
