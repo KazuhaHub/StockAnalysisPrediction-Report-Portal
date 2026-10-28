@@ -1021,8 +1021,12 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Added metadata/framing/zero-proof refusals and extended the actual non-root Portal
   acceptance to observe the configured root runtime, match a sample managed target,
   retain the old refusal and continue existing installation regression checks.
-  Native profile acceptance is pending current-source CI. See
-  [profile and Portal compatibility](77-managed-runtime-profile.md).
+  Functional source `71cadb7f17c992052977ce9a343f904d0864bda6` passed quota
+  workflow 40609387623 (job 122556907621): actual Portal profile and owned-cleanup
+  keys are true, execution_ready stays false, and Linux transport race passed in
+  4.469 s. Local full runner/CLI race passed (journal 79.429 s), focused Portal
+  race passed (2.462 s), 13 Python tests and Linux vet/staticcheck plus architecture
+  compilations passed. See [profile and Portal compatibility](77-managed-runtime-profile.md).
 - Managed review/data/start/probe lifecycle integration, staging/startup, native
   reconciliation and broker/registration/reference apps remain. No schema or
   production/beta configuration changed.

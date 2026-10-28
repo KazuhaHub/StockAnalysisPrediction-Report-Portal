@@ -98,8 +98,17 @@ journal/data provider. Its separately executed non-root Portal child then:
 
 The parent requires the child's `MANAGED_PROFILE_OBSERVED` marker. The script emits
 `native_portal_authenticated_managed_profile: true` only after that parent test
-actually passes with the marker. Current-source native profile acceptance is
-pending CI; earlier combined endpoint evidence does not prove this Portal consumer.
+actually passes with the marker. Functional source
+`71cadb7f17c992052977ce9a343f904d0864bda6` passed quota workflow
+[40609387623](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40609387623),
+job 122556907621. The completed enforcement log reports that Portal profile key
+and owned-resource cleanup as true; execution_ready remains false. Linux transport
+race checks passed in 4.469 s. General CI and daemon checks are separate.
+
+Local full runner/CLI race checks passed (journal 79.429 s), focused Portal race
+checks passed (2.462 s), all 13 Python probe tests passed, and Linux vet,
+repository-pinned staticcheck plus amd64/arm64 compilation passed. These checks do
+not complete managed review, stage execution or application readiness.
 
 ## Remaining work
 
