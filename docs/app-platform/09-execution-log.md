@@ -1366,3 +1366,16 @@ daemon workflow 40455635317 passed on the functional source as well.
   race/web/Docker jobs but retains the existing x/net vulnerability gate failure.
   The overall application framework, normal lifecycle, broker/writer, activation
   and SDK/reference-app acceptance remain incomplete.
+
+- Added an explicit frozen Moby-based seccomp profile to the closed candidate
+  policy, narrowing unrestricted ioctl access to four exact terminal/socket
+  requests while preserving the other upstream rules. Container observation
+  refuses missing/unconfined/broadened options. The actual ready fixture must
+  verify entrypoint identity, NoNewPrivs, zero effective capabilities, seccomp
+  mode, filesystem ioctl refusal and io_uring refusal before health is served;
+  parent/native probes require this evidence. Driver/transport local race passed
+  (2.244s/1.738s), and Linux amd64/arm64 fixture builds passed. Native acceptance
+  remains pending. See [candidate syscall boundary](91-candidate-seccomp.md).
+  Writable data, broker/writer authority, normal activation/lifecycle, SDK and
+  overall acceptance remain incomplete. No production/beta, schema, dependency,
+  toolchain or credential changes.

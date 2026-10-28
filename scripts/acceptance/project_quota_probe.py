@@ -313,6 +313,9 @@ def main(args):
                             if "MANAGED_INSTALL_READINESS" not in result.stdout:
                                 raise RuntimeError("Portal actual backend readiness did not execute")
                             report["native_portal_managed_backend_readiness"] = True
+                            if "CANDIDATE_SECCOMP_ENTRYPOINT_VERIFIED" not in result.stdout:
+                                raise RuntimeError("actual candidate entrypoint seccomp verification missing")
+                            report["native_candidate_seccomp_entrypoint_verified"] = True
                             if "MANAGED_BACKEND_REGISTRATION_MATERIAL" not in result.stdout:
                                 raise RuntimeError("Portal managed registration material was not prepared")
                             report["native_portal_managed_registration_material"] = True

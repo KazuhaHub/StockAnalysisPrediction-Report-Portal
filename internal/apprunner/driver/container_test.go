@@ -38,7 +38,7 @@ func TestContainerCreatePolicyIsClosed(t *testing.T) {
 	if h["Memory"] != float64(256<<20) || h["MemorySwap"] != h["Memory"] || h["NanoCpus"] != float64(500000000) || h["PidsLimit"] != float64(64) {
 		t.Fatal("reviewed limits changed", h)
 	}
-	if strings.Join(toStrings(h["CapDrop"]), ",") != "ALL" || strings.Join(toStrings(h["SecurityOpt"]), ",") != "no-new-privileges:true" {
+	if strings.Join(toStrings(h["CapDrop"]), ",") != "ALL" || strings.Join(toStrings(h["SecurityOpt"]), ",") != "no-new-privileges:true,"+candidateSeccompOption {
 		t.Fatal("capabilities changed", h)
 	}
 	mounts := h["Mounts"].([]any)

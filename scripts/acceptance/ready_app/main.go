@@ -17,6 +17,10 @@ import (
 )
 
 func main() {
+	if err := verifyFixtureSeccomp(); err != nil {
+		os.Stderr.WriteString("native fixture seccomp verification failed: " + err.Error() + "\n")
+		os.Exit(7)
+	}
 	var bootNonce [16]byte
 	if _, err := rand.Read(bootNonce[:]); err != nil {
 		os.Exit(6)

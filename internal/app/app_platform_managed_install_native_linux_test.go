@@ -165,6 +165,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			t.Fatal("stale readiness stage recommitted")
 		}
 		t.Log("MANAGED_INSTALL_READINESS")
+		t.Log("CANDIDATE_SECCOMP_ENTRYPOINT_VERIFIED")
 		registration, err := s.preparePlatformBackendRegistration(ctx, activated)
 		if err != nil {
 			t.Fatal("managed registration material", err)
