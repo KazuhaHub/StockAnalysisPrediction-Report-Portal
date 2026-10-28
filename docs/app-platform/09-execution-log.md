@@ -1782,3 +1782,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   denial acceptance. Fresh Linux/native results pending; full lifecycle transport
   and current Portal boot consumer/viewer/activation remain unfinished. No
   production/beta changes or SDK freeze.
+
+- Writable handshake transport source `898ea6907be1a6de7a8396e537b13ec84924b846`
+  passed quota workflow 40788152465/job 123166422651 and daemon workflow
+  40788152469/job 123166422265. Actual new writable backend, configured non-root
+  controller/root listener handshake, independent MAC/boot verification, wrong
+  UID/group denial and owned cleanup passed. Both new cross-UID/peer-denial
+  evidence flags and prior native writable checks are true. Full runner race
+  passed (journal 210.813s; transport 6.039s), plus local dual-arch builds,
+  vet/staticcheck and Python14. General workflow 40788152521 passed app race
+  shards/aggregate, web and Docker checks; Go job 123166423307 retained existing
+  x/net vulnerabilities GO-2026-6866/6860 after staticcheck, skipping ordinary tests.
+  See [transport acceptance](105-writable-handshake-transport.md). Full writable
+  lifecycle transport, Portal boot/viewer/activation/worker, physical lifecycle,
+  broker, SDK/reference apps and full P00–P14 acceptance remain unfinished.
+  Production, real credentials, Status, SDK freeze and beta unchanged.

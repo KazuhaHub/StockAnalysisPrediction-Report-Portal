@@ -119,9 +119,33 @@ but Portal current operation/boot integration remains unfinished.
 
 Local full runner race passed (transport 1.285s; other packages cached), portable
 fixture/proof race passed in 1.451s, platform regression cached. Linux amd64/arm64
-transport test builds, vet and Linux staticcheck passed before adding composed
-native acceptance; its updated build/static checks and fresh Linux workflows are
-pending. Passing an existing quota/daemon test alone is not new composed evidence.
+transport test builds, vet and Linux staticcheck passed, including the composed
+native fixture build/static checks; Python acceptance tests passed (14 tests).
+
+Functional source `898ea6907be1a6de7a8396e537b13ec84924b846` passed disposable
+quota workflow [40788152465](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40788152465),
+job 123166422651. Checkout identifies that exact source merged into its parent.
+Both `native_writable_handshake_cross_uid_verified` and
+`native_writable_handshake_controller_peer_denial_verified` are true. Prior native
+writable source/writer/start/recovery/readiness/delivery/handshake checks remained
+true, including file replacement refusal and journal preservation.
+`owned_resources_cleaned` is true and the owned registry cleanup step passed.
+This is actual composed channel/backend evidence, not inferred from a mock test.
+The separate daemon workflow
+[40788152469](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40788152469),
+job 123166422265, passed on the same functional source. Full Linux runner race
+passed: control 1.821s, data 1.011s, driver 2.950s, journal 210.813s,
+transport 6.039s and runner command 1.030s. The daemon's closed policy,
+controller/runner identity and Portal root-endpoint confirmation steps also passed.
+
+General workflow
+[40788152521](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40788152521)
+passed all three app race shards and their aggregate, all web tests/build checks,
+workflow lint and Docker smoke/font checks. Go job 123166423307 passed build,
+vet and staticcheck, then failed at existing `golang.org/x/net@v0.60.0`
+vulnerabilities GO-2026-6866 and GO-2026-6860 (fixed version reported v0.62.0);
+its subsequent ordinary test step was skipped. The full general workflow is
+therefore not green. Dependencies/toolchain remain unchanged in this change.
 
 ## Next dependency
 
