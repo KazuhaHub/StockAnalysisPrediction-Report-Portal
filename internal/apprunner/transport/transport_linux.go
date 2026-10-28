@@ -258,6 +258,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		defer executionStop()
 		s.handleBackendRequest(executionCtx, conn)
 		return
+	case writableBackendHandshakeQueryMagic:
+		s.handleWritableBackendHandshake(ctx, conn)
+		return
 	case backendHandshakeQueryMagic:
 		s.handleBackendHandshake(ctx, conn)
 		return
