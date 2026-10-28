@@ -1548,3 +1548,35 @@ daemon workflow 40455635317 passed on the functional source as well.
   after staticcheck in Go job 122822991559. This closes initial intent/source
   binding only, not reservation, writable native execution, readiness/activation,
   SDK/reference apps or full P00–P14 acceptance. Production and beta unchanged.
+
+- Added exact writable candidate resource reservation, current prepared-resource
+  reads and process-local one-shot claims. Stable ownership binds original data/
+  writer receipt bytes and source tuple while allowing current-key prepared
+  renewal; higher fences and unknown restart/copy/JSON takeover refuse. Only the
+  independently validated pending resource extends the strict source history.
+  Unknown claim state commits before invocation, current authority/source/resource
+  is rechecked after IO, signed expiry/cancellation is bounded and Close waits
+  before releasing journal ownership. Callback success creates no running/ready
+  evidence. Added real SQLite/crypto concurrency/drift/renewal/deadline/Close
+  tests and actual XFS-source read-only invocation acceptance for both writer
+  receipt kinds. See [writable reservation and claims](97-writable-candidate-reservation-and-claims.md).
+  Native acceptance is pending. Concrete writable native preflight/start/opaque
+  settlement, readiness/registration/activation, broker, SDK/reference apps and
+  full platform acceptance remain incomplete. No schema or production/beta changes.
+
+- Writable reservation/claim functional source
+  `62eb67278c259b39359ea6867b6d0765bc044890` passed quota workflow
+  40694331237/job 122836964588 and daemon workflow 40694331553/job 122836965353.
+  Both actual writer receipt kinds pass exact pending reservation and one-shot
+  invocation with unchanged XFS allocation; command remains unknown and resource
+  pending revision 1 without native observation. The new actual-source claim flag
+  and existing intent/writer/recovery/filtered-quota/current-viewer/owned-cleanup
+  evidence are true. Linux control/appplatform/transport/driver race passed in
+  1.448/1.396/4.854/2.461s; full daemon journal race passed in 179.838s. Local full
+  runner race, expanded claim/renewal/Close tests, platform regression, dual-arch
+  compilation, vet/staticcheck and Python14 passed. General workflow 40694331560
+  passed all app race shards/aggregate, web/Docker/workflow checks, retaining
+  the existing x/net vulnerability gate failure after staticcheck in Go job
+  122836966930. Concrete writable native preflight/start/opaque settlement,
+  readiness/registration/activation, SDK/reference apps and complete P00–P14
+  acceptance remain incomplete. No production or beta changes.
