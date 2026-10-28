@@ -149,8 +149,25 @@ requires the native markers before emitting
 Local full runner race passed (journal 123.129s, transport 1.589s; other runner
 packages cached), expanded writable race passed in 21.627s and platform regression
 passed in 8.321s. Linux amd64/arm64 journal test builds, vet, Linux staticcheck
-and all 14 Python probe tests passed. Actual native results are pending. Reopening Store
-objects is not full daemon crash/relaunch acceptance. Production, real
+and all 14 Python probe tests passed.
+
+Functional source `deaa01f19666e769dfba983d48bd956b5410d9d3` passed quota workflow
+40761567921/job 123074574861 and daemon workflow 40761567968/job 123074574054.
+The quota report requires and records all three new writable process flags as
+true, alongside original source claims, concrete driver execution, filtered
+writer/quota, current viewer and owned-resource cleanup evidence. Linux
+control/appplatform/transport/driver race passed in 1.693/1.570/5.304/2.978s.
+The daemon's full runner journal race passed in 184.912s, followed by actual
+container policy/IPC, distinct identity and root endpoint acceptance.
+
+General workflow 40761567937 passed all three app race shards, all web test
+shards, web lint/typecheck/build, Docker image/smoke and workflow lint checks.
+Go job 123074574375 passed build/vet/staticcheck, then failed the existing
+`golang.org/x/net@v0.60.0` vulnerability gate (GO-2026-6866 and GO-2026-6860);
+its subsequent ordinary test step did not execute. This dependency remains
+unchanged; the separate runner/app race results above do not make that gate pass.
+
+Reopening Store objects is not full daemon crash/relaunch acceptance. Production, real
 credentials, Status adoption, beta configuration, dependencies/toolchain and
 public SDK remain unchanged.
 

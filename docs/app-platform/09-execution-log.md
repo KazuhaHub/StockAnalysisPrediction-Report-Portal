@@ -1625,3 +1625,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   is pending. Unknown-start observation recovery, readiness/registration/
   activation, broker, SDK/reference apps and full acceptance remain incomplete.
   No schema, production, credential, dependency/toolchain or beta changes.
+
+- Writable running receipt source `deaa01f19666e769dfba983d48bd956b5410d9d3`
+  passed quota workflow 40761567921/job 123074574861 and daemon workflow
+  40761567968/job 123074574054. Actual native preflight-before-create, successful
+  process settlement and post-start atomic commit failure preservation all
+  passed, with exact owned cleanup and existing source/writer/viewer checks.
+  Full Linux journal race passed in 184.912s; local full runner race and platform
+  regression, dual-architecture journal builds, vet/staticcheck and Python14
+  passed. General workflow 40761567937 passed all app race shards, web and Docker
+  checks; Go job 123074574375 retained the existing x/net vulnerability gate
+  failure after staticcheck. Historical owner reopen/reference renewal passed;
+  full daemon crash/relaunch and unknown-process observation recovery remain
+  unfinished, as do writable readiness/registration/activation, broker, SDK,
+  reference apps and full release acceptance. No production or beta changes.
