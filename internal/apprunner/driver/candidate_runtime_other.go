@@ -26,3 +26,7 @@ func (*CandidateRuntime) StartCandidate(context.Context, CandidateLaunch) (Candi
 }
 
 func (*CandidateRuntime) CheckConfiguration(context.Context) error { return ErrUnsupported }
+
+func (*CandidateRuntime) CheckSharedRootConfiguration(context.Context, *data.Root, data.RootIdentity) error {
+	return ErrUnsupported
+}

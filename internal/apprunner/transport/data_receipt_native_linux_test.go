@@ -220,14 +220,19 @@ func TestNativeReceiptChild(t *testing.T) {
 		}
 		return
 	}
-	proof, err := ReadControllerDataReceipt(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	var proof DataReceiptObservation
+	if os.Getenv("RECEIPT_OPERATION") == "prepare" {
+		proof, err = PrepareControllerData(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	} else {
+		proof, err = ReadControllerDataReceipt(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	}
 	if action != "accepted" {
 		if err == nil || !proof.ReceivedAt().IsZero() {
 			t.Fatal("unauthorized receipt received")
 		}
 		return
 	}
-	if err != nil || proof.Receipt().NamespaceInode != os.Getenv("RECEIPT_INODE") || proof.Receipt().Format != os.Getenv("RECEIPT_FORMAT") {
+	if err != nil || proof.Receipt().NamespaceInode == "" || (os.Getenv("RECEIPT_INODE") != "" && proof.Receipt().NamespaceInode != os.Getenv("RECEIPT_INODE")) || proof.Receipt().Format != os.Getenv("RECEIPT_FORMAT") {
 		t.Fatal("cross-UID actual receipt unavailable", err)
 	}
 	if endpoint := proof.Endpoint(); !endpoint.RootController || endpoint.RunnerUID != 0 || endpoint.ControllerUID != controllerTestUID || endpoint.ControllerGID != controllerTestGID || endpoint.Path != path {

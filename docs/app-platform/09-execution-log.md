@@ -988,3 +988,17 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Portal stage integration, combined provisioning, native reconciliation, readiness,
   writer/broker access and managed registration/lifecycle remain. No schema or
   production/beta configuration changed.
+
+### Shared managed data/start endpoint
+
+- Added one explicit root/controller constructor for data preparation and candidate
+  execution with one shared journal and the exact same borrowed concrete provider
+  and root pin. Narrow read/data/candidate constructors retain their capability sets.
+- Added object/pin mismatch refusal before socket creation and extended the actual
+  Linux fixture to prepare a fresh namespace from a separate controller process,
+  inspect/replay that native evidence, then launch/read/replay a candidate through
+  the same endpoint. No in-process data dispatch shortcut remains in that fixture.
+- Native combined acceptance is pending current-source CI. See
+  [shared managed endpoint](76-managed-runtime-endpoint.md). Portal stage delivery,
+  automatic startup/staging, reconciliation, readiness/writer/broker access and
+  registration/lifecycle remain. No schema or production/beta configuration changed.

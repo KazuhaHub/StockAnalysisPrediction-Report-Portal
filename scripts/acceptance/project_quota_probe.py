@@ -306,6 +306,8 @@ def main(args):
                             raise RuntimeError("native candidate execution channel failed: " + (result.stdout+result.stderr)[-4096:])
                         report["native_candidate_execution_cross_uid_actual_start"] = True
                         report["native_candidate_execution_replay_same_native_id"] = True
+                        report["native_managed_endpoint_shared_provider_refusal"] = True
+                        report["native_managed_endpoint_data_and_candidate_cross_uid"] = True
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
