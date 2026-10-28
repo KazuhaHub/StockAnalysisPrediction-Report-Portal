@@ -89,7 +89,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err != nil || string(canonical) != raw {
 		return errAppPlatformStageEvidence
 	}
-	if (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat) || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI {
+	if (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat && p.Format != platformManagedInstallFormat) || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI {
 		return errAppPlatformStageEvidence
 	}
 	verified, err := platformVerifyStoredRelease(e, target.String, trustRevision, trust, now)
@@ -103,12 +103,21 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 		return err
 	}
 	var currentApp, currentPublisher, desired, phase string
+	var runtimeID sql.NullString
 	var generation, policy int64
-	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,generation,policy_revision FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&currentApp, &currentPublisher, &desired, &phase, &generation, &policy); err != nil {
+	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,generation,policy_revision,runtime_id FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&currentApp, &currentPublisher, &desired, &phase, &generation, &policy, &runtimeID); err != nil {
 		return err
 	}
 	if currentApp != appID || currentPublisher != publisher || desired != "enabled" || phase != "pending" || generation != 1 || policy != 1 {
 		return errAppPlatformStageEvidence
+	}
+	if lease.snapshot.Managed != (p.Format == platformManagedInstallFormat) || runtimeID != managedInstallRuntimeID(p) {
+		return errAppPlatformStageEvidence
+	}
+	if p.Format == platformManagedInstallFormat {
+		if err := validateManagedInstallTarget(e, p.Runtime, lease.controllerEpoch); err != nil {
+			return err
+		}
 	}
 	var descriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, target.String).Scan(&descriptor); err != nil {
@@ -118,10 +127,10 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err != nil {
 		return errAppPlatformStageEvidence
 	}
-	if err := platformInstallRequirements(parsed.Manifest); err != nil {
+	if err := installRequirementsForTarget(parsed.Manifest, p.Format, p.Runtime); err != nil {
 		return err
 	}
-	expected := platformInstallProjection{Format: p.Format, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: append([]string{}, parsed.Manifest.Capabilities.Optional...), DataQuotaBytes: 256 << 20}
+	expected := platformInstallProjection{Format: p.Format, Runtime: p.Runtime, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: append([]string{}, parsed.Manifest.Capabilities.Optional...), DataQuotaBytes: 256 << 20}
 	quota, err := platformInstallProfileQuota(p.Format, parsed.Manifest)
 	if err != nil || p.DataQuotaBytes != quota {
 		return errAppPlatformStageEvidence
@@ -190,11 +199,14 @@ func (s *Store) advancePlatformInstallStagingContext(ctx context.Context, expect
 }
 func (s *Store) advancePlatformInstallLocalStage(ctx context.Context, expected platformOperationLease, frontendData bool) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 {
+	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Generation != 1 {
 		return zero, errAppPlatformStageEvidence
 	}
 	nextByStage := map[appplatform.Stage]appplatform.Stage{appplatform.StageQueued: appplatform.StageValidate, appplatform.StageValidate: appplatform.StageDownload, appplatform.StageDownload: appplatform.StageStage, appplatform.StageStage: appplatform.StagePrepareData}
 	next, ok := nextByStage[expected.snapshot.Stage]
+	if frontendData && expected.snapshot.Managed {
+		return zero, errAppPlatformStageEvidence
+	}
 	if frontendData {
 		next, ok = appplatform.StageActivate, expected.snapshot.Stage == appplatform.StagePrepareData
 	}

@@ -1030,3 +1030,19 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Managed review/data/start/probe lifecycle integration, staging/startup, native
   reconciliation and broker/registration/reference apps remain. No schema or
   production/beta configuration changed.
+
+### Managed installation review and data preparation
+
+- Added explicit development managed review/admission with fresh authenticated
+  runtime targets, exact canonical plan/replay binding and persistent managed
+  installation/runtime identity. Generic HTTP installation remains static.
+- Reused current publisher/admin/lease/fence staging authority and signed native
+  data preparation. Managed receipt settlement advances to `start`, retaining
+  pending installation/no activation/no access; static completion stays unchanged.
+- SQLite focused race regression passed (19.656 s); Linux amd64/arm64 Portal test
+  compilation, vet/staticcheck and all 13 Python acceptance-script tests passed.
+  PostgreSQL focused race regression also passed. Real Linux native acceptance
+  is pending; native completion is not claimed yet. See [managed data details](78-managed-install-data.md).
+- Signed candidate intent/start/probe, staging/startup, managed scheduling,
+  reconciliation, writer/broker/registration and complete lifecycle/reference-app
+  acceptance remain. No schema, production/beta or real credentials changed.

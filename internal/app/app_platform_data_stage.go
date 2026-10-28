@@ -44,6 +44,11 @@ func (s *Server) dispatchPlatformInstallData(ctx context.Context, expected platf
 	if err != nil {
 		return platformOperationLease{}, err
 	}
+	if expected.snapshot.Managed {
+		if err := s.checkPlatformManagedDataRoot(ctx, expected, intent, endpoint); err != nil {
+			return platformOperationLease{}, err
+		}
+	}
 	proof, err := platformPrepareData(ctx, endpoint, intent)
 	if err != nil {
 		return platformOperationLease{}, err
@@ -66,7 +71,7 @@ func validPlatformDataObservation(observation platformDataObservation, intent pl
 // effect and operation updates commit together; this is not app activation.
 func (s *Server) commitPlatformObservedData(ctx context.Context, expected platformOperationLease, intent platformDataIntent, endpoint platformRuntimeEndpoint, observation platformDataObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 || expected.snapshot.Stage != appplatform.StagePrepareData || expected.rowRevision == math.MaxInt64 {
+	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Generation != 1 || expected.snapshot.Stage != appplatform.StagePrepareData || expected.rowRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
 	}
 	intent.raw, intent.signature = bytes.Clone(intent.raw), bytes.Clone(intent.signature)
@@ -139,6 +144,12 @@ func (s *Server) commitPlatformObservedData(ctx context.Context, expected platfo
 	if _, err := journal.ParseDataPreparationReceipt(raw); err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	if expected.snapshot.Managed {
+		target, err := platformManagedTargetForOperation(e, expected.id)
+		if err != nil || target.RuntimeID != runtime.id || observation.receipt.Claim.RootFilesystemUUID != target.Profile.RootFilesystemUUID || observation.receipt.Claim.RootInode != target.Profile.RootInode {
+			return zero, errAppPlatformStageEvidence
+		}
+	}
 	schema, _ := strconv.ParseInt(current.command.Payload.DataFormat, 10, 64)
 	used, _ := strconv.ParseInt(observation.receipt.UsedBytes, 10, 64)
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
@@ -157,14 +168,18 @@ func (s *Server) commitPlatformObservedData(ctx context.Context, expected platfo
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	next, err := model.Advance(expected.snapshot.Revision, appplatform.StageActivate)
+	nextStage := appplatform.StageActivate
+	if expected.snapshot.Managed {
+		nextStage = appplatform.StageStart
+	}
+	next, err := model.Advance(expected.snapshot.Revision, nextStage)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
 	result := expected
 	result.snapshot = next.Snapshot()
 	result.rowRevision++
-	changed, err = e.exec(`UPDATE app_platform_operations SET stage='activate',state_revision=?,row_revision=row_revision+1,updated_ms=? WHERE id=? AND installation_id=? AND stage='prepare_data' AND state_revision=? AND row_revision=? AND controller_epoch=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, int64(result.snapshot.Revision), now, expected.id, expected.installationID, int64(expected.snapshot.Revision), expected.rowRevision, expected.controllerEpoch, expected.fence, expected.owner, expected.leaseUntilMS, now)
+	changed, err = e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=? WHERE id=? AND installation_id=? AND stage='prepare_data' AND state_revision=? AND row_revision=? AND controller_epoch=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, string(nextStage), int64(result.snapshot.Revision), now, expected.id, expected.installationID, int64(expected.snapshot.Revision), expected.rowRevision, expected.controllerEpoch, expected.fence, expected.owner, expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
@@ -172,7 +187,7 @@ func (s *Server) commitPlatformObservedData(ctx context.Context, expected platfo
 		Stage     string `json:"stage"`
 		Namespace string `json:"namespace_id"`
 		Effect    string `json:"effect_id"`
-	}{"activate", current.namespaceID, current.effectID})
+	}{string(nextStage), current.namespaceID, current.effectID})
 	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.operation_stage','app_platform_operation',?,?,'')`, time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 		return zero, err
 	}
