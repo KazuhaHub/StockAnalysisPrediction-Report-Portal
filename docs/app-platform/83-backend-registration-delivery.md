@@ -105,8 +105,23 @@ checks historical replay. The acceptance script requires
 
 Local focused journal race, full runner/CLI race (journal 85.947 s), focused
 Portal SQLite/managed regressions (15.951 s), Linux amd64/arm64 compilation,
-vet/staticcheck and 14 Python tests passed. Native workflow evidence remains
-pending for this phase; compilation does not prove physical publication.
+vet/staticcheck and 14 Python tests passed. Functional source
+`fbbaadb617726438f74aed016894bc4f23122377` passed native quota workflow
+[40620897099](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40620897099),
+job 122594632732: `native_backend_registration_delivery_reconciled`, actual
+backend readiness and owned cleanup are true; exact registry cleanup passed.
+The root native candidate test also invokes the atomic-publication contract,
+so cancellation/no-overwrite/temporary-file checks execute under Linux root.
+Linux transport/driver race passed in 4.630/1.602 s. These results prove actual
+protected publication and same-inode recovery, not application consumption,
+handshake or production controller RPC.
+
+Daemon probe 40620896826 also passed. General CI 40620897103 completed with all
+three app race shards and aggregate, web checks/test shards, workflow lint and
+Docker smoke passing. Go job 122594659749 passed build/vet/staticcheck and market
+validation, then failed the existing x/net v0.60.0 vulnerability gate
+(GO-2026-6866 and GO-2026-6860, reported fixed in v0.62.0), skipping the following
+non-race Test step. General CI is not all green.
 
 ## Remaining platform work
 
