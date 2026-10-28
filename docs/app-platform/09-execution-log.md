@@ -1301,3 +1301,37 @@ daemon workflow 40455635317 passed on the functional source as well.
   writer, bounded socket storage, activation/scheduling and full lifecycle/SDK/
   reference-app acceptance remain. Production, beta, dependencies and schemas
   are unchanged.
+
+- Connected a private current-viewer managed request path to the native relay.
+  A completed operation selects immutable source history through an explicit
+  source tuple, without manufacturing or renewing a worker lease. Admission
+  validates current sessions, actual OU/user audience, current policy/trust and
+  runtime plus the exact three applied source effects. It keeps mutable audience
+  policy separate from the original bootstrap policy/key/document. The host
+  obtains a fresh actual boot challenge, repeats current admission before signing,
+  forwards once, and repeats admission before releasing the buffered response.
+  Post-dispatch failure is outcome-uncertain with no automatic retry. Public
+  managed launch/activation remain closed. Related SQLite race passed (20.211s),
+  PostgreSQL race passed (13.384s), broader local platform regression passed
+  (8.125s); Linux amd64 compilation, vet/default Linux staticcheck and 14 Python
+  tests passed. The dedicated PG cluster is stopped. Native acceptance now
+  requires actual current-viewer writes, audience-only policy change, post-IO
+  revocation/result suppression and a physical execution counter; its complete/
+  active Portal rows are explicitly seeded, not a normal activator. See
+  [current managed viewer requests](89-current-managed-viewer-requests.md).
+  Normal activation/root acknowledgement lifetime, broker/writer, bounded socket
+  storage, full lifecycle, SDK/reference-app and production acceptance remain.
+  No schema, dependency, production/beta or real-credential changes.
+
+- Functional source `a23114a9f4dc5d6eb6cafbad77c0a6980b0bedee` passed native
+  workflow 40640341083/job 122656764332: current-viewer and independently signed
+  request relay verification plus owned-resource/registry cleanup succeeded.
+  Linux control/appplatform/transport/driver race passed in
+  1.430/1.675/5.420/2.025s. The first native run correctly failed a missing child
+  evidence forwarding marker; parent and outer probe now both require it. The
+  final envelope binding check also passed local request race (2.685s), and
+  Linux arm64 compilation passed. General workflow 40640341091 retains the
+  existing x/net GO-2026-6866/6860 vulnerability failure, not an all-green release.
+  The real native fixture's write is an in-memory execution counter; filesystem
+  writer authorization, normal managed activation and remaining release gates
+  are not claimed complete.

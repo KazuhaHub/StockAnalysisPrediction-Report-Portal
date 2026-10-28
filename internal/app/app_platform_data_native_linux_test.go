@@ -275,6 +275,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("native backend request relay missing")
 			}
 			t.Log("MANAGED_BACKEND_REQUEST_RELAY_VERIFIED")
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")) {
+				t.Fatalf("current viewer request verification missing from controller child: %s", output.String())
+			}
+			t.Log("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")
 			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_RPC")) {
 				t.Fatal("Portal did not use protected registration RPC")
 			}

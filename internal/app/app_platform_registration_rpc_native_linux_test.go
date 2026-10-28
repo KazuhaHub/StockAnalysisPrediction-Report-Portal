@@ -217,6 +217,7 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 	}
 	t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
 	testNativeBackendRequestRelay(t, endpoint, observed, boot)
+	testNativeManagedViewerRequest(t, s, committed, endpoint, boot)
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
 	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
 }
