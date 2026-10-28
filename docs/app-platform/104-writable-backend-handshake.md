@@ -120,7 +120,28 @@ Every prior real writer/start/recovery/readiness/file delivery and owned cleanup
 check must continue passing. Focused handshake race passed (journal 6.241s,
 driver 1.294s), platform regression passed in 8.073s. Linux amd64/arm64 journal
 and arm64 driver test builds, vet, Linux staticcheck and all 14 Python probe tests
-passed. Full runner race and actual native acceptance are pending.
+passed. Full local runner race passed (journal 153.907s, driver 1.898s,
+transport 1.321s; control/data cached).
+
+Functional source `9543e04253038fd8c1fdd21de081cffad01877ef` passed actual quota
+workflow 40786578360/job 123161172419. All four new handshake possession,
+same-content inode refusal, journal preservation and stopped-backend refusal
+flags are true, alongside owned-resource cleanup and prior writable checks.
+Linux control/appplatform/transport/driver race passed in
+2.011/1.593/5.360/3.077s. Actual backend answers were independently verified by
+the host signer, including challenge/key refusal and stable nonempty boot ID.
+
+Daemon workflow 40786578356/job 123161172391 passed full Linux journal race
+in 223.745s, followed by actual native policy/IPC, distinct controller/runner
+identity and Portal root endpoint acceptance. This does not establish complete
+writable controller transport, pairing state, activation or daemon crash/relaunch.
+
+General workflow 40786578414 passed app race shards/aggregate, all web test
+shards, lint/typecheck/build, workflow lint and Docker image/smoke checks. Go job
+123161173409 passed build/vet/staticcheck then failed the existing
+`golang.org/x/net@v0.60.0` vulnerability gate (GO-2026-6866/GO-2026-6860);
+its subsequent ordinary test did not run. Dependencies remain unchanged and
+separate successful checks do not clear that gate.
 
 ## Next dependencies
 

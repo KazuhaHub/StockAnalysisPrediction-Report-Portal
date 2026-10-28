@@ -1755,3 +1755,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   Native acceptance pending. Host/controller integration, viewer/activation/worker,
   lifecycle, broker, SDK/reference apps and full acceptance remain incomplete.
   Production, credentials, Status adoption and beta unchanged.
+
+- Writable handshake source `9543e04253038fd8c1fdd21de081cffad01877ef` passed
+  quota workflow 40786578360/job 123161172419 and daemon workflow
+  40786578356/job 123161172391. Actual normal/recovered delivered-key possession,
+  host MAC/challenge/key/boot verification, same-content inode substitution
+  refusal, unchanged durable rows/file metadata and stopped handshake refusal
+  passed, with all prior writable checks and owned cleanup. Full Linux journal
+  race passed in 223.745s; local full race journal 153.907s, focused handshake
+  race, platform regression, dual-arch builds, vet/staticcheck and Python14 passed.
+  General workflow 40786578414 passed app race shards/aggregate, web and Docker
+  checks; Go job 123161173409 retained existing x/net vulnerabilities after
+  staticcheck. Physical exchange still needs host/controller integration before
+  pairing/access. Viewer forwarding, activation/worker, physical lifecycle,
+  broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
+  Production, real credentials, Status, SDK freeze and beta unchanged.
