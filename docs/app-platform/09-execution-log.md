@@ -1728,3 +1728,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   [writable registration delivery](103-writable-registration-delivery.md).
   Native acceptance pending. Handshake/viewer, activation/worker, lifecycle,
   broker, SDK/reference apps and full acceptance remain. Production/beta unchanged.
+
+- Writable registration delivery source
+  `92250b151b31e7105a7aee89b6bc00bb49a0db2a` passed quota workflow
+  40785510608/job 123157574157 and daemon workflow 40785510581/job 123157573982.
+  Real protected publication/replay, post-file receipt failure, expired fresh
+  observation recovery with metadata rollback/retry and unchanged file identity/
+  timestamps, missing-file non-creation and stopped preflight refusal passed.
+  All new delivery flags and existing source/start/readiness/cleanup flags are
+  true. Full Linux journal race passed in 147.957s; local full race journal
+  145.827s, expanded registration race 21.877s, platform regression, dual-arch
+  builds, vet/staticcheck and Python14 passed. General workflow 40785510624
+  passed app race shards/aggregate, web and Docker checks; Go job 123157574208
+  retained existing x/net vulnerability failures after staticcheck. No handshake,
+  viewer access or activation follows from file delivery. Controller transport,
+  activation/worker, physical lifecycle, broker, SDK/reference apps and full
+  P00–P14 acceptance remain. Production, credentials, Status and beta unchanged.

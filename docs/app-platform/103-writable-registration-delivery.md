@@ -139,8 +139,25 @@ Local full runner race passed (journal 145.827s, driver 2.177s, transport 1.377s
 control/data cached). Focused registration/legacy registration race passed
 (journal 17.965s, driver 1.347s), and platform regression passed in 10.201s.
 Linux amd64/arm64 journal builds and arm64 driver build, vet, Linux staticcheck
-and all 14 Python probe tests passed. Expanded postflight tests and actual native
-acceptance are pending. These checks do not establish a completed installation.
+and all 14 Python probe tests passed. Expanded registration/postflight race passed
+in 21.877s.
+
+Functional source `92250b151b31e7105a7aee89b6bc00bb49a0db2a` passed quota
+workflow 40785510608/job 123157574157. All four new registration delivery,
+file-preserving recovery, missing-file non-creation and stopped-delivery refusal
+flags are true, alongside every previous writer/start/recovery/readiness and
+owned-resource cleanup flag. Linux control/appplatform/transport/driver race
+passed in 1.582/1.374/4.779/2.472s. These checks do not establish a completed
+installation, full daemon kill/relaunch or handshake.
+
+Daemon workflow 40785510581/job 123157573982 passed full Linux journal race in
+147.957s followed by actual native policy/IPC, distinct identities and Portal
+root endpoint acceptance. General workflow 40785510624 passed app race shards/
+aggregate, all web test shards, lint/typecheck/build, workflow lint and Docker
+image/smoke checks. Go job 123157574208 passed build/vet/staticcheck, then failed
+the existing `golang.org/x/net@v0.60.0` vulnerability gate
+(GO-2026-6866/GO-2026-6860); its subsequent ordinary test did not run. No
+dependency change was made and these separate successes do not clear that gate.
 
 ## Next dependencies
 
