@@ -122,10 +122,29 @@ The parent requires native marker strings before setting
 to explicitly configured disposable GitHub-hosted root/XFS/Docker fixtures. They
 never access production, real credentials or server version configuration.
 
-Local full control/data/driver/journal/transport race, focused writer race,
-platform regression, vet/default Linux staticcheck, Linux amd64/arm64 compilation
-and all 14 Python probe tests passed. Native evidence will be recorded after the
-functional source runs. No release-complete claim follows from this slice.
+Local full control/data/driver/journal/transport race passed (control 2.019s,
+driver 2.288s, journal 110.867s, transport 1.445s; data cache hit). Focused writer
+race passed in 14.739s and platform regression in 10.757s. Vet/default Linux
+staticcheck, Linux amd64/arm64 compilation and all 14 Python probe tests passed.
+
+Functional source `6713550ddc88d20d415233261b7e9d16c1650167` passed fresh native
+acceptance:
+
+- Quota workflow 40684569991/job 122803511112 passed. All three new writer flags
+  above are true, along with the existing filtered writer quota, current viewer
+  request and owned-resource cleanup evidence. The fixture registry cleanup step
+  also passed. Linux control/appplatform/transport/driver race passed in
+  1.368/1.393/4.794/2.390s. This is actual amd64 execution; arm64 evidence is
+  compilation only.
+- Daemon workflow 40684569825/job 122803510721 passed the full runner race suite
+  (journal 105.228s), native closed-container/IPC checks and Portal confirmation
+  through the root endpoint. Its ordinary race invocation intentionally skips
+  the XFS-only writer case; the separate quota workflow above executes it.
+- General workflow 40684570082 passes web checks/tests, workflow lint and Docker
+  smoke. Go job 122803511906 passed staticcheck but failed the existing x/net
+  v0.60.0 vulnerability gate (GO-2026-6866/6860); its following non-race Test step
+  was skipped. All three app race shards and their aggregate passed. This is
+  not an all-green release.
 
 ## Remaining implementation
 

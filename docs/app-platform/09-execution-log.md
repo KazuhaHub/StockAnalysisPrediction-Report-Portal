@@ -1469,3 +1469,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   Native acceptance is pending. Writable candidate/recovery/fencing, managed
   activation, broker, SDK/reference apps and full platform acceptance remain.
   No schema, production, dependency/toolchain, credential or beta changes.
+
+- Writer execution functional source `6713550ddc88d20d415233261b7e9d16c1650167`
+  passed quota workflow 40684569991/job 122803511112 and daemon workflow
+  40684569825/job 122803510721. Actual stopped-container exclusion, native
+  journal writer settlement and post-permission commit-failure preservation are
+  verified; filtered quota/current-viewer/owned-cleanup evidence remains true.
+  Linux control/appplatform/transport/driver race passed in
+  1.368/1.393/4.794/2.390s; full daemon journal race passed in 105.228s.
+  Local full runner race, focused writer race (14.739s), platform regression
+  (10.757s), Linux dual-architecture compilation, vet/staticcheck and 14 Python
+  probe tests passed. General workflow 40684570082 passed all app race shards
+  and aggregate, web/Docker/workflow checks; its Go job 122803511906 retains the
+  existing x/net vulnerability gate failure after passing staticcheck.
+  This closes initial physical dispatch and historical receipt settlement only;
+  unknown writer recovery, writable candidate/fencing, managed activation,
+  broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
