@@ -21,7 +21,7 @@ func main() {
 		os.Stderr.WriteString("native fixture seccomp verification failed: " + err.Error() + "\n")
 		os.Exit(7)
 	}
-	if os.Getenv("PORTAL_APP_WRITER_PROBE") == "1" {
+	if os.Getenv("PORTAL_APP_WRITER_PROBE") == "1" || fixtureHasWritableData() {
 		if err := verifyFixtureWritableData(); err != nil {
 			os.Stderr.WriteString("native fixture writable data verification failed: " + err.Error() + "\n")
 			os.Exit(8)

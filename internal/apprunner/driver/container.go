@@ -38,10 +38,11 @@ type containerRoots struct{ Data, Sockets string }
 // They are not signed execution authority. No production caller dispatches them
 // until managed-command admission, native path pins and quota proofs are wired.
 type containerPlan struct {
-	name    string
-	body    []byte
-	bodySHA string
-	owner   containerOwner
+	name     string
+	body     []byte
+	bodySHA  string
+	owner    containerOwner
+	writable *WritableCandidateBinding
 }
 type containerMount struct {
 	Type        string
@@ -125,7 +126,14 @@ func validContainerPlan(plan containerPlan) bool {
 	if json.Unmarshal(plan.body, &request) != nil {
 		return false
 	}
-	for name, value := range ownerContainerLabels(plan.owner) {
+	labels := ownerContainerLabels(plan.owner)
+	if plan.writable != nil {
+		if !validWritableCandidateBinding(*plan.writable) || plan.owner.Generation != "1" || plan.owner.WriterFence != "1" || len(request.HostConfig.Mounts) != 3 || request.HostConfig.Mounts[0].Target != "/data" || request.HostConfig.Mounts[0].ReadOnly {
+			return false
+		}
+		labels = writableCandidateLabels(plan.owner, *plan.writable)
+	}
+	for name, value := range labels {
 		if request.Labels[name] != value {
 			return false
 		}

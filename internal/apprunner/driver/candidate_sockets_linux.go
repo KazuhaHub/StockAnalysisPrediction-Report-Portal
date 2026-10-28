@@ -16,6 +16,9 @@ import (
 // It creates fixed platform-owned names below the protected runtime root. It
 // never accepts paths from the app or repairs unexpected existing ownership.
 func (r *CandidateRuntime) ProvisionCandidateSockets(ctx context.Context, request CandidateLaunchRequest) error {
+	return r.provisionCandidateSocketsProfile(ctx, request, nil)
+}
+func (r *CandidateRuntime) provisionCandidateSocketsProfile(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding) error {
 	if r == nil || os.Geteuid() != 0 {
 		return ErrUnsupported
 	}
@@ -24,15 +27,24 @@ func (r *CandidateRuntime) ProvisionCandidateSockets(ctx context.Context, reques
 	if r.closed || !candidateRequestValid(request) || request.Platform != "linux/"+runtime.GOARCH {
 		return ErrInvalidResponse
 	}
-	if err := r.checkData(ctx, request.Identity, request.Data); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, writable != nil); err != nil {
 		return err
 	}
 	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
 	if err != nil {
 		return err
 	}
-	if _, err := planCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots); err != nil {
-		return err
+	if writable == nil {
+		if _, err := planCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots); err != nil {
+			return err
+		}
+	} else {
+		if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
+			return err
+		}
+		if _, err := planWritableCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *writable); err != nil {
+			return err
+		}
 	}
 	pins, err := openMountDirectory(r.roots.Sockets, 0, 0, 0700)
 	if err != nil {

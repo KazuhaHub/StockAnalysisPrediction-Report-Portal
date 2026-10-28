@@ -193,10 +193,11 @@ def main(args):
                     if writer.returncode or "NATIVE_FILTERED_DATA_WRITER_VERIFIED" not in writer.stdout:
                         raise RuntimeError("actual filtered data writer failed: " + (writer.stdout+writer.stderr)[-4096:])
                     report["native_filtered_data_writer_verified"] = True
-                    if "NATIVE_DATA_WRITER_ADAPTER_VERIFIED" not in writer.stdout or "NATIVE_WRITER_RECOVERY_PARTIAL_PERMISSION_REFUSED" not in writer.stdout:
+                    if "NATIVE_DATA_WRITER_ADAPTER_VERIFIED" not in writer.stdout or "NATIVE_WRITER_RECOVERY_PARTIAL_PERMISSION_REFUSED" not in writer.stdout or "NATIVE_WRITABLE_CANDIDATE_DRIVER_START_VERIFIED" not in writer.stdout:
                         raise RuntimeError("actual writer adapter/reference exclusion missing")
                     report["native_writer_adapter_and_exclusion_verified"] = True
                     report["native_writer_recovery_partial_permission_refused"] = True
+                    report["native_writable_candidate_driver_start_verified"] = True
         journal_root = None
         if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"

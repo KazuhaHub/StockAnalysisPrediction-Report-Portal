@@ -11,3 +11,5 @@ func verifyFixtureSeccomp() error {
 func verifyFixtureWritableData() error {
 	return errors.New("native fixture write probe requires Linux")
 }
+
+func fixtureHasWritableData() bool { return false }

@@ -1580,3 +1580,35 @@ daemon workflow 40455635317 passed on the functional source as well.
   122836966930. Concrete writable native preflight/start/opaque settlement,
   readiness/registration/activation, SDK/reference apps and complete P00–P14
   acceptance remain incomplete. No production or beta changes.
+
+- Added a separately typed concrete writable candidate driver: closed RW-data
+  builder with exact claim/source labels, protected writable data and IPC pins,
+  immutable image/policy checks, local/actual stopped/running reference exclusion,
+  fresh pre-create checks and one-shot native start returning opaque process
+  evidence. Legacy sealed builder/checks and old handle entry remain independent.
+  Replaced the disposable writer trial's JSON/Env mutation with the real typed
+  provision/preflight/start, retaining all actual filtered quota/attribute/child
+  project checks and owned cleanup. See [writable native driver](98-writable-native-driver.md).
+  Native acceptance is pending. Journal preflight binding/process settlement and
+  current running history/recovery, readiness/registration/activation, broker,
+  SDK/reference apps and complete platform acceptance remain incomplete. No
+  production, schema, credentials, dependency/toolchain or beta changes.
+
+- Writable native driver functional source
+  `32101df7fc7414212cbadf302ef9b178d76c95b2` passed quota workflow
+  40757095906/job 123058818615 and daemon workflow 40757095659/job 123058818067.
+  Actual typed preflight/start and opaque process evidence passed, including a
+  late stopped reference, running-reference and repeated-start refusal. The real
+  unprivileged filtered writer/attribute/byte/inode quota and child-project checks
+  pass without test JSON or Env mutation, with owned resource/IPC/registry cleanup.
+  `native_writable_candidate_driver_start_verified` and existing source-claim/
+  writer/recovery/current-viewer flags are true. Linux control/appplatform/
+  transport/driver race passed in 1.757/1.628/5.424/3.027s; full daemon journal
+  race passed in 178.210s. Local full runner race, platform regression, dual-arch
+  driver/fixture builds, vet/staticcheck and Python14 passed. General workflow
+  40757095413 passed all app race shards/aggregate, web/Docker/workflow checks,
+  retaining the existing x/net vulnerability gate failure after staticcheck in
+  Go job 123058818707. This proves the concrete adapter under synthetic trusted
+  fixture bindings, not current journal authorization or a full app installation.
+  Journal preflight binding/process settlement/history/recovery, activation,
+  SDK/reference apps and full acceptance remain. Production and beta unchanged.
