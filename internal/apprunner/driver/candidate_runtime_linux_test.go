@@ -22,6 +22,9 @@ func TestNativeCandidateRuntime(t *testing.T) {
 	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Geteuid() != 0 {
 		t.Fatal("native candidate requires disposable Linux root")
 	}
+	if !t.Run("registration_atomic_publication", TestBackendRegistrationAtomicPublish) {
+		t.Fatal("protected file publication contract failed")
+	}
 	input, err := os.Open(rootPath)
 	if err != nil {
 		t.Fatal(err)
