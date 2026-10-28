@@ -253,6 +253,9 @@ func (r *Root) openNamespace(id string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "runner-data-namespace"), nil
 }
 func (r *Root) inspect(ctx context.Context, id string, project uint32) (Observation, error) {
+	return r.inspectNamespaceAccess(ctx, id, project, 0, 0700)
+}
+func (r *Root) inspectNamespaceAccess(ctx context.Context, id string, project uint32, gid, mode uint32) (Observation, error) {
 	var zero Observation
 	if err := ctx.Err(); err != nil {
 		return zero, err
@@ -269,7 +272,7 @@ func (r *Root) inspect(ctx context.Context, id string, project uint32) (Observat
 	if err := native(folder, func(fd uintptr) error { return unix.Fstat(int(fd), &stat) }); err != nil {
 		return zero, err
 	}
-	if uint64(stat.Dev) != r.device || stat.Uid != 0 || stat.Mode&07777 != 0700 {
+	if uint64(stat.Dev) != r.device || stat.Uid != 0 || stat.Gid != gid || stat.Mode&07777 != mode {
 		return zero, ErrUnsafe
 	}
 	attr, err := attributes(folder)

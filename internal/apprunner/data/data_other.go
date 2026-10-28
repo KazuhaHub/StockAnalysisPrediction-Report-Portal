@@ -19,3 +19,10 @@ func (*Root) Inspect(context.Context, RootIdentity, string, uint32) (Observation
 }
 
 func (*Root) Identity(context.Context) (RootIdentity, error) { return RootIdentity{}, ErrUnsupported }
+
+func (*Root) EnableWriteAccess(context.Context, RootIdentity, Observation) (WriteAccessObservation, error) {
+	return WriteAccessObservation{}, ErrUnsupported
+}
+func (*Root) InspectWriteAccess(context.Context, RootIdentity, string, uint32) (WriteAccessObservation, error) {
+	return WriteAccessObservation{}, ErrUnsupported
+}

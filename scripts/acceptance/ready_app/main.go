@@ -21,6 +21,12 @@ func main() {
 		os.Stderr.WriteString("native fixture seccomp verification failed: " + err.Error() + "\n")
 		os.Exit(7)
 	}
+	if os.Getenv("PORTAL_APP_WRITER_PROBE") == "1" {
+		if err := verifyFixtureWritableData(); err != nil {
+			os.Stderr.WriteString("native fixture writable data verification failed: " + err.Error() + "\n")
+			os.Exit(8)
+		}
+	}
 	var bootNonce [16]byte
 	if _, err := rand.Read(bootNonce[:]); err != nil {
 		os.Exit(6)
