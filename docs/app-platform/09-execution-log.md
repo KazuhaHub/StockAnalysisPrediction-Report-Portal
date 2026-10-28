@@ -1651,3 +1651,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   [writable start recovery](100-writable-start-recovery.md). Native acceptance
   is pending; readiness/registration/activation, SDK/reference apps, lifecycle
   and complete release acceptance remain incomplete. No production/beta changes.
+
+- Writable start recovery source `f836718daa5107c7fe692d7442ab0f38a5d3c221`
+  passed quota workflow 40767469240/job 123095373863 and daemon workflow
+  40767469270/job 123095504935. Actual post-start unknown recovery after owner
+  reopen/expiry, metadata-failure atomic rollback and observation retry all
+  passed with unchanged native ID/creation/start/restart identity and original
+  claim/preflight. Full Linux journal race passed in 164.928s; local full runner
+  race journal 159.193s, expanded writable race, platform regression, dual-arch
+  builds, vet/staticcheck and Python14 passed. General workflow 40767469054
+  passed app race shards, web and Docker checks, retaining existing x/net gate
+  failures in Go job 123095584809. The inventory fixture's overly long temporary
+  socket path was shortened without changing production limits. This is owner
+  object reopen, not full daemon crash/relaunch. Writable readiness/registration/
+  activation, broker, SDK/reference apps, physical lifecycle and full P00–P14
+  acceptance remain incomplete. Production, Status adoption and beta unchanged.

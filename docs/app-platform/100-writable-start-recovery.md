@@ -144,7 +144,25 @@ and platform regression in 16.524s. Linux amd64/arm64 driver/journal test builds
 vet, Linux staticcheck and all 14 Python probe tests passed. An existing capacity
 test reused a short signed envelope after a full 65,535-row ledger scan; its
 independent next request now refreshes test authority. Production expiry checks
-are unchanged. The full runner race rerun and actual native acceptance are pending.
+are unchanged. The full runner race rerun passed (journal 159.193s, driver
+3.591s; other runner packages cached).
+
+Functional source `f836718daa5107c7fe692d7442ab0f38a5d3c221` passed quota
+workflow 40767469240/job 123095373863 and daemon workflow
+40767469270/job 123095504935. All three new recovery flags and the existing
+actual writer/start/atomic failure flags are true, with owned-resource cleanup.
+Linux control/appplatform/transport/driver race passed in
+1.628/1.551/5.234/2.911s. Full daemon journal race passed in 164.928s, followed
+by actual native policy/IPC, distinct identities and root endpoint acceptance.
+The initial Linux inventory fixture failed the production socket-path limit
+because `t.TempDir` includes the long test name. It now uses an explicitly owned
+short temporary directory; the production limit and native validation are unchanged.
+
+General workflow 40767469054 passed all app race shards, web test shards,
+lint/typecheck/build, workflow lint and Docker image/smoke checks. Go job
+123095584809 passed build/vet/staticcheck, then failed the existing
+`golang.org/x/net@v0.60.0` vulnerability gate (GO-2026-6866/GO-2026-6860), so its
+subsequent ordinary test did not run. No dependency change was made.
 
 Owner-object reopen in this fixture
 is not a whole daemon kill/relaunch, host reboot or full app installation test.
