@@ -132,7 +132,26 @@ Existing actual writer/start/recovery, quota, readonly paths and cleanup tests
 must continue to pass. Expanded writable journal race passed in 31.329s, driver
 race in 1.309s and platform regression in 8.515s. Linux amd64/arm64 driver/journal
 test builds, vet, Linux staticcheck and all 14 Python probe tests passed. Full
-runner race and actual native acceptance results are pending.
+local runner race passed (journal 148.650s, driver 2.303s, transport 1.325s;
+other runner packages cached).
+
+Functional source `57788e7976e5739e16505b11f80b63f38e6141ba` passed actual quota
+workflow 40769452465/job 123102370045. All four new readiness flags are true,
+along with actual writer/start/recovery checks and owned-resource cleanup.
+Linux control/appplatform/transport/driver race passed in
+1.752/1.602/5.426/3.096s. These cases used the actual writable fixture's private
+socket after real filtered byte/inode quota and attribute-denial checks.
+
+Daemon workflow 40769452355/job 123102370043 passed the full Linux journal race
+in 202.103s, followed by actual container policy/IPC, distinct process identity
+and Portal root endpoint acceptance. This slice does not introduce or claim a
+whole daemon kill/relaunch, marketplace installation or activation test.
+
+General workflow 40769452406 passed app race shards/aggregate, all web test
+shards, web lint/typecheck/build, workflow lint and Docker image/smoke checks.
+Go job 123102370952 passed build/vet/staticcheck, then failed the existing
+`golang.org/x/net@v0.60.0` vulnerability gate (GO-2026-6866/GO-2026-6860);
+its subsequent ordinary test did not execute. No dependency change was made.
 
 ## Next dependencies
 

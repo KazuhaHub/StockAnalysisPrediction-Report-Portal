@@ -1677,3 +1677,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   [writable readiness](101-writable-readiness.md). Native acceptance pending;
   automatic registration/handshake/viewer, activation/worker, SDK/reference apps,
   lifecycle and full acceptance remain. Production and beta unchanged.
+
+- Writable readiness source `57788e7976e5739e16505b11f80b63f38e6141ba` passed
+  quota workflow 40769452465/job 123102370045 and daemon workflow
+  40769452355/job 123102370043. Actual normal/recovered private-socket readiness,
+  exact durable deployment/command/resource preservation, unknown/stopped refusal
+  and process/schema mismatch checks passed alongside writer/start/recovery and
+  owned cleanup. Full Linux journal race passed in 202.103s; local journal race
+  148.650s, expanded writable race, platform regression, dual-arch builds,
+  vet/staticcheck and Python14 passed. General workflow 40769452406 passed app
+  race shards/aggregate, web and Docker checks, retaining existing x/net gate
+  failures in Go job 123102370952. This is current point-in-time readiness only;
+  registration/handshake/viewer, activation/worker, physical lifecycle, broker,
+  SDK/reference apps and full P00–P14 acceptance remain incomplete. No production,
+  Status adoption, SDK freeze, dependency/toolchain or beta changes.
