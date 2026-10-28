@@ -3,13 +3,16 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"golang.org/x/sys/unix"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +106,21 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, DialContext: dockerDialer(socket)}
 	defer transport.CloseIdleConnections()
 	client := daemonClient(transport)
+	// Only the explicitly disposable, credential-free fixture reports the
+	// bounded Docker start error. Production driver errors remain sanitized.
+	client.Transport = transportFunc(func(request *http.Request) (*http.Response, error) {
+		response, err := transport.RoundTrip(request)
+		if err == nil && request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/start") && response.StatusCode >= 400 {
+			raw, readErr := io.ReadAll(io.LimitReader(response.Body, 4096))
+			response.Body.Close()
+			response.Body = io.NopCloser(bytes.NewReader(raw))
+			var message struct{ Message string }
+			if readErr == nil && json.Unmarshal(raw, &message) == nil {
+				t.Logf("disposable candidate start refused (%d): %s", response.StatusCode, message.Message)
+			}
+		}
+		return response, err
+	})
 	nativeID, err := createPinnedCandidateHTTP(context.Background(), client, plan, pins)
 	if err != nil {
 		t.Fatal(err)
