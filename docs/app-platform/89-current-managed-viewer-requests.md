@@ -122,6 +122,13 @@ Local verification with Go 1.26.10, `GOWORK=off`, `GOMAXPROCS=2`, `-p 2`:
   probe tests and diff checks passed. Staticcheck first caught a test cleanup
   deferred before its expected error check; that cleanup order was corrected.
 
+Native run 40639878051/job 122655297068 initially failed its outer verification
+gate: the controller child's new marker was not explicitly checked/forwarded by
+the Portal root-parent fixture. The Python probe correctly refused the missing
+evidence. The parent now independently requires the marker from its captured child
+output before forwarding it. A fresh complete native run is required; that first
+failed run is not recorded as native acceptance.
+
 Native acceptance for this phase must be read from its own CI run, not inferred
 from local compilation or the prior phase. Phase 88's functional source
 `28e11d251ccb9e82cf05773dea29668d79e5acf7` separately passed native workflow
