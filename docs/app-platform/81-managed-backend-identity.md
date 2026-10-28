@@ -97,8 +97,21 @@ The Linux Portal fixture prepares material after its actual backend passes the
 root readiness check. It requires the exact installation/release tuple, byte-
 identical retry and unchanged effect/access counts. The parent/script requires
 `MANAGED_BACKEND_REGISTRATION_MATERIAL` before emitting
-`native_portal_managed_registration_material: true`. Native evidence is pending
-until this functional source passes. Positive Portal preparation currently uses
+`native_portal_managed_registration_material: true`. Functional source
+`8dfd0a05f7f5e1c9ab20491c859fe64eb7afb9aa` passed quota workflow
+[40617663109](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40617663109),
+job 122583845402: actual ready-backend material preparation and owned cleanup are
+true; exact registry cleanup passed. Linux transport/driver race passed in
+4.654/1.621 s. These results prove preparation under the ready candidate, not
+root key delivery or a deployed backend handshake.
+
+Local SQLite race passed (6.731 s), full appplatform race (1.562 s), PostgreSQL
+candidate/data race (13.277 s), Linux amd64/arm64 compilation, vet/staticcheck,
+actionlint and 14 Python tests passed. General CI 40617663112 passed all three
+app race shards, web checks/tests, workflow lint and Docker smoke. Its Go job
+still failed the existing x/net v0.60.0 vulnerability gate (GO-2026-6866 and
+GO-2026-6860, reported fixed in v0.62.0), skipping the following non-race test
+step. The race aggregate was still active at capture; general CI is not all green. Positive Portal preparation currently uses
 the SQLite native fixture; PostgreSQL candidate/data regressions cover shared
 loader compatibility, not full end-to-end registration preparation.
 
