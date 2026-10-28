@@ -216,6 +216,7 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 		t.Fatal("live boot proof serialized")
 	}
 	t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
+	testNativeBackendRequestRelay(t, endpoint, observed, boot)
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
 	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
 }

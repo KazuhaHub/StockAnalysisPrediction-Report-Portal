@@ -1255,3 +1255,30 @@ daemon workflow 40455635317 passed on the functional source as well.
 - See [managed boot handshake](86-managed-backend-boot-handshake.md). Forwarding,
   broker/writer, activation/scheduling and remaining full lifecycle/reference apps
   remain. No schema, production/beta, real credentials or module versions changed.
+
+### Independently signed native backend request relay
+
+- Added per-request controller signature binding the exact registration/boot,
+  method/path/body and assertion. Registration signatures cannot authorize a
+  request; backend MAC/nonce verification remains independently mandatory.
+- Added bounded fixed-socket HTTP forwarding under the shared delivered-file/
+  native-policy boundary, exact journal checks around IO and protected nonce-bound
+  response framing. No retries, arbitrary destinations, ambient headers, durable
+  request effects or user/provider/writer grants are created.
+- Native acceptance uses explicit sample control authorization and synthetic
+  viewer claims after real boot. It requires correct viewer binding, one write,
+  replay/body/forged-MAC/old-boot refusal and counter verification. This does not
+  enable browser access to pending applications.
+- Local runner/CLI race passed (journal 85.091 s), final contract/control race
+  passed (1.749/1.876 s), Portal SQLite regressions passed (28.615 s); Linux
+  compilation, vet/staticcheck, actionlint and 14 Python tests passed. Native
+  control/appplatform race gates now run directly and trigger on control edits.
+  Functional source `2224c1898da5b1f0afb2b7e840bc49fa35f94d21` passed quota
+  workflow 40635903047 (job 122642689300): actual signed relay, backend boot and
+  owned cleanup keys are true; exact registry cleanup passed. Forged-MAC refusal
+  uses an unseen nonce. Linux control/appplatform/transport/driver race passed in
+  1.342/1.476/5.011/1.827 s. General CI retains the existing x/net vulnerability
+  gate failure and skipped following non-race Test step. See [signed request relay](87-signed-backend-request-relay.md).
+  Current session/OU/grant gating and stable identities, broker/writer, activation/
+  scheduling and remaining full lifecycle/reference apps remain. No schema,
+  production/beta, real credentials or module versions changed.

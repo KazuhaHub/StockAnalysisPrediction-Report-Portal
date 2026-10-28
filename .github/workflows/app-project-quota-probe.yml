@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
       - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
@@ -15,6 +16,8 @@ on:
       - 'internal/app/app_platform_backend_identity*'
       - 'internal/app/app_platform_backend_delivery*'
       - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
       - 'internal/appplatform/backend_handshake*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
@@ -40,6 +43,7 @@ on:
     branches: [main]
     paths:
       - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
       - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
@@ -52,6 +56,8 @@ on:
       - 'internal/app/app_platform_backend_identity*'
       - 'internal/app/app_platform_backend_delivery*'
       - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
       - 'internal/appplatform/backend_handshake*'
       - 'internal/app/app_platform_install_stage*'
       - 'internal/app/app_platform_install_worker*'
@@ -98,7 +104,7 @@ jobs:
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-data-native.test" ./internal/app
-          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/transport ./internal/apprunner/driver
+          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/control ./internal/appplatform ./internal/apprunner/transport ./internal/apprunner/driver
           cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
           "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
           docker pull registry.k8s.io/pause:3.10

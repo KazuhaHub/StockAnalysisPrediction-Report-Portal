@@ -331,6 +331,9 @@ def main(args):
                             if "MANAGED_BACKEND_BOOT_VERIFIED" not in result.stdout:
                                 raise RuntimeError("actual backend boot handshake missing")
                             report["native_portal_backend_boot_verified"] = True
+                            if "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED" not in result.stdout:
+                                raise RuntimeError("signed backend request relay missing")
+                            report["native_backend_request_relay_verified"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

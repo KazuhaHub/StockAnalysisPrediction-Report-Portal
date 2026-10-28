@@ -271,6 +271,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("Portal did not verify actual backend boot")
 			}
 			t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
+			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REQUEST_RELAY_VERIFIED")) {
+				t.Fatal("native backend request relay missing")
+			}
+			t.Log("MANAGED_BACKEND_REQUEST_RELAY_VERIFIED")
 			if !bytes.Contains(output.Bytes(), []byte("MANAGED_BACKEND_REGISTRATION_RPC")) {
 				t.Fatal("Portal did not use protected registration RPC")
 			}
