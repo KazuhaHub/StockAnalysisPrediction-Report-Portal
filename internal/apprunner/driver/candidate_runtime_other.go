@@ -30,3 +30,7 @@ func (*CandidateRuntime) CheckConfiguration(context.Context) error { return ErrU
 func (*CandidateRuntime) CheckSharedRootConfiguration(context.Context, *data.Root, data.RootIdentity) error {
 	return ErrUnsupported
 }
+
+func (*CandidateRuntime) ObserveSharedConfiguration(context.Context, *data.Root, data.RootIdentity) (RuntimeConfiguration, error) {
+	return RuntimeConfiguration{}, ErrUnsupported
+}

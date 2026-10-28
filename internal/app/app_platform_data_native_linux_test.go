@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
@@ -127,7 +130,23 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(endpoint, "data.sock")
-	server, err := transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
+	var server *transport.Server
+	managed := os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != ""
+	if managed {
+		sockets, openErr := os.MkdirTemp("/run", "portal-pf-")
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer os.RemoveAll(sockets)
+		native, openErr := driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), sockets, root, pin)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer native.Close()
+		server, err = transport.ListenManagedController(context.Background(), path, 41001, 41001, store, root, pin, native)
+	} else {
+		server, err = transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +175,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=30s")
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData}
+	if managed {
+		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1")
+	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
 	var output bytes.Buffer
@@ -189,6 +211,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	readyWriter.Close()
 	if err := child.Wait(); err != nil {
 		t.Fatalf("Portal data endpoint failed: %v\n%s", err, output.String())
+	}
+	if managed {
+		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
+			t.Fatal("Portal did not validate managed profile", output.String())
+		}
+		t.Log("MANAGED_PROFILE_OBSERVED")
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {
 		t.Fatal("child did not dispatch data execution", output.String())
@@ -295,6 +323,31 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("runner endpoint not ready")
 	}
 	endpoint := platformRuntimeEndpoint{path: os.Getenv("PORTAL_DATA_SOCKET"), controllerUID: 41001, controllerGID: 41001}
+	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
+		facts, err := s.observePlatformManagedRuntime(context.Background(), session, endpoint)
+		if err != nil {
+			t.Fatal("Portal authenticated runtime profile", err)
+		}
+		p := facts.observation.Profile()
+		if p.ExecutionReady || p.Platform != "linux/"+goruntime.GOARCH {
+			t.Fatal("configuration became readiness or wrong platform")
+		}
+		var manifest appplatform.Manifest
+		raw := scalar[[]byte](t, s.st, `SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release.sha256)
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		manifest.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
+		manifest.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{p.Platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
+		compatible, err := platformManagedRuntimeCompatibility(manifest, facts, endpoint)
+		if err != nil || !compatible.Compatible {
+			t.Fatal("managed compatibility lacked authenticated target", err)
+		}
+		if err := platformInstallRequirements(manifest); err == nil {
+			t.Fatal("profile bypassed existing install gate")
+		}
+		t.Log("MANAGED_PROFILE_OBSERVED")
+	}
 	next, err := s.dispatchPlatformInstallData(context.Background(), lease, endpoint)
 	if err != nil {
 		t.Fatal(err)

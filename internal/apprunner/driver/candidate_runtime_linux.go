@@ -311,15 +311,22 @@ func (r *CandidateRuntime) CheckConfiguration(ctx context.Context) error {
 // root pin used at runtime opening. Matching pathnames/UUID text alone cannot
 // join independently owned providers into one managed endpoint.
 func (r *CandidateRuntime) CheckSharedRootConfiguration(ctx context.Context, root *data.Root, pin data.RootIdentity) error {
+	_, err := r.ObserveSharedConfiguration(ctx, root, pin)
+	return err
+}
+func (r *CandidateRuntime) ObserveSharedConfiguration(ctx context.Context, root *data.Root, pin data.RootIdentity) (RuntimeConfiguration, error) {
 	if r == nil || root == nil {
-		return ErrUnsupported
+		return RuntimeConfiguration{}, ErrUnsupported
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.root != root || r.rootIdentity != pin {
-		return ErrUnsafeSocket
+		return RuntimeConfiguration{}, ErrUnsafeSocket
 	}
-	return r.checkConfigurationLocked(ctx)
+	if err := r.checkConfigurationLocked(ctx); err != nil {
+		return RuntimeConfiguration{}, err
+	}
+	return RuntimeConfiguration{Platform: "linux/" + runtime.GOARCH, SandboxProfile: Profile, Root: r.rootIdentity}, nil
 }
 func (r *CandidateRuntime) checkConfigurationLocked(ctx context.Context) error {
 	if r.closed || r.root == nil || r.launches == nil {

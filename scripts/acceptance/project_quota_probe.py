@@ -271,6 +271,8 @@ def main(args):
                     report["native_recovered_receipt_cross_uid_transport"] = True
                 if len(args) == 11:
                     portal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_PORTAL_FIXTURE=str(receipt_fixture), APP_DATA_PORTAL_DESCRIPTOR=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors/static.json"))
+                    if candidate:
+                        portal_env["APP_CANDIDATE_DOCKER_SOCKET"] = candidate[2]
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=60s"], env=portal_env, capture_output=True, text=True, timeout=60)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
@@ -280,6 +282,10 @@ def main(args):
                     report["native_portal_signed_data_dispatch"] = True
                     report["native_portal_static_driver_queued_to_complete"] = True
                     report["native_portal_background_install_scheduler"] = True
+                    if candidate:
+                        if "MANAGED_PROFILE_OBSERVED" not in result.stdout:
+                            raise RuntimeError("Portal managed profile acceptance did not execute")
+                        report["native_portal_authenticated_managed_profile"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.

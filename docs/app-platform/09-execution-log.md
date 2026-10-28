@@ -1007,3 +1007,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   Portal stage delivery,
   automatic startup/staging, reconciliation, readiness/writer/broker access and
   registration/lifecycle remain. No schema or production/beta configuration changed.
+
+### Authenticated runtime profile consumed by Portal
+
+- Added a combined-endpoint-only configuration probe that binds actual native
+  platform/sandbox/root metadata to stable current enrollment over the existing
+  OS-authenticated read profile. Opaque, canonical, fresh metadata explicitly
+  keeps execution_ready=false and cannot be supplied by a browser or JSON proof.
+- Added Portal consumption that rechecks current admin authority/runtime binding
+  before and after network IO outside SQL transactions, then supplies the observed
+  target to compatibility matching. Existing managed-install refusal remains;
+  compatibility is not execution, readiness or an application grant.
+- Added metadata/framing/zero-proof refusals and extended the actual non-root Portal
+  acceptance to observe the configured root runtime, match a sample managed target,
+  retain the old refusal and continue existing installation regression checks.
+  Native profile acceptance is pending current-source CI. See
+  [profile and Portal compatibility](77-managed-runtime-profile.md).
+- Managed review/data/start/probe lifecycle integration, staging/startup, native
+  reconciliation and broker/registration/reference apps remain. No schema or
+  production/beta configuration changed.
