@@ -1150,3 +1150,31 @@ daemon workflow 40455635317 passed on the functional source as well.
   Protected file delivery, boot handshake, forwarding/current viewer authority,
   broker/writer and activation plus the remaining platform scope still remain.
   No schema, production/beta, real credentials or module versions changed.
+
+### Protected backend registration file delivery
+
+- Added durable unknown claims before native publication, exact current source/
+  data/resource/fence checks around IO, opaque observation settlement and
+  historical delivery receipts. Unknown retries only observe an existing file.
+- Added anonymous atomic no-overwrite publication into the candidate's fixed
+  read-only broker mount. Exact claim xattr, bytes, mode/owner/link/inode checks
+  prevent accepting a preexisting file for a new claim. No private document is
+  stored in the journal or a named temporary file.
+- Extended Linux acceptance to carry Portal material through an inherited private
+  fixture pipe, fail SQL settlement after publication, recover without replacing
+  the file, and require historical replay. Production RPC and boot handshake are
+  still separate remaining work.
+- Local focused journal race, full runner/CLI race (journal 85.947 s), focused
+  Portal regressions (15.951 s), Linux amd64/arm64 compilation, vet/staticcheck
+  and 14 Python tests passed. Functional source
+  `fbbaadb617726438f74aed016894bc4f23122377` passed quota workflow 40620897099
+  (job 122594632732): actual protected delivery recovery, backend readiness and
+  owned cleanup keys are true; exact registry cleanup passed. Linux transport/
+  driver race passed in 4.630/1.602 s; the root fixture executes atomic no-overwrite
+  publication checks. Daemon probe 40620896826 also passed. General CI passed all
+  app race shards/aggregate, web checks/test shards and Docker smoke, but retains
+  the existing x/net vulnerability gate failure and skipped non-race Test step.
+- See [protected registration delivery](83-backend-registration-delivery.md).
+  Full managed activation, forwarding, broker/writer and remaining lifecycle/
+  reference apps remain. No schema, production/beta, real credentials or module
+  versions changed.

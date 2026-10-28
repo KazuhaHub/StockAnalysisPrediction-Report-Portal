@@ -40,3 +40,10 @@ func (*CandidateRuntime) CheckSharedRootConfiguration(context.Context, *data.Roo
 func (*CandidateRuntime) ObserveSharedConfiguration(context.Context, *data.Root, data.RootIdentity) (RuntimeConfiguration, error) {
 	return RuntimeConfiguration{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) DeliverCandidateRegistration(context.Context, CandidateLaunch, string, string, []byte) (BackendRegistrationObservation, error) {
+	return BackendRegistrationObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) ObserveCandidateRegistration(context.Context, CandidateLaunch, string, string, []byte) (BackendRegistrationObservation, error) {
+	return BackendRegistrationObservation{}, ErrUnsupported
+}
