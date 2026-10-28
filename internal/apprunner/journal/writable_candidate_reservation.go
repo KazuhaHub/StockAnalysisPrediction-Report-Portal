@@ -127,6 +127,15 @@ func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byt
 			return nil, zero, ErrFenceReconciliation
 		}
 	case "unknown": // Marker validation follows exact source/resource validation.
+	case "applied":
+		r, err := ParseWritableCandidateRunningReceipt([]byte(current))
+		if err != nil {
+			return nil, zero, err
+		}
+		settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
+		if updated != settled {
+			return nil, zero, ErrFenceReconciliation
+		}
 	default:
 		return nil, zero, ErrFenceReconciliation
 	}
@@ -145,7 +154,15 @@ func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byt
 	}
 	allowed := ""
 	if resource != nil {
-		if _, err := reservedWritableCandidate(f, resource); err != nil {
+		if state == "applied" {
+			r, err := ParseWritableCandidateRunningReceipt([]byte(current))
+			if err != nil {
+				return nil, zero, err
+			}
+			if err := runningWritableCandidateResource(f, resource, r); err != nil {
+				return nil, zero, err
+			}
+		} else if _, err := reservedWritableCandidate(f, resource); err != nil {
 			return nil, zero, err
 		}
 		allowed = resource.id
@@ -154,13 +171,20 @@ func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byt
 		return nil, zero, err
 	}
 	f.resource = resource
+	if state == "applied" && resource == nil {
+		return nil, zero, ErrFenceReconciliation
+	}
 	if state == "unknown" {
 		var marker writableCandidateClaimMarker
 		if resource == nil || !canonicalDataJSON(current, &marker) || !writableCandidateMarkerMatches(marker, f) {
 			return nil, zero, ErrFenceReconciliation
 		}
 		claimed, _ := strconv.ParseInt(marker.ClaimedMS, 10, 64)
-		if updated != claimed || claimed < resource.created {
+		expectedUpdated := claimed
+		if marker.Preflight != nil {
+			expectedUpdated, _ = strconv.ParseInt(marker.PreflightBoundMS, 10, 64)
+		}
+		if updated != expectedUpdated || claimed < resource.created {
 			return nil, zero, ErrFenceReconciliation
 		}
 	}
