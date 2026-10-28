@@ -137,8 +137,26 @@ The parent requires native markers before emitting
 Local full runner race passed (journal 116.228s, transport 1.689s; other packages
 cache hits). Focused writer race passed in 20.822s, expanded recovery race in
 8.551s and platform regression in 11.433s. Vet/default Linux staticcheck,
-Linux amd64/arm64 compilation and all 14 Python probe tests passed. Native
-results will be recorded after the functional run.
+Linux amd64/arm64 compilation and all 14 Python probe tests passed. Functional source `a6f5ab4f986f5082d02117f49ccb70c6001dda23` passed fresh quota
+workflow 40686824124/job 122811213128. All four new recovery flags are true,
+including real restart/expiry, partial permission refusal, unchanged native
+inode/mode/group/ctime, and atomic failure followed by safe read-only retry.
+Existing filtered writer quota/current-viewer/owned-cleanup evidence remains
+true, and the fixture registry cleanup step passed. Linux control/appplatform/
+transport/driver race passed in 1.585/1.608/5.422/2.973s. Runtime evidence is amd64;
+arm64 evidence is compilation only.
+
+Daemon workflow 40686824149/job 122811213023 passed the full runner race suite
+(journal 154.869s), native container/IPC checks and Portal confirmation through
+the root endpoint. The quota recovery case closes/reopens Store/runtime objects
+within its test process; it does not itself kill and relaunch a daemon. Full
+process crash/restart and application availability acceptance remains required.
+
+General workflow 40686824170 passed web checks/tests, workflow lint and Docker
+smoke. Go job 122811213418 passed staticcheck but retains the existing x/net
+v0.60.0 vulnerability gate failure (GO-2026-6866/6860); its following non-race
+Test step was skipped. All three app race shards and their aggregate passed.
+This is not an all-green release.
 Actual execution remains restricted to the disposable supported Linux profile;
 no production, credentials, Status, server beta, dependency or toolchain changes.
 

@@ -1499,3 +1499,20 @@ daemon workflow 40455635317 passed on the functional source as well.
   acceptance remains pending; writable candidate/start/fencing, managed activation,
   broker, SDK/reference apps and full platform acceptance are still incomplete.
   No new schema, production, real credentials or server beta changes.
+
+- Writer recovery functional source `a6f5ab4f986f5082d02117f49ccb70c6001dda23`
+  passed quota workflow 40686824124/job 122811213128 and daemon workflow
+  40686824149/job 122811213023. Actual expired-claim recovery, partial permission
+  refusal and unchanged namespace inode/mode/group/ctime across recovery failure
+  and read-only retry are verified; all four new flags and existing filtered
+  writer/current-viewer/owned-cleanup evidence are true. Linux control/appplatform/
+  transport/driver race passed in 1.585/1.608/5.422/2.973s; full daemon journal
+  race passed in 154.869s. The recovery test reopens Store/runtime objects inside
+  its process, not a daemon kill/relaunch; full process lifecycle acceptance is
+  still outstanding. Local full runner race, expanded recovery race, platform
+  regression, dual-architecture compilation, vet/staticcheck and Python14 passed.
+  General workflow 40686824170 passed all app race shards/aggregate, web/Docker/
+  workflow checks, retaining the existing x/net vulnerability gate failure in
+  Go job 122811213418 after staticcheck passed. Initial recovery is implemented;
+  writable candidate/start/fencing, managed activation, broker, SDK/shared shell,
+  reference apps and full P00–P14 acceptance remain incomplete.
