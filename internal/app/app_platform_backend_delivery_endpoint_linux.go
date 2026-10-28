@@ -15,3 +15,7 @@ func platformDeliverBackendRegistration(ctx context.Context, endpoint platformRu
 	defer clear(document)
 	return transport.DeliverControllerRegistration(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.candidate.authority, intent.candidate.descriptor, document)
 }
+
+func platformHandshakeBackend(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformBackendDeliveryIntent, challenge string) (transport.BackendHandshakeObservation, error) {
+	return transport.HandshakeControllerBackend(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, intent.raw, intent.signature, intent.candidate.authority, intent.candidate.descriptor, challenge)
+}

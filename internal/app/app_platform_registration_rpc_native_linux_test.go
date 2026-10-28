@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -167,6 +168,54 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 		t.Fatal("restore pause accepted delivery settlement")
 	}
 	mustExec(t, s.st, `UPDATE meta SET v='0' WHERE k='app_platform_restore_paused'`)
+	before := dumpOf(t, s.st)
+	boot, err := s.probePlatformBackendBoot(ctx, committed, endpoint)
+	receiptBytes, _ := json.Marshal(observed.receipt)
+	if err != nil || len(boot.bootID) != 32 || boot.nativeID != observed.receipt.Claim.NativeID || boot.deliverySHA256 != platformDigest(receiptBytes) || boot.documentSHA256 != observed.command.DocumentSHA256 || boot.lease.rowRevision != committed.rowRevision || !samePlatformManagedRuntime(boot.runtime, observed.candidate.runtime) || boot.receivedAt.IsZero() {
+		t.Fatal("actual registered backend boot", err)
+	}
+	repeated, err := s.probePlatformBackendBoot(ctx, committed, endpoint)
+	if err != nil || repeated.bootID != boot.bootID || repeated.nativeID != boot.nativeID {
+		t.Fatal("boot identity changed without process restart", err)
+	}
+	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
+		t.Fatal("boot probe changed activation or grants")
+	}
+	signer, err := observed.registration.Signer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(signer.Key)
+	challenge, err := signer.NewChallenge(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exchanged, err := platformHandshakeBackend(ctx, endpoint, observed, challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := signer.NewChallenge(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := signer.VerifyAnswer(other, exchanged.Evidence().Answer, time.Now()); err == nil {
+		t.Fatal("old actual answer replayed for a different challenge")
+	}
+	wrong := signer
+	wrong.Key = bytes.Clone(signer.Key)
+	defer clear(wrong.Key)
+	wrong.Key[0] ^= 1
+	bad, err := wrong.NewChallenge(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof, err := platformHandshakeBackend(ctx, endpoint, observed, bad); err == nil || !proof.ReceivedAt().IsZero() {
+		t.Fatal("actual backend accepted wrong-key challenge")
+	}
+	if _, err := json.Marshal(boot); err == nil {
+		t.Fatal("live boot proof serialized")
+	}
+	t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
 	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
 }

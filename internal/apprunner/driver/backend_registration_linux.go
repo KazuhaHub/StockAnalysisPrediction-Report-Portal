@@ -150,34 +150,50 @@ func createBackendRegistrationFile(ctx context.Context, parent int, document []b
 	return ctx.Err()
 }
 func observeBackendRegistrationFile(ctx context.Context, parent int, document []byte, bindingSHA string, uid, gid int) (unix.Stat_t, error) {
+	if len(document) == 0 || len(document) > 4096 {
+		return unix.Stat_t{}, ErrInvalidResponse
+	}
+	actual, st, err := readBackendRegistrationFile(ctx, parent, bindingSHA, uid, gid)
+	defer clear(actual)
+	if err != nil {
+		return unix.Stat_t{}, err
+	}
+	if !bytes.Equal(actual, document) {
+		return unix.Stat_t{}, ErrUnsafeSocket
+	}
+	return st, nil
+}
+
+// Reads only the fixed protected file. The caller owns clearing returned bytes.
+func readBackendRegistrationFile(ctx context.Context, parent int, bindingSHA string, uid, gid int) ([]byte, unix.Stat_t, error) {
 	var zero unix.Stat_t
 	if err := ctx.Err(); err != nil {
-		return zero, err
+		return nil, zero, err
 	}
-	if len(document) == 0 || len(document) > 4096 || !containerSHA.MatchString(bindingSHA) {
-		return zero, ErrInvalidResponse
+	if !containerSHA.MatchString(bindingSHA) {
+		return nil, zero, ErrInvalidResponse
 	}
 	fd, err := unix.Openat(parent, backendRegistrationFilename, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return zero, ErrUnsafeSocket
+		return nil, zero, ErrUnsafeSocket
 	}
 	file := os.NewFile(uintptr(fd), "private-registration")
 	defer file.Close()
 	var before, after, path unix.Stat_t
-	if unix.Fstat(fd, &before) != nil || before.Mode&unix.S_IFMT != unix.S_IFREG || before.Mode&07777 != 0400 || before.Uid != uint32(uid) || before.Gid != uint32(gid) || before.Nlink != 1 || before.Size != int64(len(document)) {
-		return zero, ErrUnsafeSocket
+	if unix.Fstat(fd, &before) != nil || before.Mode&unix.S_IFMT != unix.S_IFREG || before.Mode&07777 != 0400 || before.Uid != uint32(uid) || before.Gid != uint32(gid) || before.Nlink != 1 || before.Size < 1 || before.Size > 4096 {
+		return nil, zero, ErrUnsafeSocket
 	}
 	binding := make([]byte, 65)
 	n, err := unix.Fgetxattr(fd, "user.portal.registration", binding)
 	if err != nil || n != 64 || string(binding[:n]) != bindingSHA {
-		return zero, ErrUnsafeSocket
+		return nil, zero, ErrUnsafeSocket
 	}
 	actual, err := io.ReadAll(io.LimitReader(file, 4097))
-	defer clear(actual)
-	if err != nil || !bytes.Equal(actual, document) || unix.Fstat(fd, &after) != nil || !sameBackendRegistrationStat(before, after) || unix.Fstatat(parent, backendRegistrationFilename, &path, unix.AT_SYMLINK_NOFOLLOW) != nil || !sameBackendRegistrationStat(path, after) {
-		return zero, ErrUnsafeSocket
+	if err != nil || len(actual) != int(before.Size) || unix.Fstat(fd, &after) != nil || !sameBackendRegistrationStat(before, after) || unix.Fstatat(parent, backendRegistrationFilename, &path, unix.AT_SYMLINK_NOFOLLOW) != nil || !sameBackendRegistrationStat(path, after) || ctx.Err() != nil {
+		clear(actual)
+		return nil, zero, ErrUnsafeSocket
 	}
-	return after, ctx.Err()
+	return actual, after, nil
 }
 
 func sameBackendRegistrationStat(a, b unix.Stat_t) bool {

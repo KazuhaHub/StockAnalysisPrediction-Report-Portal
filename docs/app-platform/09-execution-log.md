@@ -1231,3 +1231,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   handshake, forwarding, broker/writer, managed activation/scheduling and the
   remaining full lifecycle/reference apps remain. No schema, production/beta,
   real credentials or module versions changed.
+
+### Actual managed backend boot handshake
+
+- Added strict bounded challenge/answer bodies, read-only native handshake under
+  exact delivered-file/container/socket evidence, current journal history checks
+  and a nonce-bound protected controller exchange. Keys are not retransmitted.
+- Added Portal's independent shared-protocol MAC/challenge/boot verification and
+  post-IO authority/material revalidation. Boot evidence is live/non-serializable;
+  it creates no activation or viewer/provider/writer grant.
+- Disposable backend reads the protected file and answers with one random boot
+  identity per process. Native acceptance requires actual repeated boot proof,
+  wrong-key refusal, different-challenge replay refusal and unchanged SQL state.
+- Local appplatform/runner/CLI race passed (journal 88.439 s); SQLite regressions
+  passed (20.251 s), PostgreSQL regressions passed (16.922 s); Linux compilation,
+  vet/staticcheck, actionlint and 14 Python tests passed. Native verification is
+  pending. Fixed a synthetic fixture clock boundary and passed 30 repeat cases.
+- See [managed boot handshake](86-managed-backend-boot-handshake.md). Forwarding,
+  broker/writer, activation/scheduling and remaining full lifecycle/reference apps
+  remain. No schema, production/beta, real credentials or module versions changed.
