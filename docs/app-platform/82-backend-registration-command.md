@@ -80,8 +80,20 @@ an actual started candidate, not Portal RPC delivery or private key transfer.
 
 Local focused control/journal race and the full runner/CLI race suite passed
 (journal 79.356 s). Linux amd64/arm64 Portal compilation, Linux vet/staticcheck
-and 14 Python tests passed. Native workflow evidence is pending for this phase;
-a compile or synthetic receipt is not substituted for that evidence.
+and 14 Python tests passed. Functional source
+`c011d25e58d0ab28ec745f3375a3d79cdc66189f` passed native quota workflow
+[40619597258](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40619597258),
+job 122590125633. `native_backend_registration_intent`, actual managed backend
+readiness and owned cleanup are true; exact registry cleanup passed. Linux
+transport/driver race passed in 4.482/1.481 s. These results prove intent
+admission against the actual ready candidate, not secret transfer or handshake.
+
+General CI 40619597274 passed workflow lint, web checks and all web test shards,
+Docker smoke, Go build/vet/staticcheck and market validation. Its Go job
+122590126069 failed the existing x/net v0.60.0 vulnerability gate (GO-2026-6866
+and GO-2026-6860, reported fixed in v0.62.0), so its subsequent non-race Test
+step was skipped. App race shards were not all terminal at capture; general CI
+is not all green.
 
 ## Remaining implementation
 
