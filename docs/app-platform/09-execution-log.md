@@ -1530,3 +1530,21 @@ daemon workflow 40455635317 passed on the functional source as well.
   Native acceptance is pending. Reservation/one-shot execution, writable native
   start/fencing, managed activation, broker, SDK/reference apps and full platform
   acceptance remain. No schema, production, credential or beta changes.
+
+- Writable intent functional source `0699ce7357931adeca0c24e720309357701c74b9`
+  passed quota workflow 40690209401/job 122822784136 and daemon workflow
+  40690209510/job 122822950227. Actual direct/recovered writer sources admit
+  exact prepared start intent; wrong hashes and legacy execution paths refuse,
+  and source bytes remain unchanged with no container reservation. The new
+  `native_writable_candidate_intent_actual_sources_verified` flag and existing
+  writer/recovery/filtered-quota/current-viewer/owned-cleanup evidence are true.
+  Linux control/appplatform/transport/driver race passed in
+  1.733/1.654/5.394/3.004s; full daemon journal race passed in 166.235s. Added
+  chronology checks reject writer creation before data completion and start
+  creation before writer completion; targeted race passed in 5.326s. Local full
+  runner race, platform regression, dual-architecture compilation, vet/staticcheck
+  and Python14 passed. General workflow 40690209482 passed all app race shards/
+  aggregate, web/Docker/workflow checks, retaining the existing x/net gate failure
+  after staticcheck in Go job 122822991559. This closes initial intent/source
+  binding only, not reservation, writable native execution, readiness/activation,
+  SDK/reference apps or full P00–P14 acceptance. Production and beta unchanged.

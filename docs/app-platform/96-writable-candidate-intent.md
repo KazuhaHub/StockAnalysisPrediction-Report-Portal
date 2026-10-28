@@ -139,8 +139,25 @@ journal 116.225s, transport 1.601s; other packages cache hits). Focused writer/
 writable-contract race passed in 1.602/24.140s and platform regression in 10.688s.
 Vet/default Linux staticcheck, Linux amd64/arm64 compilation and all 14 Python
 probe tests passed. Additional chronology-drift race passed in 5.326s with
-Linux staticcheck clean. Native evidence will be recorded after the functional run. Passing
-this case proves actual-source intent admission, not a writable process start,
+Linux staticcheck clean.
+
+Functional source `0699ce7357931adeca0c24e720309357701c74b9` passed fresh quota
+workflow 40690209401/job 122822784136. The actual-source writable-intent flag is
+true after both native execution and recovered writer receipts. Existing writer
+recovery/filtered quota/current-viewer/owned-cleanup evidence remains true, and
+fixture registry cleanup passed. Linux control/appplatform/transport/driver race
+passed in 1.733/1.654/5.394/3.004s. Runtime evidence is amd64; arm64 evidence here
+is compilation only.
+
+Daemon workflow 40690209510/job 122822950227 passed the full runner race suite
+(journal 166.235s), native container/IPC checks and Portal confirmation through
+the root endpoint. General workflow 40690209482 passed all three app race shards
+and their aggregate, web checks/tests, workflow lint and Docker smoke. Go job
+122822991559 passed staticcheck but retains the existing x/net v0.60.0
+vulnerability gate failure (GO-2026-6866/6860); the following non-race Test step
+was skipped. This is not an all-green release.
+
+Passing this case proves actual-source intent admission, not a writable process start,
 readiness, backend pairing, active writer lease or complete application install.
 
 ## Required next implementation
