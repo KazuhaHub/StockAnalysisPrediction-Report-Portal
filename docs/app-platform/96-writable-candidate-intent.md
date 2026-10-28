@@ -68,6 +68,7 @@ not expose mutable buffers inside verified values.
    indexed, with its original admitted fence. Parse the canonical receipt and
    require its exact hash to match the signed outer reference. Check original
    writer creation/claim/settlement timestamps against stored command times.
+   Writer creation cannot precede preparation completion.
 5. Recheck original preparation receipt and volume using the preparation's
    original control revision/ownership. The volume must remain present at
    revision 3 with observation/settlement timestamps matching the writer receipt.
@@ -91,7 +92,8 @@ added. The approved runner command/resource layout remains unchanged.
 
 `ReadWritableCandidateIntent` independently verifies current signed authority,
 exact stored prepared command, empty receipt, no acknowledgement, original
-command timestamps and current floors. It repeats the complete source/history
+command timestamps and current floors. Start creation cannot precede writer
+completion. It repeats the complete source/history
 validation under a write-intent transaction and rechecks cancellation/time/
 signature around commit.
 
@@ -136,7 +138,8 @@ Local full control/data/driver/journal/transport race passed (control 2.307s,
 journal 116.225s, transport 1.601s; other packages cache hits). Focused writer/
 writable-contract race passed in 1.602/24.140s and platform regression in 10.688s.
 Vet/default Linux staticcheck, Linux amd64/arm64 compilation and all 14 Python
-probe tests passed. Native evidence will be recorded after the functional run. Passing
+probe tests passed. Additional chronology-drift race passed in 5.326s with
+Linux staticcheck clean. Native evidence will be recorded after the functional run. Passing
 this case proves actual-source intent admission, not a writable process start,
 readiness, backend pairing, active writer lease or complete application install.
 

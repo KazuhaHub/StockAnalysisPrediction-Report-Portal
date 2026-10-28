@@ -84,7 +84,7 @@ func TestWritableCandidateIntentRequiresCompletedWriterAndReopens(t *testing.T) 
 }
 
 func TestWritableCandidateIntentRefusesSourceAndHistoryDrift(t *testing.T) {
-	for _, mode := range []string{"writer_unknown", "writer_ack", "writer_time", "writer_receipt", "source_ack", "source_time", "volume_revision", "volume_time", "authority", "receipt_binding", "future_container", "other_command"} {
+	for _, mode := range []string{"writer_unknown", "writer_ack", "writer_time", "writer_created", "writer_receipt", "source_ack", "source_time", "volume_revision", "volume_time", "authority", "receipt_binding", "future_container", "other_command"} {
 		t.Run(mode, func(t *testing.T) {
 			s, wraw, wsig, receipt := syntheticAppliedWriterFixture(t)
 			defer s.Close()
@@ -92,6 +92,7 @@ func TestWritableCandidateIntentRefusesSourceAndHistoryDrift(t *testing.T) {
 			queries := map[string]string{
 				"writer_unknown":   `UPDATE runner_commands SET state='unknown' WHERE kind='activate'`,
 				"writer_ack":       `UPDATE runner_commands SET ack_attempted_ms=updated_ms WHERE kind='activate'`,
+				"writer_created":   `UPDATE runner_commands SET created_ms=0 WHERE kind='activate'`,
 				"writer_time":      `UPDATE runner_commands SET updated_ms=updated_ms+1 WHERE kind='activate'`,
 				"writer_receipt":   `UPDATE runner_commands SET receipt_json='{}' WHERE kind='activate'`,
 				"source_ack":       `UPDATE runner_commands SET ack_attempted_ms=updated_ms WHERE kind='prepare-data'`,
@@ -187,6 +188,19 @@ func TestWritableCandidateIntentDoesNotBecomeExecutionAuthority(t *testing.T) {
 	otherRaw, otherSig := signWritableIntent(t, replacement)
 	if _, err := s.AdmitWritableCandidateCommand(context.Background(), otherRaw, otherSig); err == nil {
 		t.Fatal("duplicate start identity admitted")
+	}
+	var oldCreated int64
+	if err := s.db.QueryRow(`SELECT created_ms FROM runner_commands WHERE stage='start'`).Scan(&oldCreated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE runner_commands SET created_ms=0,updated_ms=0 WHERE stage='start'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadWritableCandidateIntent(context.Background(), raw, sig); err == nil {
+		t.Fatal("start intent predating writer completion accepted")
+	}
+	if _, err := s.db.Exec(`UPDATE runner_commands SET created_ms=?,updated_ms=? WHERE stage='start'`, oldCreated, oldCreated); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE runner_commands SET state='unknown' WHERE stage='start'`); err != nil {
 		t.Fatal(err)

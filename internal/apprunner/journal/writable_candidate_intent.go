@@ -50,6 +50,10 @@ func loadWritableCandidateSource(ctx context.Context, tx *sql.Tx, v control.Veri
 	if err != nil {
 		return zero, err
 	}
+	sourceObserved, _ := strconv.ParseInt(source.ObservedMS, 10, 64)
+	if created < sourceObserved {
+		return zero, ErrFenceReconciliation
+	}
 	if !dataWriterReceiptMatches(receipt, dataWriterFacts{verified: w, source: source, now: now, fence: fence}) {
 		return zero, ErrFenceReconciliation
 	}
@@ -132,6 +136,10 @@ func (s *Store) ReadWritableCandidateIntent(ctx context.Context, raw, signature 
 	source, err := loadWritableCandidateSource(ctx, tx, v, now)
 	if err != nil {
 		return zero, err
+	}
+	sourceSettled, _ := strconv.ParseInt(source.writer.SettledMS, 10, 64)
+	if created < sourceSettled {
+		return zero, ErrFenceReconciliation
 	}
 	final := time.Now().UnixMilli()
 	if final < now || s.closing.Load() {
