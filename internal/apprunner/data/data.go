@@ -48,6 +48,11 @@ type Observation struct {
 	Inherited                                    bool
 }
 
+// WriteAccessObservation is a physical permission/quota observation, not a
+// writer lease or an admission receipt. A caller must separately journal and
+// fence authority and exclude old containers/open descriptors before mutation.
+type WriteAccessObservation struct{ Namespace Observation }
+
 // Open requires an explicitly configured root-owned private existing data root.
 // Implementations own a new pinned descriptor; callers retain their input file.
 func Open(root *os.File) (*Root, error) { return openRoot(root) }

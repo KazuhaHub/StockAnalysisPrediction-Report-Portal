@@ -170,11 +170,14 @@ def main(args):
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
-            native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess)$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
+            if "NATIVE_DATA_WRITE_ACCESS_TRANSITION_VERIFIED" not in native.stdout:
+                raise RuntimeError("native data write-access transition missing")
+            report["native_go_data_write_access_transition"] = True
             if candidate:
                 candidate_root = mountpoint / "candidate-data"
                 candidate_root.mkdir(mode=0o700)
@@ -184,6 +187,12 @@ def main(args):
                 if result.returncode or "--- PASS: TestNativeCandidateRuntime" not in result.stdout:
                     raise RuntimeError("native candidate runtime failed: " + (result.stdout+result.stderr)[-4096:])
                 report["native_candidate_quota_mount_start_once"] = True
+                if ready_image:
+                    writer_env = dict(candidate_env, APP_WRITER_NATIVE_IMAGE=ready_image)
+                    writer = subprocess.run([binary, "-test.run=^TestNativeDataWriterContainer$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/driver", env=writer_env, capture_output=True, text=True, timeout=70)
+                    if writer.returncode or "NATIVE_FILTERED_DATA_WRITER_VERIFIED" not in writer.stdout:
+                        raise RuntimeError("actual filtered data writer failed: " + (writer.stdout+writer.stderr)[-4096:])
+                    report["native_filtered_data_writer_verified"] = True
         journal_root = None
         if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"

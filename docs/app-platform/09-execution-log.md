@@ -1394,3 +1394,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   but retains the existing x/net vulnerability gate failure. This closes
   this runtime boundary only; writer/broker, automatic activation/lifecycle,
   SDK/reference apps and complete P00–P14 acceptance remain outstanding.
+
+- Added a native one-way write-access permission primitive that keeps namespace
+  UID 0, fixes GID 65532/mode 02770, verifies exact allocation/root pins and quota
+  inheritance, and refuses partial/already writable states without repair. The
+  sealed observer now also verifies GID 0. New disposable native tests cover
+  concurrent transition attempts, refusal/reopen/drift and an actual filtered
+  app attempting filesystem attribute changes and byte/inode quota exhaustion.
+  The ordinary candidate route must still reject the changed namespace and keep
+  data read-only. Parent probes require both native evidence markers. See
+  [data write-access primitive](92-data-write-access.md). Native acceptance is
+  pending. This is not writer authorization or revocation; persistent admission,
+  native writer exclusion, normal activation, broker and complete platform
+  acceptance remain outstanding. No schema, production/beta, dependency/toolchain
+  or credential change.
