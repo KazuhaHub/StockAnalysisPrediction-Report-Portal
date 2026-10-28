@@ -87,8 +87,16 @@ The probe emits these only after the exact native fixture reports PASS:
 - `native_managed_endpoint_shared_provider_refusal: true`
 - `native_managed_endpoint_data_and_candidate_cross_uid: true`
 
-Current-source acceptance is pending CI. Document 75's earlier candidate-only
-listener acceptance does not prove combined data/start routing.
+Functional source `265b9fdb00e5eb15b4900abb175eaf5c5b966e99` passed quota
+workflow [40607439801](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40607439801).
+Its completed job 122550353436 reports both combined-endpoint keys and
+owned-resource cleanup as true. The Linux transport race suite passed in 4.810 s.
+`execution_ready` remains false; general CI and daemon checks are separate.
+
+Local full runner/CLI race checks passed (journal 78.726 s), all 13 Python probe
+tests passed, and Linux vet/repository-pinned staticcheck plus amd64/arm64 test
+compilation passed. These results do not complete Portal stage integration or
+prove writable data, app readiness or activation.
 
 ## Remaining work
 

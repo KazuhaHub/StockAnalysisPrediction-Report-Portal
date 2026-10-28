@@ -998,7 +998,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   Linux fixture to prepare a fresh namespace from a separate controller process,
   inspect/replay that native evidence, then launch/read/replay a candidate through
   the same endpoint. No in-process data dispatch shortcut remains in that fixture.
-- Native combined acceptance is pending current-source CI. See
-  [shared managed endpoint](76-managed-runtime-endpoint.md). Portal stage delivery,
+- Functional source `265b9fdb00e5eb15b4900abb175eaf5c5b966e99` passed quota
+  workflow 40607439801, job 122550353436: combined cross-UID data/start, exact
+  provider refusal and owned-resource cleanup keys are true. Linux transport race
+  checks passed in 4.810 s. Local full runner/CLI race checks passed (journal
+  78.726 s), 13 Python tests and Linux vet/staticcheck plus both architecture
+  compilations passed. See [shared managed endpoint](76-managed-runtime-endpoint.md).
+  Portal stage delivery,
   automatic startup/staging, reconciliation, readiness/writer/broker access and
   registration/lifecycle remain. No schema or production/beta configuration changed.
