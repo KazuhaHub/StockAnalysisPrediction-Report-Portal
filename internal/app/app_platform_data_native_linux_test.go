@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -131,6 +132,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	path := filepath.Join(endpoint, "data.sock")
 	var server *transport.Server
+	var native *driver.CandidateRuntime
+	var managedSocketRoot string
 	managed := os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != ""
 	if managed {
 		sockets, openErr := os.MkdirTemp("/run", "portal-pf-")
@@ -138,9 +141,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal(openErr)
 		}
 		defer os.RemoveAll(sockets)
-		native, openErr := driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), sockets, root, pin)
-		if openErr != nil {
-			t.Fatal(openErr)
+		managedSocketRoot = sockets
+		native, err = driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), sockets, root, pin)
+		if err != nil {
+			t.Fatal(err)
 		}
 		defer native.Close()
 		server, err = transport.ListenManagedController(context.Background(), path, 41001, 41001, store, root, pin, native)
@@ -171,6 +175,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	defer readyReader.Close()
 	defer readyWriter.Close()
+	privateReader, privateWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer privateReader.Close()
+	defer privateWriter.Close()
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=30s")
 	child.Dir = work
@@ -183,7 +193,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 		defer checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
 	}
-	child.ExtraFiles = []*os.File{publicWriter, readyReader}
+	child.ExtraFiles = []*os.File{publicWriter, readyReader, privateWriter}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
 	var output bytes.Buffer
 	child.Stdout = &output
@@ -199,6 +209,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}()
 	publicWriter.Close()
 	readyReader.Close()
+	privateWriter.Close()
 	var message struct{ Raw, Signature []byte }
 	decoder := json.NewDecoder(io.LimitReader(publicReader, 131073))
 	decoder.DisallowUnknownFields()
@@ -274,6 +285,58 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("registration intent replay", err)
 			}
 			t.Log("BACKEND_REGISTRATION_INTENT_ADMITTED")
+			document, err := io.ReadAll(io.LimitReader(privateReader, 4097))
+			defer clear(document)
+			if err != nil || len(document) == 0 || len(document) > 4096 || platformDigest(document) != string(documentSHA) {
+				t.Fatal("private registration fixture transfer invalid")
+			}
+			registrationDescriptor, err := os.ReadFile(filepath.Join(childData, "registration-descriptor.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fail only journal settlement, after the native file has been
+			// published. Retrying must observe it, not repeat the file write.
+			probe, err := sql.Open("sqlite", filepath.Join(os.Getenv("APP_DATA_JOURNAL_CONTROL"), "journal.sqlite3"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer probe.Close()
+			if _, err := probe.Exec(`CREATE TRIGGER registration_delivery_fixture_failure BEFORE UPDATE OF state ON runner_commands WHEN NEW.stage='activate' AND NEW.state='applied' BEGIN SELECT RAISE(ABORT,'registration fixture settlement failure'); END`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native); err == nil {
+				t.Fatal("fixture settlement failure did not preserve uncertainty")
+			}
+			var candidate control.CandidateCommand
+			if err := json.Unmarshal(message.Raw, &candidate); err != nil {
+				t.Fatal(err)
+			}
+			registrationPath := filepath.Join(managedSocketRoot, candidate.InstallationID, candidate.TargetGeneration, "broker", "registration.json")
+			before, err := os.Lstat(registrationPath)
+			if err != nil || before.Mode().Perm() != 0400 {
+				t.Fatal("native registration publication missing", err)
+			}
+			var state string
+			if err := probe.QueryRow(`SELECT state FROM runner_commands WHERE effect_id=?`, effectID).Scan(&state); err != nil || state != "unknown" {
+				t.Fatal("native delivery failure lost uncertainty", err)
+			}
+			if _, err := probe.Exec(`DROP TRIGGER registration_delivery_fixture_failure`); err != nil {
+				t.Fatal(err)
+			}
+			delivered, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native)
+			if err != nil || delivered.Claim.DocumentSHA256 != string(documentSHA) || delivered.Claim.NativeID != nativeID {
+				t.Fatal("native delivery reconciliation", err)
+			}
+			after, err := os.Lstat(registrationPath)
+			if err != nil || !os.SameFile(before, after) {
+				t.Fatal("native registration retry replaced file", err)
+			}
+			historical, err := store.DispatchBackendRegistration(ctx, raw, signature, registrationDescriptor, document, native)
+			if err != nil || historical != delivered {
+				t.Fatal("native delivery historical replay", err)
+			}
+			t.Log("BACKEND_REGISTRATION_DELIVERY_RECONCILED")
+
 		}
 	}
 	if !bytes.Contains(output.Bytes(), []byte("DATA_STAGE_DISPATCHED")) {

@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"database/sql"
 	"strconv"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -37,6 +38,33 @@ func (s *Store) ReadCandidateRunningReceipt(ctx context.Context, raw, signature 
 		return zero, err
 	}
 	defer tx.Rollback()
+	receipt, err := readCandidateRunningTransaction(ctx, tx, f)
+	if err != nil {
+		return zero, err
+	}
+	if err := finalCandidateCheck(ctx, f); err != nil {
+		return zero, err
+	}
+	if s.closing.Load() {
+		return zero, ErrCandidateClaimUnavailable
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	if err := finalCandidateCheck(ctx, f); err != nil {
+		return zero, err
+	}
+	if s.closing.Load() {
+		return zero, ErrCandidateClaimUnavailable
+	}
+	return receipt, nil
+}
+
+// The caller owns the write-intent transaction and current verified authority.
+// This shared reader does not relax source receipt/resource/data validation when
+// a registration effect, rather than a receipt-only request, owns the operation.
+func readCandidateRunningTransaction(ctx context.Context, tx *sql.Tx, f candidateFacts) (CandidateRunningReceipt, error) {
+	var zero CandidateRunningReceipt
 	receipt, err := ParseCandidateRunningReceipt([]byte(f.receipt))
 	if err != nil || !receipt.MatchesCommand(f.command) || receipt.Claim.DataReceiptSHA256 != f.dataSHA {
 		return zero, ErrFenceReconciliation
@@ -62,21 +90,6 @@ func (s *Store) ReadCandidateRunningReceipt(ctx context.Context, raw, signature 
 	bound, _ := strconv.ParseInt(receipt.Claim.PreflightBoundMS, 10, 64)
 	if resource == nil || resource.id != c.Payload.ResourceID || resource.installation != c.InstallationID || !resource.namespace.Valid || resource.namespace.String != c.Payload.DataNamespaceID || resource.kind != "container" || resource.native != receipt.NativeID || !resource.release.Valid || resource.release.String != c.Payload.ReleaseSHA256 || resource.generation != generation || resource.epoch != c.ControllerEpoch || resource.fence != f.stored.fence || resource.writer != writer || resource.desired != "present" || resource.observed != "running" || resource.ownership != receipt.Claim.OwnershipSHA256 || resource.revision != 2 || !resource.observedMS.Valid || resource.observedMS.Int64 != nativeObserved || resource.created < 0 || resource.created > bound || resource.updated != settled || settled > f.now {
 		return zero, ErrFenceReconciliation
-	}
-	if err := finalCandidateCheck(ctx, f); err != nil {
-		return zero, err
-	}
-	if s.closing.Load() {
-		return zero, ErrCandidateClaimUnavailable
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
-	if err := finalCandidateCheck(ctx, f); err != nil {
-		return zero, err
-	}
-	if s.closing.Load() {
-		return zero, ErrCandidateClaimUnavailable
 	}
 	return receipt, nil
 }

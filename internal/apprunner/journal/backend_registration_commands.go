@@ -18,9 +18,8 @@ func (s *Store) AdmitBackendRegistrationCommand(ctx context.Context, raw, signat
 		if err != nil {
 			return verifiedAdmissionCommand{}, err
 		}
-		c, ref := verified.Command(), verified.Candidate()
-		index := candidateIndex(ref)
-		index.Format, index.Stage, index.Kind, index.EffectID, index.EffectNumber, index.PayloadSHA256 = control.BackendRegistrationFormat, "activate", "activate", c.EffectID, "1", c.PayloadSHA256
+		ref := verified.Candidate()
+		index := registrationIndex(verified)
 		return verifiedAdmissionCommand{identity: index, containerResourceID: ref.Payload.ResourceID, registrationReference: ref}, nil
 	})
 }
