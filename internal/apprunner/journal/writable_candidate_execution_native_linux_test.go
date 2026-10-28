@@ -137,7 +137,7 @@ func assertWritableFixtureReadiness(t *testing.T, s *Store, native *driver.Candi
 
 // Actual-source intent test only: secrets stay in disposable memory and no
 // registration file is delivered by this helper.
-func assertWritableFixtureRegistrationIntent(t *testing.T, s *Store, raw, sig, descriptor []byte, r WritableCandidateRunningReceipt, effect string) {
+func assertWritableFixtureRegistrationIntent(t *testing.T, s *Store, raw, sig, descriptor []byte, r WritableCandidateRunningReceipt, effect string, continuation func([]byte, []byte, []byte)) {
 	t.Helper()
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil {
@@ -194,6 +194,10 @@ func assertWritableFixtureRegistrationIntent(t *testing.T, s *Store, raw, sig, d
 	if scalar(t, s.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id='`+effect+`' AND state='prepared' AND receipt_json='{}' AND ack_attempted_ms IS NULL`) != 1 {
 		t.Fatal("intent delivered or stored private registration")
 	}
+	if continuation != nil {
+		continuation(signed, signature, document)
+	}
+
 }
 
 func TestNativeJournalWritableCandidateExecution(t *testing.T) {
@@ -252,7 +256,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for slot := 0; slot < 3; slot++ {
+	for slot := 0; slot < 5; slot++ {
 		t.Run(strconv.Itoa(slot), func(t *testing.T) {
 			ctx := context.Background()
 			base := 1800 + slot*20
@@ -336,7 +340,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				}
 			}
 			receipt, err := s.ExecuteWritableCandidate(ctx, claim, native, descriptor)
-			if slot == 0 {
+			if slot == 0 || slot == 3 || slot == 4 {
 				if err != nil || !validWritableRunningReceipt(receipt) || receipt.Claim.Preflight == nil || receipt.Claim.Preflight.Native.NamespaceInode != source.NamespaceInode {
 					t.Fatal("actual writable running settlement", err)
 				}
@@ -366,18 +370,39 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if scalar(t, s.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+writer.ResourceID+`' AND native_id='`+id+`' AND revision=2 AND observed_state='running' AND observed_ms IS NOT NULL`) != 1 {
 					t.Fatal("actual process/resource not atomic")
 				}
-				before := writableFixtureJournalSnapshot(t, s)
-				candidateFixtureDocker(t, socket, "container", "stop", "--time", "10", id)
-				if got, err := s.ObserveWritableCandidateReadiness(ctx, renewed, renewedSig, native, descriptor); err == nil || got.Format != "" {
-					t.Fatal("stopped process reported ready")
+				if slot == 0 {
+					before := writableFixtureJournalSnapshot(t, s)
+					candidateFixtureDocker(t, socket, "container", "stop", "--time", "10", id)
+					if got, err := s.ObserveWritableCandidateReadiness(ctx, renewed, renewedSig, native, descriptor); err == nil || got.Format != "" {
+						t.Fatal("stopped process reported ready")
+					}
+					if strings.TrimSpace(string(candidateFixtureDocker(t, socket, "container", "inspect", "--format", "{{.State.Running}}", id))) != "false" {
+						t.Fatal("readiness restarted stopped process")
+					}
+					if before != writableFixtureJournalSnapshot(t, s) {
+						t.Fatal("stopped readiness changed durable records")
+					}
+					assertWritableFixtureRegistrationIntent(t, s, renewed, renewedSig, descriptor, receipt, fixtureID(base+7), func(rr, rs, doc []byte) {
+						if _, err := s.DispatchWritableBackendRegistration(ctx, rr, rs, descriptor, doc, native); err == nil {
+							t.Fatal("stopped process accepted registration delivery")
+						}
+						if _, err := s.ReadWritableBackendRegistrationIntent(ctx, rr, rs); err != nil {
+							t.Fatal("stopped preflight consumed prepared intent", err)
+						}
+						if _, err := os.Lstat(writableRegistrationFixturePath(t, rr, sockets)); !os.IsNotExist(err) {
+							t.Fatal("stopped delivery created file")
+						}
+					})
+				} else if slot == 3 {
+					assertWritableFixtureRegistrationIntent(t, s, renewed, renewedSig, descriptor, receipt, fixtureID(base+7), func(rr, rs, doc []byte) {
+						assertWritableRegistrationMissingFile(t, s, native, rr, descriptor, doc, sockets)
+					})
+				} else {
+					assertWritableFixtureRegistrationIntent(t, s, renewed, renewedSig, descriptor, receipt, fixtureID(base+7), func(rr, rs, doc []byte) {
+						assertWritableRegistrationNormalDelivery(t, s, native, rr, rs, descriptor, doc, sockets)
+					})
 				}
-				if strings.TrimSpace(string(candidateFixtureDocker(t, socket, "container", "inspect", "--format", "{{.State.Running}}", id))) != "false" {
-					t.Fatal("readiness restarted stopped process")
-				}
-				if before != writableFixtureJournalSnapshot(t, s) {
-					t.Fatal("stopped readiness changed durable records")
-				}
-				assertWritableFixtureRegistrationIntent(t, s, renewed, renewedSig, descriptor, receipt, fixtureID(base+7))
+
 			} else if slot == 1 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_settlement_failure`); dropErr != nil {
 					t.Fatal(dropErr)
@@ -464,7 +489,9 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 					t.Fatal("applied recovery repeated")
 				}
 				assertWritableFixtureReadiness(t, s, native, fresh, freshSig, descriptor, recovered)
-				assertWritableFixtureRegistrationIntent(t, s, fresh, freshSig, descriptor, recovered, fixtureID(base+7))
+				assertWritableFixtureRegistrationIntent(t, s, fresh, freshSig, descriptor, recovered, fixtureID(base+7), func(rr, rs, doc []byte) {
+					s, native = assertWritableRegistrationNativeDelivery(t, s, native, rr, descriptor, doc, sockets, journalPath, socket, rootPath, root, pin)
+				})
 			}
 			if slot == 2 {
 				if _, dropErr := s.db.Exec(`DROP TRIGGER fixture_writable_preflight_failure`); dropErr != nil {
@@ -504,4 +531,8 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	t.Log("NATIVE_WRITABLE_READINESS_PRESERVES_JOURNAL")
 	t.Log("NATIVE_WRITABLE_STOPPED_READINESS_REFUSED")
 	t.Log("NATIVE_WRITABLE_REGISTRATION_INTENT_ACTUAL_SOURCES_VERIFIED")
+	t.Log("NATIVE_WRITABLE_REGISTRATION_DELIVERY_VERIFIED")
+	t.Log("NATIVE_WRITABLE_REGISTRATION_RECOVERY_PRESERVES_FILE")
+	t.Log("NATIVE_WRITABLE_REGISTRATION_MISSING_FILE_NOT_CREATED")
+	t.Log("NATIVE_WRITABLE_REGISTRATION_STOPPED_DELIVERY_REFUSED")
 }

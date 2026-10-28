@@ -80,6 +80,18 @@ func (r *CandidateRuntime) ObserveWritableCandidate(ctx context.Context, request
 // Only trusted internal read-only probes run between the two complete native
 // checks. The callback is never exposed to apps, wire callers or the journal.
 func (r *CandidateRuntime) observeWritableCandidate(ctx context.Context, request WritableCandidateLaunchRequest, expected WritableCandidateLaunchSnapshot, nativeID string, probe func(context.Context) error) (WritableCandidateRunningSnapshot, error) {
+	return r.withVerifiedWritableCandidate(ctx, request, expected, nativeID, func(ctx context.Context, _ *candidateMountPins) error {
+		if probe != nil {
+			return probe(ctx)
+		}
+		return nil
+	})
+}
+
+// Package-private infrastructure action under complete native checks and pinned
+// storage. Readiness/recovery supply only reads; registration separately supplies
+// its fixed protected-file transition after durable signed journal claiming.
+func (r *CandidateRuntime) withVerifiedWritableCandidate(ctx context.Context, request WritableCandidateLaunchRequest, expected WritableCandidateLaunchSnapshot, nativeID string, action func(context.Context, *candidateMountPins) error) (WritableCandidateRunningSnapshot, error) {
 	var zero WritableCandidateRunningSnapshot
 	if r == nil || os.Geteuid() != 0 {
 		return zero, ErrUnsupported
@@ -134,8 +146,8 @@ func (r *CandidateRuntime) observeWritableCandidate(ctx context.Context, request
 	if err != nil || state != "running" {
 		return zero, errors.Join(ErrContainerUncertain, err)
 	}
-	if probe != nil {
-		if err := probe(ctx); err != nil {
+	if action != nil {
+		if err := action(ctx, pins); err != nil {
 			return zero, err
 		}
 	}

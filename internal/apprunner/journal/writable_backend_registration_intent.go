@@ -18,7 +18,7 @@ func writableRegistrationIndex(v control.VerifiedWritableBackendRegistrationComm
 	return index
 }
 
-// This scope excludes only a separately authenticated prepared registration row
+// This scope excludes only a separately authenticated validated registration row
 // which matches every logical index field. Normal start/readiness readers keep
 // their original three-command history and cannot ignore later registration.
 func checkWritableCandidateHistoryForRegistration(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, allowedResource string, registration *control.VerifiedWritableBackendRegistrationCommand, now int64) error {
@@ -29,22 +29,7 @@ func checkWritableCandidateHistoryForRegistration(ctx context.Context, tx *sql.T
 		return ErrFenceReconciliation
 	}
 	index := writableRegistrationIndex(*registration)
-	own, err := loadAdmittedCommand(ctx, tx, index.EffectID)
-	if err == nil {
-		fence, _ := strconv.ParseInt(index.InstallationFence, 10, 64)
-		if !sameLogicalCommand(own, index) || own.fence != fence || own.state != "prepared" {
-			return ErrFenceReconciliation
-		}
-		var receipt string
-		var ack sql.NullInt64
-		var created, updated int64
-		if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms,created_ms,updated_ms FROM runner_commands WHERE effect_id=?`, index.EffectID).Scan(&receipt, &ack, &created, &updated); err != nil {
-			return err
-		}
-		if receipt != "{}" || ack.Valid || created < 0 || updated != created || updated > now {
-			return ErrFenceReconciliation
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	if _, _, err := readWritableRegistrationRow(ctx, tx, *registration, now); err != nil {
 		return err
 	}
 	c, w, ref := v.Command(), v.Writer(), v.Writer().Data()

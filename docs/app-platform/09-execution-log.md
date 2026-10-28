@@ -1717,3 +1717,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   delivered; physical delivery/recovery, handshake/viewer, activation/worker,
   broker, SDK/reference apps, lifecycle and full P00–P14 acceptance remain.
   Production, real credentials, Status adoption, SDK freeze and beta unchanged.
+
+- Added once-only writable registration delivery and observation-only uncertain
+  recovery: current private-material validation/readiness, durable unknown claim,
+  fixed protected atomic file publication, opaque physical proof and current
+  receipt CAS. Fresh expired-claim recovery reads only the original claim-bound
+  file; missing/changed files are never created or repaired. Added normal and
+  recovered historical reads, strict state/history/window validators and actual
+  normal/commit-failure/reopen-recovery/missing/stopped acceptance cases. See
+  [writable registration delivery](103-writable-registration-delivery.md).
+  Native acceptance pending. Handshake/viewer, activation/worker, lifecycle,
+  broker, SDK/reference apps and full acceptance remain. Production/beta unchanged.
