@@ -29,6 +29,15 @@ func (s *Server) withPlatformLaunchRead(session platformActorSession, installati
 	return s.withPlatformLaunchReadContext(context.Background(), session, installationID, read)
 }
 func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest) error) (platformLaunchAccess, error) {
+	return s.withPlatformLaunchAccountReadContext(ctx, session, installationID, func(e migExec, binding platformLaunchAccess, m appplatform.Manifest, _ platformActorAccount) error {
+		if read != nil {
+			return read(e, binding, m)
+		}
+		return nil
+	})
+}
+
+func (s *Server) withPlatformLaunchAccountReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest, platformActorAccount) error) (platformLaunchAccess, error) {
 	var zero platformLaunchAccess
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -153,7 +162,7 @@ func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session plat
 
 	binding := platformLaunchAccess{installationID: installationID, generation: strconv.FormatInt(generation, 10), policyRevision: strconv.FormatInt(policy, 10), entry: parsed.Manifest.Presentation.Entry, releaseSHA: releaseSHA, frontendSHA: parsed.Manifest.Frontend.SHA256}
 	if read != nil {
-		if err := read(e, binding, parsed.Manifest); err != nil {
+		if err := read(e, binding, parsed.Manifest, account); err != nil {
 			return zero, err
 		}
 	}
