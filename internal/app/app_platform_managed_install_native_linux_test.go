@@ -5,7 +5,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -20,20 +19,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
-	var m appplatform.Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatal(err)
-	}
-	m.ID = "managed-data-sample"
-	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
-	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
-	m.Capabilities.Required = []string{}
-	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{facts.observation.Profile().Platform}, Protocol: facts.observation.Profile().BackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
-	raw, err = json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw, archive := platformManagedReleaseFixture(t, facts.observation.Profile().Platform)
 	release, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
 	if err != nil {
 		t.Fatal(err)
