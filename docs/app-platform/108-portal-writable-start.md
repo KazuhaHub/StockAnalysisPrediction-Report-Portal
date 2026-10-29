@@ -115,6 +115,13 @@ checks its signed writer receipt hash, unique native ID, image and every owned
 identity/start/claim/source label, running state, zero restart count and actual
 start time no later than the original native observation. Cleanup authenticates
 ownership again before stopping/removing the exact fixture and releasing its IPC.
+The backend fixture observes and strictly accepts only its two fixed actual byte
+boundaries: native low-level 8MiB/128 inode and reviewed Portal 256MiB/65536 inode.
+It tests the corresponding inode denial independently. The root witness waits
+for the fixed proof, verifies the 256MiB/65536 inode denial results and reinspects
+the exact running process after the completed probe. Intermediate/unenforced
+byte limits refuse; no environment or application request selects a quota. This
+keeps Portal's real limits while retaining the original small native checks.
 Only public references/receipts use the fixture file; no private key/document is
 written there. Required markers/report flags are:
 
@@ -124,10 +131,45 @@ written there. Required markers/report flags are:
   `native_portal_writable_start_retained_identity`.
 - `PORTAL_WRITABLE_START_NATIVE_WITNESS` /
   `native_portal_writable_start_native_witness`.
+- `PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED` /
+  `native_portal_writable_start_full_quota_verified`.
 
 This proves Portal rollback with an already applied runner result only after
 fresh native execution. Positive expired-unknown runner recovery through Portal
-is not claimed by this fixture. Native Linux results are pending.
+is not claimed by this fixture.
+
+Local focused writer/start race passed in 15.893s; standalone start SQL race
+passed in 8.381s. Broader Portal platform/managed race passed in 138.433s. Linux
+amd64/arm64 Portal test builds, Linux vet/staticcheck and Python acceptance tests
+(14) passed. Functional source is
+`797e1ace7b9e841dd8f408fb370fde1ef7d8c4a9` (after the fixed Portal
+quota fixture and completed-probe witness updates).
+
+Final source passed disposable quota workflow
+[40816295673](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40816295673),
+job 123258102372. Checkout identifies the exact functional source merged into
+parent `a54cc364f185689cf900bd4d46d6771906395113`. All four new Portal writable
+start reconciliation, retained identity, native witness and full quota flags
+are true. The actual non-root Portal/root runner path recovered after Portal
+rollback, retained the original receipt/resource/native identity and advanced
+only to `probe`. Root verified the completed 256MiB/65536 inode denial proof and
+unchanged running/start-time facts. Both fixed fixture quota classifier tests
+and prior native checks passed. `owned_resources_cleaned` is true and owned
+registry cleanup passed.
+
+General workflow 40816295709/job 123258136783 actually executed the explicit
+SQLite/PostgreSQL writer/start contracts (25.957s combined), including start
+intent and all refusal variants. Build/vet/staticcheck also passed; later
+vulnerability scanning retained existing x/net v0.60.0 GO-2026-6866/6860 findings
+(fixed version reported v0.62.0), skipping ordinary full tests. General workflow
+[40816295709](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40816295709)
+passed all three app race shards and aggregate, all web tests/build checks,
+workflow lint and Docker font/smoke checks. Race shard 1/job 123258136904 ran the
+full runner journal race in 223.364s and its app subset in 112.071s. The explicit
+SQLite/PostgreSQL step, rather than the race name filter, covers the new start
+SQL cases. The general workflow is not green because of the retained dependency
+findings. The independent daemon workflow was not triggered by this Portal/
+fixture-only diff; no fresh standalone daemon result is claimed.
 
 ## Remaining dependency
 
