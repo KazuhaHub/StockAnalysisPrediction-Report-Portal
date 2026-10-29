@@ -1,7 +1,8 @@
 # SDK browser to native backend acceptance
 
-Status: implemented fixture, awaiting its first disposable Linux CI result.
-This document does not claim end-to-end success before inspecting that result.
+Status: the SDK/browser/native request chain passed disposable Linux acceptance
+at functional commit `93c26cf5b08e5df0bcd2b6903d58b75ae55b3bb9`. This is
+request-chain acceptance, not complete platform or production approval.
 No production startup, beta configuration, real credentials, schema, dependency
 lockfile, published package or Status deployment changes.
 
@@ -63,7 +64,9 @@ fixture installation's access; revocation requires the current synthetic session
 and exact parent Origin. Neither endpoint exists in production binaries.
 
 The compiled child uses `useAppBackend`, not a hand-written postMessage/fetch
-client. The Chromium runner:
+client. Its diagnostic result includes a local request sequence and pending
+state; the runner waits for the exact button action's settled result rather than
+reusing an earlier message. This sequence does not provide backend idempotency. The Chromium runner:
 
 1. Waits for SDK backend readiness after the React presentation commit.
 2. Reads actual backend state and verifies the viewer is the current ordinary
@@ -108,8 +111,9 @@ body. No synthetic credential is uploaded as an artifact.
 On macOS, `build.py` compiled both real bundles from the exact SDK source;
 `TestSDKBrowserArchiveDocument` passed (0.714s). Linux amd64 test compilation,
 arm64 build, vet, configured staticcheck, workflow lint, Node/Python syntax and
-14 collector tests passed. These checks do not execute Linux Docker or Chromium
-against the real native installation; that outcome must come from CI.
+14 collector tests and two public-handoff tests passed. The corrected correlated
+SDK package passed sandbox compilation (0.699s). Local macOS checks do not prove
+Linux Docker/browser execution; the following CI evidence supplies that result.
 
 Full marketplace discovery/review/install UX, update/uninstall/recovery,
 capability broker, autosize/navigation/drafts/accessibility and D5/D6 remain
@@ -117,37 +121,40 @@ outstanding. Even a passing request-chain test does not complete P00–P14 or
 approve production startup. The deployed Portal and server beta configuration
 remain unchanged.
 
-First CI run 40846011428 stopped during the host build because only Apps frontend
-dependencies were installed; the existing local Portal web dependencies had
-masked the missing clean-worker installation. No native browser assertion ran.
-The follow-up installs Portal web from its existing lockfile before compiling the
-real host; it does not externalize the missing module or substitute a mock host.
+## Verified CI evidence
 
-Second run 40846254014 compiled the bundles and reached actual native install
-checks, but the non-root controller could not traverse the worker's private
-ancestor directories to read `frontend.zip`. It did not run the browser chain.
-The next follow-up copies only built public assets, the existing Playwright/core
-runtime and Chromium into a newly owned `/tmp/portal-sdk-browser-*` tree. Files
-and subdirectories are not writable by UID 41001; no repository, credentials or
-personal profile is copied and no worker-home permissions are changed. Cleanup
-requires an exact owned path/UID and format marker, removes only that tree, and
-runs even after failure. Two local tests verify readable/non-writable handoff,
-exclusion of unrelated inputs and refusal to remove foreign/unmarked trees.
+Run 40849595539 / job 123365455189 passed on functional source
+`93c26cf5b08e5df0bcd2b6903d58b75ae55b3bb9`. Its uploaded artifact was inspected at
+`/tmp/app-sdk-native-browser-correlated-evidence/project-quota-evidence.json`:
 
-Third run 40847285556 reached the real browser's first-read stage. Inspection of
-the shared protocol found the acceptance UI projecting `viewer.subject` even
-though `protocol.Viewer` serializes that identity as `sub`. The next follow-up
-reads the documented `sub` field and retains the ordinary-role/opaque-subject
-assertion. It also reports only fixed request failure codes and numeric HTTP
-statuses for diagnosis; no credentials or raw responses are logged. A failed
-first-read run is not counted as successful end-to-end evidence.
+| Artifact field | Verified value |
+| --- | --- |
+| `sdk_native_browser_current_viewer` | true |
+| `sdk_native_browser_uncertain_no_retry` | true |
+| `sdk_native_browser_revoked` | true |
+| `native_portal_writable_background_owned_cleanup` | true |
+| `native_portal_writable_background_neighbor_preserved` | true |
+| `execution_ready` | false |
 
-Fourth run 40848577626 observed real HTTP 200 reads/writes and the deliberate
-502 interrupted-write response. Its runner then accepted the previous error
-text while a new read was still pending, closed the page and cancelled that
-read. The next follow-up gives the fixture UI a local sequence number and a
-pending state for each button action; the runner waits for that exact sequence's
-settled result. All viewer, call/write count, uncertainty and revoke assertions
-remain. The sequence is test UI correlation, not a backend idempotency key.
-The revised real bundles and sandbox document check passed locally (0.805s for
-the prior subject-field build); Linux outcome still requires the next run.
+Both explicit workflow cleanup steps, owned registry and owned public browser
+fixture, completed successfully. These assertions came from a real Chromium
+page, real shared SDK/Portal host, protected session gateway and actual isolated
+backend after a fresh scheduler-driven install. No native/backend HTTP result
+was replaced by a browser mock. The source remains a development acceptance
+fixture; it does not prove a marketplace user can yet install/update/uninstall
+through the complete product UI.
+
+Earlier runs are not success evidence:
+
+| Run | Observed failure and final correction |
+| --- | --- |
+| 40846011428 | Clean worker lacked Portal web dependencies; install from the existing lockfile before building the real host. |
+| 40846254014 | UID 41001 could not traverse private worker directories; copy only public runtime files into an owned read-only `/tmp` tree, without changing worker-home permissions. |
+| 40847285556 | Fixture UI read `viewer.subject`; the shared wire contract uses `sub`. Preserve the ordinary-role and opaque-subject checks. |
+| 40848577626 | Runner read the previous error while a new request was pending; correlate each UI action with its own settled sequence. Preserve all business call/write counters. |
+
+The public handoff excludes the repository, credentials and personal profiles.
+Only copied public frontend, Playwright/core runtime and Chromium files are
+readable by the non-root controller, and none are writable by that UID. Cleanup
+requires exact owned path/UID plus a format marker and refuses foreign or
+unmarked trees. Tests verify those boundaries.
