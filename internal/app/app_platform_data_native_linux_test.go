@@ -295,7 +295,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 			t.Log(marker)
 		}
-		for _, marker := range []string{"PORTAL_WRITABLE_BACKGROUND_COMPLETE", "PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER", "PORTAL_WRITABLE_CURRENT_DOCUMENT_HTTP", "PORTAL_WRITABLE_CURRENT_DIRECTORY_HTTP", "PORTAL_WRITABLE_DOCUMENT_HTTP_REVOKED"} {
+		for _, marker := range []string{"PORTAL_WRITABLE_BACKGROUND_COMPLETE", "PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER", "PORTAL_WRITABLE_CURRENT_DOCUMENT_HTTP", "PORTAL_WRITABLE_CURRENT_DIRECTORY_HTTP", "PORTAL_WRITABLE_DOCUMENT_HTTP_REVOKED", "PORTAL_WRITABLE_PAGE_BINDING_NATIVE"} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatal("background completion acceptance missing", marker, output.String())
 			}

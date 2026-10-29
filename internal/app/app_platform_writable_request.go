@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -25,6 +26,34 @@ func samePlatformWritableBackendAccess(a, b platformWritableBackendAccess) bool 
 // viewer/role/OU/assertion can come from an app. It performs one business request
 // with no automatic retry; any error after dispatch may follow an app-side write.
 func (s *Server) requestPlatformWritableBackend(ctx context.Context, session platformActorSession, installation, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error) {
+	return s.requestPlatformWritableBackendBinding(ctx, session, installation, nil, method, path, body, endpoint)
+}
+
+// Page identity is a precondition, never authority. The current access
+// transaction still reconstructs viewer, audience and execution identity.
+type platformBackendRequestBinding struct {
+	Generation     string `json:"generation"`
+	PolicyRevision string `json:"policyRevision"`
+	ReleaseSHA256  string `json:"releaseSha256"`
+}
+
+func (b platformBackendRequestBinding) valid() bool {
+	return platformPositiveCounter(b.Generation) && platformPositiveCounter(b.PolicyRevision) && platformValidSHA(b.ReleaseSHA256)
+}
+
+func (b platformBackendRequestBinding) matches(a platformWritableBackendAccess) bool {
+	// The completed writable source reader currently admits generation one.
+	return b.valid() && b.Generation == "1" && b.PolicyRevision == strconv.FormatInt(a.policy, 10) && b.ReleaseSHA256 == platformDigest(a.intent.start.writer.descriptor)
+}
+
+func (s *Server) requestPlatformBoundWritableBackend(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error) {
+	if !binding.valid() {
+		return driver.BackendResponse{}, errAppPlatformLaunchUnavailable
+	}
+	return s.requestPlatformWritableBackendBinding(ctx, session, installation, &binding, method, path, body, endpoint)
+}
+
+func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, session platformActorSession, installation string, binding *platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error) {
 	var zero driver.BackendResponse
 	if !appplatform.ValidBackendRequestRoute(method, path) || len(body) > appplatform.MaxBackendRequestBody || (len(body) > 0 && (method == "GET" || !json.Valid(body))) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -33,7 +62,12 @@ func (s *Server) requestPlatformWritableBackend(ctx context.Context, session pla
 	defer clear(body)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	initial, err := s.preparePlatformWritableBackendAccess(ctx, session, installation)
+	initial, err := s.withPlatformWritableBackendAccess(ctx, session, installation, func(a platformWritableBackendAccess, _ []byte) error {
+		if binding != nil && !binding.matches(a) {
+			return errAppPlatformLaunchUnavailable
+		}
+		return nil
+	})
 	if err != nil {
 		return zero, err
 	}
@@ -70,7 +104,7 @@ func (s *Server) requestPlatformWritableBackend(ctx context.Context, session pla
 	var assertion string
 	var command control.WritableBackendRequestCommand
 	current, err := s.withPlatformWritableBackendAccess(ctx, session, installation, func(a platformWritableBackendAccess, seed []byte) error {
-		if !samePlatformWritableBackendAccess(initial, a) || !validPlatformWritableHandshakeObservation(bootProof, intent, endpoint, challenge) {
+		if (binding != nil && !binding.matches(a)) || !samePlatformWritableBackendAccess(initial, a) || !validPlatformWritableHandshakeObservation(bootProof, intent, endpoint, challenge) {
 			return errAppPlatformLaunchUnavailable
 		}
 		var err error
