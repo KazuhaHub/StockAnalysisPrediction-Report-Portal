@@ -387,6 +387,12 @@ def main(args):
                         report["native_portal_writable_readiness_advanced"] = True
                         report["native_portal_writable_readiness_refreshed"] = True
                         report["native_portal_writable_readiness_stale_source_refused"] = True
+                        for marker in ("PORTAL_WRITABLE_REGISTRATION_COMMITTED", "PORTAL_WRITABLE_REGISTRATION_RETAINED_IDENTITY", "PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Portal writable registration acceptance did not execute: " + marker)
+                        report["native_portal_writable_registration_committed"] = True
+                        report["native_portal_writable_registration_retained_identity"] = True
+                        report["native_portal_writable_registration_stale_source_refused"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

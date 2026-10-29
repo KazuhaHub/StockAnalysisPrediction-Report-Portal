@@ -1929,3 +1929,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   worker, full recovery/physical lifecycle, broker, SDK/reference apps and full
   P00–P14 acceptance remain incomplete. Production, real credentials, Status,
   SDK freeze and beta configuration remain unchanged.
+
+- Added Portal writable registration preparation, protected lifecycle delivery and
+  exact original-result settlement after a Portal transaction failure. The sole
+  registration-specific source permits and verifies four effects; old writer/
+  start/readiness/readonly readers retain their strict source contracts. Keys
+  remain derived from the existing encrypted identity and only digests enter
+  public commands/control effects. Added SQL source/refusal/rollback tests and
+  actual non-root Portal/root delivery rollback/replay/current-authority fixture.
+  See [writable registration](110-portal-writable-registration.md). Fresh Linux
+  evidence pending. Host boot/possession, viewer/activation/worker and remaining
+  full platform acceptance remain incomplete; production, real credentials,
+  Status, SDK freeze and beta configuration unchanged.

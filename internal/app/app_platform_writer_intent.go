@@ -51,6 +51,11 @@ func loadPlatformWriterIntentMode(e migExec, lease platformOperationLease, runti
 // Readiness continuation checks the exact applied start and canonical readiness
 // independently; initial writer/start callers retain their original empty row.
 func loadPlatformWriterIntentState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, withStart, withReadiness bool) (platformWriterIntent, bool, error) {
+	return loadPlatformWriterIntentSource(e, lease, runtime, seed, now, create, withStart, withReadiness, false)
+}
+
+// The registration caller validates its sole fourth effect before exposing this source.
+func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, withStart, withReadiness, registration bool) (platformWriterIntent, bool, error) {
 	var zero, result platformWriterIntent
 	profile, err := platformInstallProfileInTransaction(e, lease.id)
 	if err != nil || profile != platformWritableInstallFormat || (!validPlatformWriterStage(lease) && !(withStart && (validPlatformWritableProbeStage(lease) || (withReadiness && validPlatformWritableActivateStage(lease))))) {
@@ -141,7 +146,7 @@ func loadPlatformWriterIntentState(e migExec, lease platformOperationLease, runt
 			return zero, false, err
 		}
 	} else {
-		if (effects != 2 && !(withStart && effects == 3)) || candidates != 1 {
+		if (effects != 2 && !(withStart && effects == 3) && !(registration && withStart && withReadiness && validPlatformWritableActivateStage(lease) && effects == 4)) || candidates != 1 {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		var storedRelease, namespace, readiness string

@@ -116,4 +116,5 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 		t.Fatal("rollback or refusal persisted readiness audit")
 	}
 	t.Log("PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED")
+	testNativePortalWritableRegistration(t, s, refreshed, endpoint, current)
 }

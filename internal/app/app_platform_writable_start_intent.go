@@ -35,11 +35,15 @@ func loadPlatformWritableStartIntent(e migExec, lease platformOperationLease, ru
 	return loadPlatformWritableStartState(e, lease, runtime, seed, now, create, false)
 }
 func loadPlatformWritableStartState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, readiness bool) (platformWritableStartIntent, bool, error) {
+	return loadPlatformWritableStartSource(e, lease, runtime, seed, now, create, readiness, false)
+}
+
+func loadPlatformWritableStartSource(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, readiness, registration bool) (platformWritableStartIntent, bool, error) {
 	var zero, result platformWritableStartIntent
 	if !validPlatformWriterStage(lease) && !validPlatformWritableProbeStage(lease) && !(readiness && validPlatformWritableActivateStage(lease)) {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	writer, _, err := loadPlatformWriterIntentState(e, lease, runtime, seed, now, false, true, readiness)
+	writer, _, err := loadPlatformWriterIntentSource(e, lease, runtime, seed, now, false, true, readiness, registration)
 	if err != nil || !writer.applied {
 		return zero, false, errAppPlatformStageEvidence
 	}
@@ -64,7 +68,7 @@ func loadPlatformWritableStartState(e migExec, lease platformOperationLease, run
 	} else if err != nil {
 		return zero, false, err
 	} else {
-		if count != 3 || !platformValidUUID(effect) || kind != "start-candidate" || runtimeID != runtime.id || epoch != lease.controllerEpoch || admitted != lease.fence || created < writer.effectUpdated || updated < created || updated > now {
+		if (count != 3 && !(registration && readiness && validPlatformWritableActivateStage(lease) && count == 4)) || !platformValidUUID(effect) || kind != "start-candidate" || runtimeID != runtime.id || epoch != lease.controllerEpoch || admitted != lease.fence || created < writer.effectUpdated || updated < created || updated > now {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		switch state {
