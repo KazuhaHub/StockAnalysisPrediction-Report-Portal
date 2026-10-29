@@ -97,6 +97,11 @@ browser JSON, parsed receipt or zero value can create opaque provenance.
 3. Independently parsed canonical native writer receipt: exact closed profile,
    seccomp policy, platform, physical root/project/device/namespace inode/quota,
    current-or-historical allowed control revision and nonfuture observations.
+   Host/native-to-database timestamp ordering uses the same explicit one-second
+   bound as signing; database/native events can differ by milliseconds. Original
+   row timestamps/identity stay exact across IO, and physical observations must
+   never be in the host clock future. Deterministic 1ms/1001ms cases exercise the
+   allowed/refused boundary in both database variants.
 4. Current Portal lease/review/publisher/runtime/source revalidated after IO.
    Original source, timestamps, identities and receipt state must still match.
 
@@ -144,7 +149,47 @@ Required fresh markers/report flags:
 This proves the Portal-rollback/runner-applied case only after fresh Linux
 execution. A fake SQL fixture cannot stand in for physical writer acceptance.
 Positive runner-unknown expiry recovery through Portal is not claimed by this
-test. Fresh native acceptance is pending.
+test.
+
+Local focused race passed (Portal 8.101s, transport 1.934s); broader Portal
+platform/managed race passed in 138.483s. Linux amd64/arm64 Portal test builds,
+Linux vet/staticcheck and Python acceptance tests (14) passed. Workflow
+40812304641/job 123245506889 separately confirmed that the SQLite and PostgreSQL
+writer intent/refusal tests actually executed (12.215s combined), before the
+existing x/net vulnerability scan failure. This is database evidence only;
+final source results are recorded below. Clock-boundary writer tests passed
+three consecutive local race runs in 27.810s; broader Portal platform/managed
+race after history pinning passed in 133.492s.
+
+Functional source `5a853cd1fa5926f0ae42043341220d47d2e1c032` passed disposable
+quota workflow [40814032240](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40814032240),
+job 123250796324. Checkout confirms that source merged into parent
+`3211dfe05d62853e1c1f8df479c820a0a46ee6e5`. All three new Portal writable review,
+settlement recovery and retained identity flags are true. Actual non-root Portal
+requests completed native preparation/writer execution, survived forced Portal
+rollback after the runner receipt settled, then completed the exact original
+receipt/resource/effect via historical read. Existing native checks,
+`owned_resources_cleaned` and the owned registry cleanup step passed. No writer
+process/activation/access was inferred from the writer result.
+
+The same source passed the focused SQLite/PostgreSQL storage workflow step in
+19.496s, including both 1ms allowed and 1001ms refused clock-boundary cases.
+
+Daemon workflow [40814032539](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40814032539),
+job 123251062215, passed on the same source. Full Linux runner race passed
+(control 1.870s, data 1.012s, driver 3.131s, journal 226.127s, transport 7.003s,
+runner command 1.033s), plus closed container policy, distinct process identities
+and Portal root-endpoint confirmation.
+
+General workflow [40814032138](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40814032138)
+passed all app race shards/aggregate, web tests/build checks, workflow lint and
+Docker font/smoke checks. The new writer cases have separate explicit database
+coverage as described above; the name-based race subset alone is not evidence
+for those cases. Go job 123251068257 passed build/vet, focused SQLite/PostgreSQL
+contracts and staticcheck, then failed existing `golang.org/x/net@v0.60.0`
+vulnerabilities GO-2026-6866/GO-2026-6860 (reported fixed in v0.62.0), skipping
+its ordinary full test step. The general workflow is therefore not green.
+Dependencies/toolchain remain unchanged.
 
 ## Next dependency
 
