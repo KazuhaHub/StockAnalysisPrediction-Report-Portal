@@ -70,7 +70,7 @@ func testPlatformWriterIntent(t *testing.T, pg bool) {
 func TestPlatformWriterIntentSQLite(t *testing.T)   { testPlatformWriterIntent(t, false) }
 func TestPlatformWriterIntentPostgres(t *testing.T) { testPlatformWriterIntent(t, true) }
 func testPlatformWriterRefusals(t *testing.T, pg bool) {
-	for _, mode := range []string{"runtime", "key", "trust", "publisher_key", "sponsor", "pause", "lease", "fence", "epoch", "namespace", "source", "resource", "effect", "partial", "extra", "capability"} {
+	for _, mode := range []string{"runtime", "key", "trust", "publisher_key", "sponsor", "pause", "lease", "fence", "epoch", "namespace", "namespace_created", "source_created", "source", "resource", "effect", "partial", "extra", "capability"} {
 		t.Run(mode, func(t *testing.T) {
 			s, lease := platformWriterIntentFixture(t, pg)
 			i, err := s.preparePlatformInstallWriter(context.Background(), lease)
@@ -98,6 +98,10 @@ func testPlatformWriterRefusals(t *testing.T, pg bool) {
 				mustExec(t, s.st, `UPDATE app_platform_operations SET controller_epoch=?`, platformFixtureID(900))
 			case "namespace":
 				mustExec(t, s.st, `UPDATE app_platform_data_namespaces SET revision=3`)
+			case "namespace_created":
+				mustExec(t, s.st, `UPDATE app_platform_data_namespaces SET created_ms=created_ms-1`)
+			case "source_created":
+				mustExec(t, s.st, `UPDATE app_platform_operation_effects SET created_ms=created_ms-1 WHERE effect_number=1`)
 			case "source":
 				mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}' WHERE effect_number=1`)
 			case "resource":

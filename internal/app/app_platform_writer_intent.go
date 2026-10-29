@@ -16,16 +16,16 @@ import (
 )
 
 type platformWriterIntent struct {
-	namespaceID, resourceID, effectID                                                                 string
-	dataUpdated, namespaceUpdated, namespaceRevision, effectCreated, effectUpdated, activationCreated int64
-	runtime                                                                                           platformRuntimeRegistration
-	authority                                                                                         control.Authority
-	command                                                                                           control.DataWriterCommand
-	raw, signature, descriptor                                                                        []byte
-	data                                                                                              journal.DataPreparationReceipt
-	dataSHA                                                                                           string
-	applied                                                                                           bool
-	receipt                                                                                           journal.DataWriterReceipt
+	namespaceID, resourceID, effectID                                                                                                string
+	dataCreated, dataUpdated, namespaceCreated, namespaceUpdated, namespaceRevision, effectCreated, effectUpdated, activationCreated int64
+	runtime                                                                                                                          platformRuntimeRegistration
+	authority                                                                                                                        control.Authority
+	command                                                                                                                          control.DataWriterCommand
+	raw, signature, descriptor                                                                                                       []byte
+	data                                                                                                                             journal.DataPreparationReceipt
+	dataSHA                                                                                                                          string
+	applied                                                                                                                          bool
+	receipt                                                                                                                          journal.DataWriterReceipt
 }
 
 func validPlatformWriterStage(lease platformOperationLease) bool {
@@ -70,7 +70,7 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 		return zero, false, errAppPlatformStageEvidence
 	}
 	namespaceUpdated := updated
-	result.namespaceUpdated, result.namespaceRevision = updated, revision
+	result.namespaceCreated, result.namespaceUpdated, result.namespaceRevision = created, updated, revision
 	var dataEffect, kind, digest, runtimeID, epoch, receipt string
 	var admitted, observed int64
 	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms FROM app_platform_operation_effects WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`, lease.id).Scan(&dataEffect, &kind, &digest, &runtimeID, &epoch, &admitted, &observed, &state, &receipt, &created, &updated); err != nil {
@@ -80,7 +80,10 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 		return zero, false, errAppPlatformStageEvidence
 	}
 	dataUpdated := updated
-	result.dataUpdated = updated
+	result.dataCreated, result.dataUpdated = created, updated
+	if created != result.namespaceCreated {
+		return zero, false, errAppPlatformStageEvidence
+	}
 	if revision == 2 && namespaceUpdated != dataUpdated {
 		return zero, false, errAppPlatformStageEvidence
 	}
@@ -91,6 +94,11 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 	result.data, err = journal.ParseDataPreparationReceipt([]byte(receipt))
 	if err != nil {
 		return zero, false, err
+	}
+	claimedMS, _ := strconv.ParseInt(result.data.Claim.ClaimedMS, 10, 64)
+	observedMS, _ := strconv.ParseInt(result.data.ObservedMS, 10, 64)
+	if result.dataCreated > claimedMS || observedMS > dataUpdated {
+		return zero, false, errAppPlatformStageEvidence
 	}
 	canonical, _ := json.Marshal(result.data)
 	original := dataCommand
@@ -284,7 +292,7 @@ func (s *Server) preparePlatformInstallWriter(ctx context.Context, expected plat
 	return result, nil
 }
 func samePlatformWriterIntent(a, b platformWriterIntent) bool {
-	return a.namespaceID == b.namespaceID && a.resourceID == b.resourceID && a.effectID == b.effectID && samePlatformWriterCommand(a.command, b.command) && a.data == b.data && a.dataSHA == b.dataSHA && a.dataUpdated == b.dataUpdated && a.namespaceUpdated == b.namespaceUpdated && a.namespaceRevision == b.namespaceRevision && a.effectCreated == b.effectCreated && a.effectUpdated == b.effectUpdated && a.activationCreated == b.activationCreated && a.applied == b.applied && a.receipt == b.receipt && samePlatformManagedRuntime(a.runtime, b.runtime) && bytes.Equal(a.descriptor, b.descriptor)
+	return a.namespaceID == b.namespaceID && a.resourceID == b.resourceID && a.effectID == b.effectID && samePlatformWriterCommand(a.command, b.command) && a.data == b.data && a.dataSHA == b.dataSHA && a.dataCreated == b.dataCreated && a.namespaceCreated == b.namespaceCreated && a.dataUpdated == b.dataUpdated && a.namespaceUpdated == b.namespaceUpdated && a.namespaceRevision == b.namespaceRevision && a.effectCreated == b.effectCreated && a.effectUpdated == b.effectUpdated && a.activationCreated == b.activationCreated && a.applied == b.applied && a.receipt == b.receipt && samePlatformManagedRuntime(a.runtime, b.runtime) && bytes.Equal(a.descriptor, b.descriptor)
 }
 
 func samePlatformWriterCommand(a, b control.DataWriterCommand) bool {
