@@ -18,23 +18,23 @@ def build(apps, output):
     output.mkdir(parents=True, exist_ok=False)
     (output / "node_modules").symlink_to(apps / "node_modules", target_is_directory=True)
     child = output / "child.tsx"
-    child.write_text('''import {useState} from 'react';
+    child.write_text('''import {useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
 import {AppRoot,useAppBackend,useAppPresentation} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const backend=useAppBackend(),{presentation}=useAppPresentation();
- const [result,setResult]=useState('none'),[busy,setBusy]=useState(false);
- async function run(method:string,path:string){setBusy(true);try{
+ const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
+ async function run(method:string,path:string){const id=++sequence.current;setResult({id,text:'pending'});setBusy(true);try{
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
-  const value=JSON.parse(r.body);setResult(JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub}));
- }catch(error){setResult('error:'+error.code)}finally{setBusy(false)}}
+  const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
+ }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="locale">{presentation.locale}</Typography.Text>
  <Button disabled={!backend.ready||busy} onClick={()=>run('GET','/v1/echo')}>Read backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo')}>Write backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo?disconnect=1')}>Disconnect write</Button>
- <Typography.Text data-testid="backend-result">{result}</Typography.Text></Space>
+ <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text></Space>
 }
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
     host = output / "host.tsx"

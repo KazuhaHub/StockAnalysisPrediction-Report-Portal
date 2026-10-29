@@ -13,24 +13,26 @@ async function main(){
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
-  const result=frame.getByTestId('backend-result');
-  async function read(){await frame.getByRole('button',{name:'Read backend',exact:true}).click();await result.filter({hasText:/"status":200|^error:/}).waitFor();const text=await result.innerText();if(text.startsWith('error:')){readFailure=/^error:(not_ready|unsupported|invalid_request|busy|unavailable|uncertain)$/.test(text)?text:'invalid-result';throw new Error('read refused')}return JSON.parse(text)}
+  let issued=0;
+  async function dispatch(name){
+   await frame.getByRole('button',{name,exact:true}).click();
+   const result=frame.locator('[data-testid="backend-result"][data-request-id="'+(++issued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
+  async function read(){const text=await dispatch('Read backend');if(text.startsWith('error:')){readFailure=/^error:(not_ready|unsupported|invalid_request|busy|unavailable|uncertain)$/.test(text)?text:'invalid-result';throw new Error('read refused')}const value=JSON.parse(text);if(value.status!==200)throw new Error('app read refused');return value}
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
   await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
-  stage='write';await frame.getByRole('button',{name:'Write backend',exact:true}).click();
-  await result.filter({hasText:'"count":'+(before.count+1)}).waitFor();
-  const write=JSON.parse(await result.innerText());
-  if(write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
-  stage='uncertain';await frame.getByRole('button',{name:'Disconnect write',exact:true}).click();
-  await result.filter({hasText:'error:uncertain'}).waitFor();
+  stage='write';const write=JSON.parse(await dispatch('Write backend'));
+  if(write.status!==200||write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
+  stage='uncertain';if(await dispatch('Disconnect write')!=='error:uncertain')throw new Error('missing uncertainty');
   stage='verify-count';const after=await read();
   if(after.count!==before.count+2||after.calls!==before.calls+3)throw new Error('uncertain browser write retried or omitted');
   stage='revoke';await page.getByRole('button',{name:'Revoke fixture access',exact:true}).click();
   await page.getByTestId('launch-status').filter({hasText:'revoke:204'}).waitFor();
-  await frame.getByRole('button',{name:'Read backend',exact:true}).click();
-  await result.filter({hasText:'error:unavailable'}).waitFor();
+  if(await dispatch('Read backend')!=='error:unavailable')throw new Error('revoked backend remained available');
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
   await context.close();
   console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');

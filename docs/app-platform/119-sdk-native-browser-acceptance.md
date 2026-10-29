@@ -141,3 +141,13 @@ reads the documented `sub` field and retains the ordinary-role/opaque-subject
 assertion. It also reports only fixed request failure codes and numeric HTTP
 statuses for diagnosis; no credentials or raw responses are logged. A failed
 first-read run is not counted as successful end-to-end evidence.
+
+Fourth run 40848577626 observed real HTTP 200 reads/writes and the deliberate
+502 interrupted-write response. Its runner then accepted the previous error
+text while a new read was still pending, closed the page and cancelled that
+read. The next follow-up gives the fixture UI a local sequence number and a
+pending state for each button action; the runner waits for that exact sequence's
+settled result. All viewer, call/write count, uncertainty and revoke assertions
+remain. The sequence is test UI correlation, not a backend idempotency key.
+The revised real bundles and sandbox document check passed locally (0.805s for
+the prior subject-field build); Linux outcome still requires the next run.
