@@ -293,3 +293,16 @@ The synchronous `POST /api/admin/report-exports/download` is removed in favour o
 endpoint becomes the generic count/preview endpoint. `export_jobs` arrives through migration
 step `0012`, not through the frozen baseline, and changes no existing table, so the v0.4.72
 acceptance contract is unchanged.
+
+## Follow-up — reader export (decided 2026-10-29, to be ADR 0046)
+
+Non-administrators will get report export in their own UI, as a separate change after this one,
+reusing this engine, `export_jobs` and the task tray:
+
+- Only the `reports` source, Markdown ZIP only at first, evaluated with the requester's own read
+  scope at execution time: what a user can export is exactly what they can already read.
+- Governed per OU, Workspace-style (a child inherits unless it overrides; NULL means inherit, as
+  `forecast_scope` does): export allowed (default off), maximum reports per export (default 200),
+  daily report quota (default 1,000). The OU columns are a schema change and need the owner's
+  approval of their exact shape when ADR 0046 is written.
+- Readers see and download only their own tasks; administrators keep seeing every task.
