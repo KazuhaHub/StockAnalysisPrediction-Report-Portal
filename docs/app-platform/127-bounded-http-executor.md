@@ -120,8 +120,9 @@ large headers, duplicate encodings, invalid TLS root/name, connection loss,
 concurrency, caller cancellation/deadline and released concurrency slots.
 
 Local package race/coverage checks pass (87.9% statement coverage at the first
-complete run), `go vet` and Linux amd64 test compilation pass. Broader runner
-regression and CI outcomes must be recorded separately before review. Tests do
+complete run), `go vet` and Linux amd64 test compilation pass. The complete local
+runner packages and platform contracts also pass race tests. Exact CI evidence
+is recorded separately below. Tests do
 not call an external provider or use real credentials. The general CI workflow
 runs this package's race tests before the inherited vulnerability gate; disposable
 Linux acceptance also includes it. No database shape, dependency, production,
@@ -146,3 +147,15 @@ Status, market catalogue or server beta change is included.
 6. Prove a neutral app performs this operation after marketplace installation,
    with no manual backend configuration. Keep all current providers declined
    until that integrated path has passing review/acceptance evidence.
+
+
+## CI fixture correction
+
+The first general run at `92f318e2` passed the executor race step, but web shard
+2/3 failed despite all 452 assertions passing: the shell's idle prefetch started
+loading real report-page dependencies after its test environment was destroyed.
+The layout unit fixture now mocks StockPage and RunPage, which that suite does
+not mount as route bodies. This removes the unrelated asynchronous dependency
+tree; it does not change production prefetch or suppress unhandled errors. All
+31 layout tests pass locally after the fixture correction. Final CI evidence
+remains required.

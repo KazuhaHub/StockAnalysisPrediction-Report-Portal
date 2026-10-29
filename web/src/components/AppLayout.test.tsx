@@ -71,6 +71,10 @@ vi.mock('../lib/conditionalGet', () => ({
   forgetTags,
   getIfChanged: () => (queueState.answer === null ? new Promise(() => {}) : Promise.resolve(queueState.answer)),
 }))
+// Shell tests mount route bodies explicitly. Its idle report prefetch must not
+// load unrelated page dependency trees after this test environment is destroyed.
+vi.mock('../pages/StockPage', () => ({ default: () => null }))
+vi.mock('../pages/RunPage', () => ({ default: () => null }))
 vi.mock('./Omnibox', () => ({ default: () => <input aria-label="global-search" /> }))
 vi.mock('./RunAnalysisModal', () => ({ default: () => null }))
 vi.mock('./QueueDrawer', () => ({ default: () => null }))
