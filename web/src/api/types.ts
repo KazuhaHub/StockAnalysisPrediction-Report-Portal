@@ -649,6 +649,25 @@ export interface ForecastSettings {
    * What the loop would find if it ran now. Cheap counts, not fetches, so an admin can tell "on and
    * caught up" (a small or zero backlog) from "on and stuck" (a count that is not moving).
    */
+  /** Ledger-wide confirmed completed sessions, including sleeping retries. */
+  backlog?: {
+    as_of: string
+    due: number
+    overdue: number
+    retrying: number
+    oldest_minutes: number
+    truncated: boolean
+    items: Array<{
+      set_id: number
+      symbol: string
+      checkpoint: string
+      due: string
+      minutes: number
+      refusal?: string
+      next_attempt_at?: string
+      failure?: { stage: string; source: string; at: string; from: string; to: string; detail: string }
+    }>
+  }
   due_sets: number
   pending: number
   refused: number
