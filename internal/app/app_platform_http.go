@@ -122,6 +122,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 	defer cancel()
 	// Validate the complete current document profile before advertising its URL.
 	var applicationID, layout, timeZone string
+	var backendAvailable bool
 	var display *appplatform.AppDisplay
 	binding, err := s.withPlatformLaunchReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
 		var archive []byte
@@ -129,6 +130,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 			return err
 		}
 		applicationID = m.ID
+		backendAvailable = m.Backend != nil && s.platformBackendEndpoint.Load() != nil
 		display = m.Presentation.Display
 		layout = m.Presentation.Routes[0].Layout
 		var zone sql.NullString
@@ -153,7 +155,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": []string{}, "applicationId": applicationID, "display": display, "layout": layout, "timeZone": timeZone})
+	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": []string{}, "backendAvailable": backendAvailable, "applicationId": applicationID, "display": display, "layout": layout, "timeZone": timeZone})
 }
 func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, user string) {
 	expected := platformLaunchAccess{installationID: r.PathValue("installation"), generation: r.PathValue("generation"), policyRevision: r.PathValue("policy"), releaseSHA: r.PathValue("release"), frontendSHA: r.PathValue("frontend"), entry: r.PathValue("entry")}

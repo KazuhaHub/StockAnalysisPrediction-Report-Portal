@@ -50,3 +50,12 @@ test('private document URL must match the bridge activation binding',()=>{
  view.rerender(<AppFrameV2 {...props} source={source} binding={{...binding,generation:'2'}}/>)
  expect(screen.queryByTitle('Fixture')).toBeNull()
 })
+
+test('only an advertised own-backend channel receives the parent transport and changes retire the frame',()=>{
+ const view=render(<AppFrameV2 {...props}/>);fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[0].options.onBackendRequest).toBeUndefined()
+ const old=screen.getByTitle('Fixture')
+ view.rerender(<AppFrameV2 {...props} backendAvailable/>);expect(screen.getByTitle('Fixture')).not.toBe(old)
+ expect(sessions[0].close).toHaveBeenCalledOnce();fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[1].options.onBackendRequest).toBeTypeOf('function')
+})

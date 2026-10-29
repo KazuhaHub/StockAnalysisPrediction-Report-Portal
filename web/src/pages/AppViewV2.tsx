@@ -88,7 +88,7 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: 1, minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} presentation={presentation!} height={height} />
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} presentation={presentation!} height={height} />
         </div>
       )}
     </section>

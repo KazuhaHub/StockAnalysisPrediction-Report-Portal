@@ -7,6 +7,7 @@ import {
   BRIDGE_PROTOCOL,
   BRIDGE_DEADLINE_MS,
   type BridgeBinding,
+  BridgeBackendError,
 } from "./bridge-v2";
 
 const cleanup: (() => void)[] = [];
@@ -160,13 +161,228 @@ function acknowledgement(
   return {
     ...Object.fromEntries(
       Object.entries(init).filter(
-        ([key]) => !["type", "presentation", "capabilities"].includes(key),
+        ([key]) =>
+          !["type", "presentation", "capabilities", "backend"].includes(key),
       ),
     ),
     type: "app:ready",
     ...changes,
   };
 }
+
+async function backendPair(
+  onBackendRequest?: Parameters<typeof createBridgeHost>[0]["onBackendRequest"],
+) {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onBackendRequest,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  return { ...w, host, client };
+}
+
+test("own backend channel preserves JSON bytes without platform capabilities", async () => {
+  const dispatch = vi.fn(async (_request: unknown, _signal: AbortSignal) => ({
+    status: 200,
+    body: '{"ok":true}',
+  }));
+  const { client } = await backendPair(dispatch);
+  expect(client.context()?.capabilities).toEqual([]);
+  expect(client.context()?.backendAvailable).toBe(true);
+  const request = {
+    method: "POST",
+    path: "/v1/echo",
+    body: '{ "role": "admin", "value": "中文" }',
+  };
+  await expect(client.requestBackend(request)).resolves.toEqual({
+    status: 200,
+    body: '{"ok":true}',
+  });
+  expect(dispatch).toHaveBeenCalledOnce();
+  expect(dispatch.mock.calls[0][0]).toEqual(request);
+  expect(dispatch.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+});
+
+test("backend requests fail closed before ready, without support and on invalid input", async () => {
+  const { client } = await backendPair();
+  expect(client.context()?.backendAvailable).toBe(false);
+  await expect(
+    client.requestBackend({ method: "GET", path: "/v1/echo", body: "" }),
+  ).rejects.toMatchObject({ code: "unsupported" });
+  const dispatch = vi.fn(async () => ({ status: 200, body: "{}" }));
+  const connected = await backendPair(dispatch);
+  for (const request of [
+    { method: "GET", path: "/v1/echo", body: "{}" },
+    { method: "POST", path: "https://other.invalid/v1/echo", body: "{}" },
+    { method: "POST", path: "/v1/handshake", body: "{}" },
+    { method: "POST", path: "/v1/echo", body: "not JSON" },
+    {
+      method: "POST",
+      path: "/v1/echo",
+      body: JSON.stringify("a".repeat(65536)),
+    },
+    {
+      method: "POST",
+      path: "/v1/echo",
+      body: "{}",
+      headers: { authorization: "ignored" },
+    },
+  ])
+    await expect(
+      connected.client.requestBackend(request),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  expect(dispatch).not.toHaveBeenCalled();
+  connected.client.close();
+  await expect(
+    connected.client.requestBackend({
+      method: "GET",
+      path: "/v1/echo",
+      body: "",
+    }),
+  ).rejects.toMatchObject({ code: "not_ready" });
+});
+
+test("closing backend channel aborts dispatch and marks outstanding writes uncertain", async () => {
+  let signal: AbortSignal | undefined;
+  let finish!: (v: { status: number; body: string }) => void;
+  const dispatch = vi.fn((_request, abort: AbortSignal) => {
+    signal = abort;
+    return new Promise<{ status: number; body: string }>((resolve) => {
+      finish = resolve;
+    });
+  });
+  const { client, host } = await backendPair(dispatch);
+  const pending = client.requestBackend({
+    method: "POST",
+    path: "/v1/echo",
+    body: "{}",
+  });
+  const rejected = expect(pending).rejects.toMatchObject({
+    code: "uncertain",
+    retryable: false,
+  });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+  host.close();
+  client.close();
+  await rejected;
+  expect(signal?.aborted).toBe(true);
+  finish({ status: 200, body: '{"late":true}' });
+  expect(client.state()).toBe("closed");
+});
+
+test("backend failure details never cross the channel and requests are not retried", async () => {
+  const dispatch = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("private upstream credential"))
+    .mockRejectedValueOnce(new BridgeBackendError("unavailable"))
+    .mockResolvedValueOnce({ status: 302, body: "{}" });
+  const { client } = await backendPair(dispatch);
+  const request = { method: "POST", path: "/v1/echo", body: "{}" };
+  for (const code of ["uncertain", "unavailable", "uncertain"]) {
+    await expect(client.requestBackend(request)).rejects.toMatchObject({
+      code,
+      retryable: false,
+    });
+  }
+  expect(dispatch).toHaveBeenCalledTimes(3);
+});
+
+test("backend concurrency is bounded and cancelling a request aborts only its dispatch", async () => {
+  const signals: AbortSignal[] = [],
+    finish: ((value: { status: number; body: string }) => void)[] = [];
+  const dispatch = vi.fn((_request, signal: AbortSignal) => {
+    signals.push(signal);
+    return new Promise<{ status: number; body: string }>((resolve) =>
+      finish.push(resolve),
+    );
+  });
+  const { client } = await backendPair(dispatch),
+    abort = new AbortController();
+  const request = { method: "POST", path: "/v1/echo", body: "{}" };
+  const one = client.requestBackend(request, abort.signal),
+    two = client.requestBackend(request);
+  const cancelled = expect(one).rejects.toMatchObject({
+    code: "uncertain",
+    retryable: false,
+  });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+  await expect(client.requestBackend(request)).rejects.toMatchObject({
+    code: "busy",
+  });
+  abort.abort();
+  await cancelled;
+  await vi.waitFor(() => expect(signals[0].aborted).toBe(true));
+  expect(signals[1].aborted).toBe(false);
+  finish[0]({ status: 200, body: '{"late":true}' });
+  finish[1]({ status: 200, body: '{"second":true}' });
+  await expect(two).resolves.toEqual({ status: 200, body: '{"second":true}' });
+  expect(client.state()).toBe("ready");
+});
+
+test("a stale channel cannot dispatch a backend request and request IDs cannot replay", async () => {
+  const dispatch = vi.fn(async () => ({ status: 200, body: "{}" }));
+  const w = await backendPair(dispatch);
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const message = {
+    ...acknowledgement(init),
+    type: "backend.request",
+    requestId: "1",
+    request: { method: "POST", path: "/v1/echo", body: "{}" },
+  };
+  delete (message as Record<string, unknown>).revision;
+  port.postMessage({ ...message, generation: "2" });
+  await expect(w.client.requestBackend(message.request)).resolves.toEqual({
+    status: 200,
+    body: "{}",
+  });
+  expect(dispatch).toHaveBeenCalledOnce();
+  port.postMessage(message);
+  await vi.waitFor(() => expect(w.host.state()).toBe("failed"));
+  expect(dispatch).toHaveBeenCalledOnce();
+});
+
+test("a backend timeout is uncertain, cancels native work and does not retry", async () => {
+  let signal: AbortSignal | undefined;
+  const dispatch = vi.fn((_request, abort: AbortSignal) => {
+    signal = abort;
+    return new Promise<{ status: number; body: string }>(() => {});
+  });
+  const { client } = await backendPair(dispatch);
+  vi.useFakeTimers();
+  const pending = client.requestBackend({
+    method: "POST",
+    path: "/v1/echo",
+    body: "{}",
+  });
+  const result = expect(pending).rejects.toMatchObject({
+    code: "uncertain",
+    retryable: false,
+  });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+  vi.advanceTimersByTime(30_000);
+  await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+  await result;
+  expect(dispatch).toHaveBeenCalledOnce();
+  expect(client.state()).toBe("ready");
+});
 
 test("coalesced presentation updates wait for latest application before reveal", async () => {
   const w = hostOnly();
@@ -347,6 +563,7 @@ function clientOnly() {
     revision: "1",
     presentation,
     capabilities: ["reports.read"],
+    backend: false,
   };
   function deliver(
     data: unknown,
@@ -397,6 +614,8 @@ for (const changes of [
   { protocol: "rp:init" },
   { capabilities: ["host.exec"] },
   { capabilities: ["reports.read", "reports.read"] },
+  { backend: "true" },
+  { backend: undefined },
 ]) {
   test(`closed init refuses unexpected fields/version/capabilities ${JSON.stringify(changes)}`, () => {
     const w = clientOnly();
