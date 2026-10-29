@@ -942,7 +942,7 @@
   "forecast.eval.off": "未開啟",
   "forecast.eval.offHint": "自動結算預設關閉。開啟前不會結算任何檢查點，待結算計數只隨報告入賬增長。",
   "forecast.eval.bench": "基準指數",
-  "forecast.eval.due": "目前可執行集合（不含退避等待）",
+  "forecast.eval.due": "當前可執行集合（不含退避等待）",
   "forecast.eval.pending": "待結算檢查點（含未到期）",
   "forecast.eval.refused": "可重試的失敗或拒絕",
   "forecast.eval.unsettled": "基準未核對",
