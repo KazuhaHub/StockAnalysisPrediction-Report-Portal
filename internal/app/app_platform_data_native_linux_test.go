@@ -562,6 +562,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	}
 	t.Log("STATIC_DRIVER_COMPLETE")
 	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
+		testNativePortalWritableWriter(t, s, session, endpoint)
 		testNativePortalManagedInstallData(t, s, session, endpoint)
 	}
 

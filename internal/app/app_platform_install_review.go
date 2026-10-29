@@ -75,7 +75,7 @@ func platformLoadInstallProjectionForTarget(e migExec, release platformStagedRel
 	if err := platformNoPriorInstall(e, parsed.Manifest.ID); err != nil {
 		return platformInstallProjection{}, err
 	}
-	if format == platformManagedInstallFormat {
+	if platformManagedFormat(format) {
 		if err := validateManagedInstallTarget(e, target, control.epoch); err != nil {
 			return platformInstallProjection{}, err
 		}
@@ -121,7 +121,7 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 	var result platformRemovalReview
 	err := s.withPlatformStagedReleaseContext(ctx, session, release, trustRevision, func(e migExec, actor platformActorFacts, control platformActorControl, verified platformStagedRelease) error {
 		var target *platformManagedInstallTarget
-		if format == platformManagedInstallFormat {
+		if platformManagedFormat(format) {
 			if facts == nil {
 				return errAppPlatformRuntimeConflict
 			}
@@ -191,7 +191,7 @@ func (s *Server) consumePlatformInstallReviewForFormatContext(ctx context.Contex
 }
 func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, session platformActorSession, planID, planSHA, key, requiredFormat string, facts *platformManagedRuntimeFacts, endpoint platformRuntimeEndpoint) (platformRemovalCommit, error) {
 	var result platformRemovalCommit
-	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) || (requiredFormat != "" && requiredFormat != platformFrontendInstallFormat && requiredFormat != platformManagedInstallFormat) {
+	if !platformValidUUID(planID) || !platformValidSHA(planSHA) || !platformValidUUID(key) || (requiredFormat != "" && requiredFormat != platformFrontendInstallFormat && !platformManagedFormat(requiredFormat)) {
 		return result, errAppPlatformPlanChanged
 	}
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
@@ -225,8 +225,8 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 			if requiredFormat != "" && projection.Format != requiredFormat {
 				return errAppPlatformPlanChanged
 			}
-			if projection.Format == platformManagedInstallFormat {
-				if facts == nil || requiredFormat != platformManagedInstallFormat {
+			if platformManagedFormat(projection.Format) {
+				if facts == nil || requiredFormat != projection.Format {
 					return errAppPlatformPlanChanged
 				}
 				target, err := managedInstallTarget(*facts, endpoint)
@@ -283,8 +283,8 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if json.Unmarshal([]byte(raw), &storedProjection) != nil {
 			return errAppPlatformPlanChanged
 		}
-		if storedProjection.Format == platformManagedInstallFormat {
-			if facts == nil || requiredFormat != platformManagedInstallFormat {
+		if platformManagedFormat(storedProjection.Format) {
+			if facts == nil || requiredFormat != storedProjection.Format {
 				return errAppPlatformPlanChanged
 			}
 			target, err := managedInstallTarget(*facts, endpoint)

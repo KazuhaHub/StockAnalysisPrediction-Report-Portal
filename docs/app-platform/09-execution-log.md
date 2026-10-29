@@ -1829,3 +1829,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   activation/worker, physical lifecycle, broker, SDK/reference apps and full
   P00–P14 acceptance remain unfinished. Production, credentials, Status, public
   SDK freeze and beta unchanged.
+
+- Added distinct writable install review, authenticated optional writable adapter
+  configuration and Portal typed writer intent/RPC/atomic receipt commit. Shared
+  review/data infrastructure recognizes the new format; readonly candidate source
+  explicitly refuses it. Stable future candidate identity and writer effect are
+  persisted before native IO; successful proof updates only writer/namespace,
+  leaving install pending with no process/activation/access. See
+  [Portal writable writer](107-portal-writable-install-writer.md). Added SQL
+  authority/source/refusal tests and disposable non-root Portal/root endpoint
+  acceptance for Portal rollback after actual runner permission settlement,
+  historical-read completion and exact retained receipt/resource/effect identity.
+  Fresh Linux acceptance pending. Writable start/readiness/registration/boot,
+  activation/worker and remaining full acceptance are still required. Production,
+  credentials, Status, SDK freeze and beta unchanged.

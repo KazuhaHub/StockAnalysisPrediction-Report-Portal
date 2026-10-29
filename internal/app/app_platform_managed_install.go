@@ -12,6 +12,11 @@ import (
 )
 
 const platformManagedInstallFormat = "portal.managed-install-review/1-dev.1"
+const platformWritableInstallFormat = "portal.writable-install-review/1-dev.1"
+
+func platformManagedFormat(format string) bool {
+	return format == platformManagedInstallFormat || format == platformWritableInstallFormat
+}
 
 type platformManagedInstallTarget struct {
 	RuntimeID       string                          `json:"runtime_id"`
@@ -31,7 +36,7 @@ func managedInstallTarget(f platformManagedRuntimeFacts, e platformRuntimeEndpoi
 	return &platformManagedInstallTarget{RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision, ControlRevision: r.controlRevision, Fingerprint: r.fingerprint, Profile: f.observation.Profile()}, nil
 }
 func validateManagedInstallTarget(e migExec, p *platformManagedInstallTarget, epoch string) error {
-	if p == nil || !platformValidUUID(p.RuntimeID) || !platformValidUUID(p.DeploymentID) || p.ControllerEpoch != epoch || !platformValidSHA(p.Fingerprint) || p.BindingRevision != 2 || p.ControlRevision < 1 || p.Profile.ExecutionReady || p.Profile.SandboxProfile != control.CandidateSandboxProfile || (p.Profile.Platform != "linux/amd64" && p.Profile.Platform != "linux/arm64") || p.Profile.Protocol != transport.ManagedRunnerProtocol || p.Profile.BackendProtocol != transport.ManagedBackendProtocol || !platformValidUUID(p.Profile.RootFilesystemUUID) {
+	if p == nil || !platformValidUUID(p.RuntimeID) || !platformValidUUID(p.DeploymentID) || p.ControllerEpoch != epoch || !platformValidSHA(p.Fingerprint) || p.BindingRevision != 2 || p.ControlRevision < 1 || p.Profile.ExecutionReady || (p.Profile.WritableSandboxProfile != "" && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) || p.Profile.SandboxProfile != control.CandidateSandboxProfile || (p.Profile.Platform != "linux/amd64" && p.Profile.Platform != "linux/arm64") || p.Profile.Protocol != transport.ManagedRunnerProtocol || p.Profile.BackendProtocol != transport.ManagedBackendProtocol || !platformValidUUID(p.Profile.RootFilesystemUUID) {
 		return errAppPlatformRuntimeConflict
 	}
 	inode, err := strconv.ParseUint(p.Profile.RootInode, 10, 64)
@@ -49,13 +54,13 @@ func validateManagedInstallTarget(e migExec, p *platformManagedInstallTarget, ep
 	return nil
 }
 func installRequirementsForTarget(m appplatform.Manifest, format string, p *platformManagedInstallTarget) error {
-	if format != platformManagedInstallFormat {
+	if !platformManagedFormat(format) {
 		if p != nil {
 			return errAppPlatformPlanChanged
 		}
 		return platformInstallRequirements(m)
 	}
-	if p == nil || m.Backend == nil || len(m.Capabilities.Required) != 0 {
+	if p == nil || m.Backend == nil || len(m.Capabilities.Required) != 0 || (format == platformWritableInstallFormat && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
 		return errAppPlatformInstallUnavailable
 	}
 	target := appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI, Runner: &appplatform.RunnerCompatibility{Protocol: p.Profile.Protocol, Platform: p.Profile.Platform, BackendProtocol: p.Profile.BackendProtocol}}
@@ -88,7 +93,7 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 		return nil, err
 	}
 	var p platformInstallProjection
-	if json.Unmarshal([]byte(raw), &p) != nil || p.Format != platformManagedInstallFormat || p.Runtime == nil {
+	if json.Unmarshal([]byte(raw), &p) != nil || !platformManagedFormat(p.Format) || p.Runtime == nil {
 		return nil, errAppPlatformStageEvidence
 	}
 	if err := validateManagedInstallTarget(e, p.Runtime, p.ControllerEpoch); err != nil {
@@ -127,7 +132,7 @@ func managedInstallRuntimeID(p platformInstallProjection) sql.NullString {
 }
 
 func platformManagedInstallFlag(p platformInstallProjection) int {
-	if p.Format == platformManagedInstallFormat {
+	if platformManagedFormat(p.Format) {
 		return 1
 	}
 	return 0

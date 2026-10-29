@@ -11,7 +11,7 @@ import (
 // application persistence provider, not a fictitious successful quota/receipt.
 func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (int64, error) {
 	switch format {
-	case platformManagedInstallFormat:
+	case platformManagedInstallFormat, platformWritableInstallFormat:
 		if manifest.Backend == nil || len(manifest.Capabilities.Required) != 0 {
 			return 0, errAppPlatformInstallUnavailable
 		}
@@ -45,7 +45,7 @@ func platformSetInstallProjectionFormat(e migExec, p *platformInstallProjection,
 }
 func platformParseInstallProfile(raw string) (string, error) {
 	var p platformInstallProjection
-	if len(raw) > 65536 || json.Unmarshal([]byte(raw), &p) != nil || (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat && p.Format != platformManagedInstallFormat) {
+	if len(raw) > 65536 || json.Unmarshal([]byte(raw), &p) != nil || (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat && !platformManagedFormat(p.Format)) {
 		return "", errAppPlatformStageEvidence
 	}
 	return p.Format, nil

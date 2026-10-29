@@ -19,13 +19,14 @@ var ErrManagedRuntimeObservation = errors.New("authenticated managed runtime pro
 // ManagedRuntimeProfile reports configuration/protocol facts, not app health or
 // permission to execute/activate. Native integer wire values use decimal strings.
 type ManagedRuntimeProfile struct {
-	Protocol           string `json:"protocol"`
-	Platform           string `json:"platform"`
-	BackendProtocol    string `json:"backend_protocol"`
-	SandboxProfile     string `json:"sandbox_profile"`
-	RootFilesystemUUID string `json:"root_filesystem_uuid"`
-	RootInode          string `json:"root_inode"`
-	ExecutionReady     bool   `json:"execution_ready"`
+	Protocol               string `json:"protocol"`
+	Platform               string `json:"platform"`
+	BackendProtocol        string `json:"backend_protocol"`
+	SandboxProfile         string `json:"sandbox_profile"`
+	RootFilesystemUUID     string `json:"root_filesystem_uuid"`
+	RootInode              string `json:"root_inode"`
+	WritableSandboxProfile string `json:"writable_sandbox_profile,omitempty"`
+	ExecutionReady         bool   `json:"execution_ready"`
 }
 type managedRuntimeWire struct {
 	Format     string                `json:"format"`
@@ -36,7 +37,7 @@ type managedRuntimeWire struct {
 
 func validManagedProfile(p ManagedRuntimeProfile) bool {
 	inode, err := strconv.ParseUint(p.RootInode, 10, 64)
-	return err == nil && inode > 0 && strconv.FormatUint(inode, 10) == p.RootInode && observationUUID.MatchString(p.RootFilesystemUUID) && p.RootFilesystemUUID != "00000000-0000-0000-0000-000000000000" && p.Protocol == ManagedRunnerProtocol && (p.Platform == "linux/amd64" || p.Platform == "linux/arm64") && p.BackendProtocol == ManagedBackendProtocol && p.SandboxProfile == control.CandidateSandboxProfile && !p.ExecutionReady
+	return err == nil && inode > 0 && strconv.FormatUint(inode, 10) == p.RootInode && observationUUID.MatchString(p.RootFilesystemUUID) && p.RootFilesystemUUID != "00000000-0000-0000-0000-000000000000" && p.Protocol == ManagedRunnerProtocol && (p.Platform == "linux/amd64" || p.Platform == "linux/arm64") && p.BackendProtocol == ManagedBackendProtocol && p.SandboxProfile == control.CandidateSandboxProfile && !p.ExecutionReady && (p.WritableSandboxProfile == "" || p.WritableSandboxProfile == control.WritableCandidateSandboxProfile)
 }
 func decodeManagedRuntime(raw []byte) (managedRuntimeWire, control.Authority, error) {
 	var w managedRuntimeWire
