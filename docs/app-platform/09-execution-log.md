@@ -2345,3 +2345,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   extension 131 awaits decision. See
   [executor ownership](132-network-executor-ownership.md). Actual private
   transport/current SQL grants and complete P00–P14 remain open.
+
+
+- Added a purpose-separated one-second online network confirmation binding a
+  fresh random challenge to the entire signed request metadata. The runtime
+  adapter reloads trusted local enrollment before/after the private provider,
+  refuses rotation/replay/expired/another-request proofs and exposes only fixed
+  errors. Real signature and TLS integration tests exercise all three IO checks
+  with distinct challenges. Local broker/control/platform race tests, vet and
+  Linux compilation pass. See [online confirmation](133-network-online-confirmation.md).
+  The actual peer-authenticated exchange and current SQL grant adapter remain
+  required; no schema, granted provider or production route is enabled.
