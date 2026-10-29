@@ -107,3 +107,28 @@ PostgreSQL suite and cleanup. Fresh execution, the vulnerability gate, pipefail,
 all tests and assertion outcomes remain enforced. These are finite ceilings,
 not a timeout bypass or evidence that the suite has completed. The corrected
 exact revision must run again and finish before claiming full Go CI green.
+
+
+## Corrected full CI acceptance
+
+Revision `cffc29d72b8529a235c60934a6830fa21f1fb228` passed
+[general CI run40964869350](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40964869350),
+Go job `123766675808`. Govulncheck exited successfully with zero affected
+vulnerabilities. The ordinary PostgreSQL-backed Test step then actually ran
+from 22:26:24 to 22:37:20 UTC on 2026-10-29 and completed successfully:
+`internal/app` passed in 653.617 seconds. The ordinary test is no longer skipped,
+and the corrected finite job budget was sufficient. The preceding canceled run
+is retained above as a failed observation, not retroactively counted as passing.
+
+All selected Web shards, lint/typecheck/build, race shards, workflow lint and
+Docker image/font/smoke/end-to-end checks also passed. Full-release cross-compile
+and full-race jobs were not selected for this PR event.
+[Native run40964869282](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40964869282),
+job `123766674442`, and
+[daemon run40964869226](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40964869226),
+job `123766674782`, passed their disposable Linux acceptance.
+
+This is passing ordinary full Go CI for that exact dependency/security revision,
+not completion of P00–P14, coverage of all optional full-race/release jobs, absence
+of every module-only finding, or production rollout approval. Later code changes
+still require their own full test result.

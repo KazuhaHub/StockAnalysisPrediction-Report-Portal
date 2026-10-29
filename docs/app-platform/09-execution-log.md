@@ -2321,3 +2321,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   run40965556628 passed govulncheck and is executing ordinary PostgreSQL tests;
   those are not counted as complete until the live job terminates successfully.
   Security-parent run40964869350 is also executing its full ordinary test step.
+
+
+- Dependency/security correction cffc29d7 passed general run40964869350,
+  Go job123766675808: govulncheck succeeded and the ordinary PostgreSQL-backed
+  Test step completed (internal/app 653.617s), alongside all selected
+  web/race/workflow/Docker checks. Native run40964869282 and daemon
+  run40964869226 passed. This removes the inherited verification obstruction
+  for that revision without relabeling older skipped/canceled tests. Signed
+  network code still needs its own final full-suite result.
+- Prepared the separate [credential/binding D2 extension](131-secret-binding-storage-proposal.md).
+  Owner decision is pending; no schema or persistent credential code is written.
+  This leaves unrelated current network/CI work available while awaiting it.
