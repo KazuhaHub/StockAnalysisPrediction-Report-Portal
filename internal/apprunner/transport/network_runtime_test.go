@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -9,7 +10,7 @@ import (
 func TestNetworkRuntimeProfileCanonicalAndBounded(t *testing.T) {
 	_, _, _, a, _ := networkSessionFixture(t)
 	c := networkEnrollmentFixture{a}
-	d, _ := c.ControllerDeployment(nil)
+	d, _ := c.ControllerDeployment(context.Background())
 	raw, err := encodeNetworkRuntime(d.ControllerEnrollment, 2, 3, false)
 	if err != nil {
 		t.Fatal(err)
