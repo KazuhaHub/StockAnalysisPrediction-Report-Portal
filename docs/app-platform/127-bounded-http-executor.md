@@ -1,7 +1,7 @@
 # Bounded HTTP capability executor
 
-Status: internal development executor implemented; integration and exact-revision
-CI evidence pending. This advances P07 but does not enable a capability for an
+Status: internal development executor verified at the baseline revision below;
+grant/transport integration remains incomplete. This advances P07 but does not enable a capability for an
 installed application. Required capabilities still refuse installation and
 optional capabilities remain declined. P00–P14 and D5/D6 remain incomplete.
 
@@ -157,5 +157,31 @@ loading real report-page dependencies after its test environment was destroyed.
 The layout unit fixture now mocks StockPage and RunPage, which that suite does
 not mount as route bodies. This removes the unrelated asynchronous dependency
 tree; it does not change production prefetch or suppress unhandled errors. All
-31 layout tests pass locally after the fixture correction. Final CI evidence
-remains required.
+31 layout tests pass locally after the fixture correction.
+
+## Exact baseline acceptance
+
+Functional revision `fb7441a4eb82d312a3fb7e2769f768970c907d44` has:
+
+- [General run 40959789607](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40959789607),
+  Go job `123749706815`: the explicit broker race step and all six selected
+  SQLite/PostgreSQL groups passed before govulncheck. Build, vet and Linux
+  staticcheck passed. All web shards, race shards, workflow lint and Docker
+  image/font/smoke/end-to-end checks passed, including the corrected web shard.
+- The general Go job failed only the inherited `x/net@v0.60.0` findings
+  `GO-2026-6866` and `GO-2026-6860` (log fixes: v0.62.0). The subsequent ordinary
+  broad Go test step was skipped. Full-release cross-compilation and full-race
+  workflows were not selected for this PR. General Go CI is not green.
+- [Native run 40959789289](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40959789289),
+  job `123749246999`: actual template browser verification, all eight shared SDK
+  browser flags, physical quota/remount checks, owned cleanup and neighboring
+  workload preservation passed. The generated frontend/descriptor hashes are
+  unchanged from the preceding template slice. `execution_ready` is false;
+  `production_approved` is false and the template provisions no backend.
+- [Runner daemon run 40959789461](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40959789461),
+  job `123749255765`, passed the disposable controller/root endpoint checks.
+
+The following [shared network policy change](128-network-policy-contract.md)
+removes duplicate validation and has its own exact functional revision evidence.
+Neither baseline nor later contract tests establish a production grant or a
+complete marketplace-to-broker user flow.

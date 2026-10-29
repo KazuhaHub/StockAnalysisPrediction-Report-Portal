@@ -1,7 +1,6 @@
 # One canonical network policy for review and execution
 
-Status: internal development contract implemented and locally verified. Exact
-revision CI remains required. This advances P07 network authorization, without
+Status: internal development contract verified at the functional revision below. This advances P07 network authorization, without
 creating a grant, changing database products, enabling an app route, publishing
 an SDK contract or completing the application platform.
 
@@ -94,8 +93,39 @@ completed 99,501 executions without failure; this is bounded development evidenc
 not exhaustive fuzzing or authorization proof.
 
 Local full appplatform and broker race tests, go vet, Linux amd64 broker test
-compilation and diff checks pass. CI must rerun the explicit pre-vulnerability
-executor/contract steps, general regressions and disposable Linux acceptance at
-the exact new functional head. Full P00–P14, stable SDK, actual grants and
+compilation and diff checks pass. Full P00–P14, stable SDK, actual grants and
 production rollout remain incomplete. No production, Status or server beta
 configuration changes are included.
+
+## Exact functional revision acceptance
+
+Functional revision `fc418ed4dbcaca770df63e8b79cab272a860cfb6`:
+
+- [General CI 40960961922](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40960961922),
+  Go job `123753278653`, passed the explicit broker race step and full platform
+  contract package before the vulnerability gate. All six affected SQLite and
+  PostgreSQL test groups passed, as did build, vet and Linux staticcheck.
+  All selected web/race shards, workflow checks and Docker image/font/smoke/
+  end-to-end checks passed. Full-release cross-compilation and full-race jobs
+  were not selected for this event.
+- That general Go job failed the inherited `golang.org/x/net@v0.60.0` findings
+  `GO-2026-6866` and `GO-2026-6860`; the log identifies v0.62.0 as fixed. The
+  ordinary broad Go test step following the gate was skipped. No dependency
+  was changed or gate suppressed; general Go CI is not green.
+- [Disposable native CI 40960962028](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40960962028),
+  job `123753279110`, passed the new shared-contract/executor tests and existing
+  native/browser chain. Its report records all eight SDK browser flags, quota
+  and remount enforcement, owned cleanup and neighboring workload preservation
+  true, with `execution_ready` false.
+- Actual Portal template browser evidence has `browser_verified` true,
+  `backend_provisioned` false, `development_only` true, test publisher identity
+  and `production_approved` false. Frontend SHA-256:
+  `5200fc74f29808009fe22da2e1900d82e925fa66094641c3ff66d543bfb7c876`;
+  descriptor SHA-256:
+  `b9bbbec9be9e9d61f7300945d6066f1121a1a935182f2deeed94fc6f43e37524`.
+- [Runner daemon CI 40960961951](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40960961951),
+  job `123753278353`, passed the disposable controller/root endpoint checks.
+
+These results bind the new policy to the real executor and preserve the existing
+runtime/shell paths. They do not demonstrate actual grant issuance, online
+actor-authority transport, marketplace adoption or production readiness.

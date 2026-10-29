@@ -2266,8 +2266,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   a production grant or app route; current providers remain declined. Tests use
   real local TLS with private test seams and include negative policy, DNS, TLS,
   revocation, response-limit and interruption cases. See
-  [bounded HTTP execution](127-bounded-http-executor.md). Broader runner/CI
-  evidence pending. P00–P14 remains incomplete; no storage or production changes.
+  [bounded HTTP execution](127-bounded-http-executor.md). All local runner and
+  platform contracts pass race tests. Baseline fb7441a4 passed native
+  run40959789289 and daemon run40959789461; general run40959789607 passed
+  executor/SQL/web/race/Docker checks but fails the inherited x/net gate and
+  skips ordinary broad Go tests. A web teardown/prefetch fixture failure was
+  corrected without changing production prefetch. P00–P14 remains incomplete;
+  no storage or production changes.
 
 
 - Moved network policy and target validation into the side-effect-free platform
@@ -2276,6 +2281,11 @@ daemon workflow 40455635317 passed on the functional source as well.
   the real HTTPS executor now consumes that same type and validator. Unknown,
   ambiguous, oversized or noncanonical records refuse. This does not write
   grants or change the currently declined-provider profile. Contract/executor
-  race tests, vet, Linux compilation and bounded fuzzing pass locally; exact CI
-  remains required. See [network policy contract](128-network-policy-contract.md).
+  race tests, vet, Linux compilation and bounded fuzzing pass locally. Functional
+  fc418ed4 passed native run40960962028/job123753279110 and daemon
+  run40960961951/job123753278353. General run40960961922 passed executor/contract
+  and affected SQL checks, all selected web/race/workflow/Docker checks, then
+  failed only the inherited x/net gate; ordinary broad Go tests remain skipped.
+  All native/browser/quota/cleanup flags passed, execution_ready false. See
+  [network policy contract](128-network-policy-contract.md).
   Full P00–P14 delivery, authority adapters and production remain incomplete.
