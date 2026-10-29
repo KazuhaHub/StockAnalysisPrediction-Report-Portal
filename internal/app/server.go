@@ -43,6 +43,9 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	platformBackendRequests platformDocumentBudget
+	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
+
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
@@ -110,7 +113,8 @@ type statusRecorder struct {
 	status int
 }
 
-func (w *statusRecorder) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) WriteHeader(code int)        { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // slowRequest is the latency at which a successful API read becomes worth a log line on its own.
 // A page that takes a second is a complaint waiting to happen, and it is the one class of problem

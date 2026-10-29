@@ -417,7 +417,7 @@ def main(args):
                         report["native_portal_writable_install_activated"] = True
                         report["native_portal_writable_current_ou_request_verified"] = True
                         report["native_portal_writable_post_io_ou_revoked"] = True
-                        for suffix in ("CURRENT_DOCUMENT_HTTP", "CURRENT_DIRECTORY_HTTP", "DOCUMENT_HTTP_REVOKED", "PAGE_BINDING_NATIVE"):
+                        for suffix in ("CURRENT_DOCUMENT_HTTP", "CURRENT_DIRECTORY_HTTP", "DOCUMENT_HTTP_REVOKED", "PAGE_BINDING_NATIVE", "BACKEND_SESSION_HTTP", "BACKEND_HTTP_NO_RETRY"):
                             if "PORTAL_WRITABLE_" + suffix not in result.stdout:
                                 raise RuntimeError("Writable document HTTP acceptance missing: " + suffix)
                             report["native_portal_writable_" + suffix.lower()] = True
