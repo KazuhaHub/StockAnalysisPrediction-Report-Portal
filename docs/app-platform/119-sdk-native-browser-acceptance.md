@@ -122,3 +122,14 @@ dependencies were installed; the existing local Portal web dependencies had
 masked the missing clean-worker installation. No native browser assertion ran.
 The follow-up installs Portal web from its existing lockfile before compiling the
 real host; it does not externalize the missing module or substitute a mock host.
+
+Second run 40846254014 compiled the bundles and reached actual native install
+checks, but the non-root controller could not traverse the worker's private
+ancestor directories to read `frontend.zip`. It did not run the browser chain.
+The next follow-up copies only built public assets, the existing Playwright/core
+runtime and Chromium into a newly owned `/tmp/portal-sdk-browser-*` tree. Files
+and subdirectories are not writable by UID 41001; no repository, credentials or
+personal profile is copied and no worker-home permissions are changed. Cleanup
+requires an exact owned path/UID and format marker, removes only that tree, and
+runs even after failure. Two local tests verify readable/non-writable handoff,
+exclusion of unrelated inputs and refusal to remove foreign/unmarked trees.

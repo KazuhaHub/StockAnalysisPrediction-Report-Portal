@@ -125,13 +125,15 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
           APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
-          chmod -R a+rX "$RUNNER_TEMP/sdk-browser-fixture" "$RUNNER_TEMP/sdk-browser-browsers"
+          python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
+          sdk_public=$(python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --build "$RUNNER_TEMP/sdk-browser-fixture" --packages "$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/node_modules" --browsers "$RUNNER_TEMP/sdk-browser-browsers" --runner "$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs")
           {
-            echo "APP_SDK_BROWSER_DIR=$RUNNER_TEMP/sdk-browser-fixture"
+            echo "APP_SDK_BROWSER_PUBLIC_ROOT=$sdk_public"
+            echo "APP_SDK_BROWSER_DIR=$sdk_public"
             echo "APP_SDK_BROWSER_NODE=$(command -v node)"
-            echo "APP_SDK_BROWSER_RUNNER=$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs"
-            echo "SDK_BROWSER_PACKAGE=$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/package.json"
-            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/sdk-browser-browsers"
+            echo "APP_SDK_BROWSER_RUNNER=$sdk_public/run.cjs"
+            echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
           } >> "$GITHUB_ENV"
       - name: Install ephemeral filesystem acceptance tools
         run: |
@@ -170,6 +172,9 @@ jobs:
       - name: Remove only the owned readiness registry
         if: always()
         run: bash scripts/acceptance/ready_app/cleanup-fixture.sh
+      - name: Remove only the owned public SDK browser fixture
+        if: always() && env.APP_SDK_BROWSER_PUBLIC_ROOT != ''
+        run: python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --cleanup "$APP_SDK_BROWSER_PUBLIC_ROOT"
       - name: Preserve redacted enforcement evidence
         uses: actions/upload-artifact@v7
         with:
