@@ -203,6 +203,8 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 	if readErr != nil || waitErr != nil || !strings.Contains(string(rest), "NO_REQUEST\n") {
 		t.Fatalf("sent signed data to impostor: %v %v %s %s", readErr, waitErr, rest, stderr.String())
 	}
+	testNetworkControllerIdentityBoundary(t, root, binary, endpoint)
+	testNetworkNamespaceControllerBoundary(t, root, binary)
 	t.Log("non-root signed admission, same-group peer denial, filesystem isolation and impostor server denial verified")
 }
 
