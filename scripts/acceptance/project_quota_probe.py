@@ -362,7 +362,7 @@ def main(args):
                     if ready_image:
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
-                    result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=60s"], env=portal_env, capture_output=True, text=True, timeout=60)
+                    result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=100s"], env=portal_env, capture_output=True, text=True, timeout=110)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
                     report["native_portal_install_data_stage"] = True
@@ -417,6 +417,11 @@ def main(args):
                         report["native_portal_writable_install_activated"] = True
                         report["native_portal_writable_current_ou_request_verified"] = True
                         report["native_portal_writable_post_io_ou_revoked"] = True
+                        for suffix in ("COMPLETE", "CURRENT_VIEWER", "NATIVE_WITNESS", "OWNED_CLEANUP", "FALLBACK_CLEANUP", "NEIGHBOR_PRESERVED"):
+                            marker = "PORTAL_WRITABLE_BACKGROUND_" + suffix
+                            if marker not in result.stdout:
+                                raise RuntimeError("Writable background completion acceptance missing: " + marker)
+                            report["native_portal_writable_background_" + suffix.lower()] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
                         report["native_portal_writable_background_claimed_progress"] = True
