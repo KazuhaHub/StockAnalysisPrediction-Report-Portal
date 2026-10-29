@@ -235,6 +235,39 @@ The job; cancel returns the updated job (409 if already finished).
 
 The file via `http.ServeContent`; 404 unknown, 409 not finished, 410 expired.
 
+## Addendum — forecast source and the entry-price screen (2026-10-29)
+
+A reader asked for every investment-decision V3.17 report of the last two months with its entry
+price, stop loss and probability-weighted terminal value, to find stocks now trading below the
+entry price. Markdown export plus offline extraction answers the history; the structured part is
+already in the forecast ledger (ADR 0029) for every set accepted since the ledger started:
+
+| Wanted | Ledger | Note |
+|---|---|---|
+| Entry price | `prediction_claims` kind `entry_price` | Optional per set: present when the producer sends it. |
+| Probability-weighted terminal value | kind `terminal_value` | Required on every accepted set (the reader card's "expected terminal value"). |
+| Stop loss | — | Not stored. `stop_loss` is a reserved kind that ingest refuses until a code node computes it. Out of scope here; it is a producer and ADR 0029 decision. |
+
+A seventh source, `forecasts`, joins after the six above land:
+
+- One row per accepted prediction set. Columns: `set_id`, `report_id`, `symbol`, `name`,
+  `report_date`, `made_at`, `rtype`, `version`, `stance`, `entry_price`, `terminal_value`,
+  `latest_price`, `latest_at`, `vs_entry_pct`. Prices render as yuan from fen.
+- Fields: `report_date` (date), `symbol`, `rtype`, `version`, `stance` (enum),
+  `latest_per_symbol` (enum `yes`/`no`; the screen's default is `yes`, the newest set per symbol),
+  `below_entry` (enum `yes`/`no`).
+- `latest_price` comes from the existing batch quote path (`fetchBatchUnder`, one upstream call per
+  chunk, shared cache), never one call per row, and honours the operator's quote-disclosure switch:
+  with quotes off, `below_entry` and the latest-price columns are absent from the source rather
+  than empty. A symbol the vendor cannot price is excluded from `below_entry = yes` and shown blank,
+  never treated as below.
+- `below_entry` needs a price for every candidate before it can count, so the server fetches
+  quotes for the filtered candidate set (bounded by the same 20-condition filter and a hard cap on
+  candidate symbols, refused with a clear error above it). Preview and export share the computation.
+- Acceptance: a set without `entry_price` never matches `below_entry = yes`; quotes off removes the
+  field; one upstream batch per chunk regardless of row count; `latest_per_symbol` picks the newest
+  `made_at` per symbol.
+
 ## Acceptance conditions (each becomes a test)
 
 1. Exporting 50,000 audit rows keeps heap growth under a fixed bound (fails closed: the test fails
