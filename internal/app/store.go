@@ -88,6 +88,9 @@ type Store struct {
 	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
 	// never fall back to forecast_bench for a set whose frozen code is empty).
 	onSettingRead func(key string)
+	// onExportJobsDeleted is told which export tasks a user deletion removed, after it has committed,
+	// so the server can delete their files (best effort; the hourly sweep removes any it misses).
+	onExportJobsDeleted func(jobs []*exportJob)
 	// onForecastApply is a test-only failure seam for the evaluator's per-set transaction. It is nil
 	// in production; a test makes the Nth write fail to prove the plan rolls back as one unit.
 	onForecastApply func(op int) error
@@ -308,6 +311,9 @@ func (s *Store) init() error {
 	}
 	s.EnsureDefaultGroup() // group model B: guarantee the fallback group exists
 	if err := s.EnsureDefaultForecastScope(); err != nil {
+		return err
+	}
+	if err := s.EnsureDefaultExportPolicy(); err != nil {
 		return err
 	}
 	// A ledger start set before P2 shipped has no unrecorded floor; derive and persist it once.
@@ -1028,6 +1034,11 @@ func (s *Store) DeleteUser(name string) error {
 	if err != nil {
 		return err
 	}
+	exports, err := s.exportJobsOnTx(tx, name)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
 	defer tx.Rollback() // a no-op once Commit has run; the safety net if any step below returns
 	// Exclude a route writer that validated this username before deletion but
 	// would otherwise insert its grant after the cleanup sweep.
@@ -1094,13 +1105,41 @@ func (s *Store) DeleteUser(name string) error {
 		// a future one is missing from here or from DeleteUserGroup.
 		{"DELETE FROM announcement_grants WHERE principal=?", principal},
 		{"DELETE FROM notification_route_grants WHERE principal=?", principal},
+		// Export tasks (ADR 0046): a surviving row would hand the next holder of the name the previous
+		// one's tasks, their files and their daily usage. A running worker's finalizing UPDATE is
+		// conditional on the row, so it finds nothing to update and removes its own file.
+		{"DELETE FROM export_jobs WHERE requested_by=?", name},
 	}
 	for _, st := range steps {
 		if err := run(st.q, st.arg); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if s.onExportJobsDeleted != nil && len(exports) > 0 {
+		s.onExportJobsDeleted(exports)
+	}
+	return nil
+}
+
+// exportJobsOnTx reads a user's export tasks inside a transaction, before they are deleted.
+func (s *Store) exportJobsOnTx(tx *sql.Tx, name string) ([]*exportJob, error) {
+	rows, err := tx.Query(s.bind(`SELECT `+exportJobCols+` FROM export_jobs WHERE requested_by=?`), name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*exportJob
+	for rows.Next() {
+		j, err := scanExportJob(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) CountUsers() (n int) {

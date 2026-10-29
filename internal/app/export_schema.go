@@ -49,6 +49,37 @@ func migration0012() migration {
 	}
 }
 
+// migration0013 adds the reader export policy (ADR 0046): three nullable OU columns and the index
+// the daily usage query reads. NULL means "inherit from the parent OU", the same tri-state the
+// enrolment columns use, and nothing is back-filled: the Default OU is normalised to 0 / 200 / 1000
+// at boot and on restore (ensureDefaultExportPolicy), because a step that writes data cannot accept
+// an older dump. Applying the step therefore changes nobody's access.
+func migration0013() migration {
+	cols := []colRef{
+		{table: "user_groups", name: "export_allowed"},
+		{table: "user_groups", name: "export_max_reports"},
+		{table: "user_groups", name: "export_daily_quota"},
+	}
+	return migration{
+		id:      "0013",
+		columns: cols,
+		indices: []string{"idx_export_jobs_requester"},
+		restore: restoreRule{olderDumpOK: true},
+		up: func(e migExec) error {
+			for _, c := range cols {
+				if e.columnExists(c.table, c.name) {
+					continue
+				}
+				if _, err := e.exec(`ALTER TABLE user_groups ADD COLUMN ` + c.name + ` INTEGER`); err != nil {
+					return fmt.Errorf("add user_groups.%s: %w", c.name, err)
+				}
+			}
+			_, err := e.exec(`CREATE INDEX IF NOT EXISTS idx_export_jobs_requester ON export_jobs(requested_by, created_at)`)
+			return err
+		},
+	}
+}
+
 // verifyExportJobsShape checks the column types and the identity key, which the declared column
 // names alone cannot express: a table with the right names and a TEXT created_at would sort jobs
 // lexically and compare expiry as strings.

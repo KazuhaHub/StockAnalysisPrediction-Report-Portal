@@ -74,9 +74,20 @@ type exportFieldJSON struct {
 }
 
 func (s *Server) apiExportSources(w http.ResponseWriter, r *http.Request, _ string) {
+	writeJSON(w, map[string]any{"sources": s.exportSourceDocs(r, nil, false)})
+}
+
+// exportSourceDocs describes the sources a caller may export. For a reader (readerView) it is the
+// reports source alone, Markdown ZIP alone, default columns only, and every count and option is
+// computed over what that reader may read (sc), so the picker never names a type or version the
+// reader cannot see.
+func (s *Server) exportSourceDocs(r *http.Request, sc *ownerScope, readerView bool) []map[string]any {
 	var tree []exportKindTree // built once: kind and rtype both carry it
 	out := make([]map[string]any, 0, len(exportSourceList))
 	for _, listed := range exportSourceList {
+		if readerView && listed.Key != "reports" {
+			continue
+		}
 		src := s.exportView(listed)
 		fields := make([]exportFieldJSON, 0, len(src.Fields))
 		for _, f := range src.Fields {
@@ -84,7 +95,7 @@ func (s *Server) apiExportSources(w http.ResponseWriter, r *http.Request, _ stri
 			switch {
 			case f.tree:
 				if tree == nil {
-					tree = s.reportKindTree()
+					tree = s.reportKindTreeFor(sc, readerView)
 				}
 				fj.Tree = tree
 				for _, k := range tree {
@@ -94,6 +105,8 @@ func (s *Server) apiExportSources(w http.ResponseWriter, r *http.Request, _ stri
 						fj.Options = append(fj.Options, k.Subtypes...)
 					}
 				}
+			case readerView && f.Key == "generator_version":
+				fj.Options = s.reportGeneratorVersionsFor(sc, true)
 			case f.options != nil:
 				fj.Options = f.options(s)
 			}
@@ -101,18 +114,28 @@ func (s *Server) apiExportSources(w http.ResponseWriter, r *http.Request, _ stri
 		}
 		cols := make([]map[string]any, 0, len(src.Columns))
 		for _, c := range src.Columns {
+			if readerView && !c.Default {
+				continue
+			}
 			cols = append(cols, map[string]any{"key": c.Key, "default": c.Default})
+		}
+		formats := src.Formats
+		if readerView {
+			formats = []string{"md_zip"}
 		}
 		var total int64
 		if plan, err := s.newExportPlan(src, exportNode{}); err == nil {
+			if readerView {
+				plan.withReaderLimits(sc, 0)
+			}
 			total, _ = plan.count(r.Context())
 		}
 		out = append(out, map[string]any{
-			"key": src.Key, "formats": src.Formats, "fields": fields, "columns": cols,
+			"key": src.Key, "formats": formats, "fields": fields, "columns": cols,
 			"time_field": src.TimeField, "total": total,
 		})
 	}
-	writeJSON(w, map[string]any{"sources": out})
+	return out
 }
 
 // ---------- POST /api/admin/exports/preview ----------
@@ -126,17 +149,27 @@ type exportPreviewRequest struct {
 }
 
 func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ string) {
+	s.serveExportPreview(w, r, nil, false)
+}
+
+// serveExportPreview answers a count and one page of rows. For a reader (readerView) the source must
+// be reports, the columns are the defaults whatever was asked, and sc restricts the rows.
+func (s *Server) serveExportPreview(w http.ResponseWriter, r *http.Request, sc *ownerScope, readerView bool) {
 	var in exportPreviewRequest
 	if !decodeExportRequest(w, r, &in) {
 		return
 	}
 	src := exportSourceByKey(in.Source)
-	if src == nil {
+	if src == nil || (readerView && src.Key != "reports") {
 		jsonError(w, http.StatusBadRequest, "unknown export source")
 		return
 	}
 	src = s.exportView(src)
-	cols, err := resolveExportColumns(src, in.Columns, "")
+	requested := in.Columns
+	if readerView {
+		requested = nil
+	}
+	cols, err := resolveExportColumns(src, requested, "")
 	if err != nil {
 		exportFail(w, err)
 		return
@@ -145,6 +178,9 @@ func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ stri
 	if err != nil {
 		exportFail(w, err)
 		return
+	}
+	if readerView {
+		plan.withReaderLimits(sc, 0)
 	}
 	plan.withColumns(cols)
 	size := in.PageSize
@@ -182,6 +218,35 @@ func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ stri
 	writeJSON(w, map[string]any{"total": total, "rows": rows})
 }
 
+// resolveExportTZ defaults the rendering zone to the panel's; ok is false for anything else unknown.
+func resolveExportTZ(tz string) (string, bool) {
+	switch tz {
+	case "":
+		return "panel", true
+	case "panel", "utc":
+		return tz, true
+	}
+	return "", false
+}
+
+// resolveExportOptions validates the archive options. They apply to Markdown ZIP only; a non-empty
+// message is a client mistake (400).
+func resolveExportOptions(in *exportOptions, format string) (exportOptions, string) {
+	var opts exportOptions
+	if in == nil || format != "md_zip" {
+		return opts, ""
+	}
+	opts = *in
+	switch opts.Layout {
+	case "":
+		opts.Layout = "flat"
+	case "flat", "date", "symbol":
+	default:
+		return exportOptions{}, "layout must be flat, date or symbol"
+	}
+	return opts, ""
+}
+
 // ---------- POST /api/admin/exports ----------
 
 type exportCreateRequest struct {
@@ -212,12 +277,8 @@ func (s *Server) apiExportCreate(w http.ResponseWriter, r *http.Request, user st
 		jsonError(w, http.StatusBadRequest, "format not available for this source")
 		return
 	}
-	tz := in.TZ
-	switch tz {
-	case "":
-		tz = "panel"
-	case "panel", "utc":
-	default:
+	tz, ok := resolveExportTZ(in.TZ)
+	if !ok {
 		jsonError(w, http.StatusBadRequest, "tz must be panel or utc")
 		return
 	}
@@ -226,17 +287,10 @@ func (s *Server) apiExportCreate(w http.ResponseWriter, r *http.Request, user st
 		exportFail(w, err)
 		return
 	}
-	var opts exportOptions
-	if in.Options != nil && in.Format == "md_zip" {
-		opts = *in.Options
-		switch opts.Layout {
-		case "":
-			opts.Layout = "flat"
-		case "flat", "date", "symbol":
-		default:
-			jsonError(w, http.StatusBadRequest, "layout must be flat, date or symbol")
-			return
-		}
+	opts, msg := resolveExportOptions(in.Options, in.Format)
+	if msg != "" {
+		jsonError(w, http.StatusBadRequest, msg)
+		return
 	}
 	plan, err := s.newExportPlan(src, in.Filter)
 	if err != nil {
@@ -278,6 +332,11 @@ func (s *Server) apiExportCreate(w http.ResponseWriter, r *http.Request, user st
 // ---------- GET /api/admin/exports, /{id}, cancel ----------
 
 func (s *Server) apiExportList(w http.ResponseWriter, r *http.Request, _ string) {
+	s.serveExportList(w, r, "")
+}
+
+// serveExportList lists newest first; a non-empty owner restricts it to that requester's tasks.
+func (s *Server) serveExportList(w http.ResponseWriter, r *http.Request, owner string) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
 		limit = exportListDefault
@@ -286,13 +345,18 @@ func (s *Server) apiExportList(w http.ResponseWriter, r *http.Request, _ string)
 		limit = exportListMax
 	}
 	active := r.URL.Query().Get("active") == "1"
-	jobs, err := s.st.listExportJobs(limit, active)
+	jobs, err := s.st.listExportJobs(limit, active, owner)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	views := make([]exportJobJSON, 0, len(jobs))
 	for _, j := range jobs {
+		// An owner-scoped list is a reader's own: only jobs submitted through the reader endpoints
+		// (see ownsExport).
+		if owner != "" && !j.isReader() {
+			continue
+		}
 		views = append(views, j.view())
 	}
 	writeJSON(w, map[string]any{"jobs": views})
@@ -377,6 +441,12 @@ var exportContentTypes = map[string]string{
 }
 
 func (s *Server) apiExportFile(w http.ResponseWriter, r *http.Request, user string) {
+	s.serveExportFile(w, r, user, "")
+}
+
+// serveExportFile streams a finished export. scope, when set, is recorded in the download audit row
+// so the audit console can tell a reader's download from an administrator's (ADR 0046).
+func (s *Server) serveExportFile(w http.ResponseWriter, r *http.Request, user, scope string) {
 	j := s.st.getExportJob(r.PathValue("id"))
 	if j == nil {
 		jsonError(w, http.StatusNotFound, "export not found")
@@ -418,9 +488,11 @@ func (s *Server) apiExportFile(w http.ResponseWriter, r *http.Request, user stri
 	}
 	// A resumed download re-requests ranges of one file: only the first request is a download event.
 	if rng := r.Header.Get("Range"); r.Method != http.MethodHead && (rng == "" || strings.HasPrefix(rng, "bytes=0-")) {
-		s.recordChange(r, user, AuditExportDownload, "export", j.ID, map[string]any{
-			"source": j.Source, "format": j.Format, "rows": j.RowsDone, "bytes": info.Size(),
-		})
+		detail := map[string]any{"source": j.Source, "format": j.Format, "rows": j.RowsDone, "bytes": info.Size()}
+		if scope != "" {
+			detail["scope"] = scope
+		}
+		s.recordChange(r, user, AuditExportDownload, "export", j.ID, detail)
 	}
 	w.Header().Set("Content-Type", exportContentTypes[j.Format])
 	w.Header().Set("Content-Disposition", exportDisposition(j.FileName))

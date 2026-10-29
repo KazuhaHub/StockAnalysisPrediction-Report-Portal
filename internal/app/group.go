@@ -321,3 +321,21 @@ func pickableTypes(all []string) []string {
 	}
 	return out
 }
+
+// internalTypeExclusion is an AND-joinable fragment (no leading AND) that keeps the plumbing types out
+// of a reports query, with its args. prefix qualifies the column ("r." for an aliased table).
+func internalTypeExclusion(prefix string) (string, []any) {
+	types := make([]string, 0, len(internalTypes))
+	for t := range internalTypes {
+		types = append(types, t)
+	}
+	if len(types) == 0 {
+		return "", nil
+	}
+	sort.Strings(types)
+	args := make([]any, len(types))
+	for i, t := range types {
+		args[i] = t
+	}
+	return "COALESCE(" + prefix + "rtype,'') NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(types)), ",") + ")", args
+}

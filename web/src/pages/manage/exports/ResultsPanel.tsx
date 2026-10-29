@@ -36,7 +36,8 @@ export default function ResultsPanel({
   tz: string
   labels: ExportLabels
   onPage: (page: number, pageSize: number) => void
-  onManageColumns: () => void
+  /** Absent for a reader, who does not choose columns. */
+  onManageColumns?: () => void
   onExportAll: () => void
 }) {
   const { t } = useTranslation()
@@ -66,7 +67,7 @@ export default function ResultsPanel({
           <Button type="primary" icon={<DownloadOutlined />} disabled={!total} onClick={onExportAll}>
             {t('export.results.exportAll', { n: total ?? 0 })}
           </Button>
-          <Button icon={<SettingOutlined />} aria-label={t('export.results.columns')} title={t('export.results.columns')} onClick={onManageColumns} />
+          {onManageColumns && <Button icon={<SettingOutlined />} aria-label={t('export.results.columns')} title={t('export.results.columns')} onClick={onManageColumns} />}
         </Space>
       </div>
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}

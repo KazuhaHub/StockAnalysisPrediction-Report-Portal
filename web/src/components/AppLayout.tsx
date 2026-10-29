@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
-import { AppstoreOutlined, AuditOutlined, DownOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, AuditOutlined, DownOutlined, DownloadOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { ConnectionContent, ConnectionNotice } from './ConnectionBoundary'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +25,7 @@ import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
 import NotificationBell from './NotificationBell'
 import ExportTaskTray from './ExportTaskTray'
+import { useExportPolicy } from '../lib/useExportPolicy'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -107,6 +108,10 @@ function AppShell() {
   const canWrite = can('report_edit')
   // The record is offered to whoever the model gives some access to. This is a navigation hint, not
   // a gate: the server decides on every request, and an absent hint (an older server) offers nothing.
+  // Reader report export (ADR 0046): offered only where the resolved OU policy allows it. Administrators
+  // have the console instead.
+  const { policy: exportPolicy } = useExportPolicy(!admin && !!user)
+  const canExport = !admin && !!exportPolicy?.allowed
   const canForecast = admin || forecast?.scope === 'all' || forecast?.scope === 'own'
 
   // "New version" prompt: once a deploy lands under this open tab, the shared coordinator says so
@@ -440,6 +445,7 @@ function AppShell() {
             </Popover>
           )}
           {admin && !chatFocus && <ExportTaskTray key={user} />}
+          {canExport && !chatFocus && <ExportTaskTray key={user} mode="reader" />}
           {user && <NotificationBell key={user} user={user} />}
           <Popover
             trigger="click"
@@ -463,6 +469,20 @@ function AppShell() {
                 >
                   {t('nav.account')}
                 </Button>
+                {canExport && (
+                  <Button
+                    type="text"
+                    block
+                    icon={<DownloadOutlined />}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}
+                    onClick={() => {
+                      setAccountOpen(false)
+                      navigate('/exports')
+                    }}
+                  >
+                    {t('nav.exports')}
+                  </Button>
+                )}
                 {admin && (
                   <Button
                     type="text"

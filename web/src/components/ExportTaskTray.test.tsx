@@ -117,3 +117,25 @@ describe('ExportTaskTray', () => {
     expect(screen.queryByText('export.toast.failed:{"name":"Audit Q3"}')).toBeNull()
   })
 })
+
+describe('ExportTaskTray for a reader', () => {
+  it('reads and cancels through the reader endpoints and links to their own export page', async () => {
+    const user = userEvent.setup()
+    activeJobs = [job({ requested_by: 'admin' })]
+    recentJobs = [job({ id: 'old', name: 'Old one', status: 'done', bytes: 1024, created_at: 99 })]
+    render(
+      <MemoryRouter>
+        <App>
+          <ExportTaskTray mode="reader" />
+        </App>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/exports?active=1'))
+    expect(apiMock.get.mock.calls.every((c) => !String(c[0]).includes('/api/admin/'))).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'export.tray.title' }))
+    expect((await screen.findByRole('link', { name: /export\.tray\.download/ })).getAttribute('href')).toBe('/api/exports/old/file')
+    expect(screen.getByRole('link', { name: 'export.tray.viewAll' }).getAttribute('href')).toBe('/exports')
+    await user.click(screen.getByRole('button', { name: 'export.history.cancel' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/exports/j1/cancel'))
+  })
+})

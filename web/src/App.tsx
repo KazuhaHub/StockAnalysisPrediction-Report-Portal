@@ -25,6 +25,7 @@ const AccountPage = lazyRetry(() => import('./pages/AccountPage'))
 const StockPage = lazyRetry(() => import('./pages/StockPage'))
 const RunPage = lazyRetry(() => import('./pages/RunPage'))
 const ReviewPage = lazyRetry(() => import('./pages/ReviewPage'))
+const ReaderExportPage = lazyRetry(() => import('./pages/ReaderExportPage'))
 const ReportEditorPage = lazyRetry(() => import('./pages/ReportEditorPage'))
 const ManageLayout = lazyRetry(() => import('./pages/manage/ManageLayout'))
 const AdminDraftBoundary = lazyRetry(() => import('./pages/manage/AdminDraftBoundary'))
@@ -133,6 +134,9 @@ function AppRoutes() {
         <Route path="/stock/:symbol" element={<StockPage />} />
         <Route path="/run/:key" element={<RunPage />} />
         <Route path="/review" element={<ReviewPage />} />
+        {/* Reader report export (ADR 0046). The page checks the resolved policy itself and says so when
+            export is not allowed for the reader's OU. */}
+        <Route path="/exports" element={<ReaderExportPage />} />
         {/* The forecast record is for readers the access model admits, not only administrators. The
             page asks the reader routes and shows the server's refusal itself, so a stale hint ends in
             a message rather than a redirect loop. */}

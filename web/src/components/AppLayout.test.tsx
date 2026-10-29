@@ -230,6 +230,48 @@ describe('AppLayout desktop navigation', () => {
   })
 })
 
+// Reader report export (ADR 0046): the entry is offered only where the resolved policy allows it, and
+// administrators, who have the console, neither ask nor get it.
+describe('AppLayout reader export entry', () => {
+  const exportPolicy = (allowed: boolean) => ({ allowed, max_reports: 200, daily_quota: 1000, used_today: 0, remaining: 1000, unlimited: false })
+  const answerWith = (policy: unknown) =>
+    apiGet.mockImplementation((url: string) => (url === '/api/exports/policy' ? Promise.resolve(policy) : Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' })))
+
+  beforeEach(() => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    authState.value = { ...authState.value, admin: false }
+  })
+
+  it('shows the export entry in the account menu when the policy allows it', async () => {
+    const user = userEvent.setup()
+    answerWith(exportPolicy(true))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'export.tray.title' })).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Alice' }))
+    expect(await screen.findByRole('button', { name: /nav\.exports$/ })).toBeTruthy()
+  })
+
+  it('shows neither the entry nor the tray when the policy does not allow it', async () => {
+    const user = userEvent.setup()
+    answerWith(exportPolicy(false))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/exports/policy'))
+    await user.click(screen.getByRole('button', { name: 'Alice' }))
+    expect(await screen.findByRole('button', { name: /nav\.account$/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /nav\.exports$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'export.tray.title' })).toBeNull()
+  })
+
+  it('does not ask an administrator for the reader policy', async () => {
+    authState.value = { ...authState.value, admin: true }
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(apiGet).not.toHaveBeenCalledWith('/api/exports/policy')
+  })
+})
+
 describe('AppLayout mobile chat focus mode', () => {
   beforeEach(() => {
     updateState.value = noUpdate

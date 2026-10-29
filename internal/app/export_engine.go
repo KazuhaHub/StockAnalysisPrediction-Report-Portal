@@ -118,6 +118,32 @@ func (s *Server) newExportPlan(src *exportSource, filter exportNode) (*exportPla
 	return p, nil
 }
 
+// withScope restricts the plan to what a scoped reader may read (ADR 0046). It is folded into the
+// compiled WHERE so count, preview pages and every worker batch carry the same predicate, and a nil
+// scope (an administrator) changes nothing. Only the reports source has a read scope.
+func (p *exportPlan) withScope(sc *ownerScope) {
+	frag, args := sc.where("r.")
+	if frag == "" {
+		return
+	}
+	p.where = "(" + p.where + " AND " + frag + ")"
+	p.args = append(p.args, args...)
+}
+
+// withReaderLimits applies everything a reader's export is held to beyond the filter: their read scope,
+// the exclusion of pipeline plumbing types, and, when maxID is set, only reports that existed at submit.
+func (p *exportPlan) withReaderLimits(sc *ownerScope, maxID int64) {
+	p.withScope(sc)
+	if frag, args := internalTypeExclusion("r."); frag != "" {
+		p.where = "(" + p.where + " AND " + frag + ")"
+		p.args = append(p.args, args...)
+	}
+	if maxID > 0 {
+		p.where = "(" + p.where + " AND r.id <= ?)"
+		p.args = append(p.args, maxID)
+	}
+}
+
 func (p *exportPlan) fullWhere() string {
 	w := p.where
 	if p.src.base != "" {

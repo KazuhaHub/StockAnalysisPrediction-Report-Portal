@@ -614,6 +614,40 @@ export interface ExportRequest {
   options?: { front_matter?: boolean; index_csv?: boolean; layout?: 'flat' | 'date' | 'symbol' }
 }
 
+// Reader report export (ADR 0046). The policy a reader is held to, as GET /api/exports/policy
+// answers it; `unlimited` is an administrator, who is not governed by it.
+export interface ExportPolicy {
+  allowed: boolean
+  max_reports: number
+  daily_quota: number
+  used_today: number
+  remaining: number
+  unlimited: boolean
+}
+export interface ExportPolicyResult<T> {
+  own: T | null
+  effective: T
+  source_ou: number
+  inherited: boolean
+  available: boolean
+}
+// One OU on the admin policy console: its own value, the effective one and where it came from.
+export interface ExportPolicyEntry {
+  id: number
+  name: string
+  parent_id: number
+  is_default: boolean
+  allowed: ExportPolicyResult<boolean>
+  max_reports: ExportPolicyResult<number>
+  daily_quota: ExportPolicyResult<number>
+}
+// Tri-state body of PUT /api/admin/exports/policy/{ou}: absent = unchanged, null = inherit.
+export interface ExportPolicyPatch {
+  allowed?: boolean | null
+  max_reports?: number | null
+  daily_quota?: number | null
+}
+
 // Storage-cleanup console (docs/adr/0017-storage-cleanup.md). Config + last-run summary; retention
 // floors clamp the day inputs. freq drives an admin-set daily/weekly/monthly retention pass.
 export interface CleanupConfig {

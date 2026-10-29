@@ -17,14 +17,16 @@ import {
   sortJobsForTray,
   type ExportsChangedDetail,
 } from '../lib/exportJobs'
+import { exportBase, type ExportMode } from '../lib/exportMode'
 import { useExportTasks } from '../lib/useExportTasks'
 import { STATUS_COLOR } from '../pages/manage/exports/ExportHistory'
 import { useExportLabels } from '../pages/manage/exports/labels'
 
-// The top-bar task tray (administrators only), the portal's version of Workspace's hourglass:
-// in-progress tasks with progress, finished ones with a download, failed ones with the reason.
-// A toast announces a finished task on any page.
-export default function ExportTaskTray() {
+// The top-bar task tray, the portal's version of Workspace's hourglass: in-progress tasks with
+// progress, finished ones with a download, failed ones with the reason. A toast announces a finished
+// task on any page. Administrators see every task through the admin endpoints; a reader (ADR 0046)
+// sees their own through the reader endpoints, and "view all" leads to their own export page.
+export default function ExportTaskTray({ mode = 'admin' }: { mode?: ExportMode }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { notification, message } = App.useApp()
@@ -34,6 +36,7 @@ export default function ExportTaskTray() {
 
   const { active, recent, loadRecent } = useExportTasks({
     enabled: true,
+    mode,
     currentUser: user,
     onFinished: (job) => {
       const name = job.name || labels.source(job.source)
@@ -43,7 +46,7 @@ export default function ExportTaskTray() {
           key,
           title: t('export.toast.done', { name }),
           actions: (
-            <Button size="small" type="primary" icon={<DownloadOutlined />} href={exportDownloadUrl(job.id)} onClick={() => notification.destroy(key)}>
+            <Button size="small" type="primary" icon={<DownloadOutlined />} href={exportDownloadUrl(job.id, mode)} onClick={() => notification.destroy(key)}>
               {t('export.tray.download')}
             </Button>
           ),
@@ -71,7 +74,7 @@ export default function ExportTaskTray() {
 
   const cancel = async (j: ExportJob) => {
     try {
-      await api.post(`/api/admin/exports/${encodeURIComponent(j.id)}/cancel`)
+      await api.post(`${exportBase(mode)}/${encodeURIComponent(j.id)}/cancel`)
       notifyExportsChanged()
     } catch (e) {
       message.error(errText(e, t))
@@ -118,7 +121,7 @@ export default function ExportTaskTray() {
                     </Typography.Text>
                   )}
                   {a.download && (
-                    <Button size="small" type="link" icon={<DownloadOutlined />} href={exportDownloadUrl(j.id)} style={{ padding: 0 }}>
+                    <Button size="small" type="link" icon={<DownloadOutlined />} href={exportDownloadUrl(j.id, mode)} style={{ padding: 0 }}>
                       {t('export.tray.download')}
                     </Button>
                   )}
@@ -134,7 +137,7 @@ export default function ExportTaskTray() {
         </ul>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-        <Link to="/manage/exports" onClick={() => setOpen(false)}>
+        <Link to={mode === 'reader' ? '/exports' : '/manage/exports'} onClick={() => setOpen(false)}>
           {t('export.tray.viewAll')}
         </Link>
         <Button onClick={() => setOpen(false)}>{t('export.tray.close')}</Button>

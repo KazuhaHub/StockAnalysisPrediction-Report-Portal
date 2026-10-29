@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { ExportJob } from '../api/types'
 import { EXPORTS_CHANGED_EVENT, isActiveJob, type ExportsChangedDetail } from './exportJobs'
+import { exportBase, type ExportMode } from './exportMode'
 import { startVisiblePoll } from './visiblePoll'
 
 export const ACTIVE_POLL_MS = 3000
@@ -15,8 +16,9 @@ const RECENT_LIMIT = 10
 // The tray lists every administrator's tasks, but a completion or failure toast is addressed to the
 // person who asked for the export: with `currentUser` given, onFinished fires only for their own jobs
 // (null, an identity not yet known, fires for none). Left undefined, every finished job is announced.
-export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: ExportJob) => void; currentUser?: string | null }) {
+export function useExportTasks(opts: { enabled: boolean; mode?: ExportMode; onFinished?: (job: ExportJob) => void; currentUser?: string | null }) {
   const { enabled } = opts
+  const base = exportBase(opts.mode)
   const [active, setActive] = useState<ExportJob[]>([])
   const [recent, setRecent] = useState<ExportJob[]>([])
   const watched = useRef(new Set<string>())
@@ -28,18 +30,18 @@ export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: Expo
 
   const loadRecent = useCallback(async () => {
     try {
-      const r = await api.get<{ jobs: ExportJob[] }>(`/api/admin/exports?limit=${RECENT_LIMIT}`)
+      const r = await api.get<{ jobs: ExportJob[] }>(`${base}?limit=${RECENT_LIMIT}`)
       if (alive.current) setRecent(r?.jobs ?? [])
     } catch {
       // The tray is a convenience; the history table reports errors.
     }
-  }, [])
+  }, [base])
 
   const settle = useCallback(
     async (ids: string[]) => {
       for (const id of ids) {
         try {
-          const job = await api.get<ExportJob>(`/api/admin/exports/${encodeURIComponent(id)}`)
+          const job = await api.get<ExportJob>(`${base}/${encodeURIComponent(id)}`)
           if (isActiveJob(job)) continue // still going; the active listing was just a moment behind
           watched.current.delete(id)
           const me = currentUser.current
@@ -51,12 +53,12 @@ export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: Expo
       }
       if (ids.length > 0) await loadRecent()
     },
-    [loadRecent],
+    [base, loadRecent],
   )
 
   const refresh = useCallback(async () => {
     try {
-      const r = await api.get<{ jobs: ExportJob[] }>('/api/admin/exports?active=1')
+      const r = await api.get<{ jobs: ExportJob[] }>(`${base}?active=1`)
       const jobs = r?.jobs ?? []
       if (!alive.current) return
       setActive(jobs)
@@ -66,7 +68,7 @@ export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: Expo
     } catch {
       // Keep the last good state; the next tick tries again.
     }
-  }, [settle])
+  }, [base, settle])
 
   const hasActive = active.length > 0
 

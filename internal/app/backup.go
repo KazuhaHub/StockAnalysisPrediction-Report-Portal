@@ -561,6 +561,9 @@ func applyRestorePrior(e migExec, prior restorePrior) error {
 	if err := ensureDefaultForecastScope(e); err != nil {
 		return fmt.Errorf("normalise the Default OU scope on restore: %w", err)
 	}
+	if err := ensureDefaultExportPolicy(e); err != nil {
+		return fmt.Errorf("normalise the Default OU export policy on restore: %w", err)
+	}
 	return nil
 }
 
