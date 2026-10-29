@@ -133,3 +133,11 @@ personal profile is copied and no worker-home permissions are changed. Cleanup
 requires an exact owned path/UID and format marker, removes only that tree, and
 runs even after failure. Two local tests verify readable/non-writable handoff,
 exclusion of unrelated inputs and refusal to remove foreign/unmarked trees.
+
+Third run 40847285556 reached the real browser's first-read stage. Inspection of
+the shared protocol found the acceptance UI projecting `viewer.subject` even
+though `protocol.Viewer` serializes that identity as `sub`. The next follow-up
+reads the documented `sub` field and retains the ordinary-role/opaque-subject
+assertion. It also reports only fixed request failure codes and numeric HTTP
+statuses for diagnosis; no credentials or raw responses are logged. A failed
+first-read run is not counted as successful end-to-end evidence.

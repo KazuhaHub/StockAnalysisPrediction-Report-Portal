@@ -27,7 +27,7 @@ function Fixture(){
  const [result,setResult]=useState('none'),[busy,setBusy]=useState(false);
  async function run(method:string,path:string){setBusy(true);try{
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
-  const value=JSON.parse(r.body);setResult(JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.subject}));
+  const value=JSON.parse(r.body);setResult(JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub}));
  }catch(error){setResult('error:'+error.code)}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="locale">{presentation.locale}</Typography.Text>

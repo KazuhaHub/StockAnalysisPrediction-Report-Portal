@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -118,7 +119,16 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	if err != nil {
 		t.Fatal("exclusive SDK browser listener", err)
 	}
-	server := &http.Server{Handler: fixture, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/app-platform/installations/"+installation+"/backend" {
+			recorded := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			fixture.ServeHTTP(recorded, r)
+			log.Printf("SDK fixture backend HTTP status=%d", recorded.status)
+			return
+		}
+		fixture.ServeHTTP(w, r)
+	})
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	defer func() {

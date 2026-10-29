@@ -3,6 +3,7 @@ const {createRequire}=require('node:module');
 const {chromium}=createRequire(process.env.SDK_BROWSER_PACKAGE)('playwright');
 const origin='http://127.0.0.1:31935';
 let stage='launch';
+let readFailure='none';
 async function main(){
  const browser=await chromium.launch({headless:true,timeout:10000});
  const deadline=setTimeout(()=>{void browser.close()},20000);
@@ -13,7 +14,7 @@ async function main(){
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
   const result=frame.getByTestId('backend-result');
-  async function read(){await frame.getByRole('button',{name:'Read backend',exact:true}).click();await result.filter({hasText:'"status":200'}).waitFor();return JSON.parse(await result.innerText())}
+  async function read(){await frame.getByRole('button',{name:'Read backend',exact:true}).click();await result.filter({hasText:/"status":200|^error:/}).waitFor();const text=await result.innerText();if(text.startsWith('error:')){readFailure=/^error:(not_ready|unsupported|invalid_request|busy|unavailable|uncertain)$/.test(text)?text:'invalid-result';throw new Error('read refused')}return JSON.parse(text)}
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
@@ -37,4 +38,4 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}
 }
-main().catch(()=>{console.error('SDK native browser acceptance failed at '+stage);process.exitCode=1});
+main().catch(()=>{console.error('SDK native browser acceptance failed at '+stage+' ('+readFailure+')');process.exitCode=1});
