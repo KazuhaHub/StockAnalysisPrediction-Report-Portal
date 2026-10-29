@@ -388,9 +388,10 @@ def main(args):
                         report["native_portal_writable_start_retained_identity"] = True
                         report["native_portal_writable_start_native_witness"] = True
                         report["native_portal_writable_start_full_quota_verified"] = True
-                        for marker in ("PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED"):
+                        for marker in ("PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_READINESS_WAIT_CONFIRMED"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Portal writable readiness acceptance did not execute: " + marker)
+                        report["native_portal_writable_readiness_wait_confirmed"] = True
                         report["native_portal_writable_readiness_advanced"] = True
                         report["native_portal_writable_readiness_refreshed"] = True
                         report["native_portal_writable_readiness_stale_source_refused"] = True
@@ -416,6 +417,9 @@ def main(args):
                         report["native_portal_writable_install_activated"] = True
                         report["native_portal_writable_current_ou_request_verified"] = True
                         report["native_portal_writable_post_io_ou_revoked"] = True
+                        if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
+                            raise RuntimeError("Writable background scheduler acceptance did not execute")
+                        report["native_portal_writable_background_claimed_progress"] = True
                         for stage in ("ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"):
                             marker = "PORTAL_WRITABLE_WORKER_" + stage
                             if marker not in result.stdout:

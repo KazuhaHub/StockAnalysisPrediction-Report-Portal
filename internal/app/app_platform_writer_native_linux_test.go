@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -59,19 +60,51 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil || !replay.Replayed || replay.OperationID != admitted.OperationID {
 		t.Fatal("writable admission replay", err)
 	}
-	lease, err := s.st.claimPlatformOperation(admitted.OperationID, platformFixtureID(891))
+	// A real background service must select this reviewed installation itself.
+	// Stop at a transaction fault after actual data preparation, before writer IO.
+	mustExec(t, s.st, `CREATE TRIGGER portal_worker_data_boundary BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writer_intent' BEGIN SELECT RAISE(ABORT,'worker data boundary'); END`)
+	worker, err := newPlatformWritableInstallScheduler(s, endpoint, platformFixtureID(891), 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Stop after the real data stage without admitting a writer. The driver
-	// must retain all four artifact commits and the actual data receipt.
-	mustExec(t, s.st, `CREATE TRIGGER portal_worker_data_boundary BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writer_intent' BEGIN SELECT RAISE(ABORT,'worker data boundary'); END`)
-	progress, err := s.runPlatformWritableInstall(ctx, lease, endpoint)
-	if err == nil || progress.lease.snapshot.Stage != appplatform.StageStart || progress.lease.rowRevision <= lease.rowRevision || progress.activation.activationID != "" {
-		t.Fatal("writable worker lost artifact/data progress", err)
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- worker.serve(workerCtx) }()
+	joined := false
+	defer func() {
+		cancelWorker()
+		if !joined {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("writable scheduler did not stop")
+			}
+		}
+	}()
+	deadline := time.Now().Add(15 * time.Second)
+	for worker.currentStatus().code != "retry_pending" {
+		select {
+		case err := <-done:
+			joined = true
+			t.Fatal("writable background worker stopped before boundary", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("writable background worker failed to select/advance", worker.currentStatus())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancelWorker()
+	if err := <-done; err != nil {
+		t.Fatal("stop writable background worker", err)
+	}
+	joined = true
+	lease := worker.active // Joined before inspecting service-owned mutable state.
+	if lease.id != admitted.OperationID || lease.snapshot.Stage != appplatform.StageStart || lease.rowRevision < 7 || lease.fence != 1 || worker.attempts != 1 {
+		t.Fatal("background worker lost claimed artifact/data progress")
 	}
 	mustExec(t, s.st, `DROP TRIGGER portal_worker_data_boundary`)
-	lease = progress.lease
+	t.Log("PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS")
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != 0 {
 		t.Fatal("worker crossed failed writer transaction")
 	}
