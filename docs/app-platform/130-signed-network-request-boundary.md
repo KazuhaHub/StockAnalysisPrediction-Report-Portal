@@ -153,3 +153,32 @@ Linux amd64 broker test compilation and diff checks pass. CI must run the same
 packages plus complete general/PostgreSQL and disposable Linux/native/browser
 acceptance at the exact functional revision. There is no schema, grant, SDK
 freeze, production, Status migration, catalogue or server beta change.
+
+
+## Functional revision native evidence
+
+Functional revision `050f8d89ababd4582e7b84b6f641128f77567232` passed
+[disposable native run40965556689](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40965556689),
+job `123769031268`. Its Linux race checks explicitly ran the broker, control and
+platform packages (1.416s, 2.303s and 1.478s respectively). The same run passed
+actual template/SDK/native request chains, physical quota/remount enforcement,
+owned cleanup and preservation of neighboring workloads. All eight shared SDK
+browser flags are true; `execution_ready` remains false.
+
+The generated template report records `browser_verified` true,
+`backend_provisioned` false, `development_only` true, test publisher identity
+and `production_approved` false. Frontend SHA-256:
+`5200fc74f29808009fe22da2e1900d82e925fa66094641c3ff66d543bfb7c876`;
+descriptor SHA-256:
+`b9bbbec9be9e9d61f7300945d6066f1121a1a935182f2deeed94fc6f43e37524`.
+These shell artifacts preserve existing paths; the signed network path is
+exercised separately by its real-TLS tests, not by this zero-authority template.
+
+[Runner daemon run40965556649](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40965556649),
+job `123769031375`, also passed. General run40965556628/job123769031512 passed
+the vulnerability gate and entered the ordinary PostgreSQL-backed Test step
+at 22:29:00 UTC on 2026-10-29. That full step was still running when these native
+results were recorded, and is not counted as passed. A transient 404 fetching
+its live logs is an unavailable observation, not a terminal job or restart
+reason. Final general CI evidence remains required. No production-readiness or
+complete broker-transport claim follows from these results.

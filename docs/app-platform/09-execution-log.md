@@ -2312,3 +2312,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   not durable/global replay protection. See
   [signed network requests](130-signed-network-request-boundary.md). Exact CI,
   full P00–P14 and production acceptance remain open.
+
+
+- Signed-request functional 050f8d89 passed Linux native
+  run40965556689/job123769031268, including actual broker/control/platform race
+  tests and all prior SDK/browser/quota/remount/cleanup evidence, with
+  execution_ready false. Daemon run40965556649/job123769031375 passed. General
+  run40965556628 passed govulncheck and is executing ordinary PostgreSQL tests;
+  those are not counted as complete until the live job terminates successfully.
+  Security-parent run40964869350 is also executing its full ordinary test step.
