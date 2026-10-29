@@ -2203,7 +2203,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   descriptors, a common Ant Design header, experimental dev.7 action dispatch,
   one pending operation, deadlines/cancellation and route/document ownership.
   React StrictMode and late old-route cleanup defects were caught and repaired.
+  An actual Portal-shell drill caught and repaired the inherited full-path
+  Suspense remount; a failing-then-passing test covers same-installation state
+  retention and cross-installation retirement (31 AppLayout tests pass).
   The browser/native fixture now requires page-action evidence; Linux results
-  remain pending. See [shared page actions](124-shared-page-actions.md).
+  at initial 23de4d76 passed run40935591598/job123665149793: page-action and
+  prior browser/native/cleanup flags true, execution_ready false. Apps a4c69386
+  passed all CI. The later outer-layout fix has local browser/test evidence and
+  awaits CI at its own revision. See [shared page actions](124-shared-page-actions.md).
   P06, UX-01/06/08/09 and full platform acceptance remain incomplete. Production,
   Status, publication, stable SDK freeze, storage and beta settings are unchanged.

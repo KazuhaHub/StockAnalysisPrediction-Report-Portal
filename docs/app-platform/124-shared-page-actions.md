@@ -1,6 +1,7 @@
 # Shared page metadata and actions
 
-Status: development implementation, verification in progress. This is part of
+Status: development implementation with initial native/browser evidence and a
+subsequent outer-layout correction undergoing final CI. This is part of
 P06, addressing UX-01/UX-06/UX-08/UX-09; it does not complete those acceptance
 cases, D5, P06 or P00–P14. No production deployment, Status adoption, stable SDK
 freeze, catalogue publication, database change or server beta change is included.
@@ -116,11 +117,30 @@ one-operation admission, immediate busy state, deadline/exception uncertainty,
 cooperative abort, retired callbacks, late results, route/theme preservation,
 exact envelopes and closed payloads, plus frame observer retirement.
 
+The actual Portal browser drill then exposed an inherited outer-layout defect:
+the Suspense key used the full pathname and remounted an installation on every
+subroute. A new AppLayout regression test failed with a lost counter. The key now
+uses installation identity, preserving subroute/back state while a different
+installation still retires the subtree. All 31 AppLayout tests pass. Repeating
+the complete local Portal/HTTP/session/SQLite drill confirmed header count 1
+remains 1 after navigation and the prior action receives one abort. This local
+fixture has no backend; backend authority remains a separate Linux assertion.
+
 The real SDK/Portal browser fixture adds shared Ant header buttons, app-local
 count changes and an abortable action across signed navigation. Its required
 `SDK_NATIVE_BROWSER_PAGE_ACTIONS` marker is checked by both native Go layers and
-the evidence collector. A source marker is not acceptance evidence. Linux/browser
-results and exact source pins must be recorded after those jobs complete.
+the evidence collector. A source marker is not acceptance evidence. The initial functional Portal commit
+23de4d762c587a0aad1709380922e99e871b3876 and pinned Apps
+ a4c6938618b00c4c7db768f2271229436b321051 passed native run40935591598,
+job123665149793. The downloaded report records page_actions, typed_query,
+navigation, draft_guard, document_layout, current_viewer, uncertain_no_retry,
+revoked and owned-cleanup/neighbor checks as true; execution_ready remains false.
+Apps PR33 run40935560168 passed every job. Initial Portal web/race jobs passed
+except the still-running first race shard when recorded; Go passed affected
+contract/storage checks but failed the inherited vulnerability gate. This native
+fixture did not cover the outer-layout remount. The later full-shell correction
+has passing local browser/AppLayout evidence above and requires final CI at its
+own revision. Final-head evidence belongs in the paired PR before review.
 
 Remaining work includes whole-app visual/keyboard/accessibility acceptance,
 shared overlays, persistent drafts, the broader capability broker and remaining
