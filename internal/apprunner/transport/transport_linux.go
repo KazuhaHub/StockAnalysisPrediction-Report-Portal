@@ -246,6 +246,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case networkRuntimeQueryMagic:
+		s.handleNetworkRuntime(ctx, conn)
+		return
 	case networkRequestMagic:
 		if s.network == nil || ctx.Err() != nil || !stop() {
 			return

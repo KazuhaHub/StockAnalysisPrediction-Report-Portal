@@ -29,9 +29,11 @@ and activation](113-writable-install-worker.md) and
 [signed network request checks](130-signed-network-request-boundary.md), and
 [shared executor ownership/budgets](132-network-executor-ownership.md), and
 [fresh online network confirmation](133-network-online-confirmation.md), and
-[private network controller transport](134-private-network-controller-transport.md).
-A later D2 [credential/binding storage proposal](131-secret-binding-storage-proposal.md)
-is awaiting owner decision; it is not authorized schema implementation.
+[private network controller transport](134-private-network-controller-transport.md), and
+[network runtime support observation](135-network-runtime-observation.md).
+The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
+is now owner-approved for development/isolated implementation; production and
+later job/event products remain separate decisions.
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 

@@ -2368,3 +2368,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   See [private controller transport](134-private-network-controller-transport.md).
   Actual Portal SQL/current viewer/grant admission and SDK routes remain closed;
   no pending credential schema or production/beta change is implemented.
+
+
+- Added nonce-bound read-only network runtime support/limit observation at the
+  OS-authenticated root endpoint, distinct from key enrollment, health or grants.
+  Policy/pool reporting shares actual validation maxima; unknown profiles and
+  absent providers refuse. Added explicit co-located candidate/network bootstrap
+  and native lifecycle/namespace probe assertions; exact CI remains required.
+  Local transport/broker/control/platform race tests, vet and Linux compilation
+  pass. See [runtime observation](135-network-runtime-observation.md).
+- Owner approved credential storage Option A from PR #339/proposal at 3627d68b for
+  its two named tables, existing key custody, rotation/reapproval, uninstall
+  revocation and restored pause/revocation-floor rules, development/isolated tests
+  only. The [decision record](131-secret-binding-storage-proposal.md#9-owner-decision-record)
+  now permits implementation; no credential schema/code is claimed complete by
+  this observation slice. Real credentials, production and later products remain
+  independently gated.
