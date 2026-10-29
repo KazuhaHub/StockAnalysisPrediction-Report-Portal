@@ -26,7 +26,8 @@ and activation](113-writable-install-worker.md) and
 [bounded HTTP execution](127-bounded-http-executor.md), and
 [shared network policy encoding](128-network-policy-contract.md), and
 [network dependency gate repair](129-network-dependency-security.md), and
-[signed network request checks](130-signed-network-request-boundary.md).
+[signed network request checks](130-signed-network-request-boundary.md), and
+[shared executor ownership/budgets](132-network-executor-ownership.md).
 A later D2 [credential/binding storage proposal](131-secret-binding-storage-proposal.md)
 is awaiting owner decision; it is not authorized schema implementation.
 An implemented internal primitive does not establish a complete user-facing

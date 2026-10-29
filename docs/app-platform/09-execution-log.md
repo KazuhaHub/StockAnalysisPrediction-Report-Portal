@@ -2333,3 +2333,15 @@ daemon workflow 40455635317 passed on the functional source as well.
 - Prepared the separate [credential/binding D2 extension](131-secret-binding-storage-proposal.md).
   Owner decision is pending; no schema or persistent credential code is written.
   This leaves unrelated current network/CI work available while awaiting it.
+
+
+- Added an in-memory shared network executor owner with finite global request
+  and cache capacity, current authority before allocation, per-installation
+  references across policy/epoch keys, and idle-only eviction. Signed invocations
+  retain all current checks and uncertain/no-replay rules; per-request client
+  creation cannot bypass the owner's budget. Real TLS/concurrency/eviction and
+  revocation/cancellation/refusal tests pass locally with broker/control/platform
+  race tests. No schema or credential implementation is included while D2
+  extension 131 awaits decision. See
+  [executor ownership](132-network-executor-ownership.md). Actual private
+  transport/current SQL grants and complete P00–P14 remain open.
