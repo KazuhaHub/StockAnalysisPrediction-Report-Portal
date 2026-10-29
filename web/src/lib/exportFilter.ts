@@ -185,7 +185,7 @@ function mapAt(root: ExportGroup, path: Path, fn: (n: Node) => Node | null): Exp
 
 export function addConditionAt(f: ExportFilter, groupPath: Path, cond: ExportCond): ExportFilter | null {
   const g = nodeAt(f, groupPath)
-  if (!g || !isGroup(g) || countConditions(f) >= MAX_CONDITIONS) return null
+  if (!g || !isGroup(g) || countConditions(f) >= MAX_CONDITIONS || countNodes(f) >= MAX_NODES) return null
   return mapAt(f, groupPath, (n) => ({ ...(n as ExportGroup), items: [...(n as ExportGroup).items, cond] }))
 }
 

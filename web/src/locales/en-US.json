@@ -3151,6 +3151,8 @@
   "export.op.not_in": "is none of",
   "export.op.contains": "contains",
   "export.op.before": "is before",
+  "export.op.number.after": "is greater than",
+  "export.op.number.before": "is less than",
   "export.op.after": "is on or after",
   "export.op.between": "is between",
   "export.field.kind": "Kind",

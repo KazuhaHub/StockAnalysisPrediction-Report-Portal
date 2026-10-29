@@ -26,7 +26,7 @@ export function OperatorSelect({
       style={{ width }}
       aria-label={ariaLabel}
       value={value}
-      options={field.operators.map((o) => ({ value: o, label: labels.op(o) }))}
+      options={field.operators.map((o) => ({ value: o, label: labels.op(o, field.type) }))}
       onChange={onChange}
     />
   )

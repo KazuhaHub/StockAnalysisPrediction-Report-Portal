@@ -7,7 +7,8 @@ export interface ExportLabels {
   source: (key: string) => string
   field: (key: string) => string
   column: (key: string) => string
-  op: (key: string) => string
+  /** `type` picks the number wording: on a number, before/after compare strictly (less/greater than). */
+  op: (key: string, type?: string) => string
   status: (key: string) => string
   format: (key: string) => string
   /** An enum value as the admin should read it: audit actions and target types are already named. */
@@ -26,7 +27,7 @@ export function useExportLabels(): ExportLabels {
       // field; each lookup falls through to the other namespace before giving up on the identifier.
       field: (k) => tl(`export.field.${k}`, tl(`export.column.${k}`, k)),
       column: (k) => tl(`export.column.${k}`, tl(`export.field.${k}`, k)),
-      op: (k) => tl(`export.op.${k}`, k),
+      op: (k, type) => (type === 'number' ? tl(`export.op.number.${k}`, tl(`export.op.${k}`, k)) : tl(`export.op.${k}`, k)),
       status: (k) => tl(`export.status.${k}`, k),
       format: (k) => tl(`export.format.${k}`, k),
       value: (field, v) =>

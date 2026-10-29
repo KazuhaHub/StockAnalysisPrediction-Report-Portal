@@ -3151,6 +3151,8 @@
   "export.op.not_in": "不属于",
   "export.op.contains": "包含",
   "export.op.before": "早于",
+  "export.op.number.after": "大于",
+  "export.op.number.before": "小于",
   "export.op.after": "不早于",
   "export.op.between": "介于",
   "export.field.kind": "大类",

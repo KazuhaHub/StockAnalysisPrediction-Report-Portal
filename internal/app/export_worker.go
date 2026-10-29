@@ -97,11 +97,14 @@ func (s *Server) exportRunNext() bool {
 	now := s.exports.clock().UnixMilli()
 	switch {
 	case ctx.Err() != nil:
+		// The cancel may land after the file was renamed into place, so the finished file goes too.
 		s.exportRemoveWork(j.ID)
+		_ = os.Remove(s.exportPath(j))
 		s.st.exec(`UPDATE export_jobs SET status='canceled',finished_at=?,rows_done=? WHERE id=? AND status='running'`, now, rows, j.ID)
 	case err != nil:
 		log.Printf("export %s (%s): %v", j.ID, j.Source, err)
 		s.exportRemoveWork(j.ID)
+		_ = os.Remove(s.exportPath(j))
 		s.st.exec(`UPDATE export_jobs SET status='failed',finished_at=?,error=?,rows_done=? WHERE id=? AND status='running'`,
 			now, clampError(err.Error()), rows, j.ID)
 	default:

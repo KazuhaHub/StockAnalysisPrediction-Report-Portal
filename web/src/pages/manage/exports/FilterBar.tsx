@@ -69,7 +69,7 @@ export default function FilterBar({
   const chipText = (c: ExportCond) => {
     const vals = c.values.map((v) => labels.value(c.field, v))
     const shown = vals.length > 2 ? `${vals.slice(0, 2).join(', ')} +${vals.length - 2}` : vals.join(c.operator === 'between' ? ' – ' : ', ')
-    return `${labels.field(c.field)} ${labels.op(c.operator)} ${shown}`
+    return `${labels.field(c.field)} ${labels.op(c.operator, source.fields.find((f) => f.key === c.field)?.type)} ${shown}`
   }
 
   const chipStyle = {
