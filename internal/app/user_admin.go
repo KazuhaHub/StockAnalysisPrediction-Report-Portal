@@ -322,6 +322,30 @@ func ensureDefaultForecastScope(e migExec) error {
 	return err
 }
 
+// Default reader export policy (ADR 0046): off, 200 reports per export, 1000 per user per day.
+const (
+	defaultExportMaxReports = 200
+	defaultExportDailyQuota = 1000
+)
+
+// EnsureDefaultExportPolicy gives the Default OU, the root of inheritance, a concrete value for each
+// reader export column. It fills NULLs only and never overwrites an administrator's decision. Like
+// the forecast scope it runs at boot and at the end of a restore rather than in step 0013, so an
+// older dump can still be restored.
+func (s *Store) EnsureDefaultExportPolicy() error {
+	return ensureDefaultExportPolicy(s.poolExec())
+}
+
+func ensureDefaultExportPolicy(e migExec) error {
+	_, err := e.exec(`UPDATE user_groups SET
+		export_allowed=COALESCE(export_allowed,0),
+		export_max_reports=COALESCE(export_max_reports,?),
+		export_daily_quota=COALESCE(export_daily_quota,?)
+		WHERE is_default=1 AND (export_allowed IS NULL OR export_max_reports IS NULL OR export_daily_quota IS NULL)`,
+		defaultExportMaxReports, defaultExportDailyQuota)
+	return err
+}
+
 // SetGroupPriority sets a group's base priority override (ADR 0007). An empty priority stores
 // NULL, so a non-default group then inherits the system default. The group row always exists.
 func (s *Store) SetGroupPriority(groupID int64, priority string) error {

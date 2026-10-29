@@ -381,12 +381,14 @@ export function buildExportRequest(i: {
   source: string
   format: ExportRequest['format']
   filter: ExportFilter
-  columns: string[]
+  /** Left out for a reader, who does not choose columns. */
+  columns?: string[]
   name?: string
   tz?: 'panel' | 'utc'
   options?: ExportRequest['options']
 }): ExportRequest {
-  const body: ExportRequest = { source: i.source, format: i.format, filter: cleanFilter(i.filter), columns: i.columns }
+  const body: ExportRequest = { source: i.source, format: i.format, filter: cleanFilter(i.filter) }
+  if (i.columns) body.columns = i.columns
   const name = (i.name ?? '').trim()
   if (name) body.name = name
   if (i.tz) body.tz = i.tz

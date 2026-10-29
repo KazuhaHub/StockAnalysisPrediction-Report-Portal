@@ -205,7 +205,12 @@ type exportKindTree struct {
 // reportKindTree is kind -> subtypes, from the type registry plus whatever the reports table holds.
 // Subtypes follow the registry order; kinds follow their first subtype. A subtype the registry does
 // not know yet still appears, under the kind its reports carry.
-func (s *Server) reportKindTree() []exportKindTree {
+func (s *Server) reportKindTree() []exportKindTree { return s.reportKindTreeFor(nil, false) }
+
+// reportKindTreeFor is reportKindTree for a reader: only kinds and subtypes among the reports sc may
+// read appear (the registry then supplies the order, not the membership). A nil scope is everything.
+// A reader view also leaves out the pipeline plumbing types, which the reader endpoints never export.
+func (s *Server) reportKindTreeFor(sc *ownerScope, reader bool) []exportKindTree {
 	type sub struct {
 		name string
 		ord  int
@@ -222,17 +227,40 @@ func (s *Server) reportKindTree() []exportKindTree {
 			byKind[kind][name] = ord
 		}
 	}
-	for _, t := range s.st.TypeConfigs() {
-		add(t.Kind, t.Name, t.Ord)
+	present := map[[2]string]bool{}
+	q := `SELECT DISTINCT COALESCE(kind,''),COALESCE(rtype,'') FROM reports`
+	var qargs []any
+	var conds []string
+	if frag, a := sc.where(""); frag != "" {
+		conds, qargs = append(conds, frag), a
 	}
-	if rows, err := s.st.query(`SELECT DISTINCT COALESCE(kind,''),COALESCE(rtype,'') FROM reports`); err == nil {
+	if reader {
+		if frag, a := internalTypeExclusion(""); frag != "" {
+			conds, qargs = append(conds, frag), append(qargs, a...)
+		}
+	}
+	if len(conds) > 0 {
+		q += ` WHERE ` + strings.Join(conds, ` AND `)
+	}
+	if rows, err := s.st.query(q, qargs...); err == nil {
 		for rows.Next() {
 			var kind, rt string
 			if rows.Scan(&kind, &rt) == nil {
-				add(kind, rt, 1<<30)
+				present[[2]string{kind, rt}] = true
 			}
 		}
 		rows.Close()
+	}
+	for _, t := range s.st.TypeConfigs() {
+		if reader && internalTypes[t.Name] {
+			continue
+		}
+		if sc == nil || present[[2]string{t.Kind, t.Name}] {
+			add(t.Kind, t.Name, t.Ord)
+		}
+	}
+	for k := range present {
+		add(k[0], k[1], 1<<30)
 	}
 	type kindEntry struct {
 		kind string
@@ -298,9 +326,26 @@ func (s *Server) reportRTypeOptions() []string {
 
 // reportGeneratorVersions lists the producer versions present. The version is parsed from
 // source/title, so this reads those two columns only (no bodies) and de-duplicates in Go.
-func (s *Server) reportGeneratorVersions() []string {
+func (s *Server) reportGeneratorVersions() []string { return s.reportGeneratorVersionsFor(nil, false) }
+
+// reportGeneratorVersionsFor is reportGeneratorVersions over the reports sc may read.
+func (s *Server) reportGeneratorVersionsFor(sc *ownerScope, reader bool) []string {
 	set := map[string]bool{}
-	rows, err := s.st.query(`SELECT COALESCE(source,''),COALESCE(title,'') FROM reports`)
+	q := `SELECT COALESCE(source,''),COALESCE(title,'') FROM reports`
+	var qargs []any
+	var conds []string
+	if frag, a := sc.where(""); frag != "" {
+		conds, qargs = append(conds, frag), a
+	}
+	if reader {
+		if frag, a := internalTypeExclusion(""); frag != "" {
+			conds, qargs = append(conds, frag), append(qargs, a...)
+		}
+	}
+	if len(conds) > 0 {
+		q += ` WHERE ` + strings.Join(conds, ` AND `)
+	}
+	rows, err := s.st.query(q, qargs...)
 	if err != nil {
 		return nil
 	}

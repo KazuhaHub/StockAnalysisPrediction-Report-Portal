@@ -26,6 +26,9 @@ type ouPolicyValues struct {
 	runWindow, priority, scope      *string
 	quota                           *ouRunQuota
 	totp, passkey, require2FA       *bool
+	// Reader export policy (ADR 0046); nil inherits.
+	exportAllowed               *bool
+	exportMax, exportDailyQuota *int
 }
 
 type ouPolicySnapshot struct {
@@ -45,6 +48,9 @@ type ouResolvedPolicies struct {
 	Passkey         ouPolicyResult[bool]       `json:"passkey_enroll"`
 	Require2FA      ouPolicyResult[bool]       `json:"require_2fa"`
 	ForecastScope   ouPolicyResult[string]     `json:"forecast_scope"`
+	ExportAllowed   ouPolicyResult[bool]       `json:"export_allowed"`
+	ExportMax       ouPolicyResult[int]        `json:"export_max_reports"`
+	ExportQuota     ouPolicyResult[int]        `json:"export_daily_quota"`
 }
 
 func ouNullInt(v sql.NullInt64) *int {
@@ -75,7 +81,7 @@ func (s *Store) loadOUPolicySnapshotFrom(ex execer) (ouPolicySnapshot, error) {
 	rows, err := ex.Query(`SELECT id,COALESCE(parent_id,0),COALESCE(is_default,0),
 		COALESCE(name,''),COALESCE(created_at,''),COALESCE(description,''),weight,urgent_unlimited,allow_urgent,max_queued,
 		run_window,restricted,daily_run_quota,run_quota_period,totp_enroll,passkey_enroll,require_2fa,
-		forecast_scope,priority FROM user_groups`)
+		forecast_scope,priority,export_allowed,export_max_reports,export_daily_quota FROM user_groups`)
 	if err != nil {
 		return ouPolicySnapshot{}, err
 	}
@@ -87,16 +93,19 @@ func (s *Store) loadOUPolicySnapshotFrom(ex execer) (ouPolicySnapshot, error) {
 		var isDefault int
 		var name, created, description string
 		var weight, urgent, allow, maxQueued, restricted, quota, totp, passkey, require sql.NullInt64
+		var exportAllowed, exportMax, exportQuota sql.NullInt64
 		var window, period, scope, priority sql.NullString
 		if err := rows.Scan(&id, &parent, &isDefault, &name, &created, &description, &weight, &urgent, &allow, &maxQueued,
-			&window, &restricted, &quota, &period, &totp, &passkey, &require, &scope, &priority); err != nil {
+			&window, &restricted, &quota, &period, &totp, &passkey, &require, &scope, &priority,
+			&exportAllowed, &exportMax, &exportQuota); err != nil {
 			return ouPolicySnapshot{}, err
 		}
 		nodes[id] = ouNode{parent: parent, isDefault: isDefault == 1, name: name, description: description, created: created}
 		v := ouPolicyValues{weight: ouNullInt(weight), urgent: ouNullBool(urgent), allowUrgent: ouNullBool(allow),
 			maxQueued: ouNullInt(maxQueued), runWindow: ouNullString(window), restricted: ouNullBool(restricted),
 			totp: ouNullBool(totp), passkey: ouNullBool(passkey), require2FA: ouNullBool(require),
-			scope: ouNullString(scope), priority: ouNullString(priority)}
+			scope: ouNullString(scope), priority: ouNullString(priority),
+			exportAllowed: ouNullBool(exportAllowed), exportMax: ouNullInt(exportMax), exportDailyQuota: ouNullInt(exportQuota)}
 		if quota.Valid {
 			p := QuotaDay
 			if validQuotaPeriod(period.String) {
@@ -174,6 +183,10 @@ func (s ouPolicySnapshot) resolve(leaf int64) (ouResolvedPolicies, error) {
 		Passkey:         nearestOUPolicy(chain, true, func(id int64) *bool { return s.values[id].passkey }),
 		Require2FA:      stickyOUPolicy(chain, func(id int64) *bool { return s.values[id].require2FA }),
 		ForecastScope:   nearestOUPolicy(chain, scopeNone, func(id int64) *string { return s.values[id].scope }),
+		// Not sticky: an administrator may switch export on for one sub-OU without its parent.
+		ExportAllowed: nearestOUPolicy(chain, false, func(id int64) *bool { return s.values[id].exportAllowed }),
+		ExportMax:     nearestOUPolicy(chain, defaultExportMaxReports, func(id int64) *int { return s.values[id].exportMax }),
+		ExportQuota:   nearestOUPolicy(chain, defaultExportDailyQuota, func(id int64) *int { return s.values[id].exportDailyQuota }),
 	}
 	switch p.ForecastScope.Effective {
 	case scopeAll, scopeOwn, scopeNone:

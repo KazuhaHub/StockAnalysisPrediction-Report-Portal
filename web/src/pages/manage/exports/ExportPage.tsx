@@ -3,7 +3,7 @@ import { App, Alert, Button, Card, Collapse, Grid, Segmented, Space, Typography,
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
-import type { ExportFilter, ExportJob, ExportPreviewResp, ExportSource, SettingsResp } from '../../../api/types'
+import type { ExportFilter, ExportJob, ExportPolicy, ExportPreviewResp, ExportSource, SettingsResp } from '../../../api/types'
 import LoadGate from '../../../components/LoadGate'
 import {
   applySelection,
@@ -18,15 +18,18 @@ import {
   validateFilter,
 } from '../../../lib/exportFilter'
 import { notifyExportsChanged } from '../../../lib/exportJobs'
+import { exportBase, type ExportMode } from '../../../lib/exportMode'
 import { panelToday } from '../../../lib/exportTime'
 import ColumnsDialog from './ColumnsDialog'
 import ConditionBuilder from './ConditionBuilder'
 import ExportDialog from './ExportDialog'
 import ExportHistory from './ExportHistory'
 import FilterBar from './FilterBar'
+import ReaderExportPolicy from './ReaderExportPolicy'
 import ResultsPanel from './ResultsPanel'
 import SourceRail from './SourceRail'
 import TypeTree from './TypeTree'
+import UsageLine from './UsageLine'
 import { useExportLabels } from './labels'
 
 type Mode = 'filter' | 'advanced'
@@ -35,7 +38,14 @@ const DEBOUNCE_MS = 300
 // Data export (ADR 0045): pick a source, narrow it with chips or the condition builder, watch the
 // count and preview follow, then submit a background export task. The filter is URL state, so a
 // view can be shared and other pages can link here with their own filter pre-filled.
-export default function ExportPage() {
+//
+// The reader's export page (ADR 0046) is this same page in `reader` mode: the reports source only,
+// no column choice, the reader endpoints, and a usage line. The reader's policy comes in from the
+// route, which has already checked that export is allowed. An administrator's page also carries the
+// reader-export policy console at the bottom.
+export default function ExportPage({ mode: exportMode = 'admin', policy = null }: { mode?: ExportMode; policy?: ExportPolicy | null }) {
+  const base = exportBase(exportMode)
+  const reader = exportMode === 'reader'
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { notification } = App.useApp()
@@ -87,19 +97,22 @@ export default function ExportPage() {
   const load = useCallback(() => {
     setLoadErr('')
     api
-      .get<{ sources: ExportSource[] }>('/api/admin/exports/sources')
+      .get<{ sources: ExportSource[] }>(`${base}/sources`)
       .then((r) => {
         setSources(r.sources)
         applyUrl(r.sources, paramsRef.current)
       })
       .catch((e) => setLoadErr(errText(e, t)))
-    // The panel zone only decides how times read; a failure leaves them in the viewer's zone.
-    api
-      .get<SettingsResp>('/api/admin/settings')
-      .then((s) => setTz(s?.timezone ?? ''))
-      .catch(() => {})
+    // The panel zone only decides how times read; a failure leaves them in the viewer's zone. A
+    // reader cannot read the admin settings, so their times read in their own zone.
+    if (!reader) {
+      api
+        .get<SettingsResp>('/api/admin/settings')
+        .then((s) => setTz(s?.timezone ?? ''))
+        .catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyUrl, t])
+  }, [applyUrl, base, reader, t])
   useEffect(load, [load])
 
   // Mirror source + filter into the URL (replace, so each edit is not a history entry).
@@ -131,7 +144,7 @@ export default function ExportPage() {
         const id = ++reqId.current
         setLoading(true)
         try {
-          const r = await api.post<ExportPreviewResp>('/api/admin/exports/preview', {
+          const r = await api.post<ExportPreviewResp>(`${base}/preview`, {
             source: source.key,
             filter: clean,
             columns,
@@ -151,7 +164,7 @@ export default function ExportPage() {
     )
     return () => window.clearTimeout(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.key, cleanKey, columns, page, pageSize, t])
+  }, [source?.key, cleanKey, columns, page, pageSize, base, t])
 
   // --- handlers ----------------------------------------------------------------------------
   const setFilter = (f: ExportFilter) => {
@@ -218,7 +231,7 @@ export default function ExportPage() {
   const treeField = source?.fields.find((f) => f.tree)
   const rail = source && sources && (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <SourceRail sources={sources} value={source.key} onChange={chooseSource} labels={labels} compact={compact} />
+      {!reader && <SourceRail sources={sources} value={source.key} onChange={chooseSource} labels={labels} compact={compact} />}
       {treeField?.tree && (() => {
         const tree = (
           <TypeTree
@@ -284,6 +297,7 @@ export default function ExportPage() {
                 )}
               </Card>
 
+              {reader && policy && <UsageLine policy={policy} />}
               <Card>
                 <ResultsPanel
                   source={source}
@@ -300,12 +314,13 @@ export default function ExportPage() {
                     setPage(s !== pageSize ? 1 : p)
                     setPageSize(s)
                   }}
-                  onManageColumns={() => setColsOpen(true)}
+                  onManageColumns={reader ? undefined : () => setColsOpen(true)}
                   onExportAll={() => setExportOpen(true)}
                 />
               </Card>
 
-              <ExportHistory tz={tz} labels={labels} onReuse={reuse} />
+              <ExportHistory tz={tz} labels={labels} onReuse={reuse} mode={exportMode} />
+              {!reader && <ReaderExportPolicy />}
             </main>
           </div>
 
@@ -318,6 +333,8 @@ export default function ExportPage() {
             total={preview?.total ?? 0}
             labels={labels}
             defaultName={`${labels.source(source.key)} ${today}`}
+            mode={exportMode}
+            policy={policy}
             onCancel={() => setExportOpen(false)}
             onCreated={created}
           />

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
 import type { ExportJob, ExportStatus } from '../../../api/types'
 import { EXPORTS_CHANGED_EVENT, exportDownloadUrl, fmtBytes, isActiveJob, jobActions, jobProgress, notifyExportsChanged } from '../../../lib/exportJobs'
+import { exportBase, type ExportMode } from '../../../lib/exportMode'
 import { fmtMs } from '../../../lib/exportTime'
 import { startVisiblePoll } from '../../../lib/visiblePoll'
 import type { ExportLabels } from './labels'
@@ -19,9 +20,10 @@ export const STATUS_COLOR: Record<ExportStatus, string> = {
   expired: 'default',
 }
 
-// Recent tasks of every administrator. It refreshes quickly while any task is active, and when the
+// Recent tasks of every administrator (a reader's page lists their own). It refreshes quickly while any task is active, and when the
 // tray announces a change.
-export default function ExportHistory({ tz, labels, onReuse }: { tz: string; labels: ExportLabels; onReuse: (j: ExportJob) => void }) {
+export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: { tz: string; labels: ExportLabels; onReuse: (j: ExportJob) => void; mode?: ExportMode }) {
+  const base = exportBase(mode)
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [jobs, setJobs] = useState<ExportJob[]>([])
@@ -31,7 +33,7 @@ export default function ExportHistory({ tz, labels, onReuse }: { tz: string; lab
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<{ jobs: ExportJob[] }>('/api/admin/exports?limit=50')
+      const r = await api.get<{ jobs: ExportJob[] }>(`${base}?limit=50`)
       setJobs(r?.jobs ?? [])
       setError('')
     } catch (e) {
@@ -39,7 +41,7 @@ export default function ExportHistory({ tz, labels, onReuse }: { tz: string; lab
     } finally {
       setLoading(false)
     }
-  }, [t])
+  }, [base, t])
 
   useEffect(() => {
     void load()
@@ -54,7 +56,7 @@ export default function ExportHistory({ tz, labels, onReuse }: { tz: string; lab
 
   const cancel = async (j: ExportJob) => {
     try {
-      await api.post(`/api/admin/exports/${encodeURIComponent(j.id)}/cancel`)
+      await api.post(`${base}/${encodeURIComponent(j.id)}/cancel`)
       notifyExportsChanged()
     } catch (e) {
       message.error(errText(e, t))
@@ -70,7 +72,7 @@ export default function ExportHistory({ tz, labels, onReuse }: { tz: string; lab
       render: (_, j) => <span title={j.name || j.file_name}>{j.name || j.file_name || j.id.slice(0, 8)}</span>,
     },
     { title: t('export.history.source'), key: 'source', width: 140, render: (_, j) => labels.source(j.source) },
-    { title: t('export.history.requester'), dataIndex: 'requested_by', width: 130, ellipsis: true },
+    ...(mode === 'admin' ? [{ title: t('export.history.requester'), dataIndex: 'requested_by', width: 130, ellipsis: true }] : []),
     { title: t('export.history.created'), key: 'created', width: 170, render: (_, j) => fmtMs(j.created_at, tz) },
     {
       title: t('export.history.status'),
@@ -110,7 +112,7 @@ export default function ExportHistory({ tz, labels, onReuse }: { tz: string; lab
         return (
           <Space size={0}>
             {a.download && (
-              <Button type="link" size="small" icon={<DownloadOutlined />} href={exportDownloadUrl(j.id)}>
+              <Button type="link" size="small" icon={<DownloadOutlined />} href={exportDownloadUrl(j.id, mode)}>
                 {t('export.history.download')}
               </Button>
             )}

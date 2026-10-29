@@ -514,6 +514,17 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/exports/{id}", s.apiExportGet)
 	s.admin(mux, "POST /api/admin/exports/{id}/cancel", s.apiExportCancel)
 	s.admin(mux, "GET /api/admin/exports/{id}/file", s.apiExportFile)
+	// ---- Reader report export (docs/adr/0046-reader-report-export.md) ----
+	s.admin(mux, "GET /api/admin/exports/policy", s.apiAdminExportPolicy)
+	s.admin(mux, "PUT /api/admin/exports/policy/{ou}", s.apiAdminExportPolicySave)
+	s.session(mux, "GET /api/exports/policy", s.apiReaderExportPolicy)
+	s.session(mux, "GET /api/exports/sources", s.apiReaderExportSources)
+	s.session(mux, "POST /api/exports/preview", s.apiReaderExportPreview)
+	s.session(mux, "POST /api/exports", s.apiReaderExportCreate)
+	s.session(mux, "GET /api/exports", s.apiReaderExportList)
+	s.session(mux, "GET /api/exports/{id}", s.apiReaderExportGet)
+	s.session(mux, "POST /api/exports/{id}/cancel", s.apiReaderExportCancel)
+	s.session(mux, "GET /api/exports/{id}/file", s.apiReaderExportFile)
 
 	// ---- Downloads: MD / PDF (cookie session) ----
 	s.sessionHTML(mux, "GET /report/{id}/md", s.reportMD)

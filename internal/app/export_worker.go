@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -122,6 +123,16 @@ func (s *Server) exportRunNext() bool {
 	return true
 }
 
+// wireExportCleanup makes a user deletion remove that user's export files once the rows are gone.
+func (s *Server) wireExportCleanup() {
+	s.st.onExportJobsDeleted = func(jobs []*exportJob) {
+		for _, j := range jobs {
+			s.exportRemoveWork(j.ID)
+			_ = os.Remove(s.exportPath(j))
+		}
+	}
+}
+
 func (s *Server) exportRemoveWork(id string) {
 	_ = os.Remove(s.exportPartPath(id))
 	_ = os.Remove(filepath.Join(s.exportDir(), id+".idx"))
@@ -175,6 +186,18 @@ func (s *Server) exportExecute(ctx context.Context, j *exportJob) (rowsDone, siz
 	if err != nil {
 		return 0, 0, err
 	}
+	if p.Reader {
+		// The policy and the read scope are resolved now, not frozen at submit, so a grant revoked
+		// while the job waited is honoured (ADR 0046).
+		pol, perr := s.st.readerExportPolicy(j.RequestedBy)
+		if perr != nil {
+			return 0, 0, perr
+		}
+		if !pol.Allowed {
+			return 0, 0, errExportDisabled
+		}
+		plan.withReaderLimits(s.viewerScope(j.RequestedBy), p.MaxID)
+	}
 	if err := os.MkdirAll(s.exportDir(), 0o755); err != nil {
 		return 0, 0, err
 	}
@@ -217,6 +240,11 @@ func (s *Server) exportExecute(ctx context.Context, j *exportJob) (rowsDone, siz
 
 	batchNo := 0
 	err = plan.scan(ctx, withBody, exportBatchRows, func(raw []string) error {
+		// A reader job was charged for p.Cap reports: reports ingested since submit must not push it
+		// past that.
+		if p.Reader && p.Cap > 0 && rowsDone >= p.Cap {
+			return errExportCapReached
+		}
 		if err := w.write(raw, src.build(ec, raw)); err != nil {
 			return err
 		}
@@ -234,6 +262,9 @@ func (s *Server) exportExecute(ctx context.Context, j *exportJob) (rowsDone, siz
 		}
 		return ctx.Err()
 	})
+	if errors.Is(err, errExportCapReached) {
+		err = nil
+	}
 	if err != nil {
 		return rowsDone, 0, err
 	}

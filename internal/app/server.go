@@ -289,6 +289,7 @@ func RunServer(cfgPath string) {
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
+	s.wireExportCleanup()
 	s.exportRecover() // return jobs a restart interrupted to the queue before the worker starts
 	go s.exportLoop() // the data-export task worker and its hourly expiry sweep (ADR 0045)
 

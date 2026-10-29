@@ -43,6 +43,13 @@ type exportParams struct {
 	Columns []string      `json:"columns"`
 	TZ      string        `json:"tz"`
 	Options exportOptions `json:"options"`
+	// Reader marks a job submitted through the reader endpoints (ADR 0046). Cap is the number of
+	// reports it was charged for: the worker stops there however many reports match by then.
+	// MaxID is the highest reports.id at submit: reports ingested later are never part of the job, so
+	// they cannot displace the ones that were counted (the scan runs newest first).
+	Reader bool  `json:"reader,omitempty"`
+	Cap    int64 `json:"cap,omitempty"`
+	MaxID  int64 `json:"max_id,omitempty"`
 }
 
 // exportJob is the stored row. Params stays raw until a caller needs it.
@@ -51,6 +58,12 @@ type exportJob struct {
 	RowsEstimate, RowsDone, Bytes                   int64
 	FileName, Error                                 string
 	CreatedAt, StartedAt, FinishedAt, ExpiresAt     int64
+}
+
+// isReader reports whether the job was submitted through the reader endpoints (ADR 0046).
+func (j *exportJob) isReader() bool {
+	var p exportParams
+	return json.Unmarshal([]byte(j.Params), &p) == nil && p.Reader
 }
 
 // exportJobJSON is the wire shape of a job (the API contract in ADR 0045).
@@ -114,10 +127,14 @@ func newExportID() string {
 }
 
 func (s *Store) insertExportJob(j *exportJob) error {
-	_, err := s.exec(`INSERT INTO export_jobs(`+exportJobCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := s.insertExportJobOn(s.db, j)
+	return err
+}
+
+func (s *Store) insertExportJobOn(ex execer, j *exportJob) (sql.Result, error) {
+	return ex.Exec(s.bind(`INSERT INTO export_jobs(`+exportJobCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		j.ID, j.Source, j.Format, j.Params, j.RequestedBy, j.Status, j.RowsEstimate, j.RowsDone, j.Bytes,
 		j.FileName, j.Error, j.CreatedAt, j.StartedAt, j.FinishedAt, j.ExpiresAt)
-	return err
 }
 
 // getExportJob returns nil for an unknown id.
@@ -129,13 +146,23 @@ func (s *Store) getExportJob(id string) *exportJob {
 	return j
 }
 
-func (s *Store) listExportJobs(limit int, activeOnly bool) ([]*exportJob, error) {
+// listExportJobs lists newest first; a non-empty owner restricts it to that requester's jobs.
+func (s *Store) listExportJobs(limit int, activeOnly bool, owner string) ([]*exportJob, error) {
 	q := `SELECT ` + exportJobCols + ` FROM export_jobs`
+	var where []string
+	var args []any
 	if activeOnly {
-		q += ` WHERE status IN ('queued','running')`
+		where = append(where, `status IN ('queued','running')`)
+	}
+	if owner != "" {
+		where = append(where, `requested_by=?`)
+		args = append(args, owner)
+	}
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
 	q += ` ORDER BY created_at DESC, id DESC LIMIT ` + itoa64(int64(limit))
-	rows, err := s.query(q)
+	rows, err := s.query(q, args...)
 	if err != nil {
 		return nil, err
 	}

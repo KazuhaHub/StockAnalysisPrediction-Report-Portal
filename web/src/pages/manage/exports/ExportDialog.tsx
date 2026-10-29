@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
 import type { ExportFilter, ExportFormat, ExportJob, ExportSource } from '../../../api/types'
 import { buildExportRequest } from '../../../lib/exportFilter'
+import { exportBase, exportBlock, type ExportMode } from '../../../lib/exportMode'
+import type { ExportPolicy } from '../../../api/types'
 import type { ExportLabels } from './labels'
 
 export const NAME_MAX = 80
@@ -12,6 +14,10 @@ type Layout = 'flat' | 'date' | 'symbol'
 // The Export dialog: name (with counter), format, time zone, and for a report Markdown archive the
 // per-file front matter, the index.csv manifest and the folder layout. It states how many rows it
 // will export and submits a background task; the file is collected from the task tray.
+//
+// For a reader (ADR 0046) the format is fixed, columns are not chosen, and the submit button is
+// disabled with the reason when the count is over either limit, so the server's 422/429 stay a
+// backstop rather than the normal way to find out.
 export default function ExportDialog({
   open,
   source,
@@ -20,6 +26,8 @@ export default function ExportDialog({
   total,
   labels,
   defaultName,
+  mode = 'admin',
+  policy,
   onCancel,
   onCreated,
 }: {
@@ -30,6 +38,9 @@ export default function ExportDialog({
   total: number
   labels: ExportLabels
   defaultName: string
+  mode?: ExportMode
+  /** The reader's policy and usage; absent for an administrator. */
+  policy?: ExportPolicy | null
   onCancel: () => void
   onCreated: (job: ExportJob) => void
 }) {
@@ -52,18 +63,19 @@ export default function ExportDialog({
   }, [open, defaultName, source])
 
   const reportArchive = source.key === 'reports' && format === 'md_zip'
+  const block = mode === 'reader' ? exportBlock(total, policy) : null
 
   const submit = async () => {
     setBusy(true)
     setError('')
     try {
       const job = await api.post<ExportJob>(
-        '/api/admin/exports',
+        exportBase(mode),
         buildExportRequest({
           source: source.key,
           format,
           filter,
-          columns,
+          columns: mode === 'reader' ? undefined : columns,
           name,
           tz,
           options: reportArchive ? { front_matter: frontMatter, index_csv: indexCsv, layout } : undefined,
@@ -87,7 +99,7 @@ export default function ExportDialog({
       destroyOnHidden
       okText={t('export.dialog.submit')}
       cancelText={t('export.filter.cancel')}
-      okButtonProps={{ disabled: total === 0, loading: busy }}
+      okButtonProps={{ disabled: total === 0 || block !== null, loading: busy }}
       onOk={submit}
     >
       <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -103,7 +115,7 @@ export default function ExportDialog({
             style={{ marginTop: 6 }}
           />
         </div>
-        <div>
+        {source.formats.length > 1 && <div>
           <Typography.Text strong>{t('export.dialog.format')}</Typography.Text>
           <div style={{ marginTop: 6 }}>
             <Radio.Group value={format} onChange={(e) => setFormat(e.target.value)} aria-label={t('export.dialog.format')}>
@@ -114,7 +126,7 @@ export default function ExportDialog({
               ))}
             </Radio.Group>
           </div>
-        </div>
+        </div>}
         <div>
           <Typography.Text strong>{t('export.dialog.tz')}</Typography.Text>
           <div style={{ marginTop: 6 }}>
@@ -151,6 +163,15 @@ export default function ExportDialog({
           </Space>
         )}
         <Alert type="info" showIcon title={t('export.dialog.rows', { n: total })} description={t('export.dialog.note')} />
+        {block && (
+          <Alert
+            type="warning"
+            showIcon
+            role="alert"
+            title={block.kind === 'tooLarge' ? t('export.reader.blockTooLarge', { n: block.n, max: block.max }) : t('export.reader.blockQuota', { n: block.n, remaining: block.remaining })}
+            description={t('export.reader.blockHint')}
+          />
+        )}
         {error && <Alert type="error" showIcon title={error} />}
       </Space>
     </Modal>
