@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ExportFilter, ExportCond } from '../api/types'
 import {
+  MAX_NODES,
+  countNodes,
   BELOW_ENTRY_CONDS,
   MAX_CONDITIONS,
   MAX_DEPTH,
@@ -11,6 +15,7 @@ import {
   clearBelowEntryPreset,
   isBelowEntryActive,
   auditFilterToTree,
+  runsFilterToTree,
   buildExportRequest,
   cleanFilter,
   coerceValues,
@@ -22,6 +27,7 @@ import {
   exportLink,
   filterDepth,
   isChipExpressible,
+  isCond,
   nestAt,
   parseExportParams,
   pickNode,
@@ -184,7 +190,7 @@ describe('links and URL state', () => {
   })
   it('translates audit page filters', () => {
     expect(auditFilterToTree({ action: 'report.read', actor: ' bob ', ip: '', q: 'x', since: '2026-10-01' })).toEqual(
-      and(c('action', 'in', 'report.read'), c('actor', 'is', 'bob'), c('detail', 'contains', 'x'), c('at', 'after', '2026-10-01')),
+      and(c('action', 'in', 'report.read'), c('actor', 'is', 'bob'), c('q', 'contains', 'x'), c('at', 'after', '2026-10-01')),
     )
     expect(auditFilterToTree({})).toEqual(and())
   })
@@ -237,5 +243,46 @@ describe('below-entry preset', () => {
   it('clears only its own chips', () => {
     const f = applyBelowEntryPreset({ op: 'and', items: [sym] })
     expect(clearBelowEntryPreset(f)).toEqual({ op: 'and', items: [sym] })
+  })
+})
+
+// The hand-off trees are checked against the field list the Go source declares, read from the
+// source file itself so a renamed or removed field fails here instead of at the first click.
+function declaredFieldKeys(source: string): string[] {
+  const go = readFileSync(resolve(process.cwd(), '../internal/app/export_sources.go'), 'utf8')
+  const start = go.indexOf(`func ${source}Source() *exportSource {`)
+  expect(start).toBeGreaterThan(-1)
+  const block = go.slice(start, go.indexOf('Columns:', start))
+  const keys = [...block.matchAll(/\b(?:timeField|textField|enumField)\("([a-z_]+)"/g)].map((m) => m[1])
+  if (/\bqField\(/.test(block)) keys.push('q')
+  return keys
+}
+
+const usedFields = (f: ExportFilter) => f.items.filter(isCond).map((n) => n.field)
+
+describe('hand-off trees only use declared source fields', () => {
+  it('audit', () => {
+    const declared = declaredFieldKeys('audit')
+    expect(declared).toContain('q')
+    expect(declared).toContain('at')
+    const tree = auditFilterToTree({ action: 'a', actor: 'b', ip: '1.2.3.4', q: 'x', since: '2026-10-01' })
+    expect(usedFields(tree).length).toBe(5)
+    for (const k of usedFields(tree)) expect(declared).toContain(k)
+    expect(tree.items).toContainEqual(c('q', 'contains', 'x'))
+  })
+  it('runs', () => {
+    const declared = declaredFieldKeys('runs')
+    const tree = runsFilterToTree({ status: 'finished', createdBy: ' bob ', target: 'Daily' })
+    expect(tree).toEqual(and(c('status', 'is', 'finished'), c('created_by', 'is', 'bob'), c('target', 'is', 'Daily')))
+    for (const k of usedFields(tree)) expect(declared).toContain(k)
+    expect(runsFilterToTree({})).toEqual(and())
+  })
+})
+
+describe('node bound', () => {
+  it('rejects a tree with more groups and conditions than the server accepts', () => {
+    const many = { op: 'and' as const, items: Array.from({ length: MAX_NODES }, () => ({ op: 'or' as const, items: [] })) }
+    expect(validateFilter(many)).toBe('nodes')
+    expect(countNodes({ op: 'and', items: [] })).toBe(1)
   })
 })

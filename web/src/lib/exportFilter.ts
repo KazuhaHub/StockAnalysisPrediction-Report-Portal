@@ -7,6 +7,8 @@ import type { ExportCond, ExportFilter, ExportGroup, ExportOperator, ExportReque
 
 export const MAX_CONDITIONS = 20
 export const MAX_DEPTH = 3
+/** Groups plus conditions, the server's exportMaxNodes. */
+export const MAX_NODES = 50
 
 export type Node = ExportGroup | ExportCond
 export type Path = number[]
@@ -26,10 +28,16 @@ export function filterDepth(n: Node): number {
   return isGroup(n) ? 1 + n.items.reduce((max, i) => Math.max(max, isGroup(i) ? filterDepth(i) : 0), 0) : 0
 }
 
-export function validateFilter(f: ExportFilter): null | 'conditions' | 'depth' {
+export function validateFilter(f: ExportFilter): null | 'conditions' | 'depth' | 'nodes' {
   if (countConditions(f) > MAX_CONDITIONS) return 'conditions'
   if (filterDepth(f) > MAX_DEPTH) return 'depth'
+  if (countNodes(f) > MAX_NODES) return 'nodes'
   return null
+}
+
+/** countNodes counts groups and conditions together, root included, as the server does. */
+export function countNodes(n: Node): number {
+  return isGroup(n) ? 1 + n.items.reduce((sum, c) => sum + countNodes(c), 0) : 1
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -200,7 +208,7 @@ export function nestAt(f: ExportFilter, path: Path): ExportFilter | null {
   const target = nodeAt(f, path)
   if (!parent || !isGroup(parent) || !target) return null
   const next = mapAt(f, path, (n) => ({ op: parent.op === 'and' ? 'or' : 'and', items: [n] }))
-  return filterDepth(next) > MAX_DEPTH ? null : next
+  return filterDepth(next) > MAX_DEPTH || countNodes(next) > MAX_NODES ? null : next
 }
 
 /** Whether the node at `path` can still be nested without passing the depth limit. */
@@ -339,8 +347,30 @@ export function auditFilterToTree(a: AuditFilterInput): ExportFilter {
   add('action', 'in', a.action)
   add('actor', 'is', a.actor)
   add('ip', 'is', a.ip)
-  add('detail', 'contains', a.q)
+  add('q', 'contains', a.q)
   add('at', 'after', a.since)
+  return { op: 'and', items }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Run history hand-off. Only the filters the runs source declares travel; the free-text search and
+// the derived "scheduled" status have no field there and are dropped.
+
+export interface RunsFilterInput {
+  status?: string
+  createdBy?: string
+  target?: string
+}
+
+export function runsFilterToTree(r: RunsFilterInput): ExportFilter {
+  const items: Node[] = []
+  const add = (field: string, v?: string) => {
+    const value = (v ?? '').trim()
+    if (value) items.push({ field, operator: 'is', values: [value] })
+  }
+  add('status', r.status)
+  add('created_by', r.createdBy)
+  add('target', r.target)
   return { op: 'and', items }
 }
 

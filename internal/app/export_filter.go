@@ -14,7 +14,8 @@ import (
 
 const (
 	exportMaxConditions = 20
-	exportMaxDepth      = 3 // the root group is depth 1
+	exportMaxDepth      = 3  // the root group is depth 1
+	exportMaxNodes      = 50 // groups plus conditions
 	exportMaxValues     = 200
 	exportMaxValueLen   = 256
 )
@@ -98,9 +99,13 @@ func validateExportFilter(src *exportSource, root exportNode) error {
 	if !root.isGroup() {
 		return filterErr("the filter root must be an and/or group")
 	}
-	conds := 0
+	conds, nodes := 0, 0
 	var walk func(n exportNode, depth int) error
 	walk = func(n exportNode, depth int) error {
+		nodes++
+		if nodes > exportMaxNodes {
+			return filterErr("filters hold at most %d groups and conditions in total", exportMaxNodes)
+		}
 		if n.isGroup() {
 			if n.Op != "and" && n.Op != "or" {
 				return filterErr("unknown group operator %q", n.Op)
@@ -383,8 +388,8 @@ func compileDate(col, op string, vals []string) exportLeaf {
 		return exportLeaf{sql: text + " " + not + "IN (" + placeholders(len(vals)) + ")", args: anyStrings(vals)}
 	case opBefore:
 		return exportLeaf{sql: text + " < ? AND " + text + " <> ''", args: []any{vals[0]}}
-	case opAfter:
-		return exportLeaf{sql: text + " > ?", args: []any{vals[0]}}
+	case opAfter: // on or after the day
+		return exportLeaf{sql: text + " >= ?", args: []any{vals[0]}}
 	default: // between, inclusive
 		return exportLeaf{sql: text + " >= ? AND " + text + " <= ?", args: []any{vals[0], vals[1]}}
 	}
@@ -414,9 +419,9 @@ func compileNumber(col, op string, vals []string) (exportLeaf, error) {
 	}
 }
 
-// compileInstant compares a datetime column against filter values. A bare date means the whole civil
-// day in the panel time zone, converted to UTC instants first, so "after 2026-10-01" starts at the
-// next panel-tz midnight and "between a and b" is inclusive of both days.
+// compileInstant compares a datetime column against filter values. A bare date means a civil day
+// in the panel time zone, converted to UTC instants first: "after 2026-10-01" is on or after that
+// day's first instant, "before" is strictly before it, and "between a and b" is inclusive of both days.
 func compileInstant(c *exportCompiler, f *exportField, op string, vals []string) (exportLeaf, error) {
 	col := f.col
 	one := func(v string) (lo, hiExcl time.Time, day bool, err error) {
@@ -432,12 +437,13 @@ func compileInstant(c *exportCompiler, f *exportField, op string, vals []string)
 	enc := f.enc
 	switch op {
 	case opAfter:
-		lo, hi, day, err := one(vals[0])
+		lo, _, day, err := one(vals[0])
 		if err != nil {
 			return exportLeaf{}, err
 		}
 		if day {
-			return exportLeaf{sql: col + " >= ?", args: []any{enc.format(hi)}}, nil
+			// A bare date is on-or-after: the day's own first instant is included.
+			return exportLeaf{sql: col + " >= ?", args: []any{enc.format(lo)}}, nil
 		}
 		return exportLeaf{sql: col + " > ?", args: []any{enc.format(lo)}}, nil
 	case opBefore:

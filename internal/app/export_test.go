@@ -789,8 +789,8 @@ func TestExportDateBoundariesFollowThePanelTimeZone(t *testing.T) {
 	if got := atCount("between", `["2026-10-01","2026-10-01"]`); got != "2026-10-01T15:59:59Z 2026-09-30T16:00:00Z" {
 		t.Errorf("between = %q", got)
 	}
-	if got := atCount("after", `["2026-10-01"]`); got != "2026-10-01T16:00:00Z" {
-		t.Errorf("after the day = %q", got)
+	if got := atCount("after", `["2026-10-01"]`); got != "2026-10-01T16:00:00Z 2026-10-01T15:59:59Z 2026-09-30T16:00:00Z" {
+		t.Errorf("after the day (on or after) = %q", got)
 	}
 	if got := atCount("before", `["2026-10-01"]`); got != "2026-09-30T15:59:59Z" {
 		t.Errorf("before the day = %q", got)

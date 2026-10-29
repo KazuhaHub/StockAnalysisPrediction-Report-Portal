@@ -599,7 +599,7 @@ func postgresForecastChecks(t *testing.T, e *exportEnv) {
 	if pv, _, body := e.preview(`{"source":"forecasts","columns":["set_id"],"filter":` + g + `}`); pv.Total != 2 {
 		t.Fatalf("latest among matching sets on postgres: %s", body)
 	}
-	if pv, _, body := e.preview(`{"source":"forecasts","filter":{"op":"and","items":[{"field":"stance","operator":"is","values":["long"]},{"field":"report_date","operator":"after","values":["2026-10-10"]}]}}`); pv.Total != 3 {
+	if pv, _, body := e.preview(`{"source":"forecasts","filter":{"op":"and","items":[{"field":"stance","operator":"is","values":["long"]},{"field":"report_date","operator":"after","values":["2026-10-10"]}]}}`); pv.Total != 4 { // after a date is on or after it
 		t.Fatalf("stance/date on postgres: %s", body)
 	}
 }

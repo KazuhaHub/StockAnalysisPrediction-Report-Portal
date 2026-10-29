@@ -67,7 +67,7 @@ func (s *Store) saveForecastFallbackOnce(ctx context.Context, next string, entry
 	}
 	from := forecastFallbackMode(before)
 	if from != next {
-		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,?,?,?,?)`), nowStr(), entry.Actor, entry.ActorOU, AuditForecastFallback, "settings", setForecastFallback, auditJSON(map[string]any{"from": from, "to": next}), entry.IP); err != nil {
+		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,?,?,?,?)`), time.Now().UTC().Format(time.RFC3339), entry.Actor, entry.ActorOU, AuditForecastFallback, "settings", setForecastFallback, auditJSON(map[string]any{"from": from, "to": next}), entry.IP); err != nil {
 			return err
 		}
 	}

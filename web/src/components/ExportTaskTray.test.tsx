@@ -9,6 +9,7 @@ import ExportTaskTray from './ExportTaskTray'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
+vi.mock('../auth', () => ({ useAuth: () => ({ user: 'admin' }) }))
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`)
   const hook = { t, i18n: { language: 'en-US' } }
@@ -98,5 +99,21 @@ describe('ExportTaskTray', () => {
     renderTray()
     act(() => notifyExportsChanged({ open: true }))
     expect(await screen.findByText('export.tray.empty')).toBeTruthy()
+  })
+
+  it("stays quiet when another administrator's task finishes", async () => {
+    activeJobs = [job({ requested_by: 'someone-else' })]
+    renderTray()
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/admin/exports?active=1'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    activeJobs = []
+    detail = job({ requested_by: 'someone-else', status: 'failed', error: 'disk full' })
+    act(() => notifyExportsChanged())
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(screen.queryByText('export.toast.failed:{"name":"Audit Q3"}')).toBeNull()
   })
 })

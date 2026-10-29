@@ -314,12 +314,30 @@ func (s *Server) apiExportCancel(w http.ResponseWriter, r *http.Request, _ strin
 		jsonError(w, http.StatusNotFound, "export not found")
 		return
 	}
+	wasQueued := j.Status == exportQueued
+	if wasQueued {
+		if h := s.exports.beforeQueuedCancel; h != nil {
+			h(id)
+		}
+		// The conditional UPDATE is the cancel: a worker that claimed the job first wins, in which
+		// case the job is re-read and cancelled as a running one below.
+		res, _ := s.st.exec(`UPDATE export_jobs SET status='canceled',finished_at=? WHERE id=? AND status='queued'`,
+			s.exports.clock().UnixMilli(), id)
+		if n, _ := rowsAffected(res); n == 0 {
+			if j = s.st.getExportJob(id); j == nil {
+				jsonError(w, http.StatusNotFound, "export not found")
+				return
+			}
+		}
+	}
 	switch j.Status {
 	case exportQueued:
-		// The conditional UPDATE is the cancel: a worker that claimed the job first wins, and the
-		// re-read below then sees it running.
-		s.st.exec(`UPDATE export_jobs SET status='canceled',finished_at=? WHERE id=? AND status='queued'`,
-			s.exports.clock().UnixMilli(), id)
+		// Cancelled just now: the re-read below reports it.
+	case exportCanceled:
+		if !wasQueued {
+			jsonError(w, http.StatusConflict, "export already finished")
+			return
+		}
 	case exportRunning:
 		if s.exports.cancelRunning(id) {
 			// The worker stops at the next batch boundary, removes its partial file and records the
@@ -332,8 +350,9 @@ func (s *Server) apiExportCancel(w http.ResponseWriter, r *http.Request, _ strin
 				time.Sleep(20 * time.Millisecond)
 			}
 		} else {
-			// Marked running but no live worker owns it (a row restored from a backup): nothing is
-			// writing, so closing it out is safe.
+			// Marked running but no live worker has registered (a row restored from a backup, or a
+			// worker that claimed it a moment ago and re-checks the status once registered): closing
+			// it out is safe, since a registering worker aborts on seeing it closed.
 			s.st.exec(`UPDATE export_jobs SET status='canceled',finished_at=? WHERE id=? AND status='running'`,
 				s.exports.clock().UnixMilli(), id)
 		}
@@ -398,7 +417,7 @@ func (s *Server) apiExportFile(w http.ResponseWriter, r *http.Request, user stri
 		return
 	}
 	// A resumed download re-requests ranges of one file: only the first request is a download event.
-	if rng := r.Header.Get("Range"); rng == "" || strings.HasPrefix(rng, "bytes=0-") {
+	if rng := r.Header.Get("Range"); r.Method != http.MethodHead && (rng == "" || strings.HasPrefix(rng, "bytes=0-")) {
 		s.recordChange(r, user, AuditExportDownload, "export", j.ID, map[string]any{
 			"source": j.Source, "format": j.Format, "rows": j.RowsDone, "bytes": info.Size(),
 		})

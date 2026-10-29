@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -70,6 +71,9 @@ func (s *Server) exportRunNext() bool {
 	if j == nil {
 		return false
 	}
+	if h := s.exports.afterClaim; h != nil {
+		h(j.ID)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.exports.mu.Lock()
 	if s.exports.cancels == nil {
@@ -83,6 +87,11 @@ func (s *Server) exportRunNext() bool {
 		delete(s.exports.cancels, j.ID)
 		s.exports.mu.Unlock()
 	}()
+	// A cancel that arrived between the claim and the registration above found no live worker and
+	// closed the row itself; look again now that a later cancel can reach this job's context.
+	if cur := s.st.getExportJob(j.ID); cur == nil || cur.Status != exportRunning {
+		return true
+	}
 
 	rows, bytesOut, err := s.exportExecuteSafe(ctx, j)
 	now := s.exports.clock().UnixMilli()
@@ -96,8 +105,16 @@ func (s *Server) exportRunNext() bool {
 		s.st.exec(`UPDATE export_jobs SET status='failed',finished_at=?,error=?,rows_done=? WHERE id=? AND status='running'`,
 			now, clampError(err.Error()), rows, j.ID)
 	default:
-		s.st.exec(`UPDATE export_jobs SET status='done',finished_at=?,expires_at=?,rows_done=?,bytes=? WHERE id=? AND status='running'`,
+		res, uerr := s.st.exec(`UPDATE export_jobs SET status='done',finished_at=?,expires_at=?,rows_done=?,bytes=? WHERE id=? AND status='running'`,
 			now, now+exportFileTTL.Milliseconds(), rows, bytesOut, j.ID)
+		if uerr != nil {
+			log.Printf("export %s: record completion: %v", j.ID, uerr)
+		}
+		// The job was cancelled after the file was renamed into place: it is no longer running, so
+		// nothing may point at the file. Remove it.
+		if n, _ := rowsAffected(res); uerr == nil && n == 0 {
+			_ = os.Remove(s.exportPath(j))
+		}
 	}
 	return true
 }
@@ -528,4 +545,11 @@ func (s *Server) exportSweep(now time.Time) {
 			_ = os.Remove(filepath.Join(s.exportDir(), e.Name()))
 		}
 	}
+}
+
+func rowsAffected(res sql.Result) (int64, error) {
+	if res == nil {
+		return 0, nil
+	}
+	return res.RowsAffected()
 }

@@ -11,13 +11,19 @@ const RECENT_LIMIT = 10
 // The task tray's data. It polls the cheap `active=1` listing — fast while something is running,
 // slowly otherwise — and the moment a task this browser was watching leaves that listing it asks
 // for the task itself, so the completion toast carries the real final state and fires exactly once.
-export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: ExportJob) => void }) {
+//
+// The tray lists every administrator's tasks, but a completion or failure toast is addressed to the
+// person who asked for the export: with `currentUser` given, onFinished fires only for their own jobs
+// (null, an identity not yet known, fires for none). Left undefined, every finished job is announced.
+export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: ExportJob) => void; currentUser?: string | null }) {
   const { enabled } = opts
   const [active, setActive] = useState<ExportJob[]>([])
   const [recent, setRecent] = useState<ExportJob[]>([])
   const watched = useRef(new Set<string>())
   const onFinished = useRef(opts.onFinished)
   onFinished.current = opts.onFinished
+  const currentUser = useRef(opts.currentUser)
+  currentUser.current = opts.currentUser
   const alive = useRef(true)
 
   const loadRecent = useCallback(async () => {
@@ -36,7 +42,9 @@ export function useExportTasks(opts: { enabled: boolean; onFinished?: (job: Expo
           const job = await api.get<ExportJob>(`/api/admin/exports/${encodeURIComponent(id)}`)
           if (isActiveJob(job)) continue // still going; the active listing was just a moment behind
           watched.current.delete(id)
-          if (job.status === 'done' || job.status === 'failed') onFinished.current?.(job)
+          const me = currentUser.current
+          const mine = me === undefined || (me !== null && job.requested_by === me)
+          if (mine && (job.status === 'done' || job.status === 'failed')) onFinished.current?.(job)
         } catch (e) {
           if ((e as { status?: number })?.status === 404) watched.current.delete(id)
         }

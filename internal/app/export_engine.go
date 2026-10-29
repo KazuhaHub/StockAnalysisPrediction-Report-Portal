@@ -44,6 +44,9 @@ type exportPlan struct {
 	prepared    bool
 	prices      map[string]exportPrice
 	priceLookup int // upstream chunks requested so far (diagnostic)
+	// selecting is set while count and page walk the candidates to decide membership: prefetch then
+	// prices nothing, because only the rows finally shown (or exported) need a price.
+	selecting bool
 }
 
 // newExportPlan validates and compiles a filter against a source.
@@ -192,6 +195,8 @@ func (p *exportPlan) count(ctx context.Context) (int64, error) {
 		return n, err
 	}
 	var n int64
+	p.selecting = true
+	defer func() { p.selecting = false }()
 	err := p.scan(ctx, false, exportBatchRows, func([]string) error { n++; return nil }, nil)
 	return n, err
 }
@@ -208,6 +213,7 @@ func (p *exportPlan) page(ctx context.Context, offset, limit int) ([][]string, e
 	}
 	var out [][]string
 	skipped := 0
+	p.selecting = true
 	err := p.scan(ctx, false, exportBatchRows, func(raw []string) error {
 		if skipped < offset {
 			skipped++
@@ -218,7 +224,12 @@ func (p *exportPlan) page(ctx context.Context, offset, limit int) ([][]string, e
 		}
 		return nil
 	}, nil)
-	return out, err
+	p.selecting = false
+	if err != nil {
+		return out, err
+	}
+	// Selection is done: price only the symbols of the rows on this page.
+	return out, p.prefetch(ctx, out)
 }
 
 // readBatch runs one query and buffers its rows as text. It stops early once maxBytes of text have
@@ -333,6 +344,11 @@ type exportRuntime struct {
 
 	// afterBatch, when set, runs after each batch of a running job has been flushed (test seam).
 	afterBatch func(id string, batch int)
+	// afterClaim runs between claiming a job and registering its cancel func (test seam).
+	afterClaim func(id string)
+	// beforeQueuedCancel runs after the cancel handler read a job as queued and before its
+	// conditional update (test seam).
+	beforeQueuedCancel func(id string)
 	// now is the clock (test seam).
 	now func() time.Time
 }

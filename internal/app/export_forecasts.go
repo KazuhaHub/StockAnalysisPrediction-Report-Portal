@@ -201,6 +201,9 @@ func (p *exportPlan) prefetch(ctx context.Context, rows [][]string) error {
 	if !p.needPrices || !p.s.exportQuotesOn() || p.src.symExpr == "" {
 		return nil
 	}
+	if p.selecting {
+		return nil // membership is being decided; the shown rows are priced afterwards
+	}
 	if p.belowMode {
 		return nil // prepare already priced the whole candidate set
 	}

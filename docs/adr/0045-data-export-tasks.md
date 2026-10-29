@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_export_jobs_status ON export_jobs(status, expires
 ### Audit
 
 One `export.create` entry when a task is submitted (source, format, filters, estimate) and one
-`export.download` per download. No per-report `report.read` rows.
+`export.download` per download (a `HEAD` request is not a download). No per-report `report.read` rows.
 
 ### Filter model
 
@@ -120,7 +120,8 @@ A filter is an expression tree, not a flat set of query parameters:
 - Each source declares its fields and, per field, the operators it allows (`is`, `is_not`, `in`,
   `not_in`, `contains`, `before`, `after`, `between`). The server compiles the tree to parameterized
   SQL from that whitelist only; an unknown field or operator is a 400.
-- Bounded like Workspace's activity rules: at most 20 conditions and 3 levels of nesting.
+- Bounded like Workspace's activity rules: at most 20 conditions, 3 levels of nesting and 50 nodes
+  (groups plus conditions) in total, so a tree of thousands of empty groups is a 400 before any SQL.
 - The same tree drives the count, the preview and the export, so what is previewed is what is
   exported. It is stored in `export_jobs.params` and travels in the URL (compact base64url JSON).
 
@@ -167,9 +168,11 @@ type Operator = 'is' | 'is_not' | 'in' | 'not_in' | 'contains' | 'before' | 'aft
 ```
 
 `before`/`after` take one value, `between` two (inclusive), `is`/`is_not`/`contains` one, `in`/`not_in`
-one or more. Date fields take `YYYY-MM-DD` (civil date in the panel time zone); datetime fields take
+one or more. For a date-only value `after X` means on or after X (from the start of X in the panel
+time zone) and `before X` means strictly before the start of X; `between` includes both days. An
+RFC 3339 instant compares strictly in both directions. Date fields take `YYYY-MM-DD` (civil date in the panel time zone); datetime fields take
 RFC 3339 or `YYYY-MM-DD`. An empty group matches everything. Limits: 20 conditions, depth 3 (the
-root group is depth 1). In URLs the tree is base64url-encoded JSON in the `f` query parameter.
+root group is depth 1), 50 nodes in total. In URLs the tree is base64url-encoded JSON in the `f` query parameter.
 
 ### `GET /api/admin/exports/sources`
 
@@ -229,7 +232,11 @@ type Job = {
 
 ### `GET /api/admin/exports/{id}`, `POST /api/admin/exports/{id}/cancel`
 
-The job; cancel returns the updated job (409 if already finished).
+The job; cancel returns the updated job (409 if already finished). Cancel is race-safe: a queued
+job is cancelled by a conditional update, and when a worker claimed it first the request falls
+through to the running path; a worker re-checks its status once its cancel is registered, and
+finalizes with a conditional `running -> done` update, deleting its file if the job was cancelled
+meanwhile.
 
 ### `GET /api/admin/exports/{id}/file`
 
@@ -264,6 +271,10 @@ A seventh source, `forecasts`, joins after the six above land:
 - `below_entry` needs a price for every candidate before it can count, so the server fetches
   quotes for the filtered candidate set (bounded by the same 20-condition filter and a hard cap on
   candidate symbols, refused with a clear error above it). Preview and export share the computation.
+- Prices are fetched only where something needs them. A count never calls the vendor unless the
+  filter holds `below_entry` (membership depends on the price). A preview prices only the symbols of
+  the page it returns, after selection, so the cost does not grow with the candidate total; an
+  export prices each emitted batch in chunks.
 - Acceptance: a set without `entry_price` never matches `below_entry = yes`; quotes off removes the
   field; one upstream batch per chunk regardless of row count; `latest_per_symbol` picks the newest
   `made_at` per symbol.

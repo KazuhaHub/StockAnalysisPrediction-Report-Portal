@@ -104,4 +104,28 @@ describe('useExportTasks completion', () => {
     await tick(0)
     expect(onFinished).toHaveBeenCalledTimes(1)
   })
+
+  it("announces only the current user's own tasks, while the tray still lists everyone's", async () => {
+    const onFinished = vi.fn()
+    activeJobs = [job({ id: 'mine', requested_by: 'alice' }), job({ id: 'theirs', requested_by: 'bob' })]
+    const { result } = renderHook(() => useExportTasks({ enabled: true, onFinished, currentUser: 'alice' }))
+    await tick(0)
+    expect(result.current.active).toHaveLength(2)
+    activeJobs = []
+    byId = { mine: job({ id: 'mine', requested_by: 'alice', status: 'done' }), theirs: job({ id: 'theirs', requested_by: 'bob', status: 'failed', error: 'x' }) }
+    await tick(ACTIVE_POLL_MS)
+    expect(onFinished).toHaveBeenCalledTimes(1)
+    expect(onFinished.mock.calls[0][0].id).toBe('mine')
+  })
+
+  it('announces nothing while the current user is not yet known', async () => {
+    const onFinished = vi.fn()
+    activeJobs = [job()]
+    renderHook(() => useExportTasks({ enabled: true, onFinished, currentUser: null }))
+    await tick(0)
+    activeJobs = []
+    byId = { j1: job({ status: 'done' }) }
+    await tick(ACTIVE_POLL_MS)
+    expect(onFinished).not.toHaveBeenCalled()
+  })
 })

@@ -4,6 +4,7 @@ import { DownloadOutlined, HourglassOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
+import { useAuth } from '../auth'
 import type { ExportJob } from '../api/types'
 import {
   EXPORTS_CHANGED_EVENT,
@@ -28,10 +29,12 @@ export default function ExportTaskTray() {
   const { token } = theme.useToken()
   const { notification, message } = App.useApp()
   const labels = useExportLabels()
+  const { user } = useAuth()
   const [open, setOpen] = useState(false)
 
   const { active, recent, loadRecent } = useExportTasks({
     enabled: true,
+    currentUser: user,
     onFinished: (job) => {
       const name = job.name || labels.source(job.source)
       if (job.status === 'done') {
