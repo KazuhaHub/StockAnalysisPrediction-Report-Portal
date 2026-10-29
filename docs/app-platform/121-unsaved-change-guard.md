@@ -1,8 +1,8 @@
 # Shared unsaved-change guard
 
-Status: development implementation. Local React/bridge and browser checks are
-recorded below. Linux browser/native acceptance is pending at this document's
-first commit. No production activation, catalogue publication, Status migration,
+Status: development implementation with passing Linux browser/native acceptance
+at functional source `b58bf494f723e47ece4dd83acb7a7924b809e49d`. Local
+React/bridge and browser checks are recorded below. No production activation, catalogue publication, Status migration,
 stable SDK freeze, database/dependency change or server beta configuration change.
 
 ## Behavior and ownership
@@ -115,3 +115,37 @@ route/history synchronization, persisted drafts, shared dialogs/overlays,
 accessibility and D5 acceptance, marketplace lifecycle, capability brokers,
 recovery/disable fencing and D6 rollout evidence remain open. Development-only
 runtime setup does not authorize production privileges or deployment.
+
+
+## Integration fixture follow-up
+
+The initial Portal CI at `b58bf494f723e47ece4dd83acb7a7924b809e49d`
+failed web shard 3 at AppFrameV2.integration: that older manual client acknowledged
+presentation but never sent document height. The host correctly kept the cover.
+The fixture now asserts it stays hidden after presentation, then sends the real
+client's height message before expecting reveal, for both initial and replacement
+handshakes. It also sends a real dirty bit, verifies the host observer receives
+it, and checks reload/unmount clears it. No production cover requirement, timeout
+or test assertion was weakened. The repaired integration and typecheck pass
+locally. The entire previously failing web shard 3 now passes locally (51 files,
+526 tests); the new source still requires its own CI.
+
+
+## Functional Linux evidence
+
+At functional source `b58bf494f723e47ece4dd83acb7a7924b809e49d`, quota
+workflow 40860210842/job 123401233721 completed successfully. Its redacted evidence
+has `sdk_native_browser_draft_guard`, current viewer, document layout, uncertainty
+without retry and revoked-access flags all true. The real SDK edited an app form,
+requested a host route, canceled the modal while retaining the form, then confirmed
+leave and asserted the executable iframe was removed. Owned cleanup and neighbor
+preservation passed. `execution_ready` remains false; this is isolated acceptance,
+not production readiness. Registry and public browser fixture cleanup succeeded.
+
+General workflow 40860210877/job 123401234296 passed lifecycle/current-access/
+worker/queue/writable-document SQL suites on SQLite/PostgreSQL (55.837s, 29.119s,
+8.844s, 9.175s, 70.546s and 0.307s), build/vet/staticcheck and pre-gate checks.
+It failed the inherited x/net v0.60.0 findings GO-2026-6866 and GO-2026-6860;
+its ordinary full Go tests were skipped by the gate. No dependency upgrade or
+suppression is included. Web shard 3's separate stale-fixture failure and its
+repair are retained above. New-head check results must be inspected separately.

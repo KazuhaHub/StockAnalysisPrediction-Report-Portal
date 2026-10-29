@@ -2154,4 +2154,8 @@ daemon workflow 40455635317 passed on the functional source as well.
   the actual AppViewV2 browser fixture verified Chinese host confirmation,
   cancel/state retention, theme preservation and confirmed iframe retirement.
   Companion Apps #30 passed all checks at its pinned commit. Linux runtime
-  acceptance is pending for this source; P06 and full platform remain incomplete.
+  acceptance passed at functional b58bf494 in run 40860210842/job 123401233721;
+  draft/current-viewer/layout/no-retry/revoke and owned-cleanup/neighbor flags
+  true, execution_ready false. General Go still fails inherited x/net findings.
+  Web shard3 exposed an older missing-height fixture, repaired without weakening
+  the cover requirement (526 local shard tests pass). P06/full platform remain incomplete.
