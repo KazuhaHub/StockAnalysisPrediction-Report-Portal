@@ -36,9 +36,15 @@ func validPlatformWriterStage(lease platformOperationLease) bool {
 // contract. The old sealed candidate path retains its exact two/three-effect rules.
 // This initial pre-start writer source permits exactly preparation + this writer.
 func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create bool) (platformWriterIntent, bool, error) {
+	return loadPlatformWriterIntentMode(e, lease, runtime, seed, now, create, false)
+}
+
+// Only the writable start loader consumes this extended source. It independently
+// validates the exact sole start effect before returning or committing anything.
+func loadPlatformWriterIntentMode(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, withStart bool) (platformWriterIntent, bool, error) {
 	var zero, result platformWriterIntent
 	profile, err := platformInstallProfileInTransaction(e, lease.id)
-	if err != nil || profile != platformWritableInstallFormat || !validPlatformWriterStage(lease) {
+	if err != nil || profile != platformWritableInstallFormat || (!validPlatformWriterStage(lease) && !(withStart && validPlatformWritableProbeStage(lease))) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	target, err := platformManagedTargetForOperation(e, lease.id)
@@ -125,7 +131,7 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 			return zero, false, err
 		}
 	} else {
-		if effects != 2 || candidates != 1 {
+		if (effects != 2 && !(withStart && effects == 3)) || candidates != 1 {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		var storedRelease, namespace, readiness string

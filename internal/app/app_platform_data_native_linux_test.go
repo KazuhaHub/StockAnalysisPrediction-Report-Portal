@@ -196,6 +196,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			stopServer()
 			commandPath := filepath.Join(childData, "candidate-command.json")
 			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := native.Close(); err != nil {
 				t.Error(err)
 			}
@@ -264,12 +265,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
 			t.Fatal("Portal did not validate managed profile", output.String())
 		}
-		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"} {
+		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY"} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatal("Portal writable acceptance marker missing", marker, output.String())
 			}
 			t.Log(marker)
 		}
+		checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 		t.Log("MANAGED_PROFILE_OBSERVED")
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_DATA_READY")) {
 			t.Fatal("Portal did not complete managed data stage", output.String())

@@ -1865,3 +1865,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   registration/boot/viewer/activation/worker, physical lifecycle, broker,
   SDK/reference apps and full P00–P14 acceptance remain incomplete. Production,
   real credentials, Status, SDK freeze and beta unchanged.
+
+- Added Portal writable backend start intent, authenticated lifecycle dispatch/
+  historical-read/reconciliation selection and atomic start-to-probe settlement.
+  Reuses the confirmed writer's future resource ID and exact original receipts;
+  the extended source permits only its independently validated third start
+  effect while the original writer reader keeps its strict no-start contract.
+  Added SQL source/authority/partial-history refusals and disposable non-root
+  Portal/root runner rollback recovery plus native identity/start-time witness
+  and owned cleanup. See [Portal writable start](108-portal-writable-start.md).
+  Fresh Linux evidence pending. Readiness/registration/boot/viewer/activation/
+  worker, physical lifecycle, broker, SDK/reference apps and full acceptance
+  remain incomplete. Production, credentials, Status, SDK freeze and beta unchanged.

@@ -127,4 +127,5 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	}
 	t.Log("PORTAL_WRITER_SETTLEMENT_RECONCILED")
 	t.Log("PORTAL_WRITER_RETAINED_IDENTITY")
+	testNativePortalWritableStart(t, s, completed, endpoint, final)
 }
