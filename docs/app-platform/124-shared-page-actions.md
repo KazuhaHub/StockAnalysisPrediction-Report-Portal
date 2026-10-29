@@ -1,8 +1,7 @@
 # Shared page metadata and actions
 
-Status: development implementation with initial native/browser evidence and a
-subsequent outer-layout correction also verified in Linux; narrow-label/keyboard
-coverage is undergoing a further check. This is part of
+Status: development implementation verified in Linux/native browser acceptance
+at functional commit b9bb5146da215e07906ba3e5e3ff17f0e6f1f740. This is part of
 P06, addressing UX-01/UX-06/UX-08/UX-09; it does not complete those acceptance
 cases, D5, P06 or P00–P14. No production deployment, Status adoption, stable SDK
 freeze, catalogue publication, database change or server beta change is included.
@@ -147,8 +146,16 @@ execution_ready=false. This still does not complete the full UX acceptance matri
 A further fixture check exercises a 48-character unbroken action label at 320px,
 checks document overflow, and activates that header action with Enter before
 restoring desktop dimensions. The host wraps both the action row and each button
-label. The resulting browser/native check must pass at the final PR revision;
-final-head evidence belongs in the paired PR before review.
+label. Final functional b9bb5146 passed run40937099808/job123670423183, including this
+new geometry/Enter assertion. The downloaded report again records all eight SDK
+browser flags and owned-cleanup/neighbor-preservation as true; execution_ready is
+false. Its shared source remains pinned to Apps a4c69386. Portal web tests,
+lint/types/build and Docker smoke pass at that revision. General Go contract and
+six affected storage/authorization suites pass, followed by the inherited
+GO-2026-6866/GO-2026-6860 findings in x/net v0.60.0; the ordinary broad test step
+is consequently skipped. This does not establish all-green general Go CI.
+Remaining race-job status is recorded in PR331. Documentation-only follow-ups do not change the accepted
+functional source. All source evidence is development-only.
 
 Remaining work includes whole-app visual/keyboard/accessibility acceptance,
 shared overlays, persistent drafts, the broader capability broker and remaining
