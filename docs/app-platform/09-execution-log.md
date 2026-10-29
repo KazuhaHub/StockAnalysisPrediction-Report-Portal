@@ -1929,3 +1929,43 @@ daemon workflow 40455635317 passed on the functional source as well.
   worker, full recovery/physical lifecycle, broker, SDK/reference apps and full
   P00–P14 acceptance remain incomplete. Production, real credentials, Status,
   SDK freeze and beta configuration remain unchanged.
+
+- Added Portal writable registration preparation, protected lifecycle delivery and
+  exact original-result settlement after a Portal transaction failure. The sole
+  registration-specific source permits and verifies four effects; old writer/
+  start/readiness/readonly readers retain their strict source contracts. Keys
+  remain derived from the existing encrypted identity and only digests enter
+  public commands/control effects. Added SQL source/refusal/rollback tests and
+  actual non-root Portal/root delivery rollback/replay/current-authority fixture.
+  See [writable registration](110-portal-writable-registration.md). Fresh Linux
+  evidence pending. Host boot/possession, viewer/activation/worker and remaining
+  full platform acceptance remain incomplete; production, real credentials,
+  Status, SDK freeze and beta configuration unchanged.
+
+- Extended the writable registration continuation with independent host MAC/key
+  possession and current boot verification over the existing protected writable
+  handshake. Recheck all four effects and current encrypted identity after IO;
+  return a distinct non-serializable live writable boot observation and no grants.
+  Added applied-delivery/zero-proof/serialization refusals plus actual native
+  same-boot exchanges, foreign challenge and post-IO runtime-disablement refusal.
+  Fresh composed Linux evidence pending; viewer/activation/worker and the full
+  lifecycle/SDK/reference-app requirements remain incomplete.
+
+- Writable registration + host boot functional source
+  `ae03c03467a04dc213bb1013e15041ef9bce00a8` passed quota workflow
+  40820212731/job 123270673202. All five new actual Portal registration/boot
+  flags, prior native checks, full quota witness and owned cleanup are true;
+  registry cleanup passed. General workflow 40820213195 explicitly passed both
+  SQLite/PostgreSQL registration/refusal/applied-delivery boot cases and existing
+  writer/start/readiness contracts in 61.810s, plus build/vet/staticcheck. All app
+  race shards/aggregate, web checks and Docker checks passed. Shard 1/job
+  123270877958 ran full journal race 228.876s and Portal subset 146.731s. Go job
+  123270877856 still failed the existing x/net GO-2026-6866/6860 findings and
+  skipped its ordinary full test step. Local focused registration/boot race
+  18.679s, preceding registration platform/managed race 185.591s, final dual-arch
+  Linux test builds/vet/staticcheck and Python14 passed. No standalone daemon
+  workflow was triggered by this Portal/fixture-only diff. See [registration and
+  host boot acceptance](110-portal-writable-registration.md). Writable viewer/
+  activation/worker, positive expired-unknown recovery through Portal, physical
+  lifecycle, broker, SDK/reference apps and full P00–P14 acceptance remain
+  incomplete. Production, real credentials, Status, SDK freeze and beta unchanged.
