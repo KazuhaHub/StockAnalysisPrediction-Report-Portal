@@ -241,11 +241,11 @@ func (s *Server) apiAdminReportExportDownload(w http.ResponseWriter, r *http.Req
 		if _, writeErr := fw.Write([]byte(rep.MD)); writeErr != nil {
 			log.Printf("report export: write %d: %v", rep.ID, writeErr)
 		}
-		s.recordReportRead(r, user, &rep)
 	}
 	if err := zw.Close(); err != nil {
 		log.Printf("report export: close zip: %v", err)
 	}
+	s.recordChange(r, user, AuditExportDownload, "export", "", exportAuditDetail(reps, in.Filters))
 }
 
 func nonEmptyStrings(values ...string) []string {
@@ -266,4 +266,22 @@ func truncateUTF8Bytes(s string, max int) string {
 		max--
 	}
 	return s[:max]
+}
+
+// exportAuditIDCap bounds the id list kept on the audit row; the count is always exact.
+const exportAuditIDCap = 500
+
+func exportAuditDetail(reps []Rep, filters *adminReportExportFilter) map[string]any {
+	ids := make([]int64, 0, min(len(reps), exportAuditIDCap))
+	for i := 0; i < len(reps) && i < exportAuditIDCap; i++ {
+		ids = append(ids, reps[i].ID)
+	}
+	detail := map[string]any{"source": "reports", "format": "md_zip", "count": len(reps), "ids": ids}
+	if len(reps) > exportAuditIDCap {
+		detail["ids_truncated"] = true
+	}
+	if filters != nil {
+		detail["filters"] = normalizeExportFilter(*filters)
+	}
+	return detail
 }

@@ -182,6 +182,10 @@ const (
 	AuditNotificationReview   = "notification.review"
 	AuditNotificationDispatch = "notification.dispatch"
 	AuditNotificationPublish  = "notification.publish"
+
+	// A bulk export is one decision, so it is one row: the download names how many reports left and
+	// which ones, rather than writing a report.read per report and burying every other entry.
+	AuditExportDownload = "export.download"
 )
 
 // WriteAudit records one action. Deliberately best-effort and never returns an error to its caller:
@@ -442,6 +446,7 @@ var auditVocabulary = []string{
 	AuditTargetChange,
 	AuditNotificationChange, AuditNotificationTest, AuditNotificationReplay, AuditNotificationReview, AuditNotificationDispatch,
 	AuditNotificationPublish,
+	AuditExportDownload,
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
 	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader, AuditForecastFallback,

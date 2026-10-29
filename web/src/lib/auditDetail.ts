@@ -203,6 +203,12 @@ export function auditDetail(action: string, raw: string, t: TFunction, ctx?: Det
     used.add('symbol')
     lead('title', what(String(d.symbol ?? ''), String(d.title ?? '')))
     lead('date', String(d.date ?? ''))
+  } else if (action === 'export.download' && typeof d.count === 'number') {
+    // The id list can run to hundreds; the full record keeps it, the line says how many.
+    used.add('ids')
+    used.add('ids_truncated')
+    used.add('source')
+    lead('count', t('audit.d.export', { n: d.count }))
   } else if (action === 'run.submit' && d.target) {
     lead('target', t('audit.d.run', { target: String(d.target) }))
     // The inputs stay where everything else the run carried stays — see headline() below. A run's
