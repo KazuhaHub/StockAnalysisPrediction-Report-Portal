@@ -416,6 +416,11 @@ def main(args):
                         report["native_portal_writable_install_activated"] = True
                         report["native_portal_writable_current_ou_request_verified"] = True
                         report["native_portal_writable_post_io_ou_revoked"] = True
+                        for stage in ("ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"):
+                            marker = "PORTAL_WRITABLE_WORKER_" + stage
+                            if marker not in result.stdout:
+                                raise RuntimeError("Writable install worker acceptance did not execute: " + marker)
+                            report["native_portal_writable_worker_" + stage.lower()] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

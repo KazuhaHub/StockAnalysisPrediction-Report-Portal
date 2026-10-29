@@ -26,9 +26,10 @@ func testNativePortalWritableRegistration(t *testing.T, s *Server, lease platfor
 		t.Fatal("missing delivery completed")
 	}
 	mustExec(t, s.st, `CREATE TRIGGER portal_writable_registration_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_registration_observed' BEGIN SELECT RAISE(ABORT,'registration settlement fixture'); END`)
-	if _, err := s.dispatchPlatformWritableRegistration(ctx, lease, endpoint); err == nil {
-		t.Fatal("registration audit rollback ignored")
+	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
+		t.Fatal("worker lost registration rollback progress", err)
 	}
+	t.Log("PORTAL_WRITABLE_WORKER_REGISTRATION_ROLLBACK")
 	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "prepared" || scalar[int64](t, s.st, `SELECT row_revision FROM app_platform_operations WHERE id=?`, lease.id) != lease.rowRevision {
 		t.Fatal("failed Portal registration partially committed")
 	}
@@ -41,10 +42,14 @@ func testNativePortalWritableRegistration(t *testing.T, s *Server, lease platfor
 		t.Fatal("registration provenance/source", err)
 	}
 	mustExec(t, s.st, `DROP TRIGGER portal_writable_registration_failure`)
-	completed, err := s.completePlatformWritableRegistration(ctx, lease, endpoint)
-	if err != nil {
-		t.Fatal("registration historical completion", err)
+	mustExec(t, s.st, `CREATE TRIGGER portal_worker_activation_boundary BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_install_activated' BEGIN SELECT RAISE(ABORT,'worker activation boundary'); END`)
+	progress, err := s.runPlatformWritableInstall(ctx, lease, endpoint)
+	completed := progress.lease
+	if err == nil || progress.activation.activationID != "" || completed.rowRevision != lease.rowRevision+1 {
+		t.Fatal("worker lost committed registration token after activation rollback", err)
 	}
+	mustExec(t, s.st, `DROP TRIGGER portal_worker_activation_boundary`)
+	t.Log("PORTAL_WRITABLE_WORKER_REGISTRATION_TOKEN")
 	if completed.snapshot.Stage != appplatform.StageActivate || completed.rowRevision != lease.rowRevision+1 || completed.snapshot.Revision != lease.snapshot.Revision || completed.fence != lease.fence {
 		t.Fatal("delivery changed activation authority")
 	}

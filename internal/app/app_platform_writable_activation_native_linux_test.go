@@ -23,18 +23,19 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("pending writable app admitted a viewer")
 	}
 	mustExec(t, s.st, `CREATE TRIGGER writable_activation_audit_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_install_activated' BEGIN SELECT RAISE(ABORT,'writable activation fixture'); END`)
-	if _, err := s.activatePlatformWritableInstall(ctx, lease, endpoint); err == nil {
-		t.Fatal("activation audit rollback ignored")
+	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
+		t.Fatal("worker lost activation rollback progress", err)
 	}
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" {
 		t.Fatal("failed activation partially exposed app")
 	}
 	mustExec(t, s.st, `DROP TRIGGER writable_activation_audit_failure`)
-	activated, err := s.activatePlatformWritableInstall(ctx, lease, endpoint)
+	finished, err := s.runPlatformWritableInstall(ctx, lease, endpoint)
+	activated := finished.activation
 	if err != nil {
 		t.Fatal("actual writable activation", err)
 	}
-	if activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 1 {
+	if finished.lease != (platformOperationLease{}) || activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 1 {
 		t.Fatal("activation replaced resource or failed reviewed audience")
 	}
 	if _, err := s.st.heartbeatPlatformOperation(lease); err == nil {
@@ -55,6 +56,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("activation duplicated effects/audit")
 	}
 	t.Log("PORTAL_WRITABLE_INSTALL_ACTIVATED")
+	t.Log("PORTAL_WRITABLE_WORKER_ACTIVATED")
 	// Return the shared disposable account to its original authority before the
 	// independent readonly/other fixture paths continue; no production account used.
 	group := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0) FROM users WHERE username=?`, actor.username)

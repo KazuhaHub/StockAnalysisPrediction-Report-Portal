@@ -55,9 +55,10 @@ func testNativePortalWritableStart(t *testing.T, s *Server, lease platformOperat
 		t.Fatal("unattempted start recovered")
 	}
 	mustExec(t, s.st, `CREATE TRIGGER portal_writable_start_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_start_observed' BEGIN SELECT RAISE(ABORT,'writable start settlement fixture'); END`)
-	if _, err := s.dispatchPlatformWritableStart(ctx, lease, endpoint); err == nil {
-		t.Fatal("start audit failure ignored")
+	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
+		t.Fatal("worker lost prepared start rollback progress", err)
 	}
+	t.Log("PORTAL_WRITABLE_WORKER_START_ROLLBACK")
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" || scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "prepared" {
 		t.Fatal("failed Portal start partially committed")
 	}

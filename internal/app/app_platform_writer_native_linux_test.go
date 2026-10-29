@@ -63,16 +63,19 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, stage := range []appplatform.Stage{appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage, appplatform.StagePrepareData} {
-		lease, err = s.st.advancePlatformInstallStaging(lease)
-		if err != nil || lease.snapshot.Stage != stage {
-			t.Fatal("writable staging", stage, err)
-		}
+	// Stop after the real data stage without admitting a writer. The driver
+	// must retain all four artifact commits and the actual data receipt.
+	mustExec(t, s.st, `CREATE TRIGGER portal_worker_data_boundary BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writer_intent' BEGIN SELECT RAISE(ABORT,'worker data boundary'); END`)
+	progress, err := s.runPlatformWritableInstall(ctx, lease, endpoint)
+	if err == nil || progress.lease.snapshot.Stage != appplatform.StageStart || progress.lease.rowRevision <= lease.rowRevision || progress.activation.activationID != "" {
+		t.Fatal("writable worker lost artifact/data progress", err)
 	}
-	lease, err = s.dispatchPlatformInstallData(ctx, lease, endpoint)
-	if err != nil || lease.snapshot.Stage != appplatform.StageStart {
-		t.Fatal("writable prepared data", err)
+	mustExec(t, s.st, `DROP TRIGGER portal_worker_data_boundary`)
+	lease = progress.lease
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != 0 {
+		t.Fatal("worker crossed failed writer transaction")
 	}
+	t.Log("PORTAL_WRITABLE_WORKER_ARTIFACT_DATA")
 	if _, err := s.preparePlatformInstallCandidate(ctx, lease); err == nil {
 		t.Fatal("readonly candidate adopted writable review")
 	}
@@ -90,9 +93,10 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	t.Log("PORTAL_WRITABLE_REVIEW_CONFIRMED")
 	// Force Portal rollback after root permissions and runner receipt have settled.
 	mustExec(t, s.st, `CREATE TRIGGER portal_writer_settlement_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writer_observed' BEGIN SELECT RAISE(ABORT,'writer settlement fixture'); END`)
-	if _, err := s.dispatchPlatformInstallWriter(ctx, lease, endpoint); err == nil {
-		t.Fatal("Portal writer settlement trigger ignored")
+	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
+		t.Fatal("worker lost writer rollback progress", err)
 	}
+	t.Log("PORTAL_WRITABLE_WORKER_WRITER_ROLLBACK")
 	if scalar[int](t, s.st, `SELECT revision FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 2 || scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND effect_number=2`, lease.id) != "prepared" {
 		t.Fatal("failed Portal commit partially settled writer")
 	}
