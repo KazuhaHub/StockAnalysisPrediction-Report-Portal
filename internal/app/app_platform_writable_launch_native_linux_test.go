@@ -91,6 +91,10 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		return string(raw)
 	}
 	httpBody := requestBody("POST", "/v1/echo", `{"role":"admin","subject":"forged"}`)
+	staleHTTP := strings.Replace(httpBody, `"generation":"1"`, `"generation":"2"`, 1)
+	if denied := platformBackendHTTPCall(mux, backendPath, cookie, staleHTTP, nil); denied.Code != 404 {
+		t.Fatal("stale page passed HTTP admission", denied.Code)
+	}
 	response = platformBackendHTTPCall(mux, backendPath, cookie, httpBody, map[string]string{"Sec-Fetch-Site": "same-origin"})
 	var envelope struct {
 		Status int    `json:"status"`
@@ -98,9 +102,10 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 	}
 	var echoed struct {
 		Count  int64           `json:"count"`
+		Calls  int64           `json:"calls"`
 		Viewer protocol.Viewer `json:"viewer"`
 	}
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+1 || echoed.Viewer.Role != "user" || len(echoed.Viewer.Subject) != 64 || response.Header().Get("Set-Cookie") != "" || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+1 || echoed.Calls != after.Calls+1 || echoed.Viewer.Role != "user" || len(echoed.Viewer.Subject) != 64 || response.Header().Get("Set-Cookie") != "" || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("ordinary session HTTP request did not reach current native viewer", response.Code, response.Body.String())
 	}
 	t.Log("PORTAL_WRITABLE_BACKEND_SESSION_HTTP")
@@ -113,7 +118,7 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		t.Fatal("HTTP uncertain write was represented as retryable", uncertain.Code, uncertain.Body.String())
 	}
 	response = platformBackendHTTPCall(mux, backendPath, cookie, requestBody("GET", "/v1/echo", ""), nil)
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+2 {
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+2 || echoed.Calls != after.Calls+3 {
 		t.Fatal("uncertain HTTP write was retried or lost", response.Code, response.Body.String())
 	}
 	t.Log("PORTAL_WRITABLE_BACKEND_HTTP_NO_RETRY")

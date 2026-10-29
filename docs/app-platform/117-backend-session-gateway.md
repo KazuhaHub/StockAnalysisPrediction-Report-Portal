@@ -49,6 +49,8 @@ The body is at most 64 KiB, and the outer request at most 400 KiB to accommodate
 JSON escaping. The request-body read deadline is five seconds; production log
 and gzip writer wrappers expose `Unwrap` so ResponseController can reach the
 underlying connection. Native execution has a separate twenty-second context.
+Response backpressure has a thirty-second deadline covering the full request;
+the deadline is reset before a keep-alive connection is reused.
 Two backend requests share one deployment-wide admission budget independent of
 document compilation. A saturated budget responds 429 before dispatch.
 
@@ -124,3 +126,19 @@ React host to this endpoint, with cancellation, response limits and explicit
 uncertain-write UI behavior. No token bridge or arbitrary HTTP fallback is
 allowed. Marketplace lifecycle, capabilities/broker, update/uninstall/recovery,
 D5 visual acceptance and D6 production approval remain open across P00–P14.
+
+Gateway functional commit `367090cdc2e2f3445d4685dd437ca93e81f5bccb` passed
+Linux quota run 40840763539 / job 123336296105. Its artifact explicitly records
+`native_portal_writable_backend_session_http=true` and
+`native_portal_writable_backend_http_no_retry=true`, alongside document/directory
+admission, page binding, audience revocation and owned-cleanup evidence.
+`execution_ready` remains false. Artifact inspected locally at
+`/tmp/app-backend-http-evidence/project-quota-evidence.json`.
+
+A follow-up adds the thirty-second response backpressure deadline and a refusal
+path test proving it is reset before connection reuse. Gateway race tests passed
+again (15.330s); Linux amd64 test compilation and configured staticcheck passed.
+The native acceptance is strengthened to count all business calls, including
+rejected attempts, and to submit a stale binding through the HTTP route itself.
+The preceding Linux result does not prove these additional assertions; the
+follow-up CI must rerun them. No test result here authorizes production startup.

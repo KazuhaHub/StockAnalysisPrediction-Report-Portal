@@ -208,3 +208,24 @@ func TestPlatformBackendHTTPReadDeadline(t *testing.T) {
 		t.Fatal("stalled body did not reach read deadline")
 	}
 }
+
+type platformDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	writes []time.Time
+}
+
+func (w *platformDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.writes = append(w.writes, deadline)
+	return nil
+}
+
+func TestPlatformBackendHTTPWriteDeadline(t *testing.T) {
+	s := &Server{}
+	w := &platformDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	r := httptest.NewRequest("POST", "/", nil)
+	before := time.Now()
+	s.apiPlatformBackend(w, r, "") // Invalid route, before any database access.
+	if w.Code != 404 || len(w.writes) != 2 || w.writes[0].Before(before.Add(30*time.Second)) || w.writes[0].After(time.Now().Add(30*time.Second)) || !w.writes[1].IsZero() {
+		t.Fatal("bounded write deadline was missing or leaked to keep-alive request", w.writes)
+	}
+}

@@ -74,6 +74,12 @@ func readPlatformBackendHTTPRequest(w http.ResponseWriter, r *http.Request) (pla
 }
 
 func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user string) {
+	// Bound response backpressure as well as execution. Global SSE responses
+	// remain long-lived, but a slow app client must not retain an admission slot.
+	controller := http.NewResponseController(w)
+	if err := controller.SetWriteDeadline(time.Now().Add(30 * time.Second)); err == nil {
+		defer controller.SetWriteDeadline(time.Time{})
+	}
 	if !platformHTTPPath(r) || !platformValidUUID(r.PathValue("installation")) {
 		platformDocumentFailure(w)
 		return
