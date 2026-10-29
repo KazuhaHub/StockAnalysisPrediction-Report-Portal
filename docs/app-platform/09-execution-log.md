@@ -2036,3 +2036,27 @@ daemon workflow 40455635317 passed on the functional source as well.
   writable worker/scheduler, recovery/physical lifecycle, broker, SDK/reference
   apps and full P00–P14 acceptance remain incomplete. Production, real credentials,
   Status, SDK freeze and beta unchanged.
+
+- Added a bounded claimed writable installation driver connecting immutable
+  artifact staging, actual data/writer/start/readiness, registration and current
+  boot activation. Failed attempts retain the last confirmed lease, including a
+  registration revision committed before activation rollback. Prepared-start
+  routing retains strict full writer/start source checks. Added pending/refusal
+  tests and a dedicated SQLite/PostgreSQL CI step, plus real disposable native
+  driver entry/failure/resumption checks on the original reviewed installation.
+  See [claimed writable driver](113-writable-install-worker.md). Local SQLite,
+  race, dual-arch Linux builds, Linux vet/staticcheck and Python14 passed.
+  Functional source `5f32c95095cfe11e48ac9e00daa43c964e5754e7` passed native
+  quota workflow 40829332469/job 123299658093: seven worker flags, prior native
+  checks, full quota witness and owned cleanup true; registry cleanup succeeded.
+  Fixed the parent fixture's marker relay; the initial missing-relay failure and
+  first relay edit's compile failure are not final acceptance evidence. General
+  workflow 40829332473/job 123300058040 passed lifecycle SQL 62.589s, current/legacy
+  access SQL 29.017s and worker/static SQL 10.856s on SQLite/PostgreSQL. Build,
+  vet, Linux staticcheck, published market, arm64 numeric, web, Docker and race
+  shards/aggregate passed. Shard 1/job 123300058092 passed full journal race
+  232.159s and Portal subset 141.991s. Go failed the existing x/net
+  GO-2026-6866/6860 gate and skipped ordinary full tests. Background
+  writable queue/scheduler, managed browser shell and the remaining full platform
+  acceptance are incomplete. Production, credentials, Status, SDK freeze and beta
+  configuration unchanged.
