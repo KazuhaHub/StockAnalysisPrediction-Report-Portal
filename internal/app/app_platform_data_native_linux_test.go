@@ -183,9 +183,22 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	defer registrationReader.Close()
 	defer registrationWriter.Close()
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
-	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=60s")
+	childTimeout := "-test.timeout=60s"
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		childTimeout = "-test.timeout=95s"
+	}
+	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", childTimeout)
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData}
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		for _, key := range []string{"APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH"} {
+			value := os.Getenv(key)
+			if !filepath.IsAbs(value) || filepath.Clean(value) != value {
+				t.Fatal("invalid SDK browser environment", key)
+			}
+			child.Env = append(child.Env, key+"="+value)
+		}
+	}
 	if managed {
 		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1", "PORTAL_MANAGED_IMAGE="+os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"))
 		if os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
@@ -300,6 +313,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("background completion acceptance missing", marker, output.String())
 			}
 			t.Log(marker)
+		}
+		if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+			for _, marker := range []string{"SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
+				if !bytes.Contains(output.Bytes(), []byte(marker)) {
+					t.Fatal("SDK native browser assertion missing", marker, output.String())
+				}
+				t.Log(marker)
+			}
 		}
 		checkPlatformWritableAutoFixture(t, childData, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 		// Preserve verified public evidence, then exercise cleanup when the normal

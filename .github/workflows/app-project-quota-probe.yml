@@ -97,12 +97,41 @@ concurrency:
 jobs:
   enforce-disposable-project-quota:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Check out the reviewed SDK browser fixture source
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
+          ref: 8536fda3529470fbe366b3188fa060fb7517949f
+          path: .sdk-browser-apps
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Build the exact shared SDK and Portal browser fixtures
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
+        run: |
+          npm ci --prefix .sdk-browser-apps
+          npm ci --prefix .sdk-browser-apps/apps/status/tests
+          cd .sdk-browser-apps/apps/status/tests
+          npx playwright install --with-deps chromium
+          cd "$GITHUB_WORKSPACE"
+          python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
+          APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
+          chmod -R a+rX "$RUNNER_TEMP/sdk-browser-fixture" "$RUNNER_TEMP/sdk-browser-browsers"
+          {
+            echo "APP_SDK_BROWSER_DIR=$RUNNER_TEMP/sdk-browser-fixture"
+            echo "APP_SDK_BROWSER_NODE=$(command -v node)"
+            echo "APP_SDK_BROWSER_RUNNER=$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs"
+            echo "SDK_BROWSER_PACKAGE=$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/package.json"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/sdk-browser-browsers"
+          } >> "$GITHUB_ENV"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
@@ -136,7 +165,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
       - name: Remove only the owned readiness registry
         if: always()
         run: bash scripts/acceptance/ready_app/cleanup-fixture.sh

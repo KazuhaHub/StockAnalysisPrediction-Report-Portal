@@ -14,7 +14,8 @@ and activation](113-writable-install-worker.md) and
 [complete background installation](115-writable-background-completion.md) and
 [writable launch documents](116-writable-launch-documents.md) and the
 [current-page backend session gateway](117-backend-session-gateway.md) and
-[shared SDK own-backend channel](118-sdk-own-backend-channel.md).
+[shared SDK own-backend channel](118-sdk-own-backend-channel.md) and
+[SDK browser/native request-chain acceptance](119-sdk-native-browser-acceptance.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 

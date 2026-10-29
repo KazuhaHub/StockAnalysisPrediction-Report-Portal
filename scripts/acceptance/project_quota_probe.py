@@ -362,9 +362,22 @@ def main(args):
                     if ready_image:
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
-                    result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=100s"], env=portal_env, capture_output=True, text=True, timeout=110)
+                    browser_enabled = bool(os.environ.get("APP_SDK_BROWSER_DIR"))
+                    for name in ("APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH"):
+                        if browser_enabled:
+                            value = os.environ.get(name, "")
+                            if not Path(value).is_absolute():
+                                raise RuntimeError("SDK browser bootstrap missing: " + name)
+                            portal_env[name] = value
+                    portal_limit = 140 if browser_enabled else 100
+                    result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=" + str(portal_limit) + "s"], env=portal_env, capture_output=True, text=True, timeout=portal_limit + 10)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
+                    if browser_enabled:
+                        for marker in ("SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("SDK native browser assertion missing: " + marker)
+                            report[marker.lower()] = True
                     report["native_portal_install_data_stage"] = True
                     report["native_portal_data_stage_not_activation"] = True
                     report["native_portal_static_activation_and_launch"] = True
