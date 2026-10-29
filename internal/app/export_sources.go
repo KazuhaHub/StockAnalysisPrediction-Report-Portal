@@ -92,10 +92,6 @@ func (src *exportSource) hasFormat(f string) bool { return containsString(src.Fo
 
 type exportRow map[string]any
 
-// exportSources returns the registry. It is a function so the field closures can stay package
-// private while the slice itself is built once.
-func exportSources() []*exportSource { return exportSourceList }
-
 func exportSourceByKey(key string) *exportSource {
 	for _, s := range exportSourceList {
 		if s.Key == key {
