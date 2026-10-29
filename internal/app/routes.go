@@ -472,6 +472,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/apps/market/install", s.apiAppMarketInstall)
 	s.admin(mux, "POST /api/admin/apps/market/index", s.apiAppMarketIndexSave)
 	s.admin(mux, "DELETE /api/admin/apps/{id}", s.apiAppDelete)
+	s.admin(mux, "GET /api/admin/apps/layout", s.apiAdminAppsLayout)
+	s.admin(mux, "PUT /api/admin/apps/order", s.apiAdminAppsOrder)
+	s.admin(mux, "PUT /api/admin/apps/{key}/access/{ou}", s.apiAdminAppAccess)
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
 		s.admin(mux, method+" /api/admin/apps/{id}/backend", s.apiExtensionBackend)
 	}

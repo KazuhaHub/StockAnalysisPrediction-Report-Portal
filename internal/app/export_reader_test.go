@@ -157,8 +157,10 @@ func windBackBeforeStep0013(t *testing.T, st *Store) {
 			t.Fatalf("winding back: %v", err)
 		}
 	}
-	if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0013")); err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"0013", "0014"} { // 0014 follows 0013 in the list
+		if _, err := st.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey(id)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

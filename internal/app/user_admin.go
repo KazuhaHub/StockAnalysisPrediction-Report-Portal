@@ -275,6 +275,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	if _, err := tx.Exec(s.bind(`DELETE FROM group_target_policies WHERE group_id=?`), id); err != nil {
 		return 0, 0, err
 	}
+	if _, err := tx.Exec(s.bind(`DELETE FROM app_ou_access WHERE group_id=?`), id); err != nil {
+		return 0, 0, err
+	}
 	// Children keep inheriting along the line they were in: to the deleted OU's parent, or as roots
 	// when the deleted OU was a root (§16 item 9). A parent row that is gone would leave them
 	// dangling, so they inherit from the Default instead — the same fail-closed direction as the sets.
