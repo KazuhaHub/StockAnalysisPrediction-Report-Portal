@@ -25,6 +25,13 @@ async function main(){
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
   await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
+  stage='layout-grow';
+  await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
+  const inner=await frame.locator('html').evaluate(element=>({scroll:element.scrollHeight,client:element.clientHeight}));
+  if(inner.scroll>inner.client+2)throw new Error('document gained internal scroll');
+  await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
+  await page.waitForFunction(()=>{const height=document.querySelector('iframe')?.getBoundingClientRect().height;return height>=64&&height<1000});
   stage='write';const write=JSON.parse(await dispatch('Write backend'));
   if(write.status!==200||write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
   stage='uncertain';if(await dispatch('Disconnect write')!=='error:uncertain')throw new Error('missing uncertainty');
@@ -36,6 +43,7 @@ async function main(){
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
   await context.close();
   console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');
+  console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
   console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}

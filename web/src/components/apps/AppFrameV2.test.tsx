@@ -15,14 +15,14 @@ test('frame is covered before load and remains hidden until the current session 
  render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture')
  expect(frame.getAttribute('sandbox')).toBe('allow-scripts');expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer');expect(frame.getAttribute('aria-hidden')).toBe('true');expect(frame.style.visibility).toBe('hidden');expect(frame.style.backgroundColor).toBe('rgb(0, 0, 0)');expect(frame.style.colorScheme).toBe('dark');expect(frame.style.border).toBe('0px');expect(screen.getByRole('status').textContent).toBe('apps.v2Loading')
  fireEvent.load(frame);expect(frame.style.visibility).toBe('hidden');expect(sessions).toHaveLength(1)
- act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('visible');expect(frame.hasAttribute('aria-hidden')).toBe(false);expect(screen.queryByRole('status')).toBeNull()
+ act(()=>{sessions[0].options.onReady?.(presentation);sessions[0].options.onDocumentHeight?.(640)});expect(frame.style.visibility).toBe('visible');expect(frame.hasAttribute('aria-hidden')).toBe(false);expect(screen.queryByRole('status')).toBeNull()
 })
 test('reload fences the old ready callback and restores a themed cover',()=>{
- render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const old=sessions[0];act(()=>old.options.onReady?.(presentation));fireEvent.load(frame)
- expect(old.close).toHaveBeenCalledTimes(1);expect(frame.style.visibility).toBe('hidden');act(()=>old.options.onReady?.(presentation));act(()=>old.options.onFailure?.('transport_error'));expect(screen.queryByRole('alert')).toBeNull();expect(frame.style.visibility).toBe('hidden');act(()=>sessions[1].options.onReady?.(presentation));expect(frame.style.visibility).toBe('visible')
+ render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const old=sessions[0];act(()=>{old.options.onReady?.(presentation);old.options.onDocumentHeight?.(640)});fireEvent.load(frame)
+ expect(old.close).toHaveBeenCalledTimes(1);expect(frame.style.visibility).toBe('hidden');act(()=>{old.options.onReady?.(presentation);old.options.onDocumentHeight?.(640)});act(()=>old.options.onFailure?.('transport_error'));expect(screen.queryByRole('alert')).toBeNull();expect(frame.style.visibility).toBe('hidden');act(()=>{sessions[1].options.onReady?.(presentation);sessions[1].options.onDocumentHeight?.(640)});expect(frame.style.visibility).toBe('visible')
 })
 test('presentation updates do not navigate the frame; binding changes replace it',()=>{
- const view=render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);act(()=>sessions[0].options.onReady?.(presentation))
+ const view=render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);act(()=>{sessions[0].options.onReady?.(presentation);sessions[0].options.onDocumentHeight?.(640)})
  const changed={...presentation,locale:'zh-TW' as const,theme:{...presentation.theme,dark:false,colorBgLayout:'#ffffff'}}
  view.rerender(<AppFrameV2 {...props} presentation={changed}/>);expect(screen.getByTitle('Fixture')).toBe(frame);expect(sessions[0].updatePresentation).toHaveBeenLastCalledWith(changed);expect(frame.style.backgroundColor).toBe('rgb(255, 255, 255)');expect(frame.style.colorScheme).toBe('light')
  view.rerender(<AppFrameV2 {...props} binding={{...binding,generation:'9007199254740994'}}/>);expect(screen.getByTitle('Fixture')).not.toBe(frame);expect(sessions[0].close).toHaveBeenCalledTimes(1);expect(screen.getByTitle('Fixture').style.visibility).toBe('hidden')
@@ -30,7 +30,7 @@ test('presentation updates do not navigate the frame; binding changes replace it
 test('failure removes executable frame and retry creates a new covered document',()=>{
  const view=render(<AppFrameV2 {...props}/>);let frame=screen.getByTitle('Fixture');fireEvent.load(frame);const old=sessions[0];act(()=>old.options.onFailure?.('protocol_error'))
  expect(screen.queryByTitle('Fixture')).toBeNull();expect(screen.getByRole('alert').textContent).toContain('apps.v2Failed');expect(old.close).toHaveBeenCalledTimes(1)
- fireEvent.click(screen.getByRole('button',{name:'apps.v2Retry'}));frame=screen.getByTitle('Fixture');expect(frame.style.visibility).toBe('hidden');act(()=>old.options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden');fireEvent.load(frame);view.unmount();expect(sessions[1].close).toHaveBeenCalledTimes(1)
+ fireEvent.click(screen.getByRole('button',{name:'apps.v2Retry'}));frame=screen.getByTitle('Fixture');expect(frame.style.visibility).toBe('hidden');act(()=>{old.options.onReady?.(presentation);old.options.onDocumentHeight?.(640)});expect(frame.style.visibility).toBe('hidden');fireEvent.load(frame);view.unmount();expect(sessions[1].close).toHaveBeenCalledTimes(1)
 })
 test.each(['javascript:alert(1)','https://evil.invalid/app','//evil.invalid/app','/app-assets/fixture/index.html?token=secret','/app-assets/fixture/index.html#fragment'])('unsafe executable source is refused before iframe creation: %s',source=>{
  render(<AppFrameV2 {...props} source={source}/>);expect(screen.queryByTitle('Fixture')).toBeNull();expect(screen.getByRole('alert')).toBeTruthy();expect(sessions).toHaveLength(0)
@@ -58,4 +58,21 @@ test('only an advertised own-backend channel receives the parent transport and c
  view.rerender(<AppFrameV2 {...props} backendAvailable/>);expect(screen.getByTitle('Fixture')).not.toBe(old)
  expect(sessions[0].close).toHaveBeenCalledOnce();fireEvent.load(screen.getByTitle('Fixture'))
  expect(sessions[1].options.onBackendRequest).toBeTypeOf('function')
+})
+
+test('document reveal waits for height and content can grow and shrink in one iframe',()=>{
+ render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame)
+ act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')
+ act(()=>sessions[0].options.onDocumentHeight?.(24000));expect(frame.style.visibility).toBe('visible');expect(frame.parentElement!.style.height).toBe('24000px')
+ act(()=>sessions[0].options.onDocumentHeight?.(120));expect(screen.getByTitle('Fixture')).toBe(frame);expect(frame.parentElement!.style.height).toBe('120px')
+ fireEvent.load(frame);act(()=>sessions[1].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')
+ act(()=>sessions[0].options.onDocumentHeight?.(500));expect(frame.style.visibility).toBe('hidden')
+ act(()=>sessions[1].options.onDocumentHeight?.(0));expect(frame.parentElement!.style.height).toBe('64px')
+})
+
+test('missing initial document measurement fails with a bounded retry surface',()=>{
+ vi.useFakeTimers();try{
+  render(<AppFrameV2 {...props}/>);fireEvent.load(screen.getByTitle('Fixture'));act(()=>sessions[0].options.onReady?.(presentation));
+  act(()=>vi.advanceTimersByTime(10000));expect(screen.queryByTitle('Fixture')).toBeNull();expect(screen.getByRole('alert')).toBeTruthy()
+ }finally{vi.useRealTimers()}
 })

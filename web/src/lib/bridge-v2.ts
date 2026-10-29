@@ -5,7 +5,8 @@ import {
   DESCRIPTOR_LOCALES,
 } from "./descriptor-contract.generated";
 
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.2";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.3";
+export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
 const MAX_HELLOS = 4;
@@ -150,6 +151,7 @@ export interface BridgeHostOptions extends BaseOptions {
     request: BridgeBackendRequest,
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
+  onDocumentHeight?: (height: number) => void;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -358,12 +360,22 @@ export function createBridgeHost(
     dirty = false,
     announced = false;
   let lastRequest = 0n;
+  let lastMeasure = 0n,
+    measureWindow = 0,
+    measureCount = 0;
+  let heightTimer: ReturnType<typeof setTimeout> | undefined,
+    lastHeightAt = -Infinity;
+  let pendingHeight:
+    | { height: number; presentationRevision: string }
+    | undefined;
   const requests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    clearTimeout(heightTimer);
+    pendingHeight = undefined;
     for (const request of requests.values()) {
       clearTimeout(request.timer);
       request.abort.abort();
@@ -418,6 +430,78 @@ export function createBridgeHost(
     }
     if (terminal() || !currentEnvelope) return;
     const data = event.data;
+    if (data && typeof data === "object" && data.type === "layout.measure") {
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "revision",
+          "presentationRevision",
+          "height",
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (
+        !decimal(data.revision) ||
+        !decimal(data.presentationRevision) ||
+        !Number.isInteger(data.height) ||
+        typeof data.height !== "number" ||
+        data.height < 0 ||
+        data.height > BRIDGE_DOCUMENT_MAX_HEIGHT
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (BigInt(data.revision) <= lastMeasure) return;
+      lastMeasure = BigInt(data.revision);
+      const now = Date.now();
+      if (now - measureWindow >= 1000) {
+        measureWindow = now;
+        measureCount = 0;
+      }
+      if (++measureCount > 20) {
+        fail("protocol_error");
+        return;
+      }
+      if (
+        !announced ||
+        inflight ||
+        data.presentationRevision !== revision.toString() ||
+        current?.layout !== "document"
+      )
+        return;
+      pendingHeight = {
+        height: data.height,
+        presentationRevision: data.presentationRevision,
+      };
+      if (heightTimer === undefined)
+        heightTimer = setTimeout(
+          () => {
+            heightTimer = undefined;
+            const value = pendingHeight;
+            pendingHeight = undefined;
+            if (
+              !value ||
+              terminal() ||
+              inflight ||
+              value.presentationRevision !== revision.toString() ||
+              current?.layout !== "document"
+            )
+              return;
+            lastHeightAt = Date.now();
+            try {
+              options.onDocumentHeight?.(value.height);
+            } catch {
+              fail("protocol_error");
+            }
+          },
+          Math.max(0, 100 - (Date.now() - lastHeightAt)),
+        );
+      return;
+    }
     if (
       data &&
       typeof data === "object" &&
@@ -700,6 +784,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeBackendRequest,
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
+  reportDocumentHeight(height: number): boolean;
 } {
   const {
     localWindow,
@@ -724,6 +809,55 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     connectionRevision = 0;
   let expectedHostNonce: string | undefined;
   const retiredHosts = new Set<string>();
+  let measureRevision = 0n,
+    lastMeasureAt = -Infinity;
+  let measureTimer: ReturnType<typeof setTimeout> | undefined;
+  let nextMeasure: { height: number; presentationRevision: string } | undefined;
+  let emittedMeasure:
+    | { height: number; presentationRevision: string }
+    | undefined;
+  function clearMeasure() {
+    clearTimeout(measureTimer);
+    measureTimer = undefined;
+    nextMeasure = undefined;
+    emittedMeasure = undefined;
+  }
+  function flushMeasure() {
+    measureTimer = undefined;
+    const value = nextMeasure;
+    nextMeasure = undefined;
+    if (
+      !value ||
+      terminal() ||
+      state !== "ready" ||
+      !port ||
+      !envelope ||
+      current?.layout !== "document" ||
+      value.presentationRevision !== revision.toString()
+    )
+      return;
+    if (
+      emittedMeasure?.height === value.height &&
+      emittedMeasure.presentationRevision === value.presentationRevision
+    )
+      return;
+    if (measureRevision === MAX_REVISION) {
+      fail("protocol_error");
+      return;
+    }
+    lastMeasureAt = Date.now();
+    emittedMeasure = value;
+    try {
+      port.postMessage({
+        type: "layout.measure",
+        ...envelope,
+        revision: (++measureRevision).toString(),
+        ...value,
+      });
+    } catch {
+      fail("transport_error");
+    }
+  }
   let issued = 0n;
   const requests = new Map<
     string,
@@ -742,6 +876,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   }
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    clearMeasure();
     retireRequests();
     clearTimeout(timer);
     clearInterval(retry);
@@ -922,6 +1057,9 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         envelope = undefined;
         context = current = null;
         abort.abort();
+        clearMeasure();
+        measureRevision = 0n;
+        lastMeasureAt = -Infinity;
         retireRequests();
         issued = 0n;
         abort = new AbortController();
@@ -1037,6 +1175,26 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
+    reportDocumentHeight(height: number): boolean {
+      if (
+        terminal() ||
+        state !== "ready" ||
+        !applied ||
+        !port ||
+        current?.layout !== "document" ||
+        !Number.isInteger(height) ||
+        height < 0 ||
+        height > BRIDGE_DOCUMENT_MAX_HEIGHT
+      )
+        return false;
+      nextMeasure = { height, presentationRevision: revision.toString() };
+      if (measureTimer === undefined)
+        measureTimer = setTimeout(
+          flushMeasure,
+          Math.max(0, 100 - (Date.now() - lastMeasureAt)),
+        );
+      return true;
+    },
     requestBackend(
       value: BridgeBackendRequest,
       signal?: AbortSignal,

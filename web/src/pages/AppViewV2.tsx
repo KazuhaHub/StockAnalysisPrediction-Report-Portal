@@ -49,7 +49,7 @@ function LaunchPage({ installation }: { installation: string }) {
 
   useLayoutEffect(() => {
     const element = panel.current
-    if (!element) return
+    if (!element || launch?.layout !== 'viewport') return
     const measure = () => {
       const next = Math.floor(element.getBoundingClientRect().height)
       if (next >= 64) setHeight(Math.min(next, 16384))
@@ -73,7 +73,7 @@ function LaunchPage({ installation }: { installation: string }) {
   const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%', gap: 16 }}>
+    <section style={{ display: 'flex', flexDirection: 'column', flex: launch?.layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>{t('apps.back')}</Button>
         {launch && <><AppDisplayIcon display={launch.display} /><Typography.Title level={4} style={{ margin: 0 }}>{copy?.name}</Typography.Title></>}
@@ -86,7 +86,7 @@ function LaunchPage({ installation }: { installation: string }) {
           <Spin /><span>{t('apps.v2Loading')}</span>
         </div>
       ) : (
-        <div ref={panel} style={{ flex: 1, minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
+        <div ref={panel} style={{ flex: launch.layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
             capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} presentation={presentation!} height={height} />
         </div>
