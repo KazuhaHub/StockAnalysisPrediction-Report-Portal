@@ -141,7 +141,18 @@ schema and refuses surrounding whitespace, format controls and replacement
 characters before writing a workspace. The regression test first demonstrated
 four accepted invalid names. Apps e7d12a609b1e872f607069e1b5b418e4751fd1ee passed
 all CI in run40947104413; the workflow now pins that exact source. Final paired
-native evidence is tracked in PR333. Full platform acceptance remains open.
+Portal b9dd81af3a09167a016366ba877b724cfd8e4b10 passed native run40954734818 /
+job123731758604. Its browser-evidence JSON again binds the exact default ZIP hash
+5200fc74f29808009fe22da2e1900d82e925fa66094641c3ff66d543bfb7c876 and descriptor
+b9bbbec9be9e9d61f7300945d6066f1121a1a935182f2deeed94fc6f43e37524. All eight
+prior SDK browser flags, owned cleanup and neighbor preservation remain true;
+execution_ready remains false. General run40954734940 passed every front-end/race/workflow check.
+Its first Docker job123731760387 stopped on an HTTP/2 INTERNAL_ERROR from the
+module proxy before tests. A targeted rerun job123735340512 passed image/font and
+end-to-end smoke checks. Go-test still fails only the inherited GO-2026-6866 and
+GO-2026-6860 in x/net v0.60.0 after its pure contract and six affected storage
+suites pass; the ordinary broad test step is skipped. This is not all-green
+Go CI. Exact results are linked in PR333. Full platform acceptance remains open.
 The broader P06/P07/P08, full accessibility/visual cases, persistent user data,
 managed reference app, marketplace/update/uninstall/recovery and release gates
 remain open.

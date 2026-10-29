@@ -2229,6 +2229,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   fail-closed rule. Portal15e289f2 passed run40944298514/job123695464741: actual
   generated-template browser evidence and all prior native/browser/owned-cleanup
   checks pass, execution_ready false. Apps eea3e9af passed all CI after a
-  literal-name substitution regression fix; final paired pin acceptance is pending.
+  literal-name substitution regression fix. Final name-domain validation uses
+  the shared schema maximum and rejects invalid names before filesystem creation;
+  Apps e7d12a6 passed all CI (run40947104413). Portal b9dd81af passed final native
+  run40954734818/job123731758604 with unchanged generated artifact hashes and
+  all prior native/browser/cleanup flags true, execution_ready false. General CI
+  passed all web/race/workflow checks; a module-proxy interruption in Docker
+  job123731760387 was resolved by targeted rerun job123735340512. Go-test still
+  fails only the inherited x/net vulnerability gate after affected contracts/SQL
+  pass. Broad ordinary tests remain skipped; full Go CI is not green.
   Public default/bootstrap distribution, P06/P07/P08 and full platform acceptance
   remain open. No production, Status, database, publication or beta changes.
