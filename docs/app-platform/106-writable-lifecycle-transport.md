@@ -85,7 +85,11 @@ these observations activate an app or grant viewer/broker access.
 
 Journal `DispatchDataWriter` and `DispatchWritableCandidate` check complete
 current signatures and exact managed descriptor before admission, then route only
-prepared work to existing claim/native execution. Candidate start reserves its
+prepared work to existing claim/native execution. Strict completed-history readers
+run before first-admission checks because those deliberately reject later resource
+revisions. An exact still-prepared candidate reservation is independently read
+and claimed, allowing an interruption between reservation and claim to resume
+without relaxing initial admission. Candidate start reserves its
 exact existing identity before claiming. Applied work uses the strict historical
 reader; unknown/other states refuse. Existing claims remain once-only and
 owner-bound. Existing concrete execution controls exclusion/preflight, native
@@ -119,7 +123,72 @@ Required new report flags:
 new test markers; passing a previous fixture alone is insufficient. Positive
 expired-unknown recovery over this new channel is not claimed by this fixture;
 existing native journal tests separately prove those observation-only APIs.
-Fresh composed Linux acceptance is pending.
+Local focused race passed (journal 1.994s, transport 1.442s); full local runner
+race passed after the replay correction (journal 164.939s; other packages cached;
+initial transport run 1.689s and runner command 1.268s). Portal platform regression passed in 8.103s. Linux amd64/arm64
+transport test builds, Linux vet/staticcheck and Python acceptance tests (14)
+passed. The child receipt marker uses raw test output so the parent can parse
+it independently of testing log prefixes. The completed-writer replay regression
+passed in 6.283s after routing historical reads before first-admission checks.
+
+Functional source `2f304d36818d18a9b3a8e3934697e3c3185a72a8` passed disposable
+quota workflow [40790818016](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40790818016),
+job 123175301435. Checkout identifies that exact source merged into parent
+`15b5ba863cb622f578c33726dd6f13f5bc0012fb`. Both new lifecycle evidence flags
+are true. Actual cross-UID writer/start/readiness/delivery, strict historical
+reads and identical applied replays passed, with unchanged process start/restart
+metadata and independent host MAC/boot verification. Existing writable/native
+checks, `owned_resources_cleaned` and owned registry cleanup passed.
+
+Daemon workflow [40790818046](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40790818046),
+job 123175301720, passed on the same functional source: full Linux runner race
+(control 1.903s, data 1.012s, driver 3.034s, journal 226.732s, transport 7.457s,
+runner command 1.036s), closed native policy, distinct process identities and
+Portal confirmation through the root endpoint.
+
+General workflow [40790817988](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40790817988)
+passed all three app race shards and aggregate, web tests/build, workflow lint
+and Docker font/smoke checks. Go job 123175301782 passed build/vet/staticcheck,
+then failed existing `golang.org/x/net@v0.60.0` vulnerabilities GO-2026-6866 and
+GO-2026-6860 (reported fixed in v0.62.0), skipping its ordinary test step. The
+general workflow remains failed; no dependency/toolchain upgrade is included.
+
+## Portal integration sequence
+
+The next implementation must retain the existing strict readonly source checks.
+`internal/app/app_platform_candidate_intent.go` currently requires namespace
+revision 2, two source effects (three with registration), and readonly running/
+readiness receipt formats. Merely accepting the new RPC proof in those functions
+would erase lifecycle distinctions. Introduce a separately verified writable
+source path instead:
+
+1. Reuse current operation lease, review authority, publisher trust, runtime
+   enrollment and exact descriptor verification. Persist one stable future
+   candidate resource identity before constructing its writer command. Do not
+   generate another resource/effect after an uncertain response.
+2. Bind preparation effect 1 to writer effect 2, then writable start and
+   registration: four exact effects. Validate the corresponding volume revision
+   3 / writer receipt, source hashes and candidate identity independently of the
+   old sealed revision-2 path. Existing control tables suffice; this transport
+   does not authorize a schema change.
+3. For each RPC, validate opaque action, root endpoint/UID/GID, current authority,
+   exact signed command SHA and bounded proof age. Compare typed receipt against
+   the exact expected source/native/resource identities. Re-read current Portal
+   lease/runtime/review/publisher state before committing the result with an exact
+   revision/fence CAS. A historical receipt must never substitute for current
+   readiness or restart fencing.
+4. Derive the writable registration document using the existing encrypted key
+   system and exact installation/generation/release identity. Store only the
+   public digest/receipt. Keep document bytes out of rows, logs and environment.
+   Match protected delivery before the independent challenge/MAC/boot exchange.
+5. Introduce a separate writable boot consumer and viewer/request path; only
+   then integrate activation and the automatic install worker. Test unknown
+   outcomes, reserved-but-unclaimed restart, revoked authority, stale control
+   revision, epoch restoration and lost responses through the real controller
+   endpoint, with actual physical state inspected before and after retry.
+
+A green transport fixture is a prerequisite for these steps, not evidence that
+Portal has implemented them.
 
 ## Remaining work
 

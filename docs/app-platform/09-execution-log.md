@@ -1808,3 +1808,24 @@ daemon workflow 40455635317 passed on the functional source as well.
   handshake verification. Fresh Linux acceptance pending; Portal integration,
   activation/worker and remaining full platform acceptance are not yet complete.
   Production, credentials, Status, SDK freeze and beta unchanged.
+
+- Writable lifecycle transport source `2f304d36818d18a9b3a8e3934697e3c3185a72a8`
+  passed quota workflow 40790818016/job 123175301435 and daemon workflow
+  40790818046/job 123175301720. Actual non-root controller/root listener drove
+  writer/start/readiness/protected delivery, strict historical reads and identical
+  applied replays; process start/restart metadata stayed unchanged, applied
+  recovery refused and independent host MAC/boot verification passed. Both new
+  lifecycle flags, prior native checks and owned cleanup passed. First-attempt
+  admission retains its original strict source rules; completed replay uses the
+  independent historical reader, with a 6.283s regression test. Exact prepared
+  reservation resumes through its dedicated validator. Full Linux runner race
+  passed (journal 226.732s; transport 7.457s), full local race journal 164.939s,
+  platform regression 8.103s, dual-arch builds, vet/staticcheck and Python14 passed.
+  General workflow 40790817988 passed app race shards/aggregate, web and Docker
+  checks; Go job 123175301782 retained existing x/net GO-2026-6866/6860 findings
+  after staticcheck and skipped ordinary tests. See [lifecycle acceptance and
+  Portal integration sequence](106-writable-lifecycle-transport.md). Positive
+  expired-unknown recovery over this channel, Portal writable source/boot/viewer/
+  activation/worker, physical lifecycle, broker, SDK/reference apps and full
+  P00–P14 acceptance remain unfinished. Production, credentials, Status, public
+  SDK freeze and beta unchanged.
