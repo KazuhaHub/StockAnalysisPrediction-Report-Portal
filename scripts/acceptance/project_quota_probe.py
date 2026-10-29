@@ -374,6 +374,13 @@ def main(args):
                         report["native_portal_writable_review_confirmed"] = True
                         report["native_portal_writer_settlement_reconciled"] = True
                         report["native_portal_writer_retained_identity"] = True
+                        for marker in ("PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_NATIVE_WITNESS", "PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Portal writable start acceptance did not execute: " + marker)
+                        report["native_portal_writable_start_reconciled"] = True
+                        report["native_portal_writable_start_retained_identity"] = True
+                        report["native_portal_writable_start_native_witness"] = True
+                        report["native_portal_writable_start_full_quota_verified"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

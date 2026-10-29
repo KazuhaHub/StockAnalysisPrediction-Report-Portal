@@ -123,7 +123,9 @@ jobs:
             echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket"
           } >> "$GITHUB_ENV"
       - name: Check refusal behavior without privileges
-        run: python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
+        run: |
+          python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
+          GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/ready_app -run '^TestFixedFixtureQuotaProfiles$' -count=1
       - name: Build owned readiness backend through disposable local registry
         run: bash scripts/acceptance/ready_app/build-fixture.sh
       - name: Enforce quotas only on the newly owned loopback image

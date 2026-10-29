@@ -1865,3 +1865,37 @@ daemon workflow 40455635317 passed on the functional source as well.
   registration/boot/viewer/activation/worker, physical lifecycle, broker,
   SDK/reference apps and full P00–P14 acceptance remain incomplete. Production,
   real credentials, Status, SDK freeze and beta unchanged.
+
+- Added Portal writable backend start intent, authenticated lifecycle dispatch/
+  historical-read/reconciliation selection and atomic start-to-probe settlement.
+  Reuses the confirmed writer's future resource ID and exact original receipts;
+  the extended source permits only its independently validated third start
+  effect while the original writer reader keeps its strict no-start contract.
+  Added SQL source/authority/partial-history refusals and disposable non-root
+  Portal/root runner rollback recovery plus native identity/start-time witness
+  and owned cleanup. See [Portal writable start](108-portal-writable-start.md).
+  Fresh Linux evidence pending. Readiness/registration/boot/viewer/activation/
+  worker, physical lifecycle, broker, SDK/reference apps and full acceptance
+  remain incomplete. Production, credentials, Status, SDK freeze and beta unchanged.
+
+- Portal writable start source `797e1ace7b9e841dd8f408fb370fde1ef7d8c4a9`
+  passed quota workflow 40816295673/job 123258102372. Actual non-root Portal/root
+  runner startup, forced Portal rollback, exact original result completion and
+  retained writer/resource/effect/native/start-time identity passed. All four new
+  start recovery/retained-identity/native-witness/full-quota flags are true. The
+  root witness waited for actual 256MiB/65536 inode denial verification and
+  reinspected the running process; original 8MiB/128 native fixture checks remain.
+  Fixed profile refusal tests, prior native checks and owned cleanup passed.
+  Explicit SQLite/PostgreSQL writer/start contracts passed in 25.957s. Local
+  focused race 15.893s, standalone start race 8.381s, broader platform/managed
+  race 138.433s, Linux dual-arch Portal/fixture builds, vet/staticcheck and Python14
+  passed. General workflow 40816295709 passed race shards/aggregate, web and
+  Docker checks; shard 1/job 123258136904 ran full journal race in 223.364s and its
+  app subset in 112.071s. Go job 123258136783 retained existing x/net
+  GO-2026-6866/6860 findings after explicit database tests/staticcheck, skipping
+  ordinary full tests. No standalone daemon workflow was triggered by this
+  Portal/fixture-only diff. See [writable start acceptance](108-portal-writable-start.md).
+  Readiness/registration/boot/viewer/activation/worker, positive expired-unknown
+  runner recovery through Portal, physical lifecycle, broker, SDK/reference apps
+  and full P00–P14 acceptance remain incomplete. Production, credentials, Status,
+  SDK freeze and beta unchanged.

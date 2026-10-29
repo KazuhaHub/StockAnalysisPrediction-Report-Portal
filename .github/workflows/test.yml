@@ -93,7 +93,7 @@ jobs:
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|IntentClockSkew|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime)$'
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|IntentClockSkew|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime|TestPlatformWritableStart(Intent|Refusals)(SQLite|Postgres))$'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
