@@ -24,7 +24,7 @@ import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
 import NotificationBell from './NotificationBell'
-import ExportTaskTray from './ExportTaskTray'
+import TaskTray from './TaskTray'
 import { useExportPolicy } from '../lib/useExportPolicy'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
@@ -444,8 +444,7 @@ function AppShell() {
               />
             </Popover>
           )}
-          {admin && !chatFocus && <ExportTaskTray key={user} />}
-          {canExport && !chatFocus && <ExportTaskTray key={user} mode="reader" />}
+          {user && !chatFocus && (canRun || canExport) && <TaskTray key={user} canRun={canRun} canExport={canExport} admin={admin} />}
           {user && <NotificationBell key={user} user={user} />}
           <Popover
             trigger="click"

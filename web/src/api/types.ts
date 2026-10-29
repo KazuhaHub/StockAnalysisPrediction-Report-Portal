@@ -1964,3 +1964,26 @@ export interface ForecastAccessOverview {
   counts: ForecastScopeCounts
   groups: ForecastOUAccess[]
 }
+
+// My tasks (ADR 0047): one row per run or export the caller owns.
+export type TaskKind = 'run' | 'export'
+export interface TaskItem {
+  kind: TaskKind
+  id: string
+  name: string
+  detail?: string
+  /** The native status of the kind: run queued|running|cancelling|finished|cancelled|expired, export queued|running|done|failed|canceled|expired. */
+  status: string
+  done: number
+  total: number
+  /** Tasks the scheduler will take first; present only for a queued task that is counted. */
+  ahead?: number
+  scheduled?: boolean
+  error?: string
+  counts?: { succeeded: number; partial: number; failed: number; cancelled: number }
+  created_at: number
+  finished_at: number
+  download?: string
+  cancel?: string
+  link: string
+}
