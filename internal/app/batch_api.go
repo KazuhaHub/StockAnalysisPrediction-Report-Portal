@@ -539,7 +539,15 @@ func (s *Server) apiBatchJobs(w http.ResponseWriter, r *http.Request, user strin
 	// The search box reaches the whole queue here rather than filtering the page it was sent —
 	// see queueSearchClause. `total` stays the size of the unfiltered queue, which is what the
 	// "showing the most recent N of M" line is about.
-	jobs, total := s.st.ListQueueJobs(limit, r.URL.Query().Get("q"))
+	// Anyone below administrator sees only the runs they created (ADR 0047); `total` and the
+	// search follow the same boundary.
+	var jobs []BatchJob
+	var total int
+	if s.isAdmin(user) {
+		jobs, total = s.st.ListQueueJobs(limit, r.URL.Query().Get("q"))
+	} else {
+		jobs, total = s.st.ListOwnQueueJobs(user, limit, r.URL.Query().Get("q"))
+	}
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
 		ids[i] = j.ID

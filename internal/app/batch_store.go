@@ -780,17 +780,38 @@ func (s *Store) queueSearchClause(q string) (string, []any) {
 }
 
 func (s *Store) ListQueueJobs(termLimit int, q string) ([]BatchJob, int) {
+	return s.listQueueJobs("", termLimit, q)
+}
+
+// ListOwnQueueJobs is ListQueueJobs restricted to the jobs one user created: the search, both
+// halves of the list and the returned total all stay inside that user's own rows (ADR 0047).
+func (s *Store) ListOwnQueueJobs(owner string, termLimit int, q string) ([]BatchJob, int) {
+	return s.listQueueJobs(owner, termLimit, q)
+}
+
+// listQueueJobs backs both forms; a non-empty owner restricts every query to that creator.
+func (s *Store) listQueueJobs(owner string, termLimit int, q string) ([]BatchJob, int) {
 	if termLimit <= 0 {
 		termLimit = 300
 	}
 	where, qArgs := s.queueSearchClause(q)
+	var ownerArgs []any
+	if owner != "" {
+		where = ` AND b.created_by=?` + where
+		ownerArgs = []any{owner}
+		qArgs = append(append([]any{}, ownerArgs...), qArgs...)
+	}
 	active := append([]any{}, qArgs...)
 	terminal := append(append([]any{}, qArgs...), termLimit)
 	jobs := s.queryBatchJobs(`WHERE b.status IN ('queued','running','cancelling')`+where+` ORDER BY b.id DESC`, active...)
 	jobs = append(jobs, s.queryBatchJobs(`WHERE b.status IN ('finished','cancelled','expired')`+where+` ORDER BY b.id DESC LIMIT ?`, terminal...)...)
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].ID > jobs[j].ID }) // active ids aren't always > terminal (a scheduled job)
 	var total int
-	s.queryRow("SELECT COUNT(*) FROM batch_jobs").Scan(&total)
+	if owner != "" {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE created_by=?", owner).Scan(&total)
+	} else {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs").Scan(&total)
+	}
 	return jobs, total
 }
 
