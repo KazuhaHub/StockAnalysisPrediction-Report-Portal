@@ -2299,3 +2299,25 @@ daemon workflow 40455635317 passed on the functional source as well.
   local tests and exact Linux/PG/native CI remain pending. See
   [network dependency repair](129-network-dependency-security.md). This neither
   rewrites prior evidence nor completes P07/P00–P14 or activates production.
+
+
+- Added a purpose-separated controller-signed foreground HTTP envelope binding
+  current opaque viewer scope, installation/review/release/generation/policy and
+  exact target/headers/body. A single-use call wrapper uses the shared real HTTPS
+  executor and rechecks online authority/current enrollment/expiry at all three
+  checkpoints. Post-IO refusal releases no response and never retries. Real
+  signature/TLS, tampering, revocation/expiry, copy and concurrent-use cases pass
+  locally with race/vet/Linux compilation. No private broker transport, actual
+  SQL actor adapter or granted provider is enabled. Single use is per call object,
+  not durable/global replay protection. See
+  [signed network requests](130-signed-network-request-boundary.md). Exact CI,
+  full P00–P14 and production acceptance remain open.
+
+
+- Signed-request functional 050f8d89 passed Linux native
+  run40965556689/job123769031268, including actual broker/control/platform race
+  tests and all prior SDK/browser/quota/remount/cleanup evidence, with
+  execution_ready false. Daemon run40965556649/job123769031375 passed. General
+  run40965556628 passed govulncheck and is executing ordinary PostgreSQL tests;
+  those are not counted as complete until the live job terminates successfully.
+  Security-parent run40964869350 is also executing its full ordinary test step.

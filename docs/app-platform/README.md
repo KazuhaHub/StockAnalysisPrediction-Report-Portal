@@ -25,7 +25,8 @@ and activation](113-writable-install-worker.md) and
 [capability snapshot integrity](126-capability-snapshot-integrity.md), and
 [bounded HTTP execution](127-bounded-http-executor.md), and
 [shared network policy encoding](128-network-policy-contract.md), and
-[network dependency gate repair](129-network-dependency-security.md).
+[network dependency gate repair](129-network-dependency-security.md), and
+[signed network request checks](130-signed-network-request-boundary.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 
