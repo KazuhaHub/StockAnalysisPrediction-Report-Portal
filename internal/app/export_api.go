@@ -395,7 +395,7 @@ func (s *Server) apiExportFile(w http.ResponseWriter, r *http.Request, user stri
 	// A resumed download re-requests ranges of one file: only the first request is a download event.
 	if rng := r.Header.Get("Range"); rng == "" || strings.HasPrefix(rng, "bytes=0-") {
 		s.recordChange(r, user, AuditExportDownload, "export", j.ID, map[string]any{
-			"source": j.Source, "format": j.Format, "bytes": info.Size(),
+			"source": j.Source, "format": j.Format, "rows": j.RowsDone, "bytes": info.Size(),
 		})
 	}
 	w.Header().Set("Content-Type", exportContentTypes[j.Format])

@@ -245,7 +245,7 @@ export default function ExportPage() {
       {source && (
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '260px minmax(0, 1fr)', gap: compact ? 16 : 24, alignItems: 'start' }}>
-            <aside style={compact ? undefined : { position: 'sticky', top: 'calc(var(--rp-header-h, 64px) + 16px)', background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
+            <aside style={compact ? undefined : { position: 'sticky', top: 16, background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
               {rail}
             </aside>
             <main style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>

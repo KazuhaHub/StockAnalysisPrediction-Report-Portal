@@ -124,7 +124,8 @@ export default function ConditionBuilder({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Select
           size="small"
-          style={{ width: 90 }}
+          style={{ width: 116 }}
+          popupMatchSelectWidth={false}
           aria-label={t('export.builder.groupOp')}
           value={g.op}
           options={[
