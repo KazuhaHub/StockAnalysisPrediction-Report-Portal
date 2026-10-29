@@ -22,7 +22,8 @@ and activation](113-writable-install-worker.md) and
 [signed typed query state](123-typed-route-query.md), and
 [shared page metadata/actions](124-shared-page-actions.md), and
 [development v2 authoring/template checks](125-v2-authoring-template.md), and
-[capability snapshot integrity](126-capability-snapshot-integrity.md).
+[capability snapshot integrity](126-capability-snapshot-integrity.md), and
+[bounded HTTP execution](127-bounded-http-executor.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 
