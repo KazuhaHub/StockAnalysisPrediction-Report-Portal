@@ -29,6 +29,8 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	m.ID = "notes-background-demo"
+	archive = platformSDKBrowserArchive(t, archive)
+	m.Frontend.SHA256 = platformDigest(archive)
 	m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, _ = json.Marshal(m)
 	release, err := s.stagePlatformRelease(actor, raw, platformSignTestDescriptor(t, raw), archive)
