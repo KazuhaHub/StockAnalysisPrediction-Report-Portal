@@ -137,6 +137,10 @@ func testPlatformWritableRegistrationRefusals(t *testing.T, pg bool) {
 			if mode == "audit" {
 
 				if pg {
+					t.Cleanup(func() {
+						mustExec(t, s.st, `DROP TRIGGER IF EXISTS writable_registration_audit_failure ON audit_log`)
+						mustExec(t, s.st, `DROP FUNCTION IF EXISTS writable_registration_audit_failure()`)
+					})
 					mustExec(t, s.st, `CREATE FUNCTION writable_registration_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'registration audit fixture'; END $$`)
 					mustExec(t, s.st, `CREATE TRIGGER writable_registration_audit_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.writable_registration_intent') EXECUTE FUNCTION writable_registration_audit_failure()`)
 				} else {

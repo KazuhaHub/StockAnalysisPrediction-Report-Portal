@@ -410,6 +410,12 @@ def main(args):
                                 raise RuntimeError("Writable backend request acceptance did not execute: " + marker)
                         report["native_writable_backend_request_relay_verified"] = True
                         report["native_writable_backend_request_uncertain_no_retry"] = True
+                        for marker in ("PORTAL_WRITABLE_INSTALL_ACTIVATED", "PORTAL_WRITABLE_CURRENT_OU_REQUEST_VERIFIED", "PORTAL_WRITABLE_POST_IO_OU_REVOKED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Portal writable activation/access acceptance did not execute: " + marker)
+                        report["native_portal_writable_install_activated"] = True
+                        report["native_portal_writable_current_ou_request_verified"] = True
+                        report["native_portal_writable_post_io_ou_revoked"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

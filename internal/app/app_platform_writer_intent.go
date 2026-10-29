@@ -241,6 +241,10 @@ func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, run
 }
 
 func platformWriterReceiptMatches(r journal.DataWriterReceipt, i platformWriterIntent, lease platformOperationLease, now int64) bool {
+	return platformWriterReceiptMatchesFence(r, i, lease.fence, now)
+}
+
+func platformWriterReceiptMatchesFence(r journal.DataWriterReceipt, i platformWriterIntent, fence, now int64) bool {
 	n, d, c := r.Native, i.data, i.command
 	raw, _ := json.Marshal(r)
 	if _, err := journal.ParseDataWriterReceipt(raw); err != nil {
@@ -250,7 +254,7 @@ func platformWriterReceiptMatches(r journal.DataWriterReceipt, i platformWriterI
 	sourceRevision, _ := strconv.ParseInt(d.ControlRevision, 10, 64)
 	settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
 	observed, _ := strconv.ParseInt(n.ObservedMS, 10, 64)
-	return r.Claim.EffectID == i.effectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == i.dataSHA && r.Claim.ResourceID == i.resourceID && r.Claim.AdmittedFence == strconv.FormatInt(lease.fence, 10) && revision >= sourceRevision && revision <= i.runtime.controlRevision && settled <= now+1000 && observed <= now+1000 && settled <= time.Now().UnixMilli() && observed <= time.Now().UnixMilli() && n.Profile == control.DataWriterSandboxProfile && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.Platform == c.Platform && n.RootFilesystemUUID == d.Claim.RootFilesystemUUID && n.RootInode == d.Claim.RootInode && n.ProjectID == d.ProjectID && n.Device == d.Device && n.NamespaceInode == d.NamespaceInode && n.QuotaBytes == d.QuotaBytes && n.QuotaInodes == d.QuotaInodes
+	return r.Claim.EffectID == i.effectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == i.dataSHA && r.Claim.ResourceID == i.resourceID && r.Claim.AdmittedFence == strconv.FormatInt(fence, 10) && revision >= sourceRevision && revision <= i.runtime.controlRevision && settled <= now+1000 && observed <= now+1000 && settled <= time.Now().UnixMilli() && observed <= time.Now().UnixMilli() && n.Profile == control.DataWriterSandboxProfile && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.Platform == c.Platform && n.RootFilesystemUUID == d.Claim.RootFilesystemUUID && n.RootInode == d.Claim.RootInode && n.ProjectID == d.ProjectID && n.Device == d.Device && n.NamespaceInode == d.NamespaceInode && n.QuotaBytes == d.QuotaBytes && n.QuotaInodes == d.QuotaInodes
 }
 
 func (s *Server) preparePlatformInstallWriter(ctx context.Context, expected platformOperationLease) (platformWriterIntent, error) {

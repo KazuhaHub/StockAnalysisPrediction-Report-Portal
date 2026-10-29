@@ -18,19 +18,45 @@ import (
 // A private point-in-time admission snapshot, never a bearer grant or proof of
 // current native readiness. Consumers must check the native boundary and repeat
 // admission after IO before releasing any buffered response. Close on all paths.
-type platformManagedBackendAccess struct {
-	intent        platformBackendDeliveryIntent
+type platformBackendAccessIntent interface {
+	closePlatformBackendIdentity()
+	verifyPlatformBackendIdentity(int64) error
+}
+type platformBackendAccess[T platformBackendAccessIntent] struct {
+	intent        T
 	viewer        protocol.Viewer
 	account       platformActorAccount
 	policy, fence int64
 	activationID  string
 }
+type platformManagedBackendAccess = platformBackendAccess[platformBackendDeliveryIntent]
+type platformWritableBackendAccess = platformBackendAccess[platformWritableRegistrationIntent]
 
-func (a platformManagedBackendAccess) Close()           { a.intent.registration.Close() }
-func (platformManagedBackendAccess) String() string     { return "managed backend access (redacted)" }
-func (a platformManagedBackendAccess) GoString() string { return a.String() }
-func (platformManagedBackendAccess) MarshalJSON() ([]byte, error) {
+func (a platformBackendAccess[T]) Close()           { a.intent.closePlatformBackendIdentity() }
+func (platformBackendAccess[T]) String() string     { return "managed backend access (redacted)" }
+func (a platformBackendAccess[T]) GoString() string { return a.String() }
+func (platformBackendAccess[T]) MarshalJSON() ([]byte, error) {
 	return nil, errAppPlatformLaunchUnavailable
+}
+func (a *platformBackendAccess[T]) UnmarshalJSON([]byte) error {
+	a.Close()
+	*a = platformBackendAccess[T]{}
+	return errAppPlatformLaunchUnavailable
+}
+func (i platformBackendDeliveryIntent) closePlatformBackendIdentity() { i.registration.Close() }
+func (i platformBackendDeliveryIntent) verifyPlatformBackendIdentity(now int64) error {
+	_, err := control.VerifyBackendRegistration(i.raw, i.signature, i.candidate.authority, now)
+	return err
+}
+func (i platformWritableRegistrationIntent) closePlatformBackendIdentity() { i.registration.Close() }
+func (i platformWritableRegistrationIntent) verifyPlatformBackendIdentity(now int64) error {
+	_, err := control.VerifyWritableBackendRegistration(i.raw, i.signature, i.start.writer.authority, now)
+	return err
+}
+
+type platformBackendHistoryBinding struct {
+	installation, activation, release, namespace, epoch, readiness string
+	format, fence, observed                                        int64
 }
 
 // No worker lease is manufactured or renewed here. Completed source operations
@@ -43,7 +69,21 @@ func (s *Server) preparePlatformManagedBackendAccess(ctx context.Context, sessio
 // The private optional callback may only perform bounded local cryptography or
 // reads. Its buffered output must not escape before the final checks/commit.
 func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session platformActorSession, installationID string, read func(platformManagedBackendAccess, []byte) error) (platformManagedBackendAccess, error) {
-	var zero platformManagedBackendAccess
+	return withPlatformBackendAccess(s, ctx, session, installationID, func(e migExec, b platformBackendHistoryBinding, r platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendDeliveryIntent, error) {
+		return s.loadPlatformManagedBackendHistory(e, b.installation, b.activation, b.release, b.namespace, b.epoch, b.format, b.fence, b.observed, b.readiness, r, seed, dek, now)
+	}, read)
+}
+func (s *Server) preparePlatformWritableBackendAccess(ctx context.Context, session platformActorSession, installationID string) (platformWritableBackendAccess, error) {
+	return s.withPlatformWritableBackendAccess(ctx, session, installationID, nil)
+}
+func (s *Server) withPlatformWritableBackendAccess(ctx context.Context, session platformActorSession, installationID string, read func(platformWritableBackendAccess, []byte) error) (platformWritableBackendAccess, error) {
+	return withPlatformBackendAccess(s, ctx, session, installationID, s.loadPlatformWritableBackendHistory, read)
+}
+
+// Both families share the current account/OU/audience/trust transaction. Their
+// independently checked execution histories and signed domains remain distinct.
+func withPlatformBackendAccess[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error), read func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
+	var zero platformBackendAccess[T]
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
 	}
@@ -110,7 +150,7 @@ func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session p
 	if err := e.queryRow(`SELECT id,release_sha256,data_namespace_id,generation,policy_revision,data_format,observed_ms,readiness_evidence FROM app_platform_activations WHERE installation_id=? AND state='active'`+lock, installationID).Scan(&activation, &release, &namespace, &ag, &ap, &format, &observed, &readiness); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if !platformValidUUID(activation) || !platformValidUUID(namespace) || !platformValidSHA(release) || ag != generation || ap != policy || format < 1 || observed < 0 || observed > now {
+	if !platformValidUUID(activation) || !platformValidUUID(namespace) || !platformValidSHA(release) || ag != generation || ap != policy || format < 1 || observed < 0 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	var unsafe int
@@ -131,21 +171,21 @@ func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session p
 	if err != nil || verified.appID != appID || verified.publisherID != publisher {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	intent, err := s.loadPlatformManagedBackendHistory(e, installationID, activation, release, namespace, epoch, format, fence, observed, readiness, runtime, seed, dek, now)
+	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, err
 	}
 	failed := true
 	defer func() {
 		if failed {
-			intent.registration.Close()
+			intent.closePlatformBackendIdentity()
 		}
 	}()
 	viewer, err := s.platformViewerIdentity(e, account, installationID, appID)
 	if err != nil {
 		return zero, err
 	}
-	result := platformManagedBackendAccess{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
+	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
 	if read != nil {
 		if err := read(result, seed); err != nil {
 			return zero, err
@@ -165,7 +205,7 @@ func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session p
 	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE (k='app_platform_controller_epoch' AND v=?) OR (k='app_platform_restore_paused' AND v='0')`, epoch).Scan(&markers); err != nil || markers != 2 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if _, err := control.VerifyBackendRegistration(intent.raw, intent.signature, intent.candidate.authority, time.Now().UnixMilli()); err != nil {
+	if err := intent.verifyPlatformBackendIdentity(time.Now().UnixMilli()); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -180,7 +220,7 @@ func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session p
 // session, audience, trust, runtime and installation checks and transaction locks.
 func (s *Server) loadPlatformManagedBackendHistory(e migExec, installation, activation, release, namespace, epoch string, format, fence, observed int64, readiness string, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendDeliveryIntent, error) {
 	var zero platformBackendDeliveryIntent
-	if len(seed) != ed25519.SeedSize {
+	if len(seed) != ed25519.SeedSize || observed > now {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	source := platformManagedSource{installationID: installation, epoch: epoch, generation: 1, fence: fence}
