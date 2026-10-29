@@ -331,6 +331,13 @@ def main(args):
                     report["native_writable_handshake_file_replacement_refused"] = True
                     report["native_writable_handshake_preserves_journal"] = True
                     report["native_writable_stopped_handshake_refused"] = True
+                    for marker in ("NATIVE_WRITABLE_REQUEST_VERIFIED", "NATIVE_WRITABLE_RECOVERED_REQUEST_VERIFIED", "NATIVE_WRITABLE_REQUEST_FILE_REPLACEMENT_REFUSED", "NATIVE_WRITABLE_STOPPED_REQUEST_REFUSED"):
+                        if marker not in started.stdout:
+                            raise RuntimeError("actual writable request acceptance did not execute: " + marker)
+                    report["native_writable_request_verified"] = True
+                    report["native_writable_recovered_request_verified"] = True
+                    report["native_writable_request_file_replacement_refused"] = True
+                    report["native_writable_stopped_request_refused"] = True
                     if len(args) in (9, 11):
                         handshake_env = dict(writer_journal_env, APP_WRITABLE_HANDSHAKE_TRANSPORT="1", APP_CANDIDATE_NATIVE_IMAGE=ready_image)
                         handshake = subprocess.run([args[8], "-test.run=^TestNativeWritableHandshakeTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=handshake_env, capture_output=True, text=True, timeout=70)
@@ -398,6 +405,11 @@ def main(args):
                                 raise RuntimeError("Portal writable backend boot acceptance did not execute: " + marker)
                         report["native_portal_writable_backend_boot_verified"] = True
                         report["native_portal_writable_backend_boot_current_source_refused"] = True
+                        for marker in ("WRITABLE_BACKEND_REQUEST_RELAY_VERIFIED", "WRITABLE_BACKEND_REQUEST_UNCERTAIN_NO_RETRY"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Writable backend request acceptance did not execute: " + marker)
+                        report["native_writable_backend_request_relay_verified"] = True
+                        report["native_writable_backend_request_uncertain_no_retry"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

@@ -1969,3 +1969,34 @@ daemon workflow 40455635317 passed on the functional source as well.
   activation/worker, positive expired-unknown recovery through Portal, physical
   lifecycle, broker, SDK/reference apps and full P00–P14 acceptance remain
   incomplete. Production, real credentials, Status, SDK freeze and beta unchanged.
+
+- Added the distinct signed writable backend-request family, physical fixed-socket
+  relay, current journal pre/postflight and protected root/controller frames.
+  Reuse existing bounded HTTP/structural-assertion checks without converting
+  writable authority into readonly values. Added refusal/copy/provenance tests
+  plus actual normal/recovered file-inode/stopped-process and cross-UID relay
+  acceptance. The disposable backend now counts route entries and can close
+  after one accepted write to prove the relay does not retry uncertain requests.
+  See [writable request protocol](111-writable-backend-request.md). Fresh Linux
+  results pending. Current Portal viewer/OU access, activation/worker and full
+  lifecycle/broker/SDK/reference-app acceptance remain incomplete; production,
+  credentials, Status, SDK freeze and beta configuration unchanged.
+
+- Writable request functional source `8e8381cbfc1254499da79da57cc4abeba84a7f86`
+  passed quota workflow 40822546730/job 123278068950. All six new actual normal/
+  recovered request, replaced-file/stopped-process refusal, cross-UID relay and
+  uncertain-write/no-retry flags, prior native checks, full quota witness and
+  owned cleanup are true. Registry cleanup passed. Linux control/transport/driver
+  race passed in 2.722s/8.428s/3.016s. Runner workflow 40822546716/job 123278070756
+  passed full runner race (journal 239.921s, transport 8.961s), closed policy,
+  identity isolation and Portal confirmation. General workflow 40822546671 passed
+  app race shards/aggregate, web and Docker checks; shard 1/job 123278071591 ran
+  full journal race 158.203s and Portal subset 96.450s. Go job 123278068627 passed
+  explicit SQLite/PostgreSQL contracts in 78.391s plus build/vet/staticcheck,
+  then failed existing x/net GO-2026-6866/6860 findings and skipped ordinary full
+  tests. Local control/journal/driver focused race, dual-arch test builds,
+  Linux vet/staticcheck and Python14 passed. See [writable request
+  acceptance](111-writable-backend-request.md). Current Portal writable viewer/OU
+  access and post-IO authorization, activation/worker, recovery/physical lifecycle,
+  broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
+  Production, real credentials, Status, SDK freeze and beta unchanged.

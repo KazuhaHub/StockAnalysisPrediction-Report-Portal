@@ -121,9 +121,11 @@ type fixtureRequestState struct {
 	keyID    string
 	verifier *protocol.Verifier
 	count    atomic.Int64
+	calls    atomic.Int64
 }
 
 func (s *fixtureRequestState) answerRequest(w http.ResponseWriter, r *http.Request, bootID string) {
+	s.calls.Add(1)
 	w.Header().Set("Content-Type", "application/json")
 	refuse := func() { w.WriteHeader(http.StatusForbidden); w.Write([]byte(`{"error":"forbidden"}`)) }
 	body, err := io.ReadAll(io.LimitReader(r.Body, appplatform.MaxBackendRequestBody+1))
@@ -170,10 +172,21 @@ func (s *fixtureRequestState) answerRequest(w http.ResponseWriter, r *http.Reque
 	}
 	if r.Method == http.MethodPost {
 		s.count.Add(1)
+		if r.URL.RawQuery == "disconnect=1" {
+			if hijacker, ok := w.(http.Hijacker); ok {
+				conn, _, err := hijacker.Hijack()
+				if err == nil {
+					conn.Close()
+					return
+				}
+			}
+			panic(http.ErrAbortHandler)
+		}
 	}
 	w.Header().Set("Set-Cookie", "must-not-escape=1")
 	json.NewEncoder(w).Encode(struct {
 		Count  int64           `json:"count"`
+		Calls  int64           `json:"calls"`
 		Viewer protocol.Viewer `json:"viewer"`
-	}{s.count.Load(), claims.Viewer})
+	}{s.count.Load(), s.calls.Load(), claims.Viewer})
 }
