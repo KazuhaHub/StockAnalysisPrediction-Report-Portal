@@ -171,8 +171,41 @@ Required markers/report flags are:
 | `PORTAL_WRITABLE_CURRENT_OU_REQUEST_VERIFIED` | `native_portal_writable_current_ou_request_verified` |
 | `PORTAL_WRITABLE_POST_IO_OU_REVOKED` | `native_portal_writable_post_io_ou_revoked` |
 
-Fresh actual Linux evidence is pending. Synthetic source/metadata tests do not
-prove activation, native business execution or post-IO revocation behavior.
+Functional source `d404241292776f114d277c2c825861753581ca67` passed
+[quota workflow 40826884869](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40826884869),
+job `123291856129`. Checkout explicitly contains that source and parent
+`47db445ef668fd9d48f3ed1586b48f7ba66b8708`. All three new actual activation/
+current-OU/post-IO revocation flags are true, as are prior native checks, full
+Portal quota witness and `owned_resources_cleaned`. Registry cleanup passed.
+`execution_ready=false` remains deliberate: the platform's browser/worker and
+full release gates are still incomplete.
+
+The first database run exposed a PostgreSQL fault-injection trigger left behind
+by the preceding registration test process. It blocked subsequent fixture
+registration attempts. The registration audit case now drops its own trigger and
+function in test cleanup; the two database steps then both passed on a fresh run.
+No production logic or storage validation was loosened to address that failure.
+
+[General workflow 40826884881](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40826884881)
+job `123291972286` explicitly passed the writer/start/readiness/registration/boot
+SQLite/PostgreSQL contracts in 57.776s, followed by new activation/current access
+and legacy readonly access cases in 24.764s. Both new PostgreSQL activation
+metadata/refusal and writable access/source/refusal suites ran and passed.
+Build, vet, full Linux staticcheck, published market and arm64 numerical checks
+passed. Dependency scanning then reported the existing `golang.org/x/net@v0.60.0`
+GO-2026-6866 and GO-2026-6860 findings (reported fixed in v0.62.0), failing that
+Go job and skipping ordinary full tests. Dependencies are unchanged and that job
+is not classified as passing. Web tests/build/typecheck/lint, workflow lint and
+Docker font/smoke checks passed. All three app race shards and the aggregate passed. Shard 1/job `123291972471`
+ran full runner journal race in 162.297s and its Portal subset in 98.342s.
+No standalone daemon workflow was triggered by this Portal/fixture-only diff.
+
+Local focused writable activation/access/request and legacy readonly access race
+passed in 24.308s; targeted registration-refusal/source/metadata race after the
+fixture cleanup passed in 15.161s. Linux amd64/arm64 Portal test builds, Linux
+vet/staticcheck and Python14 passed. These results prove the actual development
+activation/private viewer path; they do not prove generic managed browser launch
+or the automatic writable installation worker.
 
 ## Remaining delivery work
 

@@ -2014,3 +2014,25 @@ daemon workflow 40455635317 passed on the functional source as well.
   evidence pending. Managed browser launch/assets, worker/scheduler and remaining
   full lifecycle/broker/SDK/reference-app acceptance are incomplete. Production,
   credentials, Status, SDK freeze and beta configuration unchanged.
+
+- Writable activation/current viewer functional source
+  `d404241292776f114d277c2c825861753581ca67` passed quota workflow
+  40826884869/job 123291856129. Actual atomic activation/audit rollback, retained
+  native/writer/file identity, ordinary-user/ancestor-OU requests, reparent refusal
+  and post-IO membership revocation/no retry passed; all three new report flags,
+  prior native checks, full quota witness and owned cleanup are true. Registry
+  cleanup passed. Fixed a PostgreSQL registration audit fault trigger leaking
+  between test processes; cleanup now removes both trigger and function. General
+  workflow 40826884881/job 123291972286 passed both explicit database steps:
+  existing writable lifecycle contracts 57.776s; new activation/access and legacy
+  access contracts 24.764s. Build/vet/staticcheck, all app race shards/aggregate,
+  web and Docker checks passed. Shard 1/job 123291972471 ran full journal race
+  162.297s and Portal subset 98.342s. Go job still failed existing x/net
+  GO-2026-6866/6860 findings and skipped ordinary full tests. Local focused race
+  24.308s, cleanup-focused race 15.161s, dual-arch Linux builds, Linux
+  vet/staticcheck and Python14 passed. No standalone daemon workflow was triggered
+  by this Portal/fixture-only diff. See [activation/access
+  acceptance](112-writable-activation-access.md). Managed browser launch/assets,
+  writable worker/scheduler, recovery/physical lifecycle, broker, SDK/reference
+  apps and full P00–P14 acceptance remain incomplete. Production, real credentials,
+  Status, SDK freeze and beta unchanged.
