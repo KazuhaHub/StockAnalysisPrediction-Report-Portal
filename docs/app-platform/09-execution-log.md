@@ -15,7 +15,8 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
 | P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) and [signed data dispatch/bounded install driver](55-signed-data-dispatch-and-install-driver.md) and [opt-in background static scheduling](56-background-static-install-scheduler.md) and [runtime-free no-data frontend installation](57-runtime-free-frontend-installation.md) implemented; startup wiring, explicit fenced recovery/takeover, provider-backed static data, complete managed installer and browser market install flow remain |
 | P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; [document sizing](120-document-layout.md), [dirty navigation](121-unsaved-change-guard.md), [signed history](122-signed-route-navigation.md), [typed queries](123-typed-route-query.md) and [shared page actions](124-shared-page-actions.md) now have development/browser evidence; maintained v2 templates, persistent data/drafts, complete shell/focus/accessibility and full browser acceptance remain |
-| P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
+| P07 | In progress | [Exact denied snapshots](126-capability-snapshot-integrity.md) and [bounded HTTP executor](127-bounded-http-executor.md) implemented; actual reviewed grants, integrated authority/transport, vault and other providers remain unavailable |
+| P08..P14 | Incomplete | Authoring/template and other prerequisite work recorded below; neutral applications, full lifecycle, delivery, recovery and release acceptance remain open |
 
 ## First contract implementation
 
@@ -2255,3 +2256,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   execution_ready false. See
   [capability snapshot integrity](126-capability-snapshot-integrity.md).
   P07 adapters, future storage approvals and full P00–P14 remain open.
+
+
+- Added an internal real HTTPS capability executor with immutable host policy,
+  all-answer address filtering and pinned dial, normal TLS verification, no
+  redirects/proxies/credentials/replay, bounded body/header/time/concurrency and
+  authority checks before DNS, before dispatch and after buffering. Uncertain
+  results expose no data and cannot be retried automatically. It is not wired to
+  a production grant or app route; current providers remain declined. Tests use
+  real local TLS with private test seams and include negative policy, DNS, TLS,
+  revocation, response-limit and interruption cases. See
+  [bounded HTTP execution](127-bounded-http-executor.md). Broader runner/CI
+  evidence pending. P00–P14 remains incomplete; no storage or production changes.
