@@ -196,13 +196,6 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			stopServer()
 			commandPath := filepath.Join(childData, "candidate-command.json")
 			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
-			for _, stage := range []string{"ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"} {
-				marker := "PORTAL_WRITABLE_WORKER_" + stage
-				if !bytes.Contains(output.Bytes(), []byte(marker)) {
-					t.Fatal("Portal writable worker acceptance marker missing", marker, output.String())
-				}
-				t.Log(marker)
-			}
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := native.Close(); err != nil {
 				t.Error(err)
@@ -275,6 +268,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY", "PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_REGISTRATION_COMMITTED", "PORTAL_WRITABLE_REGISTRATION_RETAINED_IDENTITY", "PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_BACKEND_BOOT_VERIFIED", "PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED", "WRITABLE_BACKEND_REQUEST_RELAY_VERIFIED", "WRITABLE_BACKEND_REQUEST_UNCERTAIN_NO_RETRY", "PORTAL_WRITABLE_INSTALL_ACTIVATED", "PORTAL_WRITABLE_CURRENT_OU_REQUEST_VERIFIED", "PORTAL_WRITABLE_POST_IO_OU_REVOKED"} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatal("Portal writable acceptance marker missing", marker, output.String())
+			}
+			t.Log(marker)
+		}
+		for _, stage := range []string{"ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"} {
+			marker := "PORTAL_WRITABLE_WORKER_" + stage
+			if !bytes.Contains(output.Bytes(), []byte(marker)) {
+				t.Fatal("Portal writable worker acceptance marker missing", marker, output.String())
 			}
 			t.Log(marker)
 		}
