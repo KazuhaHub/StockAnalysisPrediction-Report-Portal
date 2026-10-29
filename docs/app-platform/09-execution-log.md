@@ -2268,3 +2268,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   revocation, response-limit and interruption cases. See
   [bounded HTTP execution](127-bounded-http-executor.md). Broader runner/CI
   evidence pending. P00–P14 remains incomplete; no storage or production changes.
+
+
+- Moved network policy and target validation into the side-effect-free platform
+  contract. Review/transport candidates can bind strict canonical 8 KiB records
+  with sorted path/method sets, whole-millisecond limits and exact-byte SHA-256;
+  the real HTTPS executor now consumes that same type and validator. Unknown,
+  ambiguous, oversized or noncanonical records refuse. This does not write
+  grants or change the currently declined-provider profile. Contract/executor
+  race tests, vet, Linux compilation and bounded fuzzing pass locally; exact CI
+  remains required. See [network policy contract](128-network-policy-contract.md).
+  Full P00–P14 delivery, authority adapters and production remain incomplete.

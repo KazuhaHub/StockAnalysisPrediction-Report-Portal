@@ -12,10 +12,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"slices"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 var (
@@ -29,15 +28,7 @@ var (
 // HTTPPolicy is an internal development policy, not a public wire format or a
 // stored grant. Exactly one public HTTPS origin is supported by this adapter.
 // Private-service rules and credential injection need separate authority adapters.
-type HTTPPolicy struct {
-	Origin        string
-	Paths         []string
-	Methods       []string
-	RequestBytes  int64
-	ResponseBytes int64
-	Deadline      time.Duration
-	Concurrency   int
-}
+type HTTPPolicy = appplatform.HTTPPolicy
 
 type HTTPRequest struct {
 	Method      string
@@ -70,33 +61,14 @@ type HTTP struct {
 // must be shared by all calls using its concurrency allocation. No production
 // route constructs this executor until grant review and dispatch wiring exist.
 func NewHTTP(p HTTPPolicy, authorize func(context.Context) error) (*HTTP, error) {
+	p, err := appplatform.NormalizeHTTPPolicy(p)
+	if err != nil || authorize == nil {
+		return nil, ErrDenied
+	}
 	u, err := url.Parse(p.Origin)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || !validHost(u.Hostname()) || u.Hostname() != strings.ToLower(u.Hostname()) || strings.Contains(p.Origin, "#") || p.Origin != "https://"+u.Host {
+	if err != nil {
 		return nil, ErrDenied
 	}
-	if port := u.Port(); port != "" {
-		n, e := strconv.Atoi(port)
-		if e != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port || n == 443 {
-			return nil, ErrDenied
-		}
-	} else if u.Host != u.Hostname() {
-		return nil, ErrDenied
-	}
-	if authorize == nil || p.RequestBytes < 1 || p.RequestBytes > 65536 || p.ResponseBytes < 1 || p.ResponseBytes > 1048576 || p.Deadline <= 0 || p.Deadline > 15*time.Second || p.Concurrency < 1 || p.Concurrency > 4 || len(p.Paths) < 1 || len(p.Paths) > 16 || len(p.Methods) < 1 || len(p.Methods) > 7 {
-		return nil, ErrDenied
-	}
-	for i, path := range p.Paths {
-		if !validPath(path) || (len(path) > 1 && strings.HasSuffix(path, "/")) || slices.Contains(p.Paths[:i], path) {
-			return nil, ErrDenied
-		}
-	}
-	for i, method := range p.Methods {
-		if !slices.Contains([]string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}, method) || slices.Contains(p.Methods[:i], method) {
-			return nil, ErrDenied
-		}
-	}
-	p.Paths = slices.Clone(p.Paths)
-	p.Methods = slices.Clone(p.Methods)
 	d := &net.Dialer{Timeout: 5 * time.Second}
 	return &HTTP{policy: p, origin: u, authorize: authorize, slots: make(chan struct{}, p.Concurrency), lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
@@ -112,11 +84,10 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 		return zero, ErrUnavailable
 	}
 	// Validate before allocating a slot or invoking any external work.
-	if int64(len(input.Body)) > h.policy.RequestBytes || !slices.Contains(h.policy.Methods, input.Method) || !validHeader(input.Accept) || !validHeader(input.ContentType) {
+	if int64(len(input.Body)) > h.policy.RequestBytes || !validHeader(input.Accept) || !validHeader(input.ContentType) {
 		return zero, ErrDenied
 	}
-	u, err := url.Parse(input.URL)
-	if err != nil || len(input.URL) > 4096 || u.Scheme != h.origin.Scheme || u.Host != h.origin.Host || u.User != nil || u.Fragment != "" || strings.Contains(input.URL, "#") || u.Opaque != "" || u.RawPath != "" || !validPath(u.Path) || !h.pathAllowed(u.Path) {
+	if appplatform.ValidateHTTPPolicyTarget(h.policy, input.Method, input.URL) != nil {
 		return zero, ErrDenied
 	}
 	ctx, cancel := context.WithTimeout(parent, h.policy.Deadline)
@@ -203,15 +174,6 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body}, nil
 }
 
-func (h *HTTP) pathAllowed(path string) bool {
-	for _, prefix := range h.policy.Paths {
-		if prefix == "/" || path == prefix || strings.HasPrefix(path, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 func validHeader(s string) bool {
 	if len(s) > 256 {
 		return false
@@ -219,44 +181,6 @@ func validHeader(s string) bool {
 	for _, b := range []byte(s) {
 		if b < 32 || b > 126 {
 			return false
-		}
-	}
-	return true
-}
-func validHost(host string) bool {
-	if len(host) < 3 || len(host) > 253 || !strings.Contains(host, ".") || net.ParseIP(host) != nil {
-		return false
-	}
-	labels := strings.Split(host, ".")
-	for _, label := range labels {
-		if len(label) < 1 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, b := range []byte(label) {
-			if !(b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '-') {
-				return false
-			}
-		}
-	}
-	for _, b := range []byte(labels[len(labels)-1]) {
-		if b >= 'a' && b <= 'z' {
-			return true
-		}
-	}
-	return false
-}
-func validPath(path string) bool {
-	if len(path) < 1 || len(path) > 1024 || path[0] != '/' || strings.Contains(path, "//") {
-		return false
-	}
-	for _, segment := range strings.Split(path, "/") {
-		if segment == "." || segment == ".." {
-			return false
-		}
-		for _, b := range []byte(segment) {
-			if !(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.ContainsRune("._~-", rune(b))) {
-				return false
-			}
 		}
 	}
 	return true
