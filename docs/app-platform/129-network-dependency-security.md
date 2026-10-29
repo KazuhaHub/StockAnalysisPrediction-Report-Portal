@@ -62,7 +62,14 @@ imports/features can change reachability and must run the same gate. The tool
 and database are external inputs; repeat the check at release rather than treating
 this result as a permanent certificate.
 
-The full local ordinary Go run is pending. Local PostgreSQL is unavailable;
+The first full ordinary local run reached every package and exposed an existing
+missing-locale failure in `TestEveryErrorCodeIsTranslatedInEveryLanguage`:
+`err.app_platform_runtime_unavailable` was absent from all three bundles. The
+previously skipped gate had hidden this regression. The change also supplies
+`err.app_platform_request_uncertain` text for the backend's explicit uncertain
+response, advising result verification before a deliberate resubmission. Runtime
+logic/error codes and retry behavior are unchanged. A complete local rerun is
+required after this small localization fix. Local PostgreSQL is unavailable;
 its skipped cases must not be counted as passed. General Linux CI must run its
 PostgreSQL-backed ordinary full Go test step after govulncheck, in addition to
 existing pre-gate groups. All selected race/web/Docker checks and disposable

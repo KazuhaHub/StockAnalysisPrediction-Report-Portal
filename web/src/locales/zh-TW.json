@@ -891,6 +891,8 @@
   "err.app_platform_operation_missing": "找不到此應用操作。",
   "err.app_platform_operation_failed": "應用操作失敗，需要管理員審核。",
   "err.app_platform_busy": "應用驗證忙碌中，請稍後重試。",
+  "err.app_platform_runtime_unavailable": "應用執行環境暫時無法使用。",
+  "err.app_platform_request_uncertain": "無法確認應用請求的結果，請先檢查操作結果，再決定是否重新提交。",
   "err.install_lease_recovery_required": "安裝曾中斷，需要復原審核。",
   "err.install_authority_review_required": "安裝授權已變更，需要管理員審核。",
   "err.install_execution_review_required": "安裝未能完成，需要管理員審核。",

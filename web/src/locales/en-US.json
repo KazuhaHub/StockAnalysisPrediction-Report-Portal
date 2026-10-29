@@ -891,6 +891,8 @@
   "err.app_platform_operation_missing": "This application operation was not found.",
   "err.app_platform_operation_failed": "The application operation failed. Administrator review is required.",
   "err.app_platform_busy": "Application verification is busy. Try again shortly.",
+  "err.app_platform_runtime_unavailable": "The application runtime is temporarily unavailable.",
+  "err.app_platform_request_uncertain": "The application request outcome could not be confirmed. Check its result before submitting again.",
   "err.install_lease_recovery_required": "The interrupted installation requires recovery review.",
   "err.install_authority_review_required": "Installation authority changed. Administrator review is required.",
   "err.install_execution_review_required": "The installation could not finish. Administrator review is required.",
