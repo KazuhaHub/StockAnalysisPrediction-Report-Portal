@@ -117,6 +117,7 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
         run: |
+          npm ci --prefix web
           npm ci --prefix .sdk-browser-apps
           npm ci --prefix .sdk-browser-apps/apps/status/tests
           cd .sdk-browser-apps/apps/status/tests

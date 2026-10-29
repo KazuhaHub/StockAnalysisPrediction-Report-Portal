@@ -30,7 +30,7 @@ source/common-test pins exactly match the Portal checkout before building.
 Updating the protocol requires an explicit new reviewed Apps pin; the fixture
 never downloads a moving default branch as executable SDK input.
 
-The fixture reuses the existing Node 24, Apps workspace lockfile and Apps Status
+The fixture reuses the existing Node 24, Portal web lockfile, Apps workspace lockfile and Apps Status
 browser-test lockfile (Playwright 1.64.1). No new dependency/version is introduced.
 Chromium and its system dependencies are installed only on the disposable CI
 worker. `build.py` compiles real Portal AppFrameV2 and real SDK AppRoot as classic
@@ -116,3 +116,9 @@ capability broker, autosize/navigation/drafts/accessibility and D5/D6 remain
 outstanding. Even a passing request-chain test does not complete P00–P14 or
 approve production startup. The deployed Portal and server beta configuration
 remain unchanged.
+
+First CI run 40846011428 stopped during the host build because only Apps frontend
+dependencies were installed; the existing local Portal web dependencies had
+masked the missing clean-worker installation. No native browser assertion ran.
+The follow-up installs Portal web from its existing lockfile before compiling the
+real host; it does not externalize the missing module or substitute a mock host.
