@@ -164,8 +164,38 @@ Required markers/report flags include:
 | `WRITABLE_BACKEND_REQUEST_RELAY_VERIFIED` | `native_writable_backend_request_relay_verified` |
 | `WRITABLE_BACKEND_REQUEST_UNCERTAIN_NO_RETRY` | `native_writable_backend_request_uncertain_no_retry` |
 
-Fresh Linux evidence is pending. Earlier readonly exchange, writable handshake or
-metadata/frame tests alone do not prove this complete writable request path.
+Functional source `8e8381cbfc1254499da79da57cc4abeba84a7f86` passed
+[quota workflow 40822546730](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40822546730),
+job `123278068950`. Checkout explicitly merged that source into parent
+`dca04d56832efa5b99bb1dc07632e43e3a8e8da9`. All six new request report flags are
+true, as are prior native checks, full Portal quota witness and
+`owned_resources_cleaned`. Registry cleanup also passed. `execution_ready=false`
+remains intentional: this does not complete the product access/release gates.
+The workflow ran all Linux control, transport and driver race tests in 2.722s,
+8.428s and 3.016s respectively, including the new malformed-frame and provenance
+cases; no native success was replaced with simulated framing evidence.
+
+[Runner workflow 40822546716](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40822546716),
+job `123278070756`, passed full runner race (journal 239.921s; transport 8.961s),
+closed native policy, distinct controller/runner identity isolation and Portal
+confirmation through the root endpoint.
+
+[General workflow 40822546671](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40822546671)
+passed all app race shards/aggregate, web tests/build/typecheck/lint, workflow lint
+and Docker font/smoke checks. Shard 1/job `123278071591` ran full journal race in
+158.203s and its Portal subset in 96.450s. Go job `123278068627` explicitly passed
+the SQLite/PostgreSQL writer/start/readiness/registration/boot contracts in
+78.391s, plus build, vet and staticcheck. It then failed the existing
+`golang.org/x/net@v0.60.0` GO-2026-6866 and GO-2026-6860 findings (reported fixed in
+v0.62.0), so its ordinary full test step was skipped. The Go job is not classified
+as passing; no dependency change is included.
+
+Local focused control race passed in 2.233s, journal race in 12.627s and driver
+race in 1.400s. Linux amd64/arm64 Portal, transport and journal test builds, Linux
+vet/staticcheck and Python14 passed. The ready backend fixture compiled locally;
+its actual Linux quota profile tests and execution ran in quota CI. These results
+prove the signed writable request subsystem; they do not substitute for the
+remaining Portal viewer/audience and activation integration.
 
 ## Remaining integration
 
