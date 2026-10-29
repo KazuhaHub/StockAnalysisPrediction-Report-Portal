@@ -110,3 +110,48 @@ not yet rendered an SDK-built business app in a browser. Full interactive browse
 acceptance, autosize/navigation/drafts/accessibility, complete marketplace
 install/update/uninstall/recovery, capability broker and D5/D6 remain outstanding.
 Server beta configuration, real credentials and deployed Status are unchanged.
+
+## Functional CI and browser follow-up
+
+Portal functional commit `80d5ecede6d51b016d6276f7fc274f4873772eb3` passed
+Linux quota run 40843143291 / job 123344119512, including the new authenticated
+availability-hint assertion before the required backend session/no-retry markers.
+The artifact at `/tmp/app-sdk-channel-evidence/project-quota-evidence.json`
+records both backend flags true and `execution_ready=false`.
+Apps functional commit `fef8ef7a4efd2da1aca96a4960dffaf6985bea85` passed every job
+in check run 40843217337, including shared frontend/root/template standards,
+maintained Status browser/backend/protocol checks and release-artifact builds.
+The release build jobs validate artifacts only; nothing was published.
+
+The existing local fixture was run with `--portal-http --launch-page` against
+these sources, using the real protected Portal launch/document endpoints,
+AppViewV2, AppFrameV2, preferences and SDK AppRoot. It uses disposable synthetic
+SQLite installation/session facts described in document 42; it does not create
+native managed storage or exercise a backend request in the browser.
+Only the browser plugin controlled an in-app localhost tab; no native screen
+control, real account, production server or credentials were accessed.
+
+Observed sequence:
+
+1. Fresh app rendered `en-US / UTC / 0` in the opaque sandbox.
+2. Child button changed to `en-US / UTC / 1`.
+3. Host simplified Chinese changed the title/back action and child to
+   `zh-CN / UTC / 1`; traditional Chinese changed them to `zh-TW / UTC / 1`.
+4. Host theme toggle preserved the same child counter and source. The iframe
+   retained `sandbox="allow-scripts"`; no same-origin exception was added.
+5. Refresh reauthorized/reloaded the app and negotiated `2-dev.2` again;
+   persisted host language remained traditional Chinese, while local child
+   counter restarted at zero.
+
+A browser screenshot was saved as `app-sdk-channel-browser.jpg` in the local
+visualization output folder. This is a single rendered-state record, not proof
+of every paint or absence of all white flashes. The temporary tab was closed;
+the fixture exited successfully through its stop path and its temporary directory
+was removed. There was no production UI change.
+
+An additional Apps integration test composes the real React root and real shared
+MessagePort channel under StrictMode. It proves the initial read waits for ready,
+a locale update does not repeat that read, and a button performs one explicit
+write through the supplied test dispatcher. SDK tests now pass 192 locally with
+workspace typechecks. The test dispatcher is not a native/backend authority
+attestation. The complete SDK-browser-native-backend chain remains unverified.
