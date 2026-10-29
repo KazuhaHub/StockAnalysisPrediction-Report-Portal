@@ -18,6 +18,9 @@ import (
 type platformWriterIntent struct {
 	namespaceID, resourceID, effectID                                                                                                string
 	dataCreated, dataUpdated, namespaceCreated, namespaceUpdated, namespaceRevision, effectCreated, effectUpdated, activationCreated int64
+	activationUpdated                                                                                                                int64
+	activationReadiness                                                                                                              string
+	activationObserved                                                                                                               sql.NullInt64
 	runtime                                                                                                                          platformRuntimeRegistration
 	authority                                                                                                                        control.Authority
 	command                                                                                                                          control.DataWriterCommand
@@ -42,9 +45,15 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 // Only the writable start loader consumes this extended source. It independently
 // validates the exact sole start effect before returning or committing anything.
 func loadPlatformWriterIntentMode(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, withStart bool) (platformWriterIntent, bool, error) {
+	return loadPlatformWriterIntentState(e, lease, runtime, seed, now, create, withStart, false)
+}
+
+// Readiness continuation checks the exact applied start and canonical readiness
+// independently; initial writer/start callers retain their original empty row.
+func loadPlatformWriterIntentState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, withStart, withReadiness bool) (platformWriterIntent, bool, error) {
 	var zero, result platformWriterIntent
 	profile, err := platformInstallProfileInTransaction(e, lease.id)
-	if err != nil || profile != platformWritableInstallFormat || (!validPlatformWriterStage(lease) && !(withStart && validPlatformWritableProbeStage(lease))) {
+	if err != nil || profile != platformWritableInstallFormat || (!validPlatformWriterStage(lease) && !(withStart && (validPlatformWritableProbeStage(lease) || (withReadiness && validPlatformWritableActivateStage(lease))))) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	target, err := platformManagedTargetForOperation(e, lease.id)
@@ -126,6 +135,7 @@ func loadPlatformWriterIntentMode(e migExec, lease platformOperationLease, runti
 			return zero, false, err
 		}
 		result.effectCreated, result.effectUpdated, result.activationCreated = now, now, now
+		result.activationUpdated, result.activationReadiness = now, "{}"
 		result.effectID, err = platformNewUUID()
 		if err != nil {
 			return zero, false, err
@@ -140,9 +150,17 @@ func loadPlatformWriterIntentMode(e migExec, lease platformOperationLease, runti
 		if err := e.queryRow(`SELECT id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms FROM app_platform_activations WHERE installation_id=?`, lease.installationID).Scan(&result.resourceID, &storedRelease, &generation, &policy, &namespace, &format, &state, &readiness, &observedAt, &created, &updated); err != nil {
 			return zero, false, err
 		}
-		if !platformValidUUID(result.resourceID) || storedRelease != release || namespace != result.namespaceID || generation != 1 || policy != 1 || format != schema || state != "candidate" || readiness != "{}" || observedAt.Valid || created < 0 || updated != created || created > now {
+		if !platformValidUUID(result.resourceID) || storedRelease != release || namespace != result.namespaceID || generation != 1 || policy != 1 || format != schema || state != "candidate" || created < 0 || updated < created || updated > now {
 			return zero, false, errAppPlatformStageEvidence
 		}
+		if withReadiness && validPlatformWritableActivateStage(lease) {
+			if readiness == "{}" || !observedAt.Valid {
+				return zero, false, errAppPlatformStageEvidence
+			}
+		} else if readiness != "{}" || observedAt.Valid || updated != created {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		result.activationUpdated, result.activationReadiness, result.activationObserved = updated, readiness, observedAt
 		result.activationCreated = created
 		if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms FROM app_platform_operation_effects WHERE operation_id=? AND stage='prepare_data' AND effect_number=2`, lease.id).Scan(&result.effectID, &kind, &digest, &runtimeID, &epoch, &admitted, &observed, &state, &receipt, &created, &updated); err != nil {
 			return zero, false, err
@@ -300,7 +318,7 @@ func (s *Server) preparePlatformInstallWriter(ctx context.Context, expected plat
 	return result, nil
 }
 func samePlatformWriterIntent(a, b platformWriterIntent) bool {
-	return a.namespaceID == b.namespaceID && a.resourceID == b.resourceID && a.effectID == b.effectID && samePlatformWriterCommand(a.command, b.command) && a.data == b.data && a.dataSHA == b.dataSHA && a.dataCreated == b.dataCreated && a.namespaceCreated == b.namespaceCreated && a.dataUpdated == b.dataUpdated && a.namespaceUpdated == b.namespaceUpdated && a.namespaceRevision == b.namespaceRevision && a.effectCreated == b.effectCreated && a.effectUpdated == b.effectUpdated && a.activationCreated == b.activationCreated && a.applied == b.applied && a.receipt == b.receipt && samePlatformManagedRuntime(a.runtime, b.runtime) && bytes.Equal(a.descriptor, b.descriptor)
+	return a.namespaceID == b.namespaceID && a.resourceID == b.resourceID && a.effectID == b.effectID && samePlatformWriterCommand(a.command, b.command) && a.data == b.data && a.dataSHA == b.dataSHA && a.dataCreated == b.dataCreated && a.namespaceCreated == b.namespaceCreated && a.dataUpdated == b.dataUpdated && a.namespaceUpdated == b.namespaceUpdated && a.namespaceRevision == b.namespaceRevision && a.effectCreated == b.effectCreated && a.effectUpdated == b.effectUpdated && a.activationCreated == b.activationCreated && a.activationUpdated == b.activationUpdated && a.activationReadiness == b.activationReadiness && a.activationObserved == b.activationObserved && a.applied == b.applied && a.receipt == b.receipt && samePlatformManagedRuntime(a.runtime, b.runtime) && bytes.Equal(a.descriptor, b.descriptor)
 }
 
 func samePlatformWriterCommand(a, b control.DataWriterCommand) bool {

@@ -1899,3 +1899,33 @@ daemon workflow 40455635317 passed on the functional source as well.
   runner recovery through Portal, physical lifecycle, broker, SDK/reference apps
   and full P00–P14 acceptance remain incomplete. Production, credentials, Status,
   SDK freeze and beta unchanged.
+
+- Added Portal writable readiness and activate-stage fresh refresh using the
+  existing authenticated concrete runner probe. Separate continuation validates
+  canonical applied process/history while initial writer/start readers keep
+  empty-readiness scope. Pin candidate metadata across IO; require exact current
+  source/authority and a fresh opaque proof; atomically update readiness and
+  probe-to-activate transition, or refresh only the observed candidate. Added SQL
+  source/refusal cases and actual non-root Portal/root fixture coverage for audit
+  rollback, expired-proof refusal, historical-source/fresh-probe refresh and
+  runtime disablement after native IO. See [writable readiness](109-portal-writable-readiness.md).
+  Fresh Linux results pending. Registration/boot/viewer/activation/worker and
+  remaining full platform acceptance are incomplete. Production, credentials,
+  Status, public SDK freeze and beta unchanged.
+
+- Portal writable readiness source `f4d8ebd661a5eb5496d225c92167a6d63bde6b4f`
+  passed quota workflow 40818206784/job 123264206750. All three new readiness
+  advancement/refresh/current-source refusal flags, prior native checks, full
+  Portal quota witness and owned cleanup passed; registry cleanup also passed.
+  Explicit SQLite/PostgreSQL writer/start/readiness contracts passed in 47.781s.
+  Local focused race 28.534s and platform/managed race 156.795s, dual-arch Linux
+  builds, vet/staticcheck and Python14 passed. General workflow 40818206640 passed
+  all race shards/aggregate, web and Docker checks. Shard 1/job 123264206743 ran
+  full journal race 233.690s and Portal subset 151.251s. Go job 123264206965 still
+  failed existing x/net GO-2026-6866/6860 dependency findings after focused DB
+  tests/staticcheck; ordinary full test step was skipped. No standalone daemon
+  workflow was triggered by this Portal/fixture-only diff. See [readiness
+  acceptance](109-portal-writable-readiness.md). Registration/boot/viewer/activation/
+  worker, full recovery/physical lifecycle, broker, SDK/reference apps and full
+  P00–P14 acceptance remain incomplete. Production, real credentials, Status,
+  SDK freeze and beta configuration remain unchanged.
