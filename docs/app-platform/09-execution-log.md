@@ -2395,3 +2395,10 @@ daemon workflow 40455635317 passed on the functional source as well.
   review and private-use enforcement. Driver-paired tests and focused CI group
   cover these boundaries; exact PostgreSQL CI remains required. See
   [credential implementation](136-credential-schema-and-custody.md).
+
+- Added a bounded closed canonical codec for the approved secret-binding policy
+  shape, matching HTTP operations to the exact current network-policy digest.
+  It rejects configuration/value injection and keeps representable raw_read
+  unavailable to HTTP callers. Parsing is not grant admission or credential use;
+  exact permission review/current SQL resolution and private use remain pending.
+  See [binding policy](137-secret-binding-policy.md).
