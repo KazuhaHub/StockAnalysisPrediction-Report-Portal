@@ -14,7 +14,7 @@ export interface AppFrameV2Props {
   presentation: BridgePresentation
   capabilities: readonly string[]
   backendAvailable?: boolean
-  // Supplied by the host layout. Automatic document sizing is not implemented.
+  // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
 function safeSource(source: string, binding: BridgeBinding): boolean {
@@ -49,10 +49,15 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
   const latest = useRef(presentation)
   latest.current = presentation
   const [ready, setReady] = useState(false)
+  const readyRef = useRef(false)
+  readyRef.current = ready
+  const [documentHeight, setDocumentHeight] = useState<number | null>(null)
+  const measureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const close = useCallback(() => {
     clearTimeout(assetTimer.current)
+    clearTimeout(measureTimer.current)
     epoch.current++
     session.current?.close()
     session.current = null
@@ -61,11 +66,13 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
     if (!live.current) return
     close()
     setReady(false)
+    setDocumentHeight(null)
     setFailed(true)
   }, [close])
   function loaded() {
     close()
     setReady(false)
+    setDocumentHeight(null)
     if (!frame.current?.contentWindow) { fail(); return }
     const generation = epoch.current
     try { session.current = createBridgeHost({
@@ -75,7 +82,14 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       presentation: latest.current,
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
-      onReady: () => { if (live.current && epoch.current === generation) setReady(true) },
+      onReady: () => { if (live.current && epoch.current === generation) {
+        setReady(true)
+        if (latest.current.layout === 'document') measureTimer.current = setTimeout(fail, BRIDGE_DEADLINE_MS)
+      } },
+      onDocumentHeight: value => { if (live.current && epoch.current === generation) {
+        clearTimeout(measureTimer.current)
+        setDocumentHeight(Math.max(64, value))
+      } },
       onFailure: () => { if (live.current && epoch.current === generation) fail() },
     }) } catch { fail() }
   }
@@ -90,9 +104,17 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
   useLayoutEffect(() => {
     if (session.current && !session.current.updatePresentation(presentation)) fail()
   }, [presentation, fail])
+  const layout = presentation.layout
+  useLayoutEffect(() => {
+    setDocumentHeight(null)
+    if (readyRef.current && layout === 'document') measureTimer.current = setTimeout(fail, BRIDGE_DEADLINE_MS)
+    return () => clearTimeout(measureTimer.current)
+    // The initial ready transition starts its own deadline above.
+  }, [layout, fail])
+  const visible = ready && (layout === 'viewport' || documentHeight !== null)
   if (failed) return <Alert type="error" showIcon title={t('apps.v2Failed')} action={<Button onClick={() => { close(); setReady(false); setFailed(false); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
-  return <div className="portal-app-frame-v2" aria-busy={!ready} style={{ height, background: presentation.theme.colorBgLayout, color: presentation.theme.colorText, colorScheme: presentation.theme.dark ? 'dark' : 'light' }}>
-    <iframe key={attempt} ref={frame} src={source} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={loaded} aria-hidden={ready ? undefined : true} tabIndex={ready ? 0 : -1} style={{ visibility: ready ? 'visible' : 'hidden', border: 0, background: presentation.theme.colorBgLayout, colorScheme: presentation.theme.dark ? 'dark' : 'light' }} />
-    {!ready && <div className="portal-app-frame-v2-cover" role="status"><Spin aria-hidden="true" /><span>{t('apps.v2Loading')}</span></div>}
+  return <div className="portal-app-frame-v2" aria-busy={!visible} style={{ height: layout === 'document' ? documentHeight ?? height : height, background: presentation.theme.colorBgLayout, color: presentation.theme.colorText, colorScheme: presentation.theme.dark ? 'dark' : 'light' }}>
+    <iframe key={attempt} ref={frame} src={source} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={loaded} aria-hidden={visible ? undefined : true} tabIndex={visible ? 0 : -1} style={{ visibility: visible ? 'visible' : 'hidden', border: 0, background: presentation.theme.colorBgLayout, colorScheme: presentation.theme.dark ? 'dark' : 'light' }} />
+    {!visible && <div className="portal-app-frame-v2-cover" role="status"><Spin aria-hidden="true" /><span>{t('apps.v2Loading')}</span></div>}
   </div>
 }

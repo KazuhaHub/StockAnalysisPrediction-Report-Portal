@@ -24,6 +24,7 @@ import {Button,Space,Typography} from 'antd';
 import {AppRoot,useAppBackend,useAppPresentation} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const backend=useAppBackend(),{presentation}=useAppPresentation();
+ const [expanded,setExpanded]=useState(false);
  const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
  async function run(method:string,path:string){const id=++sequence.current;setResult({id,text:'pending'});setBusy(true);try{
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
@@ -31,6 +32,8 @@ function Fixture(){
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="locale">{presentation.locale}</Typography.Text>
+ <Button onClick={()=>setExpanded(v=>!v)}>Toggle long content</Button>
+ {expanded&&<div data-testid="long-content" style={{height:3000}}>Long document content</div>}
  <Button disabled={!backend.ready||busy} onClick={()=>run('GET','/v1/echo')}>Read backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo')}>Write backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo?disconnect=1')}>Disconnect write</Button>

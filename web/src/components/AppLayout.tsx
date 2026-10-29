@@ -646,7 +646,7 @@ function AppShell() {
           width: '100%',
           margin: '0 auto',
           // Chat fills the remaining viewport height and owns its own (single) scroll.
-          ...(boundedSurface ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' } : {}),
+          ...(boundedSurface ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: onAppV2 ? 'auto' : 'hidden' } : {}),
         }}
       >
         {/* Keyed by suspenseKey (above) so a cross-page navigation to a not-yet-loaded chunk shows the

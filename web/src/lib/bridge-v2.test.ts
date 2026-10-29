@@ -384,6 +384,111 @@ test("a backend timeout is uncertain, cancels native work and does not retry", a
   expect(client.state()).toBe("ready");
 });
 
+test("document measurements are bound, coalesced and can shrink without reloading", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    height = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onDocumentHeight: height,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  for (const value of [-1, NaN, Infinity, 100001, 1.5])
+    expect(client.reportDocumentHeight(value)).toBe(false);
+  expect(client.reportDocumentHeight(100000)).toBe(true);
+  await vi.waitFor(() => expect(height).toHaveBeenLastCalledWith(100000));
+  for (let i = 0; i < 100; i++) client.reportDocumentHeight(500 + i);
+  await vi.waitFor(() => expect(height).toHaveBeenLastCalledWith(599));
+  expect(height).toHaveBeenCalledTimes(2);
+  client.reportDocumentHeight(0);
+  await vi.waitFor(() => expect(height).toHaveBeenLastCalledWith(0));
+  client.close();
+  expect(client.reportDocumentHeight(200)).toBe(false);
+});
+
+test("viewport mode cannot size the host", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    height = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: { ...presentation, layout: "viewport" },
+    capabilities: [],
+    onDocumentHeight: height,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  expect(client.reportDocumentHeight(500)).toBe(false);
+  expect(height).not.toHaveBeenCalled();
+});
+
+test("host refuses malicious height and ignores old generation measurements", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    height = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onDocumentHeight: height,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const message = {
+    ...acknowledgement(init),
+    type: "layout.measure",
+    revision: "1",
+    presentationRevision: "1",
+    height: 500,
+  };
+  port.postMessage({ ...message, generation: "2" });
+  client.reportDocumentHeight(100);
+  await vi.waitFor(() => expect(height).toHaveBeenLastCalledWith(100));
+  expect(height).toHaveBeenCalledOnce();
+  port.postMessage({ ...message, revision: "2", height: Infinity });
+  await vi.waitFor(() => expect(host.state()).toBe("failed"));
+  expect(height).toHaveBeenCalledOnce();
+});
+
 test("coalesced presentation updates wait for latest application before reveal", async () => {
   const w = hostOnly();
   let finish!: () => void;
