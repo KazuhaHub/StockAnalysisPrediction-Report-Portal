@@ -90,6 +90,10 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
+      - name: Writable application review and writer storage
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime)$'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:

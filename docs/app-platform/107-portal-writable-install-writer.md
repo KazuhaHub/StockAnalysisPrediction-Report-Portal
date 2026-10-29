@@ -113,7 +113,11 @@ Repository tests exercise stable IDs/digests, bounded signed deadlines, current
 runtime/key/admin/trust/lease/epoch/fence checks, namespace/source/resource/effect
 integrity, partial/extra history refusal, readonly/writable separation and zero
 proof refusal with dump equality. SQLite and PostgreSQL variants share the cases;
-PostgreSQL execution belongs to CI, not a local database. A profile codec test
+PostgreSQL execution belongs to CI, not a local database. A focused SQLite/
+PostgreSQL workflow step runs before vulnerability scanning: these tests do not
+match the existing name-based app race subset, and the ordinary test step can be
+skipped when a dependency scan fails. The focused step requires its existing
+service DSN and runs both database variants explicitly. A profile codec test
 preserves old omitted-field vectors and rejects unknown writable adapters.
 
 The existing disposable Linux Portal fixture now runs an additional actual
