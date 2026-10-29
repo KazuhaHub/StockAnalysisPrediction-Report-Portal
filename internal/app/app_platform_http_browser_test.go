@@ -55,7 +55,16 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, reader, id := platformFrontendBrowserInstallFixture(t, archive.Bytes())
+	var presentations []appplatform.Presentation
+	if _, err := os.Stat(filepath.Join(directory, "descriptor.json")); err == nil {
+		parsed, exact := templateCandidate(t, directory)
+		archive.Reset()
+		archive.Write(exact)
+		presentations = append(presentations, parsed.Manifest.Presentation)
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	s, reader, id := platformFrontendBrowserInstallFixture(t, archive.Bytes(), presentations...)
 	if zone := os.Getenv("APP_DOCUMENT_HTTP_NAMED_TIMEZONE"); zone != "" {
 		// Named timezone belongs only to this temporary fixture store.
 		if zone != "UTC" {
@@ -131,7 +140,7 @@ func TestPlatformHTTPBrowserFixture(t *testing.T) {
 	}
 }
 
-func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Server, platformActorSession, string) {
+func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte, presentations ...appplatform.Presentation) (*Server, platformActorSession, string) {
 	t.Helper()
 	s, actor, _ := platformInstallFixture(t, false)
 	reader := platformActivationReader(t, s, "frontend-browser-reader")
@@ -143,6 +152,12 @@ func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Serve
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
 	manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
+	if len(presentations) > 1 {
+		t.Fatal("only one signed presentation fixture may be supplied")
+	}
+	if len(presentations) == 1 {
+		manifest.Presentation = presentations[0]
+	}
 	manifest.Frontend.SHA256 = platformDigest(archive)
 	raw, err := json.Marshal(manifest)
 	if err != nil {

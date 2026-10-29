@@ -5,6 +5,8 @@ on:
       - 'internal/appplatform/contract/**'
       - 'internal/appplatform/descriptor*'
       - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
       - 'web/src/lib/bridge-v2*'
       - 'web/src/lib/route-query-v2*'
       - 'web/src/lib/page-v2*'
@@ -61,6 +63,8 @@ on:
       - 'internal/appplatform/contract/**'
       - 'internal/appplatform/descriptor*'
       - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
       - 'web/src/lib/bridge-v2*'
       - 'web/src/lib/route-query-v2*'
       - 'web/src/lib/page-v2*'
@@ -129,7 +133,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: a4c6938618b00c4c7db768f2271229436b321051
+          ref: e7d12a609b1e872f607069e1b5b418e4751fd1ee
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -140,11 +144,14 @@ jobs:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
         run: |
           npm ci --prefix web
+          npm run build --prefix web
           npm ci --prefix .sdk-browser-apps
           npm ci --prefix .sdk-browser-apps/apps/status/tests
           cd .sdk-browser-apps/apps/status/tests
           npx playwright install --with-deps chromium
           cd "$GITHUB_WORKSPACE"
+          python3 .sdk-browser-apps/scripts/test-app-template.py --v2-fixture-output "$RUNNER_TEMP/v2-template-fixture"
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateCandidate$' -count=1
           python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
           APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
           python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
@@ -157,6 +164,19 @@ jobs:
             echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
             echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
           } >> "$GITHUB_ENV"
+      - name: Exercise the generated template in the actual Portal shell
+        run: |
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" APP_V2_AUTHORING_BROWSER_RUNNER="$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/template.cjs" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateBrowser$' -count=1 -v -timeout=90s
+      - name: Preserve generated-template browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-template-browser
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/v2-template-fixture/failure.jpg
+            ${{ runner.temp }}/v2-template-fixture/proof.jpg
+            ${{ runner.temp }}/v2-template-fixture/browser-evidence.json
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
