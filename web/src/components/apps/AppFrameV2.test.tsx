@@ -89,3 +89,12 @@ test('draft state retires on reload, failure and unmount; stale channels cannot 
  const last=sessions[2];act(()=>last.options.onDraftChange?.(true));view.unmount();
  expect(changed).toHaveBeenLastCalledWith(false);changed.mockClear();act(()=>last.options.onDraftChange?.(true));expect(changed).not.toHaveBeenCalled();
 })
+
+
+test('navigation callbacks from a replaced channel cannot move the host',()=>{
+ const navigate=vi.fn();const view=render(<AppFrameV2 {...props} onNavigate={navigate}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const first=sessions[0];
+ act(()=>first.options.onNavigate?.('/editor',true));expect(navigate).toHaveBeenCalledExactlyOnceWith('/editor',true);
+ fireEvent.load(frame);navigate.mockClear();act(()=>first.options.onNavigate?.('/',false));expect(navigate).not.toHaveBeenCalled();
+ act(()=>sessions[1].options.onNavigate?.('/',false));expect(navigate).toHaveBeenCalledExactlyOnceWith('/',false);
+ view.unmount();navigate.mockClear();act(()=>sessions[1].options.onNavigate?.('/editor',false));expect(navigate).not.toHaveBeenCalled();
+})

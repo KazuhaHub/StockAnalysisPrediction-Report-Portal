@@ -5,8 +5,7 @@ import { useTranslation } from "react-i18next";
 
 // Boolean document state only: the host never receives draft contents or an
 // app-authored prompt. Proceed is the user's decision and cannot await the app.
-export default function AppDraftGuard({ dirty }: { dirty: boolean }) {
-  const { t } = useTranslation();
+export function useAppDraftBlocker(dirty: boolean) {
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
       dirty &&
@@ -23,6 +22,16 @@ export default function AppDraftGuard({ dirty }: { dirty: boolean }) {
   useEffect(() => {
     if (!dirty && blocker.state === "blocked") blocker.reset();
   }, [dirty, blocker]);
+  return blocker;
+}
+export function AppDraftPrompt({
+  dirty,
+  blocker,
+}: {
+  dirty: boolean;
+  blocker: ReturnType<typeof useAppDraftBlocker>;
+}) {
+  const { t } = useTranslation();
   return (
     <Modal
       open={dirty && blocker.state === "blocked"}
@@ -40,4 +49,9 @@ export default function AppDraftGuard({ dirty }: { dirty: boolean }) {
       {t("apps.draftLeaveBody")}
     </Modal>
   );
+}
+
+export default function AppDraftGuard({ dirty }: { dirty: boolean }) {
+  const blocker = useAppDraftBlocker(dirty);
+  return <AppDraftPrompt dirty={dirty} blocker={blocker} />;
 }

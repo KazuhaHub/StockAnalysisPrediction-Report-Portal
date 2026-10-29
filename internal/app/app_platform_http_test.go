@@ -156,12 +156,37 @@ func TestPlatformHTTPLaunchProvidesSignedLayoutAndConfiguredTimezone(t *testing.
 	var metadata struct {
 		ApplicationID string `json:"applicationId"`
 		Layout        string `json:"layout"`
-		TimeZone      string `json:"timeZone"`
-		Display       *struct {
+		Routes        []struct {
+			ID     string `json:"id"`
+			Path   string `json:"path"`
+			Layout string `json:"layout"`
+		} `json:"routes"`
+		TimeZone string `json:"timeZone"`
+		Display  *struct {
 			Icon string `json:"icon"`
 		} `json:"display"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.ApplicationID != "notes-sample" || metadata.Layout != "document" || metadata.TimeZone != "Asia/Shanghai" || metadata.Display == nil || metadata.Display.Icon != "file-text" {
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.ApplicationID != "notes-sample" || metadata.Layout != "document" || metadata.TimeZone != "Asia/Shanghai" || metadata.Display == nil || metadata.Display.Icon != "file-text" || len(metadata.Routes) != 1 || metadata.Routes[0].Path != "/" || metadata.Routes[0].ID != "home" || metadata.Routes[0].Layout != "document" {
 		t.Fatalf("missing signed presentation facts: %s %v", response.Body.String(), err)
+	}
+}
+
+func TestPlatformHTTPLaunchRegistryIsSignedAndRootLayoutDoesNotFollowOrder(t *testing.T) {
+	_, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
+	s, reader, id := platformFrontendBrowserInstallFixture(t, archive)
+	cookie := s.managedCookie(*s.st.GetUser(reader.username), reader.sessionID, reader.expires.Unix())
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	response := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+id+"/launch", cookie, "")
+	var metadata struct {
+		Layout string `json:"layout"`
+		Routes []struct {
+			ID     string `json:"id"`
+			Path   string `json:"path"`
+			Layout string `json:"layout"`
+		} `json:"routes"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil || response.Code != 200 || metadata.Layout != "document" || len(metadata.Routes) != 2 || metadata.Routes[0].Path != "/editor" || metadata.Routes[0].Layout != "viewport" || metadata.Routes[1].Path != "/" {
+		t.Fatalf("signed registry or root selection lost: %s %v", response.Body.String(), err)
 	}
 }
