@@ -99,10 +99,10 @@ func TestCleanupUsageEndpoint(t *testing.T) {
 		t.Fatalf("db_bytes = %v, want a positive size", out["db_bytes"])
 	}
 	cats, ok := out["categories"].([]any)
-	// Seven: batch, tokens, reports, audit, revisions, chat, and the forecast ledger (ADR 0029 §8),
-	// which is read-only here — v1 ships no cleanup target for it.
-	if !ok || len(cats) != 7 {
-		t.Fatalf("categories = %v, want 7", out["categories"])
+	// Eight: batch, tokens, reports, audit, revisions, chat, the forecast ledger (ADR 0029 §8), which
+	// is read-only here, and the export files (ADR 0045), which the expiry sweep owns.
+	if !ok || len(cats) != 8 {
+		t.Fatalf("categories = %v, want 8", out["categories"])
 	}
 	byKey := map[string]map[string]any{}
 	for _, raw := range cats {

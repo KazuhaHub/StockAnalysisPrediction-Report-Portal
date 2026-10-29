@@ -42,6 +42,11 @@ func gzipEligible(p string) bool {
 	if p == "/pwa-icon" {
 		return false
 	}
+	// An export file is already compressed (ZIP) or large and must keep an exact Content-Length so a
+	// download can be resumed (ADR 0045).
+	if strings.HasPrefix(p, "/api/admin/exports/") && strings.HasSuffix(p, "/file") {
+		return false
+	}
 	if strings.HasPrefix(p, "/api/") {
 		return true
 	}

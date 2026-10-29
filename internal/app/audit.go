@@ -182,6 +182,11 @@ const (
 	AuditNotificationReview   = "notification.review"
 	AuditNotificationDispatch = "notification.dispatch"
 	AuditNotificationPublish  = "notification.publish"
+
+	// Data export tasks (ADR 0045). One row when a task is submitted and one per download; reading
+	// the exported rows records nothing per report.
+	AuditExportCreate   = "export.create"
+	AuditExportDownload = "export.download"
 )
 
 // WriteAudit records one action. Deliberately best-effort and never returns an error to its caller:
@@ -363,7 +368,7 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 	}
 	rows, err := s.query(fmt.Sprintf(`SELECT id,at,COALESCE(actor,''),COALESCE(actor_ou,0),action,
 			COALESCE(target_type,''),COALESCE(target_id,''),COALESCE(detail,''),COALESCE(ip,'')
-		FROM audit_log WHERE %s ORDER BY (at LIKE '%%T%%') DESC, at DESC, id DESC LIMIT %d OFFSET %d`, cond, limit, offset), args...)
+		FROM audit_log WHERE %s ORDER BY at DESC, id DESC LIMIT %d OFFSET %d`, cond, limit, offset), args...)
 	if err != nil {
 		return nil, total
 	}
@@ -403,14 +408,11 @@ func (s *Store) DeleteAuditBefore(cutoff time.Time) (int64, error) {
 // somebody sets retention to one day. Matching each row against a cutoff in its OWN format is exact
 // for both, and needs no rewrite of existing rows: an instant that was never recorded as UTC cannot
 // be converted to UTC without assuming an offset nobody wrote down.
-// Ordering has to survive the format change too, and it cannot do it by string comparison alone:
-// a legacy row carries a LOCAL wall-clock with no zone, so on a UTC+8 server an evening legacy row
-// sorts above a strictly newer UTC one purely because its calendar date has already rolled over.
-//
-// The format switched once and never switched back, so every legacy row predates every UTC row.
-// That fact is the ordering: UTC-format rows first, newest-first among themselves, then the legacy
-// rows the same way. It is deterministic in any server timezone, which string comparison was not —
-// the test for this passed or failed depending on the time of day it was run.
+// Ordering is plain `at DESC, id DESC` (ADR 0045), so idx_audit_at serves it and a keyset export
+// can walk it. The two stamp formats compare correctly across days: a legacy row is a local wall
+// clock ("2006-01-02 15:04:05", 2026-08-01..03 only) and every later row is RFC 3339, so only the
+// order WITHIN those three days is approximate (a space sorts before the T of the same date).
+// Rewriting the legacy stamps would be a runtime data conversion, which ADR 0034 rules out.
 
 func auditBefore(cutoff time.Time) (string, []any) {
 	return "at <> '' AND ((at " + likeT + " AND at < ?) OR (at NOT " + likeT + " AND at < ?))",
@@ -445,6 +447,7 @@ var auditVocabulary = []string{
 	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
 	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
 	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader, AuditForecastFallback,
+	AuditExportCreate, AuditExportDownload,
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present

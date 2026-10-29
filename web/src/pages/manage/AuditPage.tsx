@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { auditTime } from '../../lib/auditTime'
 import { formatRegion } from '../../lib/geo'
 import {
@@ -24,13 +24,14 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
-import { FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
+import { ExportOutlined, FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import { auditDetail, headline, listSeparator, type ChangeMember, type DetailPart } from '../../lib/auditDetail'
 import type { AuditEntry, AuditResp } from '../../api/types'
 import { clickable } from '../../lib/clickable'
+import { auditFilterToTree, exportLink } from '../../lib/exportFilter'
 import { clientInfoFromDetail, clientLabel } from '../../lib/clientInfo'
 
 // The subset of i18next's t() the detail helpers use. i18next's own type is overloaded in ways that
@@ -231,6 +232,7 @@ export default function AuditPage() {
   // than a table scrolled sideways with the detail column off the edge.
   const mobile = !Grid.useBreakpoint().lg
   const [params] = useSearchParams()
+  const navigate = useNavigate()
   const [data, setData] = useState<AuditResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
@@ -465,6 +467,16 @@ export default function AuditPage() {
     />
   )
 
+  // Hands the current filters to the Export page, which turns them into chips it can edit further.
+  const exportButton = (
+    <Button
+      icon={<ExportOutlined />}
+      onClick={() => navigate(exportLink('audit', auditFilterToTree({ action, actor, ip, q, since })))}
+    >
+      {t('audit.export')}
+    </Button>
+  )
+
   const items = data?.items ?? []
   const pager = (
     <Pagination
@@ -577,6 +589,7 @@ export default function AuditPage() {
           <Space wrap>
             {narrowFilters}
             {search}
+            {exportButton}
             {tableView.controls}
           </Space>
         )
@@ -598,6 +611,7 @@ export default function AuditPage() {
                 {t('audit.filters')}
               </Button>
             </Badge>
+            {exportButton}
           </div>
           {filtersOpen && <div className="rp-audit-filters__grid">{narrowFilters}</div>}
         </div>
