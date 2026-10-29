@@ -150,7 +150,7 @@ public SDK freeze, D6 production rollout and Status adoption remain separate.
 
 ## Browser integration boundary
 
-The current launch reader still deliberately rejects runtime-bound installations
+At the functional source verified above, the launch reader still deliberately rejected runtime-bound installations
 and descriptors with a backend (`app_platform_launch.go`); the legacy AppView
 still uses its scoped static bridge. The next implementation must use completed
 writable history and current account/OU/audience/trust checks for managed assets
@@ -159,3 +159,5 @@ or manifest rejection alone would bypass the missing integration boundary. Do
 not reinterpret a managed app as static, relax sandbox/CSP, hand tokens/private
 registration to the iframe or route an app-supplied backend URL. Shared language,
 theme, navigation and shell presentation remain part of the broader P06 work.
+
+Subsequent frontend admission is tracked in [writable launch documents](116-writable-launch-documents.md); the backend iframe protocol and complete browser integration remain outstanding.
