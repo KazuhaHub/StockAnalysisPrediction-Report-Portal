@@ -178,8 +178,37 @@ The acceptance script requires and reports:
 
 The quota workflow now includes writable/writer Portal file paths for both PR and
 main events, so later source-only changes cannot omit that native composition.
-Fresh Linux acceptance is pending; earlier runner-only registration acceptance is
-not a substitute for these Portal cases.
+Functional source `ae03c03467a04dc213bb1013e15041ef9bce00a8` passed
+[quota workflow 40820212731](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40820212731),
+job `123270673202`. Its checkout explicitly merges that source into parent
+`d3c35cd13683e35b76e7d3468fdd4bb171dd8735`. The uploaded
+`project-quota-evidence.json` has all five registration/boot flags true, all prior
+native checks true and `owned_resources_cleaned=true`. The owned registry cleanup
+step also passed. `execution_ready=false` remains deliberate: these subsystem
+results do not activate the product or satisfy full platform release gates.
+
+Local registration/boot/readonly delivery focused race passed in 18.679s. The
+registration/readiness focused race passed in 21.583s before adding the explicit
+expiry cases; the broader platform/managed race with those expiry cases passed
+in 185.591s before the subsequent boot continuation. Final registration+boot
+Linux amd64/arm64 test builds, Linux vet/staticcheck and Python14 passed. A host
+Darwin staticcheck invocation also saw the existing and new Linux-only-fixture
+unused roots; the supported Linux target was checked explicitly, with no
+suppression or production callback added to conceal those diagnostics.
+
+[General workflow 40820213195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40820213195)
+job `123270877856` explicitly passed SQLite/PostgreSQL writer/start/readiness/
+registration/boot contracts and the deterministic freshness boundary in 61.810s.
+Both registration source/refusal suites and both applied-delivery boot cases ran;
+PostgreSQL was enabled, not skipped. Build, vet and full Linux staticcheck passed.
+The Go job then failed the existing `golang.org/x/net@v0.60.0` GO-2026-6866 and
+GO-2026-6860 findings (reported fixed in v0.62.0), skipping its ordinary full test
+step. Dependencies are unchanged; that job is not classified as passing. Web
+build/typecheck/lint, all web test shards, workflow lint and Docker font/smoke
+checks passed. All three app race shards and their aggregate passed. Shard 1/job `123270877958`
+ran the full runner journal race in 228.876s and its Portal subset in 146.731s. No standalone daemon
+workflow was triggered by this Portal/fixture-only diff; native composition and
+runner package races execute in quota/general workflows as described above.
 
 ## Next requirements
 
