@@ -32,11 +32,14 @@ func validPlatformWritableProbeStage(lease platformOperationLease) bool {
 // The only extension to the pre-start writer source is this exact start effect.
 // Registration/readiness history stays forbidden until separately implemented.
 func loadPlatformWritableStartIntent(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create bool) (platformWritableStartIntent, bool, error) {
+	return loadPlatformWritableStartState(e, lease, runtime, seed, now, create, false)
+}
+func loadPlatformWritableStartState(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, seed []byte, now int64, create, readiness bool) (platformWritableStartIntent, bool, error) {
 	var zero, result platformWritableStartIntent
-	if !validPlatformWriterStage(lease) && !validPlatformWritableProbeStage(lease) {
+	if !validPlatformWriterStage(lease) && !validPlatformWritableProbeStage(lease) && !(readiness && validPlatformWritableActivateStage(lease)) {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	writer, _, err := loadPlatformWriterIntentMode(e, lease, runtime, seed, now, false, true)
+	writer, _, err := loadPlatformWriterIntentState(e, lease, runtime, seed, now, false, true, readiness)
 	if err != nil || !writer.applied {
 		return zero, false, errAppPlatformStageEvidence
 	}
@@ -70,7 +73,7 @@ func loadPlatformWritableStartIntent(e migExec, lease platformOperationLease, ru
 				return zero, false, errAppPlatformStageEvidence
 			}
 		case "applied":
-			if !validPlatformWritableProbeStage(lease) || observed != lease.fence {
+			if (!validPlatformWritableProbeStage(lease) && !(readiness && validPlatformWritableActivateStage(lease))) || observed != lease.fence {
 				return zero, false, errAppPlatformStageEvidence
 			}
 			result.running, err = journal.ParseWritableCandidateRunningReceipt([]byte(receipt))
@@ -101,6 +104,9 @@ func loadPlatformWritableStartIntent(e migExec, lease platformOperationLease, ru
 		return zero, false, err
 	}
 	if result.applied && !platformWritableRunningMatches(result.running, result, lease, now) {
+		return zero, false, errAppPlatformStageEvidence
+	}
+	if readiness && validPlatformWritableActivateStage(lease) && !validStoredPlatformWritableReadiness(result, now) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	if fresh {
@@ -155,8 +161,18 @@ func clonePlatformWritableStartIntent(i platformWritableStartIntent) platformWri
 	return i
 }
 func (s *Server) preparePlatformWritableStart(ctx context.Context, lease platformOperationLease) (platformWritableStartIntent, error) {
+	return s.preparePlatformWritableStartMode(ctx, lease, false)
+}
+func (s *Server) preparePlatformWritableProbe(ctx context.Context, lease platformOperationLease) (platformWritableStartIntent, error) {
+	return s.preparePlatformWritableStartMode(ctx, lease, true)
+}
+func (s *Server) preparePlatformWritableStartMode(ctx context.Context, lease platformOperationLease, readiness bool) (platformWritableStartIntent, error) {
 	var zero platformWritableStartIntent
-	if !validPlatformWriterStage(lease) && !validPlatformWritableProbeStage(lease) {
+	if readiness {
+		if !validPlatformWritableProbeStage(lease) && !validPlatformWritableActivateStage(lease) {
+			return zero, errAppPlatformStageEvidence
+		}
+	} else if !validPlatformWriterStage(lease) && !validPlatformWritableProbeStage(lease) {
 		return zero, errAppPlatformStageEvidence
 	}
 	dek, err := s.dek()
@@ -191,7 +207,7 @@ func (s *Server) preparePlatformWritableStart(ctx context.Context, lease platfor
 	if err := validatePlatformInstallAuthority(e, lease, trust, facts.now); err != nil {
 		return zero, err
 	}
-	result, fresh, err := loadPlatformWritableStartIntent(e, lease, runtime, seed, facts.now, true)
+	result, fresh, err := loadPlatformWritableStartState(e, lease, runtime, seed, facts.now, !readiness, readiness)
 	if err != nil {
 		return zero, err
 	}
@@ -208,7 +224,7 @@ func (s *Server) preparePlatformWritableStart(ctx context.Context, lease platfor
 	if err := validatePlatformInstallAuthority(e, lease, trust, now); err != nil {
 		return zero, err
 	}
-	again, _, err := loadPlatformWritableStartIntent(e, lease, runtime, seed, now, false)
+	again, _, err := loadPlatformWritableStartState(e, lease, runtime, seed, now, false, readiness)
 	if err != nil || !samePlatformWritableStartIntent(result, again) {
 		return zero, errAppPlatformStageEvidence
 	}

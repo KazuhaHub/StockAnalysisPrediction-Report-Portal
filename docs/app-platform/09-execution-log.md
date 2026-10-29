@@ -1899,3 +1899,16 @@ daemon workflow 40455635317 passed on the functional source as well.
   runner recovery through Portal, physical lifecycle, broker, SDK/reference apps
   and full P00–P14 acceptance remain incomplete. Production, credentials, Status,
   SDK freeze and beta unchanged.
+
+- Added Portal writable readiness and activate-stage fresh refresh using the
+  existing authenticated concrete runner probe. Separate continuation validates
+  canonical applied process/history while initial writer/start readers keep
+  empty-readiness scope. Pin candidate metadata across IO; require exact current
+  source/authority and a fresh opaque proof; atomically update readiness and
+  probe-to-activate transition, or refresh only the observed candidate. Added SQL
+  source/refusal cases and actual non-root Portal/root fixture coverage for audit
+  rollback, expired-proof refusal, historical-source/fresh-probe refresh and
+  runtime disablement after native IO. See [writable readiness](109-portal-writable-readiness.md).
+  Fresh Linux results pending. Registration/boot/viewer/activation/worker and
+  remaining full platform acceptance are incomplete. Production, credentials,
+  Status, public SDK freeze and beta unchanged.

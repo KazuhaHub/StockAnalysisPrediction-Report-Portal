@@ -95,6 +95,7 @@ func testNativePortalWritableStart(t *testing.T, s *Server, lease platformOperat
 	}
 	t.Log("PORTAL_WRITABLE_START_RECONCILED")
 	t.Log("PORTAL_WRITABLE_START_RETAINED_IDENTITY")
+	testNativePortalWritableReadiness(t, s, completed, endpoint, final)
 }
 
 // Root witness/cleanup authenticates the historical signed intent and every
