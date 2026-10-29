@@ -30,7 +30,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	manifest.ID = "writer-demo"
+	manifest.ID = "notes-writer-demo"
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(manifest)
 	if err != nil {
@@ -38,7 +38,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	}
 	release, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("stage writable package", err)
 	}
 	plan, err := s.createPlatformWritableInstallReview(ctx, session, release.sha256, 1, nil, endpoint)
 	if err != nil {
