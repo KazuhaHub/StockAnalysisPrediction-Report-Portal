@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 )
 
 // Runs after the real background installation and authenticated business IO.
@@ -77,7 +79,48 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		t.Fatal("stale binding performed business IO", err)
 	}
 	t.Log("PORTAL_WRITABLE_PAGE_BINDING_NATIVE")
+	if err := s.bindPlatformBackendHTTP(endpoint); err != nil {
+		t.Fatal("trusted HTTP runtime bootstrap", err)
+	}
+	if err := s.bindPlatformBackendHTTP(endpoint); err == nil {
+		t.Fatal("HTTP runtime endpoint was replaceable")
+	}
+	backendPath := "/api/app-platform/installations/" + installation + "/backend"
+	requestBody := func(method, path, body string) string {
+		raw, _ := json.Marshal(map[string]any{"binding": binding, "method": method, "path": path, "body": body})
+		return string(raw)
+	}
+	httpBody := requestBody("POST", "/v1/echo", `{"role":"admin","subject":"forged"}`)
+	response = platformBackendHTTPCall(mux, backendPath, cookie, httpBody, map[string]string{"Sec-Fetch-Site": "same-origin"})
+	var envelope struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	var echoed struct {
+		Count  int64           `json:"count"`
+		Viewer protocol.Viewer `json:"viewer"`
+	}
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+1 || echoed.Viewer.Role != "user" || len(echoed.Viewer.Subject) != 64 || response.Header().Get("Set-Cookie") != "" || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("ordinary session HTTP request did not reach current native viewer", response.Code, response.Body.String())
+	}
+	t.Log("PORTAL_WRITABLE_BACKEND_SESSION_HTTP")
+	uncertain := platformBackendHTTPCall(mux, backendPath, cookie, requestBody("POST", "/v1/echo?disconnect=1", `{}`), nil)
+	var failure struct {
+		Code      string `json:"code"`
+		Retryable *bool  `json:"retryable"`
+	}
+	if uncertain.Code != 502 || json.Unmarshal(uncertain.Body.Bytes(), &failure) != nil || failure.Code != "app_platform_request_uncertain" || failure.Retryable == nil || *failure.Retryable || uncertain.Header().Get("Retry-After") != "" {
+		t.Fatal("HTTP uncertain write was represented as retryable", uncertain.Code, uncertain.Body.String())
+	}
+	response = platformBackendHTTPCall(mux, backendPath, cookie, requestBody("GET", "/v1/echo", ""), nil)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Status != 200 || json.Unmarshal([]byte(envelope.Body), &echoed) != nil || echoed.Count != after.Count+2 {
+		t.Fatal("uncertain HTTP write was retried or lost", response.Code, response.Body.String())
+	}
+	t.Log("PORTAL_WRITABLE_BACKEND_HTTP_NO_RETRY")
 	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
+	if response := platformBackendHTTPCall(mux, backendPath, cookie, httpBody, nil); response.Code != 404 || strings.Contains(response.Body.String(), "viewer") {
+		t.Fatal("HTTP backend remained available after audience revocation", response.Code)
+	}
 	if result, err := s.requestPlatformBoundWritableBackend(context.Background(), actor, installation, binding, "POST", "/v1/echo", []byte(`{}`), endpoint); err == nil || errors.Is(err, errAppPlatformBackendRequestUncertain) || len(result.Body) != 0 {
 		t.Fatal("page binding bypassed revoked audience", err)
 	}
