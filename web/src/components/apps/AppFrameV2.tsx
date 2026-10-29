@@ -14,6 +14,7 @@ export interface AppFrameV2Props {
   presentation: BridgePresentation
   capabilities: readonly string[]
   backendAvailable?: boolean
+  onDraftChange?: (dirty: boolean) => void
   // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
@@ -39,9 +40,11 @@ export default function AppFrameV2(props: AppFrameV2Props) {
   const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, onDraftChange }: AppFrameV2Props) {
   const { t } = useTranslation()
   const frame = useRef<HTMLIFrameElement>(null)
+  const draftObserver = useRef(onDraftChange)
+  draftObserver.current = onDraftChange
   const session = useRef<ReturnType<typeof createBridgeHost> | null>(null)
   const assetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const live = useRef(true)
@@ -61,6 +64,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
     epoch.current++
     session.current?.close()
     session.current = null
+    draftObserver.current?.(false)
   }, [])
   const fail = useCallback(() => {
     if (!live.current) return
@@ -82,6 +86,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       presentation: latest.current,
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
+      onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },
       onReady: () => { if (live.current && epoch.current === generation) {
         setReady(true)
         if (latest.current.layout === 'document') measureTimer.current = setTimeout(fail, BRIDGE_DEADLINE_MS)

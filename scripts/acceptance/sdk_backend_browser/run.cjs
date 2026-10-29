@@ -41,9 +41,23 @@ async function main(){
   await page.getByTestId('launch-status').filter({hasText:'revoke:204'}).waitFor();
   if(await dispatch('Read backend')!=='error:unavailable')throw new Error('revoked backend remained available');
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
+  stage='draft-edit';await frame.getByRole('button',{name:'Edit draft',exact:true}).click();
+  await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
+  // The boolean hint is deliberately coalesced; wait for its bounded flush.
+  await page.waitForTimeout(150);
+  stage='draft-cancel';await page.getByRole('link',{name:'Leave fixture',exact:true}).click();
+  const dialog=page.getByRole('dialog');await dialog.waitFor();
+  await dialog.getByRole('button',{name:'apps.draftStay',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
+  stage='draft-confirm';await page.getByRole('link',{name:'Leave fixture',exact:true}).click();
+  await dialog.getByRole('button',{name:'apps.draftLeave',exact:true}).click();
+  await page.getByText('Fixture closed',{exact:true}).waitFor();
+  if(await page.locator('iframe').count()!==0)throw new Error('retired app remained mounted');
   await context.close();
   console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');
   console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
+  console.log('SDK_NATIVE_BROWSER_DRAFT_GUARD');
   console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}

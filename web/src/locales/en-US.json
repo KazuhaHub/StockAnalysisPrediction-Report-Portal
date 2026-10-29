@@ -2755,5 +2755,9 @@
   "apps.backendEnabled": "Enable after review",
   "apps.backendDeleteConfirm": "Delete this backend connection and revoke its access?",
   "audit.a.app_backend.change": "App backend changed",
-  "audit.a.app_backend.delete": "App backend connection deleted"
+  "audit.a.app_backend.delete": "App backend connection deleted",
+  "apps.draftLeaveTitle": "Leave this app?",
+  "apps.draftLeaveBody": "This app has unsaved changes. Leaving discards changes that have not been saved.",
+  "apps.draftLeave": "Leave app",
+  "apps.draftStay": "Keep editing"
 }

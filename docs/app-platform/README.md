@@ -16,7 +16,8 @@ and activation](113-writable-install-worker.md) and
 [current-page backend session gateway](117-backend-session-gateway.md) and
 [shared SDK own-backend channel](118-sdk-own-backend-channel.md) and
 [SDK browser/native request-chain acceptance](119-sdk-native-browser-acceptance.md) and
-[natural document sizing](120-document-layout.md).
+[natural document sizing](120-document-layout.md), and
+[the shared unsaved-change guard](121-unsaved-change-guard.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 

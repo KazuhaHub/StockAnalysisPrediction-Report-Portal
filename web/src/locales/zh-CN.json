@@ -2755,5 +2755,9 @@
   "apps.backendEnabled": "核对后启用",
   "apps.backendDeleteConfirm": "删除后端连接并撤销其访问权限？",
   "audit.a.app_backend.change": "修改应用后端",
-  "audit.a.app_backend.delete": "删除应用后端连接"
+  "audit.a.app_backend.delete": "删除应用后端连接",
+  "apps.draftLeaveTitle": "离开此应用？",
+  "apps.draftLeaveBody": "此应用有未保存的修改。离开将丢弃尚未保存的内容。",
+  "apps.draftLeave": "离开应用",
+  "apps.draftStay": "继续编辑"
 }
