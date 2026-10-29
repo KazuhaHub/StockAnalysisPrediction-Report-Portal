@@ -445,6 +445,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	plan := forecastPlan{setID: set.SetID, wakes: map[int64]time.Time{}}
 
 	if fault != nil {
+		e.recordDeliveryFailure(s, set, "benchmark", indexSeries.Source, shiftDays(set.MadeOn, -predReferenceLagDays), now.In(chinaZone).Format("2006-01-02"), fault.err)
 		// The calendar is a shared dependency: without it no checkpoint date can be trusted. This is
 		// a SOURCE failure — it leaves attempts unchanged and never counts toward finality. A mark
 		// whose earliest possible due is still in the future is rescheduled rather than marked
@@ -460,6 +461,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 	}
 
 	if stockErr != nil {
+		e.recordDeliveryFailure(s, set, "stock", stockSeries.Source, shiftDays(set.MadeOn, -predReferenceLagDays), now.In(chinaZone).Format("2006-01-02"), stockErr)
 		// The stock's own series failed to arrive. Also a source failure: the run was not scored
 		// against a wrong price, it simply has not been delivered yet. Only marks that could be due
 		// are refused; a far-off checkpoint keeps its scheduled wake.
@@ -672,6 +674,7 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		observation, _ := forecastCallResult(ctx, quoteSourceTencent, aerr)
 		e.ledgerPass.observe(observation)
 		if aerr != nil {
+			e.recordDeliveryFailure(s, set, "adjustment", quoteSourceTencent, baseDate, last, aerr)
 			log.Printf("forecast evaluator: set %d adjustment %s%s %s..%s: %v", set.SetID, set.Market, set.Symbol, baseDate, last, aerr)
 			// The adjustment check is part of the answer: the mark waits, it is never resolved
 			// without it (F10). A source failure, so no attempt is charged.
@@ -725,6 +728,8 @@ func (e *forecastEvaluator) evaluateSet(ctx context.Context, s *Server, set fore
 		}
 		e.noteDueUnsettled(sch.Due, now)
 		if res.Refusal == "fetch_failed" && adjChecked {
+			e.recordDeliveryFailure(s, set, "adjustment", quoteSourceTencent, baseDate, sch.Due,
+				fmt.Errorf("adjustment response is missing a required close: start=%s stock_bar=%s due=%s", baseDate, res.BarDate, sch.Due))
 			log.Printf("forecast evaluator: set %d checkpoint %s adjustment %s%s missing required close: base=%s stock_bar=%s due=%s",
 				set.SetID, mark.Checkpoint, set.Market, set.Symbol, baseDate, res.BarDate, sch.Due)
 		}

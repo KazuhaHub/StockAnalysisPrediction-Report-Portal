@@ -86,3 +86,16 @@ describe('how often the record page re-reads the evaluator', () => {
     expect(REREAD_MIN_MS).toBeLessThan(REFRESH_MS)
   })
 })
+
+describe('ledger-wide backlog authority', () => {
+  it('keeps sleeping overdue work visible after an empty pass', () => {
+    const s = settings()
+    s.backlog = { as_of: new Date(NOW).toISOString(), due: 1, overdue: 1, retrying: 1, oldest_minutes: 2970, items: [], truncated: false }
+    expect(evaluatorStatus(s, NOW)).toBe('lagging')
+  })
+  it('does not keep a stale per-pass backlog after ledger recovery', () => {
+    const s = settings({}, { oldest_due_unsettled_minutes: 9999 })
+    s.backlog = { as_of: new Date(NOW).toISOString(), due: 0, overdue: 0, retrying: 0, oldest_minutes: 0, items: [], truncated: false }
+    expect(evaluatorStatus(s, NOW)).toBe('healthy')
+  })
+})

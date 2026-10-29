@@ -75,6 +75,11 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
 		return
 	}
+	backlog, backlogErr := s.forecastBacklog(time.Now())
+	if backlogErr != nil {
+		jsonErrorCode(w, http.StatusInternalServerError, "db_error", "database error")
+		return
+	}
 	diagnostics := map[string]any{
 		"status": "unavailable", "max_reads": forecastShadowMaxComparisons,
 		"max_http_attempts": forecastShadowMaxHTTPAttempts,
@@ -118,6 +123,7 @@ func (s *Server) apiForecastSettings(w http.ResponseWriter, r *http.Request, use
 		"unrecorded":  unrecorded,
 		// What the evaluator would find if it ran now. Read-only and cheap — a count, not a fetch —
 		// so an admin can tell "on and caught up" from "on and stuck" without opening the log.
+		"backlog":            backlog,
 		"due_sets":           s.st.CountForecastSetsDue(),
 		"pending":            s.st.CountForecastMarksByStatus(markPending),
 		"refused":            s.st.CountForecastMarksByStatus(markRefused),

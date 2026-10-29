@@ -303,7 +303,16 @@ func (e *forecastEvaluator) applyPlan(s *Server, set forecastWorkSet, stock fore
 		e.samplePlan(set, stock, plan)
 		return nil
 	}
-	return s.st.ApplyForecastPlan(plan, now)
+	if err := s.st.ApplyForecastPlan(plan, now); err != nil {
+		return err
+	}
+	if len(plan.settles) > 0 && len(plan.defers) == 0 {
+		var remaining int
+		if err := s.st.queryRow(`SELECT COUNT(*) FROM prediction_marks WHERE set_id=? AND status=?`, set.SetID, markRefused).Scan(&remaining); err == nil && remaining == 0 {
+			s.st.clearForecastDeliveryFailure(set.SetID)
+		}
+	}
+	return nil
 }
 
 // countPlan folds a plan's outcome into the pass's counters, whether or not it is written.
@@ -728,12 +737,17 @@ func (s *Server) forecastWatchdogOnce(now time.Time) {
 				"the heartbeat is older than 10 minutes", now, forecastStallAlertEvery)
 		}
 	}
-	// Lagging is about the LEDGER, not about the loop, so dry mode is held to it too: a due mark
-	// nobody is settling is exactly what a dry evaluator left running unnoticed looks like, and the
-	// heartbeat carries its age from whichever pass last ran.
-	if hb.Pass.OldestDueUnsettledMinutes*int(time.Minute) > int(forecastLaggingAfter) {
+	// Lagging is about the ledger, including retries sleeping until next_attempt_at.
+	// The latest pass can be empty while old work remains; a stale pass can also describe
+	// work that has recovered. Neither is authority for the current backlog.
+	backlog, backlogErr := s.forecastBacklog(now)
+	if backlogErr != nil {
+		log.Printf("forecast watchdog backlog: %v", backlogErr)
+	}
+	if backlogErr == nil && backlog.OldestMinutes > int(forecastLaggingAfter/time.Minute) {
 		s.emitForecastAlert("lagging",
-			"a due mark has been unsettled for over 6 hours", now, forecastLaggingAlertEvery)
+			fmt.Sprintf("%d completed checkpoints remain unsettled; %d older than 6 hours; oldest %d minutes (%s %s due %s)",
+				backlog.Due, backlog.Overdue, backlog.OldestMinutes, backlog.Items[0].Symbol, backlog.Items[0].Checkpoint, backlog.Items[0].Due), now, forecastLaggingAlertEvery)
 	}
 	if hb.Pass.StaleValveTripped {
 		s.emitForecastAlert("lagging",

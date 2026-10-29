@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import type { ForecastDrySample, ForecastReadinessItem, ForecastSettings } from '../../api/types'
+import ForecastBacklog from './ForecastBacklog'
 import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
@@ -186,6 +187,8 @@ export default function ForecastEvaluatorStatus({
         {hb?.pass.last_error && <Alert type="error" showIcon title={hb.pass.last_error} />}
         {hb?.pass.waiting_for_budget && <Alert type="info" showIcon title={t('forecast.eval.waitingBudget')}
           description={hb.pass.resume_at ? t('forecast.eval.resumeAt', { at: dayjs(hb.pass.resume_at).format('YYYY-MM-DD HH:mm:ss') }) : undefined} />}
+
+        <ForecastBacklog backlog={settings.backlog} />
 
         <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
           <Descriptions.Item label={t('forecast.eval.readiness.title')}>
