@@ -21,18 +21,25 @@ def build(apps, output):
     child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
-import {AppRoot,useAppBackend,useAppPresentation,useAppDraft,useAppNavigation} from '@portal-app/sdk/root-v2';
+import {AppRoot,useAppBackend,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
  const backend=useAppBackend(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
+ const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
+ useAppPage({title:'Fixture '+presentation.locale+' '+navigation.path,description:'Shared page controls',actions:[
+  {id:'increment',label:'Header increment',variant:'primary',onAction:()=>{setPageCount(n=>n+1)}},
+  {id:'wait',label:'Header wait',onAction:(signal)=>new Promise<void>((_resolve,reject)=>{signal.addEventListener('abort',()=>{setPageCancelled(n=>n+1);reject(new Error('cancelled'))},{once:true})})},
+ ]});
  const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
  async function run(method:string,path:string){const id=++sequence.current;setResult({id,text:'pending'});setBusy(true);try{
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
   const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Typography.Text data-testid="page-count">{pageCount}</Typography.Text>
+ <Typography.Text data-testid="page-cancelled">{pageCancelled}</Typography.Text>
  <Typography.Text data-testid="query-effects">{queryEffects}</Typography.Text>
  <Typography.Text data-testid="app-query">{JSON.stringify(navigation.query)}</Typography.Text>
  <Button onClick={()=>navigation.navigate('/',{query:{page:2,q:'中文 & test',active:false,sort:'newest'}})}>Set filters</Button>
@@ -50,17 +57,20 @@ function Fixture(){
 }
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
     host = output / "host.tsx"
-    host.write_text('''import {useEffect,useState} from 'react';import {createRoot} from 'react-dom/client';
+    host.write_text('''import {useEffect,useMemo,useState} from 'react';import {createRoot} from 'react-dom/client';
 import AppFrameV2 from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppFrameV2.tsx")) + ''';
+import AppPageHeader from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppPageHeader.tsx")) + ''';
 import {createBrowserRouter,RouterProvider,Link,useLocation,useNavigate} from 'react-router';
 import {AppDraftPrompt,useAppDraftBlocker} from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppDraftGuard.tsx")) + ''';
 const initial={locale:'zh-CN',timeZone:'UTC',layout:'document',theme:{dark:true,colorPrimary:'#1677ff',colorBg:'#141414',colorText:'#ffffff',colorBorder:'#424242',colorBgLayout:'#000000',borderRadius:8}};
-function Fixture(){const location=useLocation(),navigate=useNavigate();const [dirty,setDirty]=useState(false);const blocker=useAppDraftBlocker(dirty);const [launch,setLaunch]=useState<any>(null),[status,setStatus]=useState('loading'),[presentation,setPresentation]=useState<any>(initial);
+function Fixture(){const location=useLocation(),navigate=useNavigate();const [dirty,setDirty]=useState(false);const blocker=useAppDraftBlocker(dirty);const [launch,setLaunch]=useState<any>(null),[status,setStatus]=useState('loading'),[presentation,setPresentation]=useState<any>(initial),[page,setPage]=useState<any>(null);
+ const framePresentation=useMemo(()=>launch?{...presentation,layout:launch.routes.find(route=>route.path===location.pathname).layout,navigation:{path:location.pathname,search:location.search,routes:launch.routes}}:null,[launch,presentation,location.pathname,location.search]);
  useEffect(()=>{fetch('/__sdk_fixture/info').then(r=>r.json()).then(info=>fetch(info.launch)).then(async r=>{setStatus('launch:'+r.status);if(r.ok)setLaunch(await r.json())})},[]);
  return <div style={{background:initial.theme.colorBgLayout,color:initial.theme.colorText,minHeight:'100vh'}}><h1>SDK native backend fixture</h1>
  <AppDraftPrompt dirty={dirty} blocker={blocker}/><Link to="/away">Leave fixture</Link><p data-testid="launch-status">{status}</p><button onClick={()=>setPresentation({...initial,locale:'zh-TW'})}>Traditional Chinese</button>
  <button onClick={async()=>{const r=await fetch('/__sdk_fixture/revoke',{method:'POST'});setStatus('revoke:'+r.status)}}>Revoke fixture access</button>
- {launch&&<AppFrameV2 {...launch} title="SDK native fixture" presentation={{...presentation,layout:launch.routes.find(route=>route.path===location.pathname).layout,navigation:{path:location.pathname,search:location.search,routes:launch.routes}}} height={500} onDraftChange={setDirty} onNavigate={(path,replace,search)=>{if(blocker.state==='unblocked')void navigate(path+search,{replace})}}/>}</div>}
+ <AppPageHeader name="SDK native fixture" icon={null} state={page} onBack={()=>{void navigate('/away')}}/>
+ {launch&&<AppFrameV2 {...launch} title="SDK native fixture" presentation={framePresentation} onPageChange={setPage} height={500} onDraftChange={setDirty} onNavigate={(path,replace,search)=>{if(blocker.state==='unblocked')void navigate(path+search,{replace})}}/>}</div>}
 const router=createBrowserRouter([{path:'/away',element:<p>Fixture closed</p>},{path:'*',element:<Fixture/>}]);
 createRoot(document.getElementById('host')!).render(<RouterProvider router={router}/>);''')
     for name, entry, filename in (("child", child, "app.js"), ("host", host, "host.js")):

@@ -2197,3 +2197,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   still fails the inherited vulnerability gate. execution_ready remains false. Descriptor schema is extended;
   database schema, dependencies, publication, production, Status, SDK freeze and
   beta settings are unchanged. Remaining full P06/platform work stays open.
+
+
+- Added shared page metadata/actions for P06: bounded immutable plain-text
+  descriptors, a common Ant Design header, experimental dev.7 action dispatch,
+  one pending operation, deadlines/cancellation and route/document ownership.
+  React StrictMode and late old-route cleanup defects were caught and repaired.
+  The browser/native fixture now requires page-action evidence; Linux results
+  remain pending. See [shared page actions](124-shared-page-actions.md).
+  P06, UX-01/06/08/09 and full platform acceptance remain incomplete. Production,
+  Status, publication, stable SDK freeze, storage and beta settings are unchanged.
