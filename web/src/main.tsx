@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router'
+import { createBrowserRouter, RouterProvider } from 'react-router'
 import App from './App'
 import './i18n'
 import './index.css'
@@ -24,10 +24,11 @@ window.addEventListener('vite:preloadError', () => {
   window.location.reload()
 })
 
+// Keep the existing route tree/providers under one stable root while enabling
+// native router blockers for app draft guards (links, programmatic and POP).
+const router = createBrowserRouter([{ path: '*', element: <App /> }])
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <RouterProvider router={router} />
   </React.StrictMode>,
 )

@@ -5,7 +5,7 @@ import {
   DESCRIPTOR_LOCALES,
 } from "./descriptor-contract.generated";
 
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.3";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.4";
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
@@ -152,6 +152,7 @@ export interface BridgeHostOptions extends BaseOptions {
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
   onDocumentHeight?: (height: number) => void;
+  onDraftChange?: (dirty: boolean) => void;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -363,6 +364,9 @@ export function createBridgeHost(
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
+  let lastDraft = 0n,
+    draftWindow = 0,
+    draftCount = 0;
   let heightTimer: ReturnType<typeof setTimeout> | undefined,
     lastHeightAt = -Infinity;
   let pendingHeight:
@@ -430,6 +434,38 @@ export function createBridgeHost(
     }
     if (terminal() || !currentEnvelope) return;
     const data = event.data;
+    if (data && typeof data === "object" && data.type === "draft.changed") {
+      if (!exact(data, ["type", ...envelopeKeys, "revision", "dirty"])) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (
+        !announced ||
+        !decimal(data.revision) ||
+        typeof data.dirty !== "boolean"
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (BigInt(data.revision) <= lastDraft) return;
+      lastDraft = BigInt(data.revision);
+      const now = Date.now();
+      if (now - draftWindow >= 1000) {
+        draftWindow = now;
+        draftCount = 0;
+      }
+      if (++draftCount > 20) {
+        fail("protocol_error");
+        return;
+      }
+      try {
+        options.onDraftChange?.(data.dirty);
+      } catch {
+        fail("protocol_error");
+      }
+      return;
+    }
     if (data && typeof data === "object" && data.type === "layout.measure") {
       if (
         !exact(data, [
@@ -785,6 +821,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
   reportDocumentHeight(height: number): boolean;
+  setDraftDirty(dirty: boolean): boolean;
 } {
   const {
     localWindow,
@@ -809,6 +846,46 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     connectionRevision = 0;
   let expectedHostNonce: string | undefined;
   const retiredHosts = new Set<string>();
+  let draftRevision = 0n,
+    draftTimer: ReturnType<typeof setTimeout> | undefined,
+    lastDraftAt = -Infinity;
+  let queuedDraft: boolean | undefined, lastDraftValue: boolean | undefined;
+  function clearDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = undefined;
+    queuedDraft = undefined;
+    lastDraftValue = undefined;
+  }
+  function flushDraft() {
+    draftTimer = undefined;
+    const dirty = queuedDraft;
+    queuedDraft = undefined;
+    if (
+      dirty === undefined ||
+      terminal() ||
+      !applied ||
+      !port ||
+      !envelope ||
+      dirty === lastDraftValue
+    )
+      return;
+    if (draftRevision === MAX_REVISION) {
+      fail("protocol_error");
+      return;
+    }
+    lastDraftAt = Date.now();
+    lastDraftValue = dirty;
+    try {
+      port.postMessage({
+        type: "draft.changed",
+        ...envelope,
+        revision: (++draftRevision).toString(),
+        dirty,
+      });
+    } catch {
+      fail("transport_error");
+    }
+  }
   let measureRevision = 0n,
     lastMeasureAt = -Infinity;
   let measureTimer: ReturnType<typeof setTimeout> | undefined;
@@ -877,6 +954,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
     clearMeasure();
+    clearDraft();
     retireRequests();
     clearTimeout(timer);
     clearInterval(retry);
@@ -1058,6 +1136,9 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         context = current = null;
         abort.abort();
         clearMeasure();
+        clearDraft();
+        draftRevision = 0n;
+        lastDraftAt = -Infinity;
         measureRevision = 0n;
         lastMeasureAt = -Infinity;
         retireRequests();
@@ -1175,6 +1256,23 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
+    setDraftDirty(dirty: boolean): boolean {
+      if (
+        terminal() ||
+        !applied ||
+        !port ||
+        !envelope ||
+        typeof dirty !== "boolean"
+      )
+        return false;
+      queuedDraft = dirty;
+      if (draftTimer === undefined)
+        draftTimer = setTimeout(
+          flushDraft,
+          Math.max(0, 100 - (Date.now() - lastDraftAt)),
+        );
+      return true;
+    },
     reportDocumentHeight(height: number): boolean {
       if (
         terminal() ||

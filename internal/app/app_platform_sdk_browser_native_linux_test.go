@@ -149,7 +149,7 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	if err := command.Run(); err != nil {
 		t.Fatalf("SDK native browser failed: %v\n%s", err, output.String())
 	}
-	for _, marker := range []string{"SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
+	for _, marker := range []string{"SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatal("SDK browser marker missing", marker)
 		}

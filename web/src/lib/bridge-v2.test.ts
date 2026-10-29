@@ -489,6 +489,131 @@ test("host refuses malicious height and ignores old generation measurements", as
   expect(height).toHaveBeenCalledOnce();
 });
 
+test("draft state is a bounded boolean hint tied to the current channel", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    draft = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onDraftChange: draft,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  expect(client.setDraftDirty(true)).toBe(false);
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  expect(client.setDraftDirty(true)).toBe(true);
+  await vi.waitFor(() => expect(draft).toHaveBeenLastCalledWith(true));
+  client.setDraftDirty(false);
+  await vi.waitFor(() => expect(draft).toHaveBeenLastCalledWith(false));
+  expect(client.setDraftDirty("draft text" as unknown as boolean)).toBe(false);
+  client.close();
+  expect(client.setDraftDirty(true)).toBe(false);
+});
+
+test("draft host rejects contents while stale hints cannot clear edits", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    draft = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onDraftChange: draft,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const message = {
+    ...acknowledgement(init),
+    type: "draft.changed",
+    revision: "2",
+    dirty: true,
+  };
+  port.postMessage(message);
+  await vi.waitFor(() => expect(draft).toHaveBeenLastCalledWith(true));
+  port.postMessage({ ...message, revision: "1", dirty: false });
+  port.postMessage({
+    ...message,
+    generation: "2",
+    revision: "3",
+    dirty: false,
+  });
+  // A following accepted hint fences delivery of the earlier stale messages.
+  port.postMessage({ ...message, revision: "3" });
+  await vi.waitFor(() => expect(draft).toHaveBeenCalledTimes(2));
+  expect(draft.mock.calls.every(([dirty]) => dirty === true)).toBe(true);
+  port.postMessage({ ...message, revision: "4", contents: "private text" });
+  await vi.waitFor(() => expect(host.state()).toBe("failed"));
+  expect(draft).toHaveBeenCalledTimes(2);
+});
+
+test("draft host fails a flooding channel without delivering excess reports", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    draft = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onDraftChange: draft,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const now = vi.spyOn(Date, "now").mockReturnValue(1234000);
+  try {
+    for (let n = 1; n <= 21; n++)
+      port.postMessage({
+        ...acknowledgement(init),
+        type: "draft.changed",
+        revision: String(n),
+        dirty: true,
+      });
+    await vi.waitFor(() => expect(host.state()).toBe("failed"));
+    expect(draft).toHaveBeenCalledTimes(20);
+  } finally {
+    now.mockRestore();
+  }
+});
+
 test("coalesced presentation updates wait for latest application before reveal", async () => {
   const w = hostOnly();
   let finish!: () => void;

@@ -19,7 +19,8 @@ function delivery(target:Window,source:Window,origin:string,data:unknown,ports:M
 }
 test('actual host keeps frame hidden through delayed apply, latest settings and a new load handshake',async()=>{
  vi.stubGlobal('MessageChannel',NodeMessageChannel)
- const props={source:'/app-assets/fixture/index.html',title:'Fixture',height:640,binding,presentation,capabilities:[]}
+ const draft=vi.fn()
+ const props={onDraftChange:draft,source:'/app-assets/fixture/index.html',title:'Fixture',height:640,binding,presentation,capabilities:[]}
  const view=render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle<HTMLIFrameElement>('Fixture');const child=frame.contentWindow!
  vi.spyOn(child,'postMessage').mockImplementation((data:unknown,_target?:unknown,ports?:unknown)=>delivery(child,window,window.location.origin,data,(ports??[]) as MessagePort[]))
  vi.spyOn(window,'postMessage').mockImplementation((data:unknown,_target?:unknown,ports?:unknown)=>delivery(window,child,'null',data,(ports??[]) as MessagePort[]))
@@ -30,7 +31,7 @@ test('actual host keeps frame hidden through delayed apply, latest settings and 
   fireEvent.load(frame);await waitFor(()=>expect(applied).toHaveLength(1));expect(frame.style.visibility).toBe('hidden')
   const changed:BridgePresentation={...presentation,locale:'zh-TW',timeZone:'Asia/Taipei'}
   view.rerender(<AppFrameV2 {...props} presentation={changed}/>);await act(async()=>finish!());await waitFor(()=>expect(applied).toHaveLength(2));expect(frame.style.visibility).toBe('hidden')
-  await act(async()=>finish!());await waitFor(()=>expect(frame.style.visibility).toBe('visible'));expect(client.context()?.binding.generation).toBe('9007199254740993');expect(screen.queryByRole('status')).toBeNull()
-  fireEvent.load(frame);expect(frame.style.visibility).toBe('hidden');await waitFor(()=>expect(applied).toHaveLength(3));await act(async()=>finish!());await waitFor(()=>expect(frame.style.visibility).toBe('visible'))
- }finally{client.close();view.unmount()}
+  await act(async()=>finish!());await waitFor(()=>expect(client.state()).toBe('ready'));expect(frame.style.visibility).toBe('hidden');act(()=>{expect(client.reportDocumentHeight(320)).toBe(true)});await waitFor(()=>expect(frame.style.visibility).toBe('visible'));expect(client.context()?.binding.generation).toBe('9007199254740993');expect(screen.queryByRole('status')).toBeNull();act(()=>{expect(client.setDraftDirty(true)).toBe(true)});await waitFor(()=>expect(draft).toHaveBeenLastCalledWith(true))
+  fireEvent.load(frame);expect(draft).toHaveBeenLastCalledWith(false);expect(frame.style.visibility).toBe('hidden');await waitFor(()=>expect(applied).toHaveLength(3));await act(async()=>finish!());await waitFor(()=>expect(client.state()).toBe('ready'));expect(frame.style.visibility).toBe('hidden');act(()=>{expect(client.reportDocumentHeight(180)).toBe(true)});await waitFor(()=>expect(frame.style.visibility).toBe('visible'))
+ }finally{client.close();view.unmount();expect(draft).toHaveBeenLastCalledWith(false)}
 })

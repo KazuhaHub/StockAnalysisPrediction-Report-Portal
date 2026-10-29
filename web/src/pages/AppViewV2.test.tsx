@@ -2,6 +2,7 @@ import {render,screen,waitFor} from '@testing-library/react'
 import {MemoryRouter,Routes,Route} from 'react-router'
 import {beforeEach,afterEach,expect,test,vi} from 'vitest'
 import AppViewV2 from './AppViewV2'
+vi.mock('../components/apps/AppDraftGuard',()=>({default:()=>null}))
 const prefs=vi.hoisted(()=>({lang:'zh-CN',dark:true}))
 const frames=vi.hoisted(()=>[] as any[])
 vi.mock('../prefs',()=>({usePrefs:()=>prefs}))

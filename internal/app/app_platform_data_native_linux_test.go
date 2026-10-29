@@ -315,7 +315,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Log(marker)
 		}
 		if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
-			for _, marker := range []string{"SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
+			for _, marker := range []string{"SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
 				if !bytes.Contains(output.Bytes(), []byte(marker)) {
 					t.Fatal("SDK native browser assertion missing", marker, output.String())
 				}

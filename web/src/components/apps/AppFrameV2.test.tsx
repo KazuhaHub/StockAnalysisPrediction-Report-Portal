@@ -76,3 +76,16 @@ test('missing initial document measurement fails with a bounded retry surface',(
   act(()=>vi.advanceTimersByTime(10000));expect(screen.queryByTitle('Fixture')).toBeNull();expect(screen.getByRole('alert')).toBeTruthy()
  }finally{vi.useRealTimers()}
 })
+
+test('draft state retires on reload, failure and unmount; stale channels cannot restore it',()=>{
+ const changed=vi.fn();const view=render(<AppFrameV2 {...props} onDraftChange={changed}/>);
+ const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const first=sessions[0];
+ act(()=>first.options.onDraftChange?.(true));expect(changed).toHaveBeenLastCalledWith(true);
+ fireEvent.load(frame);expect(changed).toHaveBeenLastCalledWith(false);
+ act(()=>first.options.onDraftChange?.(true));expect(changed).toHaveBeenLastCalledWith(false);
+ act(()=>sessions[1].options.onDraftChange?.(true));expect(changed).toHaveBeenLastCalledWith(true);
+ act(()=>sessions[1].options.onFailure?.('protocol_error'));expect(changed).toHaveBeenLastCalledWith(false);
+ fireEvent.click(screen.getByRole('button',{name:'apps.v2Retry'}));fireEvent.load(screen.getByTitle('Fixture'));
+ const last=sessions[2];act(()=>last.options.onDraftChange?.(true));view.unmount();
+ expect(changed).toHaveBeenLastCalledWith(false);changed.mockClear();act(()=>last.options.onDraftChange?.(true));expect(changed).not.toHaveBeenCalled();
+})

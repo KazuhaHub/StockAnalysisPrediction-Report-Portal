@@ -9,6 +9,7 @@ import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
 import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import AppFrameV2 from '../components/apps/AppFrameV2'
+import AppDraftGuard from '../components/apps/AppDraftGuard'
 
 export default function AppViewV2() {
   const { installation = '' } = useParams()
@@ -24,6 +25,7 @@ function LaunchPage({ installation }: { installation: string }) {
   const [launch, setLaunch] = useState<AppLaunchV2 | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [dirty, setDirty] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(64)
 
@@ -74,6 +76,7 @@ function LaunchPage({ installation }: { installation: string }) {
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: launch?.layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
+      <AppDraftGuard dirty={dirty} />
       <Space>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>{t('apps.back')}</Button>
         {launch && <><AppDisplayIcon display={launch.display} /><Typography.Title level={4} style={{ margin: 0 }}>{copy?.name}</Typography.Title></>}
@@ -88,7 +91,7 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: launch.layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} presentation={presentation!} height={height} />
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onDraftChange={setDirty} presentation={presentation!} height={height} />
         </div>
       )}
     </section>

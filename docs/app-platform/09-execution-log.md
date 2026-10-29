@@ -2140,3 +2140,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   backend protocol/gateway, interactive SDK/reference-app browser acceptance and
   the remaining full lifecycle/platform release are unfinished. No schema,
   dependency, production, credential, Status, SDK-freeze or beta change.
+
+
+- Added the shared boolean unsaved-change guard in the experimental SDK and app
+  host. Mounted form owners aggregate with OR; presentation changes preserve
+  edits, retirement clears stale owners, and the host owns localized router/POP
+  leave confirmation plus native refresh warnings. Development protocol dev.4 is
+  matched and pinned across repositories. No draft body, destination, app veto,
+  persistence, schema, dependency, publication or production access is added.
+  See [unsaved-change guard](121-unsaved-change-guard.md) for implementation,
+  tests and bounded behavior. Local affected Portal108 and SDK200 tests,
+  typechecks/consumer builds, Python26 and the built document handler passed;
+  the actual AppViewV2 browser fixture verified Chinese host confirmation,
+  cancel/state retention, theme preservation and confirmed iframe retirement.
+  Companion Apps #30 passed all checks at its pinned commit. Linux runtime
+  acceptance passed at functional b58bf494 in run 40860210842/job 123401233721;
+  draft/current-viewer/layout/no-retry/revoke and owned-cleanup/neighbor flags
+  true, execution_ready false. General Go still fails inherited x/net findings.
+  Web shard3 exposed an older missing-height fixture, repaired without weakening
+  the cover requirement (526 local shard tests pass). P06/full platform remain incomplete.
