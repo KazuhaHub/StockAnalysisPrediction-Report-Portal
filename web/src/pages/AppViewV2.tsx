@@ -5,6 +5,7 @@ import { useNavigate, useParams, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
 import { api } from '../api/client'
+import { parseRouteSearch } from '../lib/route-query-v2'
 import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
 import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
@@ -54,8 +55,8 @@ function LaunchPage({ installation }: { installation: string }) {
   const base = `/apps/v2/${installation}`
   const path = location.pathname === base ? '/'
     : location.pathname.startsWith(base + '/') ? location.pathname.slice(base.length) : null
-  const route = !location.search && !location.hash
-    ? launch?.routes.find(route => route.path === path) : undefined
+  const registered = launch?.routes.find(route => route.path === path)
+  const route = !location.hash && registered && parseRouteSearch(registered.query ?? [], location.search) ? registered : undefined
   const layout = route?.layout
   useLayoutEffect(() => {
     const element = panel.current
@@ -73,7 +74,7 @@ function LaunchPage({ installation }: { installation: string }) {
 
   const presentation = launch ? parseBridgePresentation({
     locale: lang, timeZone: launch.timeZone, layout,
-    navigation: { path, routes: launch.routes },
+    navigation: { path, search:location.search, routes: launch.routes },
     theme: {
       dark, colorPrimary: token.colorPrimary, colorBg: token.colorBgContainer,
       colorText: token.colorText, colorBorder: token.colorBorder,
@@ -91,8 +92,8 @@ function LaunchPage({ installation }: { installation: string }) {
         {launch && <><AppDisplayIcon display={launch.display} /><Typography.Title level={4} style={{ margin: 0 }}>{copy?.name}</Typography.Title></>}
       </Space>
       {failed || (launch && (!route || !presentation)) ? (
-        <Alert type="error" showIcon title={t('apps.v2Unavailable')}
-          action={<Button onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
+        <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}
+          action={launch && !route ? <Button onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
       ) : !launch ? (
         <div role="status" style={{ display: 'grid', placeItems: 'center', minHeight: 160 }}>
           <Spin /><span>{t('apps.v2Loading')}</span>
@@ -100,9 +101,10 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onDraftChange={setDirty} onNavigate={(target, replace) => {
-              if (blocker.state !== 'unblocked' || !launch.routes.some(route => route.path === target)) return
-              void navigate(target === '/' ? base : base + target, { replace })
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onDraftChange={setDirty} onNavigate={(target, replace, search) => {
+              const destination=launch.routes.find(route=>route.path===target)
+              if (blocker.state !== 'unblocked' || !destination || !parseRouteSearch(destination.query??[],search)) return
+              void navigate((target === '/' ? base : base + target)+search, { replace })
             }} presentation={presentation!} height={height} />
         </div>
       )}

@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "be621e59c0f98681849c912bdcdb86bb1840f0b6facacec40ef3f21d00cbecc4";
+export const DESCRIPTOR_SCHEMA_SHA256 = "e956d5b4a12ad4752892a1c6a426c8d3ba1f55770536e40eeaabbc4f9de935f8";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -28,6 +28,7 @@ export interface Route {
  id: string;
  path: string;
  layout: "document" | "viewport";
+ query?: (RouteQuery)[] | null;
 }
 export interface Artifact {
  artifact: string;
@@ -63,11 +64,23 @@ export interface AppDisplayText {
  name: string;
  description: string;
 }
+export interface RouteQuery {
+ name: string;
+ type: "text" | "integer" | "boolean" | "enum";
+ max_bytes?: number;
+ min?: number;
+ max?: number;
+ values?: (string)[];
+}
 export const DESCRIPTOR_LIMITS = {
   "MaxDescriptorBytes": 131072,
   "MaxAppNameCharacters": 80,
   "MaxAppDescriptionCharacters": 320,
   "maxDescriptorDepth": 24,
+  "maxRouteQueryFields": 16,
+  "maxRouteQueryTextBytes": 256,
+  "maxRouteQueryInteger": 1000000000,
+  "maxRouteQueryValues": 16,
   "maxDescriptorRoutes": 32,
   "maxDescriptorReadableSchemas": 32,
   "minDescriptorDataSchema": 1,
@@ -88,6 +101,8 @@ export const DESCRIPTOR_CONSTANTS = {
   "descriptorBackendProtocol": "portal.backend/1"
 } as const;
 export const DESCRIPTOR_PATTERNS = {
+  "queryName": "^[a-z][a-z0-9_]{0,31}$",
+  "queryEnum": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
   "slug": "^[a-z][a-z0-9-]{0,63}$",
   "key": "^[a-z][a-z0-9_]*$",
   "copyKey": "^[a-z][a-z0-9_.-]{0,95}$",
@@ -161,7 +176,8 @@ export const DESCRIPTOR_FIELDS = {
   "Route": [
     "id",
     "path",
-    "layout"
+    "layout",
+    "query"
   ],
   "Artifact": [
     "artifact",
@@ -196,5 +212,13 @@ export const DESCRIPTOR_FIELDS = {
     "locale",
     "name",
     "description"
+  ],
+  "RouteQuery": [
+    "name",
+    "type",
+    "max_bytes",
+    "min",
+    "max",
+    "values"
   ]
 } as const;

@@ -1073,6 +1073,7 @@ test("registered navigation is source-bound and the host owns the committed path
   const routed = {
     ...presentation,
     navigation: {
+      search: "",
       path: "/",
       routes: [
         { id: "home", path: "/", layout: "document" as const },
@@ -1099,23 +1100,26 @@ test("registered navigation is source-bound and the host owns the committed path
     () => host.close(),
   );
   await vi.waitFor(() => expect(host.state()).toBe("ready"));
-  expect(client.navigate("https://evil.invalid", false)).toBe(false);
-  expect(client.navigate("/unknown", false)).toBe(false);
-  expect(client.navigate("/editor", false)).toBe(true);
+  expect(client.navigate("https://evil.invalid")).toBe(false);
+  expect(client.navigate("/unknown")).toBe(false);
+  expect(client.navigate("/editor")).toBe(true);
   await vi.waitFor(() =>
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/editor", false),
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/editor", false, ""),
   );
   expect(client.presentation()?.navigation?.path).toBe("/");
   host.updatePresentation({
     ...routed,
     layout: "viewport",
-    navigation: { ...routed.navigation, path: "/editor" },
+    navigation: {
+      ...routed.navigation,
+      path: "/editor",
+    },
   });
   await vi.waitFor(() =>
     expect(client.presentation()?.navigation?.path).toBe("/editor"),
   );
   client.close();
-  expect(client.navigate("/", true)).toBe(false);
+  expect(client.navigate("/", { replace: true })).toBe(false);
 });
 
 for (const routes of [
@@ -1148,7 +1152,11 @@ for (const routes of [
     expect(
       parseBridgePresentation({
         ...presentation,
-        navigation: { path: "/", routes },
+        navigation: {
+          search: "",
+          path: "/",
+          routes,
+        },
       }),
     ).toBeNull();
   });
@@ -1161,13 +1169,22 @@ test("route changes require the matching signed layout and cannot add query stat
   expect(
     parseBridgePresentation({
       ...presentation,
-      navigation: { path: "/editor", routes },
+      navigation: {
+        search: "",
+        path: "/editor",
+        routes,
+      },
     }),
   ).toBeNull();
   expect(
     parseBridgePresentation({
       ...presentation,
-      navigation: { path: "/", routes, query: { token: "secret" } },
+      navigation: {
+        search: "",
+        path: "/",
+        routes,
+        query: { token: "secret" },
+      },
     }),
   ).toBeNull();
 });
@@ -1178,6 +1195,7 @@ test("host ignores stale navigation and refuses injected destinations before dis
   const routed = {
     ...presentation,
     navigation: {
+      search: "",
       path: "/",
       routes: [
         { id: "home", path: "/", layout: "document" as const },
@@ -1210,6 +1228,7 @@ test("host ignores stale navigation and refuses injected destinations before dis
   const message = {
     ...acknowledgement(init),
     type: "navigation.request",
+    search: "",
     revision: "1",
     presentationRevision: "1",
     path: "/editor",
@@ -1220,6 +1239,75 @@ test("host ignores stale navigation and refuses injected destinations before dis
   port.postMessage({ ...message, revision: "2" });
   await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
   port.postMessage({ ...message, revision: "3", path: "https://evil.invalid" });
+  await vi.waitFor(() => expect(host.state()).toBe("failed"));
+  expect(navigate).toHaveBeenCalledOnce();
+});
+
+test("navigation query is validated against its signed destination rather than the active route", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    navigate = vi.fn();
+  const routed = {
+    ...presentation,
+    navigation: {
+      path: "/",
+      search: "",
+      routes: [
+        {
+          id: "home",
+          path: "/",
+          layout: "document" as const,
+          query: [{ name: "page", type: "integer" as const, min: 0, max: 100 }],
+        },
+        {
+          id: "editor",
+          path: "/editor",
+          layout: "document" as const,
+          query: [{ name: "q", type: "text" as const, max_bytes: 32 }],
+        },
+      ],
+    },
+  };
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: routed,
+    capabilities: [],
+    onNavigate: navigate,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  expect(client.navigate("/editor", { query: { page: 2 } })).toBe(false);
+  expect(client.navigate("/editor", { query: { q: "中文" } })).toBe(true);
+  await vi.waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/editor",
+      false,
+      "?q=%E4%B8%AD%E6%96%87",
+    ),
+  );
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data,
+    port = w.received.find((item) => item.event.data.type === "app:init")!.event
+      .ports[0];
+  port.postMessage({
+    ...acknowledgement(init),
+    type: "navigation.request",
+    revision: "2",
+    presentationRevision: "1",
+    path: "/editor",
+    search: "?page=2",
+    replace: false,
+  });
   await vi.waitFor(() => expect(host.state()).toBe("failed"));
   expect(navigate).toHaveBeenCalledOnce();
 });

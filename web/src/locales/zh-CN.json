@@ -2759,5 +2759,7 @@
   "apps.draftLeaveTitle": "离开此应用？",
   "apps.draftLeaveBody": "此应用有未保存的修改。离开将丢弃尚未保存的内容。",
   "apps.draftLeave": "离开应用",
-  "apps.draftStay": "继续编辑"
+  "apps.draftStay": "继续编辑",
+  "apps.v2InvalidRoute": "应用链接中的页面或参数无效。",
+  "apps.v2Home": "应用首页"
 }

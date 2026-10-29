@@ -374,7 +374,7 @@ def main(args):
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
                     if browser_enabled:
-                        for marker in ("SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
+                        for marker in ("SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
                             if marker not in result.stdout:
                                 raise RuntimeError("SDK native browser assertion missing: " + marker)
                             report[marker.lower()] = True

@@ -2176,3 +2176,24 @@ daemon workflow 40455635317 passed on the functional source as well.
   General Go still fails inherited x/net findings after affected SQL suites pass. No descriptor/storage schema,
   dependency, publication, production, Status, stable SDK or beta change.
   Typed queries and remaining P06/full platform requirements stay open.
+
+
+- Added optional signed typed query rules (bounded text/integer/boolean/enum), a
+  pinned pure validator shared by descriptor tools/host/SDK, and dev.6 canonical
+  search with host-committed typed query state. Pointer-preserved zero bounds,
+  strict duplicate/encoding/size/Unicode checks and destination-rule admission
+  retain current authority and channel guards. Invalid links have localized
+  host-owned home recovery. See [typed queries](123-typed-route-query.md).
+  Local Portal165/SDK249, shared corpus56, Python12/14/2, frontend consumers,
+  descriptor/HTTP/signed-document tests and Linux compilation pass. Actual-page
+  browser URL/back/forward/reload/type restoration and error recovery passed;
+  initial a328ee5c passed native run40868846704/job123430411682 (typed-query and
+  prior browser/native/cleanup flags true, execution_ready false). General Go
+  passed new pure contracts/SQL suites then failed inherited x/net findings.
+  A query-object identity regression was then found and fixed in Apps fa34a900;
+  final functional a1a19259 passed native run40870583604/job123436285697 with
+  unchanged query effects across locale updates and all prior flags true.
+  Apps fa34a900 passed all checks; Portal web/race/Docker pass, and general Go
+  still fails the inherited vulnerability gate. execution_ready remains false. Descriptor schema is extended;
+  database schema, dependencies, publication, production, Status, SDK freeze and
+  beta settings are unchanged. Remaining full P06/platform work stays open.

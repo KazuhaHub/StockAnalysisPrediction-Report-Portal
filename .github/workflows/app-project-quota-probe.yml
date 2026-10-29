@@ -2,6 +2,15 @@ name: app project quota probe
 on:
   pull_request:
     paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'scripts/generate_app_contract*'
       - 'internal/apprunner/data/**'
       - 'internal/apprunner/control/**'
       - 'internal/apprunner/driver/**'
@@ -47,6 +56,15 @@ on:
   push:
     branches: [main]
     paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'scripts/generate_app_contract*'
       - 'internal/apprunner/data/**'
       - 'internal/apprunner/control/**'
       - 'internal/apprunner/driver/**'
@@ -107,7 +125,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: dab705dfa233a204e2e7ca60a8af015f3edd3a4b
+          ref: fa34a900f3c29ee5218d51dd5a1b6ea7bf0c326c
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6

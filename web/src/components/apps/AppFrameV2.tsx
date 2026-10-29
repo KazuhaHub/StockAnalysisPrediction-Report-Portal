@@ -15,7 +15,7 @@ export interface AppFrameV2Props {
   capabilities: readonly string[]
   backendAvailable?: boolean
   onDraftChange?: (dirty: boolean) => void
-  onNavigate?: (path:string,replace:boolean)=>void
+  onNavigate?: (path:string,replace:boolean,search:string)=>void
   // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
@@ -89,7 +89,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       presentation: latest.current,
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
-      onNavigate: (path,replace)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace)},
+      onNavigate: (path,replace,search)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },
       onReady: () => { if (live.current && epoch.current === generation) {
         setReady(true)

@@ -60,18 +60,18 @@ test('signed deep links and history update one mounted document; dirty route can
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,routes}),{status:200})));
  render(<Page path={`/apps/v2/${installation}/edit`}/>);const element=await screen.findByTestId('v2-frame');
  expect(frames[frames.length-1].presentation).toMatchObject({layout:'viewport',navigation:{path:'/edit',routes}});
- act(()=>frames[frames.length-1].onNavigate('/',false));
+ act(()=>frames[frames.length-1].onNavigate('/',false,''));
  await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
  expect(screen.getByTestId('v2-frame')).toBe(element);expect(fetch).toHaveBeenCalledTimes(1);
  const router=routers[routers.length-1]!;
  await act(async()=>router.navigate(-1));
  await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit'));
- act(()=>frames[frames.length-1].onDraftChange(true));act(()=>frames[frames.length-1].onNavigate('/',false));
+ act(()=>frames[frames.length-1].onDraftChange(true));act(()=>frames[frames.length-1].onNavigate('/',false,''));
  await screen.findByRole('dialog');expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftStay'}));
  await waitFor(()=>expect([...router.state.blockers.values()].every(b=>b.state==='unblocked')).toBe(true));
  expect(router.state.location.pathname).toBe(`/apps/v2/${installation}/edit`);
- act(()=>frames[frames.length-1].onNavigate('/',false));await screen.findByRole('dialog');
+ act(()=>frames[frames.length-1].onNavigate('/',false,''));await screen.findByRole('dialog');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftLeave'}));
  await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
  expect(screen.getByTestId('v2-frame')).toBe(element);expect(fetch).toHaveBeenCalledTimes(1);
@@ -79,4 +79,25 @@ test('signed deep links and history update one mounted document; dirty route can
 test.each(['/unknown','/%65dit','/edit?token=secret','/edit#fragment'])('unsigned or noncanonical deep link never mounts a frame: %s',path=>{
  render(<Page path={`/apps/v2/${installation}${path}`}/>);
  return screen.findByRole('alert').then(()=>expect(frames).toHaveLength(0));
+});
+
+
+test('typed query deep links and history update the same document without refetching',async()=>{
+ const query=[{name:'page',type:'integer',min:1,max:100},{name:'q',type:'text',max_bytes:32}];
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,routes:[{id:'home',path:'/',layout:'document',query}]}),{status:200})));
+ render(<Page path={`/apps/v2/${installation}?page=2`}/>);const frame=await screen.findByTestId('v2-frame');
+ expect(frames[frames.length-1].presentation.navigation.search).toBe('?page=2');
+ act(()=>frames[frames.length-1].onNavigate('/',false,'?page=3&q=%E4%B8%AD%E6%96%87'));
+ await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.search).toBe('?page=3&q=%E4%B8%AD%E6%96%87'));
+ const router=routers[routers.length-1];await act(async()=>router.navigate(-1));
+ await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.search).toBe('?page=2'));
+ expect(screen.getByTestId('v2-frame')).toBe(frame);expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+
+test('invalid query has a host-owned home recovery without refetching or forwarding invalid state',async()=>{
+ render(<Page path={`/apps/v2/${installation}?unknown=x`}/>);
+ const alert=await screen.findByRole('alert');expect(alert.textContent).toContain('apps.v2InvalidRoute');expect(frames).toHaveLength(0);
+ fireEvent.click(screen.getByRole('button',{name:'apps.v2Home'}));await screen.findByTestId('v2-frame');
+ expect(frames[frames.length-1].presentation.navigation).toMatchObject({path:'/',search:''});expect(fetch).toHaveBeenCalledTimes(1);
 });

@@ -202,6 +202,22 @@
             "document",
             "viewport"
           ]
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RouteQuery"
+              },
+              "maxItems": 16
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-omitempty": true,
+          "description": "Optional signed query fields. Names are unique; absent/null/empty means no query fields."
         }
       },
       "required": [
@@ -458,6 +474,223 @@
         "name",
         "description"
       ]
+    },
+    "RouteQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "integer",
+            "boolean",
+            "enum"
+          ]
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "min": {
+          "type": "integer",
+          "minimum": -1000000000,
+          "maximum": 1000000000,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -1000000000,
+          "maximum": 1000000000,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "x-go-omitempty": true
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "max_bytes": {}
+              },
+              "required": [
+                "max_bytes"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "integer"
+                },
+                "min": {},
+                "max": {}
+              },
+              "required": [
+                "min",
+                "max"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "boolean"
+                }
+              },
+              "required": [],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "enum"
+                },
+                "values": {}
+              },
+              "required": [
+                "values"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Discriminated query rule. Integer min <= max; reserved names constructor/prototype are forbidden. No query field is required in a URL."
     }
   }
 }

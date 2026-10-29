@@ -76,7 +76,7 @@ def go_type(node):
     if kind == "array":
         return "[]" + go_type(base["items"])
     if kind in ("string", "integer"):
-        return {"string": "string", "integer": "int"}[kind]
+        return ("*" if node.get("x-go-pointer") else "") + {"string": "string", "integer": "int"}[kind]
     raise ValueError("unsupported generated Go field type")
 
 
@@ -139,6 +139,10 @@ def render(raw):
         "MaxAppNameCharacters": p("AppDisplayText", "name")["maxLength"],
         "MaxAppDescriptionCharacters": p("AppDisplayText", "description")["maxLength"],
         "maxDescriptorDepth": schema["x-portal-parser-limits"]["depth"],
+        "maxRouteQueryFields": without_null(p("Route", "query"))["maxItems"],
+        "maxRouteQueryTextBytes": p("RouteQuery", "max_bytes")["maximum"],
+        "maxRouteQueryInteger": p("RouteQuery", "max")["maximum"],
+        "maxRouteQueryValues": p("RouteQuery", "values")["maxItems"],
         "maxDescriptorRoutes": p("Presentation", "routes")["maxItems"],
         "maxDescriptorReadableSchemas": p("DataCompatibility", "readable_schemas")["maxItems"],
         "minDescriptorDataSchema": p("DataCompatibility", "schema")["minimum"],
@@ -165,6 +169,8 @@ def render(raw):
         go.append(f"const {key} = {json.dumps(value)}")
     ts.append("export const DESCRIPTOR_CONSTANTS = " + json.dumps(constants, indent=2) + " as const;")
     patterns = {
+        "queryName": p("RouteQuery", "name")["pattern"],
+        "queryEnum": p("RouteQuery", "values")["items"]["pattern"],
         "slug": p("Manifest", "id")["pattern"],
         "key": schema["x-portal-parser-limits"]["key_pattern"],
         "copyKey": p("Presentation", "name_key")["pattern"],
@@ -245,6 +251,23 @@ def main():
                 for key,path in (("protocol_sha256",sdk/"src/bridge-v2.ts"),("test_sha256",sdk/"tests/bridge-v2.test.ts")):
                     if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
                         raise ValueError("bridge source differs; regenerate from the Portal checkout")
+        query_pin = sdk/"tests/fixtures/route-query-v2-source.json"
+        if PORTAL_MODE and (ROOT/"web/src/lib/route-query-v2.ts").is_file():
+            source = (ROOT/"web/src/lib/route-query-v2.ts").read_bytes()
+            tests = (ROOT/"web/src/lib/route-query-v2.test.ts").read_text()
+            for quote in ('"', "'"):
+                tests = tests.replace("from "+quote+"./route-query-v2"+quote,"from "+quote+"../src/route-query-v2"+quote)
+            tests = tests.encode()
+            outputs[sdk/"src/route-query-v2.ts"] = source
+            outputs[sdk/"tests/route-query-v2.test.ts"] = tests
+            outputs[query_pin] = (json.dumps({"format":"portal.query.source/1","source_sha256":hashlib.sha256(source).hexdigest(),"test_sha256":hashlib.sha256(tests).hexdigest()},indent=2)+"\n").encode()
+        elif not PORTAL_MODE and (query_pin.exists() or (sdk/"src/route-query-v2.ts").exists() or ((sdk/"src/bridge-v2.ts").exists() and b"./route-query-v2" in (sdk/"src/bridge-v2.ts").read_bytes())):
+            pin = json.loads(query_pin.read_bytes(),object_pairs_hook=unique_object)
+            if set(pin)!={"format","source_sha256","test_sha256"} or pin["format"]!="portal.query.source/1":
+                raise ValueError("invalid query source pin")
+            for key,path in (("source_sha256",sdk/"src/route-query-v2.ts"),("test_sha256",sdk/"tests/route-query-v2.test.ts")):
+                if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
+                    raise ValueError("query source differs; regenerate from the Portal checkout")
     stale = [str(path) for path, expected in outputs.items() if not path.is_file() or path.read_bytes() != expected]
     if args.check:
         if stale:
