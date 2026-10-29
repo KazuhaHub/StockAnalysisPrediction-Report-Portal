@@ -115,7 +115,12 @@ preflight, and Go parsing/digest/sandbox-document checks on the generated candid
 The complete local Portal/HTTP/session/SQLite browser drill verified Preview,
 draft cancel/confirm and retained text after browser-back navigation. It used only
 the browser plugin, no native screen control. Linux CI repeats this flow using
-Apps source 6abdafa1b21c8d62b48d39646962914b9a1b3d9f; results remain pending.
+Apps source 6abdafa1b21c8d62b48d39646962914b9a1b3d9f. Initial Linux runs
+40942704891 and 40943549143 failed at the initial page: the disposable store had
+no named business timezone, so launch metadata intentionally supplied an empty
+zone and the frontend refused it. A bounded failure screenshot/status diagnostic
+confirmed this. The fixture now sets UTC explicitly, as the local drill already
+did, preserving the production fail-closed timezone rule. Final CI remains pending.
 The broader P06/P07/P08, full accessibility/visual cases, persistent user data,
 managed reference app, marketplace/update/uninstall/recovery and release gates
 remain open.

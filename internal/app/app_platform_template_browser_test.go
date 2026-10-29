@@ -104,6 +104,9 @@ func TestGeneratedV2TemplateBrowser(t *testing.T) {
 	}
 	parsed, archive := templateCandidate(t, dir)
 	s, reader, installation := platformFrontendBrowserInstallFixture(t, archive, parsed.Manifest.Presentation)
+	// The real host rejects an unnamed system-local business timezone.
+	// Configure the disposable store explicitly, as the local browser drill does.
+	s.st.SetSetting("timezone", "UTC")
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	mux.HandleFunc("GET /__template_fixture/start", func(w http.ResponseWriter, r *http.Request) {
