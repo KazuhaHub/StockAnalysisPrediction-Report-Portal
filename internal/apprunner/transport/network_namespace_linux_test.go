@@ -256,6 +256,12 @@ func TestNetworkTLSControllerChild(t *testing.T) {
 	if len(key) != ed25519.PrivateKeySize {
 		t.Fatal("fixture key")
 	}
+	if mode == "success" {
+		profile, err := ObserveControllerNetwork(context.Background(), os.Getenv("NETWORK_SOCKET"), controllerTestUID, controllerTestGID)
+		if err != nil || profile.Controller().Fingerprint != a.Fingerprint || profile.Profile().ActiveRequests != 2 || profile.Profile().CacheEntries != 2 || profile.Profile().WritableBackend || !profile.Endpoint().RootController {
+			t.Fatal("actual root network profile unavailable", err)
+		}
+	}
 	raw := decode("NETWORK_PACKET")
 	calls := 0
 	observed, err := RequestControllerNetwork(context.Background(), os.Getenv("NETWORK_SOCKET"), controllerTestUID, controllerTestGID, raw, decode("NETWORK_SIGNATURE"), decode("NETWORK_BODY"), a, func(ctx context.Context, c control.NetworkHTTPRequestCommand, nonce string) ([]byte, []byte, error) {

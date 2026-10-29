@@ -1,7 +1,7 @@
 # D2 extension decision: credential custody and application bindings
 
-Status: proposed, awaiting owner decision. Do not write schema/migration or
-persistent credential code from this document before approval. This decision
+Status: Option A approved by the owner on 2026-10-29 Pacific for the exact
+products and rules below. Implementation and verification remain required. This decision
 covers development and isolated tests only, not production privileges, real
 credentials, Status adoption or SDK freeze. Initial control-table approval did
 not include these independent entities.
@@ -287,6 +287,13 @@ remain independent.
 
 ## 9. Owner decision record
 
-Pending: Option A as specified above, or requested changes. Record the approved
-source revision and exact scope here before implementation. Until then, only
-this proposal and nonpersistent planning are permitted for the new products.
+Approved by the owner on 2026-10-29 Pacific in response to PR #339, covering the proposal text present at
+head `3627d68b71e4d49b59b2e59ceaabc028d3f59d6c`. The response accepts Option A and
+the stated rotation/reapproval, uninstall revocation, restored pause/revocation
+floor and existing-key-custody rules. It authorizes the two named schema products
+and their development/isolated implementation/tests. It does not authorize real
+credentials, production rollout, raw-read enablement, Status adoption, SDK freeze
+or later jobs/events/business-storage products. Do not request this same storage
+decision again; separately scoped release and later storage decisions remain.
+This approval is not evidence that tables, migration, binding operations or
+recovery behavior have already been implemented.

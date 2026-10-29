@@ -34,11 +34,12 @@ type networkExecutor interface {
 	Do(context.Context, []byte, []byte, []byte, control.Authority) (broker.HTTPResponse, error)
 }
 type networkProvider struct {
-	store    networkEnrollmentStore
-	pool     networkExecutor
-	current  broker.CurrentNetworkAuthority
-	mu       sync.Mutex
-	sessions map[string]*networkControlSession
+	activeLimit, cacheLimit int
+	store                   networkEnrollmentStore
+	pool                    networkExecutor
+	current                 broker.CurrentNetworkAuthority
+	mu                      sync.Mutex
+	sessions                map[string]*networkControlSession
 }
 type networkControlSession struct {
 	conn       net.Conn
@@ -52,7 +53,7 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 	if store == nil {
 		return nil, broker.ErrDenied
 	}
-	p := &networkProvider{store: store, sessions: make(map[string]*networkControlSession)}
+	p := &networkProvider{store: store, sessions: make(map[string]*networkControlSession), activeLimit: active, cacheLimit: entries}
 	current, err := broker.NewConfirmedNetworkAuthority(p.enrollment, p.confirm)
 	if err != nil {
 		return nil, err

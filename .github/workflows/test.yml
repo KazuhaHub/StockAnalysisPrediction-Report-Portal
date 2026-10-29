@@ -95,7 +95,7 @@ jobs:
       - name: Bounded application HTTP broker executor
         run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/broker
       - name: Private network controller transport
-        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation)'
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation|Runtime)'
       - name: Signed application descriptor and query contracts
         run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
       - name: Writable application review and writer storage

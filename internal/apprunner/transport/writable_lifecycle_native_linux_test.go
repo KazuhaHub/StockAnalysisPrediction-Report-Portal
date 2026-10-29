@@ -283,7 +283,7 @@ func TestNativeWritableLifecycleTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(endpoint, "w.sock")
-	server, err := ListenCandidateController(ctx, path, controllerTestUID, controllerTestGID, store, native)
+	server, err := ListenNetworkCandidateController(ctx, path, controllerTestUID, controllerTestGID, store, native, 2, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func nativeWritableLifecycleClient(t *testing.T, ctx context.Context, dir string
 		t.Fatal(err)
 	}
 	path := filepath.Join(endpoint, "l.sock")
-	server, err := ListenCandidateController(ctx, path, controllerTestUID, controllerTestGID, store, native)
+	server, err := ListenNetworkCandidateController(ctx, path, controllerTestUID, controllerTestGID, store, native, 2, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,6 +416,13 @@ func TestNativeWritableLifecycleChild(t *testing.T) {
 	var a control.Authority
 	if err := json.Unmarshal(decode("WL_AUTHORITY"), &a); err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv("WL_ALLOW_FAILURE") != "true" {
+		observed, err := ObserveControllerNetwork(context.Background(), os.Getenv("WL_SOCKET"), controllerTestUID, controllerTestGID)
+		c := observed.Controller()
+		if err != nil || !observed.Profile().WritableBackend || observed.Profile().ActiveRequests != 2 || observed.Profile().CacheEntries != 4 || c.DeploymentID != a.DeploymentID || c.ControllerEpoch != a.ControllerEpoch || c.ControlRevision != a.ControlRevision || c.Fingerprint != a.Fingerprint || !bytes.Equal(c.PublicKey, a.PublicKey) || !observed.Endpoint().RootController {
+			t.Fatal("combined runtime observation", err)
+		}
 	}
 	document, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
 	if err != nil {

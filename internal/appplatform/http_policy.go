@@ -18,6 +18,10 @@ import (
 
 const HTTPPolicyFormat = "portal.http-policy/1-dev.1"
 const MaxHTTPPolicyBytes = 8192
+const MaxHTTPRequestBytes = 65536
+const MaxHTTPResponseBytes = 1048576
+const MaxHTTPDeadlineMS = 15000
+const MaxHTTPConcurrency = 4
 
 var ErrInvalidHTTPPolicy = errors.New("invalid application HTTP policy")
 
@@ -68,7 +72,7 @@ func NormalizeHTTPPolicy(p HTTPPolicy) (HTTPPolicy, error) {
 	} else if u.Host != u.Hostname() {
 		return zero, ErrInvalidHTTPPolicy
 	}
-	if p.RequestBytes < 1 || p.RequestBytes > 65536 || p.ResponseBytes < 1 || p.ResponseBytes > 1048576 || p.Deadline < time.Millisecond || p.Deadline > 15*time.Second || p.Deadline%time.Millisecond != 0 || p.Concurrency < 1 || p.Concurrency > 4 || len(p.Paths) < 1 || len(p.Paths) > 16 || len(p.Methods) < 1 || len(p.Methods) > 7 {
+	if p.RequestBytes < 1 || p.RequestBytes > MaxHTTPRequestBytes || p.ResponseBytes < 1 || p.ResponseBytes > MaxHTTPResponseBytes || p.Deadline < time.Millisecond || p.Deadline > time.Duration(MaxHTTPDeadlineMS)*time.Millisecond || p.Deadline%time.Millisecond != 0 || p.Concurrency < 1 || p.Concurrency > MaxHTTPConcurrency || len(p.Paths) < 1 || len(p.Paths) > 16 || len(p.Methods) < 1 || len(p.Methods) > 7 {
 		return zero, ErrInvalidHTTPPolicy
 	}
 	for i, path := range p.Paths {
@@ -127,7 +131,7 @@ func ParseHTTPPolicy(raw []byte) (ParsedHTTPPolicy, error) {
 	var w httpPolicyWire
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&w) != nil || w.Format != HTTPPolicyFormat || w.DeadlineMS < 1 || w.DeadlineMS > 15000 {
+	if d.Decode(&w) != nil || w.Format != HTTPPolicyFormat || w.DeadlineMS < 1 || w.DeadlineMS > MaxHTTPDeadlineMS {
 		return zero, ErrInvalidHTTPPolicy
 	}
 	p, err := NormalizeHTTPPolicy(HTTPPolicy{Origin: w.Origin, Paths: w.Paths, Methods: w.Methods, RequestBytes: w.RequestBytes, ResponseBytes: w.ResponseBytes, Deadline: time.Duration(w.DeadlineMS) * time.Millisecond, Concurrency: w.Concurrency})

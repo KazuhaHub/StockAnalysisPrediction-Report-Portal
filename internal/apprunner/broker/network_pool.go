@@ -12,6 +12,9 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
+const MaxNetworkPoolActive = 8
+const MaxNetworkPoolEntries = 32
+
 // NetworkPool is owned once by the trusted broker service, not by an application
 // or each request. It bounds concurrent signed invocations and cached executors.
 // It is in-memory scheduling state, not grants, durable replay or a service lease.
@@ -55,7 +58,7 @@ func (n *networkExecutorLease) release() {
 // Bounds are trusted infrastructure settings, never request/package fields.
 // Current authority is mandatory for all calls, including cached executors.
 func NewNetworkPool(active, entries int, current CurrentNetworkAuthority) (*NetworkPool, error) {
-	if active < 1 || active > 8 || entries < 1 || entries > 32 || current == nil {
+	if active < 1 || active > MaxNetworkPoolActive || entries < 1 || entries > MaxNetworkPoolEntries || current == nil {
 		return nil, ErrDenied
 	}
 	return &NetworkPool{slots: make(chan struct{}, active), current: current, entries: make(map[networkExecutorKey]*networkExecutorEntry), capacity: entries, now: time.Now, create: func(p HTTPPolicy) (*HTTP, error) {
