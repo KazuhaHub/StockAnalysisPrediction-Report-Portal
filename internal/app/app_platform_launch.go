@@ -169,6 +169,10 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 		return zero, errAppPlatformLaunchUnavailable
 	}
 
+	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, releaseSHA, epoch, policy, parsed.Manifest); err != nil {
+		return zero, err
+	}
+
 	if namespace.Valid {
 		if int64(parsed.Manifest.Data.Schema) != dataFormat {
 			return zero, errAppPlatformLaunchUnavailable

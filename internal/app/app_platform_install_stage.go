@@ -145,34 +145,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if string(expectedRaw) != raw {
 		return errAppPlatformStageEvidence
 	}
-	rows, err := e.query(`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, lease.installationID)
-	if err != nil {
-		return err
-	}
-	index := 0
-	for rows.Next() {
-		var capability, policyJSON, review string
-		var granted int
-		var revision int64
-		if err := rows.Scan(&capability, &granted, &policyJSON, &revision, &review); err != nil {
-			rows.Close()
-			return err
-		}
-		if index >= len(p.DeclinedCapabilities) || capability != p.DeclinedCapabilities[index] || granted != 0 || policyJSON != "{}" || revision != 1 || review != planID {
-			rows.Close()
-			return errAppPlatformStageEvidence
-		}
-		index++
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if index != len(p.DeclinedCapabilities) {
-		return errAppPlatformStageEvidence
-	}
-	return nil
+	return verifyPlatformDeniedCapabilityRows(e, lease.installationID, p.DeclinedCapabilities, 1, planID, errAppPlatformStageEvidence)
 }
 
 func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {

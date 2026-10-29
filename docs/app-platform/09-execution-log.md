@@ -2240,3 +2240,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   pass. Broad ordinary tests remain skipped; full Go CI is not green.
   Public default/bootstrap distribution, P06/P07/P08 and full platform acceptance
   remain open. No production, Status, database, publication or beta changes.
+
+
+- Added exact completed-reader capability snapshot verification shared with the
+  installation worker. Signed optional declarations, canonical consumed review
+  and current denied rows/policies/review IDs must agree before static documents
+  or either backend family can be accessed. Missing/unknown/modified/rebound
+  records refuse without repair. This enables no capability provider. Meaningful
+  static/managed/writable failure cases pass locally and on SQLite/PostgreSQL in
+  CI at 21a234a0 (run40956943671/job123739365097). All web/race/workflow/Docker
+  checks passed; Go-test still fails the inherited x/net vulnerability gate and
+  skips ordinary broad tests. Native run40956943614/job123739365069 passed actual
+  generated-template and all prior SDK/native/quota/cleanup checks, with
+  execution_ready false. See
+  [capability snapshot integrity](126-capability-snapshot-integrity.md).
+  P07 adapters, future storage approvals and full P00–P14 remain open.
