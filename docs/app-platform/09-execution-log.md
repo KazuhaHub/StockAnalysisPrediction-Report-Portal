@@ -2191,6 +2191,9 @@ daemon workflow 40455635317 passed on the functional source as well.
   prior browser/native/cleanup flags true, execution_ready false). General Go
   passed new pure contracts/SQL suites then failed inherited x/net findings.
   A query-object identity regression was then found and fixed in Apps fa34a900;
-  the native effect-count follow-up requires separate CI. Descriptor schema is extended;
+  final functional a1a19259 passed native run40870583604/job123436285697 with
+  unchanged query effects across locale updates and all prior flags true.
+  Apps fa34a900 passed all checks; Portal web/race/Docker pass, and general Go
+  still fails the inherited vulnerability gate. execution_ready remains false. Descriptor schema is extended;
   database schema, dependencies, publication, production, Status, SDK freeze and
   beta settings are unchanged. Remaining full P06/platform work stays open.

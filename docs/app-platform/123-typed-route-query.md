@@ -1,8 +1,8 @@
 # Signed typed route queries and recovery
 
 Status: implemented for development with passing Linux browser/native evidence
-at initial functional commit a328ee5cf44ac376a05531e588f9555373c14f06.
-The query-identity follow-up below requires a separate native check. P06 and
+at final functional commit a1a1925960bc78c6c3738f9344709851e08d9629.
+Initial and query-identity follow-up evidence are recorded separately below. P06 and
 full platform release acceptance remain in progress. This extends the signed
 package descriptor; database tables, columns, migrations and dependencies are
 unchanged. Production, Status adoption, catalogue publication, stable SDK freeze
@@ -157,9 +157,8 @@ install and requires address/history/typed-value/reload assertions alongside
 existing route, layout, current-viewer, no-retry, revoke and dirty-guard cases.
 New marker SDK_NATIVE_BROWSER_TYPED_QUERY must survive child/parent/collector,
 producing sdk_native_browser_typed_query in redacted evidence. Its reviewed Apps
-current pin is fa34a900f3c29ee5218d51dd5a1b6ea7bf0c326c. Runtime evidence is pending actual CI
-and will be recorded with its exact functional commit; source marker presence
-alone proves nothing.
+current pin is fa34a900f3c29ee5218d51dd5a1b6ea7bf0c326c. Runtime evidence below is tied to exact functional commits; source marker
+presence alone proves nothing.
 
 Full P00–P14, persistent drafts, shared page actions/overlays, capability brokers,
 marketplace lifecycle, D5 visual/accessibility review and D6 rollout remain open.
@@ -198,3 +197,21 @@ locally with that regression. Apps follow-up fa34a900 adds this fix. The native
 fixture now observes a query-dependent layout effect around a locale update and
 requires no extra effect execution. This follow-up needs its own CI; earlier
 runtime evidence is not relabeled as the later source.
+
+
+## Final functional identity acceptance
+
+Portal a1a1925960bc78c6c3738f9344709851e08d9629 with Apps fa34a900 passed
+Linux native/quota run40870583604/job123436285697. The query marker now additionally
+requires an unchanged query-effect count across a real locale presentation
+update after URL reload. All typed-query/route/draft/current-viewer/layout/
+no-retry/revoked flags remain true; owned cleanup and neighbor preservation pass;
+execution_ready remains false. Registry/public fixture cleanup completed.
+
+Apps fa34a900 passed every job in run40870415910. Portal final functional source
+passed every web shard/build/lint, app race shard/aggregate, Docker and workflow
+lint check in run40870583526. Its pure Go descriptor/query and affected SQL suites
+passed; Go job123436285753 again failed the unchanged inherited vulnerability
+gate and skipped its ordinary full suite. No all-CI-green or production-readiness
+claim is made. A final documentation-only commit can trigger new checks; the
+functional results above remain pinned to a1a19259 rather than relabeled.
