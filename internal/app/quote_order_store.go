@@ -64,7 +64,7 @@ func (s *Store) saveQuoteOrderOnce(ctx context.Context, raw string, entry AuditE
 	if strings.Join(from, ",") != strings.Join(to, ",") {
 		detail := auditJSON(map[string]any{"from": from, "to": to})
 		if _, err := tx.ExecContext(ctx, s.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,?,?,?,?)`),
-			nowStr(), entry.Actor, entry.ActorOU, AuditQuoteOrder, "settings", setQuoteSourceOrder, detail, entry.IP); err != nil {
+			time.Now().UTC().Format(time.RFC3339), entry.Actor, entry.ActorOU, AuditQuoteOrder, "settings", setQuoteSourceOrder, detail, entry.IP); err != nil {
 			return err
 		}
 	}

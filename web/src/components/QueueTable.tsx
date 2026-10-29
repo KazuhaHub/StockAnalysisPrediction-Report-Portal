@@ -25,6 +25,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   ClockCircleOutlined,
   DeleteOutlined,
+  ExportOutlined,
   EyeOutlined,
   InfoCircleOutlined,
   PlayCircleOutlined,
@@ -32,10 +33,11 @@ import {
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
+import { exportLink, runsFilterToTree } from '../lib/exportFilter'
 import { useAuth } from '../auth'
 import type { BatchItem, BatchJob, BatchJobDetail, BatchQueueSummary, BatchTarget } from '../api/types'
 import {
@@ -265,6 +267,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const { message } = App.useApp()
   const { admin, user } = useAuth()
   const mobile = !Grid.useBreakpoint().md
+  const navigate = useNavigate()
   const [jobs, setJobs] = useState<BatchJob[]>([])
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
@@ -561,6 +564,24 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
             {t('queue.cancelSelected', { n: selectedJobs.length })}
           </Button>
         </Popconfirm>
+      )}
+      {admin && (
+        // Hands the current filters to the Export page. Only status, submitter and workflow have a
+        // field in the runs source; the free-text search and the derived "scheduled" view do not.
+        <Button
+          size="small"
+          icon={<ExportOutlined />}
+          onClick={() =>
+            navigate(
+              exportLink(
+                'runs',
+                runsFilterToTree({ status: fStatus === 'scheduled' ? '' : fStatus, createdBy: fUser, target: fTarget != null ? targets.find((tg) => tg.id === fTarget)?.name : '' }),
+              ),
+            )
+          }
+        >
+          {t('queue.export')}
+        </Button>
       )}
       {admin && (
         <Popconfirm title={t('queue.clearFinishedConfirm')} onConfirm={clearFinished}>

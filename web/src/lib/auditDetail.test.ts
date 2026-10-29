@@ -97,6 +97,13 @@ describe('auditDetail', () => {
     expect(out.map((p) => ('key' in p ? p.key : p.text))).not.toContain('ids')
   })
 
+  it('leads an export task with its source and estimate, keeping the filter off the line', () => {
+    const raw = '{"source":"audit","format":"csv","filter":{"op":"and","items":[]},"columns":["at"],"estimate":42}'
+    const out = auditDetail('export.create', raw, t)
+    expect(out[0].kind).toBe('lead')
+    expect(out.map((p) => ('key' in p ? p.key : p.text))).not.toContain('filter')
+  })
+
   it('drops the fields that say nothing', () => {
     const raw = '{"target":"研报分析","run_at":"","downgraded":false,"target_id":5,"rows":1}'
     const out = auditDetail('run.submit', raw, t)

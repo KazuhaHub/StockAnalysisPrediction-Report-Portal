@@ -4,6 +4,10 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, Grid } from 'antd'
 import AuditPage from './AuditPage'
+import { decodeFilter } from '../../lib/exportFilter'
+
+const navigateSpy = vi.hoisted(() => vi.fn())
+vi.mock('react-router', async (orig) => ({ ...(await orig<typeof import('react-router')>()), useNavigate: () => navigateSpy }))
 
 // The log is only useful if a row can be read without cross-referencing anything: who, what, which
 // object, when. Two of those need help — a machine caller has no username, and an OU id means
@@ -86,6 +90,7 @@ const screenWidth = (wide: boolean) =>
 describe('AuditPage', () => {
   beforeEach(() => {
     apiMock.get.mockReset()
+    navigateSpy.mockReset()
     apiMock.get.mockResolvedValue(RESP)
     screenWidth(true)
   })
@@ -97,6 +102,23 @@ describe('AuditPage', () => {
         apiMock.get.mock.calls.some(([u]) => String(u).includes('action=predictions.store_failed')),
       ).toBe(true),
     )
+  })
+
+  // Export is where an investigation ends: the page hands over what it is filtered to, so the admin
+  // does not rebuild it. The URL carries the tree, which is what the Export page restores.
+  it('links to Export with the current filters as a filter tree', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?action=grant.change')
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('button', { name: /audit\.export/ }))
+    expect(navigateSpy).toHaveBeenCalledTimes(1)
+    const to = new URL(navigateSpy.mock.calls[0][0] as string, 'http://x')
+    expect(to.pathname).toBe('/manage/exports')
+    expect(to.searchParams.get('source')).toBe('audit')
+    expect(decodeFilter(to.searchParams.get('f') ?? '')).toEqual({
+      op: 'and',
+      items: [{ field: 'action', operator: 'in', values: ['grant.change'] }],
+    })
   })
 
   it('names the OU the actor was in, rather than showing a bare id', async () => {

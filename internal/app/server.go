@@ -100,6 +100,9 @@ type Server struct {
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
 	forecastSignals    forecastSignals
 	forecastSlowGroups time.Duration
+	// exports is the data-export task runtime: the wake channel, the cancel handles of the running
+	// job and the test seams (export_worker.go).
+	exports exportRuntime
 }
 
 // statusRecorder records the response status code for use in request logging.
@@ -286,6 +289,8 @@ func RunServer(cfgPath string) {
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
+	s.exportRecover() // return jobs a restart interrupted to the queue before the worker starts
+	go s.exportLoop() // the data-export task worker and its hourly expiry sweep (ADR 0045)
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

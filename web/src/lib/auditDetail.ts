@@ -209,6 +209,16 @@ export function auditDetail(action: string, raw: string, t: TFunction, ctx?: Det
     used.add('ids_truncated')
     used.add('source')
     lead('count', t('audit.d.export', { n: d.count }))
+  } else if (action === 'export.download' && typeof d.rows === 'number') {
+    used.add('source')
+    lead('rows', t('audit.d.export_rows', { n: d.rows }))
+  } else if (action === 'export.create' && typeof d.estimate === 'number') {
+    // The filter tree and column list are the record, not the line: both can be long.
+    used.add('filter')
+    used.add('columns')
+    used.add('source')
+    const src = String(d.source ?? '')
+    lead('estimate', t('audit.d.export_create', { source: t(`export.source.${src}`, src), n: d.estimate }))
   } else if (action === 'run.submit' && d.target) {
     lead('target', t('audit.d.run', { target: String(d.target) }))
     // The inputs stay where everything else the run carried stays — see headline() below. A run's

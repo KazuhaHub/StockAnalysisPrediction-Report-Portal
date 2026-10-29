@@ -49,7 +49,7 @@ const WebhooksPage = lazyRetry(() => import('./pages/manage/WebhooksPage'))
 const NotificationsPage = lazyRetry(() => import('./pages/manage/NotificationsPage'))
 const InboxPage = lazyRetry(() => import('./pages/NotificationsPage'))
 const StoragePage = lazyRetry(() => import('./pages/manage/StoragePage'))
-const ReportExportPage = lazyRetry(() => import('./pages/manage/ReportExportPage'))
+const ExportPage = lazyRetry(() => import('./pages/manage/exports/ExportPage'))
 const AuditPage = lazyRetry(() => import('./pages/manage/AuditPage'))
 const QuoteSourcesPage = lazyRetry(() => import('./pages/manage/QuoteSourcesPage'))
 const ForecastPage = lazyRetry(() => import('./pages/manage/ForecastPage'))
@@ -229,7 +229,7 @@ function AppRoutes() {
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="quotes" element={<QuoteSourcesPage />} />
-          <Route path="exports" element={<ReportExportPage />} />
+          <Route path="exports" element={<ExportPage />} />
           <Route path="storage" element={<StoragePage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="apidoc" element={<ApiDocPage />} />

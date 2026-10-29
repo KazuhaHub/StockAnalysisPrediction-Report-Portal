@@ -551,26 +551,67 @@ export interface RunQuota {
   // which never refills — the UI must not invent a date for it.
 }
 
-// Bulk Markdown export in the storage console (GET /api/admin/report-exports). generator_version is
-// producer provenance derived server-side, not the written-form Rep.version.
-export interface AdminExportReport {
-  id: number
-  title: string
-  symbol: string
-  name: string
-  rtype: string
-  date: string
-  generator_version: string
-  sent_at: string
+// Data export tasks (ADR 0045). Times are unix milliseconds unless a field says otherwise.
+export type ExportOperator = 'is' | 'is_not' | 'in' | 'not_in' | 'contains' | 'before' | 'after' | 'between'
+export interface ExportCond {
+  field: string
+  operator: ExportOperator
+  values: string[]
 }
-
-export interface AdminExportReportPage {
-  reports: AdminExportReport[]
+export interface ExportGroup {
+  op: 'and' | 'or'
+  items: (ExportGroup | ExportCond)[]
+}
+export type ExportFilter = ExportGroup
+export type ExportSourceKey = 'reports' | 'audit' | 'signins' | 'runs' | 'notifications' | 'cleanup' | 'forecasts'
+export type ExportFormat = 'csv' | 'jsonl' | 'md_zip'
+export interface ExportField {
+  key: string
+  type: 'enum' | 'text' | 'date' | 'datetime' | 'number'
+  operators: ExportOperator[]
+  options?: string[]
+  tree?: { kind: string; subtypes: string[] }[]
+}
+export interface ExportSource {
+  key: ExportSourceKey
+  formats: ExportFormat[]
+  fields: ExportField[]
+  columns: { key: string; default: boolean }[]
+  time_field: string
   total: number
-  page: number
-  page_size: number
-  types: string[]
-  generator_versions: string[]
+}
+export interface ExportPreviewResp {
+  total: number
+  rows: Record<string, string | number | null>[]
+}
+export type ExportStatus = 'queued' | 'running' | 'done' | 'failed' | 'canceled' | 'expired'
+export interface ExportJob {
+  id: string
+  source: string
+  format: string
+  name: string
+  requested_by: string
+  status: ExportStatus
+  rows_estimate: number
+  rows_done: number
+  bytes: number
+  file_name: string
+  error: string
+  created_at: number
+  started_at: number
+  finished_at: number
+  expires_at: number
+  filter: ExportFilter
+  columns: string[]
+}
+export interface ExportRequest {
+  source: string
+  format: ExportFormat
+  filter: ExportFilter
+  columns?: string[]
+  name?: string
+  tz?: 'panel' | 'utc'
+  options?: { front_matter?: boolean; index_csv?: boolean; layout?: 'flat' | 'date' | 'symbol' }
 }
 
 // Storage-cleanup console (docs/adr/0017-storage-cleanup.md). Config + last-run summary; retention

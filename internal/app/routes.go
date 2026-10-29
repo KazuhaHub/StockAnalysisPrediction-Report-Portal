@@ -505,8 +505,15 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "POST /api/admin/notifications/channels/{id}/test", s.apiNotificationChannelTest)
 	s.admin(mux, "DELETE /api/admin/notifications/channels/{id}", s.apiNotificationChannelDelete)
 	s.admin(mux, "DELETE /api/admin/notifications/routes/{id}", s.apiNotificationRouteDelete)
-	s.admin(mux, "GET /api/admin/report-exports", s.apiAdminReportExports)
-	s.admin(mux, "POST /api/admin/report-exports/download", s.apiAdminReportExportDownload)
+
+	// ---- Data export tasks (docs/adr/0045-data-export-tasks.md) ----
+	s.admin(mux, "GET /api/admin/exports/sources", s.apiExportSources)
+	s.admin(mux, "POST /api/admin/exports/preview", s.apiExportPreview)
+	s.admin(mux, "POST /api/admin/exports", s.apiExportCreate)
+	s.admin(mux, "GET /api/admin/exports", s.apiExportList)
+	s.admin(mux, "GET /api/admin/exports/{id}", s.apiExportGet)
+	s.admin(mux, "POST /api/admin/exports/{id}/cancel", s.apiExportCancel)
+	s.admin(mux, "GET /api/admin/exports/{id}/file", s.apiExportFile)
 
 	// ---- Downloads: MD / PDF (cookie session) ----
 	s.sessionHTML(mux, "GET /report/{id}/md", s.reportMD)

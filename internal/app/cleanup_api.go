@@ -244,6 +244,9 @@ func (s *Server) apiCleanupUsage(w http.ResponseWriter, r *http.Request, user st
 				s.st.usageBytes("prediction_sets", "LENGTH(COALESCE(payload,''))+LENGTH(COALESCE(errors,''))")+
 					s.st.usageBytes("prediction_claims", "LENGTH(COALESCE(claim_key,''))+LENGTH(COALESCE(kind,''))"),
 				predEligible, "", ""),
+			// Export files (ADR 0045): the bytes are the exports directory on disk, and nothing here is
+			// eligible for a manual pass because the hourly expiry sweep owns their lifetime.
+			cat("exports", s.st.usageCount("export_jobs"), s.exportDirBytes(), 0, "", ""),
 		},
 	})
 }

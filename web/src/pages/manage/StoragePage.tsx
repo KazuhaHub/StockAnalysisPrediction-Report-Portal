@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
-import { AuditOutlined, DatabaseOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { AuditOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -26,6 +26,7 @@ const CAT_COLOR: Record<string, { light: string; dark: string }> = {
   audit: { light: '#8452d6', dark: '#9366e0' }, // violet
   revisions: { light: '#c8447a', dark: '#d65a8c' }, // magenta — the next slot in the ordered set
   predictions: { light: '#6b7fd6', dark: '#8395e0' }, // indigo
+  exports: { light: '#0f8f9e', dark: '#2eb0bf' }, // teal — generated export files
 }
 const CAT_ICON: Record<string, React.ReactNode> = {
   batch: <ThunderboltOutlined />,
@@ -35,6 +36,7 @@ const CAT_ICON: Record<string, React.ReactNode> = {
   audit: <AuditOutlined />,
   revisions: <HistoryOutlined />,
   predictions: <FundProjectionScreenOutlined />,
+  exports: <ExportOutlined />,
 }
 
 // fmtBytes renders an approximate byte count in human units.
@@ -313,6 +315,8 @@ export default function StoragePage() {
         </div>
         {c.key === 'chat' ? (
           <Typography.Text type="secondary">{t('storage.ruleChat')}</Typography.Text>
+        ) : c.key === 'exports' ? (
+          <Typography.Text type="secondary">{t('storage.ruleExports')}</Typography.Text>
         ) : c.eligible > 0 ? (
           <>
             <Tag color="orange" style={{ width: 'fit-content' }}>
