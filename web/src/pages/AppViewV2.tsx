@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Alert, Button, Space, Spin, Typography, theme } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Alert, Button, Spin, theme } from 'antd'
 import { useNavigate, useParams, useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
@@ -9,6 +8,8 @@ import { parseRouteSearch } from '../lib/route-query-v2'
 import { parseBridgePresentation } from '../lib/bridge-v2'
 import { parseAppLaunchV2, validInstallationId, type AppLaunchV2 } from '../lib/appLaunchV2'
 import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
+import AppPageHeader from '../components/apps/AppPageHeader'
+import type { PageActionSnapshot } from '../lib/page-v2'
 import AppFrameV2 from '../components/apps/AppFrameV2'
 import { AppDraftPrompt, useAppDraftBlocker } from '../components/apps/AppDraftGuard'
 
@@ -27,6 +28,7 @@ function LaunchPage({ installation }: { installation: string }) {
   const [launch, setLaunch] = useState<AppLaunchV2 | null>(null)
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [page, setPage] = useState<PageActionSnapshot|null>(null)
   const [dirty, setDirty] = useState(false)
   const blocker = useAppDraftBlocker(dirty)
   const panel = useRef<HTMLDivElement>(null)
@@ -72,7 +74,7 @@ function LaunchPage({ installation }: { installation: string }) {
     return () => observer.disconnect()
   }, [launch, layout])
 
-  const presentation = launch ? parseBridgePresentation({
+  const presentation = useMemo(() => launch ? parseBridgePresentation({
     locale: lang, timeZone: launch.timeZone, layout,
     navigation: { path, search:location.search, routes: launch.routes },
     theme: {
@@ -80,17 +82,15 @@ function LaunchPage({ installation }: { installation: string }) {
       colorText: token.colorText, colorBorder: token.colorBorder,
       colorBgLayout: token.colorBgLayout, borderRadius: token.borderRadius,
     },
-  }) : null
+  }) : null, [launch,lang,dark,layout,path,location.search,token])
 
   const copy = launch ? appDisplayText(launch.applicationId, launch.display, lang) : null
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 0, width: '100%', gap: 16 }}>
       <AppDraftPrompt dirty={dirty} blocker={blocker} />
-      <Space>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>{t('apps.back')}</Button>
-        {launch && <><AppDisplayIcon display={launch.display} /><Typography.Title level={4} style={{ margin: 0 }}>{copy?.name}</Typography.Title></>}
-      </Space>
+      <AppPageHeader name={copy?.name ?? ''} icon={launch ? <AppDisplayIcon display={launch.display} /> : null}
+        state={route ? page : null} onBack={() => { void navigate('/apps') }} />
       {failed || (launch && (!route || !presentation)) ? (
         <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}
           action={launch && !route ? <Button onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
@@ -101,7 +101,7 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onDraftChange={setDirty} onNavigate={(target, replace, search) => {
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search) => {
               const destination=launch.routes.find(route=>route.path===target)
               if (blocker.state !== 'unblocked' || !destination || !parseRouteSearch(destination.query??[],search)) return
               void navigate((target === '/' ? base : base + target)+search, { replace })

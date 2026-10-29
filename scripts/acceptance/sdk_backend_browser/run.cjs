@@ -23,12 +23,19 @@ async function main(){
   async function read(){const text=await dispatch('Read backend');if(text.startsWith('error:')){readFailure=/^error:(not_ready|unsupported|invalid_request|busy|unavailable|uncertain)$/.test(text)?text:'invalid-result';throw new Error('read refused')}const value=JSON.parse(text);if(value.status!==200)throw new Error('app read refused');return value}
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
+  stage='page-actions';await page.getByRole('heading',{name:'Fixture zh-CN /',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Header increment',exact:true}).click();
+  await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
+  await page.getByRole('button',{name:'Header wait',exact:true}).click();
+  await page.getByRole('button',{name:'Header wait',exact:true,disabled:true}).waitFor();
   stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
   await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
   stage='navigation';await frame.getByRole('button',{name:'Retained 0',exact:true}).click();
   await frame.getByRole('button',{name:'Open editor',exact:true}).click();
   await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
   await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  await frame.getByTestId('page-cancelled').filter({hasText:'1'}).waitFor();
+  await page.getByRole('heading',{name:'Fixture zh-TW /editor',exact:true}).waitFor();
   await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
   await page.goForward();await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
   await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
@@ -54,6 +61,16 @@ async function main(){
   if(await frame.getByTestId('query-effects').innerText()!==effects)throw new Error('appearance repeated query effects');
   await page.waitForTimeout(110);await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
   await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
+  stage='page-wrap';await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
+  const longLabel='L'.repeat(48);await page.getByRole('button',{name:longLabel,exact:true}).waitFor();
+  await page.setViewportSize({width:320,height:800});
+  const geometry=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:window.innerWidth}));
+  if(geometry.scroll>geometry.width+1)throw new Error('shared page header overflows narrow viewport');
+  await page.getByRole('button',{name:longLabel,exact:true}).focus();
+  await page.getByRole('button',{name:longLabel,exact:true}).press('Enter');
+  await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
+  await page.setViewportSize({width:1280,height:720});
+  await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
   stage='layout-grow';
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
@@ -89,6 +106,7 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_DRAFT_GUARD');
   console.log('SDK_NATIVE_BROWSER_NAVIGATION');
   console.log('SDK_NATIVE_BROWSER_TYPED_QUERY');
+  console.log('SDK_NATIVE_BROWSER_PAGE_ACTIONS');
   console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}

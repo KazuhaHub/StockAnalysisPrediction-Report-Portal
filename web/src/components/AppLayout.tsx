@@ -91,7 +91,9 @@ function AppShell() {
   // loaded chunk shows the spinner at once instead of freezing on the previous page (React 19 + RR7
   // keep the old UI during the transition otherwise). /manage/* collapses to one key — its tabs are
   // nested under ManageLayout, which owns its own Suspense, so its shell must not remount per tab.
-  const suspenseKey = loc.pathname.startsWith('/manage') ? '/manage' : loc.pathname
+  // App subroutes share one mounted document; a different installation retires it.
+  const suspenseKey = loc.pathname.startsWith('/manage') ? '/manage'
+    : onAppV2 ? loc.pathname.split('/').slice(0, 4).join('/') : loc.pathname
   const [runOpen, setRunOpen] = useState(false)
   const [runTargetId, setRunTargetId] = useState<number | undefined>() // pinned workflow from an entry-button shortcut
   const [queueOpen, setQueueOpen] = useState(false)

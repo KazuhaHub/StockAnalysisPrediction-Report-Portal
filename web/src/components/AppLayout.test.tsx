@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate, useLocation } from 'react-router'
+import { useState } from 'react'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
 
@@ -475,3 +476,27 @@ describe('AppLayout forecast record navigation', () => {
     for (const [url] of apiGet.mock.calls) expect(String(url)).not.toMatch(/forecast|predictions/)
   })
 })
+
+
+it('retains an application across its subroutes but retires it for another installation',async()=>{
+ const user=userEvent.setup();
+ function Application(){
+  const [count,setCount]=useState(0),navigate=useNavigate(),location=useLocation();
+  return <div><span data-testid="application-count">{count}</span><span data-testid="application-path">{location.pathname}</span>
+   <button onClick={()=>setCount(n=>n+1)}>Increment application</button>
+   <button onClick={()=>navigate('/apps/v2/first/editor')}>Application editor</button>
+   <button onClick={()=>navigate(-1)}>Application back</button>
+   <button onClick={()=>navigate('/apps/v2/second')}>Another application</button></div>;
+ }
+ render(<MemoryRouter initialEntries={['/apps/v2/first']}><Routes><Route element={<AppLayout/>}>
+  <Route path="apps/v2/:installation/*" element={<Application/>}/>
+ </Route></Routes></MemoryRouter>);
+ await user.click(screen.getByRole('button',{name:'Increment application'}));
+ await user.click(screen.getByRole('button',{name:'Application editor'}));
+ expect(screen.getByTestId('application-path').textContent).toBe('/apps/v2/first/editor');
+ expect(screen.getByTestId('application-count').textContent).toBe('1');
+ await user.click(screen.getByRole('button',{name:'Application back'}));
+ expect(screen.getByTestId('application-count').textContent).toBe('1');
+ await user.click(screen.getByRole('button',{name:'Another application'}));
+ expect(screen.getByTestId('application-count').textContent).toBe('0');
+});

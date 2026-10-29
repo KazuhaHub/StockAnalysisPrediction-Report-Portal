@@ -98,3 +98,15 @@ test('navigation callbacks from a replaced channel cannot move the host',()=>{
  act(()=>sessions[1].options.onNavigate?.('/',false,''));expect(navigate).toHaveBeenCalledExactlyOnceWith('/',false,'');
  view.unmount();navigate.mockClear();act(()=>sessions[1].options.onNavigate?.('/editor',false,''));expect(navigate).not.toHaveBeenCalled();
 })
+
+test('page metadata cannot return through a retired document observer',()=>{
+ const changed=vi.fn();const view=render(<AppFrameV2 {...props} onPageChange={changed}/>);
+ const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const first=sessions[0];
+ const state={page:{title:'Page',description:'',actions:[]},ready:true,busyAction:null,outcome:null,invoke:()=>false} as const;
+ act(()=>first.options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(state);
+ fireEvent.load(frame);expect(changed).toHaveBeenLastCalledWith(null);
+ act(()=>first.options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(null);
+ act(()=>sessions[1].options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(state);
+ view.unmount();expect(changed).toHaveBeenLastCalledWith(null);
+ act(()=>sessions[1].options.onPageChange?.(state));expect(changed).toHaveBeenLastCalledWith(null);
+});

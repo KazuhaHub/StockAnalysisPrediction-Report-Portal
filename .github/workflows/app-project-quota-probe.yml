@@ -7,9 +7,11 @@ on:
       - 'internal/appplatform/route_query.go'
       - 'web/src/lib/bridge-v2*'
       - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
       - 'web/src/lib/descriptor-contract.generated.ts'
       - 'web/src/components/apps/**'
       - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
       - 'scripts/generate_app_contract*'
       - 'internal/apprunner/data/**'
       - 'internal/apprunner/control/**'
@@ -61,9 +63,11 @@ on:
       - 'internal/appplatform/route_query.go'
       - 'web/src/lib/bridge-v2*'
       - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
       - 'web/src/lib/descriptor-contract.generated.ts'
       - 'web/src/components/apps/**'
       - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
       - 'scripts/generate_app_contract*'
       - 'internal/apprunner/data/**'
       - 'internal/apprunner/control/**'
@@ -125,7 +129,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: fa34a900f3c29ee5218d51dd5a1b6ea7bf0c326c
+          ref: a4c6938618b00c4c7db768f2271229436b321051
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6

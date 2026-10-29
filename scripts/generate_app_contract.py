@@ -268,6 +268,23 @@ def main():
             for key,path in (("source_sha256",sdk/"src/route-query-v2.ts"),("test_sha256",sdk/"tests/route-query-v2.test.ts")):
                 if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
                     raise ValueError("query source differs; regenerate from the Portal checkout")
+        page_pin = sdk/"tests/fixtures/page-v2-source.json"
+        if PORTAL_MODE and (ROOT/"web/src/lib/page-v2.ts").is_file():
+            source = (ROOT/"web/src/lib/page-v2.ts").read_bytes()
+            tests = (ROOT/"web/src/lib/page-v2.test.ts").read_text()
+            for quote in ('"', "'"):
+                tests = tests.replace("from "+quote+"./page-v2"+quote,"from "+quote+"../src/page-v2"+quote)
+            tests = tests.encode()
+            outputs[sdk/"src/page-v2.ts"] = source
+            outputs[sdk/"tests/page-v2.test.ts"] = tests
+            outputs[page_pin] = (json.dumps({"format":"portal.page.source/1","source_sha256":hashlib.sha256(source).hexdigest(),"test_sha256":hashlib.sha256(tests).hexdigest()},indent=2)+"\n").encode()
+        elif not PORTAL_MODE and (page_pin.exists() or (sdk/"src/page-v2.ts").exists() or ((sdk/"src/bridge-v2.ts").exists() and b"./page-v2" in (sdk/"src/bridge-v2.ts").read_bytes())):
+            pin = json.loads(page_pin.read_bytes(),object_pairs_hook=unique_object)
+            if set(pin)!={"format","source_sha256","test_sha256"} or pin["format"]!="portal.page.source/1":
+                raise ValueError("invalid page source pin")
+            for key,path in (("source_sha256",sdk/"src/page-v2.ts"),("test_sha256",sdk/"tests/page-v2.test.ts")):
+                if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
+                    raise ValueError("page source differs; regenerate from the Portal checkout")
     stale = [str(path) for path, expected in outputs.items() if not path.is_file() or path.read_bytes() != expected]
     if args.check:
         if stale:

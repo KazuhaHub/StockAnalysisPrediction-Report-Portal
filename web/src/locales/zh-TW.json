@@ -128,6 +128,7 @@
   "apps.v2State.pending": "尚未就緒",
   "apps.v2State.disabled": "已停用",
   "apps.v2State.attention": "暫時無法使用",
+  "apps.v2ActionUncertain": "未能確認操作結果，請在應用程式中核對後再決定是否重試。",
   "apps.v2Unavailable": "應用程式暫時無法使用，請檢查存取權限或聯絡管理員。",
   "apps.v2Loading": "正在載入應用程式…",
   "apps.v2Failed": "應用程式連線失敗，請重新開啟後重試。",

@@ -19,7 +19,8 @@ and activation](113-writable-install-worker.md) and
 [natural document sizing](120-document-layout.md), and
 [the shared unsaved-change guard](121-unsaved-change-guard.md), and
 [signed routes and host history](122-signed-route-navigation.md), and
-[signed typed query state](123-typed-route-query.md).
+[signed typed query state](123-typed-route-query.md), and
+[shared page metadata/actions](124-shared-page-actions.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 

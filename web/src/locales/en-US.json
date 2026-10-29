@@ -128,6 +128,7 @@
   "apps.v2State.pending": "Not ready",
   "apps.v2State.disabled": "Disabled",
   "apps.v2State.attention": "Unavailable",
+  "apps.v2ActionUncertain": "The action result could not be confirmed. Check the result in the app before trying again.",
   "apps.v2Unavailable": "This app is unavailable. Check your access or contact an administrator.",
   "apps.v2Loading": "Loading app…",
   "apps.v2Failed": "The app could not connect. Reopen it to try again.",

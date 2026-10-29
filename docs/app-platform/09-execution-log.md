@@ -14,7 +14,7 @@ not another Status-specific frontend or a manual backend deployment procedure.
 | P03 | In progress | Control storage [#193](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193), leases [#194](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194), keyring [#195](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/195), [denial review #196](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196) and [runner journal #198](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198) passed source CI; [runner journal storage/startup verification](17-runner-journal-implementation.md) implemented. [publisher trust/staged-release storage](25-trust-and-release-storage.md) implemented; [initial install intent](26-install-review-admission.md), full action admission, stage/effect commits, authenticated runner command/resource repositories and coordinated recovery remain |
 | P04 | In progress | [Read-only native daemon inspection](23-runner-daemon-inspection.md), bounded CLI and disposable Linux probe workflow implemented; [disposable XFS hard-quota probe](28-project-quota-acceptance.md) has passing native XFS byte/inode/unlinked/remount/control-write evidence; [explicit controller enrollment primitive](29-runner-controller-enrollment.md) and [signed prepare-data intent admission](30-signed-runner-command-admission.md) implemented; runtime-integrated quota/sandbox enforcement, [private Linux development intent transport](31-runner-local-intent-transport.md) implemented; production identity provisioning and physical lifecycle remain |
 | P05 | In progress | [Initial static install review/durable intent](26-install-review-admission.md) implemented; [initial fenced worker artifact stages](27-install-staging-worker.md), [native data-stage commit](53-portal-install-data-stage.md) and [initial static activation with reviewed audience](54-static-activation-and-audience.md) and [signed data dispatch/bounded install driver](55-signed-data-dispatch-and-install-driver.md) and [opt-in background static scheduling](56-background-static-install-scheduler.md) and [runtime-free no-data frontend installation](57-runtime-free-frontend-installation.md) implemented; startup wiring, explicit fenced recovery/takeover, provider-backed static data, complete managed installer and browser market install flow remain |
-| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; complete seamless shell, publisher metadata enforcement, sizing/navigation/drafts and full browser acceptance remain |
+| P06 | In progress | [Presentation transport and shared SDK contract](22-presentation-bridge-implementation.md) implemented; [shared experimental React root](36-react-presentation-root.md) adds commit-aware locale/theme/timezone integration; [covered frame host](37-presentation-frame-host.md), [authorized HTTP document delivery](41-authorized-document-http.md), [actual HTTP/SDK browser fixture](42-http-sdk-browser-acceptance.md), [protected launch page](43-app-launch-page.md) and [audience-filtered app directory](44-app-directory.md) implemented; [signed display metadata](45-signed-display-metadata.md) available for experimental packages; [document sizing](120-document-layout.md), [dirty navigation](121-unsaved-change-guard.md), [signed history](122-signed-route-navigation.md), [typed queries](123-typed-route-query.md) and [shared page actions](124-shared-page-actions.md) now have development/browser evidence; maintained v2 templates, persistent data/drafts, complete shell/focus/accessibility and full browser acceptance remain |
 | P07..P14 | Not started | Follow dependencies and remaining public-freeze, visual and production rollout gates |
 
 ## First contract implementation
@@ -2197,3 +2197,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   still fails the inherited vulnerability gate. execution_ready remains false. Descriptor schema is extended;
   database schema, dependencies, publication, production, Status, SDK freeze and
   beta settings are unchanged. Remaining full P06/platform work stays open.
+
+
+- Added shared page metadata/actions for P06: bounded immutable plain-text
+  descriptors, a common Ant Design header, experimental dev.7 action dispatch,
+  one pending operation, deadlines/cancellation and route/document ownership.
+  React StrictMode and late old-route cleanup defects were caught and repaired.
+  An actual Portal-shell drill caught and repaired the inherited full-path
+  Suspense remount; a failing-then-passing test covers same-installation state
+  retention and cross-installation retirement (31 AppLayout tests pass).
+  The browser/native fixture now requires page-action evidence; Linux results
+  at initial 23de4d76 passed run40935591598/job123665149793: page-action and
+  prior browser/native/cleanup flags true, execution_ready false. Apps a4c69386
+  passed all CI. The later outer-layout fix has local browser/test evidence and
+  also passed native run40936495688/job123668295562. A further 320px long-label
+  and Enter-action assertion passed at final functional b9bb5146 in
+  run40937099808/job123670423183, with all prior browser/native/cleanup flags
+  true and execution_ready false. See [shared page actions](124-shared-page-actions.md).
+  P06, UX-01/06/08/09 and full platform acceptance remain incomplete. Production,
+  Status, publication, stable SDK freeze, storage and beta settings are unchanged.

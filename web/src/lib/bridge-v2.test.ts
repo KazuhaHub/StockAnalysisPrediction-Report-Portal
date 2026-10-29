@@ -1311,3 +1311,155 @@ test("navigation query is validated against its signed destination rather than t
   await vi.waitFor(() => expect(host.state()).toBe("failed"));
   expect(navigate).toHaveBeenCalledOnce();
 });
+
+test("shared page actions execute once and retire with signed route changes", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    changed = vi.fn();
+  const routes = [
+    { id: "home", path: "/", layout: "document" },
+    { id: "edit", path: "/edit", layout: "document" },
+  ] as const;
+  const p = { ...presentation, navigation: { path: "/", search: "", routes } };
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: p,
+    capabilities: [],
+    onPageChange: changed,
+  });
+  cleanup.push(() => host.close());
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(() => client.close());
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const page = {
+    title: "Records",
+    description: "Latest records",
+    actions: [
+      {
+        id: "save",
+        label: "Save",
+        variant: "primary",
+        disabled: false,
+        loading: false,
+      },
+    ],
+  } as const;
+  let finish!: () => void;
+  const execute = vi.fn(
+    (_id: string, _signal: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  expect(client.describePage("a".repeat(32), page, execute)).toBe(true);
+  await vi.waitFor(() =>
+    expect(changed.mock.lastCall?.[0]?.page.title).toBe("Records"),
+  );
+  const old = changed.mock.lastCall![0].invoke;
+  expect(old("save")).toBe(true);
+  expect(old("save")).toBe(false);
+  await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+  finish();
+  await vi.waitFor(() =>
+    expect(changed.mock.lastCall?.[0]?.outcome).toBe("complete"),
+  );
+  expect(old("save")).toBe(true);
+  await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+  const runningSignal = execute.mock.calls[1][1];
+  host.updatePresentation({
+    ...p,
+    navigation: { ...p.navigation, path: "/edit" },
+  });
+  await vi.waitFor(() => expect(runningSignal.aborted).toBe(true));
+  expect(changed.mock.lastCall?.[0]).toBeNull();
+  expect(old("save")).toBe(false);
+  finish();
+  expect(client.describePage("b".repeat(32), page, execute)).toBe(true);
+  await vi.waitFor(() =>
+    expect(changed.mock.lastCall?.[0]?.page.title).toBe("Records"),
+  );
+  expect(changed.mock.lastCall?.[0]?.outcome).toBeNull();
+  expect(old("save")).toBe(false);
+});
+
+test("page descriptions require exact current binding, revision, scope and closed metadata", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    changed = vi.fn(),
+    failed = vi.fn();
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation,
+    capabilities: [],
+    onPageChange: changed,
+    onFailure: failed,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const page = { title: "Accepted", description: "", actions: [] };
+  const message = {
+    ...acknowledgement(init),
+    type: "page.describe",
+    revision: "1",
+    presentationRevision: "1",
+    scope: "a".repeat(32),
+    page,
+  };
+  port.postMessage({
+    ...message,
+    generation: "2",
+    page: { ...page, title: "Forged" },
+  });
+  port.postMessage(message);
+  await vi.waitFor(() =>
+    expect(changed.mock.lastCall?.[0]?.page.title).toBe("Accepted"),
+  );
+  port.postMessage({
+    ...message,
+    revision: "2",
+    presentationRevision: "2",
+    page: { ...page, title: "Uncommitted" },
+  });
+  port.postMessage({
+    ...message,
+    revision: "3",
+    page: { ...page, title: "Current" },
+  });
+  await vi.waitFor(() =>
+    expect(changed.mock.lastCall?.[0]?.page.title).toBe("Current"),
+  );
+  expect(
+    changed.mock.calls.some(([value]) =>
+      ["Forged", "Uncommitted"].includes(value?.page.title),
+    ),
+  ).toBe(false);
+  port.postMessage({
+    ...message,
+    revision: "4",
+    page: { ...page, html: "<script>" },
+  });
+  await vi.waitFor(() =>
+    expect(failed).toHaveBeenCalledExactlyOnceWith("protocol_error"),
+  );
+});

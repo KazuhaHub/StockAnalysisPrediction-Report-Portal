@@ -1,3 +1,10 @@
+import {
+  createPageActions,
+  parseAppPage,
+  type AppPage,
+  type PageActionSnapshot,
+} from "./page-v2";
+export type { AppPage, AppPageAction, PageActionSnapshot } from "./page-v2";
 // Experimental presentation and own-backend transport. No token or legacy fallback.
 import {
   DESCRIPTOR_CAPABILITIES,
@@ -17,7 +24,7 @@ export interface BridgeNavigationOptions {
   readonly replace?: boolean;
   readonly query?: RouteQueryValues;
 }
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.6";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.7";
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
@@ -176,6 +183,7 @@ export interface BridgeHostOptions extends BaseOptions {
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
   onDocumentHeight?: (height: number) => void;
+  onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
   onNavigate?: (path: string, replace: boolean, search: string) => void;
 }
@@ -474,8 +482,85 @@ export function createBridgeHost(
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
+  let lastDescription = 0n,
+    pageRevision = 0n,
+    pageScope = "",
+    pageInvocation = 0n,
+    pageWindow = 0,
+    pageCount = 0;
+  let pageRequest:
+    | {
+        invocation: string;
+        scope: string;
+        pageRevision: string;
+        resolve(): void;
+        reject(): void;
+        dispose(): void;
+      }
+    | undefined;
+  const pageActions = createPageActions({
+    publish: (snapshot) => options.onPageChange?.(snapshot),
+    execute: (id, signal) =>
+      new Promise<void>((resolve, reject) => {
+        if (
+          !port ||
+          !currentEnvelope ||
+          inflight ||
+          !announced ||
+          pageInvocation === MAX_REVISION
+        ) {
+          reject();
+          return;
+        }
+        const invocation = (++pageInvocation).toString(),
+          scope = pageScope,
+          described = pageRevision.toString();
+        const cancel = () => {
+          if (pageRequest?.invocation !== invocation) return;
+          pageRequest = undefined;
+          signal.removeEventListener("abort", cancel);
+          try {
+            port?.postMessage({
+              type: "page.action.cancel",
+              ...currentEnvelope,
+              invocation,
+              scope,
+              pageRevision: described,
+            });
+          } catch {
+            fail("transport_error");
+          }
+          reject();
+        };
+        pageRequest = {
+          invocation,
+          scope,
+          pageRevision: described,
+          resolve,
+          reject,
+          dispose: () => signal.removeEventListener("abort", cancel),
+        };
+        signal.addEventListener("abort", cancel, { once: true });
+        try {
+          port.postMessage({
+            type: "page.action",
+            ...currentEnvelope,
+            invocation,
+            scope,
+            pageRevision: described,
+            presentationRevision: revision.toString(),
+            actionId: id,
+          });
+        } catch {
+          cancel();
+          fail("transport_error");
+        }
+      }),
+  });
+  pageActions.setReady(false);
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    pageActions.close();
     clearTimeout(heightTimer);
     pendingHeight = undefined;
     for (const request of requests.values()) {
@@ -508,6 +593,7 @@ export function createBridgeHost(
       fail("protocol_error");
       return;
     }
+    pageActions.setReady(false);
     revision++;
     current = latest;
     dirty = false;
@@ -598,6 +684,102 @@ export function createBridgeHost(
       } catch {
         fail("protocol_error");
       }
+      return;
+    }
+    if (data && typeof data === "object" && data.type === "page.describe") {
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "revision",
+          "presentationRevision",
+          "scope",
+          "page",
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (
+        !decimal(data.revision) ||
+        !decimal(data.presentationRevision) ||
+        !isString(data.scope) ||
+        !/^[a-f0-9]{32}$/.test(data.scope)
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const parsed = data.page === null ? null : parseAppPage(data.page);
+      if (data.page !== null && !parsed) {
+        fail("protocol_error");
+        return;
+      }
+      if (BigInt(data.revision) <= lastDescription) return;
+      lastDescription = BigInt(data.revision);
+      const now = Date.now();
+      if (now - pageWindow >= 1000) {
+        pageWindow = now;
+        pageCount = 0;
+      }
+      if (++pageCount > 20) {
+        fail("protocol_error");
+        return;
+      }
+      if (
+        !announced ||
+        inflight ||
+        data.presentationRevision !== revision.toString()
+      )
+        return;
+      pageRevision = BigInt(data.revision);
+      if (pageScope !== data.scope || !parsed) pageActions.retire();
+      pageScope = data.scope;
+      if (parsed) pageActions.setPage(parsed);
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      data.type === "page.action.result"
+    ) {
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "invocation",
+          "scope",
+          "pageRevision",
+          "code",
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (
+        !decimal(data.invocation) ||
+        BigInt(data.invocation) > pageInvocation ||
+        !decimal(data.pageRevision) ||
+        !isString(data.scope) ||
+        !/^[a-f0-9]{32}$/.test(data.scope) ||
+        !["complete", "uncertain", "unavailable"].includes(data.code as string)
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const request = pageRequest;
+      if (
+        !request ||
+        request.invocation !== data.invocation ||
+        request.scope !== data.scope ||
+        request.pageRevision !== data.pageRevision
+      )
+        return;
+      pageRequest = undefined;
+      request.dispose();
+      if (data.code === "complete") request.resolve();
+      else request.reject();
       return;
     }
     if (data && typeof data === "object" && data.type === "draft.changed") {
@@ -834,6 +1016,7 @@ export function createBridgeHost(
     }
     clearTimeout(timer);
     state = "ready";
+    pageActions.setReady(true);
     if (!announced) {
       announced = true;
       try {
@@ -958,6 +1141,14 @@ export function createBridgeHost(
       if (terminal()) return false;
       const parsed = parseBridgePresentation(value);
       if (!parsed) return false;
+      if (
+        JSON.stringify([
+          latest?.navigation?.path,
+          latest?.navigation?.search,
+        ]) !==
+        JSON.stringify([parsed.navigation?.path, parsed.navigation?.search])
+      )
+        pageActions.retire();
       latest = parsed;
       dirty = true;
       if (port && !inflight) postPresentation();
@@ -986,6 +1177,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeBackendRequest,
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
+  describePage(
+    scope: string,
+    page: AppPage | null,
+    handler?: (id: string, signal: AbortSignal) => void | Promise<void>,
+  ): boolean;
   reportDocumentHeight(height: number): boolean;
   setDraftDirty(dirty: boolean): boolean;
   navigate(path: string, options?: BridgeNavigationOptions): boolean;
@@ -1120,8 +1316,79 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     }
     requests.clear();
   }
+  let pageRevision = 0n,
+    lastInvocation = 0n,
+    lastPageAt = -Infinity;
+  let pageTimer: ReturnType<typeof setTimeout> | undefined;
+  let description:
+    | {
+        scope: string;
+        page: AppPage | null;
+        handler?: (id: string, signal: AbortSignal) => void | Promise<void>;
+      }
+    | undefined;
+  let sentPage:
+    | { scope: string; revision: string; page: AppPage | null }
+    | undefined;
+  let runningAction:
+    | {
+        invocation: string;
+        scope: string;
+        pageRevision: string;
+        abort: AbortController;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
+  function cancelAction() {
+    if (!runningAction) return;
+    const previous = runningAction;
+    runningAction = undefined;
+    clearTimeout(previous.timer);
+    previous.abort.abort();
+  }
+  function clearPage() {
+    clearTimeout(pageTimer);
+    pageTimer = undefined;
+    description = sentPage = undefined;
+    cancelAction();
+  }
+  function flushPage() {
+    pageTimer = undefined;
+    if (!description || state !== "ready" || !applied || !port || !envelope)
+      return;
+    if (pageRevision === MAX_REVISION) {
+      fail("protocol_error");
+      return;
+    }
+    lastPageAt = Date.now();
+    sentPage = {
+      scope: description.scope,
+      page: description.page,
+      revision: (++pageRevision).toString(),
+    };
+    try {
+      port.postMessage({
+        type: "page.describe",
+        ...envelope,
+        revision: sentPage.revision,
+        presentationRevision: revision.toString(),
+        scope: description.scope,
+        page: description.page,
+      });
+    } catch {
+      fail("transport_error");
+    }
+  }
+  function schedulePage() {
+    if (pageTimer === undefined)
+      pageTimer = setTimeout(
+        flushPage,
+        Math.max(0, 100 - (Date.now() - lastPageAt)),
+      );
+  }
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    clearPage();
     clearMeasure();
     clearDraft();
     retireRequests();
@@ -1153,6 +1420,15 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     );
   }
   function apply(presentation: BridgePresentation, next: bigint) {
+    if (
+      current &&
+      JSON.stringify([current.navigation?.path, current.navigation?.search]) !==
+        JSON.stringify([
+          presentation.navigation?.path,
+          presentation.navigation?.search,
+        ])
+    )
+      clearPage();
     state = "applying";
     const connection = connectionRevision,
       applyingPort = port;
@@ -1187,6 +1463,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
             applied = true;
             onReady?.(presentation);
           }
+          schedulePage();
         } catch {
           fail("presentation_failed");
         }
@@ -1204,6 +1481,108 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     }
     if (terminal() || !envelope) return;
     const data = event.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "page.action" || data.type === "page.action.cancel")
+    ) {
+      const cancel = data.type === "page.action.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "invocation",
+          "scope",
+          "pageRevision",
+          ...(cancel ? [] : ["presentationRevision", "actionId"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (
+        !decimal(data.invocation) ||
+        !decimal(data.pageRevision) ||
+        !isString(data.scope) ||
+        !/^[a-f0-9]{32}$/.test(data.scope) ||
+        (!cancel &&
+          (!decimal(data.presentationRevision) || !isString(data.actionId)))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (cancel) {
+        if (
+          runningAction?.invocation === data.invocation &&
+          runningAction.scope === data.scope &&
+          runningAction.pageRevision === data.pageRevision
+        )
+          cancelAction();
+        return;
+      }
+      if (BigInt(data.invocation) <= lastInvocation) return;
+      lastInvocation = BigInt(data.invocation);
+      const action = description?.page?.actions.find(
+        (action) => action.id === data.actionId,
+      );
+      const reply = (code: string) => {
+        try {
+          port?.postMessage({
+            type: "page.action.result",
+            ...envelope,
+            invocation: data.invocation,
+            scope: data.scope,
+            pageRevision: data.pageRevision,
+            code,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (
+        state !== "ready" ||
+        data.presentationRevision !== revision.toString() ||
+        sentPage?.revision !== data.pageRevision ||
+        sentPage.scope !== data.scope ||
+        description?.scope !== data.scope ||
+        !description.handler ||
+        !action ||
+        action.disabled ||
+        action.loading ||
+        runningAction
+      ) {
+        reply("unavailable");
+        return;
+      }
+      const abort = new AbortController();
+      const running = {
+        invocation: data.invocation,
+        scope: data.scope,
+        pageRevision: data.pageRevision,
+        abort,
+        timer: setTimeout(() => finish("uncertain", true), 25_000),
+      };
+      runningAction = running;
+      function finish(code: string, expired = false) {
+        if (runningAction !== running) return;
+        runningAction = undefined;
+        clearTimeout(running.timer);
+        if (expired) abort.abort();
+        reply(code);
+      }
+      try {
+        Promise.resolve(
+          description.handler(data.actionId as string, abort.signal),
+        ).then(
+          () => finish("complete"),
+          () => finish("uncertain"),
+        );
+      } catch {
+        finish("uncertain");
+      }
+      return;
+    }
     if (data && typeof data === "object" && data.type === "backend.result") {
       const response = exact(data, [
         "type",
@@ -1306,6 +1685,9 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         abort.abort();
         clearMeasure();
         clearDraft();
+        clearPage();
+        pageRevision = lastInvocation = 0n;
+        lastPageAt = -Infinity;
         navigationRevision = 0n;
         lastNavigationAt = -Infinity;
         draftRevision = 0n;
@@ -1427,6 +1809,28 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
+    describePage(
+      scope: string,
+      page: AppPage | null,
+      handler?: (id: string, signal: AbortSignal) => void | Promise<void>,
+    ): boolean {
+      if (
+        terminal() ||
+        !isString(scope) ||
+        !/^[a-f0-9]{32}$/.test(scope) ||
+        (handler !== undefined && typeof handler !== "function")
+      )
+        return false;
+      const parsed = page === null ? null : parseAppPage(page);
+      if (page !== null && !parsed) return false;
+      if (description?.scope !== scope || !parsed) cancelAction();
+      const changed =
+        description?.scope !== scope ||
+        JSON.stringify(description.page) !== JSON.stringify(parsed);
+      description = { scope, page: parsed, handler };
+      if (changed) schedulePage();
+      return true;
+    },
     navigate(path: string, options: BridgeNavigationOptions = {}): boolean {
       if (
         terminal() ||
