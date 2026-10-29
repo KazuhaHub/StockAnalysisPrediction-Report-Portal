@@ -2060,3 +2060,31 @@ daemon workflow 40455635317 passed on the functional source as well.
   writable queue/scheduler, managed browser shell and the remaining full platform
   acceptance are incomplete. Production, credentials, Status, SDK freeze and beta
   configuration unchanged.
+
+- Added an explicit writable installation queue/service mode, preserving static/
+  frontend selectors. It claims only current canonical writable initial work;
+  expired work with residue or post-start stages is fenced into retained review/
+  recovery instead of redispatched. Failure settlement pins the consumed review,
+  request digest and exact runtime, including safe denial of revoked runtime
+  residue. Writable probe waits poll only actual native observations under a
+  bounded deadline and commit once; SQL/source errors return immediately. Added
+  SQL claim/recovery/authority/binding/retry/cancellation tests and a dedicated
+  SQLite/PostgreSQL CI step. Native acceptance now uses actual background serve
+  for queued-to-data progress and actual readiness waiting/audit-error return.
+  See [writable scheduling](114-writable-install-scheduling.md). Local tests,
+  focused race, dual-arch Linux builds, vet/staticcheck and Python14 passed.
+  Functional source `966f478d72c844598be610f0aa2bef49a5b63b09` passed native
+  quota workflow 40831373753/job 123306128129: actual background claimed-progress
+  and readiness-wait flags, prior native checks, full quota witness and owned
+  cleanup true; registry cleanup succeeded. General workflow 40831373762/job
+  123306128447 passed lifecycle SQL 74.213s, current/legacy access SQL 37.602s,
+  worker/static SQL 14.164s and queue/scheduling/legacy SQL 14.940s on SQLite/
+  PostgreSQL. Build/vet/staticcheck, published market, arm64 numeric, all app
+  race shards/aggregate, web and Docker passed. Shard 1/job 123306128452 ran
+  full journal race 239.214s and Portal subset 71.878s. Go failed existing x/net
+  GO-2026-6866/6860 findings and skipped ordinary full tests. No standalone daemon
+  workflow triggered. Updated the plan index to distinguish requirements,
+  approved development scope, implemented evidence and outstanding delivery.
+  Uninterrupted background completion/browser launch,
+  physical lifecycle, broker/SDK/reference apps and full release acceptance
+  remain incomplete. No production/credential/Status/SDK-freeze/beta change.

@@ -17,7 +17,7 @@ type platformInstallSelection struct {
 	reviewed    bool
 }
 
-// Only initial static installations belong to this worker. A query is a hint:
+// Each selector owns one explicit initial installation family. A query is a hint:
 // row/authority/lease eligibility is checked again under the usual lock order.
 func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
 	return s.claimNextPlatformInstallForFormat(ctx, worker, platformNativeInstallFormat)
@@ -25,14 +25,17 @@ func (s *Server) claimNextPlatformStaticInstall(ctx context.Context, worker stri
 func (s *Server) claimNextPlatformFrontendInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
 	return s.claimNextPlatformInstallForFormat(ctx, worker, platformFrontendInstallFormat)
 }
+func (s *Server) claimNextPlatformWritableInstall(ctx context.Context, worker string) (platformInstallSelection, error) {
+	return s.claimNextPlatformInstallForFormat(ctx, worker, platformWritableInstallFormat)
+}
 func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, format string) (platformInstallSelection, error) {
 	var zero platformInstallSelection
-	if !platformValidUUID(worker) || (format != platformNativeInstallFormat && format != platformFrontendInstallFormat) {
+	if !platformValidUUID(worker) || (format != platformNativeInstallFormat && format != platformFrontendInstallFormat && format != platformWritableInstallFormat) {
 		return zero, errAppPlatformLeaseConflict
 	}
 	var dek []byte
 	var err error
-	if format == platformNativeInstallFormat {
+	if format != platformFrontendInstallFormat {
 		dek, err = s.dek()
 		if err != nil {
 			return zero, err
@@ -70,7 +73,14 @@ func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, 
 	if err != nil {
 		return zero, err
 	}
-	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.action='install' AND o.managed=0 AND o.source_generation=0 AND o.target_generation=1 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','download','stage','prepare_data','activate') AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.phase='pending' AND i.desired_state='enabled' AND i.runtime_id IS NULL AND i.generation=1 AND i.controller_epoch=? AND o.controller_epoch=? AND p.plan_json LIKE ? ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch, `{"format":"`+format+`",%`)
+	managed, runtimeClause := 0, "runtime_id IS NULL"
+	stages := "'queued','validate','download','stage','prepare_data','activate'"
+	if format == platformWritableInstallFormat {
+		managed, runtimeClause = 1, "runtime_id IS NOT NULL"
+		stages += ",'start','probe'"
+	}
+	// Only closed constants above enter SQL syntax; user/review values stay bound.
+	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.action='install' AND o.managed=? AND o.source_generation=0 AND o.target_generation=1 AND o.completed_ms IS NULL AND o.stage IN (`+stages+`) AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.phase='pending' AND i.desired_state='enabled' AND i.`+runtimeClause+` AND i.generation=1 AND i.controller_epoch=? AND o.controller_epoch=? AND p.plan_json LIKE ? ORDER BY o.created_ms,o.id LIMIT 32`, managed, now, epoch, epoch, `{"format":"`+format+`",%`)
 	if err != nil {
 		return zero, err
 	}
@@ -94,7 +104,7 @@ func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, 
 	// Lock the shared provider before installation/operation rows. No seed is
 	// retained by the selector; this is readiness/trust preflight, not dispatch.
 	var runtimeErr error
-	if format == platformNativeInstallFormat {
+	if format != platformFrontendInstallFormat {
 		var seed []byte
 		_, seed, runtimeErr = s.platformDataRuntime(e, epoch, dek)
 		clear(seed)
@@ -115,11 +125,11 @@ func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, 
 			return zero, err
 		}
 		old := facts.lease
-		if old.leaseUntilMS > facts.now || old.snapshot.Action != appplatform.ActionInstall || old.snapshot.Managed || old.snapshot.Generation != 1 {
+		if old.leaseUntilMS > facts.now || old.snapshot.Action != appplatform.ActionInstall || old.snapshot.Managed != (managed == 1) || old.snapshot.Generation != 1 {
 			continue
 		}
 		var eligible int
-		if err = e.queryRow(`SELECT COUNT(*) FROM app_platform_installations WHERE id=? AND phase='pending' AND desired_state='enabled' AND runtime_id IS NULL AND generation=1 AND controller_epoch=?`, old.installationID, epoch).Scan(&eligible); err != nil {
+		if err = e.queryRow(`SELECT COUNT(*) FROM app_platform_installations WHERE id=? AND phase='pending' AND desired_state='enabled' AND `+runtimeClause+` AND generation=1 AND controller_epoch=?`, old.installationID, epoch).Scan(&eligible); err != nil {
 			return zero, err
 		}
 		if eligible != 1 {
@@ -136,7 +146,7 @@ func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, 
 		if err != nil {
 			return zero, err
 		}
-		if resources > 0 || (old.snapshot.Stage == appplatform.StageActivate && format == platformNativeInstallFormat) {
+		if resources > 0 || platformInstallStageMayHaveEffects(old.snapshot.Stage, format) {
 			if err = finalizePlatformInstallForReview(e, facts, "install_lease_recovery_required", true); err != nil {
 				return zero, err
 			}
@@ -187,6 +197,11 @@ func (s *Server) claimNextPlatformInstallForFormat(ctx context.Context, worker, 
 	return zero, nil
 }
 
+func platformInstallStageMayHaveEffects(stage appplatform.Stage, format string) bool {
+	return (stage == appplatform.StageActivate && format != platformFrontendInstallFormat) ||
+		(format == platformWritableInstallFormat && (stage == appplatform.StageStart || stage == appplatform.StageProbe))
+}
+
 func platformInstallAuthorityRefusal(err error) bool {
 	return errors.Is(err, errAppPlatformStageEvidence) || errors.Is(err, errAppPlatformPlanChanged) || errors.Is(err, errAppPlatformReleaseConflict) || errors.Is(err, errAppPlatformActorUnavailable) || errors.Is(err, errAppPlatformInstallUnavailable)
 }
@@ -203,8 +218,12 @@ func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code 
 	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" {
 		return errAppPlatformStageEvidence
 	}
-	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Managed || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {
+	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {
 		return errAppPlatformLeaseConflict
+	}
+	runtimeID, err := platformInstallReviewRuntime(e, lease)
+	if err != nil {
+		return err
 	}
 	now, err := platformOperationControlTime(e, facts)
 	if err != nil {
@@ -226,7 +245,7 @@ func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code 
 	if err != nil {
 		return err
 	}
-	if resources > 0 || (lease.snapshot.Stage == appplatform.StageActivate && profile == platformNativeInstallFormat) {
+	if resources > 0 || platformInstallStageMayHaveEffects(lease.snapshot.Stage, profile) {
 		outcome, phase = appplatform.EffectsUnknown, "recovery_required"
 	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
@@ -237,7 +256,7 @@ func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code 
 	if err != nil {
 		return errAppPlatformStageEvidence
 	}
-	changed, err := e.exec(`UPDATE app_platform_installations SET phase=?,control_fence=control_fence+1,revision=revision+1,updated_ms=? WHERE id=? AND phase='pending' AND generation=1 AND desired_state='enabled' AND runtime_id IS NULL AND revision=? AND control_fence=? AND controller_epoch=?`, phase, now, lease.installationID, facts.installationRevision, facts.controlFence, lease.controllerEpoch)
+	changed, err := e.exec(`UPDATE app_platform_installations SET phase=?,control_fence=control_fence+1,revision=revision+1,updated_ms=? WHERE id=? AND phase='pending' AND generation=1 AND desired_state='enabled' AND COALESCE(runtime_id,'')=? AND revision=? AND control_fence=? AND controller_epoch=?`, phase, now, lease.installationID, runtimeID, facts.installationRevision, facts.controlFence, lease.controllerEpoch)
 	if err = platformLeaseCAS(changed, err); err != nil {
 		return err
 	}

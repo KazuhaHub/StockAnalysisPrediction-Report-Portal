@@ -34,6 +34,7 @@ type platformInstallScheduler struct {
 	status   atomic.Pointer[platformInstallWorkerStatus]
 	active   platformOperationLease
 	attempts int
+	writable bool
 }
 
 func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
@@ -42,6 +43,20 @@ func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, wo
 		return nil, errAppPlatformRuntimeConflict
 	}
 	return &platformInstallScheduler{server: s, endpoint: endpoint, worker: worker, interval: interval, gate: make(chan struct{}, 1)}, nil
+}
+
+// Explicit development bootstrap only; the portable production service keeps
+// its frontend-only constructor and cannot select managed installations.
+func newPlatformWritableInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
+	if endpoint == (platformRuntimeEndpoint{}) {
+		return nil, errAppPlatformRuntimeConflict
+	}
+	w, err := newPlatformInstallScheduler(s, endpoint, worker, interval)
+	if err != nil {
+		return nil, err
+	}
+	w.writable = true
+	return w, nil
 }
 func (w *platformInstallScheduler) currentStatus() platformInstallWorkerStatus {
 	if status := w.status.Load(); status != nil {
@@ -67,7 +82,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	if w.active.id == "" {
 		var selected platformInstallSelection
 		var err error
-		if w.endpoint.path == "" {
+		if w.writable {
+			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
+		} else if w.endpoint.path == "" {
 			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
 		} else {
 			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
@@ -103,7 +120,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	w.active = renewed
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
-	result, err := w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
+	var result platformInstallRun
+	if w.writable {
+		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
+	} else {
+		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
+	}
 	if err == nil {
 		w.publish("complete", w.active.id, appplatform.StageComplete)
 		w.active, w.attempts = platformOperationLease{}, 0

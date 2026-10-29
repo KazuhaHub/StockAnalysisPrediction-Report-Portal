@@ -1,11 +1,18 @@
 # Application platform v2: delivery plan
 
-Status: proposed implementation design, prepared 2026-10-24 Pacific. The owner
-approved the product direction and writing this plan. Specific database layouts,
-host privileges and deployment are not approved by this document.
-Nothing in this directory is an implemented endpoint, command or accepted ADR.
-The previous Status rollout remains paused. This is a platform project, not a
-Status redesign. Production image/channel configuration is outside this change.
+Status: implementation in progress. The original delivery design was prepared
+2026-10-24 Pacific. The owner approved initial storage D2 and runtime/trust
+candidate A for development and disposable Linux acceptance. These decisions do
+not authorize production deployment, stable public SDK freeze or Status adoption.
+The Status rollout remains paused; server `beta` configuration is unchanged.
+
+Documents 01–08 specify the required outcome and acceptance, not completed
+features. [The execution register](09-execution-log.md) records implemented work
+and exact evidence. Recent continuations connect [claimed writable installation
+and activation](113-writable-install-worker.md) and
+[writable queue/scheduling](114-writable-install-scheduling.md).
+An implemented internal primitive does not establish a complete user-facing
+marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 
 ## The outcome
 
@@ -116,9 +123,11 @@ document. A restricted native widget renderer can be added later if needed.
 ## Decision gates
 
 The concrete D1/D3/D4 development candidate is
-[runtime and trust candidate A](18-runtime-and-trust-proposal.md). Its approval
-record is separate from the accepted initial D2 storage scope and from production
-rollout.
+[runtime and trust candidate A](18-runtime-and-trust-proposal.md), approved for
+development and isolated acceptance. Initial D2 storage approval is recorded in
+[the storage implementation](14-control-storage-implementation.md). These limited approvals
+do not authorize additional storage layouts, stable public SDK/API freeze or
+production privileges/rollout. D5 visual acceptance and D6 rollout remain open.
 
 | Gate | Required decision or evidence | Blocks |
 | --- | --- | --- |
@@ -142,7 +151,7 @@ market, no manual backend setup, restart recovery, an update with retained data,
 rejected permissions, a failed migration and recovery, a stopped/uninstalled app,
 and unaffected Portal business routes during app/runner outages.
 
-No checkbox below is completed by this plan. See the
-[execution register](09-execution-log.md) for subsequent work package state.
+The requirements above are not completed by the plan itself. See the
+[execution register](09-execution-log.md) for work package state and evidence.
 Source tests alone do not prove a production installation. Optional
 credentials for a particular business app are separate from platform acceptance.

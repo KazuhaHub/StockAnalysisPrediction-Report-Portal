@@ -22,24 +22,22 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 	if intent.writer.resourceID != start.writer.resourceID || intent.running.NativeID != start.running.NativeID {
 		t.Fatal("probe replaced original source")
 	}
-	// The controlled backend completes the full Portal hard-quota probe before
-	// opening its readiness socket. No native start is repeated while waiting.
-	var proof transport.WritableLifecycleObservation
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		proof, err = platformRunWritableStart(ctx, endpoint, intent, transport.WritableCandidateProbe)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("writable readiness unavailable", err)
-		}
-		time.Sleep(25 * time.Millisecond)
+	// The scheduler's real bounded readiness wait observes startup, but an audit
+	// failure after readiness must return immediately instead of being polled.
+	mustExec(t, s.st, `CREATE TRIGGER portal_writable_readiness_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_readiness_observed' BEGIN SELECT RAISE(ABORT,'writable readiness fixture'); END`)
+	waiting, cancelWaiting := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelWaiting()
+	began := time.Now()
+	if _, err := s.waitPlatformWritableCandidate(waiting, lease, endpoint); err == nil || time.Since(began) >= 10*time.Second {
+		t.Fatal("readiness wait ignored audit failure or polled a commit error", err)
+	}
+	proof, err := platformRunWritableStart(ctx, endpoint, intent, transport.WritableCandidateProbe)
+	if err != nil {
+		t.Fatal("actual writable readiness after bounded wait", err)
 	}
 	if !validPlatformWritableReadinessObservation(proof, intent, endpoint) {
 		t.Fatal("actual probe provenance/source")
 	}
-	mustExec(t, s.st, `CREATE TRIGGER portal_writable_readiness_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writable_readiness_observed' BEGIN SELECT RAISE(ABORT,'writable readiness fixture'); END`)
 	if _, err := s.commitPlatformWritableReadiness(ctx, lease, intent, endpoint, proof); err == nil {
 		t.Fatal("readiness audit rollback ignored")
 	}
@@ -51,7 +49,7 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 		t.Fatal("failed readiness commit partially advanced")
 	}
 	mustExec(t, s.st, `DROP TRIGGER portal_writable_readiness_failure`)
-	activated, err := s.probePlatformWritableCandidate(ctx, lease, endpoint)
+	activated, err := s.waitPlatformWritableCandidate(ctx, lease, endpoint)
 	if err != nil {
 		t.Fatal("Portal current writable readiness", err)
 	}
@@ -68,6 +66,7 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 		t.Fatal("stale probe lease accepted")
 	}
 	t.Log("PORTAL_WRITABLE_READINESS_ADVANCED")
+	t.Log("PORTAL_WRITABLE_READINESS_WAIT_CONFIRMED")
 	// Expiration of an observation must not force a new container or an implicit
 	// activation. Keep historical binding, then collect a genuinely new probe.
 	expiring, err := platformRunWritableStart(ctx, endpoint, stored, transport.WritableCandidateProbe)
