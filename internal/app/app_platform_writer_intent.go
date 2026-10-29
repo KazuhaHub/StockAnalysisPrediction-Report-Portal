@@ -95,9 +95,11 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 	if err != nil {
 		return zero, false, err
 	}
+	// Portal database and host/native clocks share the existing one-second
+	// signer bound. Original row identity/timestamps remain pinned exactly.
 	claimedMS, _ := strconv.ParseInt(result.data.Claim.ClaimedMS, 10, 64)
 	observedMS, _ := strconv.ParseInt(result.data.ObservedMS, 10, 64)
-	if result.dataCreated > claimedMS || observedMS > dataUpdated {
+	if result.dataCreated > claimedMS+1000 || observedMS > dataUpdated+1000 {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	canonical, _ := json.Marshal(result.data)
@@ -158,7 +160,7 @@ func loadPlatformWriterIntent(e migExec, lease platformOperationLease, runtime p
 			}
 			settled, _ := strconv.ParseInt(result.receipt.SettledMS, 10, 64)
 			claimed, _ := strconv.ParseInt(result.receipt.Claim.ClaimedMS, 10, 64)
-			if settled > updated || claimed < created {
+			if settled > updated+1000 || claimed+1000 < created {
 				return zero, false, errAppPlatformStageEvidence
 			}
 			result.applied = true
@@ -219,7 +221,7 @@ func platformWriterReceiptMatches(r journal.DataWriterReceipt, i platformWriterI
 	sourceRevision, _ := strconv.ParseInt(d.ControlRevision, 10, 64)
 	settled, _ := strconv.ParseInt(r.SettledMS, 10, 64)
 	observed, _ := strconv.ParseInt(n.ObservedMS, 10, 64)
-	return r.Claim.EffectID == i.effectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == i.dataSHA && r.Claim.ResourceID == i.resourceID && r.Claim.AdmittedFence == strconv.FormatInt(lease.fence, 10) && revision >= sourceRevision && revision <= i.runtime.controlRevision && settled <= now && observed <= now && n.Profile == control.DataWriterSandboxProfile && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.Platform == c.Platform && n.RootFilesystemUUID == d.Claim.RootFilesystemUUID && n.RootInode == d.Claim.RootInode && n.ProjectID == d.ProjectID && n.Device == d.Device && n.NamespaceInode == d.NamespaceInode && n.QuotaBytes == d.QuotaBytes && n.QuotaInodes == d.QuotaInodes
+	return r.Claim.EffectID == i.effectID && r.Claim.PayloadSHA256 == c.PayloadSHA256 && r.Claim.DataReceiptSHA256 == i.dataSHA && r.Claim.ResourceID == i.resourceID && r.Claim.AdmittedFence == strconv.FormatInt(lease.fence, 10) && revision >= sourceRevision && revision <= i.runtime.controlRevision && settled <= now+1000 && observed <= now+1000 && settled <= time.Now().UnixMilli() && observed <= time.Now().UnixMilli() && n.Profile == control.DataWriterSandboxProfile && n.SeccompSHA256 == driver.DataWriterPolicySHA256() && n.Platform == c.Platform && n.RootFilesystemUUID == d.Claim.RootFilesystemUUID && n.RootInode == d.Claim.RootInode && n.ProjectID == d.ProjectID && n.Device == d.Device && n.NamespaceInode == d.NamespaceInode && n.QuotaBytes == d.QuotaBytes && n.QuotaInodes == d.QuotaInodes
 }
 
 func (s *Server) preparePlatformInstallWriter(ctx context.Context, expected platformOperationLease) (platformWriterIntent, error) {

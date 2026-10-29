@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
@@ -145,3 +146,33 @@ func TestWritableReviewCannotUseReadonlyRuntime(t *testing.T) {
 		t.Fatal("readonly review authorized writer")
 	}
 }
+
+func testPlatformWriterClockSkew(t *testing.T, pg bool) {
+	for _, offset := range []int64{1, 1001} {
+		t.Run(strconv.FormatInt(offset, 10), func(t *testing.T) {
+			s, lease := platformWriterIntentFixture(t, pg)
+			raw := scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND effect_number=1`, lease.id)
+			var receipt journal.DataPreparationReceipt
+			if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+				t.Fatal(err)
+			}
+			updated := scalar[int64](t, s.st, `SELECT updated_ms FROM app_platform_operation_effects WHERE operation_id=? AND effect_number=1`, lease.id)
+			receipt.ObservedMS = strconv.FormatInt(updated+offset, 10)
+			encoded, _ := json.Marshal(receipt)
+			mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND effect_number=1`, string(encoded), lease.id)
+			// Fixture-only timing: avoid manufacturing a future native observation.
+			if delay := time.Until(time.UnixMilli(updated + offset + 1)); delay > 0 {
+				time.Sleep(delay)
+			}
+			_, err := s.preparePlatformInstallWriter(context.Background(), lease)
+			if offset == 1 && err != nil {
+				t.Fatal("allowed database/host skew refused", err)
+			}
+			if offset > 1000 && err == nil {
+				t.Fatal("excessive database/host skew accepted")
+			}
+		})
+	}
+}
+func TestPlatformWriterIntentClockSkewSQLite(t *testing.T)   { testPlatformWriterClockSkew(t, false) }
+func TestPlatformWriterIntentClockSkewPostgres(t *testing.T) { testPlatformWriterClockSkew(t, true) }
