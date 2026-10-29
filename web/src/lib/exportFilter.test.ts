@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { ExportFilter, ExportCond } from '../api/types'
 import {
+  BELOW_ENTRY_CONDS,
   MAX_CONDITIONS,
   MAX_DEPTH,
   activePreset,
   addConditionAt,
+  applyBelowEntryPreset,
   applySelection,
+  clearBelowEntryPreset,
+  isBelowEntryActive,
   auditFilterToTree,
   buildExportRequest,
   cleanFilter,
@@ -215,5 +219,23 @@ describe('condition helpers', () => {
   it('knows when a condition is complete', () => {
     expect(isCompleteCond(c('a', 'between', '1'))).toBe(false)
     expect(isCompleteCond(c('a', 'between', '1', '2'))).toBe(true)
+  })
+})
+
+describe('below-entry preset', () => {
+  const sym: ExportCond = { field: 'symbol', operator: 'is', values: ['600519'] }
+  it('adds both chips, keeps the others, and is idempotent', () => {
+    const f = applyBelowEntryPreset({ op: 'and', items: [sym] })
+    expect(f.items).toEqual([sym, ...BELOW_ENTRY_CONDS])
+    expect(applyBelowEntryPreset(f)).toEqual(f)
+    expect(isBelowEntryActive(f)).toBe(true)
+  })
+  it('is active only when both chips say yes', () => {
+    expect(isBelowEntryActive({ op: 'and', items: [BELOW_ENTRY_CONDS[1]] })).toBe(false)
+    expect(isBelowEntryActive({ op: 'and', items: [BELOW_ENTRY_CONDS[0], { ...BELOW_ENTRY_CONDS[1], values: ['no'] }] })).toBe(false)
+  })
+  it('clears only its own chips', () => {
+    const f = applyBelowEntryPreset({ op: 'and', items: [sym] })
+    expect(clearBelowEntryPreset(f)).toEqual({ op: 'and', items: [sym] })
   })
 })

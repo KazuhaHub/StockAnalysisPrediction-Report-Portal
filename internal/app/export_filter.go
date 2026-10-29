@@ -219,6 +219,12 @@ type exportLeaf struct {
 	sql  string
 	args []any
 	gv   *exportGV // non-nil: derived generator version, checked exactly in Go
+	// below is a below-entry condition (forecasts): the SQL is a prefilter and the exact test needs
+	// the latest price, so it is evaluated in Go like gv.
+	below *exportBelow
+	// latest is a latest-per-symbol condition (forecasts), evaluated in Go against the newest
+	// candidate of each symbol.
+	latest *exportLatest
 }
 
 // exportGV is a generator-version condition. The SQL side is only a prefilter; the exact test is
@@ -268,14 +274,17 @@ type exportCompiler struct {
 	src    *exportSource
 	loc    *time.Location
 	leaves []exportLeaf
+	// neutral compiles the derived conditions (latest per symbol, below entry) as true: the result
+	// is the candidate set the latest-per-symbol rule picks from.
+	neutral bool
 }
 
 // compileExportFilter returns the WHERE fragment (always parenthesised, "1=1" for an empty tree),
 // its arguments in textual order, the leaves and the evaluation tree. A derived generator-version
 // leaf contributes an over-approximating prefilter, so the fragment is a superset of the exact
 // answer whenever a tree contains one.
-func (s *Server) compileExportFilter(src *exportSource, root exportNode) (sqlText string, args []any, c *exportCompiler, tree *exportEval, err error) {
-	c = &exportCompiler{s: s, src: src, loc: s.panelLocation()}
+func (s *Server) compileExportFilter(src *exportSource, root exportNode, neutral bool) (sqlText string, args []any, c *exportCompiler, tree *exportEval, err error) {
+	c = &exportCompiler{s: s, src: src, loc: s.panelLocation(), neutral: neutral}
 	var walk func(n exportNode) (string, []any, *exportEval, error)
 	walk = func(n exportNode) (string, []any, *exportEval, error) {
 		if n.isGroup() {

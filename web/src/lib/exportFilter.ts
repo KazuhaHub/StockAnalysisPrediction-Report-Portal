@@ -298,6 +298,28 @@ export function activePreset(f: ExportFilter, timeField: string, today: string):
 }
 
 // ---------------------------------------------------------------------------------------------
+// Forecast screen preset: the newest forecast of each stock, kept only where the latest price is
+// below the entry price. Two chips, set and cleared together.
+
+export const BELOW_ENTRY_CONDS: ExportCond[] = [
+  { field: 'latest_per_symbol', operator: 'is', values: ['yes'] },
+  { field: 'below_entry', operator: 'is', values: ['yes'] },
+]
+
+const hasCond = (f: ExportFilter, c: ExportCond) =>
+  f.items.some((n) => isCond(n) && n.field === c.field && n.operator === c.operator && n.values.join() === c.values.join())
+
+export const isBelowEntryActive = (f: ExportFilter): boolean => BELOW_ENTRY_CONDS.every((c) => hasCond(f, c))
+
+export function applyBelowEntryPreset(f: ExportFilter): ExportFilter {
+  return BELOW_ENTRY_CONDS.reduce(upsertChip, f)
+}
+
+export function clearBelowEntryPreset(f: ExportFilter): ExportFilter {
+  return BELOW_ENTRY_CONDS.reduce((acc, c) => removeChip(acc, c.field), f)
+}
+
+// ---------------------------------------------------------------------------------------------
 // Audit page hand-off.
 
 export interface AuditFilterInput {

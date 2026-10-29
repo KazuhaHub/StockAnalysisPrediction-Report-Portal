@@ -29,7 +29,16 @@ export function useExportLabels(): ExportLabels {
       op: (k) => tl(`export.op.${k}`, k),
       status: (k) => tl(`export.status.${k}`, k),
       format: (k) => tl(`export.format.${k}`, k),
-      value: (field, v) => (field === 'action' ? tl(`audit.a.${v}`, v) : field === 'target_type' ? tl(`audit.t.${v}`, v) : v),
+      value: (field, v) =>
+        field === 'action'
+          ? tl(`audit.a.${v}`, v)
+          : field === 'target_type'
+            ? tl(`audit.t.${v}`, v)
+            : field === 'latest_per_symbol' || field === 'below_entry'
+              ? tl(`export.value.${v}`, v)
+              : field === 'stance'
+                ? tl(`forecast.stance.${v}`, v)
+                : v,
     }
   }, [t])
 }

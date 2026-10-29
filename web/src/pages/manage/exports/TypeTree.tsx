@@ -118,9 +118,6 @@ export default function TypeTree({
                     {k.kind}
                   </Button>
                 )}
-                <Typography.Text type="secondary" style={{ fontSize: 12, paddingInlineEnd: 6 }}>
-                  {k.subtypes.length}
-                </Typography.Text>
               </div>
               {expanded && (
                 <div role="group" style={{ paddingInlineStart: 28 }}>

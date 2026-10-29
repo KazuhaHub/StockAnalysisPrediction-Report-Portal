@@ -41,6 +41,9 @@ func finishExportEnv(t *testing.T, s *Server) *exportEnv {
 	t.Helper()
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
+	// No test in this package may reach a quote vendor: every export environment starts with a
+	// vendor that knows no symbol.
+	wireQuoteSources(s, newExportQuoteVendor(nil), failingStub("sina has no batch endpoint"))
 	mustAddUser(t, s, "admin", true)
 	mustAddUser(t, s, "bob", false)
 	return &exportEnv{t: t, s: s, mux: mux}
@@ -1078,6 +1081,7 @@ func seedEverySource(t *testing.T, st *Store) {
 	if _, err := st.InsertCleanupRun(CleanupRun{RanAt: nowStr(), Trigger: "manual", OK: true, BatchDeleted: 3}); err != nil {
 		t.Fatal(err)
 	}
+	seedForecast(t, st, forecastSeed{symbol: "600519", madeAt: "2026-10-16T14:40:12Z", entry: 1000, term: 1200})
 }
 
 func TestExportSigninsParseMethodAndClientFromDetail(t *testing.T) {
@@ -1245,10 +1249,10 @@ func TestExportListAndActiveFilter(t *testing.T) {
 // with typed parameters (text and integer keys), every source's SQL, the LIKE prefilter and the
 // panel-zone boundaries. It is skipped unless TEST_POSTGRES_DSN is set.
 func TestPostgresExport(t *testing.T) {
-	st := pgStore(t, "audit_log", "reports", "export_jobs", "batch_items", "batch_jobs", "notification_deliveries",
+	st := pgStore(t, "prediction_claims", "prediction_marks", "prediction_sets", "audit_log", "reports", "export_jobs", "batch_items", "batch_jobs", "notification_deliveries",
 		"notification_channels", "notification_events", "cleanup_runs", "type_config")
 	t.Cleanup(func() {
-		for _, tbl := range []string{"audit_log", "reports", "export_jobs", "batch_items", "batch_jobs",
+		for _, tbl := range []string{"prediction_claims", "prediction_marks", "prediction_sets", "audit_log", "reports", "export_jobs", "batch_items", "batch_jobs",
 			"notification_deliveries", "notification_channels", "notification_events", "cleanup_runs", "type_config"} {
 			st.exec("DELETE FROM " + tbl)
 		}
@@ -1340,6 +1344,10 @@ func TestPostgresExport(t *testing.T) {
 	if pv.Total != 1 {
 		t.Fatalf("q contains on postgres: %s", w.Body.String())
 	}
+
+	// The forecast ledger: the claim subqueries, the newest-per-symbol NOT EXISTS and the below-entry
+	// screen with a stubbed vendor, on the production driver.
+	postgresForecastChecks(t, e)
 
 	// The archive reads metadata and body in the same batched query.
 	e.s.exports.batchSize = 2

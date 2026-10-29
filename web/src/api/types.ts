@@ -563,7 +563,7 @@ export interface ExportGroup {
   items: (ExportGroup | ExportCond)[]
 }
 export type ExportFilter = ExportGroup
-export type ExportSourceKey = 'reports' | 'audit' | 'signins' | 'runs' | 'notifications' | 'cleanup'
+export type ExportSourceKey = 'reports' | 'audit' | 'signins' | 'runs' | 'notifications' | 'cleanup' | 'forecasts'
 export type ExportFormat = 'csv' | 'jsonl' | 'md_zip'
 export interface ExportField {
   key: string

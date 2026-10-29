@@ -76,7 +76,8 @@ type exportFieldJSON struct {
 func (s *Server) apiExportSources(w http.ResponseWriter, r *http.Request, _ string) {
 	var tree []exportKindTree // built once: kind and rtype both carry it
 	out := make([]map[string]any, 0, len(exportSourceList))
-	for _, src := range exportSourceList {
+	for _, listed := range exportSourceList {
+		src := s.exportView(listed)
 		fields := make([]exportFieldJSON, 0, len(src.Fields))
 		for _, f := range src.Fields {
 			fj := exportFieldJSON{Key: f.Key, Type: f.Type, Operators: f.Operators}
@@ -134,6 +135,7 @@ func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ stri
 		jsonError(w, http.StatusBadRequest, "unknown export source")
 		return
 	}
+	src = s.exportView(src)
 	cols, err := resolveExportColumns(src, in.Columns, "")
 	if err != nil {
 		exportFail(w, err)
@@ -144,6 +146,7 @@ func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ stri
 		exportFail(w, err)
 		return
 	}
+	plan.withColumns(cols)
 	size := in.PageSize
 	if size <= 0 {
 		size = exportPreviewDefaultSize
@@ -166,6 +169,7 @@ func (s *Server) apiExportPreview(w http.ResponseWriter, r *http.Request, _ stri
 		return
 	}
 	ec := s.newExportCtx("utc", cols)
+	ec.priceOf = plan.priceOf
 	rows := make([]map[string]any, 0, len(raws))
 	for _, raw := range raws {
 		full := src.build(ec, raw)
@@ -200,6 +204,7 @@ func (s *Server) apiExportCreate(w http.ResponseWriter, r *http.Request, user st
 		jsonError(w, http.StatusBadRequest, "unknown export source")
 		return
 	}
+	src = s.exportView(src)
 	if in.Format == "" {
 		in.Format = src.Formats[0]
 	}

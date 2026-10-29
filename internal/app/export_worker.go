@@ -175,7 +175,9 @@ func (s *Server) exportExecute(ctx context.Context, j *exportJob) (rowsDone, siz
 	}()
 	cw := &countingWriter{w: f}
 	bw := bufio.NewWriterSize(cw, 64<<10)
+	plan.withColumns(p.Columns)
 	ec := s.newExportCtx(p.TZ, p.Columns)
+	ec.priceOf = plan.priceOf
 	withBody := j.Format == "md_zip"
 
 	var w exportWriter

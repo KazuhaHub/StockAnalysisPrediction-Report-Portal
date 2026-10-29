@@ -32,29 +32,61 @@ type exportPlan struct {
 	flagSel  []string
 	flagArgs []any
 	post     func(raw []string, flagBase int) bool
+
+	// Latest prices (forecasts source). prices is filled by prepare (a below-entry condition needs
+	// every candidate priced before it can count) or per batch by prefetch (price columns only).
+	latestMode  bool // the tree holds a latest_per_symbol condition
+	candWhere   string
+	candArgs    []any
+	newest      map[string]exportNewest
+	belowMode   bool // the tree holds a below_entry condition: prices cover the whole candidate set
+	needPrices  bool // a latest-price column was requested
+	prepared    bool
+	prices      map[string]exportPrice
+	priceLookup int // upstream chunks requested so far (diagnostic)
 }
 
 // newExportPlan validates and compiles a filter against a source.
 func (s *Server) newExportPlan(src *exportSource, filter exportNode) (*exportPlan, error) {
+	src = s.exportView(src)
 	filter = normalizeExportFilter(filter)
 	if err := validateExportFilter(src, filter); err != nil {
 		return nil, err
 	}
-	whereSQL, args, c, tree, err := s.compileExportFilter(src, filter)
+	whereSQL, args, c, tree, err := s.compileExportFilter(src, filter, false)
 	if err != nil {
 		return nil, err
 	}
 	p := &exportPlan{s: s, src: src, where: whereSQL, args: args}
+	if !c.neutral {
+		for _, l := range c.leaves {
+			if l.latest != nil {
+				// The candidate set: the same tree with the derived conditions taken as true.
+				candSQL, candArgs, _, _, err := s.compileExportFilter(src, filter, true)
+				if err != nil {
+					return nil, err
+				}
+				p.candWhere, p.candArgs = candSQL, candArgs
+				break
+			}
+		}
+	}
 	hasGV := false
 	for _, l := range c.leaves {
-		if l.gv != nil {
+		if l.gv != nil || l.below != nil || l.latest != nil {
 			hasGV = true
+		}
+		if l.below != nil {
+			p.belowMode = true
+		}
+		if l.latest != nil {
+			p.latestMode = true
 		}
 	}
 	if hasGV {
 		flagAt := map[int]int{}
 		for i, l := range c.leaves {
-			if l.gv == nil {
+			if l.gv == nil && l.below == nil && l.latest == nil {
 				flagAt[i] = len(p.flagSel)
 				p.flagSel = append(p.flagSel, "CASE WHEN ("+l.sql+") THEN 1 ELSE 0 END")
 				p.flagArgs = append(p.flagArgs, l.args...)
@@ -69,6 +101,12 @@ func (s *Server) newExportPlan(src *exportSource, filter exportNode) (*exportPla
 						gv = src.gvValue(raw)
 					}
 					return g.match(gv)
+				}
+				if b := leaves[i].below; b != nil {
+					return p.belowMatch(raw) == b.want
+				}
+				if l := leaves[i].latest; l != nil {
+					return p.isLatest(raw) == l.want
 				}
 				return raw[flagBase+flagAt[i]] == "1"
 			})
@@ -163,7 +201,10 @@ func (p *exportPlan) page(ctx context.Context, offset, limit int) ([][]string, e
 	if p.post == nil {
 		q, args, _ := p.batchQuery(exportCursor{}, false, limit, offset)
 		rows, _, err := p.readBatch(ctx, q, args, 0, limit)
-		return rows, err
+		if err != nil {
+			return nil, err
+		}
+		return rows, p.prefetch(ctx, rows)
 	}
 	var out [][]string
 	skipped := 0
@@ -229,6 +270,9 @@ func (p *exportPlan) scan(ctx context.Context, withBody bool, batch int, visit f
 	if p.s.exports.batchSize > 0 {
 		batch = p.s.exports.batchSize
 	}
+	if err := p.prepare(ctx); err != nil {
+		return err
+	}
 	exprs, flagBase := p.selectList(withBody)
 	k1Idx, idIdx := -1, len(exprs)-1
 	if p.src.k1 != "" {
@@ -242,6 +286,9 @@ func (p *exportPlan) scan(ctx context.Context, withBody bool, batch int, visit f
 		q, args, _ := p.batchQuery(cur, withBody, batch, 0)
 		rows, cut, err := p.readBatch(ctx, q, args, exportBatchBytes, batch)
 		if err != nil {
+			return err
+		}
+		if err := p.prefetch(ctx, rows); err != nil {
 			return err
 		}
 		matched := 0
@@ -281,6 +328,8 @@ type exportRuntime struct {
 
 	queries   int64 // batch queries issued (atomic); also a test probe for the bounded-query guarantee
 	batchSize int   // test seam: overrides exportBatchRows
+	// maxCandidates overrides exportBelowEntryMaxSymbols (test seam).
+	maxCandidates int
 
 	// afterBatch, when set, runs after each batch of a running job has been flushed (test seam).
 	afterBatch func(id string, batch int)

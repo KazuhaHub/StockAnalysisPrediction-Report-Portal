@@ -44,6 +44,19 @@ const sources: ExportSource[] = [
     fields: [{ key: 'action', type: 'enum', operators: ['in'], options: ['report.read'] }, { key: 'at', type: 'datetime', operators: ['between'] }],
   },
 ]
+const forecastFields: ExportSource['fields'] = [
+  { key: 'symbol', type: 'text', operators: ['is', 'contains'] },
+  { key: 'latest_per_symbol', type: 'enum', operators: ['is', 'is_not'], options: ['yes', 'no'] },
+  { key: 'below_entry', type: 'enum', operators: ['is', 'is_not'], options: ['yes', 'no'] },
+]
+const forecasts: ExportSource = {
+  key: 'forecasts',
+  formats: ['csv', 'jsonl'],
+  time_field: 'report_date',
+  total: 40,
+  columns: [{ key: 'set_id', default: true }, { key: 'symbol', default: true }, { key: 'latest_price', default: true }],
+  fields: [...forecastFields, { key: 'report_date', type: 'date', operators: ['between'] }],
+}
 const rows = [{ id: 1, date: '2026-10-28', title: 'Alpha report' }, { id: 2, date: '2026-10-27', title: 'Beta report' }]
 const and = (...items: ExportFilter['items']): ExportFilter => ({ op: 'and', items })
 
@@ -74,6 +87,53 @@ beforeEach(() => {
     if (url === '/api/admin/exports/preview') return { total: 2, rows }
     if (url === '/api/admin/exports') return { id: 'job1', source: 'reports', name: 'n', status: 'queued', filter: and(), columns: [] }
     throw new Error('unexpected POST ' + url)
+  })
+})
+
+describe('ExportPage forecasts preset', () => {
+  const serve = (src: ExportSource) =>
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/exports/sources') return { sources: [src] }
+      if (url === '/api/admin/settings') return { timezone: 'Asia/Shanghai' }
+      if (url.startsWith('/api/admin/exports')) return { jobs: [] }
+      throw new Error('unexpected GET ' + url)
+    })
+
+  it('one click sets latest-per-symbol and below-entry, and a second click clears both', async () => {
+    serve(forecasts)
+    const user = userEvent.setup()
+    renderPage('/manage/exports?source=forecasts')
+    const preset = await screen.findByTestId('preset-below-entry')
+    expect(preset.getAttribute('aria-pressed')).toBe('false')
+    await user.click(preset)
+    const want = and(
+      { field: 'latest_per_symbol', operator: 'is', values: ['yes'] },
+      { field: 'below_entry', operator: 'is', values: ['yes'] },
+    )
+    await waitFor(() => expect(lastPreview()?.filter).toEqual(want))
+    expect(await screen.findByTestId('chip-below_entry')).toBeTruthy()
+    expect(screen.getByTestId('preset-below-entry').getAttribute('aria-pressed')).toBe('true')
+    await user.click(screen.getByTestId('preset-below-entry'))
+    await waitFor(() => expect(lastPreview()?.filter).toEqual(and()))
+    expect(screen.queryByTestId('chip-below_entry')).toBeNull()
+  })
+
+  it('keeps the other chips when the preset is applied and cleared', async () => {
+    serve(forecasts)
+    const user = userEvent.setup()
+    const sym = { field: 'symbol', operator: 'is' as const, values: ['600519'] }
+    renderPage(`/manage/exports?source=forecasts&f=${encodeFilter(and(sym))}`)
+    await user.click(await screen.findByTestId('preset-below-entry'))
+    await waitFor(() => expect(lastPreview()?.filter.items).toHaveLength(3))
+    await user.click(screen.getByTestId('preset-below-entry'))
+    await waitFor(() => expect(lastPreview()?.filter).toEqual(and(sym)))
+  })
+
+  it('offers no preset when the source does not expose below_entry (quotes off) or is another source', async () => {
+    serve({ ...forecasts, fields: forecasts.fields.filter((f) => f.key !== 'below_entry'), columns: forecasts.columns.filter((c) => c.key !== 'latest_price') })
+    renderPage('/manage/exports?source=forecasts')
+    await screen.findByText('export.filter.add')
+    expect(screen.queryByTestId('preset-below-entry')).toBeNull()
   })
 })
 

@@ -7,6 +7,9 @@ import type { ExportCond, ExportFilter, ExportSource } from '../../../api/types'
 import {
   MAX_CONDITIONS,
   activePreset,
+  applyBelowEntryPreset,
+  clearBelowEntryPreset,
+  isBelowEntryActive,
   chipsOf,
   countConditions,
   presetCond,
@@ -43,6 +46,10 @@ export default function FilterBar({
   const [customTime, setCustomTime] = useState(false)
   const atLimit = countConditions(filter) >= MAX_CONDITIONS
   const fieldDef = (key: string) => source.fields.find((f) => f.key === key)
+  // The entry-price screen is offered only where the server exposes it: with quotes off the source
+  // has no below_entry field and the preset disappears with it.
+  const hasBelowEntry = !!fieldDef('below_entry') && !!fieldDef('latest_per_symbol')
+  const belowEntryOn = isBelowEntryActive(filter)
 
   const closeAdd = () => {
     setAddOpen(false)
@@ -183,6 +190,18 @@ export default function FilterBar({
             {t('export.filter.add')}
           </Button>
         </Popover>
+        {hasBelowEntry && (
+          <Button
+            shape="round"
+            type={belowEntryOn ? 'primary' : 'default'}
+            aria-pressed={belowEntryOn}
+            title={t('export.preset.belowEntryHint')}
+            data-testid="preset-below-entry"
+            onClick={() => onChange(belowEntryOn ? clearBelowEntryPreset(filter) : applyBelowEntryPreset(filter))}
+          >
+            {t('export.preset.belowEntry')}
+          </Button>
+        )}
         {chips.length > 0 && (
           <Button type="link" onClick={() => { setCustomTime(false); onChange({ op: 'and', items: [] }) }}>
             {t('export.filter.clear')}

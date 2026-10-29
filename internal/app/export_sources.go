@@ -22,11 +22,13 @@ type exportField struct {
 	compile func(c *exportCompiler, f *exportField, op string, vals []string) (exportLeaf, error)
 	options func(s *Server) []string
 	tree    bool // carries the kind -> subtypes tree (reports kind / rtype)
+	quote   bool // needs the operator's quote switch on; absent from the source when it is off
 }
 
 type exportColumn struct {
 	Key     string
 	Default bool
+	quote   bool // needs the operator's quote switch on; absent from the source when it is off
 }
 
 type exportSource struct {
@@ -50,6 +52,10 @@ type exportSource struct {
 	// build turns one raw row into column values. It must not touch the database: on SQLite the pool
 	// is a single connection, and the streamer may still hold it.
 	build func(ec *exportCtx, raw []string) exportRow
+	// symIdx and entryIdx locate the symbol and the entry price (fen text) in a raw row (forecasts).
+	symIdx, entryIdx int
+	madeIdx, idIdx   int    // made_at and set id in a raw row (forecasts)
+	symExpr          string // SQL expression of the symbol; set on sources that carry prices
 	// gvValue extracts the derived generator version from a raw row (reports only).
 	gvValue func(raw []string) string
 }
@@ -99,7 +105,7 @@ func exportSourceByKey(key string) *exportSource {
 	return nil
 }
 
-var exportSourceList = []*exportSource{reportsSource(), auditSource(), signinsSource(), runsSource(), notificationsSource(), cleanupSource()}
+var exportSourceList = []*exportSource{reportsSource(), auditSource(), signinsSource(), runsSource(), notificationsSource(), cleanupSource(), forecastsSource()}
 
 func col(key string, def bool) exportColumn { return exportColumn{Key: key, Default: def} }
 
@@ -142,6 +148,8 @@ type exportCtx struct {
 	loc     *time.Location // panel zone, or UTC
 	want    map[string]bool
 	ouNames map[string]string
+	// priceOf answers a symbol's latest price from the plan driving the export (forecasts only).
+	priceOf func(symbol string) (exportPrice, bool)
 }
 
 func (ec *exportCtx) wants(key string) bool { return ec.want == nil || ec.want[key] }
