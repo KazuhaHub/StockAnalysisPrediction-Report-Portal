@@ -67,7 +67,7 @@ func verifyFixtureWritableData() error {
 	const block = 64 << 10
 	allocated := int64(0)
 	byteDenied := false
-	for allocated <= 8<<20 {
+	for allocated <= 256<<20 {
 		err := unix.Fallocate(int(file.Fd()), 0, allocated, block)
 		if errors.Is(err, unix.EDQUOT) || errors.Is(err, unix.ENOSPC) {
 			byteDenied = true
@@ -78,8 +78,12 @@ func verifyFixtureWritableData() error {
 		}
 		allocated += block
 	}
-	if !byteDenied || allocated < 7<<20 || allocated > 8<<20 {
-		return fmt.Errorf("byte quota boundary not enforced: allocated=%d denied=%v", allocated, byteDenied)
+	// Two fixed disposable profiles: low-level native tests use 8MiB/128;
+	// real Portal installation keeps its reviewed 256MiB/65536 limits. Observe
+	// the actual hard byte boundary; no environment/viewer selects a quota.
+	expectedInodes, err := fixtureQuotaInodeLimit(allocated, byteDenied)
+	if err != nil {
+		return err
 	}
 	// Release allocated extents before the independent inode test. Keep the
 	// original files and proof FD so reporting does not require a new inode.
@@ -90,7 +94,7 @@ func verifyFixtureWritableData() error {
 		return err
 	}
 	inodes, inodeDenied := 0, false
-	for inodes < 129 {
+	for inodes <= expectedInodes {
 		name := fmt.Sprintf("/data/children/f-%03d", inodes)
 		file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if errors.Is(err, unix.EDQUOT) || errors.Is(err, unix.ENOSPC) {
@@ -105,7 +109,7 @@ func verifyFixtureWritableData() error {
 		}
 		inodes++
 	}
-	if !inodeDenied || inodes < 110 || inodes >= 128 {
+	if !inodeDenied || inodes < expectedInodes-max(18, expectedInodes/512) || inodes >= expectedInodes {
 		return fmt.Errorf("inode quota boundary not enforced: created=%d denied=%v", inodes, inodeDenied)
 	}
 	if err := json.NewEncoder(proof).Encode(struct {
@@ -120,4 +124,14 @@ func verifyFixtureWritableData() error {
 		return err
 	}
 	return proof.Sync()
+}
+
+func fixtureQuotaInodeLimit(allocated int64, denied bool) (int, error) {
+	if denied && allocated >= 7<<20 && allocated <= 8<<20 {
+		return 128, nil
+	}
+	if denied && allocated >= 255<<20 && allocated <= 256<<20 {
+		return 65536, nil
+	}
+	return 0, fmt.Errorf("unsupported or unenforced fixed fixture byte quota: allocated=%d denied=%v", allocated, denied)
 }

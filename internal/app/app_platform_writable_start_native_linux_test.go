@@ -156,6 +156,7 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 		State           struct {
 			Running   bool
 			StartedAt string
+			ExitCode  int
 		}
 		RestartCount int
 	}
@@ -185,7 +186,7 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 		}
 	} else {
 		if !actual[0].State.Running || actual[0].RestartCount != 0 || actual[0].State.StartedAt == "" {
-			t.Fatal("writable process not continuously running")
+			t.Fatalf("writable process not continuously running: state=%+v restart_count=%d fixture_logs=%s", actual[0].State, actual[0].RestartCount, run("container", "logs", id))
 		}
 		started, err := time.Parse(time.RFC3339Nano, actual[0].State.StartedAt)
 		observed, _ := strconv.ParseInt(m.Receipt.NativeObservedMS, 10, 64)
