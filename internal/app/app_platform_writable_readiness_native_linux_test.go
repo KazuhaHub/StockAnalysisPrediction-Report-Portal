@@ -43,6 +43,10 @@ func testNativePortalWritableReadiness(t *testing.T, s *Server, lease platformOp
 	if _, err := s.commitPlatformWritableReadiness(ctx, lease, intent, endpoint, proof); err == nil {
 		t.Fatal("readiness audit rollback ignored")
 	}
+	if failed, err := s.runPlatformWritableInstall(ctx, lease, endpoint); err == nil || failed.lease != lease {
+		t.Fatal("worker lost readiness rollback progress", err)
+	}
+	t.Log("PORTAL_WRITABLE_WORKER_PROBE_ROLLBACK")
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "probe" || scalar[string](t, s.st, `SELECT readiness_evidence FROM app_platform_activations WHERE id=?`, intent.writer.resourceID) != "{}" {
 		t.Fatal("failed readiness commit partially advanced")
 	}

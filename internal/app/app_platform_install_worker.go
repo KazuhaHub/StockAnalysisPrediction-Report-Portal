@@ -6,7 +6,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-type platformStaticInstallRun struct {
+type platformInstallRun struct {
 	lease      platformOperationLease
 	activation platformActivationResult
 }
@@ -15,8 +15,8 @@ type platformStaticInstallRun struct {
 // Each committed stage replaces the exact lease token. Failure returns the last
 // confirmed token; a lost acknowledgement still requires durable reconciliation.
 // This bounded driver does not enroll a runtime, poll, renew or reclaim leases.
-func (s *Server) runPlatformStaticInstall(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformStaticInstallRun, error) {
-	result := platformStaticInstallRun{lease: expected}
+func (s *Server) runPlatformStaticInstall(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformInstallRun, error) {
+	result := platformInstallRun{lease: expected}
 	if expected.snapshot.Action != appplatform.ActionInstall || expected.snapshot.Managed || expected.snapshot.Generation != 1 {
 		return result, errAppPlatformStageEvidence
 	}

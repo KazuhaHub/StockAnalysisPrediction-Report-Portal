@@ -98,6 +98,10 @@ jobs:
         run: |
           test -n "$TEST_POSTGRES_DSN"
           GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatform(Writable(Access|AccessRefusals|ActivationMetadata|ActivationRefusals)|ManagedAccess|ManagedAccessRefusals)(SQLite|Postgres)|TestPlatformWritableRequest(SigningSQLite|PayloadBoundary))$'
+      - name: Writable installation worker
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableInstallRun(Pending|Refusals)|StaticInstallRun(Progress|Activation))(SQLite|Postgres)$'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
