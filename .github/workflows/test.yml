@@ -101,7 +101,7 @@ jobs:
       - name: Application credential schema and custody
         run: |
           test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformCredential'
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy)'
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"

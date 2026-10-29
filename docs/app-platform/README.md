@@ -31,7 +31,8 @@ and activation](113-writable-install-worker.md) and
 [fresh online network confirmation](133-network-online-confirmation.md), and
 [private network controller transport](134-private-network-controller-transport.md), and
 [network runtime support observation](135-network-runtime-observation.md), and
-[credential storage and custody](136-credential-schema-and-custody.md).
+[credential storage and custody](136-credential-schema-and-custody.md), and
+[canonical binding restrictions](137-secret-binding-policy.md).
 The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
 is now owner-approved for development/isolated implementation; production and
 later job/event products remain separate decisions.
