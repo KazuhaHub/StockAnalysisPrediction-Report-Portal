@@ -2169,7 +2169,10 @@ daemon workflow 40455635317 passed on the functional source as well.
   write parent history or bypass current backend authorization. See
   [signed routes and host history](122-signed-route-navigation.md). Local Portal147,
   SDK217, frontend consumers, Python26 and actual document/HTTP tests pass. A local
-  actual-page browser check verifies commit/cancel/state retention; Linux actual
-  address/history/native acceptance is pending. No descriptor/storage schema,
+  actual-page browser check verifies commit/cancel/state retention; functional
+  df293dad passed Linux run40863529181/job123412436309 with navigation, draft,
+  current-viewer/layout/no-retry/revoke and owned-cleanup/neighbor flags true.
+  execution_ready remains false. Apps dab705d passed all jobs in run40863149243.
+  General Go still fails inherited x/net findings after affected SQL suites pass. No descriptor/storage schema,
   dependency, publication, production, Status, stable SDK or beta change.
   Typed queries and remaining P06/full platform requirements stay open.

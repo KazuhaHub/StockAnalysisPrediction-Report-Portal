@@ -1,7 +1,8 @@
 # Signed app routes and host-owned history
 
-Status: development implementation. Local server/SDK/host/browser checks pass;
-Linux browser/native evidence is pending at this document's first commit. This
+Status: development implementation with passing Linux browser/native acceptance
+at functional source `df293dada59f1738137e95ebdb9d32a09e0d44ef`. Local
+server/SDK/host/browser checks pass. This
 extends P06 without completing the full shell/platform. No storage/descriptor
 schema, dependency, publication, production, Status or server beta change.
 
@@ -129,3 +130,29 @@ stacked on #30). Linux evidence will be appended only after actual completion.
 
 Full P00–P14 acceptance, typed query contracts, persistence, shared overlays/actions,
 marketplace lifecycle, capability brokers, D5 and D6 are still incomplete.
+
+
+## Functional acceptance evidence
+
+Functional Portal source `df293dada59f1738137e95ebdb9d32a09e0d44ef` passed
+quota/native workflow 40863529181/job 123412436309. The downloaded redacted JSON
+has navigation, draft guard, current viewer, document layout, no-retry uncertainty
+and revoked-access browser flags all true. The new navigation case used actual
+browser address/history, not the local memory-router fixture. Owned cleanup and
+neighbor preservation passed; public browser fixture and registry cleanup
+completed. `execution_ready` remains false. This is isolated acceptance, not D6
+production readiness or authorization.
+
+All Portal web shards, lint/typecheck/build, workflow lint and Docker checks
+passed on this functional source. Go job 123412435880 in run40863528901 passed
+lifecycle/current-access/worker/queue/document suites on SQLite/PostgreSQL
+(53.312s,27.565s,7.791s,8.511s,66.855s,0.346s), including the new out-of-order
+signed registry case, plus build/vet/staticcheck/pre-gate checks. It failed
+inherited x/net v0.60.0 findings GO-2026-6866/GO-2026-6860 and skipped ordinary
+full Go tests. No dependency upgrade, suppression or all-CI-pass claim is made.
+
+Exact Apps source `dab705dfa233a204e2e7ca60a8af015f3edd3a4b` passed every job
+in run40863149243: protocol, frontend standard, catalogue and maintained Status
+browser/container/artifact checks. No package/release/catalogue was published.
+The final document-only evidence commit may trigger new checks; results at the
+functional source above are not silently relabeled as a newer source result.
