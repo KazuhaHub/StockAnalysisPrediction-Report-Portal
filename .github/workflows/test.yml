@@ -106,6 +106,10 @@ jobs:
         run: |
           test -n "$TEST_POSTGRES_DSN"
           GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableQueue(Claim|Recovery|Authority)|WritableFailureBinding|WritableSchedulerRetries|InstallQueue(Claim|Recovery)|InstallSchedulerRetries)(SQLite|Postgres)$|^TestPlatformWritable(SchedulerCancellation|ReadinessWaitRevocation)SQLite$|^TestPlatformWritableFixtureOwnership$'
+      - name: Writable launch documents and directory
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableLaunch|WritableAccess|ManagedAccess|Launch|Directory|Viewer|HTTP)|^TestPostgresPlatform(AssetRead|Launch|DocumentRead|HTTPDocument|Directory|Display)'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:

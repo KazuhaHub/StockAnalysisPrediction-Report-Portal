@@ -118,8 +118,6 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 			t.Fatal("background app did not serve one current authorized write", method, err)
 		}
 	}
-	if _, err := s.inspectPlatformLaunchAccess(actor, admitted.InstallationID); err == nil {
-		t.Fatal("background success bypassed managed browser launch gate")
-	}
+	testNativeWritableLaunchHTTP(t, s, actor, admitted.InstallationID, release.sha256)
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 }

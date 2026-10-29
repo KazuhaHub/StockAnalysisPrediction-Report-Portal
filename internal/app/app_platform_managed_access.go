@@ -61,7 +61,7 @@ type platformBackendHistoryBinding struct {
 
 // No worker lease is manufactured or renewed here. Completed source operations
 // select immutable execution history; current session/audience/policy authorize
-// this read. Public launch and managed activation remain separate, closed gates.
+// this read. Frontend serving and live backend execution remain separate gates.
 func (s *Server) preparePlatformManagedBackendAccess(ctx context.Context, session platformActorSession, installationID string) (platformManagedBackendAccess, error) {
 	return s.withPlatformManagedBackendAccess(ctx, session, installationID, nil)
 }
@@ -83,6 +83,17 @@ func (s *Server) withPlatformWritableBackendAccess(ctx context.Context, session 
 // Both families share the current account/OU/audience/trust transaction. Their
 // independently checked execution histories and signed domains remain distinct.
 func withPlatformBackendAccess[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error), read func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
+	return withPlatformBackendRead(s, ctx, session, installationID, load, func(_ migExec, a platformBackendAccess[T], seed []byte) error {
+		if read != nil {
+			return read(a, seed)
+		}
+		return nil
+	})
+}
+
+// The optional transaction callback performs only bounded local reads/crypto.
+// Source/authority checks and buffered-result release remain shared by all users.
+func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error), read func(migExec, platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
 	var zero platformBackendAccess[T]
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -187,7 +198,7 @@ func withPlatformBackendAccess[T platformBackendAccessIntent](s *Server, ctx con
 	}
 	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
 	if read != nil {
-		if err := read(result, seed); err != nil {
+		if err := read(e, result, seed); err != nil {
 			return zero, err
 		}
 	}

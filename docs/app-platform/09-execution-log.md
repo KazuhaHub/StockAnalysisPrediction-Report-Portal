@@ -2113,3 +2113,30 @@ daemon workflow 40455635317 passed on the functional source as well.
   No production code, schema, dependency, deployment, credential, Status,
   SDK-freeze or beta change. Generic managed browser launch and
   the remaining complete lifecycle/platform acceptance are still unfinished.
+
+- Added completed writable frontend admission using its full typed native history
+  and shared current account/OU/audience/runtime/publisher transaction. Runtime
+  routing is a hint only; static restrictions remain and failures do not fall
+  back across families. Launch/document/viewer reads stay buffered through final
+  checks and close private registration material. Directory eligibility now
+  projects supported completed writable reviews without claiming launch authority
+  or native health. Existing session-only URLs, CSP/no-store/budgets and empty
+  platform capability metadata remain. Added current HTTP/refusal/OU-reparent/
+  callback/cancellation tests and expanded pre-gate SQLite/PostgreSQL static and
+  access regressions. Real background-installed apps now exercise these HTTP
+  document/directory/revocation paths. See [writable launch documents](116-writable-launch-documents.md).
+  Local focused race 60.177s, expanded local tests 5.363s, dual-arch Linux builds,
+  Linux vet/staticcheck and Python14 passed. Functional source
+  `9ab08744748d1a3dd052466dbbb39fbfa538e893` passed quota workflow 40837291395/
+  job 123324962078: all three current document/directory/revocation flags,
+  previous native/full-quota/owned-cleanup checks true; registry cleanup passed.
+  General workflow 40837291397/job 123324962656 passed lifecycle SQL 76.436s,
+  current/legacy access SQL 39.245s, worker/static SQL 14.821s, queue SQL 15.627s
+  and expanded frontend/static/access/PostgreSQL wait SQL 106.754s. Build/vet/
+  staticcheck, published market, arm64 numeric, all app race shards/aggregate,
+  web and Docker passed. Shard 1/job 123324962575 ran full journal race 238.387s
+  and Portal subset 70.707s. Go failed existing x/net GO-2026-6866/6860 findings
+  and skipped ordinary full tests; no standalone daemon workflow triggered. Iframe
+  backend protocol/gateway, interactive SDK/reference-app browser acceptance and
+  the remaining full lifecycle/platform release are unfinished. No schema,
+  dependency, production, credential, Status, SDK-freeze or beta change.

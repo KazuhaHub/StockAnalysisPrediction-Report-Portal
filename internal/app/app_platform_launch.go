@@ -38,6 +38,25 @@ func (s *Server) withPlatformLaunchReadContext(ctx context.Context, session plat
 }
 
 func (s *Server) withPlatformLaunchAccountReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest, platformActorAccount) error) (platformLaunchAccess, error) {
+	if !platformValidUUID(installationID) {
+		return platformLaunchAccess{}, errAppPlatformLaunchUnavailable
+	}
+	// Routing hint only. Both concrete transaction paths revalidate the actual
+	// runtime and current source under their own complete lock/authority boundary.
+	var runtime sql.NullString
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT runtime_id FROM app_platform_installations WHERE id=?`), installationID).Scan(&runtime); err != nil {
+		if ctx.Err() != nil {
+			return platformLaunchAccess{}, ctx.Err()
+		}
+		return platformLaunchAccess{}, errAppPlatformLaunchUnavailable
+	}
+	if runtime.Valid {
+		return s.withPlatformWritableLaunchReadContext(ctx, session, installationID, read)
+	}
+	return s.withPlatformStaticLaunchReadContext(ctx, session, installationID, read)
+}
+
+func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest, platformActorAccount) error) (platformLaunchAccess, error) {
 	var zero platformLaunchAccess
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -86,7 +105,7 @@ func (s *Server) withPlatformLaunchAccountReadContext(ctx context.Context, sessi
 		Scan(&appID, &publisherID, &desired, &phase, &installationEpoch, &runtime, &generation, &policy); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	// Managed launch stays denied until execution/readiness and broker adapters exist.
+	// This branch remains static-only; runtime-bound reads use their typed history.
 	if desired != "enabled" || phase != "ready" || installationEpoch != epoch || runtime.Valid || generation < 1 || policy < 1 {
 		return zero, errAppPlatformLaunchUnavailable
 	}

@@ -124,9 +124,19 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 			item.State = "disabled"
 		case c.phase == "pending" || c.phase == "setup_required":
 			item.State = "pending"
-		case c.desired == "enabled" && c.phase == "ready" && epoch.Valid && platformValidUUID(epoch.String) && c.epoch == epoch.String && paused.Valid && paused.String == "0" && !c.runtime.Valid:
-			item.State = "installed"
-			item.Openable = true
+		case c.desired == "enabled" && c.phase == "ready" && epoch.Valid && platformValidUUID(epoch.String) && c.epoch == epoch.String && paused.Valid && paused.String == "0":
+			eligible := !c.runtime.Valid
+			if c.runtime.Valid {
+				var err error
+				eligible, err = platformWritableLaunchEligible(e, c.id, c.runtime.String, epoch.String)
+				if err != nil {
+					return zero, err
+				}
+			}
+			if eligible {
+				item.State = "installed"
+				item.Openable = true
+			}
 		}
 		record, err := platformReadDisplayRecord(e, c.id)
 		if err != nil {
