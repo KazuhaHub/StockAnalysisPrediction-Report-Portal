@@ -79,39 +79,7 @@ func VerifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64) (
 	if err != nil || !bytes.Equal(canonical, raw) || c.Format != NetworkHTTPRequestFormat {
 		return zero, ErrInvalidCommand
 	}
-	for _, id := range []string{c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.ReviewPlanID, c.RequestID} {
-		if !candidateUUID(id) {
-			return zero, ErrInvalidCommand
-		}
-	}
-	revision, ok := counter(c.ControlRevision, true)
-	if !ok || revision != a.ControlRevision || c.DeploymentID != a.DeploymentID || c.ControllerEpoch != a.ControllerEpoch {
-		return zero, ErrInvalidCommand
-	}
-	for _, number := range []string{c.Generation, c.PolicyRevision} {
-		if _, ok := counter(number, true); !ok {
-			return zero, ErrInvalidCommand
-		}
-	}
-	for _, digest := range []string{c.ReleaseSHA256, c.ActorScope, c.BodySHA256} {
-		if !shaPattern.MatchString(digest) || digest == strings.Repeat("0", 64) {
-			return zero, ErrInvalidCommand
-		}
-	}
-	parsed, err := appplatform.ParseHTTPPolicy(c.PolicyRaw)
-	if err != nil || parsed.SHA256 != c.PolicySHA256 || appplatform.ValidateHTTPPolicyTarget(parsed.Policy, c.Method, c.URL) != nil || !appplatform.ValidHTTPPolicyHeaderValue(c.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
-		return zero, ErrInvalidCommand
-	}
-	length, ok := counter(c.BodyBytes, false)
-	if !ok || length > parsed.Policy.RequestBytes {
-		return zero, ErrInvalidCommand
-	}
-	issued, ok := counter(c.IssuedMS, false)
-	if !ok {
-		return zero, ErrInvalidCommand
-	}
-	expires, ok := counter(c.ExpiresMS, false)
-	if !ok || expires <= issued || expires-issued > 30000 || expires-issued < parsed.Policy.Deadline.Milliseconds() || issued > nowMS || nowMS >= expires {
+	if validateNetworkHTTPRequest(c, a, nowMS) != nil {
 		return zero, ErrInvalidCommand
 	}
 	if !ed25519.Verify(ed25519.PublicKey(a.PublicKey), frame(networkHTTPRequestPurpose, raw), signature) {
@@ -149,4 +117,61 @@ func ValidateNetworkHTTPBody(v VerifiedNetworkHTTPRequest, body []byte) error {
 		return ErrInvalidCommand
 	}
 	return nil
+}
+
+func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
+	if c.Format != NetworkHTTPRequestFormat || nowMS < 0 || a.ControlRevision < 1 || len(a.PublicKey) != ed25519.PublicKeySize {
+		return ErrInvalidCommand
+	}
+	keySHA := sha256.Sum256(a.PublicKey)
+	if a.Fingerprint != hex.EncodeToString(keySHA[:]) {
+		return ErrInvalidCommand
+	}
+	for _, id := range []string{c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.ReviewPlanID, c.RequestID} {
+		if !candidateUUID(id) {
+			return ErrInvalidCommand
+		}
+	}
+	revision, ok := counter(c.ControlRevision, true)
+	if !ok || revision != a.ControlRevision || c.DeploymentID != a.DeploymentID || c.ControllerEpoch != a.ControllerEpoch {
+		return ErrInvalidCommand
+	}
+	for _, number := range []string{c.Generation, c.PolicyRevision} {
+		if _, ok := counter(number, true); !ok {
+			return ErrInvalidCommand
+		}
+	}
+	for _, digest := range []string{c.ReleaseSHA256, c.ActorScope, c.BodySHA256} {
+		if !shaPattern.MatchString(digest) || digest == strings.Repeat("0", 64) {
+			return ErrInvalidCommand
+		}
+	}
+	parsed, err := appplatform.ParseHTTPPolicy(c.PolicyRaw)
+	if err != nil || parsed.SHA256 != c.PolicySHA256 || appplatform.ValidateHTTPPolicyTarget(parsed.Policy, c.Method, c.URL) != nil || !appplatform.ValidHTTPPolicyHeaderValue(c.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
+		return ErrInvalidCommand
+	}
+	length, ok := counter(c.BodyBytes, false)
+	if !ok || length > parsed.Policy.RequestBytes {
+		return ErrInvalidCommand
+	}
+	issued, ok := counter(c.IssuedMS, false)
+	if !ok {
+		return ErrInvalidCommand
+	}
+	expires, ok := counter(c.ExpiresMS, false)
+	if !ok || expires <= issued || expires-issued > 30000 || expires-issued < parsed.Policy.Deadline.Milliseconds() || issued > nowMS || nowMS >= expires {
+		return ErrInvalidCommand
+	}
+	canonical, err := json.Marshal(c)
+	if err != nil || len(canonical) > MaxCommandBytes {
+		return ErrInvalidCommand
+	}
+	return nil
+}
+
+// ValidateNetworkHTTPRequestMetadata checks bounded logical metadata against
+// current enrollment. It verifies neither a request signature nor SQL authority.
+// Use only alongside VerifyNetworkHTTPRequest and current authorization.
+func ValidateNetworkHTTPRequestMetadata(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
+	return validateNetworkHTTPRequest(c, a, nowMS)
 }
