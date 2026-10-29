@@ -11,7 +11,7 @@ import (
 
 // Private host read boundary. There is no browser identity input or bearer token.
 // Return facts only after the complete launch gate and its final session/trust/
-// epoch recheck commit. Managed apps remain denied by that gate for now.
+// epoch recheck commit. Unsupported/incomplete managed histories stay denied.
 func (s *Server) readPlatformLaunchViewerContext(ctx context.Context, session platformActorSession, installationID string) (protocol.Viewer, error) {
 	var result protocol.Viewer
 	_, err := s.withPlatformLaunchAccountReadContext(ctx, session, installationID, func(e migExec, binding platformLaunchAccess, manifest appplatform.Manifest, account platformActorAccount) error {

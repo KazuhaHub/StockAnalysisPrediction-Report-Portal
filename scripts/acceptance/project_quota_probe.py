@@ -417,6 +417,10 @@ def main(args):
                         report["native_portal_writable_install_activated"] = True
                         report["native_portal_writable_current_ou_request_verified"] = True
                         report["native_portal_writable_post_io_ou_revoked"] = True
+                        for suffix in ("CURRENT_DOCUMENT_HTTP", "CURRENT_DIRECTORY_HTTP", "DOCUMENT_HTTP_REVOKED"):
+                            if "PORTAL_WRITABLE_" + suffix not in result.stdout:
+                                raise RuntimeError("Writable document HTTP acceptance missing: " + suffix)
+                            report["native_portal_writable_" + suffix.lower()] = True
                         for suffix in ("COMPLETE", "CURRENT_VIEWER", "NATIVE_WITNESS", "OWNED_CLEANUP", "FALLBACK_CLEANUP", "NEIGHBOR_PRESERVED"):
                             marker = "PORTAL_WRITABLE_BACKGROUND_" + suffix
                             if marker not in result.stdout:

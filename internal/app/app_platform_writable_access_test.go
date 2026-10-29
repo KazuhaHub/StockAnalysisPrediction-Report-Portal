@@ -152,8 +152,8 @@ func testPlatformWritableAccess(t *testing.T, pg bool) {
 	if err != nil || v.Command().PayloadSHA256 != b.intent.command.PayloadSHA256 {
 		t.Fatal("renewed signed source", err)
 	}
-	if _, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err == nil {
-		t.Fatal("source read opened generic managed launch")
+	if binding, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err != nil || binding.installationID != lease.installationID || binding.generation != "1" || binding.policyRevision != "2" || binding.releaseSHA != platformDigest(reader.intent.start.writer.descriptor) {
+		t.Fatal("completed writable source did not preserve current launch binding", err)
 	}
 }
 func TestPlatformWritableAccessSQLite(t *testing.T)   { testPlatformWritableAccess(t, false) }

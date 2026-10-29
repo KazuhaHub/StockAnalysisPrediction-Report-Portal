@@ -163,8 +163,8 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if count != 4 {
 		t.Fatal("uncertain or denied write retried")
 	}
-	if _, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err == nil {
-		t.Fatal("private access opened generic managed launch")
+	if binding, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err != nil || binding.installationID != lease.installationID || binding.policyRevision != "2" || binding.releaseSHA != platformDigest(original.start.writer.descriptor) {
+		t.Fatal("current writable viewer launch binding", err)
 	}
 	// A read-only request must not change the existing completed control state.
 	before := dumpOf(t, s.st)
