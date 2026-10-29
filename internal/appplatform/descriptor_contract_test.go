@@ -32,6 +32,7 @@ func TestDescriptorContractSourceAndTypes(t *testing.T) {
 	types := map[string]reflect.Type{
 		"Manifest": reflect.TypeFor[Manifest](), "Compatibility": reflect.TypeFor[Compatibility](),
 		"AppDisplay": reflect.TypeFor[AppDisplay](), "AppDisplayText": reflect.TypeFor[AppDisplayText](),
+		"RouteQuery":   reflect.TypeFor[RouteQuery](),
 		"Presentation": reflect.TypeFor[Presentation](), "Route": reflect.TypeFor[Route](),
 		"Artifact": reflect.TypeFor[Artifact](), "Backend": reflect.TypeFor[Backend](),
 		"Resources": reflect.TypeFor[Resources](), "Capabilities": reflect.TypeFor[Capabilities](),

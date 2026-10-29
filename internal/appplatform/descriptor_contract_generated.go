@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "be621e59c0f98681849c912bdcdb86bb1840f0b6facacec40ef3f21d00cbecc4"
+const descriptorContractSHA256 = "e956d5b4a12ad4752892a1c6a426c8d3ba1f55770536e40eeaabbc4f9de935f8"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -30,9 +30,10 @@ type Presentation struct {
 	Display        *AppDisplay `json:"display,omitempty"`
 }
 type Route struct {
-	ID     string `json:"id"`
-	Path   string `json:"path"`
-	Layout string `json:"layout"`
+	ID     string       `json:"id"`
+	Path   string       `json:"path"`
+	Layout string       `json:"layout"`
+	Query  []RouteQuery `json:"query,omitempty"`
 }
 type Artifact struct {
 	Artifact string `json:"artifact"`
@@ -68,11 +69,23 @@ type AppDisplayText struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
+type RouteQuery struct {
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	MaxBytes *int     `json:"max_bytes,omitempty"`
+	Min      *int     `json:"min,omitempty"`
+	Max      *int     `json:"max,omitempty"`
+	Values   []string `json:"values,omitempty"`
+}
 
 const MaxDescriptorBytes = 131072
 const MaxAppNameCharacters = 80
 const MaxAppDescriptionCharacters = 320
 const maxDescriptorDepth = 24
+const maxRouteQueryFields = 16
+const maxRouteQueryTextBytes = 256
+const maxRouteQueryInteger = 1000000000
+const maxRouteQueryValues = 16
 const maxDescriptorRoutes = 32
 const maxDescriptorReadableSchemas = 32
 const minDescriptorDataSchema = 1
@@ -90,6 +103,8 @@ const descriptorFormat = "portal.app/v2"
 const descriptorBackendKind = "oci"
 const descriptorBackendProtocol = "portal.backend/1"
 
+var queryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+var queryEnumPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 var slugPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 var copyKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,95}$`)

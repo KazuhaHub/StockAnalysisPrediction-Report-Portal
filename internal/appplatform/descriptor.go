@@ -116,7 +116,7 @@ func validManifest(m Manifest) bool {
 	routeIDs, routePaths := map[string]bool{}, map[string]bool{}
 	for _, route := range p.Routes {
 		if !slugPattern.MatchString(route.ID) || !validRoutePath(route.Path) || routeIDs[route.ID] || routePaths[route.Path] ||
-			!descriptorLayoutNames[route.Layout] {
+			!descriptorLayoutNames[route.Layout] || !validRouteQueryRules(route.Query) {
 			return false
 		}
 		routeIDs[route.ID], routePaths[route.Path] = true, true

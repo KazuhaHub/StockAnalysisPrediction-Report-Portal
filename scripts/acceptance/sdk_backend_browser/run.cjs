@@ -35,6 +35,22 @@ async function main(){
   await page.waitForTimeout(110);
   await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
   await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
+  stage='query-state';await page.waitForTimeout(110);await frame.getByRole('button',{name:'Set filters',exact:true}).click();
+  const search='?active=false&page=2&q=%E4%B8%AD%E6%96%87+%26+test&sort=newest';
+  await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  const query=JSON.parse(await frame.getByTestId('app-query').innerText());
+  if(query.page!==2||query.active!==false||query.q!=='中文 & test'||query.sort!=='newest')throw new Error('typed query lost');
+  await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
+  await page.goForward();await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;
+  await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
+  await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  const restored=JSON.parse(await frame.getByTestId('app-query').innerText());
+  if(restored.page!==2||restored.active!==false||restored.q!=='中文 & test'||restored.sort!=='newest')throw new Error('query reload lost typed values');
+  await frame.getByRole('button',{name:'Retained 0',exact:true}).waitFor();
+  await page.waitForTimeout(110);await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
+  await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
   stage='layout-grow';
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
@@ -69,6 +85,7 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
   console.log('SDK_NATIVE_BROWSER_DRAFT_GUARD');
   console.log('SDK_NATIVE_BROWSER_NAVIGATION');
+  console.log('SDK_NATIVE_BROWSER_TYPED_QUERY');
   console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}

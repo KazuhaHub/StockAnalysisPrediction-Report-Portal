@@ -2759,5 +2759,7 @@
   "apps.draftLeaveTitle": "Leave this app?",
   "apps.draftLeaveBody": "This app has unsaved changes. Leaving discards changes that have not been saved.",
   "apps.draftLeave": "Leave app",
-  "apps.draftStay": "Keep editing"
+  "apps.draftStay": "Keep editing",
+  "apps.v2InvalidRoute": "The app link contains an invalid page or query.",
+  "apps.v2Home": "App home"
 }

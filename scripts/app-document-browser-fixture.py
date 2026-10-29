@@ -61,7 +61,8 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
             if self.relay():
                 return
             status, mime, body = 200, "text/html; charset=utf-8", b""
-            if self.path == "/":
+            shell = self.path == "/" or (args.launch_page and urlsplit(self.path).path.startswith("/apps"))
+            if shell:
                 body = b'<!doctype html><meta charset="utf-8"><title>Portal SDK document fixture</title><link rel="stylesheet" href="/host.css"><div id="host"></div><script src="/host.js"></script>'
             elif self.path in ("/host.js", "/host.css"):
                 name = "host.js" if self.path.endswith(".js") else "style.css"
@@ -79,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            if self.path == "/":
+            if shell:
                 cookie = (portal_state["cookieName"] + "=" + portal_state["cookie"]) if args.portal_http else "app_document_probe=fixture"
                 self.send_header("Set-Cookie", cookie + "; Path=/; HttpOnly; SameSite=Lax")
                 self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
@@ -96,7 +97,7 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
 import {createRoot} from 'react-dom/client';
 import {Button} from 'antd';
 import {AppRoot,useAppPresentation,useAppDraft,useAppNavigation} from '@portal-app/sdk/root-v2';
-function Fixture(){const navigation=useAppNavigation();const {presentation}=useAppPresentation();const [count,setCount]=useState(0),[expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);return <><span data-testid="app-route">{navigation.path}</span><Button onClick={()=>navigation.navigate('/editor')}>Open editor</Button><Button onClick={()=>navigation.navigate('/')}>Open home</Button><Button onClick={()=>setDirty(v=>!v)}>{dirty?'Save changes':'Edit draft'}</Button><Button onClick={()=>setCount(count+1)}>{presentation.locale} / {presentation.timeZone} / {count}</Button><Button onClick={()=>setExpanded(value=>!value)}>Toggle long content</Button>{expanded&&<div style={{height:3000}}>Long document content</div>}</>}
+function Fixture(){const navigation=useAppNavigation();const {presentation}=useAppPresentation();const [count,setCount]=useState(0),[expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);return <><span data-testid="app-query">{JSON.stringify(navigation.query)}</span><Button onClick={()=>navigation.navigate('/',{query:{page:2,q:'中文 & test',active:false,sort:'newest'}})}>Set filters</Button><span data-testid="app-route">{navigation.path}</span><Button onClick={()=>navigation.navigate('/editor')}>Open editor</Button><Button onClick={()=>navigation.navigate('/')}>Open home</Button><Button onClick={()=>setDirty(v=>!v)}>{dirty?'Save changes':'Edit draft'}</Button><Button onClick={()=>setCount(count+1)}>{presentation.locale} / {presentation.timeZone} / {count}</Button><Button onClick={()=>setExpanded(value=>!value)}>Toggle long content</Button>{expanded&&<div style={{height:3000}}>Long document content</div>}</>}
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(origin) + '''><Fixture/></AppRoot>);''')
     host = target / "host.tsx"
     host.write_text('''import {useState} from 'react';
@@ -122,10 +123,10 @@ createRoot(document.getElementById('host')!).render(<Fixture/>);''')
         host.write_text('''import {useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {ConfigProvider,App as AntdApp,theme} from 'antd';
-import {createMemoryRouter,RouterProvider} from 'react-router';
+import {createBrowserRouter,RouterProvider,Navigate} from 'react-router';
 import {PrefsProvider,usePrefs} from ''' + json.dumps(str(PORTAL / "web/src/prefs.tsx")) + ''';
 import AppViewV2 from ''' + json.dumps(str(PORTAL / "web/src/pages/AppViewV2.tsx")) + ''';
-function Launch({path}:{path:string}){const [router]=useState(()=>createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>}],{initialEntries:[path]}));return <RouterProvider router={router}/>};
+function Launch({path}:{path:string}){const [router]=useState(()=>createBrowserRouter([{path:'/',element:<Navigate to={path} replace/>},{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>}]));return <RouterProvider router={router}/>};
 function Host(){const prefs=usePrefs();const [path,setPath]=useState('');useEffect(()=>{fetch('/__fixture/info').then(r=>r.json()).then(info=>setPath('/apps/v2/'+info.launch.split('/')[4]))},[]);return <ConfigProvider locale={prefs.antd} theme={{algorithm:prefs.dark?theme.darkAlgorithm:theme.defaultAlgorithm}}><AntdApp><div style={{display:'flex',flexDirection:'column',height:'100dvh',background:prefs.dark?'#000':'#fff'}}><div><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle host theme</button></div>{path&&<Launch path={path}/>}</div></AntdApp></ConfigProvider>}
 createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></PrefsProvider>);''')
     for name, source, filename in (("child", child, "app.js"), ("host", host, "host.js")):

@@ -6,7 +6,18 @@ import {
   DESCRIPTOR_PATTERNS,
 } from "./descriptor-contract.generated";
 
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.5";
+import {
+  parseRouteQueryRules,
+  parseRouteSearch,
+  serializeRouteQuery,
+  type RouteQueryValues,
+  type RouteQueryRule,
+} from "./route-query-v2";
+export interface BridgeNavigationOptions {
+  readonly replace?: boolean;
+  readonly query?: RouteQueryValues;
+}
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.6";
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
@@ -33,11 +44,13 @@ export interface BridgeBinding {
   readonly releaseSha256: string;
 }
 export interface BridgeRoute {
+  readonly query?: readonly RouteQueryRule[];
   readonly id: string;
   readonly path: string;
   readonly layout: (typeof DESCRIPTOR_LAYOUTS)[number];
 }
 export interface BridgeNavigation {
+  readonly search: string;
   readonly path: string;
   readonly routes: readonly BridgeRoute[];
 }
@@ -164,7 +177,7 @@ export interface BridgeHostOptions extends BaseOptions {
   ) => Promise<BridgeBackendResponse>;
   onDocumentHeight?: (height: number) => void;
   onDraftChange?: (dirty: boolean) => void;
-  onNavigate?: (path: string, replace: boolean) => void;
+  onNavigate?: (path: string, replace: boolean, search: string) => void;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -278,7 +291,8 @@ export function parseBridgeRoutes(
   const routes: BridgeRoute[] = [];
   for (const route of value) {
     if (
-      !exact(route, ["id", "path", "layout"]) ||
+      (!exact(route, ["id", "path", "layout"]) &&
+        !exact(route, ["id", "path", "layout", "query"])) ||
       !isString(route.id) ||
       /\s/.test(route.id) ||
       !new RegExp(DESCRIPTOR_PATTERNS.slug).test(route.id) ||
@@ -300,10 +314,13 @@ export function parseBridgeRoutes(
       paths.has(route.path)
     )
       return null;
+    const query = parseRouteQueryRules(route.query);
+    if (!query) return null;
     ids.add(route.id);
     paths.add(route.path);
     routes.push(
       Object.freeze({
+        ...(query.length ? { query } : {}),
         id: route.id,
         path: route.path,
         layout: route.layout as BridgeRoute["layout"],
@@ -313,10 +330,14 @@ export function parseBridgeRoutes(
   return paths.has("/") ? Object.freeze(routes) : null;
 }
 function parseNavigation(value: unknown): BridgeNavigation | null {
-  if (!exact(value, ["path", "routes"]) || !isString(value.path)) return null;
+  if (!exact(value, ["path", "search", "routes"]) || !isString(value.path))
+    return null;
   const routes = parseBridgeRoutes(value.routes);
-  return routes?.some((route) => route.path === value.path)
-    ? Object.freeze({ path: value.path, routes })
+  const route = routes?.find((route) => route.path === value.path);
+  if (!routes || !route) return null;
+  const query = parseRouteSearch(route.query ?? [], value.search);
+  return query
+    ? Object.freeze({ path: value.path, search: query.search, routes })
     : null;
 }
 export function parseBridgePresentation(
@@ -523,6 +544,7 @@ export function createBridgeHost(
           "revision",
           "presentationRevision",
           "path",
+          "search",
           "replace",
         ])
       ) {
@@ -536,6 +558,7 @@ export function createBridgeHost(
         !decimal(data.presentationRevision) ||
         typeof data.replace !== "boolean" ||
         !isString(data.path) ||
+        !isString(data.search) ||
         data.path.length > 257
       ) {
         fail("protocol_error");
@@ -558,15 +581,20 @@ export function createBridgeHost(
         data.presentationRevision !== revision.toString()
       )
         return;
-      if (
-        !current?.navigation?.routes.some((route) => route.path === data.path)
-      ) {
+      const route = current?.navigation?.routes.find(
+        (route) => route.path === data.path,
+      );
+      if (!route || !parseRouteSearch(route.query ?? [], data.search)) {
         fail("protocol_error");
         return;
       }
-      if (data.path === current.navigation.path) return;
+      if (
+        data.path === current!.navigation!.path &&
+        data.search === current!.navigation!.search
+      )
+        return;
       try {
-        options.onNavigate?.(data.path, data.replace);
+        options.onNavigate?.(data.path, data.replace, data.search);
       } catch {
         fail("protocol_error");
       }
@@ -960,7 +988,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   ): Promise<BridgeBackendResponse>;
   reportDocumentHeight(height: number): boolean;
   setDraftDirty(dirty: boolean): boolean;
-  navigate(path: string, replace?: boolean): boolean;
+  navigate(path: string, options?: BridgeNavigationOptions): boolean;
 } {
   const {
     localWindow,
@@ -1399,19 +1427,39 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
-    navigate(path: string, replace = false): boolean {
+    navigate(path: string, options: BridgeNavigationOptions = {}): boolean {
       if (
         terminal() ||
         !applied ||
         state !== "ready" ||
         !port ||
         !envelope ||
+        !options ||
+        typeof options !== "object" ||
+        Array.isArray(options) ||
+        Object.keys(options).some((key) => key !== "replace" && key !== "query")
+      )
+        return false;
+      const replace = options.replace === undefined ? false : options.replace;
+      const route = current?.navigation?.routes.find(
+        (route) => route.path === path,
+      );
+      if (
         typeof replace !== "boolean" ||
-        !current?.navigation?.routes.some((route) => route.path === path) ||
+        !route ||
         Date.now() - lastNavigationAt < 100
       )
         return false;
-      if (path === current.navigation.path) return true;
+      const target = serializeRouteQuery(
+        route.query ?? [],
+        options.query === undefined ? {} : options.query,
+      );
+      if (!target) return false;
+      if (
+        path === current!.navigation!.path &&
+        target.search === current!.navigation!.search
+      )
+        return true;
       if (navigationRevision === MAX_REVISION) {
         fail("protocol_error");
         return false;
@@ -1424,6 +1472,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
           revision: (++navigationRevision).toString(),
           presentationRevision: revision.toString(),
           path,
+          search: target.search,
           replace,
         });
         return true;

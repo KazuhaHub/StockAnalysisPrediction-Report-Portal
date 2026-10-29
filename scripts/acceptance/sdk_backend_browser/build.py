@@ -32,6 +32,8 @@ function Fixture(){
   const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Typography.Text data-testid="app-query">{JSON.stringify(navigation.query)}</Typography.Text>
+ <Button onClick={()=>navigation.navigate('/',{query:{page:2,q:'中文 & test',active:false,sort:'newest'}})}>Set filters</Button>
  <Typography.Text data-testid="app-route">{navigation.path}</Typography.Text>
  <Button onClick={()=>navigation.navigate('/editor')}>Open editor</Button><Button onClick={()=>navigation.navigate('/')}>Open home</Button>
  <Button onClick={()=>setRetained(n=>n+1)}>Retained {retained}</Button>
@@ -56,7 +58,7 @@ function Fixture(){const location=useLocation(),navigate=useNavigate();const [di
  return <div style={{background:initial.theme.colorBgLayout,color:initial.theme.colorText,minHeight:'100vh'}}><h1>SDK native backend fixture</h1>
  <AppDraftPrompt dirty={dirty} blocker={blocker}/><Link to="/away">Leave fixture</Link><p data-testid="launch-status">{status}</p><button onClick={()=>setPresentation({...initial,locale:'zh-TW'})}>Traditional Chinese</button>
  <button onClick={async()=>{const r=await fetch('/__sdk_fixture/revoke',{method:'POST'});setStatus('revoke:'+r.status)}}>Revoke fixture access</button>
- {launch&&<AppFrameV2 {...launch} title="SDK native fixture" presentation={{...presentation,layout:launch.routes.find(route=>route.path===location.pathname).layout,navigation:{path:location.pathname,routes:launch.routes}}} height={500} onDraftChange={setDirty} onNavigate={(path,replace)=>{if(blocker.state==='unblocked')void navigate(path,{replace})}}/>}</div>}
+ {launch&&<AppFrameV2 {...launch} title="SDK native fixture" presentation={{...presentation,layout:launch.routes.find(route=>route.path===location.pathname).layout,navigation:{path:location.pathname,search:location.search,routes:launch.routes}}} height={500} onDraftChange={setDirty} onNavigate={(path,replace,search)=>{if(blocker.state==='unblocked')void navigate(path+search,{replace})}}/>}</div>}
 const router=createBrowserRouter([{path:'/away',element:<p>Fixture closed</p>},{path:'*',element:<Fixture/>}]);
 createRoot(document.getElementById('host')!).render(<RouterProvider router={router}/>);''')
     for name, entry, filename in (("child", child, "app.js"), ("host", host, "host.js")):

@@ -90,6 +90,8 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
+      - name: Signed application descriptor and query contracts
+        run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"

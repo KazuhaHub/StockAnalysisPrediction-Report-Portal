@@ -2759,5 +2759,7 @@
   "apps.draftLeaveTitle": "離開此應用程式？",
   "apps.draftLeaveBody": "此應用程式有尚未儲存的修改。離開將捨棄尚未儲存的內容。",
   "apps.draftLeave": "離開應用程式",
-  "apps.draftStay": "繼續編輯"
+  "apps.draftStay": "繼續編輯",
+  "apps.v2InvalidRoute": "應用程式連結中的頁面或參數無效。",
+  "apps.v2Home": "應用程式首頁"
 }

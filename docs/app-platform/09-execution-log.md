@@ -2176,3 +2176,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   General Go still fails inherited x/net findings after affected SQL suites pass. No descriptor/storage schema,
   dependency, publication, production, Status, stable SDK or beta change.
   Typed queries and remaining P06/full platform requirements stay open.
+
+
+- Added optional signed typed query rules (bounded text/integer/boolean/enum), a
+  pinned pure validator shared by descriptor tools/host/SDK, and dev.6 canonical
+  search with host-committed typed query state. Pointer-preserved zero bounds,
+  strict duplicate/encoding/size/Unicode checks and destination-rule admission
+  retain current authority and channel guards. Invalid links have localized
+  host-owned home recovery. See [typed queries](123-typed-route-query.md).
+  Local Portal165/SDK249, shared corpus56, Python12/14/2, frontend consumers,
+  descriptor/HTTP/signed-document tests and Linux compilation pass. Actual-page
+  browser URL/back/forward/reload/type restoration and error recovery passed;
+  Linux native runtime evidence is pending. Descriptor schema is extended;
+  database schema, dependencies, publication, production, Status, SDK freeze and
+  beta settings are unchanged. Remaining full P06/platform work stays open.

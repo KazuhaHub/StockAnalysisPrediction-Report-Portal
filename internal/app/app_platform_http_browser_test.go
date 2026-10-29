@@ -142,7 +142,7 @@ func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Serve
 	}
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
-	manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport"}, {ID: "home", Path: "/", Layout: "document"}}
+	manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
 	manifest.Frontend.SHA256 = platformDigest(archive)
 	raw, err := json.Marshal(manifest)
 	if err != nil {
@@ -171,4 +171,9 @@ func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Serve
 		t.Fatal("browser fixture created runtime/data resources")
 	}
 	return s, reader, admitted.InstallationID
+}
+
+func platformRouteQueryFixture() []appplatform.RouteQuery {
+	min, max, limit := 0, 100, 64
+	return []appplatform.RouteQuery{{Name: "page", Type: "integer", Min: &min, Max: &max}, {Name: "q", Type: "text", MaxBytes: &limit}, {Name: "active", Type: "boolean"}, {Name: "sort", Type: "enum", Values: []string{"newest", "oldest"}}}
 }

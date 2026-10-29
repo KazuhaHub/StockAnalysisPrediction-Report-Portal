@@ -24,6 +24,9 @@ class AppContractTests(unittest.TestCase):
         self.assertEqual(contract.render(self.raw), contract.render(self.raw))
         subprocess.run([sys.executable, "-B", str(SCRIPT), "--check"], check=True, capture_output=True)
 
+    def test_optional_numeric_presence_is_preserved(self):
+        self.assertEqual(contract.go_type({"type":"integer","x-go-pointer":True}),"*int")
+
     def test_duplicate_source_keys_refused(self):
         with self.assertRaisesRegex(ValueError, "duplicate source key"):
             contract.render(self.raw.replace(b'"title":', b'"$schema":"other","title":', 1))
@@ -84,6 +87,22 @@ class AppContractTests(unittest.TestCase):
             self.assertNotEqual(stale.returncode, 0)
             self.assertEqual(target.read_bytes(), before)
             self.assertFalse((root/"internal").exists())
+
+    def test_query_pin_detects_changed_and_removed_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);sdk=root/"packages/app-sdk";script=root/"scripts/generate_app_contract.py"
+            script.parent.mkdir(parents=True);(sdk/"schema").mkdir(parents=True);(sdk/"src").mkdir();(sdk/"tests/fixtures").mkdir(parents=True)
+            script.write_bytes(SCRIPT.read_bytes());(sdk/"schema/descriptor-v2.schema.json").write_bytes(self.raw);(sdk/"package.json").write_text("{}")
+            source=sdk/"src/route-query-v2.ts";tests=sdk/"tests/route-query-v2.test.ts"
+            source.write_bytes(b"source");tests.write_bytes(b"tests")
+            pin=sdk/"tests/fixtures/route-query-v2-source.json"
+            pin.write_text(json.dumps({"format":"portal.query.source/1","source_sha256":hashlib.sha256(source.read_bytes()).hexdigest(),"test_sha256":hashlib.sha256(tests.read_bytes()).hexdigest()}))
+            command=[sys.executable,"-B",str(script)];subprocess.run(command,check=True,capture_output=True)
+            subprocess.run(command+["--check"],check=True,capture_output=True)
+            source.write_bytes(b"changed")
+            self.assertNotEqual(subprocess.run(command+["--check"],capture_output=True).returncode,0)
+            source.unlink()
+            self.assertNotEqual(subprocess.run(command+["--check"],capture_output=True).returncode,0)
 
     def test_apps_bridge_export_requires_pinned_source(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -31,7 +31,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	m.ID = "notes-background-demo"
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
-		m.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport"}, {ID: "home", Path: "/", Layout: "document"}}
+		m.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
 	}
 	m.Frontend.SHA256 = platformDigest(archive)
 	m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
