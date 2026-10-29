@@ -244,7 +244,7 @@ func testPlatformCredentialConcurrentMutation(t *testing.T, pg bool) {
 			t.Fatal("unexpected concurrent failure", err)
 		}
 	}
-	if success != 1 || scalar[int](t, s.st, `SELECT revision FROM app_platform_credentials`) != 2 || scalar[int](t, s.st, `SELECT value_revision FROM app_platform_credentials`) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.credential_changed'`) != 2 {
+	if success != 1 || scalar[int](t, s.st, `SELECT revision FROM app_platform_credentials`) != 2 || scalar[int](t, s.st, `SELECT value_revision FROM app_platform_credentials`) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.credential_changed' AND target_id=?`, created.ID) != 2 {
 		t.Fatal("concurrent stale mutation committed")
 	}
 }
