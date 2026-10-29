@@ -26,8 +26,10 @@ type platformRestoreKey struct {
 	revoked, revision, created, updated int64
 }
 type platformRestorePrior struct {
-	publishers []platformRestorePublisher
-	keys       []platformRestoreKey
+	publishers  []platformRestorePublisher
+	keys        []platformRestoreKey
+	credentials []platformRevokedCredential
+	bindings    []platformRevokedSecretBinding
 }
 
 // Capture inside the destructive restore transaction, before clearing any rows.
@@ -36,7 +38,7 @@ type platformRestorePrior struct {
 func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	var prior platformRestorePrior
 	if e.s.driver == "postgres" {
-		names := migration0012().tables
+		names := append(migration0012().tables, migration0013().tables...)
 		sort.Strings(names)
 		if _, err := e.exec("LOCK TABLE " + strings.Join(names, ",") + " IN ACCESS EXCLUSIVE MODE"); err != nil {
 			return prior, err
@@ -68,15 +70,21 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	if err != nil {
 		return prior, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var k platformRestoreKey
 		if err := rows.Scan(&k.publisher, &k.id, &k.algorithm, &k.public, &k.notBefore, &k.notAfter, &k.revoked, &k.revision, &k.created, &k.updated); err != nil {
+			rows.Close()
 			return prior, err
 		}
 		prior.keys = append(prior.keys, k)
 	}
-	return prior, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return prior, err
+	}
+	err = capturePlatformCredentialFloors(e, &prior)
+	return prior, err
 }
 
 func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
@@ -106,11 +114,14 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 			}
 		}
 	}
+	if err := restorePlatformCredentialFloors(e, prior, now); err != nil {
+		return err
+	}
 	if err := verifyPlatformRestoreArtifacts(e); err != nil {
 		return err
 	}
 	var entities int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_installations)+(SELECT COUNT(*) FROM app_platform_runtime_bindings)+(SELECT COUNT(*) FROM app_platform_publishers)`).Scan(&entities); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_installations)+(SELECT COUNT(*) FROM app_platform_runtime_bindings)+(SELECT COUNT(*) FROM app_platform_publishers)+(SELECT COUNT(*) FROM app_platform_credentials)`).Scan(&entities); err != nil {
 		return err
 	}
 	if entities == 0 {

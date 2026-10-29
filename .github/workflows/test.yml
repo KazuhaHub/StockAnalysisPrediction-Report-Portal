@@ -98,6 +98,10 @@ jobs:
         run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation|Runtime)'
       - name: Signed application descriptor and query contracts
         run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
+      - name: Application credential schema and custody
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformCredential'
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"

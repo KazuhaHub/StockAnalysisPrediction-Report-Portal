@@ -9,8 +9,12 @@ import (
 // Verification is read-only. Catalog definitions, not the migration ledger or
 // constraint names alone, must still establish the approved storage contract.
 func verifyAppPlatformSchema(e migExec) error {
+	return verifyPlatformSchemaProducts(e, platformSchemaTables(), platformSchemaIndexes())
+}
+
+func verifyPlatformSchemaProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex) error {
 	if e.s.driver == "postgres" {
-		return verifyAppPlatformPostgres(e)
+		return verifyPlatformPostgresProducts(e, tables, declaredIndexes)
 	}
 	var enabled int
 	if err := e.queryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil {
@@ -20,10 +24,10 @@ func verifyAppPlatformSchema(e migExec) error {
 		return fmt.Errorf("application control requires foreign-key enforcement")
 	}
 	expected := map[string]string{}
-	for _, t := range platformSchemaTables() {
+	for _, t := range tables {
 		expected[platformPrefix+t.name] = compactPlatformSQL(t.ddl("sqlite"))
 	}
-	for _, i := range platformSchemaIndexes() {
+	for _, i := range declaredIndexes {
 		expected[i.name] = compactPlatformSQL(i.ddl())
 	}
 	rows, err := e.query(`SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL`)
@@ -54,15 +58,15 @@ func verifyAppPlatformSchema(e migExec) error {
 	return nil
 }
 
-func platformTableFilter() string {
+func platformTableFilter(tables []platformTable) string {
 	var names []string
-	for _, t := range platformSchemaTables() {
+	for _, t := range tables {
 		names = append(names, "'"+platformPrefix+t.name+"'")
 	}
 	return "(" + strings.Join(names, ",") + ")"
 }
 
-func verifyAppPlatformPostgres(e migExec) error {
+func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex) error {
 	type columnShape struct {
 		typ      string
 		nullable bool
@@ -71,7 +75,7 @@ func verifyAppPlatformPostgres(e migExec) error {
 	constraints := map[string]string{}
 	constraintKinds := map[string]string{}
 	constraintTargets := map[string]string{}
-	for _, t := range platformSchemaTables() {
+	for _, t := range tables {
 		name := platformPrefix + t.name
 		for _, c := range t.columns() {
 			columns[name+"."+c.name] = columnShape{strings.ToLower(c.sqlType("postgres")), c.nullable}
@@ -92,7 +96,7 @@ func verifyAppPlatformPostgres(e migExec) error {
 	}
 	rows, err := e.query(`SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.atthasdef,c.relkind,c.relispartition
         FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname IN ` + platformTableFilter() + ` AND a.attnum>0 AND NOT a.attisdropped`)
+        WHERE n.nspname='public' AND c.relname IN ` + platformTableFilter(tables) + ` AND a.attnum>0 AND NOT a.attisdropped`)
 	if err != nil {
 		return err
 	}
@@ -121,7 +125,7 @@ func verifyAppPlatformPostgres(e migExec) error {
 	}
 	rows, err = e.query(`SELECT k.conname,k.contype,pg_get_constraintdef(k.oid,false),k.condeferrable,k.condeferred,k.convalidated
         FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname='public' AND c.relname IN ` + platformTableFilter() + ` AND k.contype<>'n'`)
+        WHERE n.nspname='public' AND c.relname IN ` + platformTableFilter(tables) + ` AND k.contype<>'n'`)
 	if err != nil {
 		return err
 	}
@@ -159,14 +163,14 @@ func verifyAppPlatformPostgres(e migExec) error {
 		return fmt.Errorf("application control constraints are missing")
 	}
 	indexes := map[string]platformIndex{}
-	for _, i := range platformSchemaIndexes() {
+	for _, i := range declaredIndexes {
 		indexes[i.name] = i
 	}
 	rows, err = e.query(`SELECT ix.relname,t.relname,i.indisunique,i.indisvalid,i.indisready,
         COALESCE((SELECT string_agg(a.attname,',' ORDER BY key.ord) FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum,ord)
           JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=key.attnum),''),COALESCE(pg_get_expr(i.indpred,i.indrelid),'')
         FROM pg_index i JOIN pg_class ix ON ix.oid=i.indexrelid JOIN pg_class t ON t.oid=i.indrelid
-        JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname IN ` + platformTableFilter() + ` AND NOT i.indisprimary`)
+        JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname IN ` + platformTableFilter(tables) + ` AND NOT i.indisprimary`)
 	if err != nil {
 		return err
 	}

@@ -2384,3 +2384,14 @@ daemon workflow 40455635317 passed on the functional source as well.
   now permits implementation; no credential schema/code is claimed complete by
   this observation slice. Real credentials, production and later products remain
   independently gated.
+
+- Implemented the owner-approved credential extension as migration 0013 with two
+  tables/four indexes, independent verification and coordinated backup/restore.
+  Restore pauses nonrevoked records and preserves local revocation floors, or
+  refuses atomically when parent/capacity conflicts prevent preservation. Added
+  private bounded custody create/list and unbound replacement/revocation under
+  live administrator authority, existing DEK/AAD and atomic audit. Bound mutation
+  and all app credential use remain denied pending exact affected-installation
+  review and private-use enforcement. Driver-paired tests and focused CI group
+  cover these boundaries; exact PostgreSQL CI remains required. See
+  [credential implementation](136-credential-schema-and-custody.md).
