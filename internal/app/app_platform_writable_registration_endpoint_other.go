@@ -10,3 +10,7 @@ import (
 func platformRunWritableRegistration(context.Context, platformRuntimeEndpoint, platformWritableRegistrationIntent, transport.WritableLifecycleAction) (transport.WritableLifecycleObservation, error) {
 	return transport.WritableLifecycleObservation{}, errAppPlatformRuntimeConflict
 }
+
+func platformHandshakeWritableBackend(context.Context, platformRuntimeEndpoint, platformWritableRegistrationIntent, string) (transport.WritableBackendHandshakeObservation, error) {
+	return transport.WritableBackendHandshakeObservation{}, errAppPlatformRuntimeConflict
+}

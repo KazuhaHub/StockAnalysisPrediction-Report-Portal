@@ -1941,3 +1941,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   evidence pending. Host boot/possession, viewer/activation/worker and remaining
   full platform acceptance remain incomplete; production, real credentials,
   Status, SDK freeze and beta configuration unchanged.
+
+- Extended the writable registration continuation with independent host MAC/key
+  possession and current boot verification over the existing protected writable
+  handshake. Recheck all four effects and current encrypted identity after IO;
+  return a distinct non-serializable live writable boot observation and no grants.
+  Added applied-delivery/zero-proof/serialization refusals plus actual native
+  same-boot exchanges, foreign challenge and post-IO runtime-disablement refusal.
+  Fresh composed Linux evidence pending; viewer/activation/worker and the full
+  lifecycle/SDK/reference-app requirements remain incomplete.

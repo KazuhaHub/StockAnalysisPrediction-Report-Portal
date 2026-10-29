@@ -12,9 +12,12 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
-func validPlatformWritableRegistrationObservation(proof transport.WritableLifecycleObservation, i platformWritableRegistrationIntent, endpoint platformRuntimeEndpoint) bool {
+func validPlatformWritableRegistrationWire(i platformWritableRegistrationIntent) bool {
 	wire, err := json.Marshal(i.command)
-	if err != nil || !bytes.Equal(wire, i.raw) || !bytes.Equal(i.command.CandidateRaw, i.start.raw) || !bytes.Equal(i.command.CandidateSignature, i.start.signature) {
+	return err == nil && bytes.Equal(wire, i.raw) && bytes.Equal(i.command.CandidateRaw, i.start.raw) && bytes.Equal(i.command.CandidateSignature, i.start.signature)
+}
+func validPlatformWritableRegistrationObservation(proof transport.WritableLifecycleObservation, i platformWritableRegistrationIntent, endpoint platformRuntimeEndpoint) bool {
+	if !validPlatformWritableRegistrationWire(i) {
 		return false
 	}
 	age := time.Since(proof.ReceivedAt())

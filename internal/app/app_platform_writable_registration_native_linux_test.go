@@ -93,4 +93,5 @@ func testNativePortalWritableRegistration(t *testing.T, s *Server, lease platfor
 		t.Fatal("delivery duplicated audit")
 	}
 	t.Log("PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED")
+	testNativePortalWritableBoot(t, s, completed, endpoint, current)
 }

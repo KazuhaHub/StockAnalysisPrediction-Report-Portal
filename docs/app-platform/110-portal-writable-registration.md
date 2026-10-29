@@ -1,11 +1,11 @@
-# Portal writable registration intent, delivery and result recovery
+# Portal writable registration, result recovery and host boot verification
 
 This follows [109](109-portal-writable-readiness.md). A writable process that is
 ready still needs its private backend registration file. This continuation
 prepares that exact identity, delivers it through the authenticated root runner,
-and settles the actual result in Portal. It does not yet verify independent host
-key possession/boot, open a viewer, activate a generation or drive the complete
-managed installation worker. The product remains incomplete until those paths
+and settles the actual result in Portal. It also performs independent host
+key-possession/current-boot verification. It does not yet open a viewer, activate
+a generation or drive the complete managed installation worker. The product remains incomplete until those paths
 and the other P00–P14 requirements pass.
 
 ## Exact existing source and one registration effect
@@ -103,6 +103,33 @@ reconciliation through the composed Portal path is still a separate acceptance
 requirement; this phase proves recovery from Portal commit failure after actual
 successful native delivery.
 
+## Independent host boot verification
+
+After the exact registration effect is applied, the host creates a challenge
+using its independently derived per-generation signer. The protected endpoint
+calls the existing `HandshakeWritableControllerBackend` with the exact expected
+registration receipt. The root runner checks current source, exact process and
+protected file identity/content before and after the exchange, including the
+file device/inode and document digest. It returns its own opaque authenticated
+handshake observation, not a trusted application boolean.
+
+`probePlatformWritableBackendBoot` and `finishPlatformWritableBackendBoot` check
+that observation against the exact root/controller peer, signed wire command,
+original applied registration receipt SHA, original native process, challenge
+SHA, source authority and three-second monotonic receipt-age bound. Portal
+independently verifies the answer's MAC, identity, challenge and current boot
+using its locally derived key. It re-reads the complete four-effect/current-lease
+source after native IO, requires an identical snapshot, derives a new verifier
+from the current encrypted identity and verifies the same answer/boot again.
+Runtime/key/source revocation after IO refuses the result.
+
+The result is a separate private `platformWritableBootObservation`, which refuses
+JSON import/export. It binds the exact lease/runtime, original start and delivery
+SHA, document SHA, native ID, verified boot ID and live receive time. It cannot be
+substituted for the readonly boot type or used as a persisted authorization flag.
+This code writes no boot/activation/connection/grant record. The future activation
+consumer must recheck this exact source and short freshness window.
+
 ## Verification and limits
 
 Explicit SQLite/PostgreSQL tests cover deterministic identity/digest renewal,
@@ -120,7 +147,7 @@ SQL receipts are historical metadata only and never opaque native proof.
 The existing disposable non-root Portal/root runner fixture now continues from
 actual writable readiness into registration:
 
-1. Prepare the exact original source and refuse completion before native delivery.
+1. Prepare the exact original source and refuse completion/boot before native delivery.
 2. Force Portal delivery-audit failure after real native file delivery and require
    the Portal effect and operation revision remain prepared/unchanged.
 3. Read the actual original root result, remove the failure trigger, complete its
@@ -131,6 +158,13 @@ actual writable readiness into registration:
 6. Require four original effects, candidate/pending state and no access grants.
    Existing root witness still independently checks the exact running process,
    original start time, physical full-quota result and owned resource cleanup.
+7. Complete two actual host-verified challenges and require the same current boot,
+   native process and delivery binding with no control-storage changes. Obtain
+   another actual handshake, refuse a foreign challenge and current runtime
+   disablement after IO, preserving control storage.
+
+SQL cases also require applied delivery before boot, refuse zero opaque handshake
+proof, and prohibit serializing/importing the separate writable boot type.
 
 The acceptance script requires and reports:
 
@@ -139,6 +173,8 @@ The acceptance script requires and reports:
 | `PORTAL_WRITABLE_REGISTRATION_COMMITTED` | `native_portal_writable_registration_committed` |
 | `PORTAL_WRITABLE_REGISTRATION_RETAINED_IDENTITY` | `native_portal_writable_registration_retained_identity` |
 | `PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED` | `native_portal_writable_registration_stale_source_refused` |
+| `PORTAL_WRITABLE_BACKEND_BOOT_VERIFIED` | `native_portal_writable_backend_boot_verified` |
+| `PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED` | `native_portal_writable_backend_boot_current_source_refused` |
 
 The quota workflow now includes writable/writer Portal file paths for both PR and
 main events, so later source-only changes cannot omit that native composition.
@@ -147,9 +183,8 @@ not a substitute for these Portal cases.
 
 ## Next requirements
 
-Connect the existing writable host handshake to independent key/MAC/current boot
-validation, current viewer relay and managed activation, then the actual install
-worker/scheduler. Complete positive expired-unknown recovery through Portal,
+Connect current writable viewer relay and managed activation to this exact live
+host-verified boot, then the actual install worker/scheduler. Complete positive expired-unknown recovery through Portal,
 physical stop/fencing/revocation, update/migration/rollback/retained uninstall and
 restore/checkpoint lifecycle, broker/secret/task capabilities, SDK/shared React/
 Ant shell and neutral static/managed reference apps from the real market. D5

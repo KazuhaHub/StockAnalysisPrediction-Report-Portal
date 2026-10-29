@@ -19,3 +19,7 @@ func platformRunWritableRegistration(ctx context.Context, endpoint platformRunti
 	}
 	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, action, i.raw, i.signature, i.start.writer.authority, i.start.writer.descriptor, document)
 }
+
+func platformHandshakeWritableBackend(ctx context.Context, endpoint platformRuntimeEndpoint, i platformWritableRegistrationIntent, challenge string) (transport.WritableBackendHandshakeObservation, error) {
+	return transport.HandshakeWritableControllerBackend(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, i.raw, i.signature, i.start.writer.authority, i.start.writer.descriptor, i.receipt, challenge)
+}

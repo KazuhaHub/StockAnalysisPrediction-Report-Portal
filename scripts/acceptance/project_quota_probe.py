@@ -393,6 +393,11 @@ def main(args):
                         report["native_portal_writable_registration_committed"] = True
                         report["native_portal_writable_registration_retained_identity"] = True
                         report["native_portal_writable_registration_stale_source_refused"] = True
+                        for marker in ("PORTAL_WRITABLE_BACKEND_BOOT_VERIFIED", "PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Portal writable backend boot acceptance did not execute: " + marker)
+                        report["native_portal_writable_backend_boot_verified"] = True
+                        report["native_portal_writable_backend_boot_current_source_refused"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True
