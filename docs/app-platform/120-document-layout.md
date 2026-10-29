@@ -1,7 +1,7 @@
 # Natural document sizing and one Portal scroll region
 
-Status: implementation candidate; Linux browser layout acceptance pending at the
-initial functional commit. No stable SDK freeze, production activation, Status
+Status: implemented and passed real Linux browser/native layout acceptance at
+functional commit `6016b735989ee884bd1ce2f074553e1148ce0f67`. No stable SDK freeze, production activation, Status
 migration, dependency/schema change or server beta configuration change.
 
 ## User-visible behavior
@@ -89,3 +89,53 @@ when complete. No local macOS test is substituted for Linux Chromium acceptance.
 The earlier SDK/browser/native functional request chain passed Linux acceptance
 in document 119; that does not prove this new sizing extension. Full P00–P14,
 D5/D6 and production authorization remain outstanding.
+
+## Local browser and companion CI follow-up
+
+Apps commit `aa0eeec12791176ad6daaee20d2183e9d7bcf808` passed every job in check
+run 40852409804. Its frontend-standard job 123374900935 passed all 196 SDK tests,
+all nine maintained Status UI tests, template/root/demo checks, typechecks and
+builds. The local Status timeout is retained above as an observed local failure,
+not hidden with a timeout increase or used to claim a clean local result.
+
+The browser plugin exercised the real local AppViewV2/AppFrameV2/SDK root through
+protected launch/document routes using disposable synthetic SQLite facts. The
+child expanded from 64px to 3032px; its HTML clientHeight and scrollHeight were
+both 3032px with overflow hidden. Collapsing returned the same iframe to 64px.
+Traditional Chinese presentation continued to apply, and the sandbox remained
+exactly allow-scripts. This local presentation fixture does not attest native
+backend authority or every rendered paint. Its temporary tab/server exited and
+its temporary directory was removed. A screenshot is preserved in the local
+visualization output as `app-document-layout.jpg`.
+
+The reusable local browser fixture now provides the same expand/collapse button.
+An additional AppLayout test confirms the v2 content region scrolls while chat
+retains its prior overflow behavior; all 30 AppLayout tests passed. Twenty-six
+contract-generator/collector/public-fixture tests and Linux amd64 test compilation
+also passed. The full Linux native/browser layout extension still requires its
+own artifact inspection below.
+
+## Verified Linux result
+
+Quota run 40852667490 / job 123375762394 passed on functional source
+`6016b735989ee884bd1ce2f074553e1148ce0f67`. The inspected artifact at
+`/tmp/app-document-layout-evidence/project-quota-evidence.json` records:
+
+| Artifact field | Result |
+| --- | --- |
+| `sdk_native_browser_document_layout` | true |
+| `sdk_native_browser_current_viewer` | true |
+| `sdk_native_browser_uncertain_no_retry` | true |
+| `sdk_native_browser_revoked` | true |
+| `native_portal_writable_background_owned_cleanup` | true |
+| `native_portal_writable_background_neighbor_preserved` | true |
+| `execution_ready` | false |
+
+This result runs the actual SDK root/Portal frame and protected backend chain,
+not a mock iframe height. The browser expanded long content above 3000px, checked
+inner HTML scroll/client heights, collapsed below 1000px, then completed the real
+viewer/write/uncertainty/revoke checks. All existing native quota/isolation and
+owned cleanup assertions remained required. The single local rendered screenshot
+is not a substitute for this runtime evidence and does not prove every paint.
+General test run 40852667466 and later documentation/test-only follow-ups must be
+reported by their own statuses; this native result is tied to its functional SHA.

@@ -96,7 +96,7 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
 import {createRoot} from 'react-dom/client';
 import {Button} from 'antd';
 import {AppRoot,useAppPresentation} from '@portal-app/sdk/root-v2';
-function Fixture(){const {presentation}=useAppPresentation();const [count,setCount]=useState(0);return <Button onClick={()=>setCount(count+1)}>{presentation.locale} / {presentation.timeZone} / {count}</Button>}
+function Fixture(){const {presentation}=useAppPresentation();const [count,setCount]=useState(0),[expanded,setExpanded]=useState(false);return <><Button onClick={()=>setCount(count+1)}>{presentation.locale} / {presentation.timeZone} / {count}</Button><Button onClick={()=>setExpanded(value=>!value)}>Toggle long content</Button>{expanded&&<div style={{height:3000}}>Long document content</div>}</>}
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(origin) + '''><Fixture/></AppRoot>);''')
     host = target / "host.tsx"
     host.write_text('''import {useState} from 'react';

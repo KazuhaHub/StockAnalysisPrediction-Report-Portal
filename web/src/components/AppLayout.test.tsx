@@ -89,6 +89,7 @@ function renderAt(path: string) {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="chat" element={<div>chat-body</div>} />
+          <Route path="apps/v2/:installation" element={<div>application-body</div>} />
           <Route path="forecast" element={<div>forecast-body</div>} />
           <Route path="queue" element={<div>queue-body</div>} />
           <Route path="review" element={<div>review-body</div>} />
@@ -228,6 +229,16 @@ describe('AppLayout desktop navigation', () => {
 
     expect(await screen.findByText('batch-body')).toBeTruthy()
   })
+})
+
+it('gives application documents one Portal scroll region while chat retains its own scroll',async()=>{
+ const app=renderAt('/apps/v2/00000000-0000-0000-0000-000000000001')
+ await screen.findByText('application-body')
+ const content=app.container.querySelector<HTMLElement>('.ant-layout-content')!
+ expect(content.style.overflow).toBe('auto');expect(content.style.minHeight).toBe('0px')
+ app.unmount()
+ const chat=renderAt('/chat');await screen.findByText('chat-body')
+ expect(chat.container.querySelector<HTMLElement>('.ant-layout-content')!.style.overflow).toBe('hidden')
 })
 
 describe('AppLayout mobile chat focus mode', () => {
