@@ -2289,3 +2289,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   All native/browser/quota/cleanup flags passed, execution_ready false. See
   [network policy contract](128-network-policy-contract.md).
   Full P00–P14 delivery, authority adapters and production remain incomplete.
+
+
+- Isolated a dependency maintenance change from the broker features: select
+  x/net v0.62.0 and its required crypto/sys/text/sync graph to fix the two
+  reachable findings that skipped ordinary Go tests. The pinned local
+  govulncheck now exits zero for affected symbols/imported packages; two
+  nonimported-package module findings are documented. Vet passes. Full ordinary
+  local tests and exact Linux/PG/native CI remain pending. See
+  [network dependency repair](129-network-dependency-security.md). This neither
+  rewrites prior evidence nor completes P07/P00–P14 or activates production.
