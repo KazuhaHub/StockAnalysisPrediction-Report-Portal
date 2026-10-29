@@ -1240,10 +1240,30 @@ func parseTencentDaily(market, code string, body []byte, bars int, adjusted bool
 		return nil, fmt.Errorf("quote: decode tencent %s: %w", sym, err)
 	}
 	if adjusted {
-		if len(qb.QfqDay) == 0 {
-			return nil, fmt.Errorf("quote: tencent %s has no adjusted daily rows", sym)
+		// The explicit qfq endpoint uses day when no adjustment applies (captured for
+		// sh688469 and sh688825). Distinguish an absent key from a corrupt/empty qfqday:
+		// an explicitly supplied adjusted array must validate, never fall back to raw rows.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
 		}
-		qb.Day = qb.QfqDay
+		if _, present := fields["qfqday"]; present {
+			if len(qb.QfqDay) == 0 {
+				return nil, fmt.Errorf("quote: tencent %s has no adjusted daily rows", sym)
+			}
+			qb.Day = qb.QfqDay
+		} else {
+			if len(qb.Day) == 0 {
+				return nil, fmt.Errorf("quote: tencent %s has no adjustment response rows", sym)
+			}
+			// A raw ex-event needs explicit adjusted evidence. Missing qfqday must not
+			// silently neutralize the ratio check on a known split/rights/dividend date.
+			for _, row := range qb.Day {
+				if len(row) > quoteDayRowFields {
+					return nil, fmt.Errorf("quote: tencent %s has annotated rows without adjusted evidence", sym)
+				}
+			}
+		}
 	}
 	rawQt, ok := qb.Qt[sym]
 	if !ok {
