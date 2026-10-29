@@ -130,7 +130,18 @@ The generator then received a failing-then-passing literal-name regression fix:
 marker-like text inside a quoted application name must remain literal instead of
 being substituted twice and damaging JSON. Apps eea3e9afeb1896513def64edefb2cbac3ff3e80e
 passed all jobs in run40944731609. The workflow now pins that exact source and
-repeats acceptance at the paired revision; final evidence belongs in PR333.
+repeats acceptance at the paired revision. Portal c9b67807 passed native run
+40945555000/job123699847538 with the same generated ZIP/descriptor hashes and
+all prior native/browser flags. General run40945554919 passed front-end, Docker
+and race checks but failed the inherited x/net vulnerability gate after its pure
+contract and affected storage suites passed.
+
+A final name-validation correction reads the maximum directly from the shared
+schema and refuses surrounding whitespace, format controls and replacement
+characters before writing a workspace. The regression test first demonstrated
+four accepted invalid names. Apps e7d12a609b1e872f607069e1b5b418e4751fd1ee passed
+all CI in run40947104413; the workflow now pins that exact source. Final paired
+native evidence is tracked in PR333. Full platform acceptance remains open.
 The broader P06/P07/P08, full accessibility/visual cases, persistent user data,
 managed reference app, marketplace/update/uninstall/recovery and release gates
 remain open.
