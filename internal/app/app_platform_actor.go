@@ -246,7 +246,7 @@ func platformControlIdentity(e migExec, dek []byte, initialize bool) ([]byte, st
 func platformControlHasHistory(e migExec) (bool, error) {
 	// Closed schema declarations only, never request-supplied SQL identifiers.
 	// Even retained/orphaned artifacts are evidence against fresh initialization.
-	for _, table := range platformSchemaTables() {
+	for _, table := range append(platformSchemaTables(), platformCredentialTables()...) {
 		var exists bool
 		if err := e.queryRow(`SELECT EXISTS(SELECT 1 FROM ` + platformPrefix + table.name + ` LIMIT 1)`).Scan(&exists); err != nil {
 			return false, err
