@@ -149,7 +149,7 @@ function AppRoutes() {
         <Route path="/apps" element={<AppsHub />} />
         <Route path="/notifications" element={<InboxPage />} />
         <Route path="/apps/x/:id" element={<AppView />} />
-        <Route path="/apps/v2/:installation" element={<AppViewV2 />} />
+        <Route path="/apps/v2/:installation/*" element={<AppViewV2 />} />
         {/* Quotes is ungated on purpose: it reads market data and nothing about this portal, and
             every signed-in user can already see a price on a reading page. Its `perm` in
             lib/builtinApps.ts is '' to match — that file's own note asks for the two to agree. */}

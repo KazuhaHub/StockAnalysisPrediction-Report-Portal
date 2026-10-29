@@ -25,6 +25,16 @@ async function main(){
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
   await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
+  stage='navigation';await frame.getByRole('button',{name:'Retained 0',exact:true}).click();
+  await frame.getByRole('button',{name:'Open editor',exact:true}).click();
+  await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
+  await page.goForward();await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  await page.waitForTimeout(110);
+  await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
+  await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
   stage='layout-grow';
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
@@ -58,6 +68,7 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');
   console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
   console.log('SDK_NATIVE_BROWSER_DRAFT_GUARD');
+  console.log('SDK_NATIVE_BROWSER_NAVIGATION');
   console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
   console.log('SDK_NATIVE_BROWSER_REVOKED');
  }finally{clearTimeout(deadline);await browser.close()}

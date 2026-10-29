@@ -3,9 +3,10 @@ import {
   DESCRIPTOR_CAPABILITIES,
   DESCRIPTOR_LAYOUTS,
   DESCRIPTOR_LOCALES,
+  DESCRIPTOR_PATTERNS,
 } from "./descriptor-contract.generated";
 
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.4";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.5";
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
@@ -31,7 +32,17 @@ export interface BridgeBinding {
   readonly policyRevision: string;
   readonly releaseSha256: string;
 }
+export interface BridgeRoute {
+  readonly id: string;
+  readonly path: string;
+  readonly layout: (typeof DESCRIPTOR_LAYOUTS)[number];
+}
+export interface BridgeNavigation {
+  readonly path: string;
+  readonly routes: readonly BridgeRoute[];
+}
 export interface BridgePresentation {
+  readonly navigation?: BridgeNavigation;
   readonly locale: (typeof DESCRIPTOR_LOCALES)[number];
   readonly timeZone: string;
   readonly layout: (typeof DESCRIPTOR_LAYOUTS)[number];
@@ -153,6 +164,7 @@ export interface BridgeHostOptions extends BaseOptions {
   ) => Promise<BridgeBackendResponse>;
   onDocumentHeight?: (height: number) => void;
   onDraftChange?: (dirty: boolean) => void;
+  onNavigate?: (path: string, replace: boolean) => void;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -256,11 +268,63 @@ function validColor(value: unknown): value is string {
     (match[1] === "rgba") === (match[5] !== undefined)
   );
 }
+export function parseBridgeRoutes(
+  value: unknown,
+): readonly BridgeRoute[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32)
+    return null;
+  const ids = new Set<string>(),
+    paths = new Set<string>();
+  const routes: BridgeRoute[] = [];
+  for (const route of value) {
+    if (
+      !exact(route, ["id", "path", "layout"]) ||
+      !isString(route.id) ||
+      /\s/.test(route.id) ||
+      !new RegExp(DESCRIPTOR_PATTERNS.slug).test(route.id) ||
+      !isString(route.path) ||
+      /\s/.test(route.path) ||
+      route.path.length > 257 ||
+      !(
+        route.path === "/" ||
+        (route.path.startsWith("/") &&
+          new RegExp(DESCRIPTOR_PATTERNS.path).test(route.path.slice(1)) &&
+          !route.path.includes("..") &&
+          !route.path.split("/").includes(".") &&
+          !route.path.includes("//") &&
+          !route.path.endsWith("/"))
+      ) ||
+      !isString(route.layout) ||
+      !(DESCRIPTOR_LAYOUTS as readonly string[]).includes(route.layout) ||
+      ids.has(route.id) ||
+      paths.has(route.path)
+    )
+      return null;
+    ids.add(route.id);
+    paths.add(route.path);
+    routes.push(
+      Object.freeze({
+        id: route.id,
+        path: route.path,
+        layout: route.layout as BridgeRoute["layout"],
+      }),
+    );
+  }
+  return paths.has("/") ? Object.freeze(routes) : null;
+}
+function parseNavigation(value: unknown): BridgeNavigation | null {
+  if (!exact(value, ["path", "routes"]) || !isString(value.path)) return null;
+  const routes = parseBridgeRoutes(value.routes);
+  return routes?.some((route) => route.path === value.path)
+    ? Object.freeze({ path: value.path, routes })
+    : null;
+}
 export function parseBridgePresentation(
   value: unknown,
 ): BridgePresentation | null {
   if (
-    !exact(value, ["locale", "timeZone", "layout", "theme"]) ||
+    (!exact(value, ["locale", "timeZone", "layout", "theme"]) &&
+      !exact(value, ["locale", "timeZone", "layout", "theme", "navigation"])) ||
     !isString(value.locale) ||
     !(DESCRIPTOR_LOCALES as readonly string[]).includes(value.locale) ||
     !isString(value.layout) ||
@@ -274,6 +338,15 @@ export function parseBridgePresentation(
   } catch {
     return null;
   }
+  const navigation =
+    "navigation" in value ? parseNavigation(value.navigation) : undefined;
+  if (
+    navigation === null ||
+    (navigation &&
+      navigation.routes.find((route) => route.path === navigation.path)
+        ?.layout !== value.layout)
+  )
+    return null;
   const theme = value.theme;
   if (
     !exact(theme, ["dark", ...colors, "borderRadius"]) ||
@@ -286,6 +359,7 @@ export function parseBridgePresentation(
   )
     return null;
   return Object.freeze({
+    ...(navigation ? { navigation } : {}),
     locale: value.locale as BridgePresentation["locale"],
     timeZone: value.timeZone,
     layout: value.layout as BridgePresentation["layout"],
@@ -364,6 +438,9 @@ export function createBridgeHost(
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
+  let lastNavigation = 0n,
+    navigationWindow = 0,
+    navigationCount = 0;
   let lastDraft = 0n,
     draftWindow = 0,
     draftCount = 0;
@@ -434,6 +511,67 @@ export function createBridgeHost(
     }
     if (terminal() || !currentEnvelope) return;
     const data = event.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      data.type === "navigation.request"
+    ) {
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "revision",
+          "presentationRevision",
+          "path",
+          "replace",
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (
+        !announced ||
+        !decimal(data.revision) ||
+        !decimal(data.presentationRevision) ||
+        typeof data.replace !== "boolean" ||
+        !isString(data.path) ||
+        data.path.length > 257
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (BigInt(data.revision) <= lastNavigation) return;
+      lastNavigation = BigInt(data.revision);
+      const now = Date.now();
+      if (now - navigationWindow >= 1000) {
+        navigationWindow = now;
+        navigationCount = 0;
+      }
+      if (++navigationCount > 20) {
+        fail("protocol_error");
+        return;
+      }
+      if (
+        inflight ||
+        dirty ||
+        data.presentationRevision !== revision.toString()
+      )
+        return;
+      if (
+        !current?.navigation?.routes.some((route) => route.path === data.path)
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (data.path === current.navigation.path) return;
+      try {
+        options.onNavigate?.(data.path, data.replace);
+      } catch {
+        fail("protocol_error");
+      }
+      return;
+    }
     if (data && typeof data === "object" && data.type === "draft.changed") {
       if (!exact(data, ["type", ...envelopeKeys, "revision", "dirty"])) {
         fail("protocol_error");
@@ -822,6 +960,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   ): Promise<BridgeBackendResponse>;
   reportDocumentHeight(height: number): boolean;
   setDraftDirty(dirty: boolean): boolean;
+  navigate(path: string, replace?: boolean): boolean;
 } {
   const {
     localWindow,
@@ -846,6 +985,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     connectionRevision = 0;
   let expectedHostNonce: string | undefined;
   const retiredHosts = new Set<string>();
+  let navigationRevision = 0n,
+    lastNavigationAt = -Infinity;
   let draftRevision = 0n,
     draftTimer: ReturnType<typeof setTimeout> | undefined,
     lastDraftAt = -Infinity;
@@ -1137,6 +1278,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         abort.abort();
         clearMeasure();
         clearDraft();
+        navigationRevision = 0n;
+        lastNavigationAt = -Infinity;
         draftRevision = 0n;
         lastDraftAt = -Infinity;
         measureRevision = 0n;
@@ -1256,6 +1399,39 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
+    navigate(path: string, replace = false): boolean {
+      if (
+        terminal() ||
+        !applied ||
+        state !== "ready" ||
+        !port ||
+        !envelope ||
+        typeof replace !== "boolean" ||
+        !current?.navigation?.routes.some((route) => route.path === path) ||
+        Date.now() - lastNavigationAt < 100
+      )
+        return false;
+      if (path === current.navigation.path) return true;
+      if (navigationRevision === MAX_REVISION) {
+        fail("protocol_error");
+        return false;
+      }
+      lastNavigationAt = Date.now();
+      try {
+        port.postMessage({
+          type: "navigation.request",
+          ...envelope,
+          revision: (++navigationRevision).toString(),
+          presentationRevision: revision.toString(),
+          path,
+          replace,
+        });
+        return true;
+      } catch {
+        fail("transport_error");
+        return false;
+      }
+    },
     setDraftDirty(dirty: boolean): boolean {
       if (
         terminal() ||

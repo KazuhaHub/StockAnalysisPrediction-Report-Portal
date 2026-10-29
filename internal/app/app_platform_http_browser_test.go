@@ -142,6 +142,7 @@ func platformFrontendBrowserInstallFixture(t *testing.T, archive []byte) (*Serve
 	}
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
+	manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport"}, {ID: "home", Path: "/", Layout: "document"}}
 	manifest.Frontend.SHA256 = platformDigest(archive)
 	raw, err := json.Marshal(manifest)
 	if err != nil {

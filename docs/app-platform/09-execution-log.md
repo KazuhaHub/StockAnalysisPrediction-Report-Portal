@@ -2159,3 +2159,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   true, execution_ready false. General Go still fails inherited x/net findings.
   Web shard3 exposed an older missing-height fixture, repaired without weakening
   the cover requirement (526 local shard tests pass). P06/full platform remain incomplete.
+
+
+- Added signed static route registries to current launch metadata, selecting home
+  layout by path rather than array order. Matched development bridge dev.5 and
+  `useAppNavigation` follow only host-committed path/layout. Deep links, POP and
+  dirty-route confirmation preserve one installation document and mounted state;
+  undeclared/query/fragment/encoded paths never mount content. Requests cannot
+  write parent history or bypass current backend authorization. See
+  [signed routes and host history](122-signed-route-navigation.md). Local Portal147,
+  SDK217, frontend consumers, Python26 and actual document/HTTP tests pass. A local
+  actual-page browser check verifies commit/cancel/state retention; Linux actual
+  address/history/native acceptance is pending. No descriptor/storage schema,
+  dependency, publication, production, Status, stable SDK or beta change.
+  Typed queries and remaining P06/full platform requirements stay open.

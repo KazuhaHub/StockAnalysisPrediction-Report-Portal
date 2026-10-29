@@ -107,7 +107,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: f7eff236ba61725e953c7b207aef32f95b5ef76f
+          ref: dab705dfa233a204e2e7ca60a8af015f3edd3a4b
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6

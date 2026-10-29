@@ -15,6 +15,7 @@ export interface AppFrameV2Props {
   capabilities: readonly string[]
   backendAvailable?: boolean
   onDraftChange?: (dirty: boolean) => void
+  onNavigate?: (path:string,replace:boolean)=>void
   // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
@@ -40,9 +41,11 @@ export default function AppFrameV2(props: AppFrameV2Props) {
   const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, onDraftChange }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable, onDraftChange, onNavigate }: AppFrameV2Props) {
   const { t } = useTranslation()
   const frame = useRef<HTMLIFrameElement>(null)
+  const navigationObserver=useRef(onNavigate)
+  navigationObserver.current=onNavigate
   const draftObserver = useRef(onDraftChange)
   draftObserver.current = onDraftChange
   const session = useRef<ReturnType<typeof createBridgeHost> | null>(null)
@@ -86,6 +89,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       presentation: latest.current,
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
+      onNavigate: (path,replace)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },
       onReady: () => { if (live.current && epoch.current === generation) {
         setReady(true)

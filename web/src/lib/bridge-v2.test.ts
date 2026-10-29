@@ -1065,3 +1065,161 @@ for (const value of [
     ).toBeNull();
   });
 }
+
+test("registered navigation is source-bound and the host owns the committed path", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    navigate = vi.fn();
+  const routed = {
+    ...presentation,
+    navigation: {
+      path: "/",
+      routes: [
+        { id: "home", path: "/", layout: "document" as const },
+        { id: "editor", path: "/editor", layout: "viewport" as const },
+      ],
+    },
+  };
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: routed,
+    capabilities: [],
+    onNavigate: navigate,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  expect(client.navigate("https://evil.invalid", false)).toBe(false);
+  expect(client.navigate("/unknown", false)).toBe(false);
+  expect(client.navigate("/editor", false)).toBe(true);
+  await vi.waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/editor", false),
+  );
+  expect(client.presentation()?.navigation?.path).toBe("/");
+  host.updatePresentation({
+    ...routed,
+    layout: "viewport",
+    navigation: { ...routed.navigation, path: "/editor" },
+  });
+  await vi.waitFor(() =>
+    expect(client.presentation()?.navigation?.path).toBe("/editor"),
+  );
+  client.close();
+  expect(client.navigate("/", true)).toBe(false);
+});
+
+for (const routes of [
+  [],
+  [{ id: "home", path: "/only", layout: "document" }],
+  [
+    { id: "home", path: "/", layout: "document" },
+    { id: "home", path: "/editor", layout: "viewport" },
+  ],
+  [
+    { id: "home", path: "/", layout: "document" },
+    { id: "editor", path: "/", layout: "document" },
+  ],
+  [{ id: "home\n", path: "/", layout: "document" }],
+  ...[
+    "//evil",
+    "/../x",
+    "/a/./b",
+    "/a/",
+    "/%65dit",
+    "/edit?x=1",
+    "/edit#x",
+    "/edit\n",
+  ].map((path) => [
+    { id: "home", path: "/", layout: "document" },
+    { id: "editor", path, layout: "document" },
+  ]),
+]) {
+  test(`presentation refuses an unsigned/noncanonical registry ${JSON.stringify(routes)}`, () => {
+    expect(
+      parseBridgePresentation({
+        ...presentation,
+        navigation: { path: "/", routes },
+      }),
+    ).toBeNull();
+  });
+}
+test("route changes require the matching signed layout and cannot add query state", () => {
+  const routes = [
+    { id: "home", path: "/", layout: "document" },
+    { id: "editor", path: "/editor", layout: "viewport" },
+  ];
+  expect(
+    parseBridgePresentation({
+      ...presentation,
+      navigation: { path: "/editor", routes },
+    }),
+  ).toBeNull();
+  expect(
+    parseBridgePresentation({
+      ...presentation,
+      navigation: { path: "/", routes, query: { token: "secret" } },
+    }),
+  ).toBeNull();
+});
+test("host ignores stale navigation and refuses injected destinations before dispatch", async () => {
+  vi.stubGlobal("MessageChannel", NodeMessageChannel);
+  const w = windows(),
+    navigate = vi.fn();
+  const routed = {
+    ...presentation,
+    navigation: {
+      path: "/",
+      routes: [
+        { id: "home", path: "/", layout: "document" as const },
+        { id: "editor", path: "/editor", layout: "document" as const },
+      ],
+    },
+  };
+  const host = createBridgeHost({
+    localWindow: w.host,
+    frameWindow: w.child,
+    binding,
+    presentation: routed,
+    capabilities: [],
+    onNavigate: navigate,
+  });
+  const client = createBridgeClient({
+    localWindow: w.child,
+    parentWindow: w.host,
+    parentOrigin: "https://portal.example.invalid",
+    onPresentation: () => {},
+  });
+  cleanup.push(
+    () => client.close(),
+    () => host.close(),
+  );
+  await vi.waitFor(() => expect(host.state()).toBe("ready"));
+  const init = w.sent.find((item) => item.data.type === "app:init")!.data;
+  const port = w.received.find((item) => item.event.data.type === "app:init")!
+    .event.ports[0];
+  const message = {
+    ...acknowledgement(init),
+    type: "navigation.request",
+    revision: "1",
+    presentationRevision: "1",
+    path: "/editor",
+    replace: false,
+  };
+  port.postMessage({ ...message, generation: "2" });
+  port.postMessage({ ...message, presentationRevision: "2" });
+  port.postMessage({ ...message, revision: "2" });
+  await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
+  port.postMessage({ ...message, revision: "3", path: "https://evil.invalid" });
+  await vi.waitFor(() => expect(host.state()).toBe("failed"));
+  expect(navigate).toHaveBeenCalledOnce();
+});
