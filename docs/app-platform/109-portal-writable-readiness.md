@@ -130,8 +130,31 @@ Required new markers/report flags are:
 | `PORTAL_WRITABLE_READINESS_REFRESHED` | `native_portal_writable_readiness_refreshed` |
 | `PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED` | `native_portal_writable_readiness_stale_source_refused` |
 
-Fresh Linux acceptance is pending. Passing a synthetic fixture or an older
-start test is not evidence for these composed readiness cases.
+Functional source `f4d8ebd661a5eb5496d225c92167a6d63bde6b4f` passed
+[quota workflow 40818206784](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40818206784),
+job `123264206750`. The checkout merge explicitly contains this source and the
+parent `888d5ec5eb9e989bb137e71a90e062a5879096c5`. Its uploaded
+`project-quota-evidence.json` has all three new readiness flags true, all prior
+writable start/writer/native checks true, and `owned_resources_cleaned=true`.
+The owned registry cleanup step also passed. `execution_ready=false` remains
+intentional: isolated subsystem acceptance does not enable the product runtime.
+
+[General workflow 40818206640](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40818206640)
+job `123264206965` explicitly ran both SQLite and PostgreSQL writer/start/readiness
+contracts before dependency scanning; all passed in 47.781s. In particular, both
+new readiness source tests and all 16 refusal cases per database passed. Build,
+vet and staticcheck passed. Dependency scanning still reports the existing
+`golang.org/x/net@v0.60.0` findings GO-2026-6866 and GO-2026-6860 (reported fixed
+in v0.62.0), so the ordinary full test step was skipped. This change does not
+modify dependencies or classify that Go job as passing.
+
+Local focused writer/start/readiness race passed in 28.534s and broader
+platform/managed race in 156.795s; Linux amd64/arm64 Portal test builds, vet,
+staticcheck and Python14 passed. Web build/lint/typecheck, all web test shards,
+workflow lint and Docker font/smoke checks passed. All three app race shards and their aggregate passed. Shard 1/job
+`123264206743` ran the full runner journal race in 233.690s and its Portal app
+subset in 151.251s. A standalone daemon workflow is not triggered by this
+Portal/fixture-only diff; the quota workflow independently runs the real native composition.
 
 ## Remaining work
 
