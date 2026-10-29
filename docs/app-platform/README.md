@@ -10,7 +10,8 @@ Documents 01–08 specify the required outcome and acceptance, not completed
 features. [The execution register](09-execution-log.md) records implemented work
 and exact evidence. Recent continuations connect [claimed writable installation
 and activation](113-writable-install-worker.md) and
-[writable queue/scheduling](114-writable-install-scheduling.md).
+[writable queue/scheduling](114-writable-install-scheduling.md), followed by
+[complete background installation](115-writable-background-completion.md).
 An implemented internal primitive does not establish a complete user-facing
 marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 

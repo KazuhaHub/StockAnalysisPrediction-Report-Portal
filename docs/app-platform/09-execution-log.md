@@ -2088,3 +2088,28 @@ daemon workflow 40455635317 passed on the functional source as well.
   Uninterrupted background completion/browser launch,
   physical lifecycle, broker/SDK/reference apps and full release acceptance
   remain incomplete. No production/credential/Status/SDK-freeze/beta change.
+
+- Added a fresh writable native fixture driven from queued to ready solely by
+  the actual non-root background service, with no manual lease/stage/candidate
+  calls or injected install failure. It checks exact effects/claim/fence/cleared
+  ownership and actual ordinary-user POST/GET with body spoof refusal. A separate
+  pre-start signed test ownership record enables bounded cleanup on interruption
+  without staging a start by hand. Root independently verifies completed native
+  identity/full quota evidence, then exercises missing-snapshot fallback cleanup
+  and re-witnesses the neighboring app alive. Added ownership refusal tests and
+  six mandatory native report flags. See [background completion](115-writable-background-completion.md).
+  Local ownership race, dual-arch Linux builds, vet/staticcheck and Python14
+  passed. Functional source `ecc1134fb177eba871b1c7570818226a28f3d47d` passed
+  quota workflow 40833806816/job 123313800713: all six background-completion,
+  current-viewer, native-witness, fallback/owned-cleanup and neighbor-preservation
+  flags true, prior native/full-quota/owned-cleanup checks true; registry cleanup
+  succeeded. General workflow 40833806834/job 123313800959 passed lifecycle SQL
+  77.011s, current/legacy access SQL 39.915s, worker/static SQL 15.208s and queue/
+  scheduling/ownership SQL 16.098s on SQLite/PostgreSQL. Build/vet/staticcheck,
+  published market, arm64 numeric, all app race shards/aggregate, web and Docker
+  passed. Shard 1/job 123313800910 ran full journal race 211.815s and Portal
+  subset 60.478s. Go failed existing x/net GO-2026-6866/6860 findings and skipped
+  ordinary full tests. No standalone daemon workflow triggered.
+  No production code, schema, dependency, deployment, credential, Status,
+  SDK-freeze or beta change. Generic managed browser launch and
+  the remaining complete lifecycle/platform acceptance are still unfinished.

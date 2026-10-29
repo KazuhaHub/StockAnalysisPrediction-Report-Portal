@@ -183,7 +183,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	defer registrationReader.Close()
 	defer registrationWriter.Close()
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
-	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=30s")
+	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", "-test.timeout=60s")
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData}
 	if managed {
@@ -212,6 +212,19 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 					t.Error("owned IPC cleanup", err)
 				}
 			}
+		}()
+	}
+	if managed {
+		defer func() {
+			stopServer()
+			fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
+			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			if !t.Failed() {
+				// The first writable app remains alive while the second is removed.
+				checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
+				t.Log("PORTAL_WRITABLE_BACKGROUND_NEIGHBOR_PRESERVED")
+			}
+			t.Log("PORTAL_WRITABLE_BACKGROUND_OWNED_CLEANUP")
 		}()
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
@@ -282,6 +295,19 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 			t.Log(marker)
 		}
+		for _, marker := range []string{"PORTAL_WRITABLE_BACKGROUND_COMPLETE", "PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER"} {
+			if !bytes.Contains(output.Bytes(), []byte(marker)) {
+				t.Fatal("background completion acceptance missing", marker, output.String())
+			}
+			t.Log(marker)
+		}
+		checkPlatformWritableAutoFixture(t, childData, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
+		// Preserve verified public evidence, then exercise cleanup when the normal
+		// completed-controller snapshot is unavailable after an interruption.
+		if err := os.Rename(filepath.Join(childData, "writable-auto-start.json"), filepath.Join(childData, "writable-auto-start.verified.json")); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("PORTAL_WRITABLE_BACKGROUND_NATIVE_WITNESS")
 		checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 		t.Log("MANAGED_PROFILE_OBSERVED")
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_DATA_READY")) {
@@ -587,6 +613,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	t.Log("STATIC_DRIVER_COMPLETE")
 	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
 		testNativePortalWritableWriter(t, s, session, endpoint)
+		testNativeWritableBackgroundCompletion(t, s, session, endpoint)
 		testNativePortalManagedInstallData(t, s, session, endpoint)
 	}
 
