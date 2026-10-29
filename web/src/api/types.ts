@@ -551,6 +551,28 @@ export interface RunQuota {
   // which never refills — the UI must not invent a date for it.
 }
 
+// Bulk Markdown export in the storage console (GET /api/admin/report-exports). generator_version is
+// producer provenance derived server-side, not the written-form Rep.version.
+export interface AdminExportReport {
+  id: number
+  title: string
+  symbol: string
+  name: string
+  rtype: string
+  date: string
+  generator_version: string
+  sent_at: string
+}
+
+export interface AdminExportReportPage {
+  reports: AdminExportReport[]
+  total: number
+  page: number
+  page_size: number
+  types: string[]
+  generator_versions: string[]
+}
+
 // Storage-cleanup console (docs/adr/0017-storage-cleanup.md). Config + last-run summary; retention
 // floors clamp the day inputs. freq drives an admin-set daily/weekly/monthly retention pass.
 export interface CleanupConfig {
