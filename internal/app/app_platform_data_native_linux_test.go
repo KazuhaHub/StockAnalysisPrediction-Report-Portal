@@ -196,6 +196,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			stopServer()
 			commandPath := filepath.Join(childData, "candidate-command.json")
 			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			for _, stage := range []string{"ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"} {
+				marker := "PORTAL_WRITABLE_WORKER_" + stage
+				if !bytes.Contains(output.Bytes(), []byte(marker)) {
+					t.Fatal("Portal writable worker acceptance marker missing", marker, output.String())
+				}
+				t.Log(marker)
+			}
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := native.Close(); err != nil {
 				t.Error(err)
