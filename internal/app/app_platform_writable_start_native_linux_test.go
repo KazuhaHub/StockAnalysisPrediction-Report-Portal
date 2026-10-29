@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"golang.org/x/sys/unix"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -185,6 +187,37 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 			t.Error("owned writable IPC cleanup", err)
 		}
 	} else {
+		proofPath := filepath.Join(os.Getenv("APP_DATA_JOURNAL_ROOT"), index.Payload.DataNamespaceID, "writer-proof.json")
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			fd, openErr := unix.Open(proofPath, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+			var proof []byte
+			if openErr == nil {
+				f := os.NewFile(uintptr(fd), "owned-Portal-writer-proof")
+				proof, _ = io.ReadAll(io.LimitReader(f, 4097))
+				f.Close()
+			}
+			var q struct {
+				Format        string `json:"format"`
+				Allocated     int64  `json:"allocated_bytes"`
+				Inodes        int    `json:"created_inodes"`
+				ByteDenied    bool   `json:"byte_denied"`
+				InodeDenied   bool   `json:"inode_denied"`
+				AttrDenied    bool   `json:"attribute_changes_denied"`
+				RootProtected bool   `json:"root_owner_protected"`
+			}
+			if len(proof) <= 4096 && json.Unmarshal(proof, &q) == nil && q.Format == "portal.fixture.write-probe/1-dev.1" && q.Allocated >= 255<<20 && q.Allocated <= 256<<20 && q.Inodes >= 65408 && q.Inodes < 65536 && q.ByteDenied && q.InodeDenied && q.AttrDenied && q.RootProtected {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("Portal quota probe missing/refused: open=%v fixture_logs=%s", openErr, run("container", "logs", id))
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		// Reinspect after the completed physical probe, not just at process start.
+		if json.Unmarshal(run("container", "inspect", id), &actual) != nil || len(actual) != 1 || actual[0].ID != id {
+			t.Fatal("writable witness changed during quota probe")
+		}
 		if !actual[0].State.Running || actual[0].RestartCount != 0 || actual[0].State.StartedAt == "" {
 			t.Fatalf("writable process not continuously running: state=%+v restart_count=%d fixture_logs=%s", actual[0].State, actual[0].RestartCount, run("container", "logs", id))
 		}
@@ -194,5 +227,6 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 			t.Fatal("writable process restarted after original observation", err)
 		}
 		t.Log("PORTAL_WRITABLE_START_NATIVE_WITNESS")
+		t.Log("PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED")
 	}
 }
