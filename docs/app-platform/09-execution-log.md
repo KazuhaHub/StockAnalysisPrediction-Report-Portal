@@ -2299,3 +2299,16 @@ daemon workflow 40455635317 passed on the functional source as well.
   local tests and exact Linux/PG/native CI remain pending. See
   [network dependency repair](129-network-dependency-security.md). This neither
   rewrites prior evidence nor completes P07/P00–P14 or activates production.
+
+
+- Added a purpose-separated controller-signed foreground HTTP envelope binding
+  current opaque viewer scope, installation/review/release/generation/policy and
+  exact target/headers/body. A single-use call wrapper uses the shared real HTTPS
+  executor and rechecks online authority/current enrollment/expiry at all three
+  checkpoints. Post-IO refusal releases no response and never retries. Real
+  signature/TLS, tampering, revocation/expiry, copy and concurrent-use cases pass
+  locally with race/vet/Linux compilation. No private broker transport, actual
+  SQL actor adapter or granted provider is enabled. Single use is per call object,
+  not durable/global replay protection. See
+  [signed network requests](130-signed-network-request-boundary.md). Exact CI,
+  full P00–P14 and production acceptance remain open.

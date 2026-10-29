@@ -212,3 +212,17 @@ func validHTTPPolicyPath(path string) bool {
 	}
 	return true
 }
+
+// ValidHTTPPolicyHeaderValue bounds the two supported request header values;
+// it cannot permit arbitrary header names or inject additional header lines.
+func ValidHTTPPolicyHeaderValue(s string) bool {
+	if len(s) > 256 {
+		return false
+	}
+	for _, b := range []byte(s) {
+		if b < 32 || b > 126 {
+			return false
+		}
+	}
+	return true
+}

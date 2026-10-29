@@ -76,6 +76,10 @@ func NewHTTP(p HTTPPolicy, authorize func(context.Context) error) (*HTTP, error)
 }
 
 func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, error) {
+	return h.do(parent, input, nil)
+}
+
+func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.Context) error) (HTTPResponse, error) {
 	var zero HTTPResponse
 	if h == nil || h.authorize == nil || h.origin == nil || parent == nil {
 		return zero, ErrDenied
@@ -84,7 +88,7 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 		return zero, ErrUnavailable
 	}
 	// Validate before allocating a slot or invoking any external work.
-	if int64(len(input.Body)) > h.policy.RequestBytes || !validHeader(input.Accept) || !validHeader(input.ContentType) {
+	if int64(len(input.Body)) > h.policy.RequestBytes || !appplatform.ValidHTTPPolicyHeaderValue(input.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(input.ContentType) {
 		return zero, ErrDenied
 	}
 	if appplatform.ValidateHTTPPolicyTarget(h.policy, input.Method, input.URL) != nil {
@@ -99,7 +103,16 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 		return zero, ErrUnavailable
 	}
 	input.Body = bytes.Clone(input.Body)
-	if h.authorize(ctx) != nil {
+	authorize := func(ctx context.Context) error {
+		if err := h.authorize(ctx); err != nil {
+			return err
+		}
+		if extra != nil {
+			return extra(ctx)
+		}
+		return nil
+	}
+	if authorize(ctx) != nil {
 		return zero, ErrDenied
 	}
 	addresses, err := h.lookup(ctx, h.origin.Hostname())
@@ -114,7 +127,7 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 			return zero, ErrDenied
 		}
 	}
-	if h.authorize(ctx) != nil {
+	if authorize(ctx) != nil {
 		return zero, ErrDenied
 	}
 	if ctx.Err() != nil {
@@ -165,25 +178,13 @@ func (h *HTTP) Do(parent context.Context, input HTTPRequest) (HTTPResponse, erro
 		return zero, ErrUncertain
 	}
 	contentType := response.Header.Get("Content-Type")
-	if !validHeader(contentType) || len(response.Header.Values("Content-Type")) > 1 {
+	if !appplatform.ValidHTTPPolicyHeaderValue(contentType) || len(response.Header.Values("Content-Type")) > 1 {
 		return zero, ErrUncertain
 	}
-	if h.authorize(ctx) != nil || ctx.Err() != nil {
+	if authorize(ctx) != nil || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
 	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body}, nil
-}
-
-func validHeader(s string) bool {
-	if len(s) > 256 {
-		return false
-	}
-	for _, b := range []byte(s) {
-		if b < 32 || b > 126 {
-			return false
-		}
-	}
-	return true
 }
 
 var deniedPrefixes = func() []netip.Prefix {
