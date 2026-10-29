@@ -109,7 +109,7 @@ backend calls and the unchanged sandbox. It records a screenshot and fixed
 JSON evidence only after the browser assertions pass. The identity/trust fixture
 is explicit: this is not production publisher enrollment or a market release.
 
-Local checks passed: 54 authoring/catalogue Python tests, SDK267 tests, demo2,
+Local checks passed: 55 authoring/catalogue Python tests, SDK267 tests, demo2,
 Status UI9, workspace types, both generated template type/test/builds, strict SDK
 preflight, and Go parsing/digest/sandbox-document checks on the generated candidate.
 The complete local Portal/HTTP/session/SQLite browser drill verified Preview,
@@ -120,7 +120,17 @@ Apps source 6abdafa1b21c8d62b48d39646962914b9a1b3d9f. Initial Linux runs
 no named business timezone, so launch metadata intentionally supplied an empty
 zone and the frontend refused it. A bounded failure screenshot/status diagnostic
 confirmed this. The fixture now sets UTC explicitly, as the local drill already
-did, preserving the production fail-closed timezone rule. Final CI remains pending.
+did, preserving the production fail-closed timezone rule. Portal15e289f2 passed
+run40944298514/job123695464741. Its generated-template JSON confirms the browser
+flow, source/ZIP hashes, test publisher identity and no backend/production
+provisioning. The full hardened quota report retains all eight SDK browser flags,
+owned cleanup and neighbor preservation true; execution_ready remains false.
+
+The generator then received a failing-then-passing literal-name regression fix:
+marker-like text inside a quoted application name must remain literal instead of
+being substituted twice and damaging JSON. Apps eea3e9afeb1896513def64edefb2cbac3ff3e80e
+passed all jobs in run40944731609. The workflow now pins that exact source and
+repeats acceptance at the paired revision; final evidence belongs in PR333.
 The broader P06/P07/P08, full accessibility/visual cases, persistent user data,
 managed reference app, marketplace/update/uninstall/recovery and release gates
 remain open.
