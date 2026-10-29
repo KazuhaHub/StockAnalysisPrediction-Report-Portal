@@ -47,7 +47,9 @@ export default function AppView() {
         credentials: 'same-origin',
       })
       if (!res.ok) {
-        setError(res.status === 404 ? t('apps.notFound') : t('apps.tokenFailed'))
+        // A closed app answers 403 with the code app_closed (ADR 0048); say so rather than "failed".
+        const body = res.status === 403 ? await res.json().catch(() => ({})) : null
+        setError(res.status === 404 ? t('apps.notFound') : body?.code === 'app_closed' ? t('apps.closed') : t('apps.tokenFailed'))
         return null
       }
       const s: AppTokenResp = await res.json()

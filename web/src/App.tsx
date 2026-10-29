@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './auth'
 import { SiteProvider } from './site'
 import { AnnouncementsProvider } from './announcements'
 import { FavoritesProvider } from './favorites'
+import { AppAccessProvider, RequireAppOpen } from './appAccess'
 import { lazyRetry } from './lib/lazyRetry'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -87,7 +88,11 @@ function Protected({ children }: { children: React.ReactNode }) {
   // of inheriting the previous account's items.
   return (
     <FavoritesProvider key={user} user={user}>
-      <AnnouncementsProvider user={user}>{children}</AnnouncementsProvider>
+      <AnnouncementsProvider user={user}>
+        <AppAccessProvider key={user} user={user}>
+          {children}
+        </AppAccessProvider>
+      </AnnouncementsProvider>
     </FavoritesProvider>
   )
 }
@@ -168,12 +173,21 @@ function AppRoutes() {
         {/* Quotes is ungated on purpose: it reads market data and nothing about this portal, and
             every signed-in user can already see a price on a reading page. Its `perm` in
             lib/builtinApps.ts is '' to match — that file's own note asks for the two to agree. */}
-        <Route path="/apps/quotes" element={<QuotesApp />} />
+        <Route
+          path="/apps/quotes"
+          element={
+            <RequireAppOpen appKey="builtin:quotes">
+              <QuotesApp />
+            </RequireAppOpen>
+          }
+        />
         <Route
           path="/apps/batch"
           element={
             <RequirePerm perm="run_batch">
-              <BatchConsole />
+              <RequireAppOpen appKey="builtin:batch">
+                <BatchConsole />
+              </RequireAppOpen>
             </RequirePerm>
           }
         />
@@ -181,7 +195,9 @@ function AppRoutes() {
           path="/apps/recurring"
           element={
             <RequirePerm perm="run_batch">
-              <RecurringConsole />
+              <RequireAppOpen appKey="builtin:recurring">
+                <RecurringConsole />
+              </RequireAppOpen>
             </RequirePerm>
           }
         />

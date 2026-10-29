@@ -3259,7 +3259,21 @@
   "export.reader.fieldQuotaHint": "每位读者在面板时区的一个自然日内可导出的报告总数（1-100000）。",
   "export.reader.quotaBelowMax": "每日额度（{{quota}}）低于单次上限（{{max}}），额度将成为实际限制。",
   "err.export_disabled": "你所在的组织单元未开通报告导出。",
+  "err.app_closed": "该应用对你所在的组织单元不可用。",
   "err.export_empty": "没有符合条件的报告可导出。",
   "err.export_too_large": "本次导出超过单次上限，请缩小筛选范围。",
-  "err.export_quota": "今天的导出额度不足，请缩小筛选范围或明天再试。"
+  "err.export_quota": "今天的导出额度不足，请缩小筛选范围或明天再试。",
+  "apps.order.title": "应用顺序",
+  "apps.order.hint": "拖动调整顺序。应用中心按此顺序列出内置应用和已安装应用。",
+  "apps.order.drag": "调整 {{name}} 的顺序",
+  "apps.access.title": "按组织单元设置访问",
+  "apps.access.hint": "组织单元默认继承上级的设置，也可以单独覆盖。管理员始终可以看到所有应用。",
+  "apps.access.open": "开放",
+  "apps.access.closed": "关闭",
+  "apps.access.builtinNote": "内置应用关闭后会在门户中隐藏，但其底层接口与其他页面共用，不会被拦截。已安装的应用由服务器拒绝访问。",
+  "apps.closed": "该应用对你所在的组织单元不可用。",
+  "apps.unavailable": "该应用不可用",
+  "apps.unavailableHint": "该应用已对你所在的组织单元关闭。如需使用请联系管理员。",
+  "audit.a.app.order": "调整应用顺序",
+  "audit.a.app.access": "调整组织单元的应用访问"
 }

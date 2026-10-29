@@ -3259,7 +3259,21 @@
   "export.reader.fieldQuotaHint": "每位讀者在面板時區的一個自然日內可匯出的報告總數（1-100000）。",
   "export.reader.quotaBelowMax": "每日額度（{{quota}}）低於單次上限（{{max}}），額度將成為實際限制。",
   "err.export_disabled": "你所在的組織單位未開通報告匯出。",
+  "err.app_closed": "此應用對你所在的組織單位不可用。",
   "err.export_empty": "沒有符合條件的報告可匯出。",
   "err.export_too_large": "本次匯出超過單次上限，請縮小篩選範圍。",
-  "err.export_quota": "今天的匯出額度不足，請縮小篩選範圍或明天再試。"
+  "err.export_quota": "今天的匯出額度不足，請縮小篩選範圍或明天再試。",
+  "apps.order.title": "應用順序",
+  "apps.order.hint": "拖曳調整順序。應用中心依此順序列出內建應用和已安裝應用。",
+  "apps.order.drag": "調整 {{name}} 的順序",
+  "apps.access.title": "依組織單元設定存取",
+  "apps.access.hint": "組織單元預設繼承上級的設定，也可以單獨覆寫。管理員始終可以看到所有應用。",
+  "apps.access.open": "開放",
+  "apps.access.closed": "關閉",
+  "apps.access.builtinNote": "內建應用關閉後會在入口中隱藏，但其底層介面與其他頁面共用，不會被攔截。已安裝的應用由伺服器拒絕存取。",
+  "apps.closed": "此應用對你所在的組織單元不可用。",
+  "apps.unavailable": "此應用不可用",
+  "apps.unavailableHint": "此應用已對你所在的組織單元關閉。如需使用請聯絡管理員。",
+  "audit.a.app.order": "調整應用順序",
+  "audit.a.app.access": "調整組織單元的應用存取"
 }
