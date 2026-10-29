@@ -245,7 +245,7 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
-	case backendRequestQueryMagic:
+	case backendRequestQueryMagic, writableBackendRequestQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return
 		}
@@ -256,7 +256,11 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		conn.SetDeadline(executionDeadline)
 		executionStop := context.AfterFunc(executionCtx, func() { conn.Close() })
 		defer executionStop()
-		s.handleBackendRequest(executionCtx, conn)
+		if string(header[:8]) == writableBackendRequestQueryMagic {
+			s.handleWritableBackendRequest(executionCtx, conn)
+		} else {
+			s.handleBackendRequest(executionCtx, conn)
+		}
 		return
 	case writableLifecycleQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {

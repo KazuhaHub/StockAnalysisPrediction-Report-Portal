@@ -57,4 +57,5 @@ func testNativePortalWritableBoot(t *testing.T, s *Server, lease platformOperati
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1 WHERE id=?`, i.start.writer.runtime.id)
 	t.Log("PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED")
+	testNativeWritableBackendRequestRelay(t, endpoint, i, boot)
 }

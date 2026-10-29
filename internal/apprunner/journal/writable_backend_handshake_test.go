@@ -14,7 +14,7 @@ import (
 )
 
 // Synthetic applied-file metadata tests readers only, never native exchange.
-func writableHandshakeFixture(t *testing.T) (*Store, []byte, []byte, writableHandshakePreflight) {
+func writableHandshakeFixture(t *testing.T) (*Store, []byte, []byte, writableBackendExchangePreflight) {
 	t.Helper()
 	s, raw, sig, attempt := writableRegistrationClaimFixture(t)
 	var marker writableRegistrationClaim
@@ -25,7 +25,7 @@ func writableHandshakeFixture(t *testing.T) (*Store, []byte, []byte, writableHan
 	if _, err := s.db.Exec(`UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=?`, string(encoded), now, marker.EffectID); err != nil {
 		t.Fatal(err)
 	}
-	before, err := s.prepareWritableBackendHandshake(context.Background(), raw, sig, nil)
+	before, err := s.prepareWritableBackendExchange(context.Background(), raw, sig, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestWritableBackendHandshakeRefusesCurrentDrift(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := s.prepareWritableBackendHandshake(ctx, before.facts.raw, before.facts.signature, nil); err == nil {
+			if _, err := s.prepareWritableBackendExchange(ctx, before.facts.raw, before.facts.signature, nil); err == nil {
 				t.Fatal("changed source preflight accepted", mode)
 			}
 			if got, err := s.finishWritableBackendHandshake(ctx, before, "a.b", driver.WritableBackendHandshakeObservation{}); err == nil || got.Format != "" {
@@ -91,7 +91,7 @@ func TestWritableBackendHandshakeRefusesCurrentDrift(t *testing.T) {
 func TestWritableBackendHandshakeRefusesUnknownDelivery(t *testing.T) {
 	s, raw, sig, _ := writableRegistrationClaimFixture(t)
 	defer s.Close()
-	if _, err := s.prepareWritableBackendHandshake(context.Background(), raw, sig, nil); err == nil {
+	if _, err := s.prepareWritableBackendExchange(context.Background(), raw, sig, nil); err == nil {
 		t.Fatal("unknown private-file delivery treated as completed")
 	}
 }

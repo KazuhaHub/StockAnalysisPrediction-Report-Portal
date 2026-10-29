@@ -34,15 +34,15 @@ func ParseWritableBackendHandshakeEvidence(raw []byte) (WritableBackendHandshake
 	return e, nil
 }
 
-type writableHandshakePreflight struct {
+type writableBackendExchangePreflight struct {
 	facts   writableRegistrationFacts
 	receipt WritableBackendRegistrationReceipt
 	request driver.WritableCandidateLaunchRequest
 	binding driver.WritableBackendRegistrationSnapshot
 }
 
-func (s *Store) prepareWritableBackendHandshake(ctx context.Context, raw, signature, descriptor []byte) (writableHandshakePreflight, error) {
-	var zero writableHandshakePreflight
+func (s *Store) prepareWritableBackendExchange(ctx context.Context, raw, signature, descriptor []byte) (writableBackendExchangePreflight, error) {
+	var zero writableBackendExchangePreflight
 	tx, f, err := s.beginWritableRegistration(ctx, raw, signature, "applied")
 	if err != nil {
 		return zero, err
@@ -71,7 +71,7 @@ func (s *Store) prepareWritableBackendHandshake(ctx context.Context, raw, signat
 	if err := checkWritableRegistrationCurrent(ctx, f); err != nil {
 		return zero, err
 	}
-	return writableHandshakePreflight{facts: f, receipt: receipt, request: request, binding: binding}, nil
+	return writableBackendExchangePreflight{facts: f, receipt: receipt, request: request, binding: binding}, nil
 }
 
 // Holds owner exclusion through current authorization, fixed private handshake
@@ -90,7 +90,7 @@ func (s *Store) ExchangeWritableBackendHandshake(ctx context.Context, raw, signa
 	if s.closing.Load() {
 		return zero, ErrFenceReconciliation
 	}
-	before, err := s.prepareWritableBackendHandshake(ctx, raw, signature, descriptor)
+	before, err := s.prepareWritableBackendExchange(ctx, raw, signature, descriptor)
 	if err != nil {
 		return zero, err
 	}
@@ -106,7 +106,7 @@ func (s *Store) ExchangeWritableBackendHandshake(ctx context.Context, raw, signa
 	}
 	return s.finishWritableBackendHandshake(ctx, before, challenge, observed)
 }
-func (s *Store) finishWritableBackendHandshake(ctx context.Context, before writableHandshakePreflight, challenge string, observed driver.WritableBackendHandshakeObservation) (WritableBackendHandshakeEvidence, error) {
+func (s *Store) finishWritableBackendHandshake(ctx context.Context, before writableBackendExchangePreflight, challenge string, observed driver.WritableBackendHandshakeObservation) (WritableBackendHandshakeEvidence, error) {
 	var zero WritableBackendHandshakeEvidence
 	tx, f, err := s.beginWritableRegistration(ctx, before.facts.raw, before.facts.signature, "applied")
 	if err != nil {

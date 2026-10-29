@@ -42,6 +42,7 @@ func assertWritableNativeHandshake(t *testing.T, s *Store, native *driver.Candid
 	if err != nil || boot == "" {
 		t.Fatal("actual app did not prove delivered registration possession", err)
 	}
+	send := writableNativeRequestSender(t, s, native, raw, sig, descriptor, registration, boot)
 	other, err := signer.NewChallenge(time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +89,10 @@ func assertWritableNativeHandshake(t *testing.T, s *Store, native *driver.Candid
 		if got, err := s.ExchangeWritableBackendHandshake(ctx, raw, sig, descriptor, challenge, native); err == nil || got.Format != "" {
 			t.Fatal("same-content replacement inode accepted")
 		}
+		if got, err := send("POST"); err == nil || got.Format != "" {
+			t.Fatal("request accepted same-content replacement inode")
+		}
+		t.Log("NATIVE_WRITABLE_REQUEST_FILE_REPLACEMENT_REFUSED")
 	}()
 	again, err := s.ExchangeWritableBackendHandshake(ctx, raw, sig, descriptor, other, native)
 	if err != nil {
@@ -97,6 +102,7 @@ func assertWritableNativeHandshake(t *testing.T, s *Store, native *driver.Candid
 	if err != nil || againBoot != boot {
 		t.Fatal("same process boot identity changed", err)
 	}
+	assertWritableNativeRequestResult(t, send, receipt)
 	// Rename changes ctime during deliberate fault injection; compare inode and
 	// content/mode instead, while durable rows must remain byte-identical.
 	restored := writableRegistrationFixtureStamp(t, path, document)
@@ -104,13 +110,23 @@ func assertWritableNativeHandshake(t *testing.T, s *Store, native *driver.Candid
 		t.Fatal("handshake changed original file identity or durable journal")
 	}
 }
-func assertWritableStoppedHandshake(t *testing.T, s *Store, native *driver.CandidateRuntime, raw, sig, descriptor []byte, dockerSocket string, receipt WritableBackendRegistrationReceipt) {
+func assertWritableStoppedHandshake(t *testing.T, s *Store, native *driver.CandidateRuntime, raw, sig, descriptor, document []byte, dockerSocket string, receipt WritableBackendRegistrationReceipt) {
 	t.Helper()
 	before := writableFixtureJournalSnapshot(t, s)
 	candidateFixtureDocker(t, dockerSocket, "container", "stop", "--time", "10", receipt.Claim.NativeID)
 	if got, err := s.ExchangeWritableBackendHandshake(context.Background(), raw, sig, descriptor, "a.b", native); err == nil || got.Format != "" {
 		t.Fatal("stopped backend supplied handshake")
 	}
+	registration, err := appplatform.ParseBackendRegistration(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registration.Close()
+	send := writableNativeRequestSender(t, s, native, raw, sig, descriptor, registration, "stopped-fixture")
+	if got, err := send("POST"); err == nil || got.Format != "" {
+		t.Fatal("stopped writable backend supplied business reply")
+	}
+	t.Log("NATIVE_WRITABLE_STOPPED_REQUEST_REFUSED")
 	if strings.TrimSpace(string(candidateFixtureDocker(t, dockerSocket, "container", "inspect", "--format", "{{.State.Running}}", receipt.Claim.NativeID))) != "false" || before != writableFixtureJournalSnapshot(t, s) {
 		t.Fatal("handshake restarted process or changed history")
 	}

@@ -223,5 +223,5 @@ func assertWritableRegistrationNormalDelivery(t *testing.T, s *Store, native *dr
 		t.Fatal("normal replay rewrote file")
 	}
 	assertWritableNativeHandshake(t, s, native, raw, sig, descriptor, document, sockets, delivered)
-	assertWritableStoppedHandshake(t, s, native, raw, sig, descriptor, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), delivered)
+	assertWritableStoppedHandshake(t, s, native, raw, sig, descriptor, document, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), delivered)
 }

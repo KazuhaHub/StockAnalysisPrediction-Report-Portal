@@ -1969,3 +1969,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   activation/worker, positive expired-unknown recovery through Portal, physical
   lifecycle, broker, SDK/reference apps and full P00–P14 acceptance remain
   incomplete. Production, real credentials, Status, SDK freeze and beta unchanged.
+
+- Added the distinct signed writable backend-request family, physical fixed-socket
+  relay, current journal pre/postflight and protected root/controller frames.
+  Reuse existing bounded HTTP/structural-assertion checks without converting
+  writable authority into readonly values. Added refusal/copy/provenance tests
+  plus actual normal/recovered file-inode/stopped-process and cross-UID relay
+  acceptance. The disposable backend now counts route entries and can close
+  after one accepted write to prove the relay does not retry uncertain requests.
+  See [writable request protocol](111-writable-backend-request.md). Fresh Linux
+  results pending. Current Portal viewer/OU access, activation/worker and full
+  lifecycle/broker/SDK/reference-app acceptance remain incomplete; production,
+  credentials, Status, SDK freeze and beta configuration unchanged.

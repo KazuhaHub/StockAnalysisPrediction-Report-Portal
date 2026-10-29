@@ -91,7 +91,15 @@ func SignBackendRequest(c BackendRequestCommand, key ed25519.PrivateKey, a Autho
 }
 func ValidateBackendRequestData(v VerifiedBackendRequest, body []byte, assertion string) error {
 	c := v.command
-	if c.Format != BackendRequestFormat || !appplatform.ValidBackendRequestData(c.Method, c.Path, body, assertion) {
+	if c.Format != BackendRequestFormat {
+		return ErrInvalidCommand
+	}
+	return validateBackendRequestData(c.BootID, c.Method, c.Path, c.BodySHA256, c.AssertionSHA256, body, assertion)
+}
+
+// Structural consistency only; the app must independently verify MAC and viewer.
+func validateBackendRequestData(boot, method, path, bodyDigest, assertionDigest string, body []byte, assertion string) error {
+	if !appplatform.ValidBackendRequestData(method, path, body, assertion) {
 		return ErrInvalidCommand
 	}
 	encoded, _, ok := strings.Cut(assertion, ".")
@@ -111,11 +119,11 @@ func ValidateBackendRequestData(v VerifiedBackendRequest, body []byte, assertion
 	canonical, _ := json.Marshal(claims)
 	// Structural consistency is not MAC/viewer authentication. The application
 	// verifier remains mandatory before executing its route.
-	if !bytes.Equal(canonical, claimsRaw) || claims.Version != 1 || claims.BootID != c.BootID || claims.Method != c.Method || claims.Path != c.Path || claims.BodyDigest != c.BodySHA256 {
+	if !bytes.Equal(canonical, claimsRaw) || claims.Version != 1 || claims.BootID != boot || claims.Method != method || claims.Path != path || claims.BodyDigest != bodyDigest {
 		return ErrInvalidCommand
 	}
 	bodySHA, assertionSHA := sha256.Sum256(body), sha256.Sum256([]byte(assertion))
-	if hex.EncodeToString(bodySHA[:]) != c.BodySHA256 || hex.EncodeToString(assertionSHA[:]) != c.AssertionSHA256 {
+	if hex.EncodeToString(bodySHA[:]) != bodyDigest || hex.EncodeToString(assertionSHA[:]) != assertionDigest {
 		return ErrInvalidCommand
 	}
 	return nil
