@@ -3,7 +3,9 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,7 +14,7 @@ import (
 // Runs after the real background installation and authenticated business IO.
 // This checks the actual session-only HTTP paths; no browser rendering or new
 // backend bridge capability is implied by serving the frontend document.
-func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSession, installation, release string) {
+func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSession, installation, release string, endpoint platformRuntimeEndpoint) {
 	t.Helper()
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
 	mux := http.NewServeMux()
@@ -47,7 +49,38 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 	}
 	t.Log("PORTAL_WRITABLE_CURRENT_DOCUMENT_HTTP")
 	t.Log("PORTAL_WRITABLE_CURRENT_DIRECTORY_HTTP")
+	binding := platformBackendRequestBinding{Generation: launch.Binding["generation"], PolicyRevision: launch.Binding["policyRevision"], ReleaseSHA256: launch.Binding["releaseSha256"]}
+	var before struct {
+		Count int64 `json:"count"`
+		Calls int64 `json:"calls"`
+	}
+	result, err := s.requestPlatformBoundWritableBackend(context.Background(), actor, installation, binding, "GET", "/v1/echo", nil, endpoint)
+	if err != nil || result.Status != 200 || json.Unmarshal(result.Body, &before) != nil {
+		t.Fatal("current page binding did not reach native backend", err)
+	}
+	for _, stale := range []platformBackendRequestBinding{
+		{Generation: "2", PolicyRevision: binding.PolicyRevision, ReleaseSHA256: binding.ReleaseSHA256},
+		{Generation: binding.Generation, PolicyRevision: "9223372036854775807", ReleaseSHA256: binding.ReleaseSHA256},
+		{Generation: binding.Generation, PolicyRevision: binding.PolicyRevision, ReleaseSHA256: strings.Repeat("0", 64)},
+	} {
+		result, err := s.requestPlatformBoundWritableBackend(context.Background(), actor, installation, stale, "POST", "/v1/echo", []byte(`{"stale":true}`), endpoint)
+		if !errors.Is(err, errAppPlatformLaunchUnavailable) || errors.Is(err, errAppPlatformBackendRequestUncertain) || len(result.Body) != 0 {
+			t.Fatal("stale page reached native backend", err)
+		}
+	}
+	var after struct {
+		Count int64 `json:"count"`
+		Calls int64 `json:"calls"`
+	}
+	result, err = s.requestPlatformBoundWritableBackend(context.Background(), actor, installation, binding, "GET", "/v1/echo", nil, endpoint)
+	if err != nil || result.Status != 200 || json.Unmarshal(result.Body, &after) != nil || after.Count != before.Count || after.Calls != before.Calls+1 {
+		t.Fatal("stale binding performed business IO", err)
+	}
+	t.Log("PORTAL_WRITABLE_PAGE_BINDING_NATIVE")
 	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
+	if result, err := s.requestPlatformBoundWritableBackend(context.Background(), actor, installation, binding, "POST", "/v1/echo", []byte(`{}`), endpoint); err == nil || errors.Is(err, errAppPlatformBackendRequestUncertain) || len(result.Body) != 0 {
+		t.Fatal("page binding bypassed revoked audience", err)
+	}
 	for _, target := range []string{path, launch.Source} {
 		if denied := sessionTestRequest(mux, "GET", target, cookie, ""); denied.Code != 404 || strings.Contains(denied.Body.String(), "Fixture") {
 			t.Fatal("native old URL survived current grant revocation", denied.Code)
