@@ -131,3 +131,35 @@ func TestAdminReportExportZipByFiltersAndRejectsMixedSelection(t *testing.T) {
 		t.Fatalf("mixed selection status=%d, want 400", w.Code)
 	}
 }
+
+func TestAdminReportExportAuditsOneEntryPerDownload(t *testing.T) {
+	s := newV1Server(t)
+	id1 := seedExportReport(t, s, Rep{Symbol: "600001", Name: "Alpha", Date: "2026-10-18", RType: "Investment decision", Title: "600001 Investment decision V3.17", Source: "1-6-4 V3.17", MD: "# one"})
+	id2 := seedExportReport(t, s, Rep{Symbol: "600002", Name: "Beta", Date: "2026-10-19", RType: "Investment decision", Title: "600002 Investment decision V3.17", Source: "1-6-4 V3.17", MD: "# two"})
+
+	req := httptest.NewRequest("POST", "/api/admin/report-exports/download", strings.NewReader(`{"ids":[`+jsonNumber(id1)+`,`+jsonNumber(id2)+`]}`))
+	w := httptest.NewRecorder()
+	s.apiAdminReportExportDownload(w, req, "admin")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, reads := s.st.ListAudit(AuditFilter{Action: AuditReportRead}); reads != 0 {
+		t.Fatalf("bulk export wrote %d report.read rows, want 0", reads)
+	}
+	rows, total := s.st.ListAudit(AuditFilter{Action: AuditExportDownload})
+	if total != 1 {
+		t.Fatalf("export.download rows=%d, want 1", total)
+	}
+	var detail struct {
+		Source string  `json:"source"`
+		Format string  `json:"format"`
+		Count  int     `json:"count"`
+		IDs    []int64 `json:"ids"`
+	}
+	if err := json.Unmarshal([]byte(rows[0].Detail), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Actor != "admin" || detail.Source != "reports" || detail.Format != "md_zip" || detail.Count != 2 || len(detail.IDs) != 2 {
+		t.Fatalf("unexpected audit row: %+v detail=%+v", rows[0], detail)
+	}
+}

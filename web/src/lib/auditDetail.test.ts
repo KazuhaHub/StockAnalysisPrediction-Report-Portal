@@ -90,6 +90,13 @@ describe('auditDetail', () => {
     expect(out).toContainEqual(field('retries', '1'))
   })
 
+  it('leads a bulk export with how many reports left, and keeps the id list off the line', () => {
+    const raw = '{"source":"reports","format":"md_zip","count":2,"ids":[11,12]}'
+    const out = auditDetail('export.download', raw, t)
+    expect(out[0]).toEqual(lead('audit.d.export(n=2)'))
+    expect(out.map((p) => ('key' in p ? p.key : p.text))).not.toContain('ids')
+  })
+
   it('drops the fields that say nothing', () => {
     const raw = '{"target":"研报分析","run_at":"","downgraded":false,"target_id":5,"rows":1}'
     const out = auditDetail('run.submit', raw, t)
