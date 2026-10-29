@@ -182,6 +182,17 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	if err != nil || verified.appID != appID || verified.publisherID != publisher {
 		return zero, errAppPlatformLaunchUnavailable
 	}
+	var descriptor []byte
+	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release).Scan(&descriptor); err != nil {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.SHA256 != release {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
+		return zero, err
+	}
 	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, err

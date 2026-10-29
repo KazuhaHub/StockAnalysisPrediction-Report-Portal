@@ -2240,3 +2240,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   pass. Broad ordinary tests remain skipped; full Go CI is not green.
   Public default/bootstrap distribution, P06/P07/P08 and full platform acceptance
   remain open. No production, Status, database, publication or beta changes.
+
+
+- Added exact completed-reader capability snapshot verification shared with the
+  installation worker. Signed optional declarations, canonical consumed review
+  and current denied rows/policies/review IDs must agree before static documents
+  or either backend family can be accessed. Missing/unknown/modified/rebound
+  records refuse without repair. This enables no capability provider. Meaningful
+  static/managed/writable failure cases pass locally; CI evidence pending. See
+  [capability snapshot integrity](126-capability-snapshot-integrity.md).
+  P07 adapters, future storage approvals and full P00–P14 remain open.
