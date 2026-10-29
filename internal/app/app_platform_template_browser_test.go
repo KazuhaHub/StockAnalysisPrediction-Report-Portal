@@ -128,7 +128,7 @@ func TestGeneratedV2TemplateBrowser(t *testing.T) {
 	defer cancel()
 	command := exec.CommandContext(ctx, node, runner)
 	command.WaitDelay = 5 * time.Second
-	command.Env = []string{"PATH=" + filepath.Dir(node) + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "TMPDIR=" + t.TempDir(), "SDK_BROWSER_PACKAGE=" + pkg, "PLAYWRIGHT_BROWSERS_PATH=" + browsers, "APP_V2_TEMPLATE_PROOF=" + filepath.Join(dir, "proof.jpg")}
+	command.Env = []string{"PATH=" + filepath.Dir(node) + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "TMPDIR=" + t.TempDir(), "SDK_BROWSER_PACKAGE=" + pkg, "PLAYWRIGHT_BROWSERS_PATH=" + browsers, "APP_V2_TEMPLATE_PROOF=" + filepath.Join(dir, "proof.jpg"), "APP_V2_TEMPLATE_FAILURE=" + filepath.Join(dir, "failure.jpg")}
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
