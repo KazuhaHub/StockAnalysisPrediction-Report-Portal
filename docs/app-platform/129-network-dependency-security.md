@@ -68,8 +68,8 @@ missing-locale failure in `TestEveryErrorCodeIsTranslatedInEveryLanguage`:
 previously skipped gate had hidden this regression. The change also supplies
 `err.app_platform_request_uncertain` text for the backend's explicit uncertain
 response, advising result verification before a deliberate resubmission. Runtime
-logic/error codes and retry behavior are unchanged. A complete local rerun is
-required after this small localization fix. Local PostgreSQL is unavailable;
+logic/error codes and retry behavior are unchanged. The targeted locale-completeness test, production SPA build and complete local
+ordinary Go rerun pass (internal/app 102.714s). Local PostgreSQL is unavailable;
 its skipped cases must not be counted as passed. General Linux CI must run its
 PostgreSQL-backed ordinary full Go test step after govulncheck, in addition to
 existing pre-gate groups. All selected race/web/Docker checks and disposable
@@ -89,3 +89,21 @@ executor ownership/budgets, revoke/restore behavior, later storage decisions and
 all remaining P00–P14 requirements are still required. The preceding records
 continue to describe their actual old revisions and inherited failures; they are
 not retroactively relabeled green.
+
+
+## First exact-revision CI and bounded runtime correction
+
+At `20a6d9554a349dd2ac64eadf4998008e7c65dd0e`, general run40962478375/job123758556358
+passed govulncheck and entered the ordinary Test step at 22:08:17 UTC. It did
+not finish: GitHub's check annotation states that the job exceeded its maximum
+execution time of 15 minutes. The job ended canceled at 22:16:04 UTC, so the
+PostgreSQL-backed full suite is unproven, not passed. No superseding code push
+caused this cancellation. All selected web/race/workflow/Docker jobs passed;
+native run40962478255 and daemon run40962478275 passed at that same revision.
+
+The Go job budget is now 35 minutes and its explicit per-package Go test budget
+20 minutes, leaving room for build/analysis, focused SQL diagnostics, the full
+PostgreSQL suite and cleanup. Fresh execution, the vulnerability gate, pipefail,
+all tests and assertion outcomes remain enforced. These are finite ceilings,
+not a timeout bypass or evidence that the suite has completed. The corrected
+exact revision must run again and finish before claiming full Go CI green.
