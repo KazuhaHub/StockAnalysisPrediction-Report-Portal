@@ -22,6 +22,12 @@ import (
 func syntheticAppliedWriterFixture(t *testing.T) (*Store, []byte, []byte, DataWriterReceipt) {
 	t.Helper()
 	s, raw, sig, _ := admittedWriterFixture(t)
+	return s, raw, sig, syntheticSettleWriterReceipt(t, s, raw, sig)
+}
+
+// Only historical metadata for reader tests; no opaque native proof is created.
+func syntheticSettleWriterReceipt(t *testing.T, s *Store, raw, sig []byte) DataWriterReceipt {
+	t.Helper()
 	claim, err := s.ClaimDataWriter(context.Background(), raw, sig)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +59,7 @@ func syntheticAppliedWriterFixture(t *testing.T) (*Store, []byte, []byte, DataWr
 	if _, err := s.db.Exec(`UPDATE runner_resources SET revision=3,observed_ms=?,updated_ms=? WHERE kind='volume'`, now, now); err != nil {
 		t.Fatal(err)
 	}
-	return s, raw, sig, r
+	return r
 }
 
 func TestDataWriterHistoricalReceiptReadAndRenewal(t *testing.T) {
