@@ -63,6 +63,9 @@ func TestNetworkHTTPCheckBindsFreshChallengeAndCompleteRequest(t *testing.T) {
 	if json.Unmarshal(raw, &proof) != nil || proof.ExpiresMS != c.ExpiresMS {
 		t.Fatal("confirmation outlives request")
 	}
+	if VerifyNetworkHTTPCheck(c, challenge, raw, sig, a, now+49) != nil || VerifyNetworkHTTPCheck(c, challenge, raw, sig, a, now+50) == nil {
+		t.Fatal("clamped confirmation signature/window was not enforced")
+	}
 }
 
 func TestNetworkHTTPCheckRejectsSignedMalformedProof(t *testing.T) {

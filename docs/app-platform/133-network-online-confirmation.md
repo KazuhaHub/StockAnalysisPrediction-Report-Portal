@@ -142,3 +142,13 @@ adapter or private authenticated transport.
 This slice changes no migration, baseline, persistent store, credential, Status,
 public SDK freeze, catalogue, production deployment or server beta setting.
 Full P00–P14 remains incomplete.
+
+
+## Initial Linux static analysis correction
+
+At functional 94e606ec, general run40969300721/job123781705930 reached Linux
+staticcheck and failed SA4006: the request-expiry-clamping test generated a new
+signature but did not verify it. The test now verifies that exact fresh signature
+at the final valid millisecond and refuses it at request expiry. This strengthens
+the intended cryptographic assertion; no analysis rule is suppressed and runtime
+semantics are unchanged. The corrected exact revision must rerun CI.
