@@ -85,6 +85,13 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 	if err := s.bindPlatformBackendHTTP(endpoint); err == nil {
 		t.Fatal("HTTP runtime endpoint was replaceable")
 	}
+	metadata := sessionTestRequest(mux, "GET", path, cookie, "")
+	var available struct {
+		BackendAvailable bool `json:"backendAvailable"`
+	}
+	if metadata.Code != 200 || json.Unmarshal(metadata.Body.Bytes(), &available) != nil || !available.BackendAvailable {
+		t.Fatal("trusted endpoint did not advertise own-backend transport", metadata.Code)
+	}
 	backendPath := "/api/app-platform/installations/" + installation + "/backend"
 	requestBody := func(method, path, body string) string {
 		raw, _ := json.Marshal(map[string]any{"binding": binding, "method": method, "path": path, "body": body})

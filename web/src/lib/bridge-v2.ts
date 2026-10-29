@@ -1,11 +1,11 @@
-// Experimental presentation transport. No API dispatch, token or legacy fallback.
+// Experimental presentation and own-backend transport. No token or legacy fallback.
 import {
   DESCRIPTOR_CAPABILITIES,
   DESCRIPTOR_LAYOUTS,
   DESCRIPTOR_LOCALES,
 } from "./descriptor-contract.generated";
 
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.1";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.2";
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;
 const MAX_HELLOS = 4;
@@ -47,6 +47,90 @@ export interface BridgePresentation {
 export interface BridgeContext {
   readonly binding: Readonly<BridgeBinding>;
   readonly capabilities: readonly string[];
+  readonly backendAvailable: boolean;
+}
+export interface BridgeBackendRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly body: string;
+}
+export interface BridgeBackendResponse {
+  readonly status: number;
+  readonly body: string;
+}
+export type BridgeBackendFailure =
+  | "not_ready"
+  | "unsupported"
+  | "invalid_request"
+  | "busy"
+  | "unavailable"
+  | "uncertain";
+const backendFailures = new Set<BridgeBackendFailure>([
+  "not_ready",
+  "unsupported",
+  "invalid_request",
+  "busy",
+  "unavailable",
+  "uncertain",
+]);
+export class BridgeBackendError extends Error {
+  readonly retryable = false;
+  constructor(readonly code: BridgeBackendFailure) {
+    super(`Application request: ${code}`);
+    this.name = "BridgeBackendError";
+  }
+}
+export function parseBridgeBackendRequest(
+  value: unknown,
+): BridgeBackendRequest | null {
+  if (
+    !exact(value, ["method", "path", "body"]) ||
+    !isString(value.method) ||
+    !["GET", "POST", "PUT", "DELETE"].includes(value.method) ||
+    !isString(value.path) ||
+    value.path.length > 2048 ||
+    !value.path.startsWith("/v1/") ||
+    /[\\#\x00-\x20\x7f-\uffff]/.test(value.path) ||
+    value.path.split("?")[0] === "/v1/handshake" ||
+    value.path.startsWith("/v1/handshake/") ||
+    !isString(value.body) ||
+    new TextEncoder().encode(value.body).length > 65536 ||
+    (value.method === "GET" && value.body !== "")
+  )
+    return null;
+  try {
+    if (value.body !== "") JSON.parse(value.body);
+  } catch {
+    return null;
+  }
+  return Object.freeze({
+    method: value.method,
+    path: value.path,
+    body: value.body,
+  });
+}
+export function parseBridgeBackendResponse(
+  value: unknown,
+): BridgeBackendResponse | null {
+  if (
+    !exact(value, ["status", "body"]) ||
+    typeof value.status !== "number" ||
+    !Number.isInteger(value.status) ||
+    !(
+      (value.status >= 200 && value.status < 300) ||
+      [400, 403, 404, 409, 422, 429].includes(value.status)
+    ) ||
+    !isString(value.body) ||
+    value.body === "" ||
+    new TextEncoder().encode(value.body).length > 1048576
+  )
+    return null;
+  try {
+    JSON.parse(value.body);
+  } catch {
+    return null;
+  }
+  return Object.freeze({ status: value.status, body: value.body });
 }
 interface Session {
   state(): BridgeState;
@@ -62,6 +146,10 @@ export interface BridgeHostOptions extends BaseOptions {
   presentation: BridgePresentation;
   capabilities: readonly string[];
   onReady?: (presentation: BridgePresentation) => void;
+  onBackendRequest?: (
+    request: BridgeBackendRequest,
+    signal: AbortSignal,
+  ) => Promise<BridgeBackendResponse>;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -269,8 +357,18 @@ export function createBridgeHost(
     inflight = false,
     dirty = false,
     announced = false;
+  let lastRequest = 0n;
+  const requests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    for (const request of requests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    requests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -320,6 +418,108 @@ export function createBridgeHost(
     }
     if (terminal() || !currentEnvelope) return;
     const data = event.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "backend.request" || data.type === "backend.cancel")
+    ) {
+      const cancel = data.type === "backend.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > lastRequest) {
+          fail("protocol_error");
+          return;
+        }
+        const active = requests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          requests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= lastRequest) {
+        fail("protocol_error");
+        return;
+      }
+      lastRequest = BigInt(id);
+      const request = parseBridgeBackendRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "backend.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (!options.onBackendRequest) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (requests.size >= 2) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = requests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        requests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 30_000);
+      requests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new BridgeBackendError("uncertain");
+          return options.onBackendRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseBridgeBackendResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof BridgeBackendError &&
+                backendFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
+        );
+      return;
+    }
     if (
       exact(data, ["type", ...envelopeKeys, "code"]) &&
       data.type === "app:failed" &&
@@ -450,6 +650,7 @@ export function createBridgeHost(
           revision: "1",
           presentation: current,
           capabilities: granted,
+          backend: typeof options.onBackendRequest === "function",
         },
         "*",
         [outbound],
@@ -495,6 +696,10 @@ export function createBridgeHost(
 export function createBridgeClient(options: BridgeClientOptions): Session & {
   presentation(): BridgePresentation | null;
   context(): BridgeContext | null;
+  requestBackend(
+    request: BridgeBackendRequest,
+    signal?: AbortSignal,
+  ): Promise<BridgeBackendResponse>;
 } {
   const {
     localWindow,
@@ -519,8 +724,25 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     connectionRevision = 0;
   let expectedHostNonce: string | undefined;
   const retiredHosts = new Set<string>();
+  let issued = 0n;
+  const requests = new Map<
+    string,
+    {
+      resolve: (value: BridgeBackendResponse) => void;
+      reject: (error: BridgeBackendError) => void;
+      dispose: () => void;
+    }
+  >();
+  function retireRequests() {
+    for (const request of requests.values()) {
+      request.dispose();
+      request.reject(new BridgeBackendError("uncertain"));
+    }
+    requests.clear();
+  }
   const terminal = () => state === "closed" || state === "failed";
   function dispose() {
+    retireRequests();
     clearTimeout(timer);
     clearInterval(retry);
     localWindow.removeEventListener("message", onWindow);
@@ -600,6 +822,47 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     }
     if (terminal() || !envelope) return;
     const data = event.data;
+    if (data && typeof data === "object" && data.type === "backend.result") {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (!decimal(data.requestId) || BigInt(data.requestId) > issued) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response ? parseBridgeBackendResponse(data.response) : null;
+      if (
+        (response && !value) ||
+        (failure && !backendFailures.has(data.code as BridgeBackendFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = requests.get(data.requestId);
+      if (!pending) return;
+      requests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new BridgeBackendError(data.code as BridgeBackendFailure),
+        );
+      return;
+    }
     if (
       !exact(data, ["type", ...envelopeKeys, "revision", "presentation"]) ||
       data.type !== "presentation.changed"
@@ -659,6 +922,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         envelope = undefined;
         context = current = null;
         abort.abort();
+        retireRequests();
+        issued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -699,6 +964,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         "revision",
         "presentation",
         "capabilities",
+        "backend",
       ]) ||
       data.protocol !== BRIDGE_PROTOCOL ||
       !nonce(data.hostNonce) ||
@@ -715,7 +981,12 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     );
     const presentation = parseBridgePresentation(data.presentation),
       granted = capabilityList(data.capabilities);
-    if (!binding || !presentation || !granted) {
+    if (
+      !binding ||
+      !presentation ||
+      !granted ||
+      typeof data.backend !== "boolean"
+    ) {
       closeTransfers(event);
       fail("protocol_error");
       return;
@@ -725,7 +996,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     envelope = Object.fromEntries(
       envelopeKeys.map((key) => [key, data[key] as string]),
     );
-    context = Object.freeze({ binding, capabilities: granted });
+    context = Object.freeze({
+      binding,
+      capabilities: granted,
+      backendAvailable: data.backend,
+    });
     const captured = port;
     port.onmessage = (message) => {
       if (port === captured) onPort(message);
@@ -762,6 +1037,58 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     state: () => state,
     presentation: () => current,
     context: () => context,
+    requestBackend(
+      value: BridgeBackendRequest,
+      signal?: AbortSignal,
+    ): Promise<BridgeBackendResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new BridgeBackendError("not_ready"));
+      if (!context.backendAvailable)
+        return Promise.reject(new BridgeBackendError("unsupported"));
+      const request = parseBridgeBackendRequest(value);
+      if (!request)
+        return Promise.reject(new BridgeBackendError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new BridgeBackendError("not_ready"));
+      if (requests.size >= 2 || issued === MAX_REVISION)
+        return Promise.reject(new BridgeBackendError("busy"));
+      const id = (++issued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = requests.get(id);
+          if (!active) return;
+          requests.delete(id);
+          active.dispose();
+          reject(new BridgeBackendError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "backend.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 35_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        requests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "backend.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
     close() {
       if (state !== "closed") {
         state = "closed";

@@ -1,11 +1,11 @@
-// Experimental presentation host only. The caller must already authorize and
-// verify an immutable asset source and generation; this component grants no API
-// token, capability, installation or backend authority. No route registers it.
+// Experimental app host. The caller supplies an admitted document binding;
+// backend calls still require current server authorization. No token is shared.
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { Alert, Button, Spin } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation } from '../../lib/bridge-v2'
 import './AppFrameV2.css'
+import { createAppBackendTransport } from '../../lib/appBackendV2'
 
 export interface AppFrameV2Props {
   source: string
@@ -13,6 +13,7 @@ export interface AppFrameV2Props {
   binding: BridgeBinding
   presentation: BridgePresentation
   capabilities: readonly string[]
+  backendAvailable?: boolean
   // Supplied by the host layout. Automatic document sizing is not implemented.
   height: number
 }
@@ -35,10 +36,10 @@ export default function AppFrameV2(props: AppFrameV2Props) {
   if (!safeSource(props.source, props.binding) || !parseBridgePresentation(props.presentation) || !Number.isInteger(props.height) || props.height < 64 || props.height > 16384) {
     return <Alert type="error" showIcon title={t('apps.v2Failed')} />
   }
-  const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort()])
+  const identity = JSON.stringify([props.source, props.binding.installationId, props.binding.generation, props.binding.policyRevision, props.binding.releaseSha256, [...props.capabilities].sort(), props.backendAvailable === true])
   return <FrameDocument key={identity} {...props} />
 }
-function FrameDocument({ source, title, binding, presentation, capabilities, height }: AppFrameV2Props) {
+function FrameDocument({ source, title, binding, presentation, capabilities, height, backendAvailable }: AppFrameV2Props) {
   const { t } = useTranslation()
   const frame = useRef<HTMLIFrameElement>(null)
   const session = useRef<ReturnType<typeof createBridgeHost> | null>(null)
@@ -67,15 +68,16 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
     setReady(false)
     if (!frame.current?.contentWindow) { fail(); return }
     const generation = epoch.current
-    session.current = createBridgeHost({
+    try { session.current = createBridgeHost({
       localWindow: window,
       frameWindow: frame.current.contentWindow,
       binding,
       presentation: latest.current,
       capabilities,
+      onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
       onReady: () => { if (live.current && epoch.current === generation) setReady(true) },
       onFailure: () => { if (live.current && epoch.current === generation) fail() },
-    })
+    }) } catch { fail() }
   }
   useLayoutEffect(() => {
     live.current = true

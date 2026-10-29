@@ -24,13 +24,17 @@ func TestPlatformHTTPDocumentCurrentUserAndPolicy(t *testing.T) {
 		t.Fatalf("launch: %d %s", launch.Code, launch.Body.String())
 	}
 	var payload struct {
-		Source  string `json:"source"`
-		Binding struct {
+		BackendAvailable bool   `json:"backendAvailable"`
+		Source           string `json:"source"`
+		Binding          struct {
 			Generation string `json:"generation"`
 		} `json:"binding"`
 	}
 	if err := json.Unmarshal(launch.Body.Bytes(), &payload); err != nil || payload.Source == "" || payload.Binding.Generation != "1" {
 		t.Fatalf("bad launch metadata: %s %v", launch.Body.String(), err)
+	}
+	if payload.BackendAvailable {
+		t.Fatal("static app advertised an execution transport")
 	}
 	result := sessionTestRequest(mux, "GET", payload.Source, cookie, "")
 	if result.Code != 200 || !strings.Contains(result.Body.String(), "Fixture") {
