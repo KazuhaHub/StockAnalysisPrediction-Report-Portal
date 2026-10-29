@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Alert, Button, Flex, Space, Typography } from 'antd'
+import { Alert, Button, Flex, Typography } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { PageActionSnapshot } from '../../lib/page-v2'
@@ -23,14 +23,15 @@ export default function AppPageHeader({ name, icon, state, onBack }: {
           {state?.page.description && <div><Typography.Text type="secondary">{state.page.description}</Typography.Text></div>}
         </div>
       </Flex>
-      {state && <Space wrap>
+      {state && <Flex gap={8} wrap style={{ minWidth: 0, maxWidth: '100%' }}>
         {state.page.actions.map(action => <Button key={action.id}
+          style={{ maxWidth: '100%', minWidth: 0, height: 'auto', minHeight: 32, whiteSpace: 'normal', overflowWrap: 'anywhere' }}
           aria-label={action.label} aria-busy={action.loading || state.busyAction === action.id}
           type={action.variant === 'primary' ? 'primary' : 'default'} danger={action.variant === 'danger'}
           loading={action.loading || state.busyAction === action.id}
           disabled={!state.ready || action.disabled || action.loading || state.busyAction !== null}
           onClick={() => state.invoke(action.id)}>{action.label}</Button>)}
-      </Space>}
+      </Flex>}
     </Flex>
     {state?.outcome === 'uncertain' && <Alert style={{ marginTop: 12 }} type="warning" showIcon title={t('apps.v2ActionUncertain')} />}
   </div>

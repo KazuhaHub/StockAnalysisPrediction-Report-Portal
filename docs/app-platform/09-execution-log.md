@@ -2210,6 +2210,7 @@ daemon workflow 40455635317 passed on the functional source as well.
   at initial 23de4d76 passed run40935591598/job123665149793: page-action and
   prior browser/native/cleanup flags true, execution_ready false. Apps a4c69386
   passed all CI. The later outer-layout fix has local browser/test evidence and
-  awaits CI at its own revision. See [shared page actions](124-shared-page-actions.md).
+  also passed native run40936495688/job123668295562. A further 320px long-label
+  and Enter-action assertion is pending at the next revision. See [shared page actions](124-shared-page-actions.md).
   P06, UX-01/06/08/09 and full platform acceptance remain incomplete. Production,
   Status, publication, stable SDK freeze, storage and beta settings are unchanged.

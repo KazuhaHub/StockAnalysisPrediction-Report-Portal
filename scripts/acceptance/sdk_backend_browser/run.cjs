@@ -61,6 +61,16 @@ async function main(){
   if(await frame.getByTestId('query-effects').innerText()!==effects)throw new Error('appearance repeated query effects');
   await page.waitForTimeout(110);await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
   await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
+  stage='page-wrap';await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
+  const longLabel='L'.repeat(48);await page.getByRole('button',{name:longLabel,exact:true}).waitFor();
+  await page.setViewportSize({width:320,height:800});
+  const geometry=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:window.innerWidth}));
+  if(geometry.scroll>geometry.width+1)throw new Error('shared page header overflows narrow viewport');
+  await page.getByRole('button',{name:longLabel,exact:true}).focus();
+  await page.getByRole('button',{name:longLabel,exact:true}).press('Enter');
+  await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
+  await page.setViewportSize({width:1280,height:720});
+  await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
   stage='layout-grow';
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);

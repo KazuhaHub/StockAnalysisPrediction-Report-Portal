@@ -27,9 +27,10 @@ function Fixture(){
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
  const backend=useAppBackend(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
+ const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
  useAppPage({title:'Fixture '+presentation.locale+' '+navigation.path,description:'Shared page controls',actions:[
-  {id:'increment',label:'Header increment',variant:'primary',onAction:()=>{setPageCount(n=>n+1)}},
+  {id:'increment',label:longLabels?'L'.repeat(48):'Header increment',variant:'primary',onAction:()=>{setPageCount(n=>n+1)}},
   {id:'wait',label:'Header wait',onAction:(signal)=>new Promise<void>((_resolve,reject)=>{signal.addEventListener('abort',()=>{setPageCancelled(n=>n+1);reject(new Error('cancelled'))},{once:true})})},
  ]});
  const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
@@ -38,6 +39,7 @@ function Fixture(){
   const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Button onClick={()=>setLongLabels(v=>!v)}>Toggle long labels</Button>
  <Typography.Text data-testid="page-count">{pageCount}</Typography.Text>
  <Typography.Text data-testid="page-cancelled">{pageCancelled}</Typography.Text>
  <Typography.Text data-testid="query-effects">{queryEffects}</Typography.Text>

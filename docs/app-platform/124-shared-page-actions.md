@@ -1,7 +1,8 @@
 # Shared page metadata and actions
 
 Status: development implementation with initial native/browser evidence and a
-subsequent outer-layout correction undergoing final CI. This is part of
+subsequent outer-layout correction also verified in Linux; narrow-label/keyboard
+coverage is undergoing a further check. This is part of
 P06, addressing UX-01/UX-06/UX-08/UX-09; it does not complete those acceptance
 cases, D5, P06 or P00–P14. No production deployment, Status adoption, stable SDK
 freeze, catalogue publication, database change or server beta change is included.
@@ -139,8 +140,15 @@ Apps PR33 run40935560168 passed every job. Initial Portal web/race jobs passed
 except the still-running first race shard when recorded; Go passed affected
 contract/storage checks but failed the inherited vulnerability gate. This native
 fixture did not cover the outer-layout remount. The later full-shell correction
-has passing local browser/AppLayout evidence above and requires final CI at its
-own revision. Final-head evidence belongs in the paired PR before review.
+has passing local browser/AppLayout evidence above and also passed native run40936495688/job123668295562 at
+03c92fb102e094115d5755ed5c9abfa7c960c596, with the same true flags and
+execution_ready=false. This still does not complete the full UX acceptance matrix.
+
+A further fixture check exercises a 48-character unbroken action label at 320px,
+checks document overflow, and activates that header action with Enter before
+restoring desktop dimensions. The host wraps both the action row and each button
+label. The resulting browser/native check must pass at the final PR revision;
+final-head evidence belongs in the paired PR before review.
 
 Remaining work includes whole-app visual/keyboard/accessibility acceptance,
 shared overlays, persistent drafts, the broader capability broker and remaining
