@@ -226,6 +226,11 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			child.Process.Kill()
 			child.Wait()
 		}
+		// Wait/kill above joins output writes before printing a failed child's
+		// diagnostics; no concurrent bytes.Buffer read or silent EOF masking.
+		if t.Failed() {
+			t.Logf("Portal child failure output:\n%s", output.String())
+		}
 	}()
 	publicWriter.Close()
 	readyReader.Close()
@@ -258,6 +263,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if managed {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
 			t.Fatal("Portal did not validate managed profile", output.String())
+		}
+		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"} {
+			if !bytes.Contains(output.Bytes(), []byte(marker)) {
+				t.Fatal("Portal writable acceptance marker missing", marker, output.String())
+			}
+			t.Log(marker)
 		}
 		t.Log("MANAGED_PROFILE_OBSERVED")
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_DATA_READY")) {
@@ -562,6 +573,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	}
 	t.Log("STATIC_DRIVER_COMPLETE")
 	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
+		testNativePortalWritableWriter(t, s, session, endpoint)
 		testNativePortalManagedInstallData(t, s, session, endpoint)
 	}
 

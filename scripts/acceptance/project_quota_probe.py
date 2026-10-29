@@ -368,6 +368,12 @@ def main(args):
                         if "MANAGED_PROFILE_OBSERVED" not in result.stdout:
                             raise RuntimeError("Portal managed profile acceptance did not execute")
                         report["native_portal_authenticated_managed_profile"] = True
+                        for marker in ("PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Portal writable writer acceptance did not execute: " + marker)
+                        report["native_portal_writable_review_confirmed"] = True
+                        report["native_portal_writer_settlement_reconciled"] = True
+                        report["native_portal_writer_retained_identity"] = True
                         if "MANAGED_INSTALL_DATA_READY" not in result.stdout:
                             raise RuntimeError("Portal managed installation data stage did not execute")
                         report["native_portal_managed_install_data_to_start"] = True

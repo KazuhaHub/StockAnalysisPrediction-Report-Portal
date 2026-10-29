@@ -1829,3 +1829,39 @@ daemon workflow 40455635317 passed on the functional source as well.
   activation/worker, physical lifecycle, broker, SDK/reference apps and full
   P00–P14 acceptance remain unfinished. Production, credentials, Status, public
   SDK freeze and beta unchanged.
+
+- Added distinct writable install review, authenticated optional writable adapter
+  configuration and Portal typed writer intent/RPC/atomic receipt commit. Shared
+  review/data infrastructure recognizes the new format; readonly candidate source
+  explicitly refuses it. Stable future candidate identity and writer effect are
+  persisted before native IO; successful proof updates only writer/namespace,
+  leaving install pending with no process/activation/access. See
+  [Portal writable writer](107-portal-writable-install-writer.md). Added SQL
+  authority/source/refusal tests and disposable non-root Portal/root endpoint
+  acceptance for Portal rollback after actual runner permission settlement,
+  historical-read completion and exact retained receipt/resource/effect identity.
+  Fresh Linux acceptance pending. Writable start/readiness/registration/boot,
+  activation/worker and remaining full acceptance are still required. Production,
+  credentials, Status, SDK freeze and beta unchanged.
+
+- Portal writable review/writer source `5a853cd1fa5926f0ae42043341220d47d2e1c032`
+  passed quota workflow 40814032240/job 123250796324 and daemon workflow
+  40814032539/job 123251062215. Actual non-root Portal/root endpoint exercised
+  distinct writable review, native data/writer, forced Portal rollback after
+  runner settlement and exact historical completion without replacing writer
+  receipt/resource/effect identity. All three new Portal writer flags, prior
+  native checks and owned cleanup passed. Full Linux runner race passed (journal
+  226.127s; transport 7.003s). Explicit SQLite/PostgreSQL contracts passed in
+  19.496s, including pinned source creation times and 1ms allowed/1001ms refused
+  database/native clock-boundary cases. Original row identity/timestamps remain
+  exact; the existing one-second signer skew bound applies to clock ordering,
+  with physical observations never in the host clock future. Local writer race
+  repeated three times passed in 27.810s; broader local platform/managed race
+  133.492s, dual-arch builds, vet/staticcheck and Python14 passed. General workflow
+  40814032138 passed app race shards/aggregate, web and Docker checks; Go job
+  123251068257 retained existing x/net GO-2026-6866/6860 findings after focused
+  database tests/staticcheck, skipping ordinary full tests. See [Portal writable
+  acceptance](107-portal-writable-install-writer.md). Writable start/readiness/
+  registration/boot/viewer/activation/worker, physical lifecycle, broker,
+  SDK/reference apps and full P00–P14 acceptance remain incomplete. Production,
+  real credentials, Status, SDK freeze and beta unchanged.

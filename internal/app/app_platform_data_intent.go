@@ -93,7 +93,7 @@ func platformDataCommandForSource(e migExec, source platformManagedSource, runti
 	if profileErr != nil {
 		return control.Command{}, profileErr
 	}
-	if profile != platformNativeInstallFormat && profile != platformManagedInstallFormat {
+	if profile != platformNativeInstallFormat && !platformManagedFormat(profile) {
 		return control.Command{}, errAppPlatformStageEvidence
 	}
 	var target string
@@ -217,7 +217,7 @@ func (s *Server) preparePlatformInstallData(ctx context.Context, expected platfo
 	if err != nil {
 		return zero, err
 	}
-	if profile != platformNativeInstallFormat && profile != platformManagedInstallFormat {
+	if profile != platformNativeInstallFormat && !platformManagedFormat(profile) {
 		return zero, errAppPlatformStageEvidence
 	}
 	dek, err := s.dek()

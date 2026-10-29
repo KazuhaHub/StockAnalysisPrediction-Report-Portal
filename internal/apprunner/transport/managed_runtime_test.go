@@ -72,3 +72,18 @@ func TestManagedRuntimeCanonicalMetadataAndOpaqueBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedRuntimeWritableAdapterIsConfigurationOnly(t *testing.T) {
+	w, _ := managedRuntimeVector(t)
+	w.Profile.WritableSandboxProfile = control.WritableCandidateSandboxProfile
+	raw, _ := json.Marshal(w)
+	parsed, _, err := decodeManagedRuntime(raw)
+	if err != nil || parsed.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile || parsed.Profile.ExecutionReady {
+		t.Fatal("writable configuration", err)
+	}
+	w.Profile.WritableSandboxProfile = "unrestricted"
+	raw, _ = json.Marshal(w)
+	if _, _, err := decodeManagedRuntime(raw); err == nil {
+		t.Fatal("unrecognized writable adapter")
+	}
+}

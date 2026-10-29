@@ -89,7 +89,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err != nil || string(canonical) != raw {
 		return errAppPlatformStageEvidence
 	}
-	if (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat && p.Format != platformManagedInstallFormat) || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI {
+	if (p.Format != platformNativeInstallFormat && p.Format != platformFrontendInstallFormat && !platformManagedFormat(p.Format)) || p.AppID != appID || p.PublisherID != publisher || p.ControllerEpoch != epoch || p.ReleaseSHA256 != target.String || p.TrustRevision != trustRevision || p.ActorAuthority != authority || !platformValidSHA(authority) || p.PlatformAPI != platformDevelopmentAPI {
 		return errAppPlatformStageEvidence
 	}
 	verified, err := platformVerifyStoredRelease(e, target.String, trustRevision, trust, now)
@@ -111,10 +111,10 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if currentApp != appID || currentPublisher != publisher || desired != "enabled" || phase != "pending" || generation != 1 || policy != 1 {
 		return errAppPlatformStageEvidence
 	}
-	if lease.snapshot.Managed != (p.Format == platformManagedInstallFormat) || runtimeID != managedInstallRuntimeID(p) {
+	if lease.snapshot.Managed != platformManagedFormat(p.Format) || runtimeID != managedInstallRuntimeID(p) {
 		return errAppPlatformStageEvidence
 	}
-	if p.Format == platformManagedInstallFormat {
+	if platformManagedFormat(p.Format) {
 		if err := validateManagedInstallTarget(e, p.Runtime, lease.controllerEpoch); err != nil {
 			return err
 		}

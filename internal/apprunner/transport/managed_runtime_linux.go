@@ -58,7 +58,7 @@ func (s *Server) handleManagedRuntime(ctx context.Context, conn *net.UnixConn) {
 	if json.Unmarshal(second, &controller) != nil {
 		return
 	}
-	w := managedRuntimeWire{Format: "portal.runner.managed-profile/1-dev.1", Controller: controller, Profile: ManagedRuntimeProfile{Protocol: ManagedRunnerProtocol, Platform: config.Platform, BackendProtocol: ManagedBackendProtocol, SandboxProfile: config.SandboxProfile, RootFilesystemUUID: config.Root.FilesystemUUID, RootInode: strconv.FormatUint(config.Root.Inode, 10)}, ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10)}
+	w := managedRuntimeWire{Format: "portal.runner.managed-profile/1-dev.1", Controller: controller, Profile: ManagedRuntimeProfile{Protocol: ManagedRunnerProtocol, Platform: config.Platform, BackendProtocol: ManagedBackendProtocol, SandboxProfile: config.SandboxProfile, WritableSandboxProfile: control.WritableCandidateSandboxProfile, RootFilesystemUUID: config.Root.FilesystemUUID, RootInode: strconv.FormatUint(config.Root.Inode, 10)}, ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10)}
 	raw, err := json.Marshal(w)
 	if err != nil || ctx.Err() != nil {
 		return

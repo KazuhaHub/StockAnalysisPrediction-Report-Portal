@@ -43,6 +43,10 @@ func loadPlatformRegistrationCandidate(e migExec, lease platformOperationLease, 
 }
 func loadPlatformCandidateIntentMode(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64, create, applied, registration bool) (platformCandidateIntent, bool, error) {
 	var zero, result platformCandidateIntent
+	profile, profileErr := platformInstallProfileInTransaction(e, lease.id)
+	if profileErr != nil || profile != platformManagedInstallFormat {
+		return zero, false, errAppPlatformStageEvidence
+	}
 	target, err := platformManagedTargetForOperation(e, lease.id)
 	if err != nil || target.RuntimeID != runtime.id {
 		return zero, false, errAppPlatformRuntimeConflict
