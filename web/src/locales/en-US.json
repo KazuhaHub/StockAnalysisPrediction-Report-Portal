@@ -1087,6 +1087,7 @@
   "forecast.panel.p_profit": "Probability of profit",
   "forecast.panel.entry": "Entry price",
   "forecast.panel.entry_derived": "derived from the terminal value by policy",
+  "forecast.panel.stop_loss": "Stop loss",
   "forecast.panel.scenarios": "Scenarios",
   "forecast.panel.bear": "Bear",
   "forecast.panel.base": "Base",

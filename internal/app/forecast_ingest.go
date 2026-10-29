@@ -38,7 +38,7 @@ const (
 	reasonProbabilitySum = "probability_sum"
 	reasonMissingClaim   = "missing_claim"
 	reasonDuplicateKey   = "duplicate_key"
-	reasonReservedKind   = "reserved_kind"
+	reasonStopLevel      = "stop_loss_level"
 	reasonHorizon        = "horizon_not_future"
 	reasonSymbolScope    = "symbol_out_of_scope"
 	reasonBadDate        = "bad_date"
@@ -339,6 +339,7 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	// Claims.
 	claims, claimErrs := parseClaims(wire.Claims)
 	errs = append(errs, claimErrs...)
+	errs = append(errs, checkStopLevel(claims, baseFen)...)
 
 	// The symbol has to be one a vendor prices daily, or every mark on this set is a question that
 	// can never be answered. Checked here rather than at the report level: the report is stored
@@ -399,6 +400,35 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 	return &rej, nil, errs
 }
 
+// checkStopLevel refuses a stop that is not below where the position is bought. Every claim here is
+// long-only (predStances), so a stop at or above the baseline would fire on the first completed
+// session, and one at or above the advised entry would close the position the set advises opening.
+// Either is a producer bug, not a forecast. The comparison is integer fen, so equality is exact.
+func checkStopLevel(claims []predClaimRow, baseFen *int64) []predError {
+	var stop, entry *int64
+	for _, c := range claims {
+		switch c.Kind {
+		case kindStopLoss:
+			stop = c.PriceFen
+		case kindEntry:
+			entry = c.PriceFen
+		}
+	}
+	if stop == nil {
+		return nil
+	}
+	var errs []predError
+	if baseFen != nil && *stop >= *baseFen {
+		errs = append(errs, predError{reasonStopLevel, "claims",
+			fmt.Sprintf("stop_loss %s is not below the baseline %s", fenString(*stop), fenString(*baseFen))})
+	}
+	if entry != nil && *stop >= *entry {
+		errs = append(errs, predError{reasonStopLevel, "claims",
+			fmt.Sprintf("stop_loss %s is not below the entry_price %s", fenString(*stop), fenString(*entry))})
+	}
+	return errs
+}
+
 // parseClaims validates the claim list and returns the rows to insert.
 func parseClaims(in []predClaimWire) ([]predClaimRow, []predError) {
 	var errs []predError
@@ -424,15 +454,6 @@ func parseClaims(in []predClaimWire) ([]predClaimRow, []predError) {
 			errs = append(errs, predError{reasonBadEnum, path + ".kind", fmt.Sprintf("%q is not one of %s", c.Kind, strings.Join(predClaimKinds, ", "))})
 			continue
 		}
-		if c.Kind == kindStopLoss {
-			// Reserved. The contract has the name because a stop is a claim worth scoring, and it is
-			// refused until a code node computes one — admitting it now would let a producer invent a
-			// level the analysis never committed to.
-			errs = append(errs, predError{reasonReservedKind, path + ".kind",
-				"stop_loss is reserved and not accepted yet: no producer computes it in code"})
-			continue
-		}
-
 		if seenKind[c.Kind] && c.Kind != kindScenario {
 			errs = append(errs, predError{reasonDuplicateKey, path + ".kind",
 				fmt.Sprintf("a second %s claim; each kind may appear once", c.Kind)})
@@ -457,10 +478,19 @@ func parseClaims(in []predClaimWire) ([]predClaimRow, []predError) {
 			row.Label = c.Label
 		}
 
+		if c.Kind == kindStopLoss && len(c.Price) == 0 {
+			// A stop is nothing but its level, so a stop without one is not a claim at all.
+			errs = append(errs, predError{reasonBadPrice, path + ".price", "a stop_loss claim needs a price"})
+			continue
+		}
 		if len(c.Price) > 0 {
 			fen, err := parseFen(c.Price)
 			if err != nil {
 				errs = append(errs, predError{reasonBadPrice, path + ".price", err.Error()})
+				continue
+			}
+			if c.Kind == kindStopLoss && fen == 0 {
+				errs = append(errs, predError{reasonBadPrice, path + ".price", "a stop_loss of 0.00 is no stop"})
 				continue
 			}
 			row.PriceFen = &fen
@@ -812,4 +842,9 @@ func predStatusValue(status string, set *predSetRow) string {
 		return "none"
 	}
 	return set.State
+}
+
+// fenString prints integer fen as the yuan string the producer sent, for error details.
+func fenString(fen int64) string {
+	return fmt.Sprintf("%d.%02d", fen/100, fen%100)
 }
