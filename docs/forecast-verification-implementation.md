@@ -100,7 +100,7 @@ const (
 // Claim kinds, stances, labels.
 const (
     kindStance = "stance"; kindTerminal = "terminal_value"; kindScenario = "scenario"; kindEntry = "entry_price"
-    kindStopLoss = "stop_loss" // reserved: refused until a code node computes it
+    kindStopLoss = "stop_loss" // reserved until ADR 0029's 2026-10-29 amendment admitted it
     stanceLong = "long"; stanceNoPosition = "no_position"
     labelBull = "bull"; labelBase = "base"; labelBear = "bear"
 )
@@ -126,7 +126,7 @@ const (baseCheckPending = "pending"; baseMatch = "match"; baseMismatch = "mismat
 // Ingest rejection reasons. Each is stable, so tests can assert on it.
 var predRejectReasons = []string{
     "not_object", "too_large", "bad_schema", "bad_enum", "bad_price", "bad_probability",
-    "probability_sum", "missing_claim", "duplicate_key", "reserved_kind", "horizon_not_future",
+    "probability_sum", "missing_claim", "duplicate_key", "stop_loss_level", "horizon_not_future",
     "symbol_out_of_scope", "bad_date",
 }
 ```
@@ -337,7 +337,8 @@ collected.
    `bad_schema` and make the `bad_price` rule unreachable.
 5. `schema == "predictions.v1"`, else `bad_schema`.
 6. **Enums** (`decision_status`, `decision_quality`, `probability_method`, `kind`, `stance`,
-   `label`) → `bad_enum`. `kind == "stop_loss"` → `reserved_kind`.
+   `label`) → `bad_enum`. (`kind == "stop_loss"` was `reserved_kind` until ADR 0029's 2026-10-29
+   amendment; it is now admitted, and a stop not below the baseline and entry is `stop_loss_level`.)
 7. **Prices:** `parseFen(raw json.RawMessage) (int64, error)`. The input must be a JSON **string** matching
    `^\d{1,7}(\.\d{1,2})?$`. A JSON number, a third decimal, a sign or an exponent → `bad_price`.
    Conversion is integer arithmetic on the digits, never `strconv.ParseFloat`.
@@ -422,7 +423,8 @@ classifier, plus HTTP tests through `v1Ingest`.
   - a string-valued payload → `not_object`;
   - 64 KiB + 1 byte → `too_large` with `payload_truncated=1`;
   - an unknown field → `bad_schema`;
-  - `stop_loss` → `reserved_kind`.
+  - `stop_loss` at or above the baseline or the entry price → `stop_loss_level` (was `reserved_kind`
+    before ADR 0029's 2026-10-29 amendment);
 - **Horizon.**
   - Receipt at 2026-10-17T23:30Z (Shanghai 10-18) with `horizon_end` = 2026-10-18 →
     `horizon_not_future`. Run with the panel timezone set to UTC to prove it is not used.

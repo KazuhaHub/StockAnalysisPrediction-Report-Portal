@@ -72,8 +72,8 @@ const (
 	kindTerminal = "terminal_value"
 	kindScenario = "scenario"
 	kindEntry    = "entry_price"
-	// kindStopLoss is reserved: the contract has the name because a stop is worth scoring, and it is
-	// refused until a code node computes one (plan §3.2 #6).
+	// kindStopLoss was reserved until 2026-10-29, when v3risk was found to compute the level in
+	// code (trade_plan.stop_loss.price); see the ADR 0029 amendment of that date.
 	kindStopLoss = "stop_loss"
 )
 

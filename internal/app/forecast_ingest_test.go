@@ -152,9 +152,28 @@ func TestClassifyPredictionsRefusalReasons(t *testing.T) {
 		{"unknown claim kind", predWire(func(m map[string]any) {
 			claim(m, "entry_price", func(c map[string]any) { c["kind"] = "vibes" })
 		}), reasonBadEnum},
-		{"reserved stop_loss", predWire(func(m map[string]any) {
-			claim(m, "entry_price", func(c map[string]any) { c["kind"] = kindStopLoss })
-		}), reasonReservedKind},
+		// Stop loss. Admitted on 2026-10-29 once v3risk was found to compute it; the rules are the
+		// entry price's, plus the one thing a stop means: it sits below where the position is bought.
+		{"stop_loss without a price", predWire(func(m map[string]any) {
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss"})
+		}), reasonBadPrice},
+		{"stop_loss price malformed", predWire(func(m map[string]any) {
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.955"})
+		}), reasonBadPrice},
+		{"stop_loss of zero", predWire(func(m map[string]any) {
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "0.00"})
+		}), reasonBadPrice},
+		{"a second stop_loss", predWire(func(m map[string]any) {
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.50"})
+			addClaim(m, map[string]any{"key": "stop_loss.2", "kind": "stop_loss", "price": "7.40"})
+		}), reasonDuplicateKey},
+		{"stop_loss at the baseline", predWire(func(m map[string]any) {
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "8.52"})
+		}), reasonStopLevel},
+		{"stop_loss at the entry price", predWire(func(m map[string]any) {
+			m["baseline"].(map[string]any)["price"] = "9.00"
+			addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "8.65"})
+		}), reasonStopLevel},
 		{"unknown stance", predWire(func(m map[string]any) {
 			claim(m, "stance", func(c map[string]any) { c["stance"] = "aggressive" })
 		}), reasonBadEnum},
@@ -226,6 +245,67 @@ func TestClassifyPredictionsRefusalReasons(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClassifyPredictionsAcceptsAStopLoss: a stop below both the baseline and the entry price is
+// stored as an ordinary claim row in integer fen, with no probability and no weight.
+func TestClassifyPredictionsAcceptsAStopLoss(t *testing.T) {
+	set, claims, errs := classify(t, predWire(func(m map[string]any) {
+		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
+		addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.95"})
+	}), predTestRtype)
+	if len(errs) != 0 {
+		t.Fatalf("a valid stop_loss was refused: %+v", errs)
+	}
+	if set.State != predStateAccepted {
+		t.Fatalf("state = %q, want %q", set.State, predStateAccepted)
+	}
+	var got *predClaimRow
+	for i := range claims {
+		if claims[i].Kind == kindStopLoss {
+			got = &claims[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no stop_loss row among %d claims", len(claims))
+	}
+	if got.ClaimKey != "stop_loss" || got.PriceFen == nil || *got.PriceFen != 795 {
+		t.Errorf("stop_loss row = %+v, want key stop_loss and price_fen 795", *got)
+	}
+	if got.ProbBp != nil || got.WeightBp != nil {
+		t.Errorf("stop_loss carries prob/weight %v/%v; it is a price only", got.ProbBp, got.WeightBp)
+	}
+}
+
+// TestClassifyPredictionsStopLossWithoutEntry: the entry price is optional, so a stop is checked
+// against the baseline alone when no entry claim was sent.
+func TestClassifyPredictionsStopLossWithoutEntry(t *testing.T) {
+	_, _, errs := classify(t, predWire(func(m map[string]any) {
+		m["claims"] = dropClaim(m, "entry_price")
+		addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "7.95"})
+	}), predTestRtype)
+	if len(errs) != 0 {
+		t.Fatalf("a stop below the baseline with no entry claim was refused: %+v", errs)
+	}
+}
+
+// TestClassifyPredictionsAcceptsTheV317CaptureStop replays the levels v3risk computed in the
+// captured V3.17 run the producer's tests use (Dify ops/forecast-projection/fixtures/v317_no_trade.json):
+// a stop below an entry far below the baseline must pass as sent. (That run was no_trade, for which
+// the producer sends no stop; the levels are what this test is about.)
+func TestClassifyPredictionsAcceptsTheV317CaptureStop(t *testing.T) {
+	_, _, errs := classify(t, predWire(func(m map[string]any) {
+		m["baseline"].(map[string]any)["price"] = "319.49"
+		claim(m, "entry_price", func(c map[string]any) { c["price"] = "230.00" })
+		addClaim(m, map[string]any{"key": "stop_loss", "kind": "stop_loss", "price": "195.50"})
+	}), predTestRtype)
+	if len(errs) != 0 {
+		t.Fatalf("the captured V3.17 stop was refused: %+v", errs)
+	}
+}
+
+func addClaim(m map[string]any, c map[string]any) {
+	m["claims"] = append(m["claims"].([]any), c)
 }
 
 func dropClaim(m map[string]any, key string) []any {

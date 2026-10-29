@@ -118,6 +118,44 @@ resolve differently per driver in the one table whose purpose is being citable.
 
 `stop_loss` is a **reserved** kind: refused until a code node computes it.
 
+- **Amended 2026-10-29: `stop_loss` is admitted.** The condition above is met. In the live 1-6-4
+  V3.17 graph (re-pulled 2026-10-29), the code node `v3risk` (固定风控与交易策略生成) computes the
+  stop as `trade_plan.stop_loss.price` by a fixed rule: the planned average cost of the tranches,
+  less `single_trade_risk_budget` divided by the capped target weight (taken before the
+  nominal-risk cap; 12 % when that weight is 0), clamped to the policy's
+  `[stop_loss_min_pct, stop_loss_max_pct]` (8 %–20 % by default), floored to the price tick, and
+  pulled to 92 % of the lowest tranche when it would sit within 3 % of it. No LLM writes the
+  number; the report's 止损价 prose is rendered from that packet (`v3riskfix` rewrites only the
+  simulated holding). The projection node already reads `v3risk.result`, so emitting the claim is
+  selection plus the usual rounding, as this section requires.
+  - **Validation.** Same as `entry_price` — at most one per set, `price` in the strict string form —
+    and rules of its own: the price is **required** and not `0.00` (a stop is nothing but its
+    level), and it must be **strictly below** the baseline price and, when sent, the `entry_price`
+    claim. Every stance is long-only, so a stop at or above either would fire on the first session
+    or close the position the set advises opening. A breach is refused with the new reason
+    `stop_loss_level`; `reserved_kind` is retired with the reservation. `v3risk` does not produce a
+    breach under any policy `v3config` accepts: the stop is more than 3 % below every tranche, and
+    the lowest tranche is below the baseline and at most one tick above the entry claim (v3calc
+    floors that price without v3risk's epsilon); only a contrived tick, such as 1.00 on a 2-yuan
+    stock, could close the margin. Refusing the whole set for a display-only field is therefore
+    deliberate: a breach can only be a producer bug, and a rejected set is alerted (§2) where a
+    silently dropped claim would not be. The claim is optional, as `entry_price` is, so sets from
+    producers that do not send it are unaffected.
+  - **Producer.** Sent only for a long stance. On a no-position set (`no_trade_watch`) v3risk still
+    prints a stop against the observation price, but its own rule reruns the decision before any
+    position is built, so that stop commits to nothing and is not a claim.
+  - **Storage.** An ordinary `prediction_claims` row (`kind = stop_loss`, `price_fen`); no schema
+    change.
+  - **Reading.** The reading card shows the level next to the entry price, only on sets that carry
+    one, and without a percentage: the report measures the stop from the planned average cost, which
+    the ledger does not hold, so a distance from the entry or S0 would contradict it.
+  - **Scoring: later, not now.** No metric in §9 consumes the stop, and adding one is a design
+    decision rather than plumbing: the stop is measured from the planned average cost of tranches
+    that may never fill, so "stop touched" means little without the entry fill it is conditional on,
+    and a stop-hit rate needs its own null and maturity rule before it can be shown beside the
+    others. The claim is recorded now so that, when that metric is designed, the history it needs
+    already exists. Until then the stop is display and export data only.
+
 ### 4. Time is server receipt in Asia/Shanghai, and nothing caller-supplied moves it
 
 Every civil date in this feature is in **`Asia/Shanghai`** (`quote.go:260`), not the panel timezone:

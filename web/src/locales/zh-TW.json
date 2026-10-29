@@ -1083,6 +1083,7 @@
   "forecast.panel.p_profit": "到期盈利機率",
   "forecast.panel.entry": "買入價",
   "forecast.panel.entry_derived": "由終值按策略推算",
+  "forecast.panel.stop_loss": "止損價",
   "forecast.panel.scenarios": "三情景",
   "forecast.panel.bear": "悲觀",
   "forecast.panel.base": "中性",

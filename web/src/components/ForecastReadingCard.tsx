@@ -162,6 +162,7 @@ export default function ForecastReadingCard({
   const terminal = terminalClaim?.price_fen
   const pProfit = terminalClaim?.prob_bp
   const entry = claim(set, 'entry_price')?.price_fen
+  const stopLoss = claim(set, 'stop_loss')?.price_fen
   const scenarios = (['bear', 'base', 'bull'] as const).map((label) => ({ label, c: claim(set, 'scenario', label) }))
   const upside = terminal !== undefined && set.s0_fen ? terminal / set.s0_fen - 1 : undefined
   const prices = scenarios.map(({ c }) => c?.price_fen).filter((price): price is number => price !== undefined)
@@ -305,6 +306,12 @@ export default function ForecastReadingCard({
               {entry === undefined ? '—' : fenToYuan(entry)}
               <Typography.Text style={{ color: token.colorTextSecondary }}> · {t('forecast.panel.entry_derived')}</Typography.Text>
             </Descriptions.Item>
+            {/* Older sets predate the stop_loss claim, so the row appears only when one was written. No
+                distance is shown: the report measures the stop from the planned average cost, which
+                the ledger does not hold, and a percentage from any other base would contradict it. */}
+            {stopLoss !== undefined && (
+              <Descriptions.Item label={t('forecast.panel.stop_loss')}>{fenToYuan(stopLoss)}</Descriptions.Item>
+            )}
           </Descriptions>
 
           <div role="group" aria-label={t('forecast.panel.scenarios')} style={{ padding: '32px 12px 4px' }}>

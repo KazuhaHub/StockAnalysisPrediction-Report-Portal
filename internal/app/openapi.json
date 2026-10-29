@@ -664,7 +664,7 @@
               "entry_price",
               "stop_loss"
             ],
-            "description": "预测项类型。stop_loss 为保留值：在代码节点能算出止损价之前一律拒绝。"
+            "description": "预测项类型。stop_loss（止损价）每次预测至多一项，必须带 price，且须低于 baseline.price 与 entry_price，否则以 stop_loss_level 拒绝。"
           },
           "stance": {
             "type": "string",

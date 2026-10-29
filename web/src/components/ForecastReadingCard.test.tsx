@@ -101,6 +101,19 @@ describe('ForecastReadingCard', () => {
     expect(screen.queryByText('forecast.panel.not_counted')).toBeNull()
   })
 
+  it('shows the stop loss next to the entry price, as a level only', () => {
+    show([{ ...accepted, claims: [...accepted.claims, { key: 'stop_loss', kind: 'stop_loss', price_fen: 119600 }] }])
+    expect(screen.getByText('forecast.panel.stop_loss')).toBeTruthy()
+    expect(screen.getByText(/1,196\.00/)).toBeTruthy()
+    // No distance: the report's percentage is from the planned average cost, which the card lacks.
+    expect(screen.queryByText('-10.0%')).toBeNull()
+  })
+
+  it('leaves the stop loss row out of a set that has none', () => {
+    show([accepted])
+    expect(screen.queryByText('forecast.panel.stop_loss')).toBeNull()
+  })
+
   it('translates the decision quality', () => {
     show([{ ...accepted, decision_quality: 'degraded' }])
     expect(screen.getByText('forecast.quality.degraded')).toBeTruthy()
