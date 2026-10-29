@@ -49,6 +49,9 @@ async function main(){
   const restored=JSON.parse(await frame.getByTestId('app-query').innerText());
   if(restored.page!==2||restored.active!==false||restored.q!=='中文 & test'||restored.sort!=='newest')throw new Error('query reload lost typed values');
   await frame.getByRole('button',{name:'Retained 0',exact:true}).waitFor();
+  const effects=await frame.getByTestId('query-effects').innerText();
+  await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
+  if(await frame.getByTestId('query-effects').innerText()!==effects)throw new Error('appearance repeated query effects');
   await page.waitForTimeout(110);await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
   await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
   stage='layout-grow';

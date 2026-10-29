@@ -2187,6 +2187,10 @@ daemon workflow 40455635317 passed on the functional source as well.
   Local Portal165/SDK249, shared corpus56, Python12/14/2, frontend consumers,
   descriptor/HTTP/signed-document tests and Linux compilation pass. Actual-page
   browser URL/back/forward/reload/type restoration and error recovery passed;
-  Linux native runtime evidence is pending. Descriptor schema is extended;
+  initial a328ee5c passed native run40868846704/job123430411682 (typed-query and
+  prior browser/native/cleanup flags true, execution_ready false). General Go
+  passed new pure contracts/SQL suites then failed inherited x/net findings.
+  A query-object identity regression was then found and fixed in Apps fa34a900;
+  the native effect-count follow-up requires separate CI. Descriptor schema is extended;
   database schema, dependencies, publication, production, Status, SDK freeze and
   beta settings are unchanged. Remaining full P06/platform work stays open.

@@ -1,7 +1,8 @@
 # Signed typed route queries and recovery
 
-Status: implemented for development, with local server/SDK/host/browser checks.
-Linux browser/native evidence is pending at the first functional commit. P06 and
+Status: implemented for development with passing Linux browser/native evidence
+at initial functional commit a328ee5cf44ac376a05531e588f9555373c14f06.
+The query-identity follow-up below requires a separate native check. P06 and
 full platform release acceptance remain in progress. This extends the signed
 package descriptor; database tables, columns, migrations and dependencies are
 unchanged. Production, Status adoption, catalogue publication, stable SDK freeze
@@ -156,7 +157,7 @@ install and requires address/history/typed-value/reload assertions alongside
 existing route, layout, current-viewer, no-retry, revoke and dirty-guard cases.
 New marker SDK_NATIVE_BROWSER_TYPED_QUERY must survive child/parent/collector,
 producing sdk_native_browser_typed_query in redacted evidence. Its reviewed Apps
-pin is e3770921f18c173dba98dafd25847fabb5c0bb14. Runtime evidence is pending actual CI
+current pin is fa34a900f3c29ee5218d51dd5a1b6ea7bf0c326c. Runtime evidence is pending actual CI
 and will be recorded with its exact functional commit; source marker presence
 alone proves nothing.
 
@@ -169,3 +170,31 @@ gate, so malformed shared declarations are tested even when that separate gate
 fails. Native workflow path filters also cover the shared schema/query/bridge,
 frame/page and generator sources. The vulnerability gate and workflow permissions
 are unchanged.
+
+
+## Initial functional evidence and identity follow-up
+
+Initial Portal a328ee5cf44ac376a05531e588f9555373c14f06 with Apps e3770921
+passed Linux quota/native run40868846704/job123430411682. Redacted evidence has
+sdk_native_browser_typed_query, navigation, dirty guard, current viewer, document
+layout, uncertainty without retry and revoked-access flags true. Typed query
+checks included actual URL/back/forward/reload with numbers, false, Chinese text
+and enums. Owned cleanup/neighbor preservation passed; execution_ready is false.
+Registry/public fixture cleanup completed.
+
+General run40868846720 passed web shards/build/lint, all app race shards/aggregate,
+Docker, workflow lint, the new pure descriptor/query suite0.070s, and affected
+SQLite/PostgreSQL suites55.895s/29.242s/8.402s/9.835s/72.040s/0.137s. Go job
+123430412200 failed only inherited x/net GO-2026-6866/6860 findings; its ordinary
+full suite was skipped. Dependencies/gate remain unchanged. Apps e3770921 passed
+all jobs in run40868483698.
+
+Final SDK review found that locale updates recreated the query object despite
+unchanged contents, which could re-run an app's query-dependent data effect.
+A real React/MessagePort identity assertion failed first. The root now memoizes
+query values by signed definition/search/document signal, preserving identity
+across unrelated appearance updates. All249 SDK tests/typechecks/root build pass
+locally with that regression. Apps follow-up fa34a900 adds this fix. The native
+fixture now observes a query-dependent layout effect around a locale update and
+requires no extra effect execution. This follow-up needs its own CI; earlier
+runtime evidence is not relabeled as the later source.

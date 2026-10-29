@@ -18,12 +18,13 @@ def build(apps, output):
     output.mkdir(parents=True, exist_ok=False)
     (output / "node_modules").symlink_to(apps / "node_modules", target_is_directory=True)
     child = output / "child.tsx"
-    child.write_text('''import {useRef,useState} from 'react';
+    child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
 import {AppRoot,useAppBackend,useAppPresentation,useAppDraft,useAppNavigation} from '@portal-app/sdk/root-v2';
 function Fixture(){
- const navigation=useAppNavigation(),[retained,setRetained]=useState(0);
+ const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
+ useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
  const backend=useAppBackend(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
@@ -32,6 +33,7 @@ function Fixture(){
   const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Typography.Text data-testid="query-effects">{queryEffects}</Typography.Text>
  <Typography.Text data-testid="app-query">{JSON.stringify(navigation.query)}</Typography.Text>
  <Button onClick={()=>navigation.navigate('/',{query:{page:2,q:'中文 & test',active:false,sort:'newest'}})}>Set filters</Button>
  <Typography.Text data-testid="app-route">{navigation.path}</Typography.Text>
