@@ -1,6 +1,6 @@
 # Capability snapshot integrity before broker adapters
 
-Status: development implementation and verification in progress. This closes a
+Status: development implementation verified at the functional revision below. This closes a
 P07 authorization-consistency gap; it does not implement capability providers,
 persistent application files, credential bindings, tasks or notification delivery.
 P00–P14 and D5/D6 remain open. No new database products, migrations, dependency
@@ -82,9 +82,40 @@ staging, document generation and native/browser acceptance remain required.
 Local affected SQLite launch/backend/installation/frontend suites, targeted race
 checks, `go vet` and Linux amd64 test compilation passed. The initial six refusal
 cases were first observed failing against the old reader behavior. PostgreSQL
-is not available locally; its explicit CI step remains required. Native/browser
-and exact CI revision evidence remain pending. No screenshot is authorization
-evidence, and this local result does not imply complete P07 acceptance.
+is not available locally. Exact functional revision
+`21a234a0baa19335e76daa83f8ffbee2ecd541e9` has the following CI evidence:
+
+- [General CI run 40956943671](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40956943671),
+  Go job `123739365097`: all six explicit SQL groups passed before the
+  vulnerability gate. The launch/documents group ran both SQLite and PostgreSQL
+  snapshot tests, including every static subcase and both backend families;
+  none of these cases were skipped. Build, vet and Linux staticcheck passed.
+- Every selected race shard, all web test shards, web lint/typecheck/build,
+  workflow lint and Docker image/font/smoke/end-to-end checks passed. Full-release
+  cross-compilation and full-race jobs were not selected for this PR event.
+- The general Go job failed at the inherited `golang.org/x/net@v0.60.0`
+  vulnerability gate (`GO-2026-6866`, `GO-2026-6860`; the log identifies v0.62.0
+  as fixed). The ordinary broad Go test step after that gate was skipped. This
+  change neither modifies dependencies nor suppresses that gate; general Go CI
+  is not green.
+- [Disposable native run 40956943614](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40956943614),
+  job `123739365069`, passed. The generated template opened in the actual Portal
+  shell with `browser_verified: true`, `backend_provisioned: false`,
+  `development_only: true`, `production_approved: false` and test publisher
+  identity. Its frontend SHA-256 is
+  `5200fc74f29808009fe22da2e1900d82e925fa66094641c3ff66d543bfb7c876`;
+  descriptor SHA-256 is
+  `b9bbbec9be9e9d61f7300945d6066f1121a1a935182f2deeed94fc6f43e37524`.
+- The same run's `project-quota-evidence.json` records all eight shared SDK
+  browser checks true (current viewer, document layout, draft guard, navigation,
+  page actions, revocation, typed query and uncertain/no-retry), physical quota
+  enforcement and remount checks true, owned resource cleanup and neighboring
+  workload preservation true. `execution_ready` remains false. These existing
+  integration checks complement the new refusal tests; they do not demonstrate
+  an enabled capability provider.
+
+No screenshot is authorization evidence. These results do not imply complete
+P07 acceptance or permission to activate production.
 
 ## Next required work
 
