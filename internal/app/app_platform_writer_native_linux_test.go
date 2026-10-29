@@ -40,7 +40,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal("stage writable package", err)
 	}
-	plan, err := s.createPlatformWritableInstallReview(ctx, session, release.sha256, 1, nil, endpoint)
+	plan, err := s.createPlatformWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint)
 	if err != nil {
 		t.Fatal("writable review", err)
 	}

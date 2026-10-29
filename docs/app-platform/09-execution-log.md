@@ -2000,3 +2000,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   access and post-IO authorization, activation/worker, recovery/physical lifecycle,
   broker, SDK/reference apps and full P00–P14 acceptance remain incomplete.
   Production, real credentials, Status, SDK freeze and beta unchanged.
+
+- Added actual writable initial activation with fresh host boot, exact source/
+  frontend/audience validation, atomic candidate/audience/ready/completion and
+  audit, plus resulting-history reconstruction before commit. Added separate
+  completed writable history and current viewer/OU access using the shared
+  readonly authorization transaction without constructing a live lease. Current
+  writable requests recheck access before/after real native IO and withhold a
+  revoked viewer's buffered result without retrying an uncertain write. Added
+  SQL metadata/source/refusal cases and actual activation rollback, user/ancestor
+  OU business requests and post-IO membership-revocation acceptance. See
+  [writable activation/access](112-writable-activation-access.md). Fresh Linux
+  evidence pending. Managed browser launch/assets, worker/scheduler and remaining
+  full lifecycle/broker/SDK/reference-app acceptance are incomplete. Production,
+  credentials, Status, SDK freeze and beta configuration unchanged.

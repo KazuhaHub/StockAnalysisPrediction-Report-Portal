@@ -124,6 +124,9 @@ func loadPlatformWritableStartSource(e migExec, lease platformOperationLease, ru
 // Historical receipt validation only. Native/transport provenance is mandatory
 // separately; parsed JSON does not prove a process exists or is healthy.
 func platformWritableRunningMatches(r journal.WritableCandidateRunningReceipt, i platformWritableStartIntent, lease platformOperationLease, now int64) bool {
+	return platformWritableRunningSourceMatches(r, i, platformManagedSource{operationID: lease.id, installationID: lease.installationID, epoch: lease.controllerEpoch, generation: lease.snapshot.Generation, fence: lease.fence}, now)
+}
+func platformWritableRunningSourceMatches(r journal.WritableCandidateRunningReceipt, i platformWritableStartIntent, source platformManagedSource, now int64) bool {
 	encoded, _ := json.Marshal(r)
 	if _, err := journal.ParseWritableCandidateRunningReceipt(encoded); err != nil {
 		return false
@@ -144,9 +147,9 @@ func platformWritableRunningMatches(r journal.WritableCandidateRunningReceipt, i
 	if claimed+1000 < i.effectCreated || settled > now+1000 || settled > time.Now().UnixMilli() || revision < writerRevision || revision > w.runtime.controlRevision || recoveryRevision > w.runtime.controlRevision {
 		return false
 	}
-	owner := struct{ Format, Deployment, Epoch, Effect, Resource, Installation, Operation, Namespace, Release, Generation, Fence, Writer, Payload, DataReceipt, WriterReceipt string }{"portal.runner.writable-candidate-ownership/1-dev.1", w.runtime.deploymentID, lease.controllerEpoch, c.EffectID, w.resourceID, lease.installationID, lease.id, w.namespaceID, d.ReleaseSHA256, "1", strconv.FormatInt(lease.fence, 10), "1", c.PayloadSHA256, w.dataSHA, c.WriterReceiptSHA256}
+	owner := struct{ Format, Deployment, Epoch, Effect, Resource, Installation, Operation, Namespace, Release, Generation, Fence, Writer, Payload, DataReceipt, WriterReceipt string }{"portal.runner.writable-candidate-ownership/1-dev.1", w.runtime.deploymentID, source.epoch, c.EffectID, w.resourceID, source.installationID, source.operationID, w.namespaceID, d.ReleaseSHA256, "1", strconv.FormatInt(source.fence, 10), "1", c.PayloadSHA256, w.dataSHA, c.WriterReceiptSHA256}
 	ownerRaw, _ := json.Marshal(owner)
-	return m.EffectID == c.EffectID && m.PayloadSHA256 == c.PayloadSHA256 && m.ResourceID == w.resourceID && m.OwnershipSHA256 == platformDigest(ownerRaw) && m.DataReceiptSHA256 == w.dataSHA && m.WriterReceiptSHA256 == c.WriterReceiptSHA256 && m.AdmittedFence == strconv.FormatInt(lease.fence, 10) && m.SandboxProfile == control.WritableCandidateSandboxProfile && m.Preflight.SeccompSHA256 == w.receipt.Native.SeccompSHA256 && m.Preflight.SeccompSHA256 == driver.DataWriterPolicySHA256() && p.ImageID == w.receipt.Native.ImageID && p.Platform == w.command.Platform && p.RootFilesystemUUID == d.Claim.RootFilesystemUUID && p.RootInode == d.Claim.RootInode && p.ProjectID == d.ProjectID && p.Device == d.Device && p.NamespaceInode == d.NamespaceInode && p.QuotaBytes == d.QuotaBytes && p.QuotaInodes == d.QuotaInodes
+	return m.EffectID == c.EffectID && m.PayloadSHA256 == c.PayloadSHA256 && m.ResourceID == w.resourceID && m.OwnershipSHA256 == platformDigest(ownerRaw) && m.DataReceiptSHA256 == w.dataSHA && m.WriterReceiptSHA256 == c.WriterReceiptSHA256 && m.AdmittedFence == strconv.FormatInt(source.fence, 10) && m.SandboxProfile == control.WritableCandidateSandboxProfile && m.Preflight.SeccompSHA256 == w.receipt.Native.SeccompSHA256 && m.Preflight.SeccompSHA256 == driver.DataWriterPolicySHA256() && p.ImageID == w.receipt.Native.ImageID && p.Platform == w.command.Platform && p.RootFilesystemUUID == d.Claim.RootFilesystemUUID && p.RootInode == d.Claim.RootInode && p.ProjectID == d.ProjectID && p.Device == d.Device && p.NamespaceInode == d.NamespaceInode && p.QuotaBytes == d.QuotaBytes && p.QuotaInodes == d.QuotaInodes
 }
 
 func samePlatformWritableStartIntent(a, b platformWritableStartIntent) bool {

@@ -14,3 +14,7 @@ func platformRunWritableRegistration(context.Context, platformRuntimeEndpoint, p
 func platformHandshakeWritableBackend(context.Context, platformRuntimeEndpoint, platformWritableRegistrationIntent, string) (transport.WritableBackendHandshakeObservation, error) {
 	return transport.WritableBackendHandshakeObservation{}, errAppPlatformRuntimeConflict
 }
+
+func platformRequestWritableBackend(context.Context, platformRuntimeEndpoint, platformWritableRegistrationIntent, []byte, []byte, []byte, string) (transport.WritableBackendRequestObservation, error) {
+	return transport.WritableBackendRequestObservation{}, errAppPlatformRuntimeConflict
+}

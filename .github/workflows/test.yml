@@ -94,6 +94,10 @@ jobs:
         run: |
           test -n "$TEST_POSTGRES_DSN"
           GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|IntentClockSkew|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime|TestPlatformWritableStart(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableReadiness(Source|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistration(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistrationFreshness|TestPlatformWritableBootRequiresAppliedDelivery(SQLite|Postgres))$'
+      - name: Writable activation and current access
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatform(Writable(Access|AccessRefusals|ActivationMetadata|ActivationRefusals)|ManagedAccess|ManagedAccessRefusals)(SQLite|Postgres)|TestPlatformWritableRequest(SigningSQLite|PayloadBoundary))$'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
