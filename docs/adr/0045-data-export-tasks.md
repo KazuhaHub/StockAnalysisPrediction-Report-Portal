@@ -301,8 +301,11 @@ reusing this engine, `export_jobs` and the task tray:
 
 - Only the `reports` source, Markdown ZIP only at first, evaluated with the requester's own read
   scope at execution time: what a user can export is exactly what they can already read.
-- Governed per OU, Workspace-style (a child inherits unless it overrides; NULL means inherit, as
-  `forecast_scope` does): export allowed (default off), maximum reports per export (default 200),
-  daily report quota (default 1,000). The OU columns are a schema change and need the owner's
-  approval of their exact shape when ADR 0046 is written.
+- Governed per OU through the existing feature-owned OU policy model (#197; `ou_policy.go`,
+  `ou_admin_write.go`, `InheritField`): the policy is edited in an organizational-scope section of
+  the Export page, which owns it, and resolved with the shared nearest-explicit-value resolver, so a
+  child inherits unless it overrides and the console shows own value, effective value and source.
+  Policy: export allowed (default off), maximum reports per export (default 200), daily report
+  quota (default 1,000). The OU columns are a schema change and need the owner's approval of their
+  exact shape when ADR 0046 is written.
 - Readers see and download only their own tasks; administrators keep seeing every task.
