@@ -2356,3 +2356,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   Linux compilation pass. See [online confirmation](133-network-online-confirmation.md).
   The actual peer-authenticated exchange and current SQL grant adapter remain
   required; no schema, granted provider or production route is enabled.
+
+
+- Connected the signed network pool/check path to an explicitly enabled Linux
+  root/non-root Unix socket family, bounded interactive framing, four fresh
+  confirmations and request-frame-bound final observations. Existing endpoint
+  peer/ownership rules apply; ordinary listeners stay disabled for this family.
+  Local common transport/broker/control/platform race tests, vet and Linux
+  compilation pass. Added Linux socket refusal tests and opt-in real root/UID
+  plus namespace-contained actual TLS/revocation acceptance; exact CI is pending.
+  See [private controller transport](134-private-network-controller-transport.md).
+  Actual Portal SQL/current viewer/grant admission and SDK routes remain closed;
+  no pending credential schema or production/beta change is implemented.

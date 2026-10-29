@@ -46,6 +46,7 @@ type Server struct {
 	journal            admitter
 	dataExecution      *dataExecutionProvider
 	candidateExecution *candidateExecutionProvider
+	network            *networkProvider
 }
 
 type endpointProfile struct {
@@ -245,6 +246,15 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case networkRequestMagic:
+		if s.network == nil || ctx.Err() != nil || !stop() {
+			return
+		}
+		cancel()
+		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(networkSessionTimeout))
+		defer executionCancel()
+		s.network.serve(executionCtx, conn, true)
+		return
 	case backendRequestQueryMagic, writableBackendRequestQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return
