@@ -354,8 +354,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	var checkRegistrationRPC func()
-	if managed && !useService && os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
-		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, managedSocketRoot, authority, store)
+	if managed && os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
+		sockets := managedSocketRoot
+		observerStore := store
+		if useService {
+			sockets = serviceFixture.ipcRoot
+			observerStore = nil
+		}
+		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, sockets, authority, observerStore)
 	}
 	readyWriter.Close()
 	if err := child.Wait(); err != nil {

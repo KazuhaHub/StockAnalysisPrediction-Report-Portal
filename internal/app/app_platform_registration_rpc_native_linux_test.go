@@ -70,9 +70,16 @@ func observeNativeRegistrationRPCFixture(t *testing.T, ctx context.Context, read
 		if err != nil || !os.SameFile(before, after) {
 			t.Fatal("RPC reconciliation replaced original file", err)
 		}
-		receipt, err := store.ReadBackendRegistrationReceipt(ctx, message.Raw, message.Signature)
-		if err != nil || !receipt.MatchesCommand(c) {
-			t.Fatal("RPC did not settle exact delivery receipt", err)
+		if store == nil {
+			var state, receipt string
+			if err := probe.QueryRow(`SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&state, &receipt); err != nil || state != "applied" || receipt == "" || receipt == "{}" {
+				t.Fatal("running service did not settle exact delivery receipt", err)
+			}
+		} else {
+			receipt, err := store.ReadBackendRegistrationReceipt(ctx, message.Raw, message.Signature)
+			if err != nil || !receipt.MatchesCommand(c) {
+				t.Fatal("RPC did not settle exact delivery receipt", err)
+			}
 		}
 		t.Log("BACKEND_REGISTRATION_INTENT_ADMITTED")
 		t.Log("BACKEND_REGISTRATION_DELIVERY_RECONCILED")
