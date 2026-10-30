@@ -1590,7 +1590,7 @@
   "quoteAdmin.failures": "連續失敗",
   "quoteAdmin.fallback": "備源",
   "quoteAdmin.homeCards": "首頁卡片顯示行情",
-  "quoteAdmin.homeCardsHint": "開啟後，每次訪問首頁都會把當前一屏的股票代碼發給行情廠商。資料只讀、量很小，但這是一次對外披露，所以給你一個開關。",
+  "quoteAdmin.homeCardsHint": "開啟後，首頁卡片顯示即時行情。載入首頁時，目前頁面的股票代碼會傳送給行情服務商以取得報價。",
   "quoteAdmin.intraday": "分時",
   "quoteAdmin.lastError": "最近錯誤",
   "quoteAdmin.lastSuccess": "最近成功",

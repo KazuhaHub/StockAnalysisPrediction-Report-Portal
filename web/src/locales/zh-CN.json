@@ -1590,7 +1590,7 @@
   "quoteAdmin.failures": "连续失败",
   "quoteAdmin.fallback": "备源",
   "quoteAdmin.homeCards": "首页卡片显示行情",
-  "quoteAdmin.homeCardsHint": "打开后，每次访问首页都会把当前一屏的股票代码发给行情厂商。数据只读、量很小，但这是一次对外披露，所以给你一个开关。",
+  "quoteAdmin.homeCardsHint": "开启后，首页卡片显示实时行情。加载首页时，当前页面的股票代码会发送给行情服务商以获取报价。",
   "quoteAdmin.intraday": "分时",
   "quoteAdmin.lastError": "最近错误",
   "quoteAdmin.lastSuccess": "最近成功",

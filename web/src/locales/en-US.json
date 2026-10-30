@@ -1590,7 +1590,7 @@
   "quoteAdmin.failures": "Consecutive failures",
   "quoteAdmin.fallback": "Fallback",
   "quoteAdmin.homeCards": "Show quotes on home cards",
-  "quoteAdmin.homeCardsHint": "When on, every home page view sends the codes currently on screen to the quote vendor. Read-only and small, but it is an outward disclosure, so it gets a switch.",
+  "quoteAdmin.homeCardsHint": "When on, home page cards show live quotes. Each time the home page loads, the stock codes on the page are sent to the quote provider to fetch prices.",
   "quoteAdmin.intraday": "Intraday",
   "quoteAdmin.lastError": "Last error",
   "quoteAdmin.lastSuccess": "Last success",
