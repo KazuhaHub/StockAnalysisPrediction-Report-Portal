@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
+import { notifyExportsChanged } from '../lib/exportJobs'
 
 // The stylesheet as text. Vite stubs CSS for ?raw in tests, so this reads the file itself.
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index.css'), 'utf8')
@@ -77,7 +78,11 @@ vi.mock('../lib/conditionalGet', () => ({
 }))
 vi.mock('./Omnibox', () => ({ default: () => <input aria-label="global-search" /> }))
 vi.mock('./RunAnalysisModal', () => ({ default: () => null }))
-vi.mock('./QueueDrawer', () => ({ default: () => null }))
+// The drawer itself is covered by QueueDrawer.test.tsx; here only what the shell hands it matters.
+vi.mock('./QueueDrawer', () => ({
+  default: (p: { open: boolean; tab: string; canRun: boolean; canExport: boolean }) =>
+    p.open ? <div data-testid="tasks-drawer" data-tab={p.tab} data-run={String(p.canRun)} data-export={String(p.canExport)} /> : null,
+}))
 vi.mock('./SiteAnnouncement', () => ({
   AnnouncementStrip: () => null,
   AnnouncementPopup: () => null,
@@ -271,17 +276,17 @@ describe('AppLayout reader export entry', () => {
     answerWith(exportPolicy(true))
     renderAt('/queue')
     expect(await screen.findByText('queue-body')).toBeTruthy()
-    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'tasks.title' })).toBeTruthy())
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'nav.tasks' })).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Alice' }))
     expect(await screen.findByRole('button', { name: /nav\.exports$/ })).toBeTruthy()
   })
 
-  it('shows the tasks tray to a run_batch holder even where export is off', async () => {
+  it('shows the Tasks button to a run_batch holder even where export is off', async () => {
     authState.value = { ...authState.value, admin: false, can: (p) => p === 'run_batch' }
     answerWith(exportPolicy(false))
     renderAt('/queue')
     expect(await screen.findByText('queue-body')).toBeTruthy()
-    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'tasks.title' })).toBeTruthy())
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'nav.tasks' })).toBeTruthy())
   })
 
   it('shows neither the entry nor the tray when the policy does not allow it and there is no run permission', async () => {
@@ -294,7 +299,7 @@ describe('AppLayout reader export entry', () => {
     await user.click(screen.getByRole('button', { name: 'Alice' }))
     expect(await screen.findByRole('button', { name: /nav\.account$/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /nav\.exports$/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'tasks.title' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'nav.tasks' })).toBeNull()
   })
 
   it('does not ask an administrator for the reader policy', async () => {
@@ -302,6 +307,117 @@ describe('AppLayout reader export entry', () => {
     renderAt('/queue')
     expect(await screen.findByText('queue-body')).toBeTruthy()
     expect(apiGet).not.toHaveBeenCalledWith('/api/exports/policy')
+  })
+})
+
+// One Tasks entry replaces the queue button and the hourglass tray (ADR 0047).
+describe('AppLayout Tasks entry', () => {
+  const exportPolicy = (allowed: boolean) => ({ allowed, max_reports: 200, daily_quota: 1000, used_today: 0, remaining: 1000, unlimited: false })
+  const exportTask = (id: string, status = 'running') => ({ kind: 'export', id, name: `Export ${id}`, status, done: 1, total: 4, created_at: 1, finished_at: 0, link: '/exports' })
+  let feed: unknown[] = []
+  const answer = (policy: unknown) =>
+    apiGet.mockImplementation((url: string) => {
+      if (url === '/api/exports/policy') return Promise.resolve(policy)
+      if (url.startsWith('/api/tasks')) return Promise.resolve({ tasks: feed })
+      return Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' })
+    })
+  const shown = (c: HTMLElement, sel: string) => c.querySelector(`${sel}[data-show="true"]`)
+
+  beforeEach(() => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    queueState.answer = null
+    feed = []
+  })
+
+  it('has one Tasks button and no hourglass or separate queue button', async () => {
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'nav.tasks' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'tasks.title' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'nav.queue' })).toBeNull()
+    expect(document.querySelector('.anticon-hourglass')).toBeNull()
+  })
+
+  it('badges in-progress runs plus the caller\'s active exports', async () => {
+    queueState.answer = { running: 2, waiting: 1, scheduled: 0, budget: 3 }
+    feed = [exportTask('a'), exportTask('b', 'queued'), exportTask('c', 'done')]
+    answer(exportPolicy(true))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(shown(container, '.ant-badge-count')?.textContent).toContain('5'))
+  })
+
+  it('gives a reader with export only the button, counting only exports, and opens the drawer on Exports', async () => {
+    const user = userEvent.setup()
+    authState.value = { ...authState.value, admin: false, can: () => false }
+    feed = [exportTask('a')]
+    answer(exportPolicy(true))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(shown(container, '.ant-badge-count')?.textContent).toContain('1'))
+    await user.click(screen.getByRole('button', { name: 'nav.tasks' }))
+    const drawer = await screen.findByTestId('tasks-drawer')
+    expect(drawer.getAttribute('data-run')).toBe('false')
+    expect(drawer.getAttribute('data-export')).toBe('true')
+    expect(drawer.getAttribute('data-tab')).toBe('exports')
+  })
+
+  it('counts exports only where the Exports tab would be shown, and keeps the dot while the run summary is unknown', async () => {
+    authState.value = { ...authState.value, admin: false, can: (p) => p === 'run_batch' }
+    feed = [exportTask('a')]
+    answer(exportPolicy(false))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/tasks?limit=20'))
+    expect(shown(container, '.ant-badge-count')).toBeNull()
+    expect(shown(container, '.ant-badge-dot')).not.toBeNull()
+  })
+
+  it('keeps the dot, not a firm number, while the run summary is unknown even with active exports', async () => {
+    authState.value = { ...authState.value, admin: false, can: () => true }
+    feed = [exportTask('a')]
+    answer(exportPolicy(true))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/tasks?limit=20'))
+    expect(shown(container, '.ant-badge-dot')).not.toBeNull()
+    expect(shown(container, '.ant-badge-count')).toBeNull()
+  })
+
+  it('opens on Runs for someone who can run', async () => {
+    const user = userEvent.setup()
+    answer(exportPolicy(true))
+    authState.value = { ...authState.value, admin: false, can: (p) => p === 'run_batch' }
+    renderAt('/queue')
+    await user.click(await screen.findByRole('button', { name: 'nav.tasks' }))
+    expect((await screen.findByTestId('tasks-drawer')).getAttribute('data-tab')).toBe('runs')
+  })
+
+  it('opens the drawer on the Exports tab when an export is submitted', async () => {
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(screen.queryByTestId('tasks-drawer')).toBeNull()
+    act(() => notifyExportsChanged({ open: true }))
+    expect((await screen.findByTestId('tasks-drawer')).getAttribute('data-tab')).toBe('exports')
+  })
+
+  it('keeps the tool buttons quiet and uniform, with a separator before the account', async () => {
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    const classes = ['nav.tasks', 'nav.workbench', 'inbox.title'].map((n) => screen.getByRole('button', { name: n }).classList.contains('rp-header-icon'))
+    expect(classes).toEqual([true, true, true])
+    expect(document.querySelector('#rp-app-header .rp-header-sep')).not.toBeNull()
+  })
+
+  it('shows the label only at desktop width, and never lets the compact header overflow its button', async () => {
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'nav.tasks' }).textContent).toBe('')
   })
 })
 

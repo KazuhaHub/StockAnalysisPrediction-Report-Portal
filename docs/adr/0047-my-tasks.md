@@ -129,6 +129,8 @@ bounded to the caller's own rows, in the store, not filtered in Go over a global
   "ahead": 2,
   "scheduled": true,
   "error": "failed exports",
+  "format": "exports only: md_zip | csv | jsonl",
+  "bytes": 3400,
   "counts": {"succeeded":1,"partial":0,"failed":0,"cancelled":0},
   "created_at": 1761700000000, "finished_at": 0,
   "download": "export done only",
@@ -142,6 +144,8 @@ bounded to the caller's own rows, in the store, not filtered in Go over a global
 - `ahead` is present only on a queued task that is counted; `scheduled` only on a deferred run.
 - `done`/`total`: a run's settled rows over its rows (live counts while running); an export's rows
   written over its estimate.
+- `format` and `bytes` are present on exports only: the job's format, and the file size once the
+  export is done (omitted while it is 0). Runs never carry them.
 - `counts` is present on runs, so the client can tell a clean finish from one with failures.
 - Times are unix milliseconds for both kinds (run timestamps are stored as local strings and converted).
 - A run carries `cancel` and `link` only when the caller holds `run_batch` (an administrator does); a

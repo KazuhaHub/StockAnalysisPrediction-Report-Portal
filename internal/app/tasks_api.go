@@ -41,6 +41,8 @@ type taskJSON struct {
 	Ahead      *int       `json:"ahead,omitempty"` // queued and counted only; a count, never who
 	Scheduled  bool       `json:"scheduled,omitempty"`
 	Error      string     `json:"error,omitempty"`
+	Format     string     `json:"format,omitempty"` // exports only: md_zip | csv | jsonl
+	Bytes      int64      `json:"bytes,omitempty"`  // exports only: the file size once done
 	Counts     *runCounts `json:"counts,omitempty"`
 	CreatedAt  int64      `json:"created_at"`
 	FinishedAt int64      `json:"finished_at"`
@@ -201,7 +203,7 @@ func (s *Server) myExportTasks(user string, limit int) ([]taskJSON, error) {
 		}
 		t := taskJSON{
 			Kind: "export", ID: j.ID, Name: name, Status: j.Status, Done: j.RowsDone, Total: j.RowsEstimate,
-			Error: j.Error, CreatedAt: j.CreatedAt, FinishedAt: j.FinishedAt, Link: link,
+			Format: j.Format, Bytes: j.Bytes, Error: j.Error, CreatedAt: j.CreatedAt, FinishedAt: j.FinishedAt, Link: link,
 		}
 		// A reader's finished file is served only while their policy allows export (ADR 0046).
 		if j.Status == exportDone && (exportAllowed || !j.isReader()) {

@@ -231,8 +231,10 @@ export function InputsPreview({
   )
 }
 
+// A run that will not change again: finished, cancelled, or expired (a preset-window job whose
+// window passed while it was still queued).
 export function isTerminal(status: string) {
-  return status === 'finished' || status === 'cancelled'
+  return status === 'finished' || status === 'cancelled' || status === 'expired'
 }
 
 // difyModeKind maps a Dify target's raw app mode to the three run types the portal
