@@ -3361,5 +3361,6 @@
   "notifications.region": "通知",
   "notifications.close": "关闭通知",
   "notifications.more_one": "还有 {{count}} 条通知",
-  "notifications.more_other": "还有 {{count}} 条通知"
+  "notifications.more_other": "还有 {{count}} 条通知",
+  "tasks.toast.view": "查看"
 }

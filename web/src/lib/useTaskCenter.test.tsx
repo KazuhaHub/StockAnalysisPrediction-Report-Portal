@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import type { TaskItem } from '../api/types'
-import { notifyExportsChanged } from './exportJobs'
+import { EXPORTS_CHANGED_EVENT, notifyExportsChanged } from './exportJobs'
+import { QUEUE_EVENT } from './shortcuts'
 import NotificationStack from '../components/NotificationStack'
 import { useTaskCenter } from './useTaskCenter'
 
@@ -102,6 +103,32 @@ describe('useTaskCenter completion toasts', () => {
   it('reports a run where nothing succeeded as failed', async () => {
     await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
     expect(await screen.findByText('tasks.toast.runFailed:{"name":"Deep dive"}')).toBeTruthy()
+  })
+
+  it('offers a View action on a failed run that opens the Tasks drawer and closes the card', async () => {
+    const opened = vi.fn()
+    window.addEventListener(QUEUE_EVENT, opened)
+    await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
+    fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
+    expect(opened).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(document.querySelector('.rp-notify-card')).toBeNull())
+    window.removeEventListener(QUEUE_EVENT, opened)
+  })
+
+  it('offers a View action on a partial run', async () => {
+    await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 1, partial: 0, failed: 2, cancelled: 0 } }))
+    expect(await screen.findByRole('button', { name: 'tasks.toast.view' })).toBeTruthy()
+  })
+
+  it('opens the exports tab from a failed export and closes the card', async () => {
+    const opened = vi.fn()
+    const onEvent = (e: Event) => { if ((e as CustomEvent).detail?.open) opened() }
+    window.addEventListener(EXPORTS_CHANGED_EVENT, onEvent)
+    await watchThen(exp(), exp({ status: 'failed', error: 'disk full' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
+    expect(opened).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(document.querySelector('.rp-notify-card')).toBeNull())
+    window.removeEventListener(EXPORTS_CHANGED_EVENT, onEvent)
   })
 
   it('stays quiet when the person cancelled the task', async () => {

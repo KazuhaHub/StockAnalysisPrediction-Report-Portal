@@ -3361,5 +3361,6 @@
   "notifications.region": "Notifications",
   "notifications.close": "Close notification",
   "notifications.more_one": "{{count}} more notification",
-  "notifications.more_other": "{{count}} more notifications"
+  "notifications.more_other": "{{count}} more notifications",
+  "tasks.toast.view": "View"
 }
