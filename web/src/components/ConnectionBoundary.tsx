@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { api, clearConnectionError, getConnectionError, subscribeConnection } from '../api/client'
 import { useAuth } from '../auth'
 
+const MIN_PROBE_BUSY_MS = 600
+
 const ConnectionContext = createContext({ error: null as string | null, blocked: false, busy: false, retry: async (): Promise<boolean | null> => null })
 
 export default function ConnectionBoundary({ children }: { children: ReactNode }) {
@@ -24,18 +26,28 @@ export default function ConnectionBoundary({ children }: { children: ReactNode }
   const [busy, setBusy] = useState(false)
   const pending = useRef(false)
   // Resolves true when the probe reconnected, false when it failed, null when a probe was already
-  // running and this call did nothing.
+  // running and this call did nothing. A failed probe stays busy for at least MIN_PROBE_BUSY_MS:
+  // a refused connection fails in milliseconds, and the spinner would otherwise be a one-frame
+  // flicker, so neither the automatic probes nor a manual retry would visibly have happened.
   const retry = useCallback(async (): Promise<boolean | null> => {
     if (pending.current) return null
     pending.current = true
     setBusy(true)
+    const started = Date.now()
+    let ok = false
     try {
       await api.get('/api/site')
       clearConnectionError()
       await refresh()
-      return true
-    } catch { return false /* Preserve the notice until a connection probe succeeds. */ }
-    finally { pending.current = false; setBusy(false) }
+      ok = true
+    } catch { /* Preserve the notice until a connection probe succeeds. */ }
+    if (!ok) {
+      const rest = MIN_PROBE_BUSY_MS - (Date.now() - started)
+      if (rest > 0) await new Promise((r) => window.setTimeout(r, rest))
+    }
+    pending.current = false
+    setBusy(false)
+    return ok
   }, [refresh])
   useEffect(() => {
     if (!error) return
@@ -50,9 +62,6 @@ export default function ConnectionBoundary({ children }: { children: ReactNode }
 
 const RECOVERED_MS = 1500
 const LEAVE_MS = 220
-// A refused connection fails in milliseconds; below this a manual retry's spinner is only a flicker
-// and the click looks ignored.
-const MIN_MANUAL_BUSY_MS = 600
 const STILL_DOWN_MS = 3000
 
 /**
@@ -80,8 +89,8 @@ export function ConnectionNotice({ top = 'var(--rp-header-h, 64px)' }: { top?: n
     const timer = window.setTimeout(() => setPhase(phase === 'recovered' ? 'leaving' : 'idle'), phase === 'recovered' ? RECOVERED_MS : LEAVE_MS)
     return () => window.clearTimeout(timer)
   }, [phase])
-  // A manual retry stays visibly busy for at least MIN_MANUAL_BUSY_MS, and a failed one says so for
-  // STILL_DOWN_MS with a short shake. `stillDown` is a counter so a second failure restarts the shake.
+  // A failed manual retry says so for STILL_DOWN_MS with a short shake; automatic probes only spin
+  // (the probe itself keeps that spin visible), so the strip does not nag every interval. `stillDown` is a counter so a second failure restarts the shake.
   const [manualBusy, setManualBusy] = useState(false)
   const [stillDown, setStillDown] = useState(0)
   const alive = useRef(true)
@@ -96,10 +105,7 @@ export function ConnectionNotice({ top = 'var(--rp-header-h, 64px)' }: { top?: n
     if (manualBusy) return
     setManualBusy(true)
     setStillDown(0)
-    const started = Date.now()
     const ok = await retry()
-    const rest = MIN_MANUAL_BUSY_MS - (Date.now() - started)
-    if (rest > 0) await new Promise((r) => window.setTimeout(r, rest))
     if (!alive.current) return
     setManualBusy(false)
     if (ok === false) setStillDown((n) => n + 1)

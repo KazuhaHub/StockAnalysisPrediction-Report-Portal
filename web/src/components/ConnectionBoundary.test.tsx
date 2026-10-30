@@ -105,3 +105,13 @@ it('ends a failed manual retry under StrictMode too', async () => {
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('connection.stillDown'))
   expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(false)
 })
+it('shows an automatic probe as a visible spin, without the manual failure message', async () => {
+  mount()
+  await disconnect()
+  act(() => { window.dispatchEvent(new Event('online')) })
+  await new Promise((r) => setTimeout(r, 300))
+  expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(true)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(false))
+  expect(screen.getByRole('alert').textContent).toContain('connection.notice')
+  expect(screen.getByRole('alert').textContent).not.toContain('connection.stillDown')
+})
