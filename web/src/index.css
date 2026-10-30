@@ -2453,3 +2453,28 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rp-connection-shake { animation: none; }
 }
+
+/* Apps administration (list > detail > service status by OU). */
+.rp-app-detail {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.rp-app-access {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  min-height: 420px;
+}
+.rp-app-access__tree { padding: 12px 8px; border-inline-end: 1px solid var(--ant-color-border-secondary); min-width: 0; }
+.rp-app-access__tree .rp-ou-picker--manage { width: 100% !important; border: 0 !important; }
+.rp-app-access__tree .rp-ou-picker__tree { max-height: 360px; }
+.rp-app-access__setting { padding: 24px 28px; min-width: 0; }
+@media (max-width: 760px) {
+  .rp-app-detail, .rp-app-access { grid-template-columns: minmax(0, 1fr); }
+  .rp-app-access__tree { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
+  .rp-app-access__setting { padding: 16px; }
+}
+@media (max-width: 760px) {
+  .rp-apps-col-type { display: none; }
+}

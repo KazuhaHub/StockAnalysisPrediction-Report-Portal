@@ -50,6 +50,7 @@ export default function OrgUnitPicker({
   onAdd,
   loading = false,
   collapsible = true,
+  annotate,
 }: {
   groups: UserGroupRow[]
   /** Accounts with no primary group; they belong to the Default OU by inheritance. */
@@ -69,6 +70,8 @@ export default function OrgUnitPicker({
    *  portal has none — and "No groups yet" is a claim about the directory. */
   collapsible?: boolean
   loading?: boolean
+  /** Extra marker drawn after an OU's name, e.g. a policy page's "Overridden" label. */
+  annotate?: (group: UserGroupRow) => React.ReactNode
 }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -132,6 +135,7 @@ export default function OrgUnitPicker({
                 <span>{g.name}</span>
                 {g.is_default && <Tag color="green">{t('users.defaultGroupTag')}</Tag>}
                 {g.restricted_effective && <Tag color="volcano">{t('users.restrictedTag')}</Tag>}
+                {annotate?.(g)}
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {reach.get(g.id) ?? g.members}
                 </Typography.Text>
@@ -141,7 +145,7 @@ export default function OrgUnitPicker({
           }
         })
     return build(0)
-  }, [groups, visible, reach, t])
+  }, [groups, visible, reach, t, annotate])
 
   if (collapsed) {
     return (
