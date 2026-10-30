@@ -25,7 +25,9 @@ jobs:
   go-test:
     name: go-test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Includes the focused SQL diagnostics and the ordinary full PostgreSQL run.
+    # The latter now executes after the repaired vulnerability gate.
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16-alpine
@@ -90,6 +92,48 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
+      - name: Bounded application HTTP broker executor
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/broker
+      - name: Private network controller transport
+        run: GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m ./internal/apprunner/transport -run '^TestNetwork(Session|Unix|Root|Observation|Runtime)'
+      - name: Signed application descriptor and query contracts
+        run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
+      - name: Application credential schema and custody
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatform(Credential|SecretBindingPolicy|SecretUninstall)'
+      - name: Application capability review and publication
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^(TestPlatformInstallCapability|TestManagedInstallRequiresOpaqueRuntimeFacts)'
+      - name: Current network provider authority
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority'
+      - name: Current viewer network request authority
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)'
+      - name: Writable application review and writer storage
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatformWriter(Intent|IntentClockSkew|Refusals)(SQLite|Postgres)|TestWritableReviewCannotUseReadonlyRuntime|TestPlatformWritableStart(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableReadiness(Source|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistration(Intent|Refusals)(SQLite|Postgres)|TestPlatformWritableRegistrationFreshness|TestPlatformWritableBootRequiresAppliedDelivery(SQLite|Postgres))$'
+      - name: Writable activation and current access
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^(TestPlatform(Writable(Access|AccessRefusals|ActivationMetadata|ActivationRefusals)|ManagedAccess|ManagedAccessRefusals)(SQLite|Postgres)|TestPlatformWritableRequest(SigningSQLite|PayloadBoundary|BindingBoundary|BindingSQLite|BindingPostgres)|TestPlatformBackendHTTP(Admission(SQLite|Postgres)|Decoder|BootstrapRefusal|Enrolment|ReadDeadline|WriteDeadline))$'
+      - name: Writable installation worker
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableInstallRun(Pending|Refusals)|StaticInstallRun(Progress|Activation))(SQLite|Postgres)$'
+      - name: Writable installation queue and scheduling
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(WritableQueue(Claim|Recovery|Authority)|WritableFailureBinding|WritableSchedulerRetries|InstallQueue(Claim|Recovery)|InstallSchedulerRetries)(SQLite|Postgres)$|^TestPlatformWritable(SchedulerCancellation|ReadinessWaitRevocation)SQLite$|^TestPlatformWritableFixtureOwnership$'
+      - name: Writable launch documents and directory
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/app -run '^TestPlatform(BackendCapabilitySnapshot|CapabilitySnapshot|WritableLaunch|WritableAccess|ManagedAccess|Launch|Directory|Viewer|HTTP)|^TestPostgresPlatform(AssetRead|Launch|DocumentRead|HTTPDocument|Directory|Display)'
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
@@ -117,7 +161,7 @@ jobs:
       - name: Test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=5m ./... 2>&1 | tee go-test-output.txt
+          go test -count=1 -timeout=20m ./... 2>&1 | tee go-test-output.txt
       - name: Upload test output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -183,7 +227,7 @@ jobs:
           cache: false
       - name: Race the concurrency packages
         if: matrix.shard == 1
-        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ 2>&1 | tee go-race-packages.txt
+        run: go test -race -count=1 -timeout=5m ./internal/queue/ ./internal/batch/ ./internal/dify/ ./internal/webhook/ ./internal/apprunner/journal/ 2>&1 | tee go-race-packages.txt
       # The subset is name-based on purpose: the run queue, scheduler, retry/reconcile loops,
       # webhook delivery and chat gate are the paths a race detector can actually catch here. The
       # list is the top-level tests that pattern selects, dealt out exactly like go-race-full's.
@@ -191,7 +235,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1'
+          subset='Batch|Schedul|Priority|Ticket|Urgent|Queue|Cancel|Retry|Requeue|Resume|Reconcile|Webhook|Chat|Job|Throttle|Shutdown|Cleanup|Recurring|Dify|Session|LoginHistory|PersonalHistory|Legacy|Logout|Forecast|Evaluator|Settle|Watchdog|Population|Restore|Scope|Alert|Ledger|QuoteOrder|Readiness|QuoteProbe|QuoteShadow|SinaRange|SinaKline|ShadowHTTPBudget|ShadowNeverWrites|FallbackModesTier1|AppPlatform|Keyring|Seal|RotateSecretKey'
           tests=$(go test -race -list "$subset" ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
           regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
@@ -369,6 +413,10 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Publisher signature fixture reproducibility
+        run: node scripts/generate_publisher_signature_vectors.mjs --check
+      - name: Runner command fixture reproducibility
+        run: node scripts/generate_runner_command_vectors.mjs --check
       - name: Install deps
         working-directory: web
         run: npm ci

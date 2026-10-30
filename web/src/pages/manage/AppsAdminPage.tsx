@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Input, Space, Table, Typography, theme } from 'antd'
+import { Button, Card, Input, Space, Table, Tabs, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router'
@@ -9,6 +9,8 @@ import AppInstall from './AppInstall'
 import AppReorderModal from './AppReorderModal'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
+import AppPlatformInstallPanel from './AppPlatformInstallPanel'
+import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
 
 // The Apps list: every built-in and installed app with where it is switched on, in the administrator's
 // order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
@@ -56,9 +58,12 @@ export default function AppsAdminPage() {
     { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]
 
-  return (
-    <LoadGate loading={loading} error={error} onRetry={reload}>
-      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+  return <Tabs items={[
+    {
+      key: 'apps',
+      label: t('nav.apps'),
+      children: <LoadGate loading={loading} error={error} onRetry={reload}>
+        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Space wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button icon={<OrderedListOutlined aria-hidden="true" />} onClick={() => setReordering(true)} disabled={apps.length < 2}>
             {t('apps.reorder')}
@@ -89,8 +94,11 @@ export default function AppsAdminPage() {
             onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
           />
         </Card>
-      </Space>
-      <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={reload} />
-    </LoadGate>
-  )
+        </Space>
+        <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={reload} />
+      </LoadGate>,
+    },
+    { key: 'platform', label: t('appPlatform.tab'), children: <AppPlatformInstallPanel /> },
+    { key: 'publishers', label: t('appTrust.tab'), children: <AppPlatformPublishersPanel /> },
+  ]} />
 }

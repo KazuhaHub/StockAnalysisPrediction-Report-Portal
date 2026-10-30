@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate, useLocation } from 'react-router'
+import { useState } from 'react'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
 import { notifyExportsChanged } from '../lib/exportJobs'
@@ -76,6 +77,10 @@ vi.mock('../lib/conditionalGet', () => ({
   forgetTags,
   getIfChanged: () => (queueState.answer === null ? new Promise(() => {}) : Promise.resolve(queueState.answer)),
 }))
+// Shell tests mount route bodies explicitly. Its idle report prefetch must not
+// load unrelated page dependency trees after this test environment is destroyed.
+vi.mock('../pages/StockPage', () => ({ default: () => null }))
+vi.mock('../pages/RunPage', () => ({ default: () => null }))
 vi.mock('./Omnibox', () => ({ default: () => <input aria-label="global-search" /> }))
 vi.mock('./RunAnalysisModal', () => ({ default: () => null }))
 // The drawer itself is covered by QueueDrawer.test.tsx; here only what the shell hands it matters.
@@ -99,6 +104,7 @@ function renderAt(path: string) {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="chat" element={<div>chat-body</div>} />
+          <Route path="apps/v2/:installation" element={<div>application-body</div>} />
           <Route path="forecast" element={<div>forecast-body</div>} />
           <Route path="queue" element={<div>queue-body</div>} />
           <Route path="review" element={<div>review-body</div>} />
@@ -419,6 +425,17 @@ describe('AppLayout Tasks entry', () => {
     expect(await screen.findByText('queue-body')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'nav.tasks' }).textContent).toBe('')
   })
+
+})
+
+it('gives application documents one Portal scroll region while chat retains its own scroll',async()=>{
+ const app=renderAt('/apps/v2/00000000-0000-0000-0000-000000000001')
+ await screen.findByText('application-body')
+ const content=app.container.querySelector<HTMLElement>('.ant-layout-content')!
+ expect(content.style.overflow).toBe('auto');expect(content.style.minHeight).toBe('0px')
+ app.unmount()
+ const chat=renderAt('/chat');await screen.findByText('chat-body')
+ expect(chat.container.querySelector<HTMLElement>('.ant-layout-content')!.style.overflow).toBe('hidden')
 })
 
 describe('AppLayout mobile chat focus mode', () => {
@@ -665,3 +682,26 @@ it.each([['/manage', true], ['/manage/overview', true], ['/manage', false], ['/m
   expect(screen.queryByLabelText('global-search')).toBeNull()
   expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
 })
+
+it('retains an application across its subroutes but retires it for another installation',async()=>{
+ const user=userEvent.setup();
+ function Application(){
+  const [count,setCount]=useState(0),navigate=useNavigate(),location=useLocation();
+  return <div><span data-testid="application-count">{count}</span><span data-testid="application-path">{location.pathname}</span>
+   <button onClick={()=>setCount(n=>n+1)}>Increment application</button>
+   <button onClick={()=>navigate('/apps/v2/first/editor')}>Application editor</button>
+   <button onClick={()=>navigate(-1)}>Application back</button>
+   <button onClick={()=>navigate('/apps/v2/second')}>Another application</button></div>;
+ }
+ render(<MemoryRouter initialEntries={['/apps/v2/first']}><Routes><Route element={<AppLayout/>}>
+  <Route path="apps/v2/:installation/*" element={<Application/>}/>
+ </Route></Routes></MemoryRouter>);
+ await user.click(screen.getByRole('button',{name:'Increment application'}));
+ await user.click(screen.getByRole('button',{name:'Application editor'}));
+ expect(screen.getByTestId('application-path').textContent).toBe('/apps/v2/first/editor');
+ expect(screen.getByTestId('application-count').textContent).toBe('1');
+ await user.click(screen.getByRole('button',{name:'Application back'}));
+ expect(screen.getByTestId('application-count').textContent).toBe('1');
+ await user.click(screen.getByRole('button',{name:'Another application'}));
+ expect(screen.getByTestId('application-count').textContent).toBe('0');
+});

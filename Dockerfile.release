@@ -80,6 +80,7 @@ ENV TZ=UTC RP_CONFIG=/app/config/config.yaml
 WORKDIR /app
 COPY bin/linux-${TARGETARCH}/report-portal /app/report-portal
 COPY config.example.yaml /app/config.example.yaml
+COPY internal/apprunner/driver/seccomp/LICENSE internal/apprunner/driver/seccomp/README.md /app/third-party/moby-profiles/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /app/report-portal /usr/local/bin/docker-entrypoint.sh \
  && mkdir -p /app/config /app/data

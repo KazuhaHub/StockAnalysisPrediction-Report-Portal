@@ -397,12 +397,22 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
 	var tx *sql.Tx
+	var identityFloors map[string]restoreIdentityFloor
 	if force {
 		tx, err = s.db.Begin()
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback() //nolint:errcheck // no-op once committed
+		captured, captureErr := capturePlatformRestorePrior(migExec{s: s, ex: tx})
+		if captureErr != nil {
+			return nil, captureErr
+		}
+		prior.appPlatform = &captured
+		identityFloors, err = s.captureIdentityFloors(tx, identity)
+		if err != nil {
+			return nil, err
+		}
 		// Empty EVERY table in the schema, not only the ones the dump carries: a table the dump
 		// omits must end up empty too, or the result is a mix of two databases that never existed.
 		for _, t := range s.backupTables() {
@@ -417,7 +427,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if !force {
 		return rep, nil
 	}
-	if err := s.resetIdentities(tx, identity, rep.Rows); err != nil {
+	if err := s.advanceRestoreIdentities(tx, identity, identityFloors); err != nil {
 		return nil, err
 	}
 	// The database's own consistency is settled HERE, inside the transaction that wrote the rows: a
@@ -437,6 +447,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 // restorePrior holds the live values a restore must reconcile against the dump rather than replace
 // outright. It is captured before the restore's transaction clears the tables.
 type restorePrior struct {
+	appPlatform    *platformRestorePrior
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
 	readerStage    string // the live reading stage as the readers resolve it: off, card or full
@@ -467,6 +478,11 @@ func (s *Store) populationFromRow() string {
 // takes the data back with it rather than leaving a half-loaded database behind.
 func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if prior.appPlatform != nil {
+		if err := applyPlatformRestore(e, *prior.appPlatform); err != nil {
+			return err
+		}
+	}
 	if err := resetRestoredExtensionConnections(e); err != nil {
 		return err
 	}
@@ -855,23 +871,6 @@ func (s *Store) identityColumns() (map[string]string, error) {
 		out[t] = c
 	}
 	return out, rows.Err()
-}
-
-// resetIdentities moves each Postgres identity sequence past the ids just restored. Without it the
-// sequence still sits at 1 and the very next insert collides with a restored row.
-func (s *Store) resetIdentities(tx *sql.Tx, identity map[string]string, restored map[string]int64) error {
-	for table, col := range identity {
-		if restored[table] == 0 {
-			continue
-		}
-		q := fmt.Sprintf(
-			`SELECT setval(pg_get_serial_sequence('%s','%s'), COALESCE((SELECT MAX(%s) FROM %s),0)+1, false)`,
-			table, col, col, table)
-		if _, err := tx.Exec(q); err != nil {
-			return fmt.Errorf("reset %s.%s sequence: %w", table, col, err)
-		}
-	}
-	return nil
 }
 
 // collectColumns fills in the real column set of every table, which is what decides whether a dump

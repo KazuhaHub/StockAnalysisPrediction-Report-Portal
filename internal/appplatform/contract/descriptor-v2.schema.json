@@ -1,0 +1,696 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:portal:app:descriptor:v2:experimental",
+  "title": "Experimental Portal app v2 descriptor structure",
+  "description": "Editor/tooling structure only. Exact-byte parsing, semantic checks, signature/trust, artifact integrity, compatibility, administrator review and runtime admission remain mandatory. Not the legacy app.json format.",
+  "$ref": "#/$defs/Manifest",
+  "x-portal-parser-limits": {
+    "bytes": 131072,
+    "depth": 24,
+    "key_pattern": "^[a-z][a-z0-9_]*$"
+  },
+  "$defs": {
+    "Manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "const": "portal.app/v2"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+          "maxLength": 128,
+          "description": "Numeric prerelease identifiers additionally forbid leading zeroes in the strict parser."
+        },
+        "publisher": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/Compatibility"
+        },
+        "presentation": {
+          "$ref": "#/$defs/Presentation"
+        },
+        "frontend": {
+          "$ref": "#/$defs/Artifact"
+        },
+        "backend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Backend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Capabilities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data": {
+          "$ref": "#/$defs/DataCompatibility"
+        }
+      },
+      "required": [
+        "format",
+        "id",
+        "version",
+        "publisher",
+        "compatibility",
+        "presentation",
+        "frontend",
+        "data"
+      ],
+      "x-typescript-name": "Descriptor"
+    },
+    "Compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform_api": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[0-9A-Za-z.*+<>=~^| -]{1,96}$",
+          "allOf": [
+            {
+              "not": {
+                "pattern": "^ +$"
+              }
+            }
+          ],
+          "description": "Bounded range declaration only; actual range parsing and compatibility admission are separate.",
+          "x-go-name": "PlatformAPI"
+        },
+        "runner_protocol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[0-9A-Za-z.*+<>=~^| -]{1,96}$",
+          "allOf": [
+            {
+              "not": {
+                "pattern": "^ +$"
+              }
+            }
+          ],
+          "description": "Bounded range declaration only; actual range parsing and compatibility admission are separate."
+        }
+      },
+      "required": [
+        "platform_api",
+        "runner_protocol"
+      ]
+    },
+    "Presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,95}$"
+        },
+        "description_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,95}$"
+        },
+        "locales": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "en-US",
+              "zh-CN",
+              "zh-TW"
+            ]
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "description": "Strict parsing also requires unique route IDs/paths and a home path."
+        },
+        "entry": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "description": "The strict byte parser additionally requires a normalized relative path without dot segments, traversal, repeated separators or leading slash."
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AppDisplay"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-pointer": true,
+          "x-go-omitempty": true,
+          "description": "Signed host display metadata. Optional only for pre-freeze experimental package compatibility; maintained v2 publishers must provide it."
+        }
+      },
+      "required": [
+        "name_key",
+        "description_key",
+        "locales",
+        "routes",
+        "entry"
+      ]
+    },
+    "Route": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 257,
+          "pattern": "^/[A-Za-z0-9._/-]*$",
+          "description": "Root or slash followed by a strict normalized relative path."
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "document",
+            "viewport"
+          ]
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RouteQuery"
+              },
+              "maxItems": 16
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-go-omitempty": true,
+          "description": "Optional signed query fields. Names are unique; absent/null/empty means no query fields."
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "layout"
+      ]
+    },
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._/-]+$",
+          "description": "The strict byte parser additionally requires a normalized relative path without dot segments, traversal, repeated separators or leading slash."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "x-go-name": "SHA256"
+        }
+      },
+      "required": [
+        "artifact",
+        "sha256"
+      ]
+    },
+    "Backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "oci"
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$",
+          "description": "Strict parsing also rejects repeated separators and double dots."
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "linux/amd64",
+              "linux/arm64"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "protocol": {
+          "const": "portal.backend/1"
+        },
+        "resources": {
+          "$ref": "#/$defs/Resources"
+        }
+      },
+      "required": [
+        "kind",
+        "image",
+        "platforms",
+        "protocol",
+        "resources"
+      ]
+    },
+    "Resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memory_mib": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "x-go-name": "MemoryMiB"
+        },
+        "cpu_millis": {
+          "type": "integer",
+          "minimum": 25,
+          "maximum": 4000,
+          "x-go-name": "CPUMillis"
+        },
+        "pids": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1024,
+          "x-go-name": "PIDs"
+        }
+      },
+      "required": [
+        "memory_mib",
+        "cpu_millis",
+        "pids"
+      ]
+    },
+    "Capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "reports.read",
+                  "storage.files",
+                  "tasks.schedule",
+                  "events.subscribe",
+                  "notifications.publish",
+                  "network.http",
+                  "network.stream",
+                  "secrets.use",
+                  "secrets.read",
+                  "background.run",
+                  "files.export"
+                ]
+              },
+              "maxItems": 11,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "optional": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "reports.read",
+                  "storage.files",
+                  "tasks.schedule",
+                  "events.subscribe",
+                  "notifications.publish",
+                  "network.http",
+                  "network.stream",
+                  "secrets.use",
+                  "secrets.read",
+                  "background.run",
+                  "files.export"
+                ]
+              },
+              "maxItems": 11,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "description": "Strict parsing additionally checks disjoint lists, backend requirements and background handler dependencies."
+    },
+    "DataCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "readable_schemas": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "description": "The strict parser also requires this list to contain data.schema."
+        },
+        "writes_on_startup": {
+          "enum": [
+            false,
+            null
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "readable_schemas"
+      ]
+    },
+    "AppDisplay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string",
+          "enum": [
+            "appstore",
+            "file-text",
+            "dashboard",
+            "calendar",
+            "bar-chart",
+            "cloud",
+            "tool",
+            "experiment"
+          ]
+        },
+        "texts": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/AppDisplayText"
+          }
+        }
+      },
+      "required": [
+        "icon",
+        "texts"
+      ]
+    },
+    "AppDisplayText": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locale": {
+          "type": "string",
+          "enum": [
+            "en-US",
+            "zh-CN",
+            "zh-TW"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 320
+        }
+      },
+      "required": [
+        "locale",
+        "name",
+        "description"
+      ]
+    },
+    "RouteQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "text",
+            "integer",
+            "boolean",
+            "enum"
+          ]
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "min": {
+          "type": "integer",
+          "minimum": -1000000000,
+          "maximum": 1000000000,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -1000000000,
+          "maximum": 1000000000,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "x-go-omitempty": true
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "text"
+                },
+                "max_bytes": {}
+              },
+              "required": [
+                "max_bytes"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "integer"
+                },
+                "min": {},
+                "max": {}
+              },
+              "required": [
+                "min",
+                "max"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "boolean"
+                }
+              },
+              "required": [],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "values"
+                    ],
+                    "properties": {
+                      "values": {}
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "enum"
+                },
+                "values": {}
+              },
+              "required": [
+                "values"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "max_bytes"
+                    ],
+                    "properties": {
+                      "max_bytes": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "min"
+                    ],
+                    "properties": {
+                      "min": {}
+                    }
+                  },
+                  {
+                    "required": [
+                      "max"
+                    ],
+                    "properties": {
+                      "max": {}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Discriminated query rule. Integer min <= max; reserved names constructor/prototype are forbidden. No query field is required in a URL."
+    }
+  }
+}

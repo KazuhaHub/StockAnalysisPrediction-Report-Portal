@@ -511,6 +511,8 @@ jobs:
             # README + example config + LICENSE are tracked files; a missing one must fail the
             # release loudly rather than ship an incomplete archive.
             cp README.md config.example.yaml LICENSE "build/${pkg}/"
+            mkdir -p "build/${pkg}/third-party/moby-profiles"
+            cp internal/apprunner/driver/seccomp/LICENSE internal/apprunner/driver/seccomp/README.md "build/${pkg}/third-party/moby-profiles/"
             if [ "$goos" = "windows" ]; then
               (cd build && zip -qr "../dist/${pkg}.zip" "${pkg}")
             else

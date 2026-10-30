@@ -1,0 +1,112 @@
+name: app runner daemon probe
+on:
+  pull_request:
+    paths:
+      - 'internal/apprunner/**'
+      - 'internal/app/app_platform_runtime*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/secretbox*'
+      - 'cmd/app-runner/**'
+      - '.github/workflows/app-runner-probe.yml'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/apprunner/**'
+      - 'internal/app/app_platform_runtime*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/secretbox*'
+      - 'cmd/app-runner/**'
+      - '.github/workflows/app-runner-probe.yml'
+      - 'go.mod'
+      - 'go.sum'
+permissions:
+  contents: read
+concurrency:
+  group: app-runner-probe-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  inspect-disposable-daemon:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify runner contracts and inspect the ephemeral daemon
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          probe_socket=$(readlink -f /var/run/docker.sock)
+          test -S "$probe_socket"
+          export PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket"
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          docker pull docker.io/library/busybox:1.37.0
+          probe_digest=$(docker image inspect docker.io/library/busybox:1.37.0 --format '{{index .RepoDigests 0}}')
+          test -n "$probe_digest"
+          probe_image="docker.io/library/busybox@${probe_digest##*@}"
+          export PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$probe_image"
+          echo "PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE=$probe_image" >> "$GITHUB_ENV"
+          go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
+          go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
+
+      - name: Verify closed candidate container policy on the disposable daemon
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          probe_socket=$(readlink -f /var/run/docker.sock)
+          docker pull registry.k8s.io/pause:3.10
+          lifecycle_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
+          test -n "$lifecycle_image"
+          container_binary=$(mktemp "$RUNNER_TEMP/container-policy.XXXXXXXX")
+          trap 'rm -f "$container_binary"' EXIT
+          go test -p 2 -race -c -o "$container_binary" ./internal/apprunner/driver
+          chmod 0500 "$container_binary"
+          cd internal/apprunner/driver
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket" PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE" PORTAL_APP_RUNNER_LIFECYCLE_IMAGE="$lifecycle_image" "$container_binary" -test.v -test.timeout=90s -test.run='^(TestDockerAcceptanceCandidate(Container|Lifecycle)|TestNativeCandidateMountPins.*)$'
+
+      - name: Verify distinct controller and runner identities in isolation
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          identity_binary=$(mktemp "$RUNNER_TEMP/runner-identity.XXXXXXXX")
+          trap 'rm -f "$identity_binary"' EXIT
+          go test -p 2 -race -c -o "$identity_binary" ./internal/apprunner/transport
+          chmod 0500 "$identity_binary"
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_IDENTITY_ACCEPTANCE=1 "$identity_binary" -test.v -test.timeout=90s -test.run='^TestControllerIdentityAcceptance$'
+
+      - name: Verify Portal confirmation through the root endpoint
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          portal_binary=$(mktemp "$RUNNER_TEMP/portal-confirm.XXXXXXXX")
+          trap 'rm -f "$portal_binary"' EXIT
+          go test -p 2 -race -c -o "$portal_binary" ./internal/app
+          chmod 0500 "$portal_binary"
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'
