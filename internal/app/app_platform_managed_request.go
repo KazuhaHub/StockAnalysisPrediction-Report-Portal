@@ -43,7 +43,7 @@ func (s *Server) requestPlatformManagedBackend(ctx context.Context, session plat
 	}
 	defer initial.Close()
 	intent := initial.intent
-	if err := s.checkPlatformManagedOperationRoot(ctx, intent.candidate.command.OperationID, intent.candidate.runtime, intent.candidate.authority, endpoint); err != nil {
+	if err := s.checkPlatformManagedBackendRoot(ctx, intent.candidate.command.OperationID, intent.candidate.runtime, intent.candidate.authority, endpoint); err != nil {
 		return zero, err
 	}
 	signer, err := intent.registration.Signer("")

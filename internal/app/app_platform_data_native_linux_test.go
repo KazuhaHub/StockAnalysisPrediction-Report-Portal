@@ -147,7 +147,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer native.Close()
-		server, err = transport.ListenManagedController(context.Background(), path, 41001, 41001, store, root, pin, native)
+		badPath := filepath.Join(endpoint, "invalid-network.sock")
+		if _, err := transport.ListenNetworkManagedController(context.Background(), badPath, 41001, 41001, store, root, pin, native, 0, 4); err == nil {
+			t.Fatal("invalid network pool silently started managed listener")
+		}
+		if _, err := os.Stat(badPath); !os.IsNotExist(err) {
+			t.Fatal("invalid network bootstrap left an endpoint")
+		}
+		server, err = transport.ListenNetworkManagedController(context.Background(), path, 41001, 41001, store, root, pin, native, 2, 4)
 	} else {
 		server, err = transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
 	}
@@ -291,7 +298,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
 			t.Fatal("Portal did not validate managed profile", output.String())
 		}
-		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY", "PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_READINESS_WAIT_CONFIRMED", "PORTAL_WRITABLE_REGISTRATION_COMMITTED", "PORTAL_WRITABLE_REGISTRATION_RETAINED_IDENTITY", "PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_BACKEND_BOOT_VERIFIED", "PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED", "WRITABLE_BACKEND_REQUEST_RELAY_VERIFIED", "WRITABLE_BACKEND_REQUEST_UNCERTAIN_NO_RETRY", "PORTAL_WRITABLE_INSTALL_ACTIVATED", "PORTAL_WRITABLE_CURRENT_OU_REQUEST_VERIFIED", "PORTAL_WRITABLE_POST_IO_OU_REVOKED"} {
+		for _, marker := range []string{"PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT", "PORTAL_WRITABLE_NETWORK_GRANT_LAUNCHED", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY", "PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_READINESS_WAIT_CONFIRMED", "PORTAL_WRITABLE_REGISTRATION_COMMITTED", "PORTAL_WRITABLE_REGISTRATION_RETAINED_IDENTITY", "PORTAL_WRITABLE_REGISTRATION_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_BACKEND_BOOT_VERIFIED", "PORTAL_WRITABLE_BACKEND_BOOT_CURRENT_SOURCE_REFUSED", "WRITABLE_BACKEND_REQUEST_RELAY_VERIFIED", "WRITABLE_BACKEND_REQUEST_UNCERTAIN_NO_RETRY", "PORTAL_WRITABLE_INSTALL_ACTIVATED", "PORTAL_WRITABLE_CURRENT_OU_REQUEST_VERIFIED", "PORTAL_WRITABLE_POST_IO_OU_REVOKED"} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatal("Portal writable acceptance marker missing", marker, output.String())
 			}

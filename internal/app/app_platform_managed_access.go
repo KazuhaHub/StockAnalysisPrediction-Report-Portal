@@ -168,7 +168,7 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	if err := e.queryRow(`SELECT
  (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (completed_ms IS NULL OR stage='recovery_required'))+
  (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND (granted<>0 OR policy_revision<>?))+
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
  (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>?)`, installationID, installationID, installationID, policy, installationID, activation).Scan(&unsafe); err != nil || unsafe != 0 {
 		return zero, errAppPlatformLaunchUnavailable
 	}

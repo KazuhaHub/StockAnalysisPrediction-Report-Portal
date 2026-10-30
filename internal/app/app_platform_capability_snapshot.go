@@ -2,18 +2,16 @@ package app
 
 import (
 	"encoding/json"
-	"slices"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// The current development profile supports no platform capability providers.
-// Its denied rows must be a complete, exact projection of the signed optional
-// declaration and the operation's consumed review, not merely a set of zero bits.
+// Capability rows must exactly match the signed declaration and consumed review,
+// including explicit network restrictions. A grant bit alone proves no scope.
 // This read grants no authority and does not repair inconsistent records.
 func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, epoch string, policy int64, m appplatform.Manifest) error {
 	fail := errAppPlatformLaunchUnavailable
-	if policy < 1 || len(m.Capabilities.Required) != 0 {
+	if policy < 1 {
 		return fail
 	}
 	var count int
@@ -38,43 +36,8 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	if err != nil || string(canonical) != raw || projection.AppID != m.ID || projection.PublisherID != m.Publisher || projection.ReleaseSHA256 != release || projection.ControllerEpoch != epoch || projection.PlatformAPI != platformDevelopmentAPI {
 		return fail
 	}
-	expected := append([]string{}, m.Capabilities.Optional...)
-	slices.Sort(expected)
-	if !slices.Equal(expected, projection.DeclinedCapabilities) {
+	if installRequirementsForTarget(m, projection.Format, projection.Runtime) != nil {
 		return fail
 	}
-	return verifyPlatformDeniedCapabilityRows(e, installation, expected, policy, planID, fail)
-}
-
-// Call only after the caller has verified the signed declaration/review and
-// current installation lifecycle. The worker and reader share this exact check.
-func verifyPlatformDeniedCapabilityRows(e migExec, installation string, expected []string, policy int64, planID string, fail error) error {
-	if policy < 1 || !platformValidUUID(planID) {
-		return fail
-	}
-	rows, err := e.query(`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	index := 0
-	for rows.Next() {
-		var capability, policyJSON, review string
-		var granted int
-		var revision int64
-		if err := rows.Scan(&capability, &granted, &policyJSON, &revision, &review); err != nil {
-			return err
-		}
-		if index >= len(expected) || capability != expected[index] || granted != 0 || policyJSON != "{}" || revision != policy || review != planID {
-			return fail
-		}
-		index++
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if index != len(expected) {
-		return fail
-	}
-	return nil
+	return verifyPlatformInstallCapabilityRows(e, installation, m, projection, true, policy, planID, fail)
 }

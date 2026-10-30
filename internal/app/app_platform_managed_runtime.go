@@ -11,8 +11,10 @@ import (
 )
 
 type platformManagedRuntimeFacts struct {
-	runtime     platformRuntimeRegistration
-	observation transport.ManagedRuntimeObservation
+	runtime       platformRuntimeRegistration
+	observation   transport.ManagedRuntimeObservation
+	network       *platformNetworkRuntimeFacts
+	networkPolicy string
 }
 
 func platformRuntimeAuthority(r platformRuntimeRegistration) control.Authority {
@@ -82,4 +84,14 @@ func platformManagedRuntimeCompatibility(m appplatform.Manifest, f platformManag
 	}
 	p := f.observation.Profile()
 	return appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI, Runner: &appplatform.RunnerCompatibility{Protocol: p.Protocol, Platform: p.Platform, BackendProtocol: p.BackendProtocol}})
+}
+
+func validPlatformInstallRuntimeFacts(f platformManagedRuntimeFacts, e platformRuntimeEndpoint) bool {
+	if !validPlatformManagedRuntimeObservation(f.observation, f.runtime, e) {
+		return false
+	}
+	if f.networkPolicy == "" {
+		return f.network == nil
+	}
+	return f.network != nil && samePlatformManagedRuntime(f.network.runtime, f.runtime) && validPlatformNetworkRuntimeObservation(f.network.observation, f.runtime, e)
 }

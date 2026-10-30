@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"slices"
 	"strconv"
 	"time"
 
@@ -130,7 +129,7 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 	if err := installRequirementsForTarget(parsed.Manifest, p.Format, p.Runtime); err != nil {
 		return err
 	}
-	expected := platformInstallProjection{Format: p.Format, Runtime: p.Runtime, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: append([]string{}, parsed.Manifest.Capabilities.Optional...), DataQuotaBytes: 256 << 20}
+	expected := platformInstallProjection{Format: p.Format, Runtime: p.Runtime, AppID: appID, PublisherID: publisher, ReleaseSHA256: target.String, TrustRevision: verified.trustRevision, KeyRevision: verified.keyRevision, KeyID: verified.verificationKeyID, ControllerEpoch: epoch, ActorAuthority: authority, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: p.DeclinedCapabilities, DataQuotaBytes: 256 << 20}
 	quota, err := platformInstallProfileQuota(p.Format, parsed.Manifest)
 	if err != nil || p.DataQuotaBytes != quota {
 		return errAppPlatformStageEvidence
@@ -140,12 +139,16 @@ func validatePlatformInstallAuthority(e migExec, lease platformOperationLease, t
 		return err
 	}
 	expected.Audience = p.Audience
-	slices.Sort(expected.DeclinedCapabilities)
+	selection, err := platformInstallCapabilitySelection(parsed.Manifest, p.Runtime)
+	if err != nil {
+		return err
+	}
+	expected.DeclinedCapabilities = platformDeclinedCapabilities(selection)
 	expectedRaw, _ := json.Marshal(expected)
 	if string(expectedRaw) != raw {
 		return errAppPlatformStageEvidence
 	}
-	return verifyPlatformDeniedCapabilityRows(e, lease.installationID, p.DeclinedCapabilities, 1, planID, errAppPlatformStageEvidence)
+	return verifyPlatformInstallCapabilityRows(e, lease.installationID, parsed.Manifest, p, false, 1, planID, errAppPlatformStageEvidence)
 }
 
 func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, trust appplatform.PublisherTrust, now int64) error {

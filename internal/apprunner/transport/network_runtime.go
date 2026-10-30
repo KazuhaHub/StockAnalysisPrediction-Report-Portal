@@ -70,13 +70,26 @@ func encodeNetworkRuntime(c journal.ControllerEnrollment, active, entries int, w
 	if err != nil {
 		return nil, ErrNetworkRuntimeIncompatible
 	}
-	profile := NetworkRuntimeProfile{Format: NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat, ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat, MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes, MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency, ActiveRequests: active, CacheEntries: entries, WritableBackend: writable}
+	profile := networkRuntimeProfile(active, entries, writable)
 	raw, err := json.Marshal(networkRuntimeWire{Controller: controller, Profile: profile})
 	if err != nil || len(raw) > maxNetworkRuntimeBytes {
 		return nil, ErrNetworkRuntimeIncompatible
 	}
 	return raw, nil
 }
+func networkRuntimeProfile(active, entries int, writable bool) NetworkRuntimeProfile {
+	return NetworkRuntimeProfile{Format: NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat, ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat, MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes, MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency, ActiveRequests: active, CacheEntries: entries, WritableBackend: writable}
+}
+
+// ValidateNetworkRuntimeProfile checks the exact currently supported limits and
+// formats. It validates metadata, never OS provenance or current grant authority.
+func ValidateNetworkRuntimeProfile(p NetworkRuntimeProfile) error {
+	if p.ActiveRequests < 1 || p.ActiveRequests > broker.MaxNetworkPoolActive || p.CacheEntries < 1 || p.CacheEntries > broker.MaxNetworkPoolEntries || p != networkRuntimeProfile(p.ActiveRequests, p.CacheEntries, p.WritableBackend) {
+		return ErrNetworkRuntimeIncompatible
+	}
+	return nil
+}
+
 func decodeNetworkRuntime(raw []byte) (journal.ControllerEnrollment, NetworkRuntimeProfile, error) {
 	var zero journal.ControllerEnrollment
 	if len(raw) == 0 || len(raw) > maxNetworkRuntimeBytes || !utf8.Valid(raw) {

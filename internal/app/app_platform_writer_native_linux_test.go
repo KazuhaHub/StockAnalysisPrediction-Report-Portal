@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,8 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 		t.Fatal(err)
 	}
 	manifest.ID = "notes-writer-demo"
+	manifest.Capabilities.Required = []string{"network.http"}
+	manifest.Capabilities.Optional = slices.DeleteFunc(manifest.Capabilities.Optional, func(c string) bool { return c == "network.http" })
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(manifest)
 	if err != nil {
@@ -41,7 +44,11 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal("stage writable package", err)
 	}
-	plan, err := s.createPlatformWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint)
+	policy, err := appplatform.ParseHTTPPolicy([]byte(platformNetworkPolicyFixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := s.createPlatformNetworkWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint, policy.Policy)
 	if err != nil {
 		t.Fatal("writable review", err)
 	}
@@ -52,14 +59,21 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if _, err := s.consumePlatformManagedInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint); err == nil {
 		t.Fatal("readonly consumer adopted writable review")
 	}
-	admitted, err := s.consumePlatformWritableInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint)
+	if _, err := s.consumePlatformWritableInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint); err == nil {
+		t.Fatal("non-network consumer adopted selected grant")
+	}
+	admitted, err := s.consumePlatformNetworkWritableInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint)
 	if err != nil {
 		t.Fatal("writable consumption", err)
 	}
-	replay, err := s.consumePlatformWritableInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint)
+	replay, err := s.consumePlatformNetworkWritableInstallReview(ctx, session, plan.ID, plan.SHA256, platformFixtureID(890), endpoint)
 	if err != nil || !replay.Replayed || replay.OperationID != admitted.OperationID {
 		t.Fatal("writable admission replay", err)
 	}
+	if p.Runtime.NetworkPolicy != platformNetworkPolicyFixture(t) || transport.ValidateNetworkRuntimeProfile(p.Runtime.NetworkProfile) != nil || !p.Runtime.NetworkProfile.WritableBackend || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != 0 || scalar[string](t, s.st, `SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != p.Runtime.NetworkPolicy {
+		t.Fatal("actual selected network grant not bound to review")
+	}
+	t.Log("PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT")
 	// A real background service must select this reviewed installation itself.
 	// Stop at a transaction fault after actual data preparation, before writer IO.
 	mustExec(t, s.st, `CREATE TRIGGER portal_worker_data_boundary BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.writer_intent' BEGIN SELECT RAISE(ABORT,'worker data boundary'); END`)

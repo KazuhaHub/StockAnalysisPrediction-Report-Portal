@@ -2425,3 +2425,27 @@ daemon workflow 40455635317 passed on the functional source as well.
   (internal/app 639.531s), plus daemon 40975335250/job 123801849748 and quota/browser
   40975335287/job 123801849873. This corrects the earlier test nil-Context failure
   without counting that original failed general run as passed.
+
+- Integrated explicit required/optional network restriction selection with actual
+  runtime-aware installation review/consume, exact pending/active grant rows,
+  worker/current-reader checks and atomic writable activation. Pending selections
+  remain bit zero; only complete boot/authority/audience activation publishes the
+  reviewed grant. Static and unsupported providers remain denied. Extended the
+  real native writer lifecycle with required review/grant markers; exact new
+  native/PG CI remains required. Local complete Go tests (79.423s), focused race,
+  vet and Linux compilation pass. SDK/HTTP dispatch is still pending. See
+  [reviewed installation](140-reviewed-network-installation.md).
+- Credential storage 6e9c792822090448d79344a3fada9601bf694952 passes full general
+  workflow 40976283036/job 123805413217, including actual PG credential cases,
+  staticcheck, zero reachable vulnerabilities and ordinary full Go tests
+  (internal/app 666.965s). Binding policy a5a91bac3abba0fcd44b52bbf9ed9b9808bfe122
+  passes 40976735170/job 123806522400 (full internal/app 645.809s); uninstall
+  459f355a6788ee5331d563cf09b74997eb64d0da passes 40977484269/job 123809004565
+  (full internal/app 420.338s), with explicit actual PG rollback/denial cases.
+- Current-network-source predecessor 515653c1fe0727253419be726f23a6c15b8c629b
+  passes daemon 40978378120/job 123811958335, including actual Portal/root
+  CURRENT_SQL_NETWORK_PROFILE_CROSS_UID_VERIFIED and endpoint acceptance (2.39s).
+  Its general 40978378060/job 123811958838 now also passes actual PG source
+  cases, staticcheck, zero reachable vulnerabilities and ordinary full Go tests
+  (internal/app 666.278s). This does not prove the new installation
+  selection/publication slice.

@@ -1,7 +1,7 @@
 # Bind network-provider observation to current Portal authority
 
 Status: private administrator observation adapter implemented; exact Linux
-acceptance and current revision CI remain required. This prerequisite is part of
+acceptance and full general CI pass at 515653c1fe0727253419be726f23a6c15b8c629b. This prerequisite is part of
 P07's actual permission review path, not completion of that path or an enabled
 network/credential provider.
 
@@ -80,3 +80,13 @@ review, shared rotation/revocation and response projection against upstream echo
 
 No schema, production service, real credentials, Status adoption, public SDK
 freeze, application catalogue or server beta setting is changed here.
+
+## Exact revision result
+
+At 515653c1fe0727253419be726f23a6c15b8c629b, daemon workflow 40978378120/job
+123811958335 passes the required cross-UID marker and actual Portal endpoint
+acceptance (2.39s). General workflow 40978378060/job 123811958838 passes the
+actual PostgreSQL no-authority case, staticcheck, govulncheck with no reachable
+vulnerabilities and ordinary full Go tests (internal/app 666.278s). This evidence
+proves this observation adapter's scope; later grant/dispatch changes require
+their own exact revision acceptance.
