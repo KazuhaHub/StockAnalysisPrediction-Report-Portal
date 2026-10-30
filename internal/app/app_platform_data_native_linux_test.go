@@ -331,7 +331,11 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 			t.Log("PORTAL_WRITABLE_BACKGROUND_NATIVE_WITNESS")
 			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			if !t.Failed() {
+				t.Log("PORTAL_WRITABLE_BACKGROUND_NEIGHBOR_PRESERVED")
+			}
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			t.Log("PORTAL_WRITABLE_BACKGROUND_OWNED_CLEANUP")
 			if err := os.RemoveAll(serviceFixture.root); err != nil {
 				t.Error("remove service fixture root", err)
 			}
