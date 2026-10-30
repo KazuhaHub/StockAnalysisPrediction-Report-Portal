@@ -309,7 +309,20 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				return
 			}
 			defer native.Close()
-			checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			commandPath := filepath.Join(childData, "candidate-command.json")
+			checkPlatformFixtureCandidate(t, commandPath, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			if _, err := os.Stat(commandPath); err == nil {
+				message := readPlatformFixtureCandidate(t, commandPath, fixtureAuthority)
+				var c control.CandidateCommand
+				if json.Unmarshal(message.Raw, &c) != nil {
+					t.Error("invalid managed service candidate command")
+					return
+				}
+				identity := driver.CandidateIdentity{DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID, ResourceID: c.Payload.ResourceID, NamespaceID: c.Payload.DataNamespaceID, ReleaseSHA256: c.Payload.ReleaseSHA256, Generation: c.TargetGeneration, ControlFence: c.InstallationFence, WriterFence: c.Payload.WriterFence}
+				if err := native.ReleaseCandidateHTTPStorage(context.Background(), identity); err != nil {
+					t.Error("managed service candidate IPC cleanup", err)
+				}
+			}
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := os.RemoveAll(serviceFixture.root); err != nil {
