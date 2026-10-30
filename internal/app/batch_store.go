@@ -446,8 +446,13 @@ func (s *Store) RecentJobActivity(since string) []JobActivity {
 
 // RunningJobCount returns how many jobs are currently admitted (status 'running'
 // or 'cancelling') — the in-flight count the scheduler weighs against the budget.
-func (s *Store) RunningJobCount() int {
+// A non-empty owner restricts the count to that creator's jobs.
+func (s *Store) RunningJobCount(owner string) int {
 	var n int
+	if owner != "" {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE status IN ('running','cancelling') AND created_by=?", owner).Scan(&n)
+		return n
+	}
 	s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE status IN ('running','cancelling')").Scan(&n)
 	return n
 }
@@ -456,8 +461,13 @@ func (s *Store) RunningJobCount() int {
 // status 'running') across all jobs — the true count of concurrent runs the global
 // run gate caps. This is what "N running at once" means to the user, whereas
 // RunningJobCount counts whole jobs (a batch can hold several running rows).
-func (s *Store) RunningItemCount() int {
+// A non-empty owner restricts the count to rows of that creator's jobs.
+func (s *Store) RunningItemCount(owner string) int {
 	var n int
+	if owner != "" {
+		s.queryRow("SELECT COUNT(*) FROM batch_items i JOIN batch_jobs b ON b.id=i.job_id WHERE i.status='running' AND b.created_by=?", owner).Scan(&n)
+		return n
+	}
 	s.queryRow("SELECT COUNT(*) FROM batch_items WHERE status='running'").Scan(&n)
 	return n
 }
@@ -780,17 +790,51 @@ func (s *Store) queueSearchClause(q string) (string, []any) {
 }
 
 func (s *Store) ListQueueJobs(termLimit int, q string) ([]BatchJob, int) {
+	return s.listQueueJobs("", termLimit, q)
+}
+
+// ListOwnQueueJobs is ListQueueJobs restricted to the jobs one user created: the search, both
+// halves of the list and the returned total all stay inside that user's own rows (ADR 0047).
+func (s *Store) ListOwnQueueJobs(owner string, termLimit int, q string) ([]BatchJob, int) {
+	return s.listQueueJobs(owner, termLimit, q)
+}
+
+// ListOwnTaskJobs backs the my-tasks tray (ADR 0047): every active job one user created, plus their
+// termLimit most recently FINISHED terminal jobs, ranked by finish time (creation time when none was
+// recorded) so a long-running old job that just finished is not cut by newer ones that finished
+// earlier. Both reads are bounded by the owner filter and the limit; there is no total.
+func (s *Store) ListOwnTaskJobs(owner string, termLimit int) []BatchJob {
+	if termLimit <= 0 {
+		termLimit = 10
+	}
+	jobs := s.queryBatchJobs(`WHERE b.status IN ('queued','running','cancelling') AND b.created_by=? ORDER BY b.id DESC`, owner)
+	return append(jobs, s.queryBatchJobs(`WHERE b.status IN ('finished','cancelled','expired') AND b.created_by=?
+		ORDER BY COALESCE(NULLIF(b.finished_at,''), b.created_at) DESC, b.id DESC LIMIT ?`, owner, termLimit)...)
+}
+
+// listQueueJobs backs both forms; a non-empty owner restricts every query to that creator.
+func (s *Store) listQueueJobs(owner string, termLimit int, q string) ([]BatchJob, int) {
 	if termLimit <= 0 {
 		termLimit = 300
 	}
 	where, qArgs := s.queueSearchClause(q)
+	var ownerArgs []any
+	if owner != "" {
+		where = ` AND b.created_by=?` + where
+		ownerArgs = []any{owner}
+		qArgs = append(append([]any{}, ownerArgs...), qArgs...)
+	}
 	active := append([]any{}, qArgs...)
 	terminal := append(append([]any{}, qArgs...), termLimit)
 	jobs := s.queryBatchJobs(`WHERE b.status IN ('queued','running','cancelling')`+where+` ORDER BY b.id DESC`, active...)
 	jobs = append(jobs, s.queryBatchJobs(`WHERE b.status IN ('finished','cancelled','expired')`+where+` ORDER BY b.id DESC LIMIT ?`, terminal...)...)
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].ID > jobs[j].ID }) // active ids aren't always > terminal (a scheduled job)
 	var total int
-	s.queryRow("SELECT COUNT(*) FROM batch_jobs").Scan(&total)
+	if owner != "" {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE created_by=?", owner).Scan(&total)
+	} else {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs").Scan(&total)
+	}
 	return jobs, total
 }
 
@@ -949,8 +993,13 @@ func (s *Store) ItemJobAndStatus(itemID int64) (jobID int64, status string, ok b
 // (YYYY-MM-DD) — the server-side "done today" count, so the console tile stays exact even though the
 // job list is now paginated. finished_at is the local nowStr() wall clock; the (status,finished_at)
 // index serves this.
-func (s *Store) CountFinishedOn(dayPrefix string) int {
+// A non-empty owner restricts the count to that creator's jobs.
+func (s *Store) CountFinishedOn(dayPrefix, owner string) int {
 	var n int
+	if owner != "" {
+		s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE status IN ('finished','cancelled') AND finished_at LIKE ? AND created_by=?", dayPrefix+"%", owner).Scan(&n)
+		return n
+	}
 	s.queryRow("SELECT COUNT(*) FROM batch_jobs WHERE status IN ('finished','cancelled') AND finished_at LIKE ?", dayPrefix+"%").Scan(&n)
 	return n
 }

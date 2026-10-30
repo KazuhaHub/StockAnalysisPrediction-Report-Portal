@@ -332,8 +332,8 @@ func TestApiRecurringOwnership(t *testing.T) {
 	req.SetPathValue("id", itoa(id))
 	rec := httptest.NewRecorder()
 	s.apiRecurringDelete(rec, req, "bob")
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("bob deleting alice's task: status %d; want 403", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("bob deleting alice's task: status %d; want 404", rec.Code)
 	}
 	if _, ok := st.GetRecurringTask(id); !ok {
 		t.Errorf("task was deleted despite forbidden")

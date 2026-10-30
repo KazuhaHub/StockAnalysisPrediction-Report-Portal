@@ -305,8 +305,10 @@ export default function RunAnalysisModal({
   // Three distinct states so the banner never misleads: a run starts immediately only when a run
   // slot is free (concurrent runs < the run cap); otherwise it queues. Count actual concurrent
   // runs (rows), the unit the cap governs — not whole jobs.
-  const waiting = queue?.waiting ?? 0
-  const running = queue?.running_rows ?? queue?.running ?? 0
+  // The capacity fields are the whole queue's; the plain ones are the caller's own for a
+  // non-administrator, and say nothing about whether the cap is full (ADR 0047).
+  const waiting = queue?.queue_waiting ?? queue?.waiting ?? 0
+  const running = queue?.queue_running_rows ?? queue?.running_rows ?? queue?.running ?? 0
   const budget = queue?.budget ?? 1
   const busy = running >= budget
   // The queue call stays outside the modal's gate (it only annotates controls that read fine

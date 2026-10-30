@@ -539,7 +539,15 @@ func (s *Server) apiBatchJobs(w http.ResponseWriter, r *http.Request, user strin
 	// The search box reaches the whole queue here rather than filtering the page it was sent —
 	// see queueSearchClause. `total` stays the size of the unfiltered queue, which is what the
 	// "showing the most recent N of M" line is about.
-	jobs, total := s.st.ListQueueJobs(limit, r.URL.Query().Get("q"))
+	// Anyone below administrator sees only the runs they created (ADR 0047); `total` and the
+	// search follow the same boundary.
+	var jobs []BatchJob
+	var total int
+	if s.isAdmin(user) {
+		jobs, total = s.st.ListQueueJobs(limit, r.URL.Query().Get("q"))
+	} else {
+		jobs, total = s.st.ListOwnQueueJobs(user, limit, r.URL.Query().Get("q"))
+	}
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
 		ids[i] = j.ID
@@ -802,11 +810,22 @@ func (s *Server) apiRunQuota(w http.ResponseWriter, r *http.Request, user string
 		"remaining": remaining, "period": period, "resets_at": s.quotaResetsAt(period, time.Now())})
 }
 
+// ownedBatchJob loads a job for a caller who may act on it: its creator, or an administrator. A job
+// that is someone else's answers 404, the same as an id that does not exist, so ids do not leak
+// existence (ADR 0047).
+func (s *Server) ownedBatchJob(w http.ResponseWriter, id int64, user string) (BatchJob, bool) {
+	job, ok := s.st.GetBatchJob(id)
+	if !ok || (!s.isAdmin(user) && job.CreatedBy != user) {
+		jsonError(w, http.StatusNotFound, "job not found")
+		return BatchJob{}, false
+	}
+	return job, true
+}
+
 func (s *Server) apiBatchJobDetail(w http.ResponseWriter, r *http.Request, user string) {
 	id := pathID(r, "id")
-	job, ok := s.st.GetBatchJob(id)
+	job, ok := s.ownedBatchJob(w, id, user)
 	if !ok {
-		jsonError(w, http.StatusNotFound, "job not found")
 		return
 	}
 	queued, running, succeeded, partial, failed, cancelled := s.st.LiveJobCounts(id)
@@ -898,13 +917,8 @@ func (s *Server) apiBatchItemReconcile(w http.ResponseWriter, r *http.Request, u
 // mirrors job cancel: a non-admin may only cancel rows of their own job.
 func (s *Server) apiBatchItemsCancel(w http.ResponseWriter, r *http.Request, user string) {
 	id := pathID(r, "id")
-	job, ok := s.st.GetBatchJob(id)
+	_, ok := s.ownedBatchJob(w, id, user)
 	if !ok {
-		jsonError(w, http.StatusNotFound, "job not found")
-		return
-	}
-	if !s.isAdmin(user) && job.CreatedBy != user {
-		jsonError(w, http.StatusForbidden, "you can only cancel your own runs")
 		return
 	}
 	var in struct {
@@ -940,15 +954,10 @@ func itoa64(v int64) string { return strconv.FormatInt(v, 10) }
 
 func (s *Server) apiBatchJobCancel(w http.ResponseWriter, r *http.Request, user string) {
 	id := pathID(r, "id")
-	job, ok := s.st.GetBatchJob(id)
-	if !ok {
-		jsonError(w, http.StatusNotFound, "job not found")
-		return
-	}
 	// A non-admin may cancel only their own run; admins may cancel anyone's. All other
 	// queue mutations (delete / retry / reschedule / reprioritize) are admin-only routes.
-	if !s.isAdmin(user) && job.CreatedBy != user {
-		jsonError(w, http.StatusForbidden, "you can only cancel your own runs")
+	job, ok := s.ownedBatchJob(w, id, user)
+	if !ok {
 		return
 	}
 	if err := s.st.CancelBatchJob(id); err != nil {
@@ -1013,10 +1022,19 @@ func (s *Server) apiBatchJobReprioritize(w http.ResponseWriter, r *http.Request,
 // because no work is executing and presenting it as running would be misleading.
 func (s *Server) apiBatchQueue(w http.ResponseWriter, r *http.Request, user string) {
 	now := time.Now()
+	// An administrator sees the whole queue. Anyone else sees their own counts: the page they are
+	// looking at lists only their runs, and totals that ignore that would contradict it (ADR 0047).
+	owner := ""
+	if !s.isAdmin(user) {
+		owner = user
+	}
 	scheduled := 0
 	blockedRunning := 0
 	loc := s.panelLocation()
 	for _, j := range s.st.SchedulableJobs() {
+		if owner != "" && j.CreatedBy != owner {
+			continue
+		}
 		if j.Status == "queued" && (!runAtDue(j.RunAt, now) || invertBlocksNow(j.RunPreset, now, loc)) {
 			scheduled++
 		} else if j.Status == "running" && j.runningItems == 0 && j.liveItems > 0 && invertBlocksNow(j.RunPreset, now, loc) {
@@ -1026,20 +1044,40 @@ func (s *Server) apiBatchQueue(w http.ResponseWriter, r *http.Request, user stri
 			blockedRunning++
 		}
 	}
-	running := s.st.RunningJobCount() - blockedRunning
+	running := s.st.RunningJobCount(owner) - blockedRunning
 	if running < 0 {
 		running = 0
 	}
+	queuedAll := s.queuedItems() // due, awaiting admission (excludes not-yet-due)
+	waiting := len(queuedAll)
+	if owner != "" {
+		waiting = 0
+		mine := map[int64]bool{}
+		for _, j := range s.st.QueuedJobs() {
+			if j.CreatedBy == owner {
+				mine[j.ID] = true
+			}
+		}
+		for _, it := range queuedAll {
+			if mine[it.ID] {
+				waiting++
+			}
+		}
+	}
 	// Polled by the header badge and by every open queue view; unchanged is the normal answer.
 	writeJSONIfChanged(w, r, map[string]any{
-		"waiting":      len(s.queuedItems()), // due, awaiting admission (excludes not-yet-due)
+		"waiting":      waiting,
 		"running":      running,
-		"running_rows": s.st.RunningItemCount(), // concurrent runs (rows) — what the run cap governs
-		"scheduled":    scheduled,
-		"budget":       s.batchBudget(),
-		"reserved":     s.batchReserved(),
-		"my_priority":  s.resolveBasePriority(user),                    // the caller's resolved base priority (0..100, ADR 0008)
-		"done_today":   s.st.CountFinishedOn(now.Format("2006-01-02")), // server-side count (exact under the paginated job list)
+		"running_rows": s.st.RunningItemCount(owner), // concurrent runs (rows) — what the run cap governs
+		// Capacity is not the caller's own: whether a new run starts at once depends on the whole
+		// queue, so these two are global for everyone (numbers only, no identities).
+		"queue_running_rows": s.st.RunningItemCount(""),
+		"queue_waiting":      len(queuedAll),
+		"scheduled":          scheduled,
+		"budget":             s.batchBudget(),
+		"reserved":           s.batchReserved(),
+		"my_priority":        s.resolveBasePriority(user),                           // the caller's resolved base priority (0..100, ADR 0008)
+		"done_today":         s.st.CountFinishedOn(now.Format("2006-01-02"), owner), // server-side count (exact under the paginated job list)
 	})
 }
 

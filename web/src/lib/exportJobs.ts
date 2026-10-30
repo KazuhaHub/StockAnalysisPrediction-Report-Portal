@@ -1,7 +1,7 @@
 import type { ExportJob } from '../api/types'
 import { exportBase, type ExportMode } from './exportMode'
 
-// Helpers shared by the Export page's history table and the task tray.
+// Helpers shared by the Export pages' history table and the My tasks tray.
 
 export const isActiveJob = (j: Pick<ExportJob, 'status'>): boolean => j.status === 'queued' || j.status === 'running'
 
@@ -17,13 +17,6 @@ export function jobActions(j: Pick<ExportJob, 'status'>): { download: boolean; c
 }
 
 export const exportDownloadUrl = (id: string, mode: ExportMode = 'admin'): string => `${exportBase(mode)}/${encodeURIComponent(id)}/file`
-
-/** Active tasks first (oldest first, so the next to finish is on top), then the rest newest first. */
-export function sortJobsForTray(jobs: ExportJob[]): ExportJob[] {
-  const active = jobs.filter(isActiveJob).sort((a, b) => a.created_at - b.created_at)
-  const rest = jobs.filter((j) => !isActiveJob(j)).sort((a, b) => b.created_at - a.created_at)
-  return [...active, ...rest]
-}
 
 export function fmtBytes(n: number): string {
   if (!n || n < 0) return '0 B'

@@ -9,7 +9,7 @@ import type { BatchJob } from '../api/types'
 // Mutable so a test can inject jobs into the mocked API. vi.hoisted keeps it reachable from
 // the hoisted vi.mock factory below. `hold` makes every polled GET hang, which is what a slow
 // link looks like for the seconds that matter: the page is up and nothing has answered yet.
-const store = vi.hoisted(() => ({ jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false }))
+const store = vi.hoisted(() => ({ jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
 const forgetTags = vi.hoisted(() => vi.fn())
 
 // Smoke test: the queue page must mount without crashing (it renders on load, before any
@@ -18,7 +18,7 @@ const forgetTags = vi.hoisted(() => vi.fn())
 vi.mock('../api/client', () => ({
   api: {
     get: (url: string) => {
-      if (url.includes('/queue')) return Promise.resolve({ running: 0, waiting: 0, scheduled: 0, budget: 0 })
+      if (url.includes('/queue')) return Promise.resolve(store.summary)
       if (url.includes('/targets')) return Promise.resolve({ targets: [] })
       return Promise.resolve({ jobs: store.jobs })
     },
@@ -40,11 +40,11 @@ vi.mock('../lib/conditionalGet', () => ({
     if (store.fail) return Promise.reject(new Error(store.fail))
     if (store.unchanged) return Promise.resolve(UNCHANGED)
     return String(url).includes('/queue')
-      ? Promise.resolve({ running: 0, waiting: 0, scheduled: 0, budget: 0 })
+      ? Promise.resolve(store.summary)
       : Promise.resolve({ jobs: store.jobs })
   },
 }))
-vi.mock('../auth', () => ({ useAuth: () => ({ admin: true, user: 'alice' }) }))
+vi.mock('../auth', () => ({ useAuth: () => ({ admin: store.admin, user: 'alice' }) }))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, o?: Record<string, unknown>) => (o ? `${k}:${JSON.stringify(o)}` : k) }),
 }))
@@ -81,7 +81,37 @@ describe('QueueTable', () => {
     store.hold = false
     store.fail = ''
     store.unchanged = false
+    store.admin = true
+    store.summary = { running: 0, waiting: 0, scheduled: 0, budget: 0 }
     forgetTags.mockClear()
+  })
+
+  // A non-administrator's list holds only their own runs (ADR 0047), so a submitter filter would only
+  // ever offer their own name.
+  it('offers the submitter filter to an administrator', async () => {
+    store.jobs = [job({ status: 'queued' })]
+    mount()
+    await screen.findByText('queue.source.single')
+    expect(Array.from(document.querySelectorAll('[class*="placeholder"]')).some((e) => e.textContent === 'batch.col.createdBy')).toBe(true)
+  })
+
+  // The "Max at once" tag compares concurrent runs with the global cap, so it reads the whole queue's
+  // running rows, not the caller's own tile (ADR 0047).
+  it('shows the whole queue against the cap in the Max-at-once tag for a non-administrator', async () => {
+    store.admin = false
+    store.summary = { running: 0, running_rows: 0, waiting: 0, scheduled: 0, budget: 4, queue_running_rows: 4, queue_waiting: 1 }
+    store.jobs = [job({ status: 'queued' })]
+    mount()
+    expect(await screen.findByText('4 / 4')).toBeTruthy()
+    expect(screen.queryByText('0 / 4')).toBeNull()
+  })
+
+  it('hides the submitter filter from a non-administrator', async () => {
+    store.admin = false
+    store.jobs = [job({ status: 'queued' })]
+    mount()
+    await screen.findByText('queue.source.single')
+    expect(Array.from(document.querySelectorAll('[class*="placeholder"]')).some((e) => e.textContent === 'batch.col.createdBy')).toBe(false)
   })
 
   it('shows blocked preset runs as waiting with their execution mode', async () => {

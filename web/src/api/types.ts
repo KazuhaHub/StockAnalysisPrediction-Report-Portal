@@ -145,6 +145,8 @@ export interface BatchQueueSummary {
   waiting: number // due, awaiting admission (excludes not-yet-due scheduled)
   running: number // jobs with active work; excludes preset-window waits between batch rows
   running_rows?: number // concurrent runs (rows) executing now — what the run cap governs
+  queue_running_rows?: number // the whole queue's concurrent runs, for everyone — compare with budget (ADR 0047)
+  queue_waiting?: number // the whole queue's due, waiting jobs, for everyone
   scheduled: number // jobs waiting for a future time or outside an inverted preset window
   budget: number // max concurrent runs (rows) allowed at once
   reserved: number // slots held for urgent runs
@@ -1989,4 +1991,27 @@ export interface ForecastAccessOverview {
   affected: number
   counts: ForecastScopeCounts
   groups: ForecastOUAccess[]
+}
+
+// My tasks (ADR 0047): one row per run or export the caller owns.
+export type TaskKind = 'run' | 'export'
+export interface TaskItem {
+  kind: TaskKind
+  id: string
+  name: string
+  detail?: string
+  /** The native status of the kind: run queued|running|cancelling|finished|cancelled|expired, export queued|running|done|failed|canceled|expired. */
+  status: string
+  done: number
+  total: number
+  /** Tasks the scheduler will take first; present only for a queued task that is counted. */
+  ahead?: number
+  scheduled?: boolean
+  error?: string
+  counts?: { succeeded: number; partial: number; failed: number; cancelled: number }
+  created_at: number
+  finished_at: number
+  download?: string
+  cancel?: string
+  link: string
 }

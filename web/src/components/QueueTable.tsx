@@ -549,7 +549,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         <span style={{ fontSize: 12 }}>
           <Typography.Text type="secondary">{t('queue.budget')}</Typography.Text>{' '}
           <Tag>
-            {summary.running_rows ?? summary.running ?? 0} / {summary.budget}
+            {summary.queue_running_rows ?? summary.running_rows ?? summary.running ?? 0} / {summary.budget}
           </Tag>
         </span>
       )}
@@ -629,7 +629,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
               { value: 'cancelled', label: t('batch.status.cancelled') },
             ]}
           />
-          <Select showSearch optionFilterProp="label" allowClear placeholder={t('batch.col.createdBy')} style={{ width: 140 }} value={fUser || undefined} onChange={(v) => setFUser(v || '')} options={submitters.map((u) => ({ value: u, label: u }))} />
+          {admin && <Select showSearch optionFilterProp="label" allowClear placeholder={t('batch.col.createdBy')} style={{ width: 140 }} value={fUser || undefined} onChange={(v) => setFUser(v || '')} options={submitters.map((u) => ({ value: u, label: u }))} />}
           {/* loading, not an empty dropdown: "no workflows" is not something this filter knows. */}
           <Select showSearch optionFilterProp="label" allowClear loading={!targetsLoaded} placeholder={t('run.workflow')} style={{ width: 200 }} value={fTarget} onChange={setFTarget} options={targets.map((tg) => ({ value: tg.id, label: tg.name }))} />
           {tableView.controls}
