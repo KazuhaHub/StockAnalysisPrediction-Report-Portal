@@ -1,3 +1,5 @@
+import { AppNetworkError, parseNetworkRequest, parseNetworkResponse, type NetworkRequest, type NetworkResponse, type AppNetworkFailure } from "./network-v2";
+export { AppNetworkError, encodeNetworkBody, decodeNetworkBody, type NetworkRequest, type NetworkResponse } from "./network-v2";
 import {
   createPageActions,
   parseAppPage,
@@ -105,6 +107,7 @@ const backendFailures = new Set<BridgeBackendFailure>([
   "unavailable",
   "uncertain",
 ]);
+const networkFailures = new Set<AppNetworkFailure>(backendFailures);
 export class BridgeBackendError extends Error {
   readonly retryable = false;
   constructor(readonly code: BridgeBackendFailure) {
@@ -182,6 +185,7 @@ export interface BridgeHostOptions extends BaseOptions {
     request: BridgeBackendRequest,
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
+  onNetworkRequest?: (request: NetworkRequest, signal: AbortSignal) => Promise<NetworkResponse>;
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -464,6 +468,7 @@ export function createBridgeHost(
     dirty = false,
     announced = false;
   let lastRequest = 0n;
+  let lastNetworkRequest = 0n;
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
@@ -479,6 +484,10 @@ export function createBridgeHost(
     | { height: number; presentationRevision: string }
     | undefined;
   const requests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const networkRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
@@ -568,6 +577,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     requests.clear();
+    for (const request of networkRequests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    networkRequests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -889,6 +903,108 @@ export function createBridgeHost(
     if (
       data &&
       typeof data === "object" &&
+      (data.type === "network.request" || data.type === "network.cancel")
+    ) {
+      const cancel = data.type === "network.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > lastNetworkRequest) {
+          fail("protocol_error");
+          return;
+        }
+        const active = networkRequests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          networkRequests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= lastNetworkRequest) {
+        fail("protocol_error");
+        return;
+      }
+      lastNetworkRequest = BigInt(id);
+      const request = parseNetworkRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "network.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (!options.onNetworkRequest || !granted?.includes("network.http")) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (networkRequests.size >= 2) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = networkRequests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        networkRequests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 30_000);
+      networkRequests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new AppNetworkError("uncertain");
+          return options.onNetworkRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseNetworkResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof AppNetworkError &&
+                networkFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
       (data.type === "backend.request" || data.type === "backend.cancel")
     ) {
       const cancel = data.type === "backend.cancel";
@@ -1177,6 +1293,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeBackendRequest,
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
+  requestNetwork(request: NetworkRequest, signal?: AbortSignal): Promise<NetworkResponse>;
   describePage(
     scope: string,
     page: AppPage | null,
@@ -1301,11 +1418,20 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     }
   }
   let issued = 0n;
+  let networkIssued = 0n;
   const requests = new Map<
     string,
     {
       resolve: (value: BridgeBackendResponse) => void;
       reject: (error: BridgeBackendError) => void;
+      dispose: () => void;
+    }
+  >();
+  const networkRequests = new Map<
+    string,
+    {
+      resolve: (value: NetworkResponse) => void;
+      reject: (error: AppNetworkError) => void;
       dispose: () => void;
     }
   >();
@@ -1315,6 +1441,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new BridgeBackendError("uncertain"));
     }
     requests.clear();
+    for (const request of networkRequests.values()) {
+      request.dispose();
+      request.reject(new AppNetworkError("uncertain"));
+    }
+    networkRequests.clear();
   }
   let pageRevision = 0n,
     lastInvocation = 0n,
@@ -1583,6 +1714,47 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       }
       return;
     }
+    if (data && typeof data === "object" && data.type === "network.result") {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (!decimal(data.requestId) || BigInt(data.requestId) > networkIssued) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response ? parseNetworkResponse(data.response) : null;
+      if (
+        (response && !value) ||
+        (failure && !networkFailures.has(data.code as AppNetworkFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = networkRequests.get(data.requestId);
+      if (!pending) return;
+      networkRequests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new AppNetworkError(data.code as AppNetworkFailure),
+        );
+      return;
+    }
     if (data && typeof data === "object" && data.type === "backend.result") {
       const response = exact(data, [
         "type",
@@ -1696,6 +1868,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         lastMeasureAt = -Infinity;
         retireRequests();
         issued = 0n;
+        networkIssued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -1965,6 +2138,58 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "backend.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestNetwork(
+      value: NetworkRequest,
+      signal?: AbortSignal,
+    ): Promise<NetworkResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (!context.capabilities.includes("network.http"))
+        return Promise.reject(new AppNetworkError("unsupported"));
+      const request = parseNetworkRequest(value);
+      if (!request)
+        return Promise.reject(new AppNetworkError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (networkRequests.size >= 2 || networkIssued === MAX_REVISION)
+        return Promise.reject(new AppNetworkError("busy"));
+      const id = (++networkIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = networkRequests.get(id);
+          if (!active) return;
+          networkRequests.delete(id);
+          active.dispose();
+          reject(new AppNetworkError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "network.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 35_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        networkRequests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "network.request",
             ...envelope,
             requestId: id,
             request,

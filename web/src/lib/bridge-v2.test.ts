@@ -1463,3 +1463,50 @@ test("page descriptions require exact current binding, revision, scope and close
     expect(failed).toHaveBeenCalledExactlyOnceWith("protocol_error"),
   );
 });
+
+async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost>[0]["onNetworkRequest"], granted=true) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:granted?["network.http"]:[],onNetworkRequest});
+ const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,parentOrigin:"https://portal.example.invalid",onPresentation:()=>{}});
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
+const networkRequest=()=>({method:"GET",url:"https://api.example.com/v1",accept:"application/json",contentType:"",bodyBase64:""});
+test("reviewed network channel preserves binary response and remote auth status",async()=>{
+ const dispatch=vi.fn(async(_request:unknown)=>({status:401,contentType:"application/octet-stream",bodyBase64:"AP+A"}));
+ const {client}=await networkPair(dispatch);
+ await expect(client.requestNetwork(networkRequest())).resolves.toEqual({status:401,contentType:"application/octet-stream",bodyBase64:"AP+A"});
+ expect(dispatch).toHaveBeenCalledOnce();expect(dispatch.mock.calls[0][0]).toEqual(networkRequest());
+});
+test("network channel refuses ungranted, unsupported and malformed requests",async()=>{
+ const dispatch=vi.fn(async()=>({status:200,contentType:"",bodyBase64:""}));
+ const absent=await networkPair(dispatch,false);
+ await expect(absent.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await networkPair();
+ await expect(unsupported.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const ready=await networkPair(dispatch);
+ await expect(ready.client.requestNetwork({...networkRequest(),headers:{}} as never)).rejects.toMatchObject({code:"invalid_request"});
+ expect(dispatch).not.toHaveBeenCalled();
+});
+test("network cancellation and disposal never retry a possibly executed request",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,s:AbortSignal)=>{signal=s;return new Promise<never>(()=>{});});
+ const {client}=await networkPair(dispatch);
+ const abort=new AbortController();const pending=client.requestNetwork(networkRequest(),abort.signal);
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());abort.abort();
+ await expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ expect(dispatch).toHaveBeenCalledOnce();
+ const next=client.requestNetwork(networkRequest());await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledTimes(2));
+ client.close();await expect(next).rejects.toMatchObject({code:"uncertain",retryable:false});
+});
+test("network failures are closed and pending work has a fixed ceiling",async()=>{
+ const dispatch=vi.fn(async()=>{throw new Error("remote private detail");});const one=await networkPair(dispatch);
+ await expect(one.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"uncertain",retryable:false});expect(dispatch).toHaveBeenCalledOnce();
+ const held=await networkPair(()=>new Promise<never>(()=>{}));
+ const first=held.client.requestNetwork(networkRequest()),second=held.client.requestNetwork(networkRequest());
+ await expect(held.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"busy"});
+ held.client.close();await expect(first).rejects.toMatchObject({code:"uncertain"});await expect(second).rejects.toMatchObject({code:"uncertain"});
+});
