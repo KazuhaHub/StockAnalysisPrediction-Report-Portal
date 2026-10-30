@@ -242,6 +242,29 @@ describe('RunAnalysisModal draws each input as its declared type', () => {
     expect(qq('.ant-select')).toHaveLength(2)
   })
 
+  // A required number typed into its spinner must submit, not report itself empty.
+  it('submits a required number input the user typed', async () => {
+    const user = userEvent.setup()
+    posted.calls = []
+    await open([{ key: 'n', label: 'Minutes', type: 'number', required: true }])
+    await waitFor(() => expect(q('.ant-input-number input')).toBeTruthy())
+    await user.type(q('.ant-input-number input') as HTMLInputElement, '2')
+    await user.click(screen.getByText('run.run'))
+    await waitFor(() => expect(posted.calls).toHaveLength(1))
+    expect(screen.queryByText('run.required:{"field":"Minutes"}')).toBeNull()
+    expect(posted.calls[0].rows).toEqual([{ n: '2' }])
+  })
+
+  it('still refuses a required number input left empty', async () => {
+    const user = userEvent.setup()
+    posted.calls = []
+    await open([{ key: 'n', label: 'Minutes', type: 'number', required: true }])
+    await waitFor(() => expect(q('.ant-input-number input')).toBeTruthy())
+    await user.click(screen.getByText('run.run'))
+    expect(await screen.findByText('run.required:{"field":"Minutes"}')).toBeTruthy()
+    expect(posted.calls).toHaveLength(0)
+  })
+
   it('falls back to a text box for a select that arrived without options', async () => {
     // An empty menu is not a control — it is a field nobody can fill.
     await open([{ key: 'mode', label: 'Mode', type: 'select' }])

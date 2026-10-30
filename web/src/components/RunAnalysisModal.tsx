@@ -347,7 +347,10 @@ export default function RunAnalysisModal({
               ? [
                   {
                     required: true,
-                    type: isFileInput(i.type) ? 'array' : undefined,
+                    // The rule's type must match the value its control produces. A rule that carries
+                    // a `type` key at all, even an undefined one, is checked as a string, which made
+                    // every required number input report itself empty however it was filled.
+                    ...(isFileInput(i.type) ? { type: 'array' as const } : i.type === 'number' ? { type: 'number' as const } : {}),
                     message: t('run.required', { field: title }),
                   },
                 ]
