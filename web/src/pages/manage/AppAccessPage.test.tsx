@@ -77,14 +77,30 @@ describe('App service status', () => {
     expect((inherit() as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('keeps Save disabled until the choice differs from the effective value', async () => {
+  it('while inheriting, shows the effective value but needs a choice before Save is enabled', async () => {
     const user = userEvent.setup()
     renderAt('/manage/apps/builtin%3Aquotes/access')
     await heading('nav.quotes · Default')
+    expect((screen.getByRole('radio', { name: /apps\.access\.on$/ }) as HTMLInputElement).checked).toBe(true)
     expect((save() as HTMLButtonElement).disabled).toBe(true)
-    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
-    expect((save() as HTMLButtonElement).disabled).toBe(false)
+    // Picking the value already in effect still pins it as an explicit override.
     await user.click(screen.getByRole('radio', { name: /apps\.access\.on$/ }))
+    expect((save() as HTMLButtonElement).disabled).toBe(false)
+    await user.click(save())
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/apps/builtin%3Aquotes/access/1', { enabled: true }))
+  })
+
+  it('with its own value, enables Save only when the choice differs from that value', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    await user.click(screen.getByText('Research')) // overrides quotes as closed
+    await heading('nav.quotes · Research')
+    expect((screen.getByRole('radio', { name: /apps\.access\.off$/ }) as HTMLInputElement).checked).toBe(true)
+    expect((save() as HTMLButtonElement).disabled).toBe(true)
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.on$/ }))
+    expect((save() as HTMLButtonElement).disabled).toBe(false)
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
     expect((save() as HTMLButtonElement).disabled).toBe(true)
   })
 

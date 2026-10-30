@@ -139,9 +139,13 @@ function AccessEditor({
   const { token } = theme.useToken()
   // No row for this OU means nothing was set anywhere above it: the built-in baseline, open.
   const mine: AppAccessOU = app.access.find((a) => a.ou === group.id) ?? { ou: group.id, own: null, effective: true, source_ou: 0, inherited: false }
-  const [draft, setDraft] = useState(mine.effective)
+  // null = no choice made yet. While inheriting, the radios show the effective value without that
+  // being a choice; saving any choice writes an explicit override, which pins the OU against later
+  // changes to its parent.
+  const [choice, setChoice] = useState<boolean | null>(null)
+  const draft = choice ?? mine.effective
   const [busy, setBusy] = useState(false)
-  const dirty = draft !== mine.effective
+  const dirty = choice !== null && choice !== mine.own
 
   const source =
     mine.own !== null
@@ -170,6 +174,9 @@ function AccessEditor({
       value={value}
       aria-label={title}
       aria-describedby={id}
+      // onChange does not fire for the radio that is already checked, and while inheriting the
+      // effective value is shown checked: choosing it is how an admin pins that value.
+      onClick={() => setChoice(value)}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -198,7 +205,7 @@ function AccessEditor({
           {source}
         </Tag>
       </div>
-      <Radio.Group value={draft} onChange={(e) => setDraft(e.target.value)} style={{ display: 'block' }} disabled={busy}>
+      <Radio.Group value={draft} onChange={(e) => setChoice(e.target.value)} style={{ display: 'block' }} disabled={busy}>
         {option(true, t('apps.access.on'), t('apps.access.onHint'), 'apps-access-on')}
         {option(false, t('apps.access.off'), t('apps.access.offHint'), 'apps-access-off')}
       </Radio.Group>
