@@ -79,6 +79,7 @@ export default function AppsAdminPage() {
               {t('apps.count', { count: shown.length })}
             </Typography.Text>
           </div>
+          <div className="rp-table-scroll">
           <Table
             className="rp-apps-table"
             rowKey="key"
@@ -86,9 +87,9 @@ export default function AppsAdminPage() {
             columns={columns}
             pagination={false}
             locale={{ emptyText: t('apps.empty') }}
-            scroll={{ x: 'max-content' }}
             onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
           />
+          </div>
         </Card>
       </Space>
       <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />

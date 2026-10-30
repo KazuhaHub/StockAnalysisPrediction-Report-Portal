@@ -299,7 +299,6 @@ body {
 }
 .rp-policy-scope, .rp-policy-content { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .rp-policy-scope { border-inline-end: 1px solid var(--ant-color-border-secondary); padding-inline-end: 16px; }
-.rp-policy-scope > .ant-btn { margin-bottom: 16px; text-align: start; justify-content: flex-start; }
 .rp-policy-scope > .ant-typography { margin-top: 16px; font-size: 12px; }
 .rp-policy-scope .rp-ou-picker--manage { position: static; width: 100% !important; border: 0 !important; }
 .rp-policy-scope .rp-ou-picker__tree { max-height: none !important; }
@@ -563,6 +562,7 @@ body {
 .rp-table-scroll { max-width: 100%; }
 .rp-scope-fold { min-width: 0; width: 100%; }
 .rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
+.rp-scope-fold__body { margin-top: 8px; }
 .rp-policy-scope-toggle { min-width: 0; }
 .rp-policy-scope-toggle__label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {
@@ -575,11 +575,10 @@ body {
   .rp-policy-scope-header > .rp-policy-scope-toggle { max-width: 60%; }
   .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
   .rp-table-scroll { overflow-x: auto; }
-  .rp-table-scroll .ant-table table { min-width: 640px; }
+  .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
   .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
   .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }
-  .rp-policy-scope > .ant-btn { margin-bottom: 8px; }
 }
 
 .rp-plain-list {

@@ -1,27 +1,22 @@
+import { useState } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { mockNarrowViewport } from '../../test/narrow'
 import ScopeFold from './ScopeFold'
 
-const realMatchMedia = window.matchMedia
-let matches = true
-let listeners: Array<() => void> = []
-beforeEach(() => {
-  matches = true
-  listeners = []
-  Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query: string) => ({
-    get matches() { return matches && query.includes('767') }, media: query,
-    addEventListener: (_: string, fn: () => void) => { listeners.push(fn) }, removeEventListener: () => {},
-  }) })
-})
-afterEach(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: realMatchMedia }) })
+const viewport = mockNarrowViewport()
 
-const mount = () => render(<ScopeFold label="Research, Sales">{(fold) => <ul aria-label="units"><li><button onClick={fold}>pick</button></li></ul>}</ScopeFold>)
+function Counter() {
+  const [n, setN] = useState(0)
+  return <button onClick={() => setN(n + 1)}>count {n}</button>
+}
+const mount = () => render(<ScopeFold label="Research, Sales">{(fold, folded) => <ul aria-label="units" data-folded={String(folded)}><li><button onClick={fold}>pick</button></li><li><Counter /></li></ul>}</ScopeFold>)
 
 describe('ScopeFold', () => {
   it('renders its content untouched on desktop', () => {
-    matches = false
+    viewport.set(false)
     mount()
-    expect(screen.getByRole('list', { name: 'units' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'units' }).getAttribute('data-folded')).toBe('false')
     expect(screen.queryByRole('button', { name: /Research/ })).toBeNull()
   })
 
@@ -33,20 +28,32 @@ describe('ScopeFold', () => {
     expect(document.getElementById(toggle.getAttribute('aria-controls') ?? '')).toBeTruthy()
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByRole('list', { name: 'units' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'units' }).getAttribute('data-folded')).toBe('true')
   })
 
-  it('folds again when the content reports a choice', () => {
+  it('folds again on a choice and returns focus to the toggle', () => {
     mount()
-    fireEvent.click(screen.getByRole('button', { name: 'Research, Sales' }))
+    const toggle = screen.getByRole('button', { name: 'Research, Sales' })
+    fireEvent.click(toggle)
     fireEvent.click(screen.getByRole('button', { name: 'pick' }))
     expect(screen.queryByRole('list')).toBeNull()
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('keeps the tree mounted while folded so its own state survives', () => {
+    mount()
+    const toggle = screen.getByRole('button', { name: 'Research, Sales' })
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'count 0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+    expect(screen.queryByRole('button', { name: /count/ })).toBeNull()
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'count 1' })).toBeTruthy()
   })
 
   it('shows the content directly once the viewport widens', () => {
     mount()
-    matches = false
-    act(() => { listeners.forEach((fn) => fn()) })
+    act(() => viewport.set(false))
     expect(screen.getByRole('list', { name: 'units' })).toBeTruthy()
   })
 })

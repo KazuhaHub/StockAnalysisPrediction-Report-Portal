@@ -134,4 +134,12 @@ describe('Scope rail across breakpoints', () => {
     fireEvent.click(screen.getByRole('button', { name: 'ou.expand' }))
     expect(await screen.findByRole('tree')).toBeTruthy()
   })
+  it('hands focus back to the toggle after a pick, even though the pick remounts the workspace', async () => {
+    mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(toggle()))
+  })
 })

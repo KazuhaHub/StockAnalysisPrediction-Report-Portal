@@ -5,6 +5,7 @@ import { App } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppAccessPage from './AppAccessPage'
 import { groups, layout } from './appsAdminFixtures'
+import { mockNarrowViewport } from '../../test/narrow'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
@@ -196,5 +197,22 @@ describe('App service status', () => {
     expect(crumbs.textContent).toContain('apps.title')
     expect(crumbs.textContent).toContain('Hello')
     expect(crumbs.textContent).toContain('apps.section.status.title')
+  })
+})
+
+describe('App service status on a phone', () => {
+  mockNarrowViewport()
+  it('folds the unit tree behind a current-unit button and folds it after a pick', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/hello/access')
+    await heading('Hello · Default')
+    expect(screen.queryByRole('tree')).toBeNull()
+    const toggle = screen.getByRole('button', { name: /Default/ })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await user.click(toggle)
+    await user.click(await screen.findByText('Research'))
+    await heading('Hello · Research')
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(screen.getByRole('button', { name: /Research/ }).getAttribute('aria-expanded')).toBe('false')
   })
 })

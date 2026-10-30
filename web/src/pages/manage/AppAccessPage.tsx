@@ -9,6 +9,7 @@ import LoadGate from '../../components/LoadGate'
 import { useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppsBreadcrumb } from './appsAdminParts'
 import OrgUnitPicker from './OrgUnitPicker'
+import ScopeFold from './ScopeFold'
 
 // The service status of one app by organizational unit (ADR 0048), modelled on the Google Workspace
 // Admin console: pick an OU on the left, set that one app on or off on the right. An OU inherits its
@@ -109,7 +110,8 @@ function AccessWorkspace({
       <Card styles={{ body: { padding: 0 } }}>
         <div className="rp-app-access">
           <div className="rp-app-access__tree">
-            <OrgUnitPicker
+            <ScopeFold label={selected?.name ?? t('ou.title')}>
+              {(fold) => <OrgUnitPicker
               collapsible={false}
               mode="manage"
               groups={groups}
@@ -122,7 +124,10 @@ function AccessWorkspace({
                 if (ids[0] && ids[0] !== selected?.id) requestSelect(ids[0])
               }}
               annotate={annotate}
+              onPick={fold}
             />
+              }
+            </ScopeFold>
           </div>
           <div className="rp-app-access__setting">
             {selected ? (

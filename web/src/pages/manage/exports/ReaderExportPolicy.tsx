@@ -8,6 +8,7 @@ import type { ExportPolicyEntry, UserGroupRow } from '../../../api/types'
 import LoadGate from '../../../components/LoadGate'
 import { inheritedView, policyDraft, policyDraftValid, policyPatch, quotaBelowMax, type PolicyDraft } from '../../../lib/exportMode'
 import InheritField from '../InheritField'
+import ScopeFold from '../ScopeFold'
 import OrgUnitPicker from '../OrgUnitPicker'
 
 // The reader-export policy console (ADR 0046), the section at the foot of the administrator's Export
@@ -53,7 +54,8 @@ export default function ReaderExportPolicy() {
     <Card title={t('export.reader.policyTitle')} extra={<Typography.Text type="secondary">{t('export.reader.policyHint')}</Typography.Text>}>
       <LoadGate loading={loading} error={error} onRetry={load}>
         <div className="rp-reader-export-policy">
-          <OrgUnitPicker
+          <ScopeFold label={selected?.name ?? t('ou.title')}>
+            {(fold) => <OrgUnitPicker
             collapsible={false}
             mode="manage"
             groups={groups}
@@ -65,7 +67,10 @@ export default function ReaderExportPolicy() {
             onSelect={(ids) => {
               if (ids[0]) setSelectedId(ids[0])
             }}
+            onPick={fold}
           />
+            }
+          </ScopeFold>
           {selected && (
             <PolicyEditor
               // A fresh draft for each OU, and again whenever the server's answer for it changes.

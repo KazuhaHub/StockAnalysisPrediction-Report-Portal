@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { App, ConfigProvider } from 'antd'
 import { MemoryRouter } from 'react-router'
 import UsersPage from './UsersPage'
+import { mockNarrowViewport } from '../../test/narrow'
 
 // Groups management used to live in a Drawer opened from a toolbar button; it is now
 // the second sub-tab. Both tabs must render off a single load.
@@ -133,5 +134,33 @@ describe('UsersPage — accounts / groups sub-tabs', () => {
       </MemoryRouter>,
     )
     expect((await screen.findByRole('tab', { name: 'users.tabAccounts' })).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
+describe('UsersPage on a phone', () => {
+  mockNarrowViewport()
+  const open = (path: string) => render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[path]}><App><UsersPage /></App></MemoryRouter></ConfigProvider>)
+  const units = () => { listing.groups = [{ id: 1, name: 'Default', is_default: true, members: 0, weight: 2 }, { id: 7, name: 'Research Desk', members: 3, weight: null }] }
+
+  it('folds the account filter tree and keeps one collapse control out of it', async () => {
+    units()
+    open('/manage/users')
+    const toggle = await screen.findByRole('button', { name: /ou.title/ })
+    expect(screen.queryByRole('tree')).toBeNull()
+    fireEvent.click(toggle)
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'ou.collapse' })).toBeNull()
+  })
+  it('folds the OU directory tree after a pick', async () => {
+    units()
+    open('/manage/users?tab=groups&ou=7')
+    await screen.findByDisplayValue('Research Desk')
+    expect(screen.queryByRole('tree')).toBeNull()
+    const toggle = screen.getByRole('button', { name: /Research Desk/ })
+    fireEvent.click(toggle)
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Default'))
+    await waitFor(() => expect(screen.queryByDisplayValue('Research Desk')).toBeNull())
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(screen.getByRole('button', { name: /Default/ }).getAttribute('aria-expanded')).toBe('false')
   })
 })

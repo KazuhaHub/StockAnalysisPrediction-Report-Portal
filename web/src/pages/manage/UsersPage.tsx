@@ -476,7 +476,8 @@ export default function UsersPage() {
   const accounts = (
     <div className="rp-users-directory">
       <ScopeFold label={ouScoped && ouSelected.length ? ouSelected.map((id) => groups.find((g) => g.id === id)?.name ?? id).join(', ') : t('ou.title')}>
-        {(fold) => <OrgUnitPicker
+        {(fold, folded) => <OrgUnitPicker
+          collapsible={!folded}
           groups={groups}
           loading={!settled}
           unassigned={(data?.users || []).filter((u) => !u.primary_group).length}
