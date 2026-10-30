@@ -17,7 +17,18 @@ function set(id: number | null) {
  * console both embed the queue table), so opening the global detail would stack a second one.
  */
 export function pageShowsJob(loc: { pathname: string; search: string }, id: number): boolean {
-  return (loc.pathname === '/queue' || loc.pathname === '/apps/batch') && new URLSearchParams(loc.search).get('job') === String(id)
+  if (loc.pathname !== '/queue' && loc.pathname !== '/apps/batch') return false
+  const raw = new URLSearchParams(loc.search).get('job')
+  return raw !== null && Number(raw) === id // numeric, like the queue page: ?job=07 is job 7
+}
+
+/** Asked of the shell to put its Tasks drawer away (it owns the drawer's open state). */
+export const CLOSE_TASKS_EVENT = 'rp:close-tasks'
+
+/** Puts away everything laid over the page for a run: the in-place detail and the Tasks drawer. */
+export function dismissTaskOverlays(): void {
+  closeJobDetail()
+  window.dispatchEvent(new Event(CLOSE_TASKS_EVENT))
 }
 
 export const openJobDetail = (id: number): void => set(id)

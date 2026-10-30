@@ -3,7 +3,7 @@ import { notifyExportsChanged } from './exportJobs'
 import { notify, type NotifyAction } from './notify'
 import { useRef } from 'react'
 import { useLocation } from 'react-router'
-import { openJobDetail, pageShowsJob } from './jobDetailStore'
+import { dismissTaskOverlays, openJobDetail, pageShowsJob } from './jobDetailStore'
 import { runOutcome } from './taskUi'
 import { taskKey, useMyTasks } from './useMyTasks'
 import type { TaskItem } from '../api/types'
@@ -19,7 +19,11 @@ export function useTaskCenter(enabled: boolean) {
   locRef.current = loc
   // "View" opens the thing itself: a run's detail in place over the current page, the Tasks drawer's Exports tab for an export.
   // A caller without run_batch gets no link from the server, and the detail would only 403: offer nothing.
-  const viewRun = (task: TaskItem): NotifyAction[] => !task.link ? [] : [{ label: t('tasks.toast.view'), primary: true, onClick: () => { if (!pageShowsJob(locRef.current, Number(task.id))) openJobDetail(Number(task.id)) } }]
+  const viewRun = (task: TaskItem): NotifyAction[] => !task.link ? [] : [{ label: t('tasks.toast.view'), primary: true, onClick: () => {
+    // The page's own drawer already shows this run: just clear whatever is laid over it.
+    if (pageShowsJob(locRef.current, Number(task.id))) dismissTaskOverlays()
+    else openJobDetail(Number(task.id))
+  } }]
   const viewExports: NotifyAction[] = [{ label: t('tasks.toast.view'), primary: true, onClick: () => notifyExportsChanged({ open: true }) }]
   return useMyTasks({
     enabled,

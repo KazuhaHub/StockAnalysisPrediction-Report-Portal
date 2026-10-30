@@ -6,7 +6,7 @@ import type { TaskItem } from '../api/types'
 import { EXPORTS_CHANGED_EVENT, notifyExportsChanged } from './exportJobs'
 import NotificationStack from '../components/NotificationStack'
 import { useTaskCenter } from './useTaskCenter'
-import { closeJobDetail, useOpenJobDetail } from './jobDetailStore'
+import { CLOSE_TASKS_EVENT, closeJobDetail, openJobDetail, useOpenJobDetail } from './jobDetailStore'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
@@ -150,6 +150,22 @@ describe('useTaskCenter completion toasts', () => {
     act(() => notifyExportsChanged())
     fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
     expect(screen.getByTestId('detail').textContent).toBe('')
+  })
+
+  it('puts covering overlays away when the page already shows that run', async () => {
+    const closeTasks = vi.fn()
+    window.addEventListener(CLOSE_TASKS_EVENT, closeTasks)
+    tasks = [run()]
+    renderProbe(true, '/queue?job=7')
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalled())
+    await settle()
+    act(() => openJobDetail(3)) // another run's detail is open over the page
+    tasks = [run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } })]
+    act(() => notifyExportsChanged())
+    fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
+    expect(screen.getByTestId('detail').textContent).toBe('')
+    expect(closeTasks).toHaveBeenCalled()
+    window.removeEventListener(CLOSE_TASKS_EVENT, closeTasks)
   })
 
   it('offers a View action on a partial run', async () => {

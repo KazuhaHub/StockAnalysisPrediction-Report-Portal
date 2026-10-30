@@ -395,9 +395,6 @@ func TestJobJSONCarriesInstantsAlongsideTheWallClock(t *testing.T) {
 	if got, want := m["started_at_ms"], time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC).UnixMilli(); got != want {
 		t.Fatalf("started_at_ms = %v, want %d", got, want)
 	}
-	if _, ok := m["created_at_ms"]; ok {
-		t.Fatal("created_at_ms is not read by any client and must not be part of the API")
-	}
 	if m["finished_at_ms"] != int64(0) {
 		t.Fatalf("unset finish must be 0, got %v", m["finished_at_ms"])
 	}

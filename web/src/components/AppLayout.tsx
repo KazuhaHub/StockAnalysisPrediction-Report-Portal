@@ -21,6 +21,7 @@ import ScrollToTop from './ScrollToTop'
 import RunAnalysisModal from './RunAnalysisModal'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
 import JobDetailHost from './JobDetailHost'
+import { CLOSE_TASKS_EVENT } from '../lib/jobDetailStore'
 import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
@@ -229,12 +230,15 @@ function AppShell() {
       setDrawerTab('exports')
       setQueueOpen(true)
     }
+    const closeTasks = () => setQueueOpen(false)
+    window.addEventListener(CLOSE_TASKS_EVENT, closeTasks)
     window.addEventListener(EXPORTS_CHANGED_EVENT, openExports)
     window.addEventListener(RUN_ANALYSIS_EVENT, openRun)
     window.addEventListener(QUEUE_EVENT, openQueue)
     return () => {
       window.removeEventListener(RUN_ANALYSIS_EVENT, openRun)
       window.removeEventListener(QUEUE_EVENT, openQueue)
+      window.removeEventListener(CLOSE_TASKS_EVENT, closeTasks)
       window.removeEventListener(EXPORTS_CHANGED_EVENT, openExports)
     }
   }, [canRun])

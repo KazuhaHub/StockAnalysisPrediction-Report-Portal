@@ -9,6 +9,7 @@ import { exportBase } from '../lib/exportMode'
 import { fmtBytes } from '../lib/exportJobs'
 import { fmtMs } from '../lib/exportTime'
 import { loadFailure } from '../lib/loadFailure'
+import { useOnReconnect } from '../lib/useOnReconnect'
 
 export interface ExportDetailModalProps {
   /** The export's row from /api/tasks; null keeps the modal closed. */
@@ -49,6 +50,10 @@ export default function ExportDetailModal({ task, onClose, onCancel }: ExportDet
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, status, link, attempt])
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
+  // A connection loss is no answer and the status may never change again: ask once more when it is back.
+  useOnReconnect(() => {
+    if (id && !job) retry()
+  })
 
   const dash = <Typography.Text type="secondary">—</Typography.Text>
   const time = (ms?: number) => (ms ? fmtMs(ms, '') : dash)

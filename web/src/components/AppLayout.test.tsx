@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
+import { CLOSE_TASKS_EVENT } from '../lib/jobDetailStore'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
@@ -401,6 +402,18 @@ describe('AppLayout Tasks entry', () => {
     expect(screen.queryByTestId('tasks-drawer')).toBeNull()
     act(() => notifyExportsChanged({ open: true }))
     expect((await screen.findByTestId('tasks-drawer')).getAttribute('data-tab')).toBe('exports')
+  })
+
+  it('puts the Tasks drawer away when asked to by a notification', async () => {
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    await screen.findByText('queue-body')
+    act(() => notifyExportsChanged({ open: true }))
+    await screen.findByTestId('tasks-drawer')
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_TASKS_EVENT))
+    })
+    await vi.waitFor(() => expect(screen.queryByTestId('tasks-drawer')).toBeNull())
   })
 
   it('keeps the tool buttons quiet and uniform, with a separator before the account', async () => {

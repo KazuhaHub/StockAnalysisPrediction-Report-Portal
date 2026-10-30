@@ -691,6 +691,28 @@ describe('Tasks drawer rows open the export in place', () => {
     expect(modalEl().querySelector('.ant-spin')).not.toBeNull()
   })
 
+  it('loads the detail once the connection is back, after a connection loss', async () => {
+    let down = true
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) {
+        if (down) throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
+        return exportJob()
+      }
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    await waitFor(() => expect(modalEl().querySelector('.ant-spin')).not.toBeNull())
+    down = false
+    act(() => {
+      window.dispatchEvent(new Event('rp:connection-restored'))
+    })
+    expect(await within(modalEl()).findByText('export.source.reports')).toBeTruthy()
+    expect(modalEl().querySelector('.ant-spin')).toBeNull()
+  })
+
   it('shows the failure reason', async () => {
     withExport(exportJob({ status: 'failed', error: 'over the limit', finished_at: Date.now() }))
     mount({ tab: 'exports', tasks: [exp({ status: 'failed', error: 'over the limit', cancel: undefined, finished_at: Date.now() })] })
