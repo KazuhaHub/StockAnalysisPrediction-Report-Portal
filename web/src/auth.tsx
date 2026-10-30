@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, onSessionLost } from './api/client'
 import { forgetTags } from './lib/conditionalGet'
+import { resetNotifications } from './lib/notify'
 import type { Me } from './api/types'
 import type { CaptchaValue } from './components/CaptchaField'
 import { getCredential } from './lib/webauthn'
@@ -85,6 +86,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const identity = me?.user ?? ''
   useEffect(() => {
     forgetTags()
+    // Pop-ups belong to the person who raised them; another reader must not inherit a security card.
+    resetNotifications()
   }, [identity])
 
   const value = useMemo<AuthCtx>(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { App, Alert, Button, Card, Collapse, Grid, Segmented, Space, Typography, theme } from 'antd'
+import { Alert, Button, Card, Collapse, Grid, Segmented, Space, Typography, theme } from 'antd'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
@@ -19,6 +19,7 @@ import {
   validateFilter,
 } from '../../../lib/exportFilter'
 import { notifyExportsChanged } from '../../../lib/exportJobs'
+import { notify } from '../../../lib/notify'
 import { exportBase, type ExportMode } from '../../../lib/exportMode'
 import { panelToday } from '../../../lib/exportTime'
 import ColumnsDialog from './ColumnsDialog'
@@ -50,7 +51,6 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
   const { t } = useTranslation()
   const { catchLoad, retryKey } = useLoadFailure()
   const { token } = theme.useToken()
-  const { notification } = App.useApp()
   const labels = useExportLabels()
   const compact = !Grid.useBreakpoint().lg
   const [params, setParams] = useSearchParams()
@@ -203,23 +203,12 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
   const created = (job: ExportJob) => {
     setExportOpen(false)
     notifyExportsChanged({ job })
-    const key = `export-${job.id}`
-    notification.success({
-      key,
+    notify({
+      key: `export-${job.id}`,
+      kind: 'actionable',
       title: t('export.created.title'),
       description: t('export.created.body', { name: job.name || labels.source(job.source) }),
-      actions: (
-        <Button
-          size="small"
-          type="primary"
-          onClick={() => {
-            notifyExportsChanged({ open: true })
-            notification.destroy(key)
-          }}
-        >
-          {t('export.created.view')}
-        </Button>
-      ),
+      actions: [{ label: t('export.created.view'), primary: true, onClick: () => notifyExportsChanged({ open: true }) }],
     })
   }
   const reuse = (job: ExportJob) => {

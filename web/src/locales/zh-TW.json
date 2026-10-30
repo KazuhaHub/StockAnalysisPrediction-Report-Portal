@@ -3357,5 +3357,10 @@
   "apps.access.discardOk": "放棄",
   "apps.access.reloadFailed": "已儲存，但頁面未能重新整理。請重新載入以查看目前狀態。",
   "apps.detail.installedFailed": "無法讀取已安裝應用清單，因此不顯示版本、入口檔案和權限範圍。",
-  "apps.perm.run_batch": "執行批次任務"
+  "apps.perm.run_batch": "執行批次任務",
+  "notifications.region": "通知",
+  "notifications.close": "關閉通知",
+  "notifications.more_one": "還有 {{count}} 則通知",
+  "notifications.more_other": "還有 {{count}} 則通知",
+  "tasks.toast.view": "查看"
 }

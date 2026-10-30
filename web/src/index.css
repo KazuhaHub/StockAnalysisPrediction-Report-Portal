@@ -2231,11 +2231,96 @@ body {
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
-@media (max-width: 575px) {
-  .rp-login-activity-notice.ant-notification-notice {
-    width: min(384px, calc(100vw - 24px));
-    max-width: calc(100vw - 24px);
-  }
+/* Unified notifications (lib/notify.ts). Colours arrive as custom properties derived from the antd
+   tokens by NotificationStack, so light and dark follow the theme. */
+.rp-notify-stack {
+  position: fixed;
+  top: calc(var(--rp-header-h, 64px) + env(safe-area-inset-top, 0px) + 12px);
+  right: 16px;
+  z-index: 2050;
+  width: 356px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.rp-notify-stack > * { pointer-events: auto; }
+.rp-notify-card {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  color: var(--rp-n-text);
+  background: var(--rp-n-solid);
+  background: var(--rp-n-bg);
+  border: 1px solid var(--rp-n-border);
+  box-shadow: var(--rp-n-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  animation: rp-notify-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.rp-notify-card.is-leaving { animation: rp-notify-out 0.25s ease-in forwards; }
+@keyframes rp-notify-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes rp-notify-out { to { transform: translateX(24px); opacity: 0; } }
+.rp-notify-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+}
+.rp-notify-body { flex: 1; min-width: 0; }
+.rp-notify-top { display: flex; align-items: baseline; gap: 8px; }
+.rp-notify-title { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-notify-time { flex: none; font-size: 12px; color: var(--rp-n-muted); }
+.rp-notify-desc { margin-top: 1px; font-size: 13px; color: var(--rp-n-muted); overflow-wrap: anywhere; }
+.rp-notify-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rp-notify-close {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--rp-n-border);
+  background: var(--rp-n-close-bg);
+  color: var(--rp-n-text);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.15s, transform 0.15s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.rp-notify-card:hover .rp-notify-close,
+.rp-notify-card:focus-within .rp-notify-close,
+.rp-notify-close:focus-visible { opacity: 1; transform: none; }
+.rp-notify-more {
+  align-self: flex-end;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  color: var(--rp-n-muted);
+  background: var(--rp-n-solid);
+  background: var(--rp-n-bg);
+  border: 1px solid var(--rp-n-border);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-notify-card, .rp-notify-card.is-leaving { animation: none; }
+  .rp-notify-close { transition: none; }
 }
 .rp-sr-only {
   position: absolute;
