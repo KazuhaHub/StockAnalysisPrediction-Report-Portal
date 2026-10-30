@@ -209,10 +209,8 @@ body {
     width: 100% !important;
     max-width: none;
   }
-  /* The directory pages have no fold, so their tree keeps a cap rather than pushing the editor away. */
-  .rp-ou-console .rp-ou-picker--manage .rp-ou-picker__tree {
-    max-height: 300px !important;
-  }
+  .rp-scope-fold .rp-ou-picker { width: 100% !important; }
+  .rp-scope-fold .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-ou-profile-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -563,6 +561,8 @@ body {
 .rp-reader-export-policy { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
 .rp-batch-targets-section > .ant-space-item { min-width: 0; }
 .rp-table-scroll { max-width: 100%; }
+.rp-scope-fold { min-width: 0; width: 100%; }
+.rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
 .rp-policy-scope-toggle { min-width: 0; }
 .rp-policy-scope-toggle__label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {

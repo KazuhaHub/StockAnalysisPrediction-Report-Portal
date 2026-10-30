@@ -33,6 +33,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
+import ScopeFold from './ScopeFold'
 import UserAvatar from '../../components/UserAvatar'
 import OrgUnitDetail from './OrgUnitDetail'
 import { usePendingSettings } from './AdminDraftBoundary'
@@ -474,16 +475,19 @@ export default function UsersPage() {
   // at all times, so inheritance stops being something you can only infer from an edit dialog.
   const accounts = (
     <div className="rp-users-directory">
-      <OrgUnitPicker
-        groups={groups}
-        loading={!settled}
-        unassigned={(data?.users || []).filter((u) => !u.primary_group).length}
-        scoped={ouScoped}
-        onScopedChange={setOuScoped}
-        selected={ouSelected}
-        onSelect={setOuSelected}
-        onManage={() => setTab('groups')}
-      />
+      <ScopeFold label={ouScoped && ouSelected.length ? ouSelected.map((id) => groups.find((g) => g.id === id)?.name ?? id).join(', ') : t('ou.title')}>
+        {(fold) => <OrgUnitPicker
+          groups={groups}
+          loading={!settled}
+          unassigned={(data?.users || []).filter((u) => !u.primary_group).length}
+          scoped={ouScoped}
+          onScopedChange={setOuScoped}
+          selected={ouSelected}
+          onSelect={setOuSelected}
+          onManage={() => setTab('groups')}
+          onPick={fold}
+        />}
+      </ScopeFold>
       {accountList}
     </div>
   )
@@ -558,7 +562,8 @@ function GroupsPanel({
     <div className="rp-ou-groups-page">
       <Typography.Paragraph type="secondary">{t('ou.directoryHint')}</Typography.Paragraph>
       <div className="rp-ou-console">
-        <OrgUnitPicker
+        <ScopeFold label={sel?.name ?? t('ou.title')}>
+          {(fold) => <OrgUnitPicker
           mode="manage"
           groups={groups}
           loading={groupsLoading}
@@ -577,7 +582,10 @@ function GroupsPanel({
           }}
           onManage={() => {}}
           onAdd={() => setAdding(true)}
+          onPick={fold}
         />
+          }
+        </ScopeFold>
         {sel ? (
           <OrgUnitDetail
             key={sel.id}

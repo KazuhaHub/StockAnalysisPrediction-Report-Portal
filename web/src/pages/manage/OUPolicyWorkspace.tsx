@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Typography } from 'antd'
-import { DownOutlined, GlobalOutlined, LeftOutlined, RightOutlined, UpOutlined } from '@ant-design/icons'
+import { GlobalOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { UserGroupRow } from '../../api/types'
+import { ScopeFoldToggle } from './ScopeFold'
 import { useNarrow } from '../../lib/useNarrow'
 import LoadGate from '../../components/LoadGate'
 import OrgUnitPicker from './OrgUnitPicker'
@@ -55,13 +56,12 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
         aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{(phone || !collapsed) && t('ou.globalScope')}</Button>
       {phone
         // The visible unit name stays in the accessible name; aria-expanded carries the state.
-        ? <Button className="rp-policy-scope-toggle" icon={treeOpen ? <UpOutlined /> : <DownOutlined />} aria-expanded={treeOpen} aria-controls={TREE_ID} onClick={() => setTreeOpen(value => !value)}>
-          <span className="rp-policy-scope-toggle__label">{scoped && selected ? selected.name : t('ou.unitScope')}</span></Button>
+        ? <ScopeFoldToggle open={treeOpen} label={scoped && selected ? selected.name : t('ou.unitScope')} controls={TREE_ID} onClick={() => setTreeOpen(value => !value)} />
         : <Button icon={collapsed ? <RightOutlined /> : <LeftOutlined />} aria-expanded={!collapsed} aria-label={t(collapsed ? 'ou.expand' : 'ou.collapse')} title={t(collapsed ? 'ou.expand' : 'ou.collapse')} onClick={() => setDeskCollapsed(value => !value)} />}</div>
       <div id={TREE_ID} hidden={collapsed}>{!collapsed && <LoadGate loading={loading} error={error} onRetry={load}>
         <OrgUnitPicker collapsible={false} mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
           selected={scoped && selected ? [selected.id] : []} onManage={() => {}}
-          onSelect={(ids) => { if (ids[0]) selectScope(ids[0]) }} onReselect={() => setTreeOpen(false)} />
+          onSelect={(ids) => { if (ids[0]) selectScope(ids[0]) }} onPick={() => setTreeOpen(false)} />
       </LoadGate>}</div>
       {!collapsed && <Typography.Paragraph type="secondary">{t('ou.featureScopeHint')}</Typography.Paragraph>}
     </aside>

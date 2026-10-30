@@ -51,7 +51,7 @@ export default function OrgUnitPicker({
   loading = false,
   collapsible = true,
   annotate,
-  onReselect,
+  onPick,
 }: {
   groups: UserGroupRow[]
   /** Accounts with no primary group; they belong to the Default OU by inheritance. */
@@ -67,8 +67,9 @@ export default function OrgUnitPicker({
    */
   mode?: 'filter' | 'manage'
   onAdd?: () => void
-  /** Manage mode: the already-selected OU was clicked again (the selection itself is kept). */
-  onReselect?: () => void
+  /** A tree click settled on a single unit — including a re-click of the selected one, which keeps
+   *  the selection. Not called while several units are being picked. */
+  onPick?: () => void
   /** The owner's groups request is still out. `groups` is [] because of that, not because this
    *  portal has none — and "No groups yet" is a claim about the directory. */
   collapsible?: boolean
@@ -260,11 +261,12 @@ export default function OrgUnitPicker({
               const ids = keys.map(Number)
               // In manage mode a click must never clear the selection, or the detail pane would
               // vanish when you click the OU you are already editing.
-              if (mode === 'manage' && ids.length === 0) { onReselect?.(); return }
+              if (mode === 'manage' && ids.length === 0) { onPick?.(); return }
               onSelect(ids)
               // Picking an OU is the act of scoping — making the admin also flip the radio would
               // be a second step with no decision in it.
               if (mode === 'filter' && ids.length > 0) onScopedChange(true)
+              if (!multi) onPick?.()
             }}
           />
         )}

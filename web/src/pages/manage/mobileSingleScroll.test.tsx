@@ -80,6 +80,11 @@ describe('phone layout has a single vertical scroll region', () => {
     expect(phone).toMatch(/\.rp-admin-page-body\s*\{[^}]*scrollbar-gutter:\s*auto[^}]*padding-inline-end:\s*0/)
   })
 
+  it('leaves no capped tree on phones now that every directory tree folds', () => {
+    expect(phone).not.toMatch(/max-height:\s*300px/)
+    expect(phone).toMatch(/\.rp-scope-fold \.rp-ou-picker__tree\s*\{[^}]*max-height:\s*none/)
+  })
+
   it('removes fixed-height tree panes on page-level phone panes only', () => {
     expect(phone).toMatch(/\.rp-app-access__tree \.rp-ou-picker__tree\s*\{[^}]*max-height:\s*none/)
     expect(phone).toMatch(/\.rp-export-type-tree\s*\{[^}]*max-height:\s*none/)
