@@ -54,4 +54,5 @@ func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformA
 		t.Fatal("missing native result released response")
 	}
 	t.Log("PORTAL_NETWORK_CURRENT_GRANT_RECHECKED")
+	testNativePlatformNetworkRoundtrip(t, s, actor, installation, binding, endpoint)
 }

@@ -26,6 +26,7 @@ on:
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_network_request*'
       - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_writer*'
       - 'internal/app/app_platform_writable*'
@@ -90,6 +91,7 @@ on:
       - 'internal/apprunner/transport/**'
       - 'internal/app/app_platform_network_request*'
       - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
       - 'internal/app/app_platform_data*'
       - 'internal/app/app_platform_writer*'
       - 'internal/app/app_platform_writable*'
@@ -192,7 +194,7 @@ jobs:
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev iproute2 util-linux
       - name: Build native data and independent UAPI probes
         run: |
           GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data

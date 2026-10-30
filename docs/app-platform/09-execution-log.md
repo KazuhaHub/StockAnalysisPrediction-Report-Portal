@@ -2463,3 +2463,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   actual activation. Exact new native/PG execution remains required; neither an
   actual Portal-mediated HTTPS exchange nor a public SDK route is claimed. See
   [current-viewer network requests](141-current-viewer-network-request.md).
+
+- Initial network-request revision 7e69b4ab passed actual native quota/browser
+  40987519817/job 123841897884, including both current SQL signing/withdrawal
+  assertions. General 40987519779/job 123841898193 passed focused PG cases but
+  failed staticcheck U1000 on the coordinator not called in tests; b6c3cbd7 adds
+  paired real-coordinator denied-grant coverage and awaits corrected general CI.
+- Added mandatory actual Portal/current-SQL HTTPS scenarios inside fresh Linux
+  mount/network namespaces after actual writable activation: standard TLS success,
+  grant withdrawal before IO with no extra request, and withdrawal after server
+  arrival with empty uncertain result and exactly one additional request. All
+  network/hosts/CA changes are isolated to the child process; root peer and
+  ordinary user identity remain real. Native markers and quota report fields
+  require these cases; new-revision Linux execution remains required. See
+  [Portal HTTPS acceptance](142-portal-https-native-acceptance.md).
