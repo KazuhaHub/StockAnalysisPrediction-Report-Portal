@@ -27,12 +27,13 @@ import { useTableView } from '../../components/TableView'
 import { ExportOutlined, FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
 import { auditDetail, headline, listSeparator, type ChangeMember, type DetailPart } from '../../lib/auditDetail'
 import type { AuditEntry, AuditResp } from '../../api/types'
 import { clickable } from '../../lib/clickable'
 import { auditFilterToTree, exportLink } from '../../lib/exportFilter'
 import { clientInfoFromDetail, clientLabel } from '../../lib/clientInfo'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 
 // The subset of i18next's t() the detail helpers use. i18next's own type is overloaded in ways that
 // make it awkward to pass down; this is the shape it is assignable to, and the shape both need —
@@ -219,6 +220,7 @@ const ACTION_COLOR: Record<string, string> = {
  * the same rule the SMTP password and the SSO client secrets already follow.
  */
 export default function AuditPage() {
+  const { failure, retryKey } = useLoadFailure()
   const { t, i18n } = useTranslation()
   const locale = i18n?.resolvedLanguage || i18n?.language || navigator.language
   // A phone cannot hold six columns. antd does not refuse — it squeezes them until CJK wraps one
@@ -272,11 +274,15 @@ export default function AuditPage() {
         setLoading(false)
       })
       .catch((e) => {
-        setErr(errText(e, t))
+        // A lost connection keeps the rows on screen (or the spinner, before any arrived) and the
+        // page asks again when the connection returns.
+        const text = failure(e)
+        if (text === null) return
+        setErr(text)
         setLoading(false)
       })
-  }, [action, actor, ip, q, since, page, t])
-  useEffect(load, [load])
+  }, [action, actor, ip, q, since, page, t, failure])
+  useEffect(load, [load, retryKey])
 
   const ouNames = data?.ou_names ?? {}
   const geo = data?.geo

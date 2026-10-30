@@ -29,6 +29,7 @@ import dayjs from 'dayjs'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api, errText } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import type { Principal } from '../api/types'
 import Markdown from '../components/Markdown'
 import { principalOptions } from '../components/principals'
@@ -74,6 +75,7 @@ const DATE_FMT = 'YYYY-MM-DD'
 
 export default function ReportEditorPage() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const navigate = useNavigate()
   const { id } = useParams()
@@ -117,6 +119,7 @@ export default function ReportEditorPage() {
 
   useEffect(() => {
     let live = true
+    let lost = false
     setLoading(true)
     const seed = editingId ?? from
     api
@@ -156,13 +159,18 @@ export default function ReportEditorPage() {
         // which would make every freshly loaded page read as unsaved.
         setSaved(snapshot(form.getFieldsValue(true), r.body_md ?? ''))
       })
-      .catch((e) => live && message.error(errText(e, t)))
-      .finally(() => live && setLoading(false))
+      .catch((e) => {
+        // A lost connection keeps the editor loading and loads it again when the connection returns.
+        const text = failure(e)
+        if (text === null) lost = true
+        else if (live) message.error(text)
+      })
+      .finally(() => { if (live && !lost) setLoading(false) })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingId, from, reloads])
+  }, [editingId, from, reloads, retryKey])
 
   const audienceOptions = useMemo(
     () =>

@@ -3,6 +3,7 @@ import { Alert, App, Button, Form, Input, Modal, Popconfirm, Space, Switch, Typo
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../api/client'
 import type { AppSummary } from '../api/types'
+import { useLoadFailure } from '../lib/useOnReconnect'
 
 interface Connection {
   revision: number
@@ -20,6 +21,7 @@ const initialPolicy = { version: 1, routes: [{ method: 'GET', prefix: '/v1/compo
 
 export default function AppBackendModal({ app, onClose }: { app: AppSummary | null; onClose: () => void }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [form] = Form.useForm<Fields>()
   const [connection, setConnection] = useState<Connection | null>(null)
@@ -36,11 +38,18 @@ export default function AppBackendModal({ app, onClose }: { app: AppSummary | nu
     api.get<Connection>(endpoint).then(c => {
       if (!active) return
       setConnection(c)
+      setLoading(false)
       form.setFieldsValue({ ...c, key_id: '', signing_key: '', policy: JSON.stringify(c.policy, null, 2) })
-    }).catch(e => { if (active && !(e instanceof ApiError && e.status === 404)) setError(errText(e, t)) })
-      .finally(() => { if (active) setLoading(false) })
+    }).catch(e => {
+      if (!active) return
+      // A lost connection keeps the form loading and reloads it when the connection returns.
+      const text = e instanceof ApiError && e.status === 404 ? '' : failure(e)
+      if (text === null) return
+      if (text) setError(text)
+      setLoading(false)
+    })
     return () => { active = false }
-  }, [app, endpoint, form, t])
+  }, [app, endpoint, form, t, retryKey])
   const save = async () => {
     const values = await form.validateFields()
     let policy: unknown

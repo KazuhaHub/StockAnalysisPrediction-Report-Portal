@@ -4,12 +4,15 @@ import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
 
 export default function WebhooksPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [hooks, setHooks] = useState<Webhook[]>([])
   const [events, setEvents] = useState<string[]>([])
@@ -37,13 +40,13 @@ export default function WebhooksPage() {
         setEvents(r.events || [])
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const eventLabel = (code: string) => t(`webhook.event.${code}`, code)
 

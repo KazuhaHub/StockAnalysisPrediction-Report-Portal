@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, Empty, Popconfirm, Space, Spin, Tag, Typograp
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import type { AccountSessionsResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { clientLabel } from '../lib/clientInfo'
@@ -14,14 +15,18 @@ export default function AccountSessionsPanel() {
   const [data, setData] = useState<AccountSessionsResponse | null>(null)
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const { failure, retryKey } = useLoadFailure()
   const load = useCallback(async () => {
     try {
       const result = await api.get<AccountSessionsResponse>('/api/me/sessions')
       setData({ ...result, items: result.items ?? [] })
       setFailed(false)
-    } catch { setFailed(true) }
-  }, [])
-  useEffect(() => { void load() }, [load])
+    } catch (e) {
+      // A lost connection is not an answer: the panel keeps its spinner and loads again when it returns.
+      if (failure(e) !== null) setFailed(true)
+    }
+  }, [failure])
+  useEffect(() => { void load() }, [load, retryKey])
 
   const revoke = async (idOrScope: string, bulk: boolean) => {
     setBusy(true)

@@ -4,6 +4,7 @@ import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from 
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { RunFreq, RunOverrun, RunPreset, RunPresetAnchor, RunPresetInterval, RunPresetsResp } from '../../api/types'
 import { WEEK_ORDER, parseWeeklyRows, presetSummary, weeklyIntervals, wrapsMidnight, type WeeklyRow } from '../../lib/runSchedule'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
@@ -105,6 +106,7 @@ const presetBody = (p: RunPreset) => ({
 
 export default function RunPresetsEditor() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [presets, setPresets] = useState<RunPreset[]>([])
   const [draft, setDraft] = useState<RunPreset | null>(null)
@@ -136,12 +138,12 @@ export default function RunPresetsEditor() {
         setPresets(r.presets || [])
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const ids = useMemo(() => presets.map((p) => String(p.id)), [presets])
 

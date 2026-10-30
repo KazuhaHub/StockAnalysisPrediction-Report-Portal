@@ -3,6 +3,8 @@ import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select,
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { TokenRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
@@ -16,6 +18,7 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 // Scopes: all / ingest / query. A secret is shown once on creation; the table keeps only its prefix.
 export default function TokensPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,13 +37,13 @@ export default function TokensPage() {
     return api
       .get<{ tokens: TokenRow[] }>('/api/admin/tokens')
       .then((r) => { setTokens(r.tokens || []); setLoaded(true) })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   useEffect(() => {
     load()
-  }, [])
+  }, [retryKey])
 
   const openAdd = () => {
     form.resetFields()

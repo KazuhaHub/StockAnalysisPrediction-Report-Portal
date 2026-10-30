@@ -3,6 +3,7 @@ import { App, Button, Card, Radio, Result, Space, Tag, Typography, theme } from 
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { AppAccessOU, UserGroupRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import { useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
@@ -17,6 +18,7 @@ import OrgUnitPicker from './OrgUnitPicker'
 // only hidden by this: the server cannot gate the API behind it, which the note under the choice says.
 export default function AppAccessPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const navigate = useNavigate()
   const key = useParams().key ?? ''
   const catalog = useAppsCatalog()
@@ -27,18 +29,21 @@ export default function AppAccessPage() {
 
   const loadGroups = useCallback(async () => {
     setGroupsError('')
+    let settled = true
     try {
       const g = await api.get<{ groups: UserGroupRow[] }>('/api/admin/groups')
       setGroups(g?.groups ?? [])
     } catch (e) {
-      setGroupsError(errText(e, t))
+      const text = failure(e)
+      if (text === null) settled = false
+      else setGroupsError(text)
     } finally {
-      setGroupsLoading(false)
+      if (settled) setGroupsLoading(false)
     }
-  }, [t])
+  }, [t, failure])
   useEffect(() => {
     void loadGroups()
-  }, [loadGroups])
+  }, [loadGroups, retryKey])
 
   const app = catalog.apps.find((a) => a.key === key)
   const retry = () => {

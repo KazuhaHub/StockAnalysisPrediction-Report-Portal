@@ -679,6 +679,7 @@
   "common.loadFailed": "無法載入本頁設定。",
   "common.loadFailedContent": "無法載入內容。",
   "common.loading": "載入中…",
+  "common.waitingForConnection": "正在等待連線恢復…",
   "common.more": "更多",
   "common.name": "名稱",
   "common.ok": "確定",

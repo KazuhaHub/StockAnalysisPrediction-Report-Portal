@@ -3,6 +3,8 @@ import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Table
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { Role, SSOProviderAdmin, SSORuleRow, SSORulesResp, UserGroupRow } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
@@ -45,6 +47,7 @@ export default function SSORulesEditor({
   roles: Role[]
 }) {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [rules, setRules] = useState<SSORuleRow[]>([])
   const [shadowed, setShadowed] = useState<number[]>([])
@@ -69,10 +72,10 @@ export default function SSORulesEditor({
         setDirty(false)
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Row keys are positions, not ids: an unsaved row has no id yet, and the server assigns ids from
   // the array order on save, so a position is the only thing stable across an edit.

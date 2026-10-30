@@ -3,6 +3,7 @@ import { App, Alert, Button, Card, Collapse, Grid, Segmented, Space, Typography,
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
+import { useLoadFailure } from '../../../lib/useOnReconnect'
 import type { ExportFilter, ExportJob, ExportPolicy, ExportPreviewResp, ExportSource, SettingsResp } from '../../../api/types'
 import LoadGate from '../../../components/LoadGate'
 import {
@@ -47,6 +48,7 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
   const base = exportBase(exportMode)
   const reader = exportMode === 'reader'
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { token } = theme.useToken()
   const { notification } = App.useApp()
   const labels = useExportLabels()
@@ -102,7 +104,7 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
         setSources(r.sources)
         applyUrl(r.sources, paramsRef.current)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
+      .catch(catchLoad(setLoadErr))
     // The panel zone only decides how times read; a failure leaves them in the viewer's zone. A
     // reader cannot read the admin settings, so their times read in their own zone.
     if (!reader) {
@@ -113,7 +115,7 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyUrl, base, reader, t])
-  useEffect(load, [load])
+  useEffect(load, [load, retryKey])
 
   // Mirror source + filter into the URL (replace, so each edit is not a history entry).
   useEffect(() => {

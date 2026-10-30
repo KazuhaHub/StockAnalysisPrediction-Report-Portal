@@ -6,6 +6,8 @@ import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import { useAuth } from '../../auth'
 import type { AppSummary, AppsResp, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
 import { difyModeKind } from '../../lib/batchUi'
@@ -26,6 +28,7 @@ type Row = { key: string; type: 'group'; group: LinkGroup } | { key: string; typ
 
 export default function LinksPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const { can } = useAuth()
@@ -65,14 +68,14 @@ export default function LinksPage() {
       // The `!loading` guard below covered the wait but not the failure: `finally` alone dropped
       // the rejection and settled the page on "No entry buttons yet", which is what a genuinely
       // empty home page looks like.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   useEffect(() => {
     api.get<AppsResp>('/api/apps').then((r) => setAppList(r.apps || [])).catch(() => {})

@@ -5,7 +5,9 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import DashboardChart from './DashboardChart'
 import DashboardChartCard from './DashboardChartCard'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 
 type Dataset = 'reports' | 'runs' | 'accounts'
 interface Result {
@@ -24,6 +26,7 @@ const dimensions: Record<Dataset, string[]> = {
 
 export default function StatisticsPage() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const [dataset, setDataset] = useState<Dataset>('reports')
   const [group, setGroup] = useState('kind')
   const [interval, setInterval] = useState('month')
@@ -46,10 +49,10 @@ export default function StatisticsPage() {
     setResult(undefined)
     api.get<Result>(`/api/admin/statistics?${applied}&page=${page}&page_size=${size}${view === 'chart' ? '&view=chart' : ''}`)
       .then(value => { if (live) setResult(value) })
-      .catch(err => { if (live) setError(errText(err, t)) })
-      .finally(() => { if (live) setBusy(false) })
+      .catch(err => { const text = failure(err); if (live && text !== null) setError(text) })
+      .then(...settleOnAnswer(() => { if (live) setBusy(false) }))
     return () => { live = false }
-  }, [applied, page, size, revision, view, t])
+  }, [applied, page, size, revision, view, t, retryKey])
 
   // Draft filters do not alter the result or export until the user applies them.
   const apply = () => {

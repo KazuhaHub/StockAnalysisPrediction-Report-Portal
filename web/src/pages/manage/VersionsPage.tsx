@@ -3,6 +3,8 @@ import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Se
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
@@ -28,6 +30,7 @@ export default function VersionsPage() {
 
 function VersionRegistry() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [groups, setGroups] = useState<Principal[]>([])
@@ -54,10 +57,10 @@ function VersionRegistry() {
         setUsers(result.users ?? [])
         setLoaded(true)
       })
-      .catch((error) => setLoadErr(errText(error, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (version?: VersionRow) => {
     const value: VersionRow = version ? { ...version, grants: [...version.grants] } : {

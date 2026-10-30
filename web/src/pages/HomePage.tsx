@@ -24,7 +24,7 @@ import { DownOutlined, FilterOutlined, FolderOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { api, errText, qs } from '../api/client'
+import { api, qs } from '../api/client'
 import type { HomeResp, LinkItem } from '../api/types'
 import { SiteLogo, useSite } from '../site'
 import { useAuth } from '../auth'
@@ -34,6 +34,8 @@ import { linkIconComponent } from '../components/linkIcons'
 import { linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
 import { useAppAccess } from '../appAccess'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import { useLoadFailure } from '../lib/useOnReconnect'
+import { settleOnAnswer } from '../lib/loadFailure'
 import { useHomeQuotes } from '../lib/useHomeQuotes'
 import { versionLabel } from '../lib/versionLabel'
 import { useFavorites } from '../favorites'
@@ -43,6 +45,7 @@ const { RangePicker } = DatePicker
 
 export default function HomePage() {
   const { t } = useTranslation()
+  const { catchLoad } = useLoadFailure()
   const { title } = useSite()
   const { token } = theme.useToken()
   const navigate = useNavigate()
@@ -85,8 +88,10 @@ export default function HomePage() {
       // Without this the rejection was dropped and the page settled on a blank strip where the
       // reports go — no cards, no message, nothing to retry. The `data &&` guard below meant it
       // did not claim "no matching reports", but it did not say anything at all either.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      // A lost connection is not an answer: the page keeps what it has (or its spinner), and the
+      // poll below runs again the moment the connection returns.
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
@@ -108,6 +113,7 @@ export default function HomePage() {
         .then((r) => {
           setData(r)
           setLoadErr('')
+          setLoading(false)
         })
         .catch(() => {})
     return startVisiblePoll(refetch, 60000, { skipLeading: true })

@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError, api } from './api/client'
+import { isConnectionError } from './api/connection'
+import { useOnReconnect } from './lib/useOnReconnect'
 import type { FavoriteItem, FavoritesResp, QuoteResp } from './api/types'
 
 type Market = QuoteResp['market']
@@ -42,6 +44,7 @@ export function FavoritesProvider({ user, children }: { user: string; children: 
   const loadedRef = useRef(loaded)
   const errorRef = useRef(error)
   const requestRef = useRef<Promise<void> | null>(null)
+  const staleRef = useRef(false)
   const busyRef = useRef(new Set<string>())
   const reorderingRef = useRef(false)
 
@@ -61,6 +64,7 @@ export function FavoritesProvider({ user, children }: { user: string; children: 
       if (!force && loadedRef.current) return Promise.resolve()
       if (requestRef.current) return requestRef.current
       setLoading(true)
+      staleRef.current = false
       const request = api
         .get<FavoritesResp>('/api/favorites')
         .then((response) => {
@@ -69,12 +73,18 @@ export function FavoritesProvider({ user, children }: { user: string; children: 
           replaceError(null)
         })
         .catch((cause) => {
-          replaceError(cause)
+          // A lost connection is not an answer: the list stays "not loaded yet" (the grid keeps
+          // its spinner) and reloads when the connection returns. The failure still reaches an
+          // action that asked for the list.
+          if (isConnectionError(cause)) staleRef.current = true
+          else replaceError(cause)
           throw cause
         })
         .finally(() => {
-          loadedRef.current = true
-          setLoaded(true)
+          if (!staleRef.current) {
+            loadedRef.current = true
+            setLoaded(true)
+          }
           setLoading(false)
           requestRef.current = null
         })
@@ -83,6 +93,11 @@ export function FavoritesProvider({ user, children }: { user: string; children: 
     },
     [replaceError, replaceItems, user],
   )
+
+  // The list that never arrived because the connection was down loads again when it returns.
+  useOnReconnect(() => {
+    if (staleRef.current) void ensureLoaded(true).catch(() => {})
+  })
 
   const markBusy = useCallback((key: string, busy: boolean) => {
     const next = new Set(busyRef.current)

@@ -9,6 +9,8 @@ import { useAuth } from '../auth'
 import type { BatchTarget, RecurringDetail, RecurringRun, RecurringTask, RecurringTasksResp } from '../api/types'
 import { csvToRows, downloadCSV, toCSV } from '../lib/csv'
 import LoadGate from '../components/LoadGate'
+import { useLoadFailure } from '../lib/useOnReconnect'
+import { settleOnAnswer } from '../lib/loadFailure'
 
 // Recurring-tasks console (计划任务; docs/adr/0018-recurring-tasks.md). A first-party app card
 // (gated by run_batch) that manages saved job templates + a daily/weekly/monthly cadence the server
@@ -33,6 +35,7 @@ type Draft = typeof emptyDraft
 
 export default function RecurringConsole() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const { admin } = useAuth()
   const [targets, setTargets] = useState<BatchTarget[]>([])
@@ -71,7 +74,7 @@ export default function RecurringConsole() {
         if (r.maxConcurrency) setMaxConcurrency(r.maxConcurrency)
         setLoaded(true)
       })
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
   }
 
   // Two claims this console must not make before its two GETs land: "no run targets yet" (with
@@ -79,12 +82,12 @@ export default function RecurringConsole() {
   const load = () => {
     setLoadErr('')
     loadTargets().catch(() => {})
-    return loadTasks().catch((e) => setLoadErr(errText(e, t)))
+    return loadTasks().catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const draftTarget = useMemo(() => targets.find((tg) => tg.id === draft.targetId), [targets, draft.targetId])
   const targetKeys = useMemo(() => (draftTarget?.inputs || []).map((i) => i.key), [draftTarget])

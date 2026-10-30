@@ -24,6 +24,8 @@ import { useTranslation } from 'react-i18next'
 import useFormDraft from './useFormDraft'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import { forgetTags } from '../../lib/conditionalGet'
 import { useAnnouncements } from '../../announcements'
 import type {
@@ -80,6 +82,7 @@ interface FormValues {
 // its own — there is no page-level Save button, the way the entry-buttons page works.
 export default function AnnouncementPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { refresh: refreshFeed } = useAnnouncements()
   const { token } = theme.useToken()
@@ -121,14 +124,14 @@ export default function AnnouncementPage() {
       // Not a `finally`-only settle: a failed GET that renders as "no announcements yet" looks
       // exactly like a portal that has none, and the drag handler would then be able to send
       // "replace the whole order" from a list that was never there.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // The admin's own shell polls the reader feed every 60s. After a change, drop its stored ETag AND
   // ask again, so the edit shows up in this tab now rather than up to a minute later. Dropping the

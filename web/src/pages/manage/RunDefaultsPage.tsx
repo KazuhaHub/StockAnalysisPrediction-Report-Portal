@@ -3,6 +3,8 @@ import { App, ConfigProvider, InputNumber, Select, Switch, Typography } from 'an
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import { visibleOn } from '../../lib/batchUi'
 import { presetSummary } from '../../lib/runSchedule'
 import type { BatchConfig, BatchTarget, RunMode, RunPreset, RunPresetsResp } from '../../api/types'
@@ -41,6 +43,7 @@ export default function RunDefaultsPage() {
 }
 function RunDefaultsEditor({ ou }: { ou?: number }) {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const draft = useSettingsDraft({ targetId: 0, mode: 'now' as RunMode, presetId: 0, idle: false, retries: 0, notify: false, showRule: false, inherit: {} as Record<string, boolean> })
   const { targetId, mode, presetId, idle, retries, notify, showRule } = draft.value
@@ -74,13 +77,13 @@ function RunDefaultsEditor({ ou }: { ou?: number }) {
         setTargets(tg.targets || [])
         setPresets(ps.presets || [])
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const save = async () => {
     setSaving(true)

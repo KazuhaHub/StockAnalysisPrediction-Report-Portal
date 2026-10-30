@@ -4,6 +4,7 @@ import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import ScrollRegion from './ScrollRegion'
@@ -77,6 +78,7 @@ const REASONS = ['pending_baseline', 'non_standard_horizon', 'missing_mark', 'pe
 
 export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '', hideCounts = false, defaultPresentation = 'table' }: Props) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { token } = theme.useToken()
   // No cell (a caller that opens the list on its own) is the scored view, as it always was.
   const membership = !!cell && cell.state !== 'mature'
@@ -117,14 +119,16 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
         }
       })
       .catch((e) => {
-        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first', excluded: [], scored: false, countsVisible: false })
+        // A lost connection leaves the drawer loading and asks again when it returns.
+        const text = failure(e)
+        if (mine.live && text !== null) setStored({ key, members: [], next: '', loading: false, error: text, errorAt: 'first', excluded: [], scored: false, countsVisible: false })
       })
     return () => {
       mine.live = false
     }
     // `request` closes over exactly the values in `key`; `t` is stable in the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, key, revision])
+  }, [open, key, revision, retryKey])
 
   const current: Loaded =
     stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '', excluded: [], scored: false, countsVisible: false }

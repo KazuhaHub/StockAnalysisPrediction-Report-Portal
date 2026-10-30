@@ -4,6 +4,8 @@ import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
@@ -160,6 +162,7 @@ function fmtBytes(n: number): string {
 
 export default function QuoteSourcesPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [ledger, setLedger] = useState<QuoteLedgerState | null>(null)
   const [saving, setSaving] = useState(false)
@@ -256,8 +259,8 @@ export default function QuoteSourcesPage() {
         apply(st)
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   useEffect(() => {
@@ -268,7 +271,7 @@ export default function QuoteSourcesPage() {
       cancelConfirmation.current?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const save = async () => {
     if (savePending.current) return

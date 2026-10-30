@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Empty, Modal, Select, Space, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../api/client'
+import { api } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import type { ComparableReport, ReportDiff } from '../api/types'
 import { SectionBlock } from './DiffSections'
 import { clickable } from '../lib/clickable'
@@ -22,6 +23,7 @@ export default function CompareModal({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   // null until the comparable-editions list has actually come back: "there is no earlier edition
   // to compare with" is the reason this dialog would have nothing to do, and it must be the
   // server's answer rather than the state's starting value.
@@ -45,12 +47,12 @@ export default function CompareModal({
         // The previous edition is the comparison people want; the rest are one click away.
         setAgainst(items[0]?.id)
       })
-      .catch((e) => setErr(errText(e, t)))
+      .catch((e) => { const text = failure(e); if (text !== null) setErr(text) })
     // `t` is deliberately not a dependency: it is used only to word an error, and re-running this
     // effect for a new `t` identity re-fetches the list — which, since the answer replaces state,
     // re-renders and asks again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reportId])
+  }, [open, reportId, retryKey])
 
   const load = useCallback(() => {
     if (!against) return
@@ -58,12 +60,17 @@ export default function CompareModal({
     setErr('')
     api
       .get<ReportDiff>(`/api/reports/diff?a=${against}&b=${reportId}`)
-      .then(setDiff)
-      .catch((e) => setErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then((d) => { setDiff(d); setLoading(false) })
+      .catch((e) => {
+        // A lost connection leaves the spinner up; the diff is requested again when it returns.
+        const text = failure(e)
+        if (text === null) return
+        setErr(text)
+        setLoading(false)
+      })
     // `t` omitted for the same reason as above — it only words the error.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [against, reportId])
+  }, [against, reportId, retryKey])
   useEffect(load, [load])
 
   const shown = useMemo(

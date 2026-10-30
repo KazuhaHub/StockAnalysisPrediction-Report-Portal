@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { TrackingResp, TrackingRow } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useLoadFailure } from '../lib/useOnReconnect'
+import { settleOnAnswer } from '../lib/loadFailure'
 
 // The review queue: what the reports ASSUMED, and whether it held.
 //
@@ -29,6 +31,7 @@ const VERDICTS = ['confirmed', 'invalidated', 'expired']
 
 export default function ReviewPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
@@ -54,9 +57,9 @@ export default function ReviewPage() {
         setData(r)
         setErr('')
       })
-      .catch((e) => setErr(errText(e, t)))
-      .finally(() => setLoading(false))
-  }, [status, itype, q, sort, t])
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setErr))
+  }, [status, itype, q, sort, t, retryKey])
   useEffect(load, [load])
 
   const review = async (row: TrackingRow, verdict: string) => {

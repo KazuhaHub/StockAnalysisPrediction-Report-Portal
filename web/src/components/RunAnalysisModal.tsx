@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
 import { visibleOn } from '../lib/batchUi'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import { formatReportDateTime } from '../lib/datetime'
 import { buildRow, inputDisplayMeta, isFileInput } from '../lib/difyInputs'
 import { readPrefetched } from '../lib/prefetch'
@@ -86,6 +87,7 @@ export default function RunAnalysisModal({
   initialTargetId?: number // pre-select this workflow when opened from a pinned entry-button shortcut
 }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { email, mailEnabled } = useAuth()
   const navigate = useNavigate()
@@ -154,6 +156,7 @@ export default function RunAnalysisModal({
       // banner's "Loading…" — it just ends it by saying nothing rather than by guessing.
       .finally(() => setQueueSettled(true))
     let live = true
+    let lost = false
     const gated = [
       api
         .get<{ targets: BatchTarget[] }>('/api/admin/batch/targets')
@@ -164,7 +167,11 @@ export default function RunAnalysisModal({
         // allSettled below swallows this, and the spinner would end on "No workflows configured
         // yet. Add one under Manage → Batch." — advice for a server that never answered.
         .catch((e) => {
-          if (live) setLoadErr(errText(e, t))
+          // A lost connection is not an answer: the dialog keeps its spinner and loads again when
+          // the connection returns.
+          const text = failure(e)
+          if (text === null) lost = true
+          else if (live) setLoadErr(text)
         }),
       // Presets + the admin-set run-form defaults (default mode button + idle pre-check).
       api.get<RunPresetsResp>('/api/admin/batch/presets').then(applyPresets),
@@ -172,13 +179,13 @@ export default function RunAnalysisModal({
     // allSettled, not all: a failed presets call must still open the form (with no preset
     // windows), rather than leave the modal spinning for ever on a detail.
     Promise.allSettled(gated).then(() => {
-      if (live) setLoading(false)
+      if (live && !lost) setLoading(false)
     })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, retryKey])
 
   // 运行分析 generates a report (Dify ingests it). visibleOn applies both rules: agent apps
   // are conversational and post no report (capability), and an admin may restrict a target

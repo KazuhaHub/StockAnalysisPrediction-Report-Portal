@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, I
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import { formatReportTime } from '../../lib/datetime'
 import { startVisiblePoll } from '../../lib/visiblePoll'
 import Markdown from '../../components/Markdown'
@@ -41,6 +42,7 @@ function elapsed(startedAt: string): string {
 
 export default function ChatAdminPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [limit, setLimit] = useState(0)
   const [stream, setStream] = useState(true)
@@ -85,7 +87,7 @@ export default function ChatAdminPage() {
       })
       // Only the first poll has anything to report; after that the numbers on screen are the
       // server's, and a dropped poll must not replace them.
-      .catch((e) => setCfgErr(errText(e, t)))
+      .catch(catchLoad(setCfgErr))
   const loadConvs = () => {
     setConvsErr('')
     return api
@@ -94,12 +96,12 @@ export default function ChatAdminPage() {
         setConvs(r.conversations || [])
         setConvsLoaded(true)
       })
-      .catch((e) => setConvsErr(errText(e, t)))
+      .catch(catchLoad(setConvsErr))
   }
   useEffect(() => {
     loadConvs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
   useEffect(() => {
     if (!auto) return
     return startVisiblePoll(load, 3000)

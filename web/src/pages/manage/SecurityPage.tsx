@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
@@ -93,6 +94,7 @@ export default function SecurityPage() {
 
 function GlobalSecuritySettings() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [captcha, setCaptcha] = useState<CaptchaCfg | null>(null)
   const [reg, setReg] = useState<RegCfg | null>(null)
@@ -140,12 +142,15 @@ function GlobalSecuritySettings() {
           limits: r.limits, twofa: r.twofa, recovery: r.recovery.mode ?? (r.recovery.enabled ? 'email' : 'hidden'), lockout: r.lockout })
       })
       .catch((e) => {
-        setLoadErr(errText(e, t))
-        message.error(errText(e, t))
+        // A lost connection keeps the spinner and loads again when the connection returns.
+        const text = failure(e)
+        if (text === null) return
+        setLoadErr(text)
+        message.error(text)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load() }, [load, retryKey])
 
   const save = async () => {
     if (!captcha || !reg || !login || !limits || !twofa || !lockout) return

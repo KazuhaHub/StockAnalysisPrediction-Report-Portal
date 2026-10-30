@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import useFormDraft from './useFormDraft'
 import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import { difyModeTag, surfaceSupportsMode } from '../../lib/batchUi'
 import { ALL_SURFACES } from '../../api/types'
 import type { Surface } from '../../api/types'
@@ -87,6 +88,7 @@ export default function BatchAdminPage() {
 
 function GlobalExecutionTargets() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
 
   const [plugins, setPlugins] = useState<BatchPlugin[]>([])
@@ -129,14 +131,17 @@ function GlobalExecutionTargets() {
       .then((r) => {
         setPlugins(r.plugins || [])
         setPluginsErr('')
+        setPluginsLoaded(true)
       })
       .catch((e) => {
         // Named, not swallowed: settling the flag alone would turn a failed request into
         // "no custom plugins are installed", which is the claim this sweep exists to remove.
-        setPluginsErr(errText(e, t))
+        // A lost connection is not an answer either: the flag stays down and the list loads again
+        // when the connection returns.
+        const text = failure(e)
+        if (text !== null) { setPluginsErr(text); setPluginsLoaded(true) }
         throw e
       })
-      .finally(() => setPluginsLoaded(true))
   // Sequenced, because this is the one list on the page that is refetched from four places — the
   // initial load, a delete, a surfaces save and a reorder — and two GETs can be in flight at once
   // with no ordering guarantee on their answers. Whichever landed last used to win, so a slow
@@ -158,12 +163,12 @@ function GlobalExecutionTargets() {
   const load = () => {
     setLoadErr('')
     loadPlugins().catch(() => {})
-    return loadTargets().catch((e) => setLoadErr(errText(e, t)))
+    return loadTargets().catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // Custom (non-Dify) plugins — the bundled "dify" adapter is hidden; it's implied.
   const customPlugins = useMemo(() => plugins.filter((p) => p.slug !== 'dify'), [plugins])

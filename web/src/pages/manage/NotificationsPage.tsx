@@ -3,11 +3,13 @@ import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, 
 import { useTranslation } from 'react-i18next'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [data, setData] = useState<NotificationOverview>()
   const [error, setError] = useState('')
@@ -39,7 +41,7 @@ export default function NotificationsPage() {
 
   const load = async () => {
     setError('')
-    try { setData(await notifications.overview()) } catch (e) { setError(errText(e, t)) }
+    try { setData(await notifications.overview()) } catch (e) { const text = failure(e); if (text !== null) setError(text) }
   }
   const loadHistory = async (more = false) => {
     setHistoryError('')
@@ -48,10 +50,10 @@ export default function NotificationsPage() {
       setHistory(old => more ? [...old, ...result.deliveries] : result.deliveries)
       setNext(result.next_cursor)
       setHistoryLoaded(true)
-    } catch (e) { setHistoryError(errText(e, t)) }
+    } catch (e) { const text = failure(e); if (text !== null) setHistoryError(text) }
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (historyLoaded) void loadHistory() }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (historyLoaded) void loadHistory() }, [state, retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, refreshHistory = true) => {
     setBusy(true)
     try { await fn(); await load(); if (historyLoaded && refreshHistory) await loadHistory() } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }

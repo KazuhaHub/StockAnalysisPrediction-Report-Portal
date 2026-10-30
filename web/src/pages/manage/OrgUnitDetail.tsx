@@ -3,6 +3,7 @@ import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, 
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { loadFailure } from '../../lib/loadFailure'
 import type { ForecastScope, GroupTargetRow, GroupTargetsResp, OUPolicyResults, UserGroupRow } from '../../api/types'
 import InheritField from './InheritField'
 import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSettings'
@@ -192,7 +193,7 @@ export default function OrgUnitDetail({
         ...Object.fromEntries(Object.entries(group).filter(([key]) => POLICY_FIELDS.has(key))),
         name: d.name, parent_id: d.parent_id,
       }).then((r) => { if (current) setPreviewPolicies(r.inherited_policy_results) })
-        .catch((e) => { if (current) setPreviewError(errText(e, t)) })
+        .catch((e) => { const text = loadFailure(e, t); if (current && text !== null) setPreviewError(text) })
     }, 150)
     return () => { current = false; clearTimeout(timer) }
   }, [group.id, group.parent_id, group.policy_results, d.parent_id])

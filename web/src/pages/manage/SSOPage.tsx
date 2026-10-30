@@ -3,6 +3,8 @@ import { Alert, App, Button, Card, Collapse, Form, Grid, Input, InputNumber, Sel
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { Role, SSOProviderAdmin, SSOProvidersResp, UserGroupRow, UsersResp } from '../../api/types'
 import SSORulesEditor from './SSORulesEditor'
 import SSOSetupGuide from './SSOSetupGuide'
@@ -463,6 +465,7 @@ function ProviderForm({
 
 export default function SSOPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [providers, setProviders] = useState<SSOProviderAdmin[]>([])
   const [groups, setGroups] = useState<UserGroupRow[]>([])
@@ -504,13 +507,13 @@ export default function SSOPage() {
         setAllowPrivate(r.allow_private === true)
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // A provider that has not been saved has no row, so its SP addresses come from the server's
   // derived defaults instead. Without them the setup guide — the thing an admin reads BEFORE

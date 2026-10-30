@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
 import { AuditOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { CleanupConfig, CleanupResult, CleanupRun, CleanupUsage, CleanupUsageCategory } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
@@ -66,6 +67,7 @@ function isDarkSurface(c: string): boolean {
 
 export default function StoragePage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
   const dark = isDarkSurface(token.colorBgContainer)
@@ -158,14 +160,22 @@ export default function StoragePage() {
         setPredictionsFloor(r.predictions_floor)
       })
       .then(() => setLoaded(true))
-      .catch((e) => setLoadErr(errText(e, t)))
+      .catch(onFail)
+  }
+  // A lost connection is not an answer: the page keeps its spinner and loads again when the
+  // connection returns.
+  const offline = useRef(false)
+  const onFail = (e: unknown) => {
+    const text = failure(e)
+    if (text === null) offline.current = true
+    else setLoadErr(text)
   }
   const loadUsage = () => api.get<CleanupUsage>('/api/admin/cleanup/usage').then(setUsage)
   const loadHistory = () => {
     setHistoryError('')
     return api.get<{ runs: CleanupRun[] }>('/api/admin/cleanup/history')
       .then((r) => { setHistory(r.runs ?? []); setHistoryLoaded(true) })
-      .catch((e) => setHistoryError(errText(e, t)))
+      .catch(catchLoad(setHistoryError))
   }
 
   // Usage belongs inside the gate with the config: the card above reads `usage?.db_bytes ?? 0`,
@@ -175,12 +185,13 @@ export default function StoragePage() {
     setLoading(true)
     setLoadErr('')
     loadHistory().catch(() => {})
-    return Promise.all([loadConfig(), loadUsage().catch((e) => setLoadErr(errText(e, t)))]).finally(() => setLoading(false))
+    offline.current = false
+    return Promise.all([loadConfig(), loadUsage().catch(onFail)]).finally(() => { if (!offline.current) setLoading(false) })
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const save = async () => {
     setSaving(true)

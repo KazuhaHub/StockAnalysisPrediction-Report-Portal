@@ -3,6 +3,7 @@ import { Alert, Empty, Space, Spin, Tag, Typography, theme } from 'antd'
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import type { LoginActivityResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
@@ -13,6 +14,7 @@ export default function LoginActivityPanel() {
   const { token } = theme.useToken()
   const [data, setData] = useState<LoginActivityResponse | null>(null)
   const [failed, setFailed] = useState(false)
+  const { failure, retryKey } = useLoadFailure()
 
   useEffect(() => {
     let live = true
@@ -21,13 +23,14 @@ export default function LoginActivityPanel() {
       .then((r) => {
         if (live) setData(r)
       })
-      .catch(() => {
-        if (live) setFailed(true)
+      .catch((e) => {
+        if (live && failure(e) !== null) setFailed(true)
       })
     return () => {
       live = false
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryKey])
 
   if (failed) return <Alert type="error" showIcon title={t('loginActivity.loadFailed')} />
   if (!data) return <div style={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><Spin /></div>

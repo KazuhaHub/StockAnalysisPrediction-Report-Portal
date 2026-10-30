@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../api/client'
+import { isConnectionError } from '../api/connection'
 import type { ForecastGroupsResponse } from '../api/types'
+import { useOnReconnect } from './useOnReconnect'
 
 export type RecordState =
   // idle: the caller has no query yet (a custom range with a missing date). Nothing is requested.
@@ -20,6 +22,14 @@ export function useForecastRecord(query: string | null, identity: string, allowe
   const [revision, setRevision] = useState(0)
   const key = JSON.stringify([query, identity, allowed, revision])
   const [stored, setStored] = useState<{ key: string; state: RecordState }>()
+  const offline = useRef(false)
+  // A request that could not reach the server is neither an answer nor an error: the record stays
+  // loading and is asked for again when the connection returns.
+  useOnReconnect(() => {
+    if (!offline.current) return
+    offline.current = false
+    setRevision((n) => n + 1)
+  })
 
   useEffect(() => {
     if (!allowed || query === null) {
@@ -31,6 +41,7 @@ export function useForecastRecord(query: string | null, identity: string, allowe
     const publish = (state: RecordState) => {
       if (!cancelled) setStored({ key, state })
     }
+    offline.current = false
     publish({ kind: 'loading' })
     const load = async (attempt: number) => {
       try {
@@ -38,7 +49,9 @@ export function useForecastRecord(query: string | null, identity: string, allowe
         publish({ kind: 'ready', data })
       } catch (error) {
         if (cancelled) return
-        if (error instanceof ApiError && error.status === 403) {
+        if (isConnectionError(error)) {
+          offline.current = true
+        } else if (error instanceof ApiError && error.status === 403) {
           publish({ kind: 'unavailable', code: error.code })
         } else if (error instanceof ApiError && error.status === 503 && error.code === 'forecast_busy' && attempt < 3) {
           const base = 250 * 2 ** attempt

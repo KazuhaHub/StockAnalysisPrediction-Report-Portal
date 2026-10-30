@@ -679,6 +679,7 @@
   "common.loadFailed": "Could not load this page's settings.",
   "common.loadFailedContent": "Could not load this content.",
   "common.loading": "Loading…",
+  "common.waitingForConnection": "Waiting for the connection…",
   "common.more": "More",
   "common.name": "Name",
   "common.ok": "OK",

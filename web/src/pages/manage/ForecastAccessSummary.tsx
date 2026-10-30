@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Table, Tag, Typography } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { ForecastAccessOverview, ForecastOUAccess, ForecastScope, UserGroupRow } from '../../api/types'
 
 // Who may read the forecast record, per OU, as the SERVER resolved it (GET /api/admin/forecast/access).
@@ -21,6 +22,7 @@ const TONE: Record<ForecastScope, string> = { all: 'green', own: 'blue', none: '
 
 export default function ForecastAccessSummary() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const [state, setState] = useState<State>({ kind: 'loading' })
   const [revision, setRevision] = useState(0)
 
@@ -35,14 +37,16 @@ export default function ForecastAccessSummary() {
         if (!cancelled) setState({ kind: 'ready', overview, names: new Map((list.groups ?? []).map((g) => [g.id, g.name])) })
       })
       .catch((e) => {
-        if (!cancelled) setState({ kind: 'error', message: errText(e, t) })
+        // A lost connection leaves the card loading; it asks again when the connection returns.
+        const text = failure(e)
+        if (!cancelled && text !== null) setState({ kind: 'error', message: text })
       })
     return () => {
       cancelled = true
     }
     // `t` is stable in the app; under a test double it is not, and depending on it would refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revision])
+  }, [revision, retryKey])
 
   const rows = useMemo(() => (state.kind === 'ready' ? state.overview.groups : []), [state])
   const nameOf = (id: number) => (state.kind === 'ready' ? state.names.get(id) : undefined) ?? `#${id}`

@@ -19,6 +19,8 @@ import {
 import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
@@ -132,6 +134,7 @@ function KindColorPicker({ color, onChange }: { color: string; onChange: (color:
 
 export default function TypesPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [groups, setGroups] = useState<TypeGroup[]>([])
   const [kinds, setKinds] = useState<string[]>([])
@@ -167,8 +170,8 @@ export default function TypesPage() {
       // Not optional here: save() posts every row this page holds, so a swallowed failure would
       // leave an empty `groups` under a live Save button — one click from writing "no types at
       // all" over the real configuration.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   const saveColor = async (kind: string, color: string) => {
@@ -178,7 +181,7 @@ export default function TypesPage() {
 
   useEffect(() => {
     load()
-  }, [])
+  }, [retryKey])
 
   const update = (name: string, patch: Partial<TypeRow>) =>
     setGroups((gs) => gs.map((g) => ({ ...g, rows: g.rows.map((r) => (r.name === name ? { ...r, ...patch } : r)) })))

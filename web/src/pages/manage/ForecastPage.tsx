@@ -4,7 +4,9 @@ import { SettingOutlined } from '@ant-design/icons'
 import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { ForecastSettings } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import { readPrefetched } from '../../lib/prefetch'
@@ -34,6 +36,7 @@ export default function ForecastPage() {
 
 function GlobalForecastOperations() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const [params] = useSearchParams()
 
   const [settings, setSettings] = useState<ForecastSettings | null>(null)
@@ -56,8 +59,8 @@ function GlobalForecastOperations() {
         setSettings(st)
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
 
   // Empty deps on purpose: the request goes out once, and a reload behind a save calls load()
@@ -72,7 +75,7 @@ function GlobalForecastOperations() {
     }
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const row = (label: string, value: React.ReactNode) => <Descriptions.Item label={label}>{value}</Descriptions.Item>
 

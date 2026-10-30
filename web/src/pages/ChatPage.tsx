@@ -11,6 +11,7 @@ import LoadGate from '../components/LoadGate'
 import { difyModeTag } from '../lib/batchUi'
 import type { ChatConversation, ChatTarget, ChatTurn } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useLoadFailure } from '../lib/useOnReconnect'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -98,6 +99,7 @@ const sortConvs = (cs: ChatConversation[]) => [...cs].sort((a, b) => Number(b.st
 // rename, star (pin to top), or delete it.
 export default function ChatPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
   const { name, admin, user } = useAuth()
@@ -185,13 +187,13 @@ export default function ChatPage() {
       })
       // Swallowing this used to leave "no chat or agent apps yet" on screen for good — a failed
       // request wearing the face of a configuration answer.
-      .catch((e) => setTargetsErr(errText(e, t)))
+      .catch(catchLoad(setTargetsErr))
   }
   useEffect(() => {
     loadTargets()
     // Read ?target once on mount (the intended "open pre-selected" UX); later manual switching wins.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   useEffect(() => {
     api
@@ -243,9 +245,15 @@ export default function ChatPage() {
       // on screen to lose. A background refresh that fails after a sent message must leave the
       // rail exactly as it is; the rows in it are still the last thing the server said.
       .catch((e) => {
-        if (!quiet) setConvsErr(errText(e, t))
+        const text = failure(e)
+        if (!quiet && text !== null) setConvsErr(text)
       })
   }
+  // The rail that could not load because the connection was down loads when it returns.
+  useEffect(() => {
+    if (retryKey > 0 && !convsLoaded) loadConvs(targetId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryKey])
   useEffect(() => {
     setConvId(undefined)
     setMsgs([])

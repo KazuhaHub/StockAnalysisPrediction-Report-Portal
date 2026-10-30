@@ -14,6 +14,7 @@ import { formatTaskTime, runOutcome } from '../lib/taskUi'
 import { isActiveTask, taskKey } from '../lib/useMyTasks'
 import { useAuth } from '../auth'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import { loadFailure } from '../lib/loadFailure'
 import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
 
@@ -96,7 +97,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     } catch (e) {
       // Read only while !loaded: a poll that fails once the list is on screen changes nothing,
       // since those runs are still the last thing the server said about the queue.
-      setLoadErr(errText(e, t))
+      const text = loadFailure(e, t)
+      if (text !== null) setLoadErr(text)
     }
     await summaryRequest
   }
