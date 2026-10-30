@@ -452,6 +452,33 @@ describe('AppLayout mobile chat focus mode', () => {
     expect(screen.getByText('nav.home')).toBeTruthy()
   })
 
+// A phone could not fit the logo, the header version pill and the controls on one row: the controls
+// wrapped to a second line under the logo. On a phone the version moves into the account menu.
+describe('AppLayout header version on a phone', () => {
+  afterEach(() => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' }
+  })
+
+  it('keeps the version pill out of the compact header and offers it in the account menu', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'header' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    const header = container.querySelector('#rp-app-header') as HTMLElement
+    expect(header.querySelector('.rp-version-label')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Alice' }))
+    expect(document.querySelector('.ant-popover .rp-version-label')).not.toBeNull()
+  })
+
+  it('keeps the version pill in the header at desktop width', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'header' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(container.querySelector('#rp-app-header .rp-version-label')).not.toBeNull()
+  })
+})
+
 describe('AppLayout header centring', () => {
   beforeEach(() => {
     siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' }
@@ -663,5 +690,12 @@ it.each([['/manage', true], ['/manage/overview', true], ['/manage', false], ['/m
   expect(await screen.findByText('manage-body')).toBeTruthy()
   expect(container.querySelector('#rp-app-header .rp-header-search')).toBeNull()
   expect(screen.queryByLabelText('global-search')).toBeNull()
-  expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
+  if (desktop) {
+    expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
+  } else {
+    // A phone keeps the header to one row; the version is in the account menu instead.
+    expect(container.querySelector('#rp-app-header .rp-version-label')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Alice' }))
+    expect((await screen.findByText('version.label:2026.38.1')).closest('.ant-popover')).not.toBeNull()
+  }
 })

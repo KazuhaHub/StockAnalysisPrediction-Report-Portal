@@ -299,7 +299,9 @@ function AppShell() {
           <SiteLogo size={22} color={token.colorPrimary} />
           {!compact ? title : chatFocus ? t('nav.chat') : null}
         </Link>
-        {showHeaderVersion && !chatFocus && (
+        {/* On a phone the logo, this pill and the controls did not fit one row and the controls
+            wrapped under the logo; there the version lives in the account menu instead. */}
+        {showHeaderVersion && !compact && (
           <VersionLabel
             size={11}
             style={{
@@ -625,6 +627,11 @@ function AppShell() {
                   getPopupContainer={(trigger) => trigger.parentElement as HTMLElement}
                   options={langs.map((l) => ({ value: l.code, label: l.label }))}
                 />
+                {showHeaderVersion && compact && (
+                  <div style={{ marginTop: 10 }}>
+                    <VersionLabel size={12} />
+                  </div>
+                )}
                 <Divider style={{ margin: '10px 0 8px' }} />
                 <Button
                   type="text"
