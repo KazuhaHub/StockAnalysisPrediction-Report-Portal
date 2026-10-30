@@ -1,37 +1,51 @@
-import { afterEach } from 'vitest'
+import { afterAll, afterEach, expect } from 'vitest'
 import { resetNotifications } from '../lib/notify'
 import { cleanup, configure } from '@testing-library/react'
+import { auditEnabled, drainPendingTimers, installTimerTracking } from './pendingTimers'
 
-// Unmount rendered React trees after each test so queries don't see stale DOM.
-afterEach(cleanup)
+// Clear timers and animation frames still pending when a test FILE ends. antd/rc-* schedule delayed
+// state updates (tooltip delay, debounced form values, motion end, click wave) and several have no
+// unmount cleanup, so one can fire after the file's jsdom environment is gone. React then reaches
+// for `window` and vitest reports `ReferenceError: window is not defined` as an unhandled error
+// although every test passed, roaming between files on whichever loses a CPU race.
+//
+// Draining once per file, not per test, leaves timers a later test in the same file may legitimately
+// depend on untouched. By then the last test's tree is unmounted, so nothing is left to observe the
+// cleared callbacks. See pendingTimers.ts for the RP_TIMER_AUDIT=1 harness that lists the offenders.
+installTimerTracking()
+
+// afterAll hooks run in reverse registration order: the opt-in probe is registered first so it runs
+// LAST, after the drain. The probe makes the leak deterministic: it removes `window` for 300ms, as
+// environment teardown does, so any timer still pending reports the unhandled error.
+//   RP_TEARDOWN_PROBE=1 RP_NO_TIMER_DRAIN=1 npx vitest run   # unhandled errors in each leaking file
+//   RP_TEARDOWN_PROBE=1 npx vitest run                       # must report none
+afterAll(async () => {
+  if (process.env.RP_TEARDOWN_PROBE !== '1') return
+  const g = globalThis as { window?: unknown }
+  const w = g.window
+  delete g.window
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  g.window = w
+})
+afterAll(async () => {
+  if (process.env.RP_NO_TIMER_DRAIN === '1') return
+  const leaked = drainPendingTimers()
+  if (auditEnabled() && leaked.length > 0) {
+    process.stderr.write(`TIMER-LEAK ${expect.getState().testPath ?? ''} :: ${leaked.length} :: ${[...new Set(leaked)].join(' || ')}\n`)
+  }
+  // React's scheduler runs on setImmediate; let work queued by the final unmount flush while
+  // `window` still exists, then clear whatever that work scheduled in turn.
+  await new Promise((resolve) => setImmediate(resolve))
+  drainPendingTimers()
+})
 // The notification store is module-global; a pop-up must not leak into the next test.
 afterEach(resetNotifications)
-
-// Drain antd's pending debounce timers after unmount.
-//
-// antd's Form debounces its field values through @rc-component/util's useDelayState, which stores a
-// pending callback in a ref and cancels it only when a newer value arrives — it has no unmount
-// cleanup, and neither does the useDebounce effect that drives it (antd/lib/form/hooks/useDebounce).
-// So a form that unmounts within the debounce window leaves a live 10ms setTimeout behind.
-//
-// On an idle workstation it fires long before the test file finishes and nothing is wrong. On a
-// loaded runner the file's last test can end first, and the callback then runs while the jsdom
-// environment is being torn down. React reaches for `window` to resolve the update's priority and
-// throws `ReferenceError: window is not defined` — OUTSIDE any test, so vitest reports it as an
-// unhandled error and fails the run even though every test passed:
-//
-//     Uncaught Exception: ReferenceError: window is not defined
-//       resolveUpdatePriority  react-dom-client.development.js
-//       dispatchSetState       react-dom-client.development.js
-//       Timeout._onTimeout     @rc-component/util/lib/hooks/useDelayState.js:39
-//
-// It hit unrelated pull requests (a Go-only dependency bump included) because the test file that
-// loses the CPU race is the one that reports it.
-//
-// Firing those timers here, with the environment still up, is not papering over a product bug:
-// production never unmounts a form mid-debounce into a missing global, so the pending callback is
-// harmless there. This runs a real macrotask (jsdom' setTimeout, not a fake clock), which is enough
-// for any timer already due to fire while window is still defined.
+// Unmount rendered React trees after each test so queries don't see stale DOM.
+afterEach(cleanup)
+// Registered last, so it runs FIRST: give the test's own in-flight async work (resolved fetches,
+// debounced field values) a real 20ms to land while the tree is still mounted, before teardown.
+// Without it a late resolution surfaces after the notification store reset and leaks a pop-up into
+// the next test.
 afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 20))
 })
