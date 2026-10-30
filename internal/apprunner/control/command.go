@@ -61,11 +61,11 @@ var shaPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var fieldPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 func frame(purpose string, raw []byte) []byte {
-	prefix := []byte(purpose + "\x00")
-	result := make([]byte, len(prefix)+8+len(raw))
-	copy(result, prefix)
-	binary.BigEndian.PutUint64(result[len(prefix):], uint64(len(raw)))
-	copy(result[len(prefix)+8:], raw)
+	result := append([]byte(purpose), 0)
+	size := make([]byte, 8)
+	binary.BigEndian.PutUint64(size, uint64(len(raw)))
+	result = append(result, size...)
+	result = append(result, raw...)
 	return result
 }
 func counter(value string, positive bool) (int64, bool) {

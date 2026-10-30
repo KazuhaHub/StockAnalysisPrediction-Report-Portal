@@ -43,11 +43,10 @@ func (s *Server) handleEnrollment(ctx context.Context, conn *net.UnixConn) {
 	if err != nil {
 		return
 	}
-	reply := make([]byte, 44, 44+len(raw))
-	copy(reply, enrollmentReplyMagic)
-	copy(reply[8:40], nonce[:])
-	binary.BigEndian.PutUint32(reply[40:44], uint32(len(raw)))
-	reply = append(reply, raw...)
+	reply, err := buildReplyFrame(enrollmentReplyMagic, nonce[:], raw)
+	if err != nil {
+		return
+	}
 	io.Copy(conn, bytes.NewReader(reply))
 }
 

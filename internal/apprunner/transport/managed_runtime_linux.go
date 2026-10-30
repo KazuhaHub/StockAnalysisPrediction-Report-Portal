@@ -66,11 +66,10 @@ func (s *Server) handleManagedRuntime(ctx context.Context, conn *net.UnixConn) {
 	if _, _, err := decodeManagedRuntime(raw); err != nil {
 		return
 	}
-	reply := make([]byte, 44, 44+len(raw))
-	copy(reply, managedRuntimeReplyMagic)
-	copy(reply[8:40], nonce[:])
-	binary.BigEndian.PutUint32(reply[40:], uint32(len(raw)))
-	reply = append(reply, raw...)
+	reply, err := buildReplyFrame(managedRuntimeReplyMagic, nonce[:], raw)
+	if err != nil {
+		return
+	}
 	io.Copy(conn, bytes.NewReader(reply))
 }
 

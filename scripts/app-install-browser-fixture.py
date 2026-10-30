@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import time
 from urllib.parse import urlsplit
+from fixture_http import fixture_cookie
 
 PORTAL = Path(__file__).resolve().parents[1]
 WEB = PORTAL / "web"
@@ -95,7 +96,9 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                     return
                 path = urlsplit(self.path).path
                 if path in ("/", "/manage/apps", "/apps"):
-                    data = b'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"><div id="host"></div><script src="/host.js"></script>'
+                    cookie = fixture_cookie(state["cookieName"], state["cookie"])
+                    cookie_script = f"<script>document.cookie={json.dumps(cookie)}</script>"
+                    data = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"><div id="host"></div>' + cookie_script + '<script src="/host.js"></script>').encode()
                     mime = "text/html; charset=utf-8"
                 elif path in ("/host.js", "/style.css"):
                     data = (target / "built" / path[1:]).read_bytes()
@@ -106,8 +109,6 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                 self.send_response(200)
                 self.send_header("Content-Type", mime)
                 self.send_header("Cache-Control", "no-store")
-                if mime.startswith("text/html"):
-                    self.send_header("Set-Cookie", state["cookieName"] + "=" + state["cookie"] + "; Path=/; HttpOnly; SameSite=Lax")
                 self.end_headers()
                 self.wfile.write(data)
 

@@ -81,11 +81,10 @@ func (s *Server) handleDataResponse(ctx context.Context, conn *net.UnixConn, exe
 	digest := sha256.New()
 	digest.Write(header)
 	digest.Write(body)
-	reply := make([]byte, 44, 44+len(encoded))
-	copy(reply, replyMagic)
-	copy(reply[8:40], digest.Sum(nil))
-	binary.BigEndian.PutUint32(reply[40:44], uint32(len(encoded)))
-	reply = append(reply, encoded...)
+	reply, err := buildReplyFrame(replyMagic, digest.Sum(nil), encoded)
+	if err != nil {
+		return
+	}
 	io.Copy(conn, bytes.NewReader(reply))
 }
 

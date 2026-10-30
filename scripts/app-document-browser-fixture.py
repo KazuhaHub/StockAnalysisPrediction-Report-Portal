@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from fixture_http import fixture_cookie
 
 PORTAL = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -63,11 +64,15 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
             status, mime, body = 200, "text/html; charset=utf-8", b""
             shell = self.path == "/" or (args.launch_page and urlsplit(self.path).path.startswith("/apps"))
             if shell:
-                body = b'<!doctype html><meta charset="utf-8"><title>Portal SDK document fixture</title><link rel="stylesheet" href="/host.css"><div id="host"></div><script src="/host.js"></script>'
+                body = b'<!doctype html><meta charset="utf-8"><title>Portal SDK document fixture</title><link rel="stylesheet" href="/host.css"><div id="host"></div><script src="/fixture-cookie.js"></script><script src="/host.js"></script>'
             elif self.path in ("/host.js", "/host.css"):
                 name = "host.js" if self.path.endswith(".js") else "style.css"
                 mime = "text/javascript" if name.endswith(".js") else "text/css"
                 body = (target / "host" / name).read_bytes()
+            elif self.path == "/fixture-cookie.js":
+                cookie = fixture_cookie(portal_state["cookieName"], portal_state["cookie"]) if args.portal_http else "app_document_probe=fixture; Path=/; SameSite=Lax"
+                mime = "text/javascript"
+                body = f"document.cookie={json.dumps(cookie)}".encode()
             elif self.path == "/app-assets/v2-probe.html":
                 if "app_document_probe=fixture" not in self.headers.get("Cookie", ""):
                     status, body = 401, b"Unauthorized"
@@ -81,8 +86,6 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
             if shell:
-                cookie = (portal_state["cookieName"] + "=" + portal_state["cookie"]) if args.portal_http else "app_document_probe=fixture"
-                self.send_header("Set-Cookie", cookie + "; Path=/; HttpOnly; SameSite=Lax")
                 self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
             if self.path == "/app-assets/v2-probe.html":
                 self.send_header("Content-Security-Policy", (target / "document.html.csp").read_text())

@@ -88,10 +88,20 @@ func (c *platformMarketClient) fetch(ctx context.Context, rawURL string, limit i
 	if limit <= 0 || limit > appplatform.MaxFrontendArchiveBytes || c.checkURL(rawURL) != nil {
 		return nil, errPlatformMarketFetch
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	target, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, errPlatformMarketFetch
 	}
+	// ValidateCatalogueURL has already fixed this to a canonical public HTTPS
+	// URL. Construct the request from those parsed components rather than
+	// reparsing an arbitrary transport string.
+	target = &url.URL{Scheme: "https", Host: target.Host, Path: target.Path}
+	req := (&http.Request{
+		Method: http.MethodGet,
+		URL:    target,
+		Header: make(http.Header),
+		Host:   target.Host,
+	}).WithContext(ctx)
 	req.Header.Set("Accept-Encoding", "identity")
 	response, err := c.safe.http.Do(req)
 	if err != nil {
