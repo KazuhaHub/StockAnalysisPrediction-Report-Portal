@@ -52,7 +52,7 @@ export default function ReaderExportPolicy() {
   return (
     <Card title={t('export.reader.policyTitle')} extra={<Typography.Text type="secondary">{t('export.reader.policyHint')}</Typography.Text>}>
       <LoadGate loading={loading} error={error} onRetry={load}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>
+        <div className="rp-reader-export-policy">
           <OrgUnitPicker
             collapsible={false}
             mode="manage"

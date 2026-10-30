@@ -165,6 +165,7 @@ export default function ForecastLedgerStart({
               columns={candidateColumns}
               dataSource={value.candidates}
               locale={{ emptyText: t('forecast.population.no_candidates') }}
+              scroll={{ x: 'max-content' }}
             />
 
             {err && <Alert type="error" showIcon title={err} />}

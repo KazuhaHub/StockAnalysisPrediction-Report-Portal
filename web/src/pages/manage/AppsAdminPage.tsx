@@ -86,6 +86,7 @@ export default function AppsAdminPage() {
             columns={columns}
             pagination={false}
             locale={{ emptyText: t('apps.empty') }}
+            scroll={{ x: 'max-content' }}
             onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
           />
         </Card>

@@ -1,7 +1,7 @@
 import { App, ConfigProvider } from 'antd'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminDraftBoundary from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
 
@@ -81,5 +81,24 @@ describe('Feature-owned organizational policy', () => {
     mount('/manage/security?scope=ou&ou=999')
     await screen.findByText('ou.scopeMissing')
     expect(screen.queryByRole('button', { name: 'common.save' })).toBeNull()
+  })
+})
+
+describe('Phone scope rail', () => {
+  const realMatchMedia = window.matchMedia
+  beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query: string) => ({
+      matches: query.includes('767'), media: query, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {},
+    }) })
+  })
+  afterEach(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: realMatchMedia }) })
+  it('starts compact, expands inline on demand and folds back after choosing a unit', async () => {
+    const router = mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    expect(screen.queryByRole('tree')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'ou.expand' }))
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(router.state.location.search).toContain('ou=7'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
   })
 })

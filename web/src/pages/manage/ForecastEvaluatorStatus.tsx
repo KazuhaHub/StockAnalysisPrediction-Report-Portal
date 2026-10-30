@@ -217,6 +217,7 @@ export default function ForecastEvaluatorStatus({
               pagination={false}
               dataSource={hb.dry_sample}
               columns={sampleColumns}
+              scroll={{ x: 'max-content' }}
             />
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('forecast.eval.sample.empty')} />

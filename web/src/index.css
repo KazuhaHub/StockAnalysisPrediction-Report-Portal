@@ -210,7 +210,8 @@ body {
     max-width: none;
   }
   .rp-ou-picker--manage .rp-ou-picker__tree {
-    max-height: 300px !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
   .rp-ou-profile-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -560,8 +561,17 @@ body {
   margin-inline-start: auto;
 }
 @media (max-width: 767px) {
-  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
-  .rp-policy-scope { max-height: 180px; border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  /* One scroll region: the page body. The workspace grows with its content and neither pane clips. */
+  .rp-admin-page-body:has(> .rp-policy-workspace) { overflow: auto; }
+  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 16px; height: auto; }
+  .rp-policy-scope, .rp-policy-content { overflow: visible; max-height: none; }
+  .rp-policy-scope { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  .rp-policy-content { padding-inline-end: 0; }
+  .rp-policy-scope-header > .ant-btn:last-child { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+  .rp-admin-page-body .ant-space-item { min-width: 0; }
+  .rp-admin-page-body .ant-table-content { overflow-x: auto; }
+  .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
+  .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }
   .rp-policy-scope > .ant-btn { margin-bottom: 8px; }
 }
@@ -2573,6 +2583,8 @@ body {
 .rp-dashboard-data-scroll thead { position: sticky; top: 0; background: var(--ant-color-bg-elevated); z-index: 1; }
 .rp-dashboard-data-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 
+.rp-reader-export-policy { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.rp-batch-targets-table { max-width: 100%; min-width: 0; }
 .rp-batch-targets-table td { overflow-wrap: anywhere; }
 .rp-batch-targets-table .ant-space { max-width: 100%; }
 .rp-statistics-page { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -2647,6 +2659,8 @@ body {
 .rp-app-access__setting { padding: 24px 28px; min-width: 0; }
 @media (max-width: 760px) {
   .rp-app-detail, .rp-app-access { grid-template-columns: minmax(0, 1fr); }
+  .rp-app-access { min-height: 0; }
+  .rp-app-access__tree .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-app-access__tree { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
   .rp-app-access__setting { padding: 16px; }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Typography } from 'antd'
-import { GlobalOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { DownOutlined, GlobalOutlined, LeftOutlined, RightOutlined, UpOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
@@ -11,6 +11,23 @@ import LoadGate from '../../components/LoadGate'
 import OrgUnitPicker from './OrgUnitPicker'
 import OrgUnitDetail, { type OUPolicySection } from './OrgUnitDetail'
 
+const PHONE_QUERY = '(max-width: 767px)'
+
+/** True on phone-width viewports, where the rail stacks above the editor instead of sitting beside it. */
+function usePhone(): boolean {
+  const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(PHONE_QUERY) : null
+  const [phone, setPhone] = useState(() => query()?.matches ?? false)
+  useEffect(() => {
+    const mq = query()
+    if (!mq) return
+    const onChange = () => setPhone(mq.matches)
+    onChange()
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
+  return phone
+}
+
 export type FeaturePolicySection = Exclude<OUPolicySection, 'directory'>
 
 /** The persistent scope rail sits between primary navigation and the feature's editor. */
@@ -18,7 +35,12 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   const { t } = useTranslation()
   const { catchLoad, retryKey } = useLoadFailure()
   const [params, setParams] = useSearchParams()
-  const [collapsed, setCollapsed] = useState(false)
+  const phone = usePhone()
+  // Desktop collapses the rail to an icon column; a phone folds the tree away instead and keeps it
+  // closed until asked, so the stacked tree never pushes the editor off the first screen.
+  const [deskCollapsed, setDeskCollapsed] = useState(false)
+  const [treeOpen, setTreeOpen] = useState(false)
+  const collapsed = phone ? !treeOpen : deskCollapsed
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -38,12 +60,15 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
     next.set('scope', id === undefined ? 'global' : 'ou')
     if (id !== undefined) next.set('ou', String(id))
     if (next.toString() !== params.toString()) setParams(next)
+    setTreeOpen(false)
   }
-  return <div className={`rp-policy-workspace ${collapsed ? 'rp-policy-workspace--collapsed' : ''}`} key={params.toString()}>
+  return <div className={`rp-policy-workspace ${!phone && collapsed ? 'rp-policy-workspace--collapsed' : ''}`} key={params.toString()}>
     <aside className="rp-policy-scope" aria-label={t('ou.unitScope')}>
-      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={!collapsed} type={scoped ? 'text' : 'primary'}
-        aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{!collapsed && t('ou.globalScope')}</Button>
-      <Button icon={collapsed ? <RightOutlined /> : <LeftOutlined />} aria-label={t(collapsed ? 'ou.expand' : 'ou.collapse')} title={t(collapsed ? 'ou.expand' : 'ou.collapse')} onClick={() => setCollapsed(value => !value)} /></div>
+      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={phone || !collapsed} type={scoped ? 'text' : 'primary'}
+        aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{(phone || !collapsed) && t('ou.globalScope')}</Button>
+      {phone
+        ? <Button icon={treeOpen ? <UpOutlined /> : <DownOutlined />} aria-label={t(treeOpen ? 'ou.collapse' : 'ou.expand')} title={t(treeOpen ? 'ou.collapse' : 'ou.expand')} onClick={() => setTreeOpen(value => !value)}>{scoped && selected ? selected.name : null}</Button>
+        : <Button icon={collapsed ? <RightOutlined /> : <LeftOutlined />} aria-label={t(collapsed ? 'ou.expand' : 'ou.collapse')} title={t(collapsed ? 'ou.expand' : 'ou.collapse')} onClick={() => setDeskCollapsed(value => !value)} />}</div>
       {!collapsed && <>
       <LoadGate loading={loading} error={error} onRetry={load}>
         <OrgUnitPicker collapsible={false} mode="manage" groups={groups} unassigned={0} scoped onScopedChange={() => {}}
