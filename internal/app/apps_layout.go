@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 )
 
 // App ordering and per-OU app access (ADR 0048).
@@ -84,7 +85,7 @@ func (s *Store) ReplaceAppOrder(keys []string) error {
 	e := migExec{s: s, ex: tx}
 	// Validated here, inside the write, so an uninstall that lands after the handler's check cannot
 	// leave a position row behind for an app that is gone.
-	for _, k := range keys {
+	for _, k := range appLockOrder(keys) {
 		if err := s.requireApp(e, k); err != nil {
 			return err
 		}
@@ -236,19 +237,127 @@ func (s *Store) appAccessFor(user string) (appAccessView, error) {
 
 // ---------- reader-facing ----------
 
-// appOpenQuiet is the access check for a caller that has no response to write: it fails closed.
-func (s *Store) appOpenQuiet(user, key string) bool {
-	view, err := s.appAccessFor(user)
-	return err == nil && view.open(key)
+// appAccessSnapshotLoads counts OU snapshot loads made by the single-app check, so a test can show
+// that an app with no access rows costs none.
+var appAccessSnapshotLoads atomic.Int64
+
+// appOpenForKey answers "may user open this one app" as cheaply as the answer allows. A user who no
+// longer exists or is deactivated is definitely closed (false, nil). An administrator is exempt, known
+// from the user row alone. An app with no access rows at all is open for everyone, which one indexed
+// lookup on the primary key's prefix settles. Only an app with rows pays for the OU snapshot. A store
+// failure is the one error return.
+func (s *Store) appOpenForKey(user, key string) (bool, error) {
+	var role string
+	var active int
+	switch err := s.queryRow(`SELECT COALESCE(role,'user'),COALESCE(active,1) FROM users WHERE username=?`, user).Scan(&role, &active); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	if active == 0 {
+		return false, nil
+	}
+	if can(role, PermManage) {
+		return true, nil
+	}
+	var one int
+	switch err := s.queryRow(`SELECT 1 FROM app_ou_access WHERE app_key=? LIMIT 1`, key).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	appAccessSnapshotLoads.Add(1)
+	sub, snap, err := s.loadOUPolicySubject(user)
+	if err != nil {
+		return false, err
+	}
+	chain, err := snap.graph.policyChain(sub.EffectiveOU)
+	if err != nil {
+		return false, err
+	}
+	rows, err := s.appAccessRowsFor(key)
+	if err != nil {
+		return false, err
+	}
+	return resolveAppAccess(chain, rows).Effective, nil
 }
 
-// appClosedFor is true only on a definite answer: the app is closed for the user. The bridge credential
-// check uses it so an unreadable policy leaves that check as it was (the handler behind it needs the
-// same store and fails on its own), where the extension proxy, which forwards to a backend, uses
-// appOpenQuiet and fails closed.
+// appAccessRowsFor reads one app's rows as OU -> enabled.
+func (s *Store) appAccessRowsFor(key string) (map[int64]bool, error) {
+	rows, err := s.query(`SELECT group_id,enabled FROM app_ou_access WHERE app_key=?`, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var ou int64
+		var en int
+		if err := rows.Scan(&ou, &en); err != nil {
+			return nil, err
+		}
+		out[ou] = en != 0
+	}
+	return out, rows.Err()
+}
+
+// appOpenQuiet is the access check for a caller that has no response to write: it fails closed.
+func (s *Store) appOpenQuiet(user, key string) bool {
+	open, err := s.appOpenForKey(user, key)
+	return err == nil && open
+}
+
+// appClosedFor is true only on a definite answer: the app is closed for the user, or the user is
+// gone. The bridge credential check uses it so an unreadable policy leaves that check as it was (the
+// handler behind it needs the same store and fails on its own), where the extension proxy, which
+// forwards to a backend, uses appOpenQuiet and fails closed.
 func (s *Store) appClosedFor(user, key string) bool {
-	view, err := s.appAccessFor(user)
-	return err == nil && !view.open(key)
+	open, err := s.appOpenForKey(user, key)
+	return err == nil && !open
+}
+
+// txAppRows reads one app's rows inside the caller's transaction.
+func txAppRows(e migExec, key string) (map[int64]bool, error) {
+	rows, err := e.query(`SELECT group_id,enabled FROM app_ou_access WHERE app_key=?`, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var ou int64
+		var en int
+		if err := rows.Scan(&ou, &en); err != nil {
+			return nil, err
+		}
+		out[ou] = en != 0
+	}
+	return out, rows.Err()
+}
+
+// appLockOrder is the order in which a write locks several apps' rows: sorted and de-duplicated, so
+// two concurrent writes that name the same apps in different orders cannot deadlock on Postgres.
+func appLockOrder(keys []string) []string {
+	out := slices.Clone(keys)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// appClosesSomewhere reports whether a change to one app's rows turns the app from open to closed for
+// at least one OU, which is the only kind of change that can invalidate a token already minted.
+func appClosesSomewhere(snap ouPolicySnapshot, before, after map[int64]bool) bool {
+	for id := range snap.graph.nodes {
+		chain, err := snap.graph.policyChain(id)
+		if err != nil {
+			continue
+		}
+		if resolveAppAccess(chain, before).Effective && !resolveAppAccess(chain, after).Effective {
+			return true
+		}
+	}
+	return false
 }
 
 // closeApp answers a closed app. 403 with a stable code: the SPA tells "this app is switched off for
@@ -261,12 +370,12 @@ func closeApp(w http.ResponseWriter) {
 // the request and returns done=true: access is a gate, so an unreadable policy refuses rather than
 // admits.
 func (s *Server) appOpenFor(w http.ResponseWriter, user, key string) (open, done bool) {
-	view, err := s.st.appAccessFor(user)
+	open, err := s.st.appOpenForKey(user, key)
 	if err != nil {
 		jsonError(w, http.StatusServiceUnavailable, "app access unavailable")
 		return false, true
 	}
-	if !view.open(key) {
+	if !open {
 		closeApp(w)
 		return false, true
 	}
@@ -433,9 +542,9 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 	var from *bool
-	notFound := false
+	notFound, closes := false, false
 	err := s.st.withOUMutation(func(e migExec) error {
-		from, notFound = nil, false
+		from, notFound, closes = nil, false, false
 		snap, err := s.st.loadOUPolicySnapshotFrom(e.ex)
 		if err != nil {
 			return err
@@ -452,7 +561,19 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		return s.st.setAppAccess(e, key, ou, enabled)
+		before, err := txAppRows(e, key)
+		if err != nil {
+			return err
+		}
+		if err := s.st.setAppAccess(e, key, ou, enabled); err != nil {
+			return err
+		}
+		after, err := txAppRows(e, key)
+		if err != nil {
+			return err
+		}
+		closes = appClosesSomewhere(snap, before, after)
+		return nil
 	})
 	switch {
 	case errors.Is(err, errUnknownApp):
@@ -465,8 +586,12 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		jsonError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	// Whatever was minted before this change was minted under the old answer.
-	s.appTok.revokeApp(key)
+	// Tokens minted under the old answer are revoked only when this change closes the app somewhere it
+	// was open. An opening or a no-op leaves them alone: revoking would force every open frame to
+	// re-mint for nothing, and an extension frame to fail.
+	if closes {
+		s.appTok.revokeApp(key)
+	}
 	if (from == nil) != (enabled == nil) || (from != nil && *from != *enabled) {
 		s.recordChange(r, user, AuditAppAccess, "app", key, map[string]any{"field": "access", "ou": ou, "from": from, "to": enabled})
 	}

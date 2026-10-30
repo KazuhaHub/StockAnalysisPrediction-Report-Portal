@@ -86,7 +86,9 @@ func TestAnUnchangedOrderIsNotAudited(t *testing.T) {
 			t.Fatal(w.Body.String())
 		}
 	}
-	count := func() int { return scalar[int](t, e.s.st, `SELECT COUNT(*) FROM audit_log WHERE action=?`, AuditAppOrder) }
+	count := func() int {
+		return scalar[int](t, e.s.st, `SELECT COUNT(*) FROM audit_log WHERE action=?`, AuditAppOrder)
+	}
 	put(`{"keys":["beta","alpha"]}`)
 	if count() != 1 {
 		t.Fatalf("a real change wrote %d rows", count())

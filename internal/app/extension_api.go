@@ -300,7 +300,14 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry, ok := s.appTok.extensionEntry(token, time.Now())
-	if !ok || entry.appID != r.PathValue("id") || !entry.accountGenerationKnown {
+	if !ok {
+		// Unknown, expired or revoked (an app closed for the viewer revokes its tokens): the same 401
+		// the bridge answers, which is the signal for the host page to mint a new token. A token that
+		// is live but not allowed stays a 403.
+		v1err(w, http.StatusUnauthorized, "token_invalid", "the app token is missing, expired or revoked")
+		return
+	}
+	if entry.appID != r.PathValue("id") || !entry.accountGenerationKnown {
 		deny()
 		return
 	}
@@ -317,8 +324,12 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 	if in.Method != "GET" {
 		need = "extension.manage"
 	}
-	if !s.st.appOpenQuiet(entry.username, entry.appID) { // ADR 0048: re-checked on every request
-		deny()
+	if open, err := s.st.appOpenForKey(entry.username, entry.appID); err != nil || !open { // ADR 0048: re-checked on every request
+		if err == nil {
+			v1err(w, http.StatusForbidden, "app_closed", "app_closed")
+		} else {
+			deny()
+		}
 		return
 	}
 	app, installed := s.st.GetApp(entry.appID)

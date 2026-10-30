@@ -69,14 +69,24 @@ change.
 - `POST /api/apps/{id}/token` answers `403 {"error":"app_closed","code":"app_closed"}` for a closed
   app and mints nothing.
 - **Tokens already minted are cut off too** (a token lives 30 minutes). Two mechanisms, because
-  neither covers the other. (a) Any access change for an app revokes that app's outstanding tokens
-  (`revokeApp`), so an open frame's next call fails and its re-mint answers `app_closed`. (b) Every
-  request authenticated by an app token re-checks access for the token's recorded app and user: the
-  bridge credential check (`tokenOK`, behind every `/api/v1` read) and the backend-connection proxy
-  (`v1ExtensionRequest`). That is what cuts off a user moved into a closed OU, or an access row
-  changed without going through the API. The bridge check refuses only on a definite "closed"
-  answer, leaving an unreadable policy to the handler behind it, which needs the same store; the
-  proxy, which forwards to a backend, fails closed.
+  neither covers the other. (a) An access change that **closes** the app somewhere it was open
+  (resolved before and after, per OU) revokes that app's outstanding tokens (`revokeApp`); an opening
+  or a no-op revokes nothing, since that would force every open frame to re-mint for no reason. A
+  revoked token is answered 401 by the bridge and by the backend proxy (`token_invalid`), the signal
+  the host page already uses to mint a new one, and the mint then answers 403 `app_closed`. A token
+  that is live but not allowed stays a 403 (the proxy's `app_closed` for a definite close,
+  `extension_forbidden` otherwise). (b) Every request authenticated by an app token re-checks access
+  for the token's recorded app and user: the bridge credential check (`tokenOK`, behind every
+  `/api/v1` read) and the backend-connection proxy (`v1ExtensionRequest`). That is what cuts off a
+  user moved into a closed OU, a user who was deleted or deactivated, or a row changed without going
+  through the API. The bridge check refuses only on a definite "closed" (or "user gone") answer,
+  leaving a store failure to the handler behind it, which needs the same store; the proxy, which
+  forwards to a backend, fails closed.
+- The per-request check is cheap by construction: the user row decides the administrator exemption
+  and a missing or deactivated user; an app with no rows in `app_ou_access` is open for everyone and
+  is settled by one primary-key-prefix lookup; only an app that has rows loads the OU snapshot, and
+  then reads only that app's rows. Write transactions lock app rows in sorted key order, so two
+  concurrent reorders cannot deadlock on Postgres.
 - `GET /app-assets/{id}/{path}` answers the same 403 when the request carries a session whose OU has
   the app closed. The route is public by design (the bundle holds no secrets) and the sandboxed
   frame's own sub-resource requests carry no cookie, so a request with **no session cannot be
@@ -194,6 +204,13 @@ value and the source, with an open/closed switch. The hub, entry buttons and rou
     `FavoritesGrid.test.tsx`)
 20. An older dump with no sections for the two tables restores into empty tables.
     (`TestMigration0014OlderDumpRestoresWithEmptyTables`)
+
+21. Only a closing change revokes tokens; the proxy answers a revoked token 401 and a definitely
+    closed app 403. (`TestOnlyAClosingChangeRevokesTokens`, `TestReopeningNeverRevokes`,
+    `TestAMissingAppTokenIsA401AtTheProxyAndAClosedAppIsA403`)
+22. A deleted user's token is closed at the bridge; an app with no rows, and an administrator, cost no
+    OU snapshot; write locks are taken in sorted order. (`TestADeletedUsersTokenIsClosedAtTheBridge`,
+    `TestAnAppWithNoAccessRowsCostsNoSnapshot`, `TestAppLockOrderIsSortedAndDeduplicated`)
 
 ## Consequences
 
