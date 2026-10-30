@@ -1,9 +1,10 @@
 # Session-only HTTP gateway for reviewed application networking
 
-Status: development gateway and refusal tests implemented. Focused local race
-and vet pass; Linux compilation passes. New-revision PostgreSQL and native HTTP
-execution remain required. The typed shared SDK and browser path are not yet
-implemented or advertised by launch metadata.
+Status: revision `8a11f1d40c883e1b134fbf5ab9706c6321342a35` passes full
+general workflow 40991159862 and native quota/HTTP/browser workflow 40991159933.
+Actual PostgreSQL and the new native session-HTTP assertions execute in CI.
+The typed shared SDK, launch availability and browser network path remain
+incomplete; see the separate WIP and remaining-work handoff in document 144.
 
 ## 1. Request and response
 
@@ -113,8 +114,8 @@ The root parent and Python report require:
 - `PORTAL_NETWORK_SESSION_HTTP`
 - `PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN`
 
-Those assertions still require exact new-revision CI execution. Earlier private
-coordinator success does not prove these new HTTP assertions. The direct and
+The exact revision recorded at the top now passes these native assertions.
+Earlier private coordinator success alone would not prove them. The direct and
 HTTP cases together expect exactly four HTTPS requests, with the before-IO cases
 adding none.
 

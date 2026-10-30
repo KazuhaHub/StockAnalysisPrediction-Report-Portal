@@ -1,9 +1,11 @@
 # Current-viewer network request authority
 
-Status: private foreground coordinator implemented for development. Focused local
-race tests, vet and Linux cross-compilation pass. Exact new PostgreSQL and native
-signing assertions require CI. This slice does not expose a public HTTP/SDK route
-or prove a complete Portal-mediated HTTPS exchange.
+Status: private foreground coordinator verified at corrected revision
+`b6c3cbd7015ddefa62df6e71e5a88303546fa60c`: general 40989047942/job
+123846758444 and native quota/browser 40989047714/job 123846757999 pass.
+General includes actual PostgreSQL, staticcheck, zero reachable vulnerabilities
+and full internal/app tests (637.127s). This slice itself does not expose a public
+HTTP/SDK route; later documents 142/143 record the actual HTTPS and HTTP adapters.
 
 ## 1. Inputs and trust boundaries
 

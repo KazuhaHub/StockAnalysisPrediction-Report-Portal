@@ -1,0 +1,1570 @@
+{
+  "captured_at": "2026-10-29T20:43:47.793846-07:00",
+  "portal_verified_base": "8a11f1d40c883e1b134fbf5ab9706c6321342a35",
+  "portal_wip": "5374def07a28e60d52112f8fa2e63d76640a7679",
+  "apps_verified_base": "e7d12a609b1e872f607069e1b5b418e4751fd1ee",
+  "apps_wip": "f50eee2262fc9f4726043bc23c0916ffd4bdbff3",
+  "pr_chain_newest_first": [
+    {
+      "baseRefName": "kazuha/app-network-native-roundtrip",
+      "headRefName": "kazuha/app-network-http-gateway",
+      "isDraft": true,
+      "number": 356,
+      "title": "feat(apps): expose session-bound reviewed network requests",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/356"
+    },
+    {
+      "baseRefName": "kazuha/app-network-viewer-authority",
+      "headRefName": "kazuha/app-network-native-roundtrip",
+      "isDraft": true,
+      "number": 354,
+      "title": "test(apps): exercise actual Portal HTTPS and live grant withdrawal",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/354"
+    },
+    {
+      "baseRefName": "kazuha/app-network-install-grants",
+      "headRefName": "kazuha/app-network-viewer-authority",
+      "isDraft": true,
+      "number": 352,
+      "title": "feat(apps): enforce current viewer network request authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/352"
+    },
+    {
+      "baseRefName": "kazuha/app-network-runtime-authority",
+      "headRefName": "kazuha/app-network-install-grants",
+      "isDraft": false,
+      "number": 351,
+      "title": "feat: review and publish restricted network installation grants",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/351"
+    },
+    {
+      "baseRefName": "kazuha/app-uninstall-secret-bindings",
+      "headRefName": "kazuha/app-network-runtime-authority",
+      "isDraft": false,
+      "number": 347,
+      "title": "feat: bind app network provider observations to current authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/347"
+    },
+    {
+      "baseRefName": "kazuha/app-secret-binding-policy",
+      "headRefName": "kazuha/app-uninstall-secret-bindings",
+      "isDraft": false,
+      "number": 346,
+      "title": "feat: revoke app credential bindings on reviewed uninstall",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/346"
+    },
+    {
+      "baseRefName": "kazuha/app-credential-storage",
+      "headRefName": "kazuha/app-secret-binding-policy",
+      "isDraft": false,
+      "number": 345,
+      "title": "feat: validate canonical app secret binding policies",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/345"
+    },
+    {
+      "baseRefName": "kazuha/app-network-runtime-observation",
+      "headRefName": "kazuha/app-credential-storage",
+      "isDraft": false,
+      "number": 344,
+      "title": "feat: add encrypted app credential custody and restore floors",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/344"
+    },
+    {
+      "baseRefName": "kazuha/app-network-private-transport",
+      "headRefName": "kazuha/app-network-runtime-observation",
+      "isDraft": false,
+      "number": 343,
+      "title": "feat(apps): observe network runtime support before permission admission",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/343"
+    },
+    {
+      "baseRefName": "kazuha/app-network-online-confirmation",
+      "headRefName": "kazuha/app-network-private-transport",
+      "isDraft": false,
+      "number": 342,
+      "title": "feat(apps): connect private network controller transport with isolated TLS acceptance",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/342"
+    },
+    {
+      "baseRefName": "kazuha/app-network-executor-pool",
+      "headRefName": "kazuha/app-network-online-confirmation",
+      "isDraft": false,
+      "number": 341,
+      "title": "feat(apps): require fresh signed online network confirmations",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/341"
+    },
+    {
+      "baseRefName": "kazuha/app-secret-binding-storage-proposal",
+      "headRefName": "kazuha/app-network-executor-pool",
+      "isDraft": false,
+      "number": 340,
+      "title": "feat(apps): share network executors within bounded installation budgets",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/340"
+    },
+    {
+      "baseRefName": "kazuha/app-signed-network-requests",
+      "headRefName": "kazuha/app-secret-binding-storage-proposal",
+      "isDraft": false,
+      "number": 339,
+      "title": "docs(apps): propose credential and binding storage extension",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/339"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-network-security",
+      "headRefName": "kazuha/app-signed-network-requests",
+      "isDraft": false,
+      "number": 338,
+      "title": "feat(apps): bind signed viewer HTTP requests to current authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/338"
+    },
+    {
+      "baseRefName": "kazuha/app-network-policy-contract",
+      "headRefName": "kazuha/app-platform-network-security",
+      "isDraft": false,
+      "number": 337,
+      "title": "fix(apps): restore full Go verification after network security updates",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/337"
+    },
+    {
+      "baseRefName": "kazuha/app-broker-http-executor",
+      "headRefName": "kazuha/app-network-policy-contract",
+      "isDraft": false,
+      "number": 336,
+      "title": "feat(apps): share canonical HTTP policy validation",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/336"
+    },
+    {
+      "baseRefName": "kazuha/app-capability-snapshot-integrity",
+      "headRefName": "kazuha/app-broker-http-executor",
+      "isDraft": false,
+      "number": 335,
+      "title": "feat(apps): add bounded HTTPS capability executor",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/335"
+    },
+    {
+      "baseRefName": "kazuha/app-v2-authoring-template",
+      "headRefName": "kazuha/app-capability-snapshot-integrity",
+      "isDraft": false,
+      "number": 334,
+      "title": "fix(apps): bind live capability snapshots to the consumed review",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/334"
+    },
+    {
+      "baseRefName": "kazuha/app-shared-page-actions",
+      "headRefName": "kazuha/app-v2-authoring-template",
+      "isDraft": false,
+      "number": 333,
+      "title": "test(apps): accept the generated v2 template in the actual Portal shell",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/333"
+    },
+    {
+      "baseRefName": "kazuha/app-typed-route-query",
+      "headRefName": "kazuha/app-shared-page-actions",
+      "isDraft": false,
+      "number": 331,
+      "title": "feat(apps): render shared page metadata and actions in the Portal shell",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/331"
+    },
+    {
+      "baseRefName": "kazuha/app-signed-navigation",
+      "headRefName": "kazuha/app-typed-route-query",
+      "isDraft": false,
+      "number": 330,
+      "title": "feat(apps): restore typed queries through host URL and history",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/330"
+    },
+    {
+      "baseRefName": "kazuha/app-draft-navigation-guard",
+      "headRefName": "kazuha/app-signed-navigation",
+      "isDraft": false,
+      "number": 328,
+      "title": "feat(apps): synchronize signed app routes and browser history",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/328"
+    },
+    {
+      "baseRefName": "kazuha/app-document-layout",
+      "headRefName": "kazuha/app-draft-navigation-guard",
+      "isDraft": false,
+      "number": 327,
+      "title": "feat(apps): confirm departure from unsaved application documents",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/327"
+    },
+    {
+      "baseRefName": "kazuha/app-sdk-native-browser-acceptance",
+      "headRefName": "kazuha/app-document-layout",
+      "isDraft": false,
+      "number": 324,
+      "title": "Unify application document sizing and Portal scrolling",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/324"
+    },
+    {
+      "baseRefName": "kazuha/app-sdk-backend-channel",
+      "headRefName": "kazuha/app-sdk-native-browser-acceptance",
+      "isDraft": false,
+      "number": 321,
+      "title": "Verify SDK browser requests against the real native backend",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/321"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-session-gateway",
+      "headRefName": "kazuha/app-sdk-backend-channel",
+      "isDraft": false,
+      "number": 320,
+      "title": "Connect shared application SDK to its own backend gateway",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/320"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-request-binding",
+      "headRefName": "kazuha/app-backend-session-gateway",
+      "isDraft": false,
+      "number": 319,
+      "title": "Add session gateway for managed application backends",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/319"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-launch-documents",
+      "headRefName": "kazuha/app-backend-request-binding",
+      "isDraft": false,
+      "number": 318,
+      "title": "Bind application backend execution to current page identity",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/318"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-background-completion",
+      "headRefName": "kazuha/app-writable-launch-documents",
+      "isDraft": false,
+      "number": 317,
+      "title": "feat(apps): admit completed writable frontend documents and launch metadata",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/317"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-install-scheduler",
+      "headRefName": "kazuha/app-writable-background-completion",
+      "isDraft": false,
+      "number": 316,
+      "title": "test(apps): verify complete background writable installation and ownership",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/316"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-install-worker",
+      "headRefName": "kazuha/app-writable-install-scheduler",
+      "isDraft": false,
+      "number": 315,
+      "title": "feat(apps): schedule writable installs with bounded readiness waits",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/315"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-activation-access",
+      "headRefName": "kazuha/app-writable-install-worker",
+      "isDraft": false,
+      "number": 314,
+      "title": "feat(apps): drive writable installations through activation",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/314"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-backend-request",
+      "headRefName": "kazuha/app-writable-activation-access",
+      "isDraft": false,
+      "number": 313,
+      "title": "feat(apps): activate writable installs and authorize current viewers",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/313"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-registration",
+      "headRefName": "kazuha/app-writable-backend-request",
+      "isDraft": false,
+      "number": 312,
+      "title": "feat(apps): relay authenticated writable backend requests",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/312"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-install-readiness",
+      "headRefName": "kazuha/app-writable-registration",
+      "isDraft": false,
+      "number": 311,
+      "title": "feat(apps): register and verify writable backends through Portal",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/311"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-install-start",
+      "headRefName": "kazuha/app-writable-install-readiness",
+      "isDraft": false,
+      "number": 310,
+      "title": "feat(apps): confirm and refresh writable backend readiness",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/310"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-install-writer",
+      "headRefName": "kazuha/app-writable-install-start",
+      "isDraft": false,
+      "number": 309,
+      "title": "feat(apps): connect writable backend start and Portal recovery",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/309"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-lifecycle-transport",
+      "headRefName": "kazuha/app-writable-install-writer",
+      "isDraft": false,
+      "number": 308,
+      "title": "feat(apps): connect writable install reviews and writer settlement",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/308"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-handshake-transport",
+      "headRefName": "kazuha/app-writable-lifecycle-transport",
+      "isDraft": false,
+      "number": 307,
+      "title": "feat(apps): expose authenticated writable lifecycle transport",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/307"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-handshake",
+      "headRefName": "kazuha/app-writable-handshake-transport",
+      "isDraft": false,
+      "number": 306,
+      "title": "feat(apps): authenticate writable handshake controller transport",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/306"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-registration-delivery",
+      "headRefName": "kazuha/app-writable-handshake",
+      "isDraft": false,
+      "number": 305,
+      "title": "feat(apps): bind writable backend handshake to delivered identity",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/305"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-registration-intent",
+      "headRefName": "kazuha/app-writable-registration-delivery",
+      "isDraft": false,
+      "number": 304,
+      "title": "feat(apps): deliver and reconcile protected writable registration",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/304"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-readiness",
+      "headRefName": "kazuha/app-writable-registration-intent",
+      "isDraft": false,
+      "number": 303,
+      "title": "feat(apps): bind writable registration intent to running evidence",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/303"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-start-recovery",
+      "headRefName": "kazuha/app-writable-readiness",
+      "isDraft": false,
+      "number": 302,
+      "title": "feat(apps): verify writable backend readiness under current authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/302"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-running-receipts",
+      "headRefName": "kazuha/app-writable-start-recovery",
+      "isDraft": false,
+      "number": 301,
+      "title": "feat(apps): reconcile uncertain writable starts without reexecution",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/301"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-native-driver",
+      "headRefName": "kazuha/app-writable-running-receipts",
+      "isDraft": false,
+      "number": 300,
+      "title": "feat(apps): bind writable preflight and settle running receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/300"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-candidate-claims",
+      "headRefName": "kazuha/app-writable-native-driver",
+      "isDraft": false,
+      "number": 299,
+      "title": "feat(apps): add closed writable native preflight and start",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/299"
+    },
+    {
+      "baseRefName": "kazuha/app-writable-candidate-intent",
+      "headRefName": "kazuha/app-writable-candidate-claims",
+      "isDraft": false,
+      "number": 294,
+      "title": "feat(apps): reserve writable resources with one-shot candidate claims",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/294"
+    },
+    {
+      "baseRefName": "kazuha/app-writer-recovery",
+      "headRefName": "kazuha/app-writable-candidate-intent",
+      "isDraft": false,
+      "number": 293,
+      "title": "feat(apps): bind writable start intent to completed writer receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/293"
+    },
+    {
+      "baseRefName": "kazuha/app-writer-execution",
+      "headRefName": "kazuha/app-writer-recovery",
+      "isDraft": false,
+      "number": 292,
+      "title": "feat(apps): recover uncertain writer grants through native observation",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/292"
+    },
+    {
+      "baseRefName": "kazuha/app-writer-intent",
+      "headRefName": "kazuha/app-writer-execution",
+      "isDraft": false,
+      "number": 291,
+      "title": "feat(apps): execute initial writer grants with native receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/291"
+    },
+    {
+      "baseRefName": "kazuha/app-data-write-access",
+      "headRefName": "kazuha/app-writer-intent",
+      "isDraft": false,
+      "number": 290,
+      "title": "feat(apps): authenticate and journal one-shot initial writer intents",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/290"
+    },
+    {
+      "baseRefName": "kazuha/app-container-seccomp",
+      "headRefName": "kazuha/app-data-write-access",
+      "isDraft": false,
+      "number": 289,
+      "title": "feat(apps): add pinned data write access and an actual filtered quota trial",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/289"
+    },
+    {
+      "baseRefName": "kazuha/app-bounded-ipc-storage",
+      "headRefName": "kazuha/app-container-seccomp",
+      "isDraft": false,
+      "number": 288,
+      "title": "feat(apps): enforce a fixed syscall boundary before backend entrypoints",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/288"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-active-history",
+      "headRefName": "kazuha/app-bounded-ipc-storage",
+      "isDraft": false,
+      "number": 287,
+      "title": "feat(apps): enforce bounded private HTTP storage and owned cleanup",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/287"
+    },
+    {
+      "baseRefName": "kazuha/app-viewer-identity",
+      "headRefName": "kazuha/app-managed-active-history",
+      "isDraft": false,
+      "number": 286,
+      "title": "feat(apps): authorize managed requests from current viewer and completed execution history",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/286"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-request-relay",
+      "headRefName": "kazuha/app-viewer-identity",
+      "isDraft": false,
+      "number": 285,
+      "title": "feat(apps): bind stable viewer identity to current session and OU authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/285"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-boot-handshake",
+      "headRefName": "kazuha/app-backend-request-relay",
+      "isDraft": false,
+      "number": 284,
+      "title": "feat(apps): relay independently signed backend requests over protected runtime",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/284"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-registration-effect",
+      "headRefName": "kazuha/app-backend-boot-handshake",
+      "isDraft": false,
+      "number": 283,
+      "title": "feat(apps): verify managed backend boot over protected native handshake",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/283"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-registration-channel",
+      "headRefName": "kazuha/app-backend-registration-effect",
+      "isDraft": false,
+      "number": 282,
+      "title": "feat(apps): persist and settle Portal backend delivery effects",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/282"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-registration-delivery",
+      "headRefName": "kazuha/app-backend-registration-channel",
+      "isDraft": false,
+      "number": 281,
+      "title": "feat(apps): deliver backend registration over authenticated controller RPC",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/281"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-registration-command",
+      "headRefName": "kazuha/app-backend-registration-delivery",
+      "isDraft": false,
+      "number": 280,
+      "title": "feat(apps): deliver claim-bound backend registration files with recovery",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/280"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-backend-identity",
+      "headRefName": "kazuha/app-backend-registration-command",
+      "isDraft": false,
+      "number": 279,
+      "title": "feat(apps): authenticate backend registration intent against candidate history",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/279"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-readiness",
+      "headRefName": "kazuha/app-managed-backend-identity",
+      "isDraft": false,
+      "number": 278,
+      "title": "feat(apps): derive managed backend identity and private registration material",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/278"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-candidate-start",
+      "headRefName": "kazuha/app-managed-readiness",
+      "isDraft": false,
+      "number": 277,
+      "title": "feat(apps): verify managed backend readiness through the root runner",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/277"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-install-data",
+      "headRefName": "kazuha/app-managed-candidate-start",
+      "isDraft": false,
+      "number": 276,
+      "title": "feat(apps): start managed candidates and recover original native receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/276"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-runtime-profile",
+      "headRefName": "kazuha/app-managed-install-data",
+      "isDraft": false,
+      "number": 275,
+      "title": "feat(apps): bind managed installation review and data to authenticated runtime",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/275"
+    },
+    {
+      "baseRefName": "kazuha/app-managed-runtime-endpoint",
+      "headRefName": "kazuha/app-managed-runtime-profile",
+      "isDraft": false,
+      "number": 274,
+      "title": "feat(apps): consume authenticated managed runtime compatibility facts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/274"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-execution-channel",
+      "headRefName": "kazuha/app-managed-runtime-endpoint",
+      "isDraft": false,
+      "number": 273,
+      "title": "feat(apps): share one managed runtime endpoint for data and launch",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/273"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-receipt-channel",
+      "headRefName": "kazuha/app-candidate-execution-channel",
+      "isDraft": false,
+      "number": 272,
+      "title": "feat(apps): dispatch native candidates through authenticated local channel",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/272"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-receipt-replay",
+      "headRefName": "kazuha/app-candidate-receipt-channel",
+      "isDraft": false,
+      "number": 271,
+      "title": "feat(apps): authenticate local candidate receipt reads",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/271"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-native-receipt",
+      "headRefName": "kazuha/app-candidate-receipt-replay",
+      "isDraft": false,
+      "number": 270,
+      "title": "feat(apps): replay applied candidate receipts without native reexecution",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/270"
+    },
+    {
+      "baseRefName": "kazuha/app-native-candidate-launch",
+      "headRefName": "kazuha/app-candidate-native-receipt",
+      "isDraft": false,
+      "number": 269,
+      "title": "feat(apps): persist native candidate execution receipts atomically",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/269"
+    },
+    {
+      "baseRefName": "kazuha/app-container-start-stop",
+      "headRefName": "kazuha/app-native-candidate-launch",
+      "isDraft": false,
+      "number": 268,
+      "title": "feat(apps): compose verified native candidate launch",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/268"
+    },
+    {
+      "baseRefName": "kazuha/app-container-mount-pins",
+      "headRefName": "kazuha/app-container-start-stop",
+      "isDraft": false,
+      "number": 267,
+      "title": "feat(apps): add owned candidate start and stop adapters",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/267"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-execution-claims",
+      "headRefName": "kazuha/app-container-mount-pins",
+      "isDraft": false,
+      "number": 266,
+      "title": "feat(apps): pin native candidate mount identities",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/266"
+    },
+    {
+      "baseRefName": "kazuha/app-candidate-command",
+      "headRefName": "kazuha/app-candidate-execution-claims",
+      "isDraft": false,
+      "number": 265,
+      "title": "feat(apps): reserve and claim managed candidate execution",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/265"
+    },
+    {
+      "baseRefName": "kazuha/app-container-create-policy",
+      "headRefName": "kazuha/app-candidate-command",
+      "isDraft": false,
+      "number": 264,
+      "title": "feat(apps): authenticate and admit managed candidate intent",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/264"
+    },
+    {
+      "baseRefName": "kazuha/app-backend-image-inspection",
+      "headRefName": "kazuha/app-container-create-policy",
+      "isDraft": false,
+      "number": 263,
+      "title": "feat(apps): add closed candidate container creation policy",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/263"
+    },
+    {
+      "baseRefName": "kazuha/app-publisher-ui",
+      "headRefName": "kazuha/app-backend-image-inspection",
+      "isDraft": false,
+      "number": 262,
+      "title": "feat(apps): inspect immutable managed backend images",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/262"
+    },
+    {
+      "baseRefName": "kazuha/app-publisher-management",
+      "headRefName": "kazuha/app-publisher-ui",
+      "isDraft": false,
+      "number": 261,
+      "title": "feat(apps): add reviewed publisher trust management UI",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/261"
+    },
+    {
+      "baseRefName": "kazuha/app-market-ui",
+      "headRefName": "kazuha/app-publisher-management",
+      "isDraft": false,
+      "number": 260,
+      "title": "feat: add explicit publisher trust management APIs",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/260"
+    },
+    {
+      "baseRefName": "kazuha/app-market-fetch",
+      "headRefName": "kazuha/app-market-ui",
+      "isDraft": false,
+      "number": 259,
+      "title": "feat: connect online marketplace downloads to installation review",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/259"
+    },
+    {
+      "baseRefName": "kazuha/app-install-ui",
+      "headRefName": "kazuha/app-market-fetch",
+      "isDraft": false,
+      "number": 258,
+      "title": "feat: fetch and verify remote development marketplace releases",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/258"
+    },
+    {
+      "baseRefName": "kazuha/app-install-management",
+      "headRefName": "kazuha/app-install-ui",
+      "isDraft": false,
+      "number": 257,
+      "title": "feat: add reviewed installation confirmation and progress UI",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/257"
+    },
+    {
+      "baseRefName": "kazuha/app-install-service",
+      "headRefName": "kazuha/app-install-management",
+      "isDraft": false,
+      "number": 256,
+      "title": "feat: add reviewed application installation management APIs",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/256"
+    },
+    {
+      "baseRefName": "kazuha/app-frontend-install",
+      "headRefName": "kazuha/app-install-service",
+      "isDraft": false,
+      "number": 255,
+      "title": "feat: run frontend installs through the Portal lifecycle",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/255"
+    },
+    {
+      "baseRefName": "kazuha/app-install-scheduler",
+      "headRefName": "kazuha/app-frontend-install",
+      "isDraft": false,
+      "number": 254,
+      "title": "feat: install frontend apps without a data runtime",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/254"
+    },
+    {
+      "baseRefName": "kazuha/app-data-dispatch",
+      "headRefName": "kazuha/app-install-scheduler",
+      "isDraft": false,
+      "number": 253,
+      "title": "feat: schedule static app installs with fenced recovery",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/253"
+    },
+    {
+      "baseRefName": "kazuha/app-static-activation",
+      "headRefName": "kazuha/app-data-dispatch",
+      "isDraft": false,
+      "number": 250,
+      "title": "feat: dispatch signed data preparation and drive static installs",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/250"
+    },
+    {
+      "baseRefName": "kazuha/app-install-data-stage",
+      "headRefName": "kazuha/app-static-activation",
+      "isDraft": false,
+      "number": 249,
+      "title": "feat: activate static apps with reviewed audience",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/249"
+    },
+    {
+      "baseRefName": "kazuha/app-data-receipt-channel",
+      "headRefName": "kazuha/app-install-data-stage",
+      "isDraft": false,
+      "number": 248,
+      "title": "Commit Portal install data preparation from authenticated native receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/248"
+    },
+    {
+      "baseRefName": "kazuha/app-data-reconciliation",
+      "headRefName": "kazuha/app-data-receipt-channel",
+      "isDraft": false,
+      "number": 247,
+      "title": "Retrieve authenticated native data receipts over the local runner channel",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/247"
+    },
+    {
+      "baseRefName": "kazuha/app-native-data-receipts",
+      "headRefName": "kazuha/app-data-reconciliation",
+      "isDraft": false,
+      "number": 246,
+      "title": "Reconcile uncertain prepared app data under fresh signed authority",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/246"
+    },
+    {
+      "baseRefName": "kazuha/app-data-root-identity",
+      "headRefName": "kazuha/app-native-data-receipts",
+      "isDraft": false,
+      "number": 244,
+      "title": "Execute native app data preparation with durable physical receipts",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/244"
+    },
+    {
+      "baseRefName": "kazuha/app-data-execution-claims",
+      "headRefName": "kazuha/app-data-root-identity",
+      "isDraft": false,
+      "number": 243,
+      "title": "Require physical root identity for native app data operations",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/243"
+    },
+    {
+      "baseRefName": "kazuha/app-data-reservations",
+      "headRefName": "kazuha/app-data-execution-claims",
+      "isDraft": false,
+      "number": 242,
+      "title": "feat: guard data execution with durable one-shot claims",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/242"
+    },
+    {
+      "baseRefName": "kazuha/app-xfs-data-primitive",
+      "headRefName": "kazuha/app-data-reservations",
+      "isDraft": false,
+      "number": 240,
+      "title": "feat: persist data project reservations for admitted runner commands",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/240"
+    },
+    {
+      "baseRefName": "kazuha/app-display-metadata",
+      "headRefName": "kazuha/app-xfs-data-primitive",
+      "isDraft": false,
+      "number": 239,
+      "title": "feat: add native sealed XFS data preparation primitive",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/239"
+    },
+    {
+      "baseRefName": "kazuha/app-directory",
+      "headRefName": "kazuha/app-display-metadata",
+      "isDraft": false,
+      "number": 238,
+      "title": "feat: show signed localized app names and shared icons",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/238"
+    },
+    {
+      "baseRefName": "kazuha/app-launch-page",
+      "headRefName": "kazuha/app-directory",
+      "isDraft": false,
+      "number": 237,
+      "title": "feat: discover authorized platform apps from AppsHub",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/237"
+    },
+    {
+      "baseRefName": "kazuha/app-http-browser-acceptance",
+      "headRefName": "kazuha/app-launch-page",
+      "isDraft": false,
+      "number": 236,
+      "title": "feat: connect authorized apps to the Portal shell and preferences",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/236"
+    },
+    {
+      "baseRefName": "kazuha/app-document-http",
+      "headRefName": "kazuha/app-http-browser-acceptance",
+      "isDraft": false,
+      "number": 234,
+      "title": "test: verify real Portal HTTP and SDK browser lifecycle",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/234"
+    },
+    {
+      "baseRefName": "kazuha/app-sandbox-document",
+      "headRefName": "kazuha/app-document-http",
+      "isDraft": false,
+      "number": 233,
+      "title": "feat: serve current-user app launch metadata and version-bound documents",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/233"
+    },
+    {
+      "baseRefName": "kazuha/app-verified-asset-read",
+      "headRefName": "kazuha/app-sandbox-document",
+      "isDraft": false,
+      "number": 231,
+      "title": "feat: compile verified frontend resources into private sandbox documents",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/231"
+    },
+    {
+      "baseRefName": "kazuha/app-launch-access",
+      "headRefName": "kazuha/app-verified-asset-read",
+      "isDraft": false,
+      "number": 229,
+      "title": "feat: read immutable app assets with current user authorization",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/229"
+    },
+    {
+      "baseRefName": "kazuha/app-frame-v2",
+      "headRefName": "kazuha/app-launch-access",
+      "isDraft": false,
+      "number": 227,
+      "title": "feat: verify current reader access before app launch",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/227"
+    },
+    {
+      "baseRefName": "kazuha/app-react-root",
+      "headRefName": "kazuha/app-frame-v2",
+      "isDraft": false,
+      "number": 226,
+      "title": "Add covered v2 application presentation host",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/226"
+    },
+    {
+      "baseRefName": "kazuha/app-runtime-control-revocation",
+      "headRefName": "kazuha/app-react-root",
+      "isDraft": false,
+      "number": 225,
+      "title": "Record shared React app root integration",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/225"
+    },
+    {
+      "baseRefName": "kazuha/app-runtime-enrollment-confirmation",
+      "headRefName": "kazuha/app-runtime-control-revocation",
+      "isDraft": false,
+      "number": 224,
+      "title": "Revoke Portal runtime signing authority atomically",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/224"
+    },
+    {
+      "baseRefName": "kazuha/app-runtime-registration",
+      "headRefName": "kazuha/app-runtime-enrollment-confirmation",
+      "isDraft": false,
+      "number": 223,
+      "title": "Confirm Portal control bindings against live runner enrollment",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/223"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-controller-identity",
+      "headRefName": "kazuha/app-runtime-registration",
+      "isDraft": false,
+      "number": 222,
+      "title": "Prepare sealed Portal runtime signing identities",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/222"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-local-transport",
+      "headRefName": "kazuha/app-runner-controller-identity",
+      "isDraft": false,
+      "number": 221,
+      "title": "Separate Portal and runner control socket identities",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/221"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-commands",
+      "headRefName": "kazuha/app-runner-local-transport",
+      "isDraft": false,
+      "number": 220,
+      "title": "Add private Linux runner intent transport",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/220"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-enrollment",
+      "headRefName": "kazuha/app-runner-commands",
+      "isDraft": false,
+      "number": 219,
+      "title": "Verify signed prepare-data commands and journal immutable intent",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/219"
+    },
+    {
+      "baseRefName": "kazuha/app-project-quota-probe",
+      "headRefName": "kazuha/app-runner-enrollment",
+      "isDraft": false,
+      "number": 217,
+      "title": "Persist explicitly pinned runner controller enrollment",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/217"
+    },
+    {
+      "baseRefName": "kazuha/app-install-stages",
+      "headRefName": "kazuha/app-project-quota-probe",
+      "isDraft": false,
+      "number": 214,
+      "title": "Verify hard project quotas on owned disposable Linux filesystems",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/214"
+    },
+    {
+      "baseRefName": "kazuha/app-install-review",
+      "headRefName": "kazuha/app-install-stages",
+      "isDraft": false,
+      "number": 213,
+      "title": "Advance admitted static installs through verified artifact staging",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/213"
+    },
+    {
+      "baseRefName": "kazuha/app-trust-repository",
+      "headRefName": "kazuha/app-install-review",
+      "isDraft": false,
+      "number": 212,
+      "title": "Review static app installation and persist fenced install intent",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/212"
+    },
+    {
+      "baseRefName": "kazuha/app-publisher-verification",
+      "headRefName": "kazuha/app-trust-repository",
+      "isDraft": false,
+      "number": 211,
+      "title": "Persist publisher trust and stage verified app releases transactionally",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/211"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-preflight",
+      "headRefName": "kazuha/app-publisher-verification",
+      "isDraft": false,
+      "number": 210,
+      "title": "Verify exact descriptor signatures against bounded publisher trust",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/210"
+    },
+    {
+      "baseRefName": "kazuha/app-bridge-presentation",
+      "headRefName": "kazuha/app-runner-preflight",
+      "isDraft": false,
+      "number": 209,
+      "title": "Add bounded read-only Docker daemon inspection for the app runner",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/209"
+    },
+    {
+      "baseRefName": "kazuha/app-descriptor-schema",
+      "headRefName": "kazuha/app-bridge-presentation",
+      "isDraft": false,
+      "number": 207,
+      "title": "Add isolated app presentation sessions with refresh fencing",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/207"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-removal-stages",
+      "headRefName": "kazuha/app-descriptor-schema",
+      "isDraft": false,
+      "number": 204,
+      "title": "Generate shared app descriptor types and domains from one schema",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/204"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-effect-intents",
+      "headRefName": "kazuha/app-platform-removal-stages",
+      "isDraft": false,
+      "number": 203,
+      "title": "Advance reviewed app removal through persisted control stages",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/203"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-runtime-contract-proposal",
+      "headRefName": "kazuha/app-platform-effect-intents",
+      "isDraft": false,
+      "number": 201,
+      "title": "Persist fenced app operation effect intents across worker reclaim",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/201"
+    },
+    {
+      "baseRefName": "kazuha/app-runner-journal",
+      "headRefName": "kazuha/app-platform-runtime-contract-proposal",
+      "isDraft": false,
+      "number": 200,
+      "title": "Propose app runtime and trust contracts for isolated development",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/200"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-removal-review",
+      "headRefName": "kazuha/app-runner-journal",
+      "isDraft": false,
+      "number": 198,
+      "title": "Add runner journal storage with private ownership and verified recovery",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/198"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-operation-leases",
+      "headRefName": "kazuha/app-platform-removal-review",
+      "isDraft": false,
+      "number": 196,
+      "title": "Add actor-bound disable and uninstall review transactions",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/196"
+    },
+    {
+      "baseRefName": "kazuha/app-platform-control-storage",
+      "headRefName": "kazuha/app-platform-operation-leases",
+      "isDraft": false,
+      "number": 194,
+      "title": "Persist fenced application operation claims and heartbeats",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/194"
+    },
+    {
+      "baseRefName": "main",
+      "headRefName": "kazuha/app-platform-control-storage",
+      "isDraft": false,
+      "number": 193,
+      "title": "Add approved application control storage and restore fencing",
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/193"
+    }
+  ],
+  "chain_stop_base": "main",
+  "verified_checks": [
+    {
+      "baseRefName": "kazuha/app-network-install-grants",
+      "headRefOid": "b6c3cbd7015ddefa62df6e71e5a88303546fa60c",
+      "isDraft": true,
+      "number": 352,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:03:03Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047714/job/123846757999",
+          "name": "enforce-disposable-project-quota",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "app project quota probe"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:19:27Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758444",
+          "name": "go-test",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:07:27Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758467",
+          "name": "go race (1/3)",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:02:25Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758253",
+          "name": "go race (2/3)",
+          "startedAt": "2026-10-30T01:59:36Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:01:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758500",
+          "name": "go race (3/3)",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T01:59:34Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846759743",
+          "name": "go race full (other packages)",
+          "startedAt": "2026-10-30T01:59:35Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T01:59:34Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846759233",
+          "name": "go race full (${{ matrix.shard }}/4)",
+          "startedAt": "2026-10-30T01:59:35Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T01:59:59Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758436",
+          "name": "workflow lint",
+          "startedAt": "2026-10-30T01:59:36Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T01:59:57Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758432",
+          "name": "web lint + typecheck + build",
+          "startedAt": "2026-10-30T01:59:36Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:01:27Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758546",
+          "name": "web tests (1/3)",
+          "startedAt": "2026-10-30T01:59:36Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:01:04Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758428",
+          "name": "web tests (2/3)",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:00:32Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758577",
+          "name": "web tests (3/3)",
+          "startedAt": "2026-10-30T01:59:37Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:00:53Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846758448",
+          "name": "docker image (font gate + smoke)",
+          "startedAt": "2026-10-30T01:59:36Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T01:59:34Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123846759850",
+          "name": "release targets (cross-compile)",
+          "startedAt": "2026-10-30T01:59:35Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:07:31Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123849288985",
+          "name": "go race",
+          "startedAt": "2026-10-30T02:07:29Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:01:32Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40989047942/job/123847358428",
+          "name": "web typecheck + build",
+          "startedAt": "2026-10-30T02:01:29Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        }
+      ],
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/352"
+    },
+    {
+      "baseRefName": "kazuha/app-network-viewer-authority",
+      "headRefOid": "4ee32ad20ad2a979a781088dfd9c13b703554af2",
+      "isDraft": true,
+      "number": 354,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:20:56Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619226/job/123851844667",
+          "name": "enforce-disposable-project-quota",
+          "startedAt": "2026-10-30T02:15:28Z",
+          "status": "COMPLETED",
+          "workflowName": "app project quota probe"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:36:27Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936438",
+          "name": "go-test",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:23:53Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936602",
+          "name": "go race (1/3)",
+          "startedAt": "2026-10-30T02:15:56Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:18:56Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936556",
+          "name": "go race (2/3)",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936443",
+          "name": "go race (3/3)",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:15:42Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851937547",
+          "name": "go race full (other packages)",
+          "startedAt": "2026-10-30T02:15:42Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:15:42Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851937277",
+          "name": "go race full (${{ matrix.shard }}/4)",
+          "startedAt": "2026-10-30T02:15:42Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:16:00Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936369",
+          "name": "workflow lint",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:16:07Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936050",
+          "name": "web lint + typecheck + build",
+          "startedAt": "2026-10-30T02:15:43Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:12Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936503",
+          "name": "web tests (1/3)",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936437",
+          "name": "web tests (2/3)",
+          "startedAt": "2026-10-30T02:15:43Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:04Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936506",
+          "name": "web tests (3/3)",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:12Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851936488",
+          "name": "docker image (font gate + smoke)",
+          "startedAt": "2026-10-30T02:15:44Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:15:42Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123851937970",
+          "name": "release targets (cross-compile)",
+          "startedAt": "2026-10-30T02:15:42Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:24:00Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123854547247",
+          "name": "go race",
+          "startedAt": "2026-10-30T02:23:56Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:17:55Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40990619214/job/123852467012",
+          "name": "web typecheck + build",
+          "startedAt": "2026-10-30T02:17:52Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        }
+      ],
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/354"
+    },
+    {
+      "baseRefName": "kazuha/app-network-native-roundtrip",
+      "headRefOid": "8a11f1d40c883e1b134fbf5ab9706c6321342a35",
+      "isDraft": true,
+      "number": 356,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:25:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159933/job/123853636591",
+          "name": "enforce-disposable-project-quota",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "app project quota probe"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:35:01Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636790",
+          "name": "go-test",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:28:50Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636958",
+          "name": "go race (1/3)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:24:14Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636845",
+          "name": "go race (2/3)",
+          "startedAt": "2026-10-30T02:21:08Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:23:31Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636899",
+          "name": "go race (3/3)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:21:01Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853638147",
+          "name": "go race full (other packages)",
+          "startedAt": "2026-10-30T02:21:01Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:21:01Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853637523",
+          "name": "go race full (${{ matrix.shard }}/4)",
+          "startedAt": "2026-10-30T02:21:01Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:21:30Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636598",
+          "name": "workflow lint",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:21:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636774",
+          "name": "web lint + typecheck + build",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:23:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636838",
+          "name": "web tests (1/3)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:22:28Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636832",
+          "name": "web tests (2/3)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:22:15Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636864",
+          "name": "web tests (3/3)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:22:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853636837",
+          "name": "docker image (font gate + smoke)",
+          "startedAt": "2026-10-30T02:21:03Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:21:01Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123853637608",
+          "name": "release targets (cross-compile)",
+          "startedAt": "2026-10-30T02:21:01Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:28:54Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123856120729",
+          "name": "go race",
+          "startedAt": "2026-10-30T02:28:52Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-30T02:23:25Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/40991159862/job/123854377533",
+          "name": "web typecheck + build",
+          "startedAt": "2026-10-30T02:23:23Z",
+          "status": "COMPLETED",
+          "workflowName": "test"
+        }
+      ],
+      "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/356"
+    }
+  ]
+}

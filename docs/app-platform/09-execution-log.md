@@ -2493,3 +2493,13 @@ daemon workflow 40455635317 passed on the functional source as well.
   stale-page/absent-runtime zero-IO and post-IO withdrawal assertions; exact new
   native/PG proof remains pending. The SDK/launch/browser path is still pending.
   See [network session gateway](143-network-session-http-gateway.md).
+
+- Handoff snapshot (2026-10-29 Pacific): Portal candidate 8a11f1d4 has full
+  general 40991159862 and native 40991159933 passing; it remains an open draft,
+  not a released/production platform. Preserved incomplete SDK work separately
+  at Portal 5374def0 and Apps f50eee2, with 70 focused tests per repository and
+  typechecks passing, but no complete SDK/root/launch/browser integration or
+  full WIP CI claim. The remaining-work handbook (144) provides H00–H18,
+  all 90 original acceptance cases and a 131-open-PR dependency snapshot.
+  Remaining implementation is handed over; no production or legacy adoption
+  is performed as part of documentation delivery.
