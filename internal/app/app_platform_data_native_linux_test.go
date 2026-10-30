@@ -323,8 +323,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 					t.Error("managed service candidate IPC cleanup", err)
 				}
 			}
-			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
+			if err := os.Rename(filepath.Join(childData, "writable-auto-start.json"), filepath.Join(childData, "writable-auto-start.verified.json")); err != nil {
+				t.Error("preserve verified background witness", err)
+				return
+			}
+			t.Log("PORTAL_WRITABLE_BACKGROUND_NATIVE_WITNESS")
+			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := os.RemoveAll(serviceFixture.root); err != nil {
 				t.Error("remove service fixture root", err)
