@@ -28,8 +28,8 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   const [deskCollapsed, setDeskCollapsed] = useState(false)
   const [treeOpen, setTreeOpen] = useState(false)
   const collapsed = phone ? !treeOpen : deskCollapsed
-  // The idle Global button is a plain default button restyled to look like text: antd renders a text
-  // button differently, which would remount the button (and drop its focus) when the scope changes.
+  // The selected Global state is a class on the same text button: switching antd button variants
+  // would rebuild the element and drop its focus.
   // Picking a unit keeps the rail mounted (only the editor is keyed to the URL), so the toggle that
   // had focus is still there to take it back. Choosing Global leaves focus on the Global button.
   const toggleEl = useRef<HTMLButtonElement>(null)
@@ -48,6 +48,9 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   }
   useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const scoped = params.get('scope') === 'ou'
+  // Back/Forward and links change the scope without a pick; the phone tree folds on any change.
+  const scopeKey = params.toString()
+  useEffect(() => { setTreeOpen(false) }, [scopeKey])
   const requested = params.get('ou')
   const selected = requested !== null ? groups.find((group) => group.id === Number(requested) && Number(requested) > 0) : groups.find((group) => group.is_default)
   const selectScope = (id?: number) => {
@@ -60,7 +63,7 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   }
   return <div className={`rp-policy-workspace ${!phone && collapsed ? 'rp-policy-workspace--collapsed' : ''}`}>
     <aside className="rp-policy-scope" aria-label={t('ou.unitScope')}>
-      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={phone || !collapsed} type={scoped ? 'default' : 'primary'} className={scoped ? 'rp-policy-scope-global--idle' : undefined}
+      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={phone || !collapsed} type="text" className={scoped ? undefined : 'rp-policy-scope-global--active'}
         aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{(phone || !collapsed) && t('ou.globalScope')}</Button>
       {phone
         // The visible unit name stays in the accessible name; aria-expanded carries the state.

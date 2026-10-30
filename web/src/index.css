@@ -562,8 +562,14 @@ body {
 .rp-scope-fold { min-width: 0; width: 100%; }
 .rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
 .rp-scope-fold__body { margin-top: 8px; }
-.rp-policy-scope-header > .rp-policy-scope-global--idle { background: transparent; border-color: transparent; box-shadow: none; }
-.rp-policy-scope-header > .rp-policy-scope-global--idle:hover { background: var(--ant-color-bg-text-hover); }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active {
+  color: var(--ant-color-text-light-solid) !important;
+  background: var(--ant-color-primary) !important;
+}
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover { background: var(--ant-color-primary-hover) !important; }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active { background: var(--ant-color-primary-active) !important; }
 /* Wide screens: the fold wrappers vanish so the tree is laid out exactly as if they were not there. */
 .rp-scope-fold--inline, .rp-scope-fold--inline > .rp-scope-fold__body { display: contents; }
 .rp-policy-scope-toggle { min-width: 0; }

@@ -151,7 +151,8 @@ export default function OrgUnitPicker({
     return build(0)
   }, [groups, visible, reach, t, annotate])
 
-  if (collapsed) {
+  // A tree that cannot collapse (a phone fold shows it in full) ignores a collapse made earlier.
+  if (collapsed && collapsible) {
     return (
       <Tooltip title={t('ou.expand')}>
         <Button

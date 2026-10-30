@@ -172,3 +172,14 @@ describe('OrgUnitPicker onPick', () => {
     expect(onPick).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('OrgUnitPicker collapsed state', () => {
+  it('shows the tree again when it stops being collapsible', () => {
+    const props = { groups: TREE, unassigned: 0, scoped: false, onScopedChange: () => {}, selected: [], onSelect: () => {}, onManage: () => {} }
+    const view = render(<App><OrgUnitPicker {...props} /></App>)
+    fireEvent.click(screen.getByRole('button', { name: 'ou.collapse' }))
+    expect(screen.queryByText('Detached')).toBeNull()
+    view.rerender(<App><OrgUnitPicker {...props} collapsible={false} /></App>)
+    expect(screen.getByText('Detached')).toBeTruthy()
+  })
+})
