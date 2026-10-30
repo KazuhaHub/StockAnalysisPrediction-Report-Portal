@@ -1510,3 +1510,41 @@ test("network failures are closed and pending work has a fixed ceiling",async()=
  await expect(held.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"busy"});
  held.client.close();await expect(first).rejects.toMatchObject({code:"uncertain"});await expect(second).rejects.toMatchObject({code:"uncertain"});
 });
+test("network and own-backend channels keep independent request identities and results",async()=>{
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const backend=vi.fn(async()=>({status:200,body:'{"channel":"backend"}'}));
+ const network=vi.fn(async()=>({status:200,contentType:"application/json",bodyBase64:"eyJjaGFubmVsIjoibmV0d29yayJ9"}));
+ const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:["network.http"],onBackendRequest:backend,onNetworkRequest:network});
+ const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,parentOrigin:"https://portal.example.invalid",onPresentation:()=>{}});
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ const [backendResult,networkResult]=await Promise.all([
+  client.requestBackend({method:"GET",path:"/v1/echo",body:""}),
+  client.requestNetwork(networkRequest()),
+ ]);
+ expect(backendResult).toEqual({status:200,body:'{"channel":"backend"}'});
+ expect(networkResult).toEqual({status:200,contentType:"application/json",bodyBase64:"eyJjaGFubmVsIjoibmV0d29yayJ9"});
+ expect(backend).toHaveBeenCalledOnce();expect(network).toHaveBeenCalledOnce();
+});
+test("network results with extra fields are rejected as uncertain",async()=>{
+ const dispatch=vi.fn(async()=>({status:200,contentType:"",bodyBase64:"",headers:{cookie:"private"}}));
+ const {client}=await networkPair(dispatch);
+ await expect(client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"uncertain",retryable:false});
+ expect(dispatch).toHaveBeenCalledOnce();
+});
+test("network deadline reports uncertainty once and ignores a late response",async()=>{
+ let resolve!: (value:{status:number;contentType:string;bodyBase64:string})=>void;
+ const dispatch=vi.fn(()=>new Promise<{status:number;contentType:string;bodyBase64:string}>(done=>{resolve=done;}));
+ const {client}=await networkPair(dispatch);
+ vi.useFakeTimers();
+ const pending=client.requestNetwork(networkRequest());
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.advanceTimersByTimeAsync(0);
+ expect(dispatch).toHaveBeenCalledOnce();
+ await vi.advanceTimersByTimeAsync(30_000);
+ await rejected;
+ resolve({status:200,contentType:"",bodyBase64:""});
+ await vi.advanceTimersByTimeAsync(10_000);
+ expect(dispatch).toHaveBeenCalledOnce();
+});

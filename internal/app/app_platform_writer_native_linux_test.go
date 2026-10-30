@@ -35,6 +35,11 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	manifest.ID = "notes-writer-demo"
 	manifest.Capabilities.Required = []string{"network.http"}
 	manifest.Capabilities.Optional = slices.DeleteFunc(manifest.Capabilities.Optional, func(c string) bool { return c == "network.http" })
+	archive = platformSDKBrowserArchive(t, archive)
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
+	}
+	manifest.Frontend.SHA256 = platformDigest(archive)
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(manifest)
 	if err != nil {

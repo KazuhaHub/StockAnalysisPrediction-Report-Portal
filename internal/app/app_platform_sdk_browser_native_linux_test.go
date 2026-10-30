@@ -45,7 +45,7 @@ func platformSDKBrowserArchive(t *testing.T, original []byte) []byte {
 // Runs under the real non-root controller after the background scheduler has
 // completed the signed SDK package. No candidate, boot or browser response is
 // fabricated; only the browser/session bootstrap and revoke control are fixture.
-func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux) {
+func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork bool) {
 	t.Helper()
 	dir := os.Getenv("APP_SDK_BROWSER_DIR")
 	if dir == "" {
@@ -149,7 +149,11 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	if err := command.Run(); err != nil {
 		t.Fatalf("SDK native browser failed: %v\n%s", err, output.String())
 	}
-	for _, marker := range []string{"SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"} {
+	markers := []string{"SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"}
+	if expectNetwork {
+		markers = append(markers, "SDK_NATIVE_BROWSER_NETWORK")
+	}
+	for _, marker := range markers {
 		if !strings.Contains(output.String(), marker) {
 			t.Fatal("SDK browser marker missing", marker)
 		}

@@ -125,6 +125,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 	var backendAvailable bool
 	var display *appplatform.AppDisplay
 	var routes []appplatform.Route
+	capabilities := []string{}
 	binding, err := s.withPlatformLaunchReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
 		var archive []byte
 		if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, current.frontendSHA).Scan(&archive); err != nil {
@@ -132,6 +133,13 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		}
 		applicationID = m.ID
 		backendAvailable = m.Backend != nil && s.platformBackendEndpoint.Load() != nil
+		var networkGranted int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&networkGranted); err != nil {
+			return err
+		}
+		if networkGranted == 1 {
+			capabilities = append(capabilities, "network.http")
+		}
 		display = m.Presentation.Display
 		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
 		for _, route := range routes {
@@ -162,7 +170,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": []string{}, "backendAvailable": backendAvailable, "applicationId": applicationID, "display": display, "routes": routes, "layout": layout, "timeZone": timeZone})
+	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": capabilities, "backendAvailable": backendAvailable, "applicationId": applicationID, "display": display, "routes": routes, "layout": layout, "timeZone": timeZone})
 }
 func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, user string) {
 	expected := platformLaunchAccess{installationID: r.PathValue("installation"), generation: r.PathValue("generation"), policyRevision: r.PathValue("policy"), releaseSHA: r.PathValue("release"), frontendSHA: r.PathValue("frontend"), entry: r.PathValue("entry")}

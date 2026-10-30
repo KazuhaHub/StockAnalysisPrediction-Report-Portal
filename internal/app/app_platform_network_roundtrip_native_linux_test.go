@@ -192,7 +192,7 @@ func platformNetworkFixtureCount(t *testing.T) int {
 		t.Fatal(err)
 	}
 	count, err := strconv.Atoi(string(raw))
-	if err != nil || count < 1 || count > 4 {
+	if err != nil || count < 1 || count > 5 {
 		t.Fatal("invalid HTTPS fixture count", err)
 	}
 	return count

@@ -21,11 +21,11 @@ def build(apps, output):
     child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
-import {AppRoot,useAppBackend,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
+import {AppRoot,useAppBackend,useAppNetwork,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
- const backend=useAppBackend(),{presentation}=useAppPresentation();
+ const backend=useAppBackend(),network=useAppNetwork(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
@@ -38,7 +38,13 @@ function Fixture(){
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
   const value=JSON.parse(r.body);setResult({id,text:JSON.stringify({status:r.status,count:value.count,calls:value.calls,role:value.viewer?.role,subject:value.viewer?.sub})});
  }catch(error){setResult({id,text:'error:'+error.code})}finally{setBusy(false)}}
+ const networkSequence=useRef(0),[networkResult,setNetworkResult]=useState({id:0,text:'none'}),[networkBusy,setNetworkBusy]=useState(false);
+ async function runNetwork(){const id=++networkSequence.current;setNetworkResult({id,text:'pending'});setNetworkBusy(true);try{
+  const r=await network.request({method:'GET',url:'https://api.example.com/v1/success',accept:'application/json',contentType:''});
+  setNetworkResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
+ }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
  <Button onClick={()=>setLongLabels(v=>!v)}>Toggle long labels</Button>
  <Typography.Text data-testid="page-count">{pageCount}</Typography.Text>
  <Typography.Text data-testid="page-cancelled">{pageCancelled}</Typography.Text>
@@ -55,7 +61,9 @@ function Fixture(){
  <Button disabled={!backend.ready||busy} onClick={()=>run('GET','/v1/echo')}>Read backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo')}>Write backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo?disconnect=1')}>Disconnect write</Button>
- <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text></Space>
+ <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text>
+ <Button disabled={!network.ready||networkBusy} onClick={()=>runNetwork()}>Read network</Button>
+ <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text></Space>
 }
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
     host = output / "host.tsx"

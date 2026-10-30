@@ -7,6 +7,13 @@ test.each(['0','01','+1','9223372036854775808','1e3'])('counter alias or overflo
 test.each(['../index.html','./index.html','nested//index.html','%69ndex.html','index.html?x=1','index.html#x',''])('unsafe entry refuses %s',entry=>{const value=fixture();value.source=value.source.replace('nested/index.html',entry);expect(parseAppLaunchV2(value,id)).toBeNull()})
 test('invalid display cannot pass the launch metadata boundary',()=>{expect(parseAppLaunchV2({...fixture(),display:{icon:'https://evil.invalid/icon',texts:[]}},id)).toBeNull()})
 test('backend availability is a boolean hint with no effect on platform capabilities',()=>{expect(parseAppLaunchV2({...fixture(),backendAvailable:true},id)).toMatchObject({backendAvailable:true,capabilities:[]});expect(parseAppLaunchV2({...fixture(),backendAvailable:'true'},id)).toBeNull()})
+test('launch advertises only the reviewed host network capability',()=>{
+ const value={...fixture(),capabilities:['network.http']}
+ expect(parseAppLaunchV2(value,id)).toMatchObject({capabilities:['network.http']})
+ for(const capabilities of [['network.http','network.http'],['secrets.read'],['unknown.capability']]){
+  expect(parseAppLaunchV2({...fixture(),capabilities},id)).toBeNull()
+ }
+})
 
 test('launch refuses missing, mismatched or duplicated signed route registries',()=>{
  expect(parseAppLaunchV2({...fixture(),routes:undefined},id)).toBeNull();
