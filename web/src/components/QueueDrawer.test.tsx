@@ -107,6 +107,21 @@ describe('Tasks drawer tabs', () => {
     expect(screen.getByRole('tab', { name: /tasks\.tab\.exports/ }).textContent).toContain('1')
   })
 
+  it('lays the four figures out as a grid, one column each', async () => {
+    const { container } = mount()
+    await screen.findByText('queue.budget')
+    const grid = container.ownerDocument.querySelector('.rp-task-stats')
+    expect(grid).not.toBeNull()
+    expect(grid!.children).toHaveLength(4)
+  })
+
+  it('shows the Mine / All switch only while the Runs tab is on screen', async () => {
+    const { rerender } = mount()
+    expect(await screen.findByText('queue.scope.mine')).toBeTruthy()
+    rerender(<Harness tab="exports" />)
+    await waitFor(() => expect(screen.queryByText('queue.scope.mine')).toBeNull())
+  })
+
   it('shows only Exports, without a tab bar, to a reader who cannot run', async () => {
     store.admin = false
     mount({ canRun: false, canExport: true, tab: 'exports', tasks: [exp()] })

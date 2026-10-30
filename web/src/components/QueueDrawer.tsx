@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Space, Tabs, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, DownloadOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
@@ -165,7 +165,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
 
   // null = not answered yet; a dash rather than a 0, which would read as a settled idle queue.
   const stat = (label: string, value: number | null) => (
-    <div style={{ flex: 1, textAlign: 'center' }}>
+    <div>
       <div style={{ fontSize: 20, fontWeight: 500 }}>{value ?? <Typography.Text type="secondary">—</Typography.Text>}</div>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         {label}
@@ -245,7 +245,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         sub={<InputsPreview inputs={j.inputs} rows={1} style={{ whiteSpace: 'nowrap' }} />}
         percent={percent}
         detail={detail}
-        time={formatTaskTime(live ? j.created_at : j.finished_at, lang)}
+        time={formatTaskTime(live ? j.created_at : j.finished_at, lang, undefined, t('tasks.justNow'))}
         actions={
           <>
             {live && (
@@ -295,7 +295,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
         percent={percent}
         detail={detail}
-        time={formatTaskTime(live ? x.created_at : finishedAtOf(x), lang)}
+        time={formatTaskTime(live ? x.created_at : finishedAtOf(x), lang, undefined, t('tasks.justNow'))}
         actions={
           <>
             {x.cancel && iconAction(t('tasks.cancel'), <StopOutlined />, { onClick: () => void cancelExport(x), danger: true })}
@@ -310,12 +310,12 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
 
   const runsPane = (
     <>
-      <Space style={{ width: '100%', padding: '12px 0 4px' }} size={0}>
+      <div className="rp-task-stats">
         {stat(t('queue.running'), summary?.running ?? null)}
         {stat(t('queue.waiting'), summary?.waiting ?? null)}
         {stat(t('queue.scheduled'), summary?.scheduled ?? null)}
         {stat(t('queue.budget'), summary?.budget ?? null)}
-      </Space>
+      </div>
       <LoadGate
         loading={!loaded && !loadErr}
         error={loaded ? undefined : loadErr}
@@ -353,7 +353,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span>{t('tasks.title')}</span>
-          {admin && showRuns && (
+          {admin && showRuns && activeTab === 'runs' && (
             <Segmented
               size="small"
               value={scope}

@@ -3292,6 +3292,7 @@
   "tasks.result.exportDone": "Done · {{n}} reports · {{size}}",
   "tasks.result.exportDoneNoSize": "Done · {{n}} reports",
   "tasks.keptDays": "Files kept {{n}} days",
+  "tasks.justNow": "just now",
   "tasks.openQueue": "Open full queue",
   "tasks.openExports": "Open export page",
   "tasks.emptyRuns": "No runs yet",

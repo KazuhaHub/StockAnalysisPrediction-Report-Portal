@@ -1355,6 +1355,16 @@ body {
 .rp-app-header .ant-btn.ant-btn-primary {
   box-shadow: none;
 }
+/* The Runs tab's four figures: equal columns, number over label, a hairline between columns. */
+.rp-task-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 12px 0 4px;
+  text-align: center;
+}
+.rp-task-stats > div + div {
+  border-inline-start: 1px solid var(--ant-color-border-secondary);
+}
 /* A task in the Tasks drawer: two lines, actions muted until the row is hovered or focused. */
 .rp-task-row {
   display: flex;

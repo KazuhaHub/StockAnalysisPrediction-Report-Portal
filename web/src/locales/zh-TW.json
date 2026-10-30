@@ -3292,6 +3292,7 @@
   "tasks.result.exportDone": "已完成 · {{n}} 篇 · {{size}}",
   "tasks.result.exportDoneNoSize": "已完成 · {{n}} 篇",
   "tasks.keptDays": "檔案保留 {{n}} 天",
+  "tasks.justNow": "剛剛",
   "tasks.openQueue": "開啟完整佇列",
   "tasks.openExports": "開啟匯出頁",
   "tasks.emptyRuns": "還沒有執行",

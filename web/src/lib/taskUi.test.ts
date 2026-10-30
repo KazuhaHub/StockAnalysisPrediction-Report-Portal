@@ -16,8 +16,12 @@ describe('runOutcome', () => {
 describe('formatTaskTime', () => {
   const now = new Date(2026, 9, 29, 12, 0, 0).getTime()
   it('reads a fresh instant relatively for the first hour', () => {
-    expect(formatTaskTime(now - 5_000, 'en-US', now)).toMatch(/now/i)
+    expect(formatTaskTime(now - 5_000, 'en-US', now, 'just now')).toBe('just now')
     expect(formatTaskTime(now - 3 * 60_000, 'en-US', now)).toMatch(/3 minutes ago/)
+  })
+  it('reads minutes naturally in Chinese', () => {
+    expect(formatTaskTime(now - 3 * 60_000, 'zh-CN', now, '刚刚')).toBe('3分钟前')
+    expect(formatTaskTime(now - 3 * 60_000, 'zh-TW', now, '剛剛')).toMatch(/3\s?分鐘前/)
   })
   it('shows the clock for earlier today and the date for another day', () => {
     expect(formatTaskTime(new Date(2026, 9, 29, 9, 30).getTime(), 'en-US', now)).toBe('09:30')

@@ -15,9 +15,10 @@ const MINUTE = 60_000
 /**
  * A short time for a task row. An instant (epoch milliseconds) under an hour old reads relatively;
  * anything else is the clock for today or "MM-DD HH:mm" for another day. A wall-clock string (what
- * the run queue stores) carries no zone, so it is never made relative.
+ * the run queue stores) carries no zone, so it is never made relative. `justNow` is the translated
+ * label for an instant under a minute old.
  */
-export function formatTaskTime(value: number | string | undefined | null, lang: string, now: number = Date.now()): string {
+export function formatTaskTime(value: number | string | undefined | null, lang: string, now: number = Date.now(), justNow = ''): string {
   if (value === undefined || value === null || value === '' || value === 0) return ''
   const d = dayjs(value)
   if (!d.isValid()) return ''
@@ -25,7 +26,7 @@ export function formatTaskTime(value: number | string | undefined | null, lang: 
     const age = now - value
     if (age >= 0 && age < 60 * MINUTE) {
       const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' })
-      return age < MINUTE ? rtf.format(0, 'second') : rtf.format(-Math.floor(age / MINUTE), 'minute')
+      return age < MINUTE ? justNow || rtf.format(0, 'second') : rtf.format(-Math.floor(age / MINUTE), 'minute')
     }
   }
   return d.isSame(dayjs(now), 'day') ? d.format('HH:mm') : d.format('MM-DD HH:mm')
