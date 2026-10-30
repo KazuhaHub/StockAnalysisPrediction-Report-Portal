@@ -6,11 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Superseded PR runs may be cancelled. Every main push and manual run gets its own
-# group so neither running nor pending full-race backstops can be replaced.
+# A newer run on the same branch replaces an older one, on pull requests and on main alike.
+# Every PR already passed this workflow before merging, so a main run that a later merge
+# supersedes adds nothing the later run will not check: that run covers the same changes, and
+# the release guard requires a green run on the exact commit it tags, which is always the newest.
+# Keeping every main run used to queue a full race suite per merge behind the account's
+# concurrent-job limit (six back-to-back merges stretched a 4-minute run to ~10 minutes).
+# Manual runs keep a group of their own and are never cancelled.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
