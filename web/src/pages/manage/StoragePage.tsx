@@ -68,7 +68,10 @@ function isDarkSurface(c: string): boolean {
 
 export default function StoragePage() {
   const { t } = useTranslation()
-  const { failure, catchLoad, retryKey } = useLoadFailure()
+  const { failure, retryKey } = useLoadFailure()
+  // The history table has its own retry: a failed history request must never reload the retention
+  // and schedule form (which may hold unsaved edits).
+  const { catchLoad: catchHistory, retryKey: historyRetry } = useLoadFailure()
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
   const dark = isDarkSurface(token.colorBgContainer)
@@ -176,7 +179,7 @@ export default function StoragePage() {
     setHistoryError('')
     return api.get<{ runs: CleanupRun[] }>('/api/admin/cleanup/history')
       .then((r) => { setHistory(r.runs ?? []); setHistoryLoaded(true) })
-      .catch(catchLoad(setHistoryError))
+      .catch(catchHistory(setHistoryError))
   }
 
   // Usage belongs inside the gate with the config: the card above reads `usage?.db_bytes ?? 0`,
@@ -193,6 +196,10 @@ export default function StoragePage() {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryKey])
+  useEffect(() => {
+    if (historyRetry > 0) loadHistory().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyRetry])
 
   const save = async () => {
     setSaving(true)

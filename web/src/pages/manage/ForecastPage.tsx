@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { ForecastSettings } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import { readPrefetched } from '../../lib/prefetch'
@@ -50,7 +50,7 @@ function GlobalForecastOperations() {
     return ['status', 'diagnostics', 'alerts', 'access'].includes(requested) ? requested : 'status'
   })
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -59,8 +59,8 @@ function GlobalForecastOperations() {
         setSettings(st)
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   // Empty deps on purpose: the request goes out once, and a reload behind a save calls load()
@@ -104,7 +104,7 @@ function GlobalForecastOperations() {
         ]}>
         <SettingsPanel section="status">
         <div className="rp-admin-list-page">
-        {settings && <ForecastEvaluatorStatus settings={settings} onChanged={load} />}
+        {settings && <ForecastEvaluatorStatus settings={settings} onChanged={() => load({ quiet: true })} />}
         <Card title={t('forecast.eval.title')}>
           {settings && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -160,7 +160,7 @@ function GlobalForecastOperations() {
         </div>
         </SettingsPanel>
         <SettingsPanel section="diagnostics">{settings && <ForecastDiagnostics value={settings.diagnostics} fallback={settings.fallback} />}</SettingsPanel>
-        <SettingsPanel section="alerts">{settings && <ForecastAlerts settings={settings} onChanged={load} />}</SettingsPanel>
+        <SettingsPanel section="alerts">{settings && <ForecastAlerts settings={settings} onChanged={() => load({ quiet: true })} />}</SettingsPanel>
         <SettingsPanel section="access">
         <ForecastAccessSummary />
         </SettingsPanel>
@@ -172,7 +172,7 @@ function GlobalForecastOperations() {
           open={settingsOpen}
           value={settings}
           onClose={() => setSettingsOpen(false)}
-          onSaved={load}
+          onSaved={() => load({ quiet: true })}
         />
       )}
 
@@ -181,7 +181,7 @@ function GlobalForecastOperations() {
           open={ledgerOpen}
           value={settings.population}
           onClose={() => setLedgerOpen(false)}
-          onSaved={load}
+          onSaved={() => load({ quiet: true })}
         />
       )}
     </LoadGate>

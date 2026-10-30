@@ -130,7 +130,7 @@ export default function OrgUnitDetail({
   onMembers?: () => void
 }) {
   const { t } = useTranslation()
-  const { failure, retryKey } = useLoadFailure()
+  const { failure, retryKey } = useLoadFailure({ ignoreDrafts: true })
   const { message } = App.useApp()
   const def = groups.find((g) => g.is_default)
   const isDefault = !!group.is_default
@@ -209,8 +209,11 @@ export default function OrgUnitDetail({
   // Who the inherited values come from. Run governance falls back to the Default group; the OU tree
   // is not involved, which is a distinction the old screen never drew and this label has to.
   const from = def?.name ?? t('users.defaultGroupTag')
-  const sourceOf = (key: keyof OUPolicyResults) => inheritedPolicies
-    ? groups.find((g) => g.id === inheritedPolicies[key].source_ou)?.name ?? t('ou.systemDefault') : from
+  // While a parent move's preview is unanswered, the current parent's values would pass for the
+  // result of the move; they are shown as a dash instead.
+  const pending = (text: string) => (previewPending ? '—' : text)
+  const sourceOf = (key: keyof OUPolicyResults) => pending(inheritedPolicies
+    ? groups.find((g) => g.id === inheritedPolicies[key].source_ou)?.name ?? t('ou.systemDefault') : from)
   const num = (n: number) => (n > 0 ? String(n) : t('ou.unlimited'))
   // "20" does not say 20 of what, and "0 per month" is a contradiction — unlimited has no window.
   const quotaLabel = (n: number, period: string) => (n > 0 ? `${n} ${t(`ou.period.${period}`)}` : t('ou.unlimited'))
@@ -378,7 +381,7 @@ export default function OrgUnitDetail({
           label={t('users.urgentPolicy')}
           hint={t('users.urgentPolicyHint')}
           from={sourceOf('weight')}
-          inherited={t(`ou.urgent.${wouldInherit.urgent.value}`)}
+          inherited={pending(t(`ou.urgent.${wouldInherit.urgent.value}`))}
           inheriting={d.urgentInherit}
           onInheritingChange={(v) => set('urgentInherit', v)}
         >
@@ -404,7 +407,7 @@ export default function OrgUnitDetail({
           label={t('users.maxQueued')}
           hint={t('users.maxQueuedHint')}
           from={sourceOf('max_queued')}
-          inherited={num(wouldInherit.maxQueued.value)}
+          inherited={pending(num(wouldInherit.maxQueued.value))}
           inheriting={d.maxqInherit}
           onInheritingChange={(v) => set('maxqInherit', v)}
         >
@@ -415,7 +418,7 @@ export default function OrgUnitDetail({
           label={t('users.runWindow')}
           hint={t('users.runWindowHint')}
           from={sourceOf('run_window')}
-          inherited={wouldInherit.runWindow.value || t('ou.anyHour')}
+          inherited={pending(wouldInherit.runWindow.value || t('ou.anyHour'))}
           inheriting={d.windowInherit}
           onInheritingChange={(v) => set('windowInherit', v)}
         >
@@ -444,7 +447,7 @@ export default function OrgUnitDetail({
           label={t('ou.allowTOTP')}
           hint={t('ou.allowTOTPHint')}
           from={sourceOf('totp_enroll')}
-          inherited={wouldInherit.totpAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
+          inherited={pending(wouldInherit.totpAllowed.value ? t('ou.allowed') : t('ou.notAllowed'))}
           inheriting={d.totpInherit}
           onInheritingChange={(v) => set('totpInherit', v)}
         >
@@ -454,7 +457,7 @@ export default function OrgUnitDetail({
           label={t('ou.allowPasskey')}
           hint={t('ou.allowPasskeyHint')}
           from={sourceOf('passkey_enroll')}
-          inherited={wouldInherit.passkeyAllowed.value ? t('ou.allowed') : t('ou.notAllowed')}
+          inherited={pending(wouldInherit.passkeyAllowed.value ? t('ou.allowed') : t('ou.notAllowed'))}
           inheriting={d.passkeyInherit}
           onInheritingChange={(v) => set('passkeyInherit', v)}
         >
@@ -466,7 +469,7 @@ export default function OrgUnitDetail({
           label={t('ou.require2fa')}
           hint={t('ou.require2faHint')}
           from={sourceOf('require_2fa')}
-          inherited={wouldInherit.require2fa.value ? t('ou.required') : t('ou.notRequired')}
+          inherited={pending(wouldInherit.require2fa.value ? t('ou.required') : t('ou.notRequired'))}
           inheriting={d.requireInherit}
           onInheritingChange={(v) => set('requireInherit', v)}
         >
@@ -479,8 +482,8 @@ export default function OrgUnitDetail({
           <InheritField
             label={t('forecast.scope.label')}
             hint={t('forecast.scope.help')}
-            from={forecastInherit.from}
-            inherited={t(`forecast.scope.${forecastInherit.value}`)}
+            from={pending(forecastInherit.from)}
+            inherited={pending(t(`forecast.scope.${forecastInherit.value}`))}
             inheriting={d.forecastScope == null}
             // Choosing "set here" without picking a value pins what is in effect, as the other
             // fields do.
@@ -526,7 +529,7 @@ export default function OrgUnitDetail({
             label={t('users.dailyRunQuota')}
             hint={t('users.dailyRunQuotaHint')}
             from={sourceOf('quota')}
-            inherited={quotaLabel(wouldInherit.dailyQuota.value, wouldInherit.quotaPeriod.value)}
+            inherited={pending(quotaLabel(wouldInherit.dailyQuota.value, wouldInherit.quotaPeriod.value))}
             inheriting={d.quotaInherit}
             canInherit={!isDefault}
             onInheritingChange={(v) => set('quotaInherit', v)}

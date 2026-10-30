@@ -4,7 +4,7 @@ import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { Role, SSOProviderAdmin, SSOProvidersResp, UserGroupRow, UsersResp } from '../../api/types'
 import SSORulesEditor from './SSORulesEditor'
 import SSOSetupGuide from './SSOSetupGuide'
@@ -481,7 +481,7 @@ export default function SSOPage() {
 
   // `loaded` is checked separately from `loading` so that saving a provider — which calls load()
   // again through onSaved — refreshes the tabs in place instead of replacing them with a spinner.
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     api
@@ -507,8 +507,8 @@ export default function SSOPage() {
         setAllowPrivate(r.allow_private === true)
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
   useEffect(() => {
     load()
@@ -535,7 +535,7 @@ export default function SSOPage() {
                 provider={forKind(kind)}
                 groups={groups}
                 publicUrl={publicUrl}
-                onSaved={load}
+                onSaved={() => load({ quiet: true })}
               />
             ),
           })),

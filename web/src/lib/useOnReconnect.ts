@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { loadFailure, type LoadOpts } from './loadFailure'
+import { hasPendingDrafts } from './pendingDrafts'
 
 /** Runs `fn` whenever the API client reports the connection is back ('rp:connection-restored'). */
 export function useOnReconnect(fn: () => void) {
@@ -20,15 +21,19 @@ export function useOnReconnect(fn: () => void) {
  * re-runs the load. A view whose load never failed on the connection is not reloaded, so edits in
  * progress are not overwritten by a refresh nobody needed.
  */
-export function useLoadFailure() {
+export function useLoadFailure(options: { ignoreDrafts?: boolean } = {}) {
   const { t } = useTranslation()
   const tRef = useRef(t)
+  const ignoreDrafts = useRef(!!options.ignoreDrafts)
   tRef.current = t
   const stale = useRef(false)
   const [retryKey, setRetryKey] = useState(0)
   useOnReconnect(() => {
     if (!stale.current) return
     stale.current = false
+    // Reloading a form from the server while it holds unsaved edits would overwrite them.
+    // (A request derived from the draft itself, like a preview of it, opts out: it must be asked again.)
+    if (!ignoreDrafts.current && hasPendingDrafts()) return
     setRetryKey((n) => n + 1)
   })
   const failure = useCallback((e: unknown, opts?: LoadOpts): string | null => {

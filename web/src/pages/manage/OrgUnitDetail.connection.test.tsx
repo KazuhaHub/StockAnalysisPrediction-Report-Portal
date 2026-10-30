@@ -35,6 +35,8 @@ describe('OrgUnitDetail parent-move preview while the connection is down', () =>
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1), { timeout: 2000 })
     await act(async () => { await Promise.resolve() })
     expect(screen.getByText('ou.previewPending')).toBeTruthy()
+    // The current parent's values must not stand in for the unanswered preview.
+    expect(screen.queryAllByText(/ou\.inheritedAs/).every((n) => n.textContent?.includes('—'))).toBe(true)
     expect((screen.getByRole('button', { name: /common.save|manage.save/ }) as HTMLButtonElement).disabled).toBe(true)
     await act(async () => { window.dispatchEvent(new Event('rp:connection-restored')) })
     await waitFor(() => expect(screen.queryByText('ou.previewPending')).toBeNull(), { timeout: 2000 })

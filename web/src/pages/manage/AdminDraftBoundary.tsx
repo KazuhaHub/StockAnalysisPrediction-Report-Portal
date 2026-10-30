@@ -1,3 +1,4 @@
+import { markDraft } from '../../lib/pendingDrafts'
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { Modal } from 'antd'
 import { useBlocker } from 'react-router'
@@ -14,6 +15,10 @@ export function usePendingSettings(dirty: boolean, saving = false) {
     register?.(id, { dirty, saving })
     return () => register?.(id, null)
   }, [register, id, dirty, saving])
+  useEffect(() => {
+    markDraft(id, dirty)
+    return () => markDraft(id, false)
+  }, [id, dirty])
   useEffect(() => {
     if (!dirty && !saving) return
     const preventUnload = (event: BeforeUnloadEvent) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App,
@@ -107,6 +107,9 @@ export default function RunAnalysisModal({
   const [targetsOk, setTargetsOk] = useState(false) // …and a failed list is not an empty one
   const [queueSettled, setQueueSettled] = useState(false) // the ungated queue-depth call has come back
   const [loadErr, setLoadErr] = useState('')
+  const presetsApplied = useRef(false) // the admin's run defaults have been applied to the form
+  const loadingRef = useRef(true)
+  loadingRef.current = loading
   const [optionalExpanded, setOptionalExpanded] = useState(true)
 
   // Presets carry the admin's run-form defaults with them, so reading them warm and reading them
@@ -136,8 +139,10 @@ export default function RunAnalysisModal({
     const warmTargets = readPrefetched<{ targets: BatchTarget[] }>('/api/admin/batch/targets', WARM_MAX_AGE)
     const warmPresets = readPrefetched<RunPresetsResp>('/api/admin/batch/presets', WARM_MAX_AGE)
     setLoadErr('')
+    presetsApplied.current = false
     if (warmTargets && warmPresets) {
       setTargets(warmTargets.targets || [])
+      presetsApplied.current = true
       applyPresets(warmPresets)
       setTargetsOk(true)
       setLoading(false)
@@ -174,7 +179,7 @@ export default function RunAnalysisModal({
           else if (live) setLoadErr(text)
         }),
       // Presets + the admin-set run-form defaults (default mode button + idle pre-check).
-      api.get<RunPresetsResp>('/api/admin/batch/presets').then(applyPresets),
+      api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => { presetsApplied.current = true; applyPresets(r) }),
     ]
     // allSettled, not all: a failed presets call must still open the form (with no preset
     // windows), rather than leave the modal spinning for ever on a detail.
@@ -185,7 +190,35 @@ export default function RunAnalysisModal({
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, retryKey])
+  }, [open])
+
+  // The connection came back after a request above could not connect. Only the data that failed is
+  // fetched again, and it lands in place: nothing the user has chosen or typed in the open dialog
+  // (mode, window, retries, notify, input values) is reset, and a target list that did not change
+  // keeps its identity so the form is not re-initialised.
+  useEffect(() => {
+    if (!open || retryKey === 0) return
+    let live = true
+    api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => {
+      if (!live) return
+      const next = r.targets || []
+      setTargets((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      setTargetsOk(true)
+      setLoadErr('')
+    }).catch(() => {})
+    api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => {
+      if (!live) return
+      if (!presetsApplied.current) {
+        presetsApplied.current = true
+        // The form was still behind the spinner, so the admin's defaults apply as on a first open.
+        if (loadingRef.current) { applyPresets(r); return }
+      }
+      setPresets(r.presets || [])
+      setDefaults(readRunDefaults(r))
+    }).catch(() => {}).finally(() => { if (live) setLoading(false) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryKey])
 
   // 运行分析 generates a report (Dify ingests it). visibleOn applies both rules: agent apps
   // are conversational and post no report (capability), and an admin may restrict a target
