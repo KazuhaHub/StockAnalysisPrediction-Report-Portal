@@ -281,7 +281,7 @@ jobs:
           observe_service | sudo -n tee "$root/observer-second.log"
           sudo -n grep -q NATIVE_MANAGED_SERVICE_PROFILE_VERIFIED "$root/observer-second.log"
           stop_service
-          grep -q 'app-runner ready profile=linux-docker-rootful-projectquota/v1-dev platform=linux/' "$root/service.log"
+          sudo -n grep -q 'app-runner ready profile=linux-docker-rootful-projectquota/v1-dev platform=linux/' "$root/service.log"
 
       - name: Verify closed candidate container policy on the disposable daemon
         shell: bash
