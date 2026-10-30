@@ -3347,5 +3347,12 @@
   "apps.access.overridden": "已覆盖",
   "apps.access.source.system": "继承自系统默认",
   "apps.access.source.inherited": "继承自 {{from}}",
-  "apps.access.source.overridden": "在此处单独设置"
+  "apps.access.source.overridden": "在此处单独设置",
+  "apps.access.offHintBuiltin": "应用中心、入口按钮和相关链接中都不再出现。",
+  "apps.access.discardTitle": "放弃未保存的选择？",
+  "apps.access.discardBody": "你为这个组织单元选了一个值，但还没有保存。",
+  "apps.access.discardOk": "放弃",
+  "apps.access.reloadFailed": "已保存，但页面未能刷新。请重新加载以查看当前状态。",
+  "apps.detail.installedFailed": "无法读取已安装应用列表，因此不显示版本、入口文件和权限范围。",
+  "apps.perm.run_batch": "运行批量任务"
 }

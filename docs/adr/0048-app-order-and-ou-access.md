@@ -184,9 +184,15 @@ value and the source, with an open/closed switch. The hub, entry buttons and rou
 13. Hub: built-in and installed apps interleave in server order, closed built-ins are hidden, the
     built-in permission still applies, and an older server's answer shows today's list.
     (`AppsHub.test.tsx`)
-14. Admin: the order persists on drop as the whole key sequence; the access control shows own value,
-    inherited value and source OU, sets an override, and clears it with `null`.
-    (`AppLayoutAdmin.test.tsx`)
+14. Admin (apps list, app detail, service status by OU): the list summarizes each app by the OUs it
+    is effectively open for; the Reorder dialog writes the whole key sequence only when Done is
+    pressed and Cancel discards. The service status page shows own value, inherited value and source
+    OU; a choice is written only on Save, and while an OU inherits, saving any choice writes an
+    explicit override even when it equals the inherited value (this pins the OU against later parent
+    changes); Save is otherwise enabled only when the choice differs from the OU's own value;
+    Inherit clears the override with `null` and is enabled only when one exists; leaving an OU with
+    an unsaved choice asks first. (`AppsAdminPage.test.tsx`, `AppDetailPage.test.tsx`,
+    `AppAccessPage.test.tsx`, `appsAdminModel.test.ts`)
 15. A closed built-in app's route shows a not-available result, never the console, and does not flash
     it while the answer loads; the answer fails open. Entry buttons pinned to a closed app are hidden.
     (`appAccess.test.tsx`)

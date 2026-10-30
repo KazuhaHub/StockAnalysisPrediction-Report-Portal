@@ -3347,5 +3347,12 @@
   "apps.access.overridden": "Overridden",
   "apps.access.source.system": "Inherited from system default",
   "apps.access.source.inherited": "Inherited from {{from}}",
-  "apps.access.source.overridden": "Overridden here"
+  "apps.access.source.overridden": "Overridden here",
+  "apps.access.offHintBuiltin": "Hidden from the apps hub, entry buttons and links.",
+  "apps.access.discardTitle": "Discard the unsaved choice?",
+  "apps.access.discardBody": "You chose a value for this organizational unit but did not save it.",
+  "apps.access.discardOk": "Discard",
+  "apps.access.reloadFailed": "Saved, but the page could not refresh. Reload it to see the current state.",
+  "apps.detail.installedFailed": "The installed app list could not be read, so version, entry file and permission scopes are not shown.",
+  "apps.perm.run_batch": "Run batch jobs"
 }

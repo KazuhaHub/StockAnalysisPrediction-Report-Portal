@@ -2478,3 +2478,8 @@ body {
 @media (max-width: 760px) {
   .rp-apps-col-type { display: none; }
 }
+.rp-apps-col-chevron { width: 40px; }
+@media (max-width: 760px) {
+  .rp-apps-col-chevron { display: none; }
+}
+.rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }

@@ -47,14 +47,13 @@ export default function AppsAdminPage() {
         </Space>
       ),
     },
-    { title: t('apps.col.status'), width: 260, render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
+    { title: t('apps.col.status'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
     {
       title: t('apps.col.type'),
-      width: 120,
       className: 'rp-apps-col-type',
       render: (_: unknown, a: AdminApp) => (a.builtin ? t('apps.type.builtin') : t('apps.type.installed')),
     },
-    { title: '', width: 40, align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
+    { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]
 
   return (
@@ -81,6 +80,7 @@ export default function AppsAdminPage() {
             </Typography.Text>
           </div>
           <Table
+            className="rp-apps-table"
             rowKey="key"
             dataSource={shown}
             columns={columns}

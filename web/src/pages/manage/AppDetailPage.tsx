@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { App, Button, Card, Result, Space, Tag, Typography, theme } from 'antd'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Alert, App, Button, Card, Result, Space, Tag, Typography, theme } from 'antd'
 import { RightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -28,7 +28,7 @@ function Section({
 }) {
   const { token } = theme.useToken()
   return (
-    <Card hoverable={!!onOpen} styles={{ body: { padding: '16px 20px' } }} {...(onOpen ? clickable(onOpen, title) : {})}>
+    <Card hoverable={!!onOpen} styles={{ body: { padding: '16px 20px' } }} {...(onOpen ? clickable(onOpen) : {})}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 220px', minWidth: 0 }}>
           <Typography.Text strong style={{ fontSize: 15, color: danger ? token.colorError : undefined }}>
@@ -71,6 +71,14 @@ function AppDetail({ app }: { app: AdminApp }) {
   const [backendOpen, setBackendOpen] = useState(false)
   const name = labels.title(app)
   const description = labels.description(app)
+  const permLabel = (perm: string) => (perm ? t(`apps.perm.${perm}`) : t('apps.perm.none'))
+  // A stable object: the backend dialog resets its form whenever the app it is given changes, and a
+  // fresh literal on every render would do that on any unrelated re-render of this page.
+  const { key: appKey, icon: appIcon, version: appVersion } = app
+  const backendApp = useMemo(
+    () => (backendOpen ? { id: appKey, name, icon: appIcon, version: appVersion } : null),
+    [backendOpen, appKey, name, appIcon, appVersion],
+  )
 
   const uninstall = () =>
     modal.confirm({
@@ -93,13 +101,14 @@ function AppDetail({ app }: { app: AdminApp }) {
   const facts: [string, ReactNode][] = [[t('apps.detail.type'), app.builtin ? t('apps.type.builtin') : t('apps.type.installed')]]
   if (app.version) facts.push([t('apps.version'), app.version])
   if (app.builtinDef) {
-    facts.push([t('apps.detail.route'), app.builtinDef.to], [t('apps.detail.permission'), app.builtinDef.perm || t('apps.perm.none')])
+    facts.push([t('apps.detail.route'), app.builtinDef.to], [t('apps.detail.permission'), permLabel(app.builtinDef.perm)])
   } else if (app.entry) {
     facts.push([t('apps.detail.entry'), app.entry])
   }
 
   return (
     <>
+      {!app.detailKnown && <Alert type="warning" showIcon title={t('apps.detail.installedFailed')} style={{ marginBottom: 16 }} />}
       <AppsBreadcrumb app={app} name={name} />
       <div className="rp-app-detail">
         <Card styles={{ body: { padding: 20 } }}>
@@ -134,7 +143,9 @@ function AppDetail({ app }: { app: AdminApp }) {
             hint={app.builtin ? t('apps.section.scopes.hintBuiltin') : t('apps.section.scopes.hint')}
             value={
               app.builtinDef ? (
-                <Typography.Text>{app.builtinDef.perm || t('apps.perm.none')}</Typography.Text>
+                <Typography.Text>{permLabel(app.builtinDef.perm)}</Typography.Text>
+              ) : !app.detailKnown ? (
+                '—'
               ) : app.scopes.length ? (
                 <Space size={4} wrap>
                   {app.scopes.map((s) => (
@@ -156,7 +167,7 @@ function AppDetail({ app }: { app: AdminApp }) {
           )}
         </Space>
       </div>
-      <AppBackendModal app={backendOpen ? { id: app.key, name, icon: app.icon, version: app.version } : null} onClose={() => setBackendOpen(false)} />
+      <AppBackendModal app={backendApp} onClose={() => setBackendOpen(false)} />
     </>
   )
 }

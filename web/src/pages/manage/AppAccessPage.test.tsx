@@ -114,6 +114,53 @@ describe('App service status', () => {
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/apps/builtin%3Aquotes/access/1', { enabled: false }))
   })
 
+  it('only promises that open sessions stop for an installed app', async () => {
+    const first = renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    expect(screen.getByText('apps.access.offHintBuiltin')).toBeTruthy()
+    expect(screen.queryByText('apps.access.offHint')).toBeNull()
+    first.unmount()
+    renderAt('/manage/apps/hello/access')
+    await heading('Hello · Default')
+    expect(screen.getByText('apps.access.offHint')).toBeTruthy()
+  })
+
+  it('asks before leaving an OU with an unsaved choice, and keeps it when declined', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
+    await user.click(screen.getByText('Research'))
+    expect(await screen.findByText('apps.access.discardBody')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'common.cancel' }))
+    expect(screen.getByRole('heading', { name: 'nav.quotes · Default' })).toBeTruthy()
+    expect((save() as HTMLButtonElement).disabled).toBe(false)
+    await user.click(screen.getByText('Research'))
+    await user.click((await screen.findAllByRole('button', { name: 'apps.access.discardOk' })).slice(-1)[0])
+    await heading('nav.quotes · Research')
+  })
+
+  it('switches OU without asking when nothing is unsaved', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    await user.click(screen.getByText('Research'))
+    await heading('nav.quotes · Research')
+    expect(screen.queryByText('apps.access.discardBody')).toBeNull()
+  })
+
+  it('keeps the page and warns when the refresh after a successful save fails', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    apiMock.get.mockRejectedValue(new Error('down'))
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
+    await user.click(save())
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalled())
+    expect(await screen.findByText('apps.access.reloadFailed')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'nav.quotes · Default' })).toBeTruthy()
+  })
+
   it('sends null to inherit again', async () => {
     const user = userEvent.setup()
     renderAt('/manage/apps/builtin%3Aquotes/access')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, Card, Radio, Result, Space, Tag, Typography, theme } from 'antd'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -67,12 +67,31 @@ function AccessWorkspace({
   groups: UserGroupRow[]
   selectedId: number | null
   onSelect: (id: number) => void
-  reload: () => Promise<void>
+  reload: () => Promise<boolean>
 }) {
   const { t } = useTranslation()
   const labels = useAppLabels()
   const name = labels.title(app)
+  const { modal } = App.useApp()
   const selected = groups.find((g) => g.id === selectedId) ?? groups.find((g) => g.is_default) ?? groups[0]
+  // Whether the open editor holds a choice that was not saved; moving to another OU would drop it.
+  const dirty = useRef(false)
+  const setDirty = useCallback((d: boolean) => {
+    dirty.current = d
+  }, [])
+  const requestSelect = (id: number) => {
+    if (!dirty.current) {
+      onSelect(id)
+      return
+    }
+    modal.confirm({
+      title: t('apps.access.discardTitle'),
+      content: t('apps.access.discardBody'),
+      okText: t('apps.access.discardOk'),
+      cancelText: t('common.cancel'),
+      onOk: () => onSelect(id),
+    })
+  }
   const overridden = useMemo(() => new Set(app.access.filter((a) => a.own !== null).map((a) => a.ou)), [app.access])
   const annotate = useCallback(
     (g: UserGroupRow) => (overridden.has(g.id) ? <Tag color="blue">{t('apps.access.overridden')}</Tag> : null),
@@ -95,7 +114,7 @@ function AccessWorkspace({
               selected={selected ? [selected.id] : []}
               onManage={() => {}}
               onSelect={(ids) => {
-                if (ids[0]) onSelect(ids[0])
+                if (ids[0] && ids[0] !== selected?.id) requestSelect(ids[0])
               }}
               annotate={annotate}
             />
@@ -110,6 +129,7 @@ function AccessWorkspace({
                 group={selected}
                 groups={groups}
                 reload={reload}
+                onDirtyChange={setDirty}
               />
             ) : (
               <Typography.Text type="secondary">{t('users.noGroups')}</Typography.Text>
@@ -127,12 +147,14 @@ function AccessEditor({
   group,
   groups,
   reload,
+  onDirtyChange,
 }: {
   app: AdminApp
   name: string
   group: UserGroupRow
   groups: UserGroupRow[]
-  reload: () => Promise<void>
+  reload: () => Promise<boolean>
+  onDirtyChange: (dirty: boolean) => void
 }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -146,6 +168,10 @@ function AccessEditor({
   const draft = choice ?? mine.effective
   const [busy, setBusy] = useState(false)
   const dirty = choice !== null && choice !== mine.own
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
 
   const source =
     mine.own !== null
@@ -158,7 +184,7 @@ function AccessEditor({
     setBusy(true)
     try {
       await api.put(`/api/admin/apps/${encodeURIComponent(app.key)}/access/${group.id}`, { enabled })
-      await reload()
+      if (!(await reload())) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {
       message.error(errText(e, t))
@@ -207,7 +233,7 @@ function AccessEditor({
       </div>
       <Radio.Group value={draft} onChange={(e) => setChoice(e.target.value)} style={{ display: 'block' }} disabled={busy}>
         {option(true, t('apps.access.on'), t('apps.access.onHint'), 'apps-access-on')}
-        {option(false, t('apps.access.off'), t('apps.access.offHint'), 'apps-access-off')}
+        {option(false, t('apps.access.off'), app.builtin ? t('apps.access.offHintBuiltin') : t('apps.access.offHint'), 'apps-access-off')}
       </Radio.Group>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
         <Button disabled={busy || mine.own === null} onClick={() => void put(null)}>

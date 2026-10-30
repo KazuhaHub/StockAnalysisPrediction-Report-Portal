@@ -78,6 +78,17 @@ describe('Apps list', () => {
     expect(within(rowOf('Hello')).getByText(/1\.2\.0/)).toBeTruthy()
   })
 
+  it('fits a phone: no fixed column widths, and Type and the chevron are marked to hide when narrow', async () => {
+    const { container } = renderPage()
+    await screen.findByText('nav.batch')
+    // A fixed width (a <col> or a width style on a header) is what pushed the page sideways at 375px.
+    expect(container.querySelectorAll('col[style*="width"]').length).toBe(0)
+    expect(container.querySelectorAll('th[style*="width"]').length).toBe(0)
+    expect(container.querySelector('th.rp-apps-col-type')).not.toBeNull()
+    expect(container.querySelector('th.rp-apps-col-chevron')).not.toBeNull()
+    expect(container.querySelector('td.rp-apps-col-chevron')).not.toBeNull()
+  })
+
   it('filters by the search box and counts the rows', async () => {
     const user = userEvent.setup()
     renderPage()

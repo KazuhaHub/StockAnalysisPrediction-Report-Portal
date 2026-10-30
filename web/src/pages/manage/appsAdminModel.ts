@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp, AppsResp, AppSummary } from '../../api/types'
@@ -15,6 +15,8 @@ export interface AdminApp {
   version?: string
   entry?: string
   scopes: string[]
+  /** False when the installed list could not be read, so version, entry and scopes are unknown, not empty. */
+  detailKnown: boolean
   access: AppAccessOU[]
 }
 
@@ -47,9 +49,9 @@ export function useAppLabels() {
   }
 }
 
-function merge(entry: AppLayoutEntry, installed: Map<string, AppSummary>): AdminApp {
+function merge(entry: AppLayoutEntry, installed: Map<string, AppSummary> | null): AdminApp {
   const def = entry.builtin ? builtinAppByKey(builtinSlug(entry.key)) : undefined
-  const inst = entry.builtin ? undefined : installed.get(entry.key)
+  const inst = entry.builtin ? undefined : installed?.get(entry.key)
   return {
     key: entry.key,
     builtin: entry.builtin,
@@ -59,27 +61,37 @@ function merge(entry: AppLayoutEntry, installed: Map<string, AppSummary>): Admin
     version: inst?.version,
     entry: inst?.entry,
     scopes: inst?.scopes ?? [],
+    detailKnown: entry.builtin || installed !== null,
     access: entry.access ?? [],
   }
 }
 
-/** Loads every app in the administrator's order. The installed list only adds detail, so its failure is not fatal. */
+/**
+ * Loads every app in the administrator's order. The installed list only adds detail; when it cannot
+ * be read the apps say so (`detailKnown`) rather than claiming to have no scopes. `reload` resolves
+ * false when a refresh failed: before the first load that is the page's error, after it the page it
+ * already has stays and the caller decides how to warn.
+ */
 export function useAppsCatalog() {
   const { t } = useTranslation()
   const [apps, setApps] = useState<AdminApp[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const load = useCallback(async () => {
-    setError('')
+  const loaded = useRef(false)
+  const load = useCallback(async (): Promise<boolean> => {
     try {
       const [layout, installed] = await Promise.all([
         api.get<AppLayoutResp>('/api/admin/apps/layout'),
         api.get<AppsResp>('/api/apps').catch(() => null),
       ])
-      const byID = new Map((installed?.apps ?? []).map((a) => [a.id, a]))
+      const byID = installed ? new Map((installed.apps ?? []).map((a) => [a.id, a])) : null
       setApps((layout?.apps ?? []).map((e) => merge(e, byID)))
+      setError('')
+      loaded.current = true
+      return true
     } catch (e) {
-      setError(errText(e, t))
+      if (!loaded.current) setError(errText(e, t))
+      return false
     } finally {
       setLoading(false)
     }
