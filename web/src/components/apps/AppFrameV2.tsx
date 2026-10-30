@@ -7,6 +7,7 @@ import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type Bri
 import './AppFrameV2.css'
 import { createAppBackendTransport } from '../../lib/appBackendV2'
 import { createAppNetworkTransport } from '../../lib/appNetworkV2'
+import { createAppReportsTransport } from '../../lib/appReportsV2'
 
 export interface AppFrameV2Props {
   source: string
@@ -95,6 +96,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
       onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
+      onReportRequest: capabilities.includes('reports.read') ? createAppReportsTransport(binding) : undefined,
       onNavigate: (path,replace,search)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search)},
       onPageChange: value=>{if(live.current&&epoch.current===generation)pageObserver.current?.(value)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },

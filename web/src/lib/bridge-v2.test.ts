@@ -1473,6 +1473,127 @@ async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost
  await vi.waitFor(()=>expect(host.state()).toBe("ready"));
  return {...w,host,client};
 }
+const reportSummary = {
+ id:42,runId:"run-42",symbol:"600100",name:"Example",date:"2026-10-30",
+ time:"09:30",kind:"research",subtype:"daily",title:"Current report",
+ source:"analysis",version:"report-version",
+};
+async function reportsPair(
+ onReportRequest?: Parameters<typeof createBridgeHost>[0]["onReportRequest"],
+ granted=true,
+) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({
+  localWindow:w.host,
+  frameWindow:w.child,
+  binding,
+  presentation,
+  capabilities:granted?["reports.read"]:[],
+  onReportRequest,
+ });
+ const client=createBridgeClient({
+  localWindow:w.child,
+  parentWindow:w.host,
+  parentOrigin:"https://portal.example.invalid",
+  onPresentation:()=>{},
+ });
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
+test("report channel preserves query, detail and Markdown results",async()=>{
+ const dispatch=vi.fn(async(request:{kind:string},_signal:AbortSignal)=>request.kind==="get"
+  ? {kind:"get" as const,report:{...reportSummary,bodyMarkdown:"# Evidence"}}
+  : {kind:"query" as const,count:1,total:3,offset:0,limit:20,items:[reportSummary]});
+ const {client}=await reportsPair(dispatch);
+ expect(client.context()?.capabilities).toEqual(["reports.read"]);
+ await expect(client.requestReports({kind:"query",query:{q:"current",limit:20}})).resolves.toEqual({
+  kind:"query",count:1,total:3,offset:0,limit:20,items:[reportSummary],
+ });
+ await expect(client.requestReports({kind:"get",id:42})).resolves.toEqual({
+  kind:"get",report:{...reportSummary,bodyMarkdown:"# Evidence"},
+ });
+ expect(dispatch).toHaveBeenCalledTimes(2);
+ expect(dispatch.mock.calls[0][0]).toEqual({kind:"query",query:{q:"current",limit:20}});
+ expect(dispatch.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
+});
+test("report requests fail closed without grant, transport or valid input",async()=>{
+ const dispatch=vi.fn(async()=>({kind:"query" as const,count:0,total:0,offset:0,limit:20,items:[]}));
+ const ungranted=await reportsPair(dispatch,false);
+ await expect(ungranted.client.requestReports({kind:"query",query:{limit:20}})).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await reportsPair();
+ await expect(unsupported.client.requestReports({kind:"query",query:{limit:20}})).rejects.toMatchObject({code:"unsupported"});
+ const ready=await reportsPair(dispatch);
+ for(const request of [
+  {kind:"query",query:{limit:51}},
+  {kind:"get",id:0},
+  {kind:"query",query:{headers:{}}},
+  {kind:"query",query:{limit:20},extra:true},
+ ]) await expect(ready.client.requestReports(request as never)).rejects.toMatchObject({code:"invalid_request"});
+ expect(dispatch).not.toHaveBeenCalled();
+});
+test("report failures stay bounded and a closed host aborts pending reads",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,abort:AbortSignal)=>{
+  signal=abort;
+  return new Promise<never>(()=>{});
+ });
+ const {client,host}=await reportsPair(dispatch);
+ const pending=client.requestReports({kind:"query",query:{limit:20}});
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ host.close();
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ client.close();
+ await rejected;
+ expect(dispatch).toHaveBeenCalledOnce();
+});
+test("report failure details are replaced with stable channel codes",async()=>{
+ const dispatch=vi
+  .fn()
+  .mockRejectedValueOnce(new Error("private upstream detail"))
+  .mockResolvedValueOnce({kind:"query",count:1,total:1,offset:0,limit:20,items:[]});
+ const {client}=await reportsPair(dispatch);
+ await expect(client.requestReports({kind:"query",query:{limit:20}})).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await expect(client.requestReports({kind:"query",query:{limit:20}})).rejects.toMatchObject({code:"uncertain",retryable:false});
+ expect(dispatch).toHaveBeenCalledTimes(2);
+});
+test("report request identities are isolated and cannot be replayed",async()=>{
+ const dispatch=vi.fn(()=>new Promise<never>(()=>{}));
+ const w=await reportsPair(dispatch);
+ const init=w.sent.find(item=>item.data.type==="app:init")!.data;
+ const port=w.received.find(item=>item.event.data.type==="app:init")!.event.ports[0];
+ const message={
+  ...acknowledgement(init),
+  type:"reports.request",
+  requestId:"1",
+  request:{kind:"query",query:{limit:20}},
+ };
+ delete (message as Record<string,unknown>).revision;
+ port.postMessage({...message,generation:"2"});
+ port.postMessage(message);
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ port.postMessage(message);
+ await vi.waitFor(()=>expect(w.host.state()).toBe("failed"));
+ expect(dispatch).toHaveBeenCalledOnce();
+});
+test("report deadline is uncertain, cancels native work and never retries",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,abort:AbortSignal)=>{
+  signal=abort;
+  return new Promise<never>(()=>{});
+ });
+ const {client}=await reportsPair(dispatch);
+ vi.useFakeTimers();
+ const pending=client.requestReports({kind:"query",query:{limit:20}});
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ await vi.advanceTimersByTimeAsync(20_000);
+ await rejected;
+ expect(signal?.aborted).toBe(true);
+ expect(dispatch).toHaveBeenCalledOnce();
+});
 const networkRequest=()=>({method:"GET",url:"https://api.example.com/v1",accept:"application/json",contentType:"",bodyBase64:""});
 test("reviewed network channel preserves binary response and remote auth status",async()=>{
  const dispatch=vi.fn(async(_request:unknown)=>({status:401,contentType:"application/octet-stream",bodyBase64:"AP+A"}));

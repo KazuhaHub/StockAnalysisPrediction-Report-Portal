@@ -69,6 +69,20 @@ test('network transport exists only for a granted network capability and capabil
  expect(sessions[1].options.onNetworkRequest).toBeTypeOf('function')
 })
 
+test('report transport exists only for a current reports.read grant and revocation retires the frame',()=>{
+ const view=render(<AppFrameV2 {...props}/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.onReportRequest).toBeUndefined()
+ view.rerender(<AppFrameV2 {...props} capabilities={['reports.read']}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(old);expect(sessions[0].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[1].options.onReportRequest).toBeTypeOf('function')
+ const current=screen.getByTitle('Fixture')
+ view.rerender(<AppFrameV2 {...props} capabilities={[]}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(current);expect(sessions[1].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[2].options.onReportRequest).toBeUndefined()
+})
+
 test('document reveal waits for height and content can grow and shrink in one iframe',()=>{
  render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame)
  act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')

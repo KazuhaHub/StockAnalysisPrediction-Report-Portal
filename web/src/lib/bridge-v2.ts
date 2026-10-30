@@ -92,6 +92,46 @@ export interface BridgeBackendResponse {
   readonly status: number;
   readonly body: string;
 }
+export interface BridgeReportQuery {
+  readonly symbol?: string;
+  readonly q?: string;
+  readonly kind?: string;
+  readonly subtype?: string;
+  readonly date?: string;
+  readonly since?: string;
+  readonly until?: string;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+export type BridgeReportRequest =
+  | { readonly kind: "query"; readonly query: BridgeReportQuery }
+  | { readonly kind: "get"; readonly id: number };
+export interface BridgeReportSummary {
+  readonly id: number;
+  readonly runId: string;
+  readonly symbol: string;
+  readonly name: string;
+  readonly date: string;
+  readonly time: string;
+  readonly kind: string;
+  readonly subtype: string;
+  readonly title: string;
+  readonly source: string;
+  readonly version: string;
+}
+export interface BridgeReportDetail extends BridgeReportSummary {
+  readonly bodyMarkdown: string;
+}
+export type BridgeReportResponse =
+  | {
+      readonly kind: "query";
+      readonly count: number;
+      readonly total: number;
+      readonly offset: number;
+      readonly limit: number;
+      readonly items: readonly BridgeReportSummary[];
+    }
+  | { readonly kind: "get"; readonly report: BridgeReportDetail };
 export type BridgeBackendFailure =
   | "not_ready"
   | "unsupported"
@@ -113,6 +153,13 @@ export class BridgeBackendError extends Error {
   constructor(readonly code: BridgeBackendFailure) {
     super(`Application request: ${code}`);
     this.name = "BridgeBackendError";
+  }
+}
+export class BridgeReportError extends Error {
+  readonly retryable = false;
+  constructor(readonly code: BridgeBackendFailure) {
+    super(`Application reports: ${code}`);
+    this.name = "BridgeReportError";
   }
 }
 export function parseBridgeBackendRequest(
@@ -167,6 +214,161 @@ export function parseBridgeBackendResponse(
   }
   return Object.freeze({ status: value.status, body: value.body });
 }
+const reportQueryKeys = [
+  "symbol",
+  "q",
+  "kind",
+  "subtype",
+  "date",
+  "since",
+  "until",
+  "limit",
+  "offset",
+];
+function reportText(value: unknown, limit = 512): value is string {
+  return isString(value) && value.length <= limit && !/[\x00\r\n]/.test(value);
+}
+function reportDate(value: unknown): value is string {
+  return reportText(value, 32) && (value === "" || value === "today" || /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+function reportBody(value: unknown): value is string {
+  return isString(value) && value.length <= 1_048_576 && !value.includes("\x00");
+}
+function integer(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+export function parseBridgeReportRequest(
+  value: unknown,
+): BridgeReportRequest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "get") {
+    if (!exact(value, ["kind", "id"])) return null;
+    return typeof value.id === "number" &&
+      Number.isSafeInteger(value.id) &&
+      value.id > 0
+      ? Object.freeze({ kind: "get", id: value.id })
+      : null;
+  }
+  if (kind !== "query" || !exact(value, ["kind", "query"])) return null;
+  const query = value.query;
+  if (!query || typeof query !== "object" || Array.isArray(query)) return null;
+  const q = query as Record<string, unknown>;
+  if (
+    !Object.keys(q).every((key) => reportQueryKeys.includes(key)) ||
+    !["symbol", "q", "kind", "subtype"].every(
+      (key) => q[key] === undefined || reportText(q[key]),
+    ) ||
+    !["date", "since", "until"].every(
+      (key) => q[key] === undefined || reportDate(q[key]),
+    ) ||
+    (q.limit !== undefined &&
+      (!integer(q.limit) || q.limit < 1 || q.limit > 50)) ||
+    (q.offset !== undefined &&
+      (!integer(q.offset) || q.offset < 0 || q.offset > 1_000_000))
+  )
+    return null;
+  return Object.freeze({
+    kind: "query",
+    query: Object.freeze({ ...q }) as BridgeReportQuery,
+  });
+}
+function parseBridgeReportSummary(value: unknown): BridgeReportSummary | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !exact(value, [
+      "id",
+      "runId",
+      "symbol",
+      "name",
+      "date",
+      "time",
+      "kind",
+      "subtype",
+      "title",
+      "source",
+      "version",
+    ]) ||
+    typeof value.id !== "number" ||
+    !Number.isSafeInteger(value.id) ||
+    value.id <= 0
+  )
+    return null;
+  for (const key of [
+    "runId",
+    "symbol",
+    "name",
+    "date",
+    "time",
+    "kind",
+    "subtype",
+    "title",
+    "source",
+    "version",
+  ]) {
+    if (!reportText(value[key])) return null;
+  }
+  return Object.freeze({
+    id: value.id,
+    runId: value.runId as string,
+    symbol: value.symbol as string,
+    name: value.name as string,
+    date: value.date as string,
+    time: value.time as string,
+    kind: value.kind as string,
+    subtype: value.subtype as string,
+    title: value.title as string,
+    source: value.source as string,
+    version: value.version as string,
+  });
+}
+export function parseBridgeReportResponse(
+  value: unknown,
+): BridgeReportResponse | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "get") {
+    if (!exact(value, ["kind", "report"])) return null;
+    const raw = value.report;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const { bodyMarkdown, ...summaryValue } = raw as Record<string, unknown>;
+    const summary = parseBridgeReportSummary(summaryValue);
+    if (!summary || !reportBody(bodyMarkdown)) return null;
+    return Object.freeze({
+      kind: "get",
+      report: Object.freeze({ ...summary, bodyMarkdown }),
+    });
+  }
+  if (
+    kind !== "query" ||
+    !exact(value, ["kind", "count", "total", "offset", "limit", "items"]) ||
+    !integer(value.count) ||
+    value.count < 0 ||
+    value.count > 50 ||
+    !integer(value.total) ||
+    value.total < 0 ||
+    !integer(value.offset) ||
+    value.offset < 0 ||
+    !integer(value.limit) ||
+    value.limit < 1 ||
+    value.limit > 50 ||
+    !Array.isArray(value.items) ||
+    value.items.length !== value.count
+  )
+    return null;
+  const items = value.items.map(parseBridgeReportSummary);
+  if (items.some((item) => item === null)) return null;
+  return Object.freeze({
+    kind: "query",
+    count: value.count,
+    total: value.total,
+    offset: value.offset,
+    limit: value.limit,
+    items: Object.freeze(items as BridgeReportSummary[]),
+  });
+}
 interface Session {
   state(): BridgeState;
   close(): void;
@@ -186,6 +388,10 @@ export interface BridgeHostOptions extends BaseOptions {
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
   onNetworkRequest?: (request: NetworkRequest, signal: AbortSignal) => Promise<NetworkResponse>;
+  onReportRequest?: (
+    request: BridgeReportRequest,
+    signal: AbortSignal,
+  ) => Promise<BridgeReportResponse>;
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -469,6 +675,7 @@ export function createBridgeHost(
     announced = false;
   let lastRequest = 0n;
   let lastNetworkRequest = 0n;
+  let reportIssued = 0n;
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
@@ -488,6 +695,10 @@ export function createBridgeHost(
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
   const networkRequests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const reportRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
@@ -582,6 +793,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     networkRequests.clear();
+    for (const request of reportRequests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    reportRequests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -897,6 +1113,107 @@ export function createBridgeHost(
             }
           },
           Math.max(0, 100 - (Date.now() - lastHeightAt)),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "reports.request" || data.type === "reports.cancel")
+    ) {
+      const cancel = data.type === "reports.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > reportIssued) {
+          fail("protocol_error");
+          return;
+        }
+        const active = reportRequests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          reportRequests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= reportIssued) {
+        fail("protocol_error");
+        return;
+      }
+      reportIssued = BigInt(id);
+      const request = parseBridgeReportRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "reports.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (!options.onReportRequest || !granted?.includes("reports.read")) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (reportRequests.size >= 2) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = reportRequests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        reportRequests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 15_000);
+      reportRequests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted) throw new BridgeReportError("uncertain");
+          return options.onReportRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseBridgeReportResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof BridgeReportError &&
+                backendFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
         );
       return;
     }
@@ -1294,6 +1611,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
   requestNetwork(request: NetworkRequest, signal?: AbortSignal): Promise<NetworkResponse>;
+  requestReports(
+    request: BridgeReportRequest,
+    signal?: AbortSignal,
+  ): Promise<BridgeReportResponse>;
   describePage(
     scope: string,
     page: AppPage | null,
@@ -1419,6 +1740,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   }
   let issued = 0n;
   let networkIssued = 0n;
+  let reportIssued = 0n;
   const requests = new Map<
     string,
     {
@@ -1435,6 +1757,14 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       dispose: () => void;
     }
   >();
+  const reportRequests = new Map<
+    string,
+    {
+      resolve: (value: BridgeReportResponse) => void;
+      reject: (error: BridgeReportError) => void;
+      dispose: () => void;
+    }
+  >();
   function retireRequests() {
     for (const request of requests.values()) {
       request.dispose();
@@ -1446,6 +1776,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new AppNetworkError("uncertain"));
     }
     networkRequests.clear();
+    for (const request of reportRequests.values()) {
+      request.dispose();
+      request.reject(new BridgeReportError("uncertain"));
+    }
+    reportRequests.clear();
   }
   let pageRevision = 0n,
     lastInvocation = 0n,
@@ -1714,6 +2049,47 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       }
       return;
     }
+    if (data && typeof data === "object" && data.type === "reports.result") {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (!decimal(data.requestId) || BigInt(data.requestId) > reportIssued) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response ? parseBridgeReportResponse(data.response) : null;
+      if (
+        (response && !value) ||
+        (failure && !backendFailures.has(data.code as BridgeBackendFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = reportRequests.get(data.requestId);
+      if (!pending) return;
+      reportRequests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new BridgeReportError(data.code as BridgeBackendFailure),
+        );
+      return;
+    }
     if (data && typeof data === "object" && data.type === "network.result") {
       const response = exact(data, [
         "type",
@@ -1869,6 +2245,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         retireRequests();
         issued = 0n;
         networkIssued = 0n;
+        reportIssued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -2190,6 +2567,58 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "network.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestReports(
+      value: BridgeReportRequest,
+      signal?: AbortSignal,
+    ): Promise<BridgeReportResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new BridgeReportError("not_ready"));
+      if (!context.capabilities.includes("reports.read"))
+        return Promise.reject(new BridgeReportError("unsupported"));
+      const request = parseBridgeReportRequest(value);
+      if (!request)
+        return Promise.reject(new BridgeReportError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new BridgeReportError("not_ready"));
+      if (reportRequests.size >= 2 || reportIssued === MAX_REVISION)
+        return Promise.reject(new BridgeReportError("busy"));
+      const id = (++reportIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = reportRequests.get(id);
+          if (!active) return;
+          reportRequests.delete(id);
+          active.dispose();
+          reject(new BridgeReportError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "reports.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 20_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        reportRequests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "reports.request",
             ...envelope,
             requestId: id,
             request,
