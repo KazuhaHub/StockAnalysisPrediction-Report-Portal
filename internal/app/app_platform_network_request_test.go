@@ -47,6 +47,9 @@ func testPlatformNetworkRequestRequiresGrant(t *testing.T, pg bool) {
 		intent.Close()
 		t.Fatal("denied optional capability signed a request")
 	}
+	if result, err := s.requestPlatformNetwork(context.Background(), actor, lease.installationID, binding, "GET", "https://api.example.com/v1", "application/json", "", nil, platformRuntimeEndpoint{}); !errors.Is(err, errAppPlatformNetworkUnavailable) || len(result.Body) != 0 {
+		t.Fatal("denied capability reached dispatch or released a response", err)
+	}
 	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
 		t.Fatal("refused request wrote authority")
 	}

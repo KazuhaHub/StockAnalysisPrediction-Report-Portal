@@ -101,3 +101,12 @@ mismatch. That exact subcase then passed three consecutive race runs. A repeated
 run failed in the same fixture setup for the `grant` subcase. The combined race
 regression remains unresolved; passing focused new cases is not a passing
 combined run or a diagnosed/fixed root cause.
+
+Initial revision 7e69b4ab8ed1749c94c6ee5ad0534455513979bc passed native quota/
+browser workflow 40987519817/job 123841897884, including the two actual current-
+SQL signing/withdrawal markers. General workflow 40987519779/job 123841898193
+passed the focused PG request group but failed staticcheck U1000 because the
+complete private dispatch path had not been called by tests. The paired denied-
+grant fixture now also calls the real coordinator and requires fixed denial,
+empty response and no SQL mutation. A corrected revision must pass general CI;
+the original failed run is not a pass. Actual HTTPS remains a separate next slice.
