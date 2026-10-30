@@ -91,8 +91,16 @@ pin matching, idempotent bootstrap, conflicting enrollment, CLI refusal and the
 Portal environment bootstrap. Linux tests compile the concrete root/data/Docker
 service path.
 
-The disposable quota/browser workflow now executes the real current-viewer HTTPS
-and SDK network paths. A remaining H03 gate is to add this exact service command
-to a disposable XFS/Docker deployment drill, restart it, reconnect Portal, install
-a managed app through the UI, and record the exact run and artifacts. No existing
-test-only endpoint or inspect command is being presented as that evidence.
+On source candidate `cf4084b308bb19fcea17a7e826ae80f66042f210`, full test workflow
+`41010542804` and app-runner daemon workflow `41010542824` both passed. The latter
+created a newly owned loopback XFS project-quota mount, bootstrapped and started
+the real `serve` command, observed the managed profile from the controller UID,
+stopped the service and verified socket removal, restarted it without replacing
+the journal or enrollment, observed the profile again, and confirmed the Portal
+root endpoint. Existing browser/native coverage continues to exercise current
+viewer HTTPS and SDK network paths.
+
+A remaining H03 gate is to connect this exact long-running service to the Portal
+browser managed-installation path and record a complete managed app installation
+through the UI. The service restart drill and the separately hosted Portal
+browser acceptance are not being presented as that one combined flow.
