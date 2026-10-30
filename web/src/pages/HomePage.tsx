@@ -31,7 +31,8 @@ import { useAuth } from '../auth'
 import Omnibox from '../components/Omnibox'
 import ReportCard from '../components/ReportCard'
 import { linkIconComponent } from '../components/linkIcons'
-import { linkDisplayLabel, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
+import { linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
+import { useAppAccess } from '../appAccess'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import { useHomeQuotes } from '../lib/useHomeQuotes'
 import { versionLabel } from '../lib/versionLabel'
@@ -46,6 +47,7 @@ export default function HomePage() {
   const { token } = theme.useToken()
   const navigate = useNavigate()
   const { can } = useAuth()
+  const appAccess = useAppAccess()
   const [sp, setSp] = useSearchParams()
   const [data, setData] = useState<HomeResp | null>(null)
   const [loading, setLoading] = useState(true)
@@ -191,6 +193,10 @@ export default function HomePage() {
     if (res) {
       const perm = shortcutPerm(res)
       if (perm && !can(perm)) return null
+      // An entry button pinned to an app the reader's OU has closed (ADR 0048) is hidden like one
+      // pinned to an app the reader lacks the permission for.
+      const appKey = shortcutAppKey(res)
+      if (appKey && !appAccess.isOpen(appKey)) return null
       return (
         <Button key={l.id} icon={<Icon />} onClick={() => triggerShortcut(res.shortcut, navigate, res.param)}>
           {linkDisplayLabel(l, t)}

@@ -89,6 +89,13 @@ export function shortcutPerm(res: ResolvedShortcut): string | undefined {
   return res.shortcut.requiresRun ? 'run_batch' : undefined
 }
 
+// shortcutAppKey is the app an 'apps' entry button is pinned to, as the key the server's per-OU app
+// access uses (ADR 0048): `builtin:<slug>` for a built-in app, the installed app's id otherwise.
+// Undefined for the bare hub button and for every other shortcut.
+export function shortcutAppKey(res: ResolvedShortcut): string | undefined {
+  return res.shortcut.key === 'apps' ? res.param : undefined
+}
+
 // builtinAppOptions lists the built-in apps as entry-button pin choices (value `builtin:<key>`),
 // for the target picker in the entry-button editor. Downloadable apps are appended by the caller.
 export function builtinAppOptions(label: (titleKey: string) => string): { value: string; label: string }[] {

@@ -7,6 +7,7 @@ import { api, errText } from '../../api/client'
 import type { AppMarketEntry, AppMarketResp, AppPreviewResp, AppsResp, AppSummary } from '../../api/types'
 import AppBackendModal from '../../components/AppBackendModal'
 import ScopePermissionModal from '../../components/ScopePermissionModal'
+import AppLayoutAdmin from './AppLayoutAdmin'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
 // actual install once the scopes are approved.
@@ -201,6 +202,8 @@ export default function AppsAdminPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <AppBackendModal app={backendApp} onClose={() => setBackendApp(null)} />
+      {/* Order and per-OU access for every app, built-in and installed (ADR 0048). */}
+      <AppLayoutAdmin />
       <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
       <Card
         title={

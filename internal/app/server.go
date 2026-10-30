@@ -1110,6 +1110,12 @@ func repKind(r Rep) string {
 func (s *Server) tokenOK(r *http.Request, need string) bool {
 	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	if s.appTok != nil && s.appTok.valid(got, need, time.Now()) {
+		// A token minted for a user opening an app is only as good as that user's access to the app
+		// right now (ADR 0048): a closed app, or a user moved into a closed OU, is cut off here, not
+		// when the token's lifetime ends.
+		if entry, ok := s.appTok.entry(got); ok && entry.appID != "" && entry.username != "" && s.st.appClosedFor(entry.username, entry.appID) {
+			return false
+		}
 		return true
 	}
 	return s.st.TokenValid(got, need)

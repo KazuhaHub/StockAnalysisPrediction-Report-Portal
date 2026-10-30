@@ -31,6 +31,7 @@ import { FavoriteButton } from '../components/FavoriteButton'
 import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
+import { useAppAccess } from '../appAccess'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
@@ -96,6 +97,7 @@ const sameSymbol = (a: string, b: string) => a.trim().toUpperCase() === b.trim()
 export default function StockPage() {
   const { t } = useTranslation()
   const { admin, forecast, forecastReader, user } = useAuth()
+  const quotesOpen = useAppAccess().isOpen('builtin:quotes')
   // Older servers omit the navigation hint; preserve their existing reading-page requests.
   // An explicit none still suppresses both reads, and every server response remains authoritative.
   const forecastEnabled = forecast === undefined || forecast?.scope === 'all' || forecast?.scope === 'own'
@@ -535,13 +537,16 @@ export default function StockPage() {
               />
             </div>
           )}
-          <div style={{ marginTop: 8, textAlign: 'right' }}>
-            {/* What makes keeping this panel small fair: the full-size chart, the other ranges and
-                the other markets are one click away, already pointed at the symbol being read. */}
-            <Link to={`/apps/quotes${qs({ symbol: data.symbol })}`} style={{ fontSize: 12 }}>
-              {t('quote.openInApp')}
-            </Link>
-          </div>
+          {quotesOpen && (
+            <div style={{ marginTop: 8, textAlign: 'right' }}>
+              {/* What makes keeping this panel small fair: the full-size chart, the other ranges and
+                  the other markets are one click away, already pointed at the symbol being read. When
+                  the Quotes app is closed for the reader (ADR 0048) there is no such link to offer. */}
+              <Link to={`/apps/quotes${qs({ symbol: data.symbol })}`} style={{ fontSize: 12 }}>
+                {t('quote.openInApp')}
+              </Link>
+            </div>
+          )}
         </Card>
 
         {/* Narrow / wide mode: the timeline is a horizontal strip on top; normal mode on a

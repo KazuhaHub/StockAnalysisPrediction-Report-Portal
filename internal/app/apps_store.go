@@ -119,7 +119,7 @@ func (s *Store) DeleteApp(id string) error {
 			return err
 		}
 	}
-	for _, q := range []string{`DELETE FROM app_backend_connections WHERE app_id=?`, `DELETE FROM app_files WHERE app_id=?`, `DELETE FROM apps WHERE id=?`} {
+	for _, q := range []string{`DELETE FROM app_backend_connections WHERE app_id=?`, `DELETE FROM app_files WHERE app_id=?`, `DELETE FROM app_order WHERE app_key=?`, `DELETE FROM app_ou_access WHERE app_key=?`, `DELETE FROM apps WHERE id=?`} {
 		if _, err := tx.Exec(s.bind(q), id); err != nil {
 			return err
 		}
