@@ -12,6 +12,8 @@ const store = vi.hoisted(() => ({
   jobs: [] as unknown[],
   summary: { running: 0, waiting: 0, scheduled: 0, budget: 3 },
 }))
+// Counts the live pollers: started minus stopped. The first tick runs at once, as the real one does.
+const poll = vi.hoisted(() => ({ live: 0 }))
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
 vi.mock('../lib/conditionalGet', () => ({
@@ -20,6 +22,15 @@ vi.mock('../lib/conditionalGet', () => ({
   getIfChanged: (url: string) => {
     store.urls.push(String(url))
     return String(url).includes('/queue') ? Promise.resolve(store.summary) : Promise.resolve({ jobs: store.jobs })
+  },
+}))
+vi.mock('../lib/visiblePoll', () => ({
+  startVisiblePoll: (fn: () => unknown) => {
+    poll.live++
+    void fn()
+    return () => {
+      poll.live--
+    }
   },
 }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: store.admin, user: 'alice' }) }))
@@ -59,6 +70,7 @@ const rows = (section: string) => within(screen.getByRole('list', { name: sectio
 
 beforeEach(() => {
   store.urls = []
+  poll.live = 0
   store.admin = true
   store.jobs = []
   store.summary = { running: 0, waiting: 0, scheduled: 0, budget: 3 }
@@ -166,6 +178,26 @@ describe('Tasks drawer Runs tab', () => {
     expect(await screen.findByText('tasks.result.done:{"ok":1}')).toBeTruthy()
     expect(screen.getByText('tasks.result.partly:{"ok":3,"failed":1}')).toBeTruthy()
     expect(screen.getByText('tasks.result.failed:{"failed":2}')).toBeTruthy()
+  })
+
+  it('treats an expired run as finished: muted, labelled, and with no cancel', async () => {
+    store.jobs = [job({ id: 8, status: 'expired', total: 1, succeeded: 0, finished_at: '2026-10-29 09:30:00' })]
+    mount()
+    await waitFor(() => expect(rows('tasks.section.finished')).toHaveLength(1))
+    expect(screen.queryByRole('list', { name: 'tasks.section.active' })).toBeNull()
+    expect(rows('tasks.section.finished')[0].textContent).toContain('batch.status.expired')
+    expect(screen.queryByRole('button', { name: 'tasks.cancel' })).toBeNull()
+  })
+
+  it('stops polling the queue while the Exports tab is shown, and polls at once on return', async () => {
+    const { rerender } = mount()
+    await waitFor(() => expect(poll.live).toBe(1))
+    rerender(<Harness tab="exports" />)
+    await waitFor(() => expect(poll.live).toBe(0))
+    store.urls = []
+    rerender(<Harness tab="runs" />)
+    await waitFor(() => expect(poll.live).toBe(1))
+    await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs'))).toBe(true))
   })
 
   it('lists at most five recently finished runs, newest first', async () => {

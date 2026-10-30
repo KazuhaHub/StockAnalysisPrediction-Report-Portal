@@ -585,6 +585,7 @@
   "batch.status.cancelling": "Cancelling",
   "batch.status.failed": "Failed",
   "batch.status.finished": "Finished",
+  "batch.status.expired": "Expired",
   "batch.status.partial": "Partial",
   "batch.status.queued": "Queued",
   "batch.status.running": "Running",

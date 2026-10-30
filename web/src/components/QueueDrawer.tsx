@@ -52,6 +52,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const showRuns = canRun
   const showExports = canExport || admin
   const activeTab: DrawerTab = tab === 'exports' ? (showExports ? 'exports' : 'runs') : showRuns ? 'runs' : 'exports'
+  // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
+  const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
   const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
@@ -102,7 +104,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   useEffect(() => {
     if (!open) return
     void refreshTasks()
-    if (!canRun) return
+    if (!runsShown) return
     // Reopening asks again, so the drawer must not present the previous open's answer as this
     // one's — but it keeps the rows it has so a reopen is not a flash of spinner.
     setLoadErr('')
@@ -114,7 +116,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       unwatch()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, scope, canRun])
+  }, [open, scope, runsShown])
 
   const targetName = (id: number) => targets.find((tg) => tg.id === id)?.name || `#${id}`
 
@@ -209,6 +211,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       detail = t(`batch.status.${j.status}`, j.status)
     } else if (j.status === 'cancelled') {
       detail = t('tasks.result.cancelled')
+    } else if (j.status === 'expired') {
+      detail = t('batch.status.expired')
     } else {
       const ok = j.succeeded + j.partial
       const outcome = runOutcome(j)

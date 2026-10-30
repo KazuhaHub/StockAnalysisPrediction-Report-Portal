@@ -585,6 +585,7 @@
   "batch.status.cancelling": "取消中",
   "batch.status.failed": "失敗",
   "batch.status.finished": "已完成",
+  "batch.status.expired": "已過期",
   "batch.status.partial": "部分成功",
   "batch.status.queued": "排隊中",
   "batch.status.running": "執行中",

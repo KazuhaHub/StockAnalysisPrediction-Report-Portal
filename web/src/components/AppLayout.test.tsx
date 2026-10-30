@@ -363,6 +363,28 @@ describe('AppLayout Tasks entry', () => {
     expect(drawer.getAttribute('data-tab')).toBe('exports')
   })
 
+  it('counts exports only where the Exports tab would be shown, and keeps the dot while the run summary is unknown', async () => {
+    authState.value = { ...authState.value, admin: false, can: (p) => p === 'run_batch' }
+    feed = [exportTask('a')]
+    answer(exportPolicy(false))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/tasks?limit=20'))
+    expect(shown(container, '.ant-badge-count')).toBeNull()
+    expect(shown(container, '.ant-badge-dot')).not.toBeNull()
+  })
+
+  it('keeps the dot, not a firm number, while the run summary is unknown even with active exports', async () => {
+    authState.value = { ...authState.value, admin: false, can: () => true }
+    feed = [exportTask('a')]
+    answer(exportPolicy(true))
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(apiGet).toHaveBeenCalledWith('/api/tasks?limit=20'))
+    expect(shown(container, '.ant-badge-dot')).not.toBeNull()
+    expect(shown(container, '.ant-badge-count')).toBeNull()
+  })
+
   it('opens on Runs for someone who can run', async () => {
     const user = userEvent.setup()
     answer(exportPolicy(true))

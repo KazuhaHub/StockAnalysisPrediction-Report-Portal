@@ -130,7 +130,8 @@ function AppShell() {
   // completion toasts, so it runs wherever the header does.
   const showTasks = canRun || canExport
   const { tasks: myTasks, active: myActive, refresh: refreshTasks } = useTaskCenter(showTasks)
-  const activeExports = myActive.filter((x) => x.kind === 'export' && isActiveTask(x)).length
+  // Counted only where the drawer would show the Exports tab, so badge and drawer agree.
+  const activeExports = canExport || admin ? myActive.filter((x) => x.kind === 'export' && isActiveTask(x)).length : 0
   const canForecast = admin || forecast?.scope === 'all' || forecast?.scope === 'own'
 
   // "New version" prompt: once a deploy lands under this open tab, the shared coordinator says so
@@ -399,7 +400,7 @@ function AppShell() {
             // enough not to read as an alert. (Only for someone who can run; an export-only reader
             // has no summary to wait for.)
             <Badge
-              {...(canRun && !queue && activeExports === 0
+              {...(canRun && !queue
                 ? { dot: true, color: token.colorTextQuaternary }
                 : { count: (canRun && queue ? queue.running + queue.waiting + queue.scheduled : 0) + activeExports })}
               size="small"

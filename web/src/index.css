@@ -1322,7 +1322,8 @@ body {
 .rp-header-tools {
   display: flex;
   align-items: center;
-  gap: 4px;
+  /* Wide enough that a two-digit or 99+ badge on Tasks clears the next icon. */
+  gap: 8px;
 }
 .rp-header-icon.ant-btn {
   width: 32px;
