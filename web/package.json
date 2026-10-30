@@ -15,6 +15,7 @@
     "gen:zh-tw": "node scripts/gen-zh-tw.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:durations": "node scripts/gen-test-durations.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
