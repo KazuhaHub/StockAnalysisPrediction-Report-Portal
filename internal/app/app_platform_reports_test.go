@@ -179,3 +179,64 @@ func TestPlatformReportsTwoOUsAndOldBinding(t *testing.T) {
 		t.Fatal("old generation read report data")
 	}
 }
+
+func TestPlatformReportsNoAccessAndAdminDemotion(t *testing.T) {
+	s, installationOwner, installation := platformReportsFixture(t)
+	binding, err := s.inspectPlatformLaunchAccess(installationOwner, installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingMap := map[string]string{"generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}
+	if err := s.st.UpsertUser(User{Username: "reports-no-access", PasswordHash: "fixture", Role: "user", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	noAccess := platformReportSession(t, s, "reports-no-access")
+	denied := platformReportsRequest(t, s, noAccess, installation, map[string]any{"binding": bindingMap, "query": map[string]any{"limit": 20}})
+	if denied.Code != http.StatusNotFound || bytes.Contains(denied.Body.Bytes(), []byte("visible report")) {
+		t.Fatalf("no-access viewer read application reports: %d", denied.Code)
+	}
+
+	if err := s.st.UpsertUser(User{Username: "reports-demoted-admin", PasswordHash: "fixture", Role: "admin", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	demoted := platformReportSession(t, s, "reports-demoted-admin")
+	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{"id": platformFixtureID(614), "installation_id": installation, "principal_type": "user", "username": demoted.username, "account_created": demoted.created, "account_generation": demoted.generation, "group_id": nil, "group_created": nil, "revision": 1, "created_ms": 1, "updated_ms": 1})
+	root := s.st.EnsureDefaultGroup()
+	group, err := s.st.CreateUserGroup("reports-demoted-group", "", int(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.st.SetGroupRestricted(group, true)
+	if err := s.st.SetPrimaryGroup(demoted.username, group); err != nil {
+		t.Fatal(err)
+	}
+	s.st.SaveVersion(ReportVersion{Name: "reports-admin-secret", Ord: 3, Visibility: VisibilityOwner})
+	reportID, _, err := s.st.UpsertReport(Rep{Symbol: "600101", Date: "2026-10-30", RType: "research", Title: "admin-only report", Version: "reports-admin-secret", MD: "admin-only report"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.StampReportOwner(reportID, group); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.AddReportViewer(reportID, "2026-10-30", demoted.username, group); err != nil {
+		t.Fatal(err)
+	}
+	query := map[string]any{"binding": bindingMap, "query": map[string]any{"q": "admin-only report", "limit": 20}}
+	response := platformReportsRequest(t, s, demoted, installation, query)
+	var adminResult struct {
+		Total int `json:"total"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &adminResult) != nil || adminResult.Total != 1 {
+		t.Fatalf("current administrator report scope: %d %s", response.Code, response.Body.String())
+	}
+	if err := s.st.SetUserRole(demoted.username, "user"); err != nil {
+		t.Fatal(err)
+	}
+	response = platformReportsRequest(t, s, demoted, installation, query)
+	var demotedResult struct {
+		Total int `json:"total"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &demotedResult) != nil || demotedResult.Total != 0 {
+		t.Fatalf("demoted administrator retained global report scope: %d %s", response.Code, response.Body.String())
+	}
+}
