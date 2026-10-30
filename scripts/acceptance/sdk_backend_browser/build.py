@@ -21,11 +21,11 @@ def build(apps, output):
     child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
-import {AppRoot,useAppBackend,useAppNetwork,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
+import {AppRoot,useAppBackend,useAppNetwork,useAppReports,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
- const backend=useAppBackend(),network=useAppNetwork(),{presentation}=useAppPresentation();
+ const backend=useAppBackend(),network=useAppNetwork(),reports=useAppReports(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
@@ -43,8 +43,17 @@ function Fixture(){
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/success',accept:'application/json',contentType:''});
   setNetworkResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
  }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
+ const reportsSequence=useRef(0),[reportsResult,setReportsResult]=useState({id:0,text:'none'}),[reportsBusy,setReportsBusy]=useState(false);
+ async function runReports(){const id=++reportsSequence.current;setReportsResult({id,text:'pending'});setReportsBusy(true);try{
+  const page=await reports.query({q:'Browser current viewer report',limit:20});
+  if(page.count!==1||page.items.length!==1)throw Object.assign(new Error('report count'),{code:'uncertain'});
+  const detail=await reports.get(page.items[0].id);
+  if(detail.kind!=='get')throw Object.assign(new Error('report detail'),{code:'uncertain'});
+  setReportsResult({id,text:JSON.stringify({count:page.count,total:page.total,title:detail.report.title,bodyMarkdown:detail.report.bodyMarkdown})});
+ }catch(error){setReportsResult({id,text:'error:'+error.code})}finally{setReportsBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
+ <Typography.Text data-testid="reports-ready">{String(reports.ready)}</Typography.Text>
  <Button onClick={()=>setLongLabels(v=>!v)}>Toggle long labels</Button>
  <Typography.Text data-testid="page-count">{pageCount}</Typography.Text>
  <Typography.Text data-testid="page-cancelled">{pageCancelled}</Typography.Text>
@@ -63,7 +72,9 @@ function Fixture(){
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo?disconnect=1')}>Disconnect write</Button>
  <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text>
  <Button disabled={!network.ready||networkBusy} onClick={()=>runNetwork()}>Read network</Button>
- <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text></Space>
+ <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text>
+ <Button disabled={!reports.ready||reportsBusy} onClick={()=>runReports()}>Read reports</Button>
+ <Typography.Text data-testid="reports-result" data-request-id={reportsResult.id}>{reportsResult.text}</Typography.Text></Space>
 }
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
     host = output / "host.tsx"

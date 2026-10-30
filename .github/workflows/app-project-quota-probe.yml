@@ -7,10 +7,12 @@ on:
       - 'internal/appplatform/route_query.go'
       - 'internal/app/app_platform_capability_snapshot*'
       - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
       - 'internal/app/app_platform_managed_access.go'
       - 'internal/app/app_platform_template_browser_test.go'
       - 'internal/app/app_platform_http_browser_test.go'
       - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/appReportsV2*'
       - 'web/src/lib/route-query-v2*'
       - 'web/src/lib/page-v2*'
       - 'web/src/lib/descriptor-contract.generated.ts'
@@ -73,10 +75,12 @@ on:
       - 'internal/appplatform/route_query.go'
       - 'internal/app/app_platform_capability_snapshot*'
       - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
       - 'internal/app/app_platform_managed_access.go'
       - 'internal/app/app_platform_template_browser_test.go'
       - 'internal/app/app_platform_http_browser_test.go'
       - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/appReportsV2*'
       - 'web/src/lib/route-query-v2*'
       - 'web/src/lib/page-v2*'
       - 'web/src/lib/descriptor-contract.generated.ts'
@@ -149,7 +153,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: ba6c6b78826f53ec01a05eb3e60544eeb54e9593
+          ref: 576c6445bba85b0e348cbb9b2435c43c2b897647
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6

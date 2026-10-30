@@ -129,7 +129,7 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		t.Fatal("uncertain HTTP write was retried or lost", response.Code, response.Body.String())
 	}
 	t.Log("PORTAL_WRITABLE_BACKEND_HTTP_NO_RETRY")
-	testNativeSDKBackendBrowser(t, s, actor, installation, mux, false)
+	testNativeSDKBackendBrowser(t, s, actor, installation, mux, false, false)
 	mustExec(t, s.st, `DELETE FROM app_platform_access_grants WHERE installation_id=?`, installation)
 	if response := platformBackendHTTPCall(mux, backendPath, cookie, httpBody, nil); response.Code != 404 || strings.Contains(response.Body.String(), "viewer") {
 		t.Fatal("HTTP backend remained available after audience revocation", response.Code)

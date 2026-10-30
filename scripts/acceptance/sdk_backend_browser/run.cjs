@@ -24,12 +24,24 @@ async function main(){
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   const networkAvailable=await frame.getByTestId('network-ready').innerText()==='true';
+  let reportsIssued=0;
+  async function dispatchReports(){
+   await frame.getByRole('button',{name:'Read reports',exact:true}).click();
+   const result=frame.locator('[data-testid="reports-result"][data-request-id="'+(++reportsIssued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
   if(networkAvailable){
    stage='network-success';await frame.getByRole('button',{name:'Read network',exact:true}).click();
    const result=frame.locator('[data-testid="network-result"]');
    await result.filter({hasNotText:'pending'}).waitFor();
    const text=await result.innerText(),value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('network SDK result changed');
+  }
+  const reportsReady=await frame.getByTestId('reports-ready').innerText();
+  if(reportsReady==='true'){
+   stage='reports';const reportText=await dispatchReports(),report=JSON.parse(reportText);
+   if(report.count!==1||report.total!==1||report.title!=='Browser current viewer report'||!report.bodyMarkdown.includes('Current viewer evidence.'))throw new Error('reports SDK result changed');
   }
   stage='page-actions';await page.getByRole('heading',{name:'Fixture zh-CN /',exact:true}).waitFor();
   await page.getByRole('button',{name:'Header increment',exact:true}).click();
@@ -100,6 +112,9 @@ async function main(){
    await result.filter({hasNotText:'pending'}).waitFor();
    if(await result.innerText()!=='error:unavailable')throw new Error('revoked network remained available');
   }
+  if(reportsReady==='true'){
+   stage='reports-revoked';if(await dispatchReports()!=='error:unavailable')throw new Error('revoked reports remained available');
+  }
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
   stage='draft-edit';await frame.getByRole('button',{name:'Edit draft',exact:true}).click();
   await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
@@ -125,6 +140,9 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_REVOKED');
   if(networkAvailable){
    console.log('SDK_NATIVE_BROWSER_NETWORK');
+  }
+  if(reportsReady==='true'){
+   console.log('SDK_NATIVE_BROWSER_REPORTS');
   }
  }finally{clearTimeout(deadline);await browser.close()}
 }

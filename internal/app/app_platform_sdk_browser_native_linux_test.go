@@ -45,7 +45,7 @@ func platformSDKBrowserArchive(t *testing.T, original []byte) []byte {
 // Runs under the real non-root controller after the background scheduler has
 // completed the signed SDK package. No candidate, boot or browser response is
 // fabricated; only the browser/session bootstrap and revoke control are fixture.
-func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork bool) {
+func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork, expectReports bool) {
 	t.Helper()
 	dir := os.Getenv("APP_SDK_BROWSER_DIR")
 	if dir == "" {
@@ -61,6 +61,27 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 		}
 	}
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	if expectReports {
+		group := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0) FROM users WHERE username=?`, actor.username)
+		if group == 0 {
+			t.Fatal("browser report fixture requires a restricted current viewer")
+		}
+		reportID, _, err := s.st.UpsertReport(Rep{
+			Symbol: "SDK600100", Date: "2026-10-30", RType: "research",
+			Kind: "browser", RunID: "sdk-browser-report",
+			Title: "Browser current viewer report",
+			MD:    "# Browser current viewer report\n\nCurrent viewer evidence.",
+		})
+		if err != nil {
+			t.Fatal("browser report fixture", err)
+		}
+		if _, err := s.st.StampReportOwner(reportID, group); err != nil {
+			t.Fatal("browser report owner", err)
+		}
+		if err := s.st.AddReportViewer(reportID, "2026-10-30", actor.username, group); err != nil {
+			t.Fatal("browser report viewer", err)
+		}
+	}
 	fixture := http.NewServeMux()
 	fixture.Handle("/", mux)
 	launch := "/api/app-platform/installations/" + installation + "/launch"
@@ -152,6 +173,9 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	markers := []string{"SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"}
 	if expectNetwork {
 		markers = append(markers, "SDK_NATIVE_BROWSER_NETWORK")
+	}
+	if expectReports {
+		markers = append(markers, "SDK_NATIVE_BROWSER_REPORTS")
 	}
 	for _, marker := range markers {
 		if !strings.Contains(output.String(), marker) {
