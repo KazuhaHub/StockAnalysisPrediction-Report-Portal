@@ -23,6 +23,16 @@ func TestManagedInstallRequiresOpaqueRuntimeFacts(t *testing.T) {
 	if _, err := s.createPlatformInstallReviewForFormatContext(context.Background(), session, release.sha256, 1, nil, platformManagedInstallFormat); err == nil {
 		t.Fatal("caller format minted managed review")
 	}
+	policy, err := appplatform.ParseHTTPPolicy([]byte(platformNetworkPolicyFixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformNetworkWritableInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}, policy.Policy); err == nil {
+		t.Fatal("network policy metadata minted runtime facts")
+	}
+	if _, err := s.consumePlatformNetworkWritableInstallReview(context.Background(), session, platformFixtureID(880), release.sha256, platformFixtureID(881), platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("missing review became network grant")
+	}
 	if _, err := managedInstallTarget(platformManagedRuntimeFacts{}, platformRuntimeEndpoint{}); err == nil {
 		t.Fatal("zero facts minted target")
 	}

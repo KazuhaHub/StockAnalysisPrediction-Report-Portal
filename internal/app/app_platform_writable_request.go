@@ -77,7 +77,7 @@ func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, sess
 	if err != nil {
 		return zero, err
 	}
-	if err := s.checkPlatformManagedOperationRoot(ctx, verified.Candidate().Index().OperationID, intent.start.writer.runtime, intent.start.writer.authority, endpoint); err != nil {
+	if err := s.checkPlatformManagedBackendRoot(ctx, verified.Candidate().Index().OperationID, intent.start.writer.runtime, intent.start.writer.authority, endpoint); err != nil {
 		return zero, err
 	}
 	signer, err := intent.registration.Signer("")

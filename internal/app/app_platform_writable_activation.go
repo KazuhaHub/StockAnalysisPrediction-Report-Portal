@@ -16,6 +16,8 @@ import (
 type platformWritableActivationMetadata struct {
 	frontendSHA, documentSHA string
 	audience                 []platformInstallAudience
+	capabilities             []platformSelectedCapability
+	reviewPlanID             string
 }
 
 func validPlatformWritableBootForActivation(o platformWritableBootObservation, lease platformOperationLease, i platformWritableRegistrationIntent) bool {
@@ -29,8 +31,8 @@ func loadPlatformWritableActivationMetadata(e migExec, lease platformOperationLe
 		return zero, errAppPlatformStageEvidence
 	}
 	var archive []byte
-	var raw, digest string
-	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,f.content FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256 WHERE o.id=?`, lease.id).Scan(&raw, &digest, &archive); err != nil {
+	var raw, digest, planID string
+	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,f.content,p.id FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256 WHERE o.id=?`, lease.id).Scan(&raw, &digest, &archive, &planID); err != nil {
 		return zero, err
 	}
 	var plan platformInstallProjection
@@ -49,7 +51,14 @@ func loadPlatformWritableActivationMetadata(e migExec, lease platformOperationLe
 	if err := validatePlatformInstallAudience(e, plan.Audience, now); err != nil {
 		return zero, err
 	}
-	return platformWritableActivationMetadata{frontendSHA: document.SourceSHA256, documentSHA: document.DocumentSHA256, audience: plan.Audience}, nil
+	selection, err := platformInstallCapabilitySelection(parsed.Manifest, plan.Runtime)
+	if err != nil {
+		return zero, err
+	}
+	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, selection, false, 1, planID, errAppPlatformStageEvidence); err != nil {
+		return zero, err
+	}
+	return platformWritableActivationMetadata{frontendSHA: document.SourceSHA256, documentSHA: document.DocumentSHA256, audience: plan.Audience, capabilities: selection, reviewPlanID: planID}, nil
 }
 
 // Development continuation only. It verifies a real current boot before the
@@ -139,6 +148,15 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	for _, capability := range metadata.capabilities {
+		if !capability.granted {
+			continue
+		}
+		changed, err := e.exec(`UPDATE app_platform_capability_grants SET granted=1,updated_ms=? WHERE installation_id=? AND capability=? AND granted=0 AND policy_json=? AND policy_revision=1 AND review_plan_id=?`, now, lease.installationID, capability.capability, capability.policy, metadata.reviewPlanID)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return zero, err
+		}
+	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
@@ -164,6 +182,9 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 		return zero, err
 	}
 	if err := platformVerifyInstallAuthorityAtCommit(e, lease, trust, now); err != nil {
+		return zero, err
+	}
+	if err := verifyPlatformSelectedCapabilityRows(e, lease.installationID, metadata.capabilities, true, 1, metadata.reviewPlanID, errAppPlatformStageEvidence); err != nil {
 		return zero, err
 	}
 	expectedActive := clonePlatformWritableRegistrationIntent(current)

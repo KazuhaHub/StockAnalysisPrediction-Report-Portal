@@ -12,7 +12,7 @@ import (
 func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (int64, error) {
 	switch format {
 	case platformManagedInstallFormat, platformWritableInstallFormat:
-		if manifest.Backend == nil || len(manifest.Capabilities.Required) != 0 {
+		if manifest.Backend == nil || !platformSupportedRequiredCapabilities(manifest) {
 			return 0, errAppPlatformInstallUnavailable
 		}
 		return 256 << 20, nil

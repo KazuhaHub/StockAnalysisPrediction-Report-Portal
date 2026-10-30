@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"slices"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -37,8 +36,8 @@ type platformInstallProjection struct {
 }
 
 // Only an internal development protocol is assigned here; this is not Portal's
-// CalVer/channel or a released public API version. Required providers are denied
-// until their actual enforcement adapters exist. Optional capabilities decline.
+// CalVer/channel or a released public API version. Generic frontend admission
+// still declines providers; explicit managed review selects narrow restrictions.
 func platformInstallRequirements(manifest appplatform.Manifest) error {
 	compatibility, err := appplatform.EvaluateCompatibility(manifest, appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI})
 	if err != nil || !compatibility.Compatible || len(manifest.Capabilities.Required) != 0 {
@@ -80,11 +79,11 @@ func platformLoadInstallProjectionForTarget(e migExec, release platformStagedRel
 			return platformInstallProjection{}, err
 		}
 	}
-	declined := slices.Clone(parsed.Manifest.Capabilities.Optional)
-	if declined == nil {
-		declined = []string{}
+	selection, err := platformInstallCapabilitySelection(parsed.Manifest, target)
+	if err != nil {
+		return platformInstallProjection{}, err
 	}
-	slices.Sort(declined)
+	declined := platformDeclinedCapabilities(selection)
 	return platformInstallProjection{Format: format, Runtime: target, AppID: release.appID, PublisherID: release.publisherID, ReleaseSHA256: release.sha256, TrustRevision: release.trustRevision, KeyRevision: release.keyRevision, KeyID: release.verificationKeyID, ControllerEpoch: control.epoch, ActorAuthority: actor.authorityFingerprint, PlatformAPI: platformDevelopmentAPI, DeclinedCapabilities: declined, DataQuotaBytes: 256 << 20}, nil
 }
 
@@ -167,7 +166,7 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 		}
 		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + 900000}
 		_, err = e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms) VALUES(?,NULL,?,?,'install',NULL,?,0,0,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`, id, projection.AppID, projection.PublisherID, release, trustRevision, control.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint, result.SHA256, result.JSON, result.ExpiresMS, control.nowMS, control.nowMS)
-		if err == nil && facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+		if err == nil && facts != nil && !validPlatformInstallRuntimeFacts(*facts, endpoint) {
 			return errAppPlatformRuntimeConflict
 		}
 		return err
@@ -239,7 +238,7 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 			}
 			result = previous
 			_, err = platformRefreshActor(e, session, actor, control)
-			if err == nil && facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+			if err == nil && facts != nil && !validPlatformInstallRuntimeFacts(*facts, endpoint) {
 				return errAppPlatformRuntimeConflict
 			}
 			return err
@@ -342,8 +341,20 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if _, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,'install',?,0,1,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, operationID, installationID, planID, actor.scope, keyDigest, requestDigest, platformManagedInstallFlag(projection), control.epoch, control.nowMS, control.nowMS); err != nil {
 			return err
 		}
-		for _, capability := range projection.DeclinedCapabilities {
-			if _, err := e.exec(`INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,0,'{}',1,?,?,?)`, installationID, capability, planID, control.nowMS, control.nowMS); err != nil {
+		var descriptor []byte
+		if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, projection.ReleaseSHA256).Scan(&descriptor); err != nil {
+			return err
+		}
+		parsed, err := appplatform.ParseDescriptor(descriptor)
+		if err != nil {
+			return errAppPlatformPlanChanged
+		}
+		selection, err := platformInstallCapabilitySelection(parsed.Manifest, projection.Runtime)
+		if err != nil {
+			return err
+		}
+		for _, capability := range selection {
+			if _, err := e.exec(`INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,?,?,1,?,?,?)`, installationID, capability.capability, 0, capability.policy, planID, control.nowMS, control.nowMS); err != nil {
 				return err
 			}
 		}
@@ -367,7 +378,7 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if expires <= final.nowMS {
 			return errAppPlatformPlanExpired
 		}
-		if facts != nil && !validPlatformManagedRuntimeObservation(facts.observation, facts.runtime, endpoint) {
+		if facts != nil && !validPlatformInstallRuntimeFacts(*facts, endpoint) {
 			return errAppPlatformRuntimeConflict
 		}
 		result = platformRemovalCommit{OperationID: operationID, InstallationID: installationID, Generation: 1, Revision: 1, Stage: appplatform.StageQueued}

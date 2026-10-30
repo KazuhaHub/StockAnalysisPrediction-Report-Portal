@@ -26,18 +26,36 @@ type platformManagedInstallTarget struct {
 	ControlRevision int64                           `json:"control_revision"`
 	Fingerprint     string                          `json:"fingerprint"`
 	Profile         transport.ManagedRuntimeProfile `json:"profile"`
+	NetworkPolicy   string                          `json:"network_policy,omitempty"`
+	NetworkProfile  transport.NetworkRuntimeProfile `json:"network_profile,omitzero"`
 }
 
 func managedInstallTarget(f platformManagedRuntimeFacts, e platformRuntimeEndpoint) (*platformManagedInstallTarget, error) {
-	if !validPlatformManagedRuntimeObservation(f.observation, f.runtime, e) {
+	if !validPlatformInstallRuntimeFacts(f, e) {
 		return nil, errAppPlatformRuntimeConflict
 	}
 	r := f.runtime
-	return &platformManagedInstallTarget{RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision, ControlRevision: r.controlRevision, Fingerprint: r.fingerprint, Profile: f.observation.Profile()}, nil
+	target := &platformManagedInstallTarget{RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision, ControlRevision: r.controlRevision, Fingerprint: r.fingerprint, Profile: f.observation.Profile()}
+	if f.networkPolicy != "" {
+		if f.network == nil || !samePlatformManagedRuntime(f.network.runtime, r) || !validPlatformNetworkRuntimeObservation(f.network.observation, r, e) {
+			return nil, errAppPlatformRuntimeConflict
+		}
+		target.NetworkPolicy = f.networkPolicy
+		target.NetworkProfile = f.network.observation.Profile()
+	} else if f.network != nil {
+		return nil, errAppPlatformRuntimeConflict
+	}
+	if _, err := platformNetworkTargetPolicy(target); err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 func validateManagedInstallTarget(e migExec, p *platformManagedInstallTarget, epoch string) error {
 	if p == nil || !platformValidUUID(p.RuntimeID) || !platformValidUUID(p.DeploymentID) || p.ControllerEpoch != epoch || !platformValidSHA(p.Fingerprint) || p.BindingRevision != 2 || p.ControlRevision < 1 || p.Profile.ExecutionReady || (p.Profile.WritableSandboxProfile != "" && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) || p.Profile.SandboxProfile != control.CandidateSandboxProfile || (p.Profile.Platform != "linux/amd64" && p.Profile.Platform != "linux/arm64") || p.Profile.Protocol != transport.ManagedRunnerProtocol || p.Profile.BackendProtocol != transport.ManagedBackendProtocol || !platformValidUUID(p.Profile.RootFilesystemUUID) {
 		return errAppPlatformRuntimeConflict
+	}
+	if _, err := platformNetworkTargetPolicy(p); err != nil {
+		return err
 	}
 	inode, err := strconv.ParseUint(p.Profile.RootInode, 10, 64)
 	if err != nil || inode == 0 || strconv.FormatUint(inode, 10) != p.Profile.RootInode {
@@ -60,8 +78,11 @@ func installRequirementsForTarget(m appplatform.Manifest, format string, p *plat
 		}
 		return platformInstallRequirements(m)
 	}
-	if p == nil || m.Backend == nil || len(m.Capabilities.Required) != 0 || (format == platformWritableInstallFormat && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
+	if p == nil || m.Backend == nil || (p.NetworkPolicy != "" && format != platformWritableInstallFormat) || (format == platformWritableInstallFormat && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
 		return errAppPlatformInstallUnavailable
+	}
+	if _, err := platformInstallCapabilitySelection(m, p); err != nil {
+		return err
 	}
 	target := appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI, Runner: &appplatform.RunnerCompatibility{Protocol: p.Profile.Protocol, Platform: p.Profile.Platform, BackendProtocol: p.Profile.BackendProtocol}}
 	compatible, err := appplatform.EvaluateCompatibility(m, target)
@@ -106,6 +127,23 @@ func (s *Server) checkPlatformManagedRuntimeRoot(ctx context.Context, lease plat
 }
 
 func (s *Server) checkPlatformManagedOperationRoot(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
+	return s.checkPlatformManagedOperationProfiles(ctx, operation, runtime, authority, endpoint, true)
+}
+
+// Completed own-backend business traffic still validates the current managed
+// root and source. Network-provider availability is checked by network calls;
+// an optional provider outage must not disable unrelated backend operations.
+func (s *Server) checkPlatformManagedBackendRoot(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
+	var completed int
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND action='install' AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL`), operation).Scan(&completed); err != nil {
+		return err
+	}
+	if completed != 1 {
+		return errAppPlatformStageEvidence
+	}
+	return s.checkPlatformManagedOperationProfiles(ctx, operation, runtime, authority, endpoint, false)
+}
+func (s *Server) checkPlatformManagedOperationProfiles(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint, requireNetwork bool) error {
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
 	target, err := platformManagedTargetForOperation(pool, operation)
 	if err != nil {
@@ -115,11 +153,25 @@ func (s *Server) checkPlatformManagedOperationRoot(ctx context.Context, operatio
 	if err != nil {
 		return err
 	}
-	actual, err := managedInstallTarget(platformManagedRuntimeFacts{runtime: runtime, observation: observed}, endpoint)
+	facts := platformManagedRuntimeFacts{runtime: runtime, observation: observed}
+	if requireNetwork && target.NetworkPolicy != "" {
+		network, err := platformReadNetworkRuntime(ctx, endpoint)
+		if err != nil {
+			return err
+		}
+		facts.network = &platformNetworkRuntimeFacts{runtime: runtime, observation: network}
+		facts.networkPolicy = target.NetworkPolicy
+	}
+	actual, err := managedInstallTarget(facts, endpoint)
 	if err != nil {
 		return err
 	}
-	if *actual != *target {
+	expected := *target
+	if !requireNetwork {
+		expected.NetworkPolicy = ""
+		expected.NetworkProfile = transport.NetworkRuntimeProfile{}
+	}
+	if *actual != expected {
 		return errAppPlatformRuntimeConflict
 	}
 	return nil

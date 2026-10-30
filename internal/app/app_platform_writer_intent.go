@@ -70,7 +70,7 @@ func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, run
 		return zero, false, err
 	}
 	parsed, err := appplatform.ParseDescriptor(result.descriptor)
-	if err != nil || parsed.SHA256 != release || parsed.Manifest.Backend == nil || len(parsed.Manifest.Capabilities.Required) != 0 {
+	if err != nil || parsed.SHA256 != release || parsed.Manifest.Backend == nil || installRequirementsForTarget(parsed.Manifest, profile, target) != nil {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	var origin, owner, state string

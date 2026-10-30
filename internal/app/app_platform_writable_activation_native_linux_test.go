@@ -29,6 +29,9 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "pending" || scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=?`, lease.installationID) != "candidate" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 || scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" {
 		t.Fatal("failed activation partially exposed app")
 	}
+	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, lease.installationID) != 0 {
+		t.Fatal("failed activation raised reviewed grant")
+	}
 	mustExec(t, s.st, `DROP TRIGGER writable_activation_audit_failure`)
 	finished, err := s.runPlatformWritableInstall(ctx, lease, endpoint)
 	activated := finished.activation
@@ -55,6 +58,17 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.writable_install_activated' AND target_id=?`, lease.installationID) != 1 {
 		t.Fatal("activation duplicated effects/audit")
 	}
+	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, lease.installationID) != 1 {
+		t.Fatal("native install lost reviewed network grant")
+	}
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, lease.installationID)
+	denied, err := s.preparePlatformWritableBackendAccess(ctx, actor, lease.installationID)
+	if err == nil {
+		denied.Close()
+		t.Fatal("current ready reader ignored revoked selected grant")
+	}
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.http'`, lease.installationID)
+	t.Log("PORTAL_WRITABLE_NETWORK_GRANT_LAUNCHED")
 	t.Log("PORTAL_WRITABLE_INSTALL_ACTIVATED")
 	t.Log("PORTAL_WRITABLE_WORKER_ACTIVATED")
 	// Return the shared disposable account to its original authority before the
