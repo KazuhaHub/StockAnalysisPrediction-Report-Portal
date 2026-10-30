@@ -22,9 +22,9 @@ describe('SMTP drafts', () => {
     fireEvent.change(host, { target: { value: 'new.example.org' } })
     fireEvent.blur(host)
     expect(server.post).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'email.testSection' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'email.testSection' }))
     expect((screen.getByRole('button', { name: 'email.test' }) as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'email.connection' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'email.connection' }))
     server.fail = true
     fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
     await screen.findByText('Offline')

@@ -125,7 +125,7 @@ describe('StoragePage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('storage.cat.batch')
-    await user.click(screen.getByRole('button', { name: 'manage.operation.retention' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.operation.retention' }))
     // The reports switch is in the first danger section below the ordinary targets, so it is the
     // second-to-last one: the forecast ledger's danger section follows it. Both are danger targets and
     // both preview a live count before confirming, so the assertion keys on the target rather than on
@@ -140,7 +140,7 @@ describe('StoragePage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('storage.cat.batch')
-    await user.click(screen.getByRole('button', { name: 'manage.operation.retention' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.operation.retention' }))
     // The ledger is the LAST switch: its danger section follows the reports one. It gets the same
     // preview-then-confirm treatment, because a ledger record cannot be rebuilt.
     const switches = screen.getAllByRole('switch')
@@ -153,7 +153,7 @@ describe('StoragePage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findAllByText('storage.cat.batch')
-    await user.click(screen.getByRole('button', { name: 'manage.operation.retention' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.operation.retention' }))
     const days = screen.getAllByRole('spinbutton').find((input) => (input as HTMLInputElement).value === '90')!
     fireEvent.change(days, { target: { value: '91' } })
     await user.click(screen.getAllByRole('button', { name: /common\.save/ }).find((button) => !(button as HTMLButtonElement).disabled)!)

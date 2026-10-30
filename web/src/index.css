@@ -305,49 +305,37 @@ body {
 .rp-policy-scope .rp-ou-picker--manage { position: static; width: 100% !important; border: 0 !important; }
 .rp-policy-scope .rp-ou-picker__tree { max-height: none !important; }
 .rp-policy-content { scrollbar-gutter: stable; padding-inline-end: 12px; }
-.rp-policy-content .rp-settings-workspace {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
-}
-.rp-policy-content .rp-settings-sections {
-  flex-direction: row;
-  flex-wrap: wrap;
-  padding-inline-end: 0;
-  padding-bottom: 12px;
-  border-inline-end: 0;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-}
 .rp-admin-page-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px 24px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--ant-color-border-secondary);
 }
-.rp-admin-page-header > div {
-  flex: 1 1 320px;
+.rp-admin-page-header__row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+.rp-admin-page-header__title { min-width: 0; flex: 1 1 auto; }
 .rp-admin-page-header h2.ant-typography {
-  margin: 4px 0 6px;
-  font-size: 24px;
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
 }
 .rp-admin-page-header .ant-typography {
   margin-bottom: 0;
 }
 .rp-admin-page-header__area {
+  display: block;
   font-size: 12px;
+  line-height: 1.4;
 }
-.rp-admin-related {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  font-size: 12px;
-}
+.rp-admin-page-header__desc { font-size: 13px; }
 .rp-admin-mobile-bar {
   flex-shrink: 0;
   z-index: 5;
@@ -461,22 +449,39 @@ body {
     padding: 16px;
   }
   .rp-admin-page-header {
-    margin-bottom: 16px;
-  }
-  .rp-admin-related {
-    align-items: flex-start;
+    margin-bottom: 12px;
   }
 }
 
 .rp-settings-workspace {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  align-items: stretch;
-  gap: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
-  min-height: 280px;
   overflow-anchor: none;
 }
+.rp-settings-tabs {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+.rp-settings-tab {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rp-settings-tab:hover { color: var(--ant-color-text); }
+.rp-settings-tab--active { color: var(--ant-color-primary); border-bottom-color: var(--ant-color-primary); }
+.rp-settings-tab:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-admin-list-page {
   display: flex;
   flex-direction: column;
@@ -493,39 +498,13 @@ body {
 .rp-admin-editor-drawer .ant-drawer-content-wrapper {
   max-width: 100vw;
 }
-.rp-settings-sections {
-  overflow: auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-inline-end: 16px;
-  border-inline-end: 1px solid var(--ant-color-border-secondary);
-}
-.rp-settings-sections .ant-btn {
-  border-radius: 8px;
-  justify-content: flex-start;
-  text-align: start;
-  height: auto;
-  min-height: 36px;
-  white-space: normal;
-}
 .rp-settings-content {
   min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding-inline-end: 12px;
 }
-.rp-settings-section-picker {
-  display: none;
-}
-.rp-settings-section-picker .ant-select {
-  width: 100%;
-}
+/* Settings panels use the full content width now that sections are tabs rather than a side
+   column; individual fields keep their own widths through .rp-settings-field. */
 .rp-settings-panel {
-  max-width: 960px;
+  min-width: 0;
 }
 .rp-settings-field {
   display: grid;
@@ -545,6 +524,24 @@ body {
 .rp-settings-panel h4.ant-typography {
   margin-top: 0;
 }
+.rp-settings-save-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: var(--ant-color-bg-elevated);
+  border-top: 1px solid var(--ant-color-border-secondary);
+  box-shadow: 0 -2px 8px var(--ant-color-fill-tertiary);
+  animation: rp-save-dock-in 160ms ease-out;
+}
+@keyframes rp-save-dock-in {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-settings-save-dock { animation: none; }
+}
 .rp-settings-save-bar {
   display: flex;
   align-items: center;
@@ -558,33 +555,11 @@ body {
   gap: 8px;
   margin-inline-start: auto;
 }
-@media (max-width: 1000px) {
-  .rp-settings-workspace {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 16px;
-  }
-  .rp-settings-sections {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding-inline-end: 0;
-    padding-bottom: 12px;
-    border-inline-end: 0;
-    border-bottom: 1px solid var(--ant-color-border-secondary);
-  }
-}
 @media (max-width: 767px) {
   .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
   .rp-policy-scope { max-height: 180px; border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
   .rp-policy-scope > .ant-typography { display: none; }
   .rp-policy-scope > .ant-btn { margin-bottom: 8px; }
-  .rp-settings-sections {
-    display: none;
-  }
-  .rp-settings-section-picker {
-    display: block;
-  }
 }
 
 .rp-plain-list {
@@ -2273,13 +2248,11 @@ body {
 
 .rp-sso-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-.rp-admin-page-header > .rp-admin-page-actions { flex: 0 1 auto; align-self: center; }
+.rp-admin-page-header__row > .rp-admin-page-actions { flex: 0 1 auto; align-self: center; }
 .rp-dashboard-layout-tools[hidden] { display: none; }
 .rp-dashboard-header-tools { display: flex; justify-content: flex-end; }
 .rp-admin-content--directory { padding: 16px 20px; }
-.rp-admin-content--directory .rp-admin-page-header { margin-bottom: 12px; padding-bottom: 12px; }
 .rp-admin-content--directory .rp-admin-page-header__area { display: none; }
-.rp-admin-content--directory .rp-admin-page-header h2 { font-size: 22px; margin-top: 0; }
 .rp-users-directory { display: flex; gap: 16px; align-items: flex-start; }
 .rp-users-directory > .ant-space { flex: 1; min-width: 0; }
 .rp-user-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -2295,8 +2268,7 @@ body {
 .rp-users-table .ant-table-cell .ant-space { flex-wrap: nowrap; }
 .rp-sso-page { gap: 0; }
 .rp-sso-network { max-width: 960px; padding-block: 8px; }
-.rp-sso-provider-form .rp-settings-panel { max-width: none; }
-@media (max-width: 767px) { .rp-users-directory { flex-direction: column; } .rp-admin-page-header > .rp-admin-page-actions { flex-basis: 100%; } }
+@media (max-width: 767px) { .rp-users-directory { flex-direction: column; } .rp-admin-page-header__row > .rp-admin-page-actions { flex-basis: 100%; align-self: stretch; } }
 
 .rp-dashboard-palette-groups { margin-top: 16px; }
 .rp-dashboard-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -2400,20 +2372,13 @@ body {
 .rp-statistics-filters .ant-select, .rp-statistics-filters .ant-picker { width: 100%; }
 .rp-account-page { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; }
 .rp-account-security { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.rp-account-page .rp-settings-workspace { grid-template-columns: 190px minmax(0, 1fr); }
-.rp-account-page .rp-settings-panel { max-width: none; }
 .rp-account-page .rp-settings-panel > .ant-card { border: 0; box-shadow: none; background: transparent; }
 .rp-account-page .rp-settings-panel > .ant-card > .ant-card-head { padding-inline: 0; }
 .rp-account-page .rp-settings-panel > .ant-card > .ant-card-body { padding: 20px 0; }
 .rp-account-page .ant-form { max-width: 640px; }
 .rp-account-page .rp-settings-panel .ant-card-head-title { white-space: normal; }
 @media (max-width: 767px) {
- .rp-account-page .rp-settings-workspace { grid-template-columns: minmax(0, 1fr); }
  .rp-statistics-filters label { flex-basis: 100%; }
-}
-@media (max-width: 767px) {
- .rp-account-page .rp-settings-workspace { height: auto !important; }
- .rp-account-page .rp-settings-content { overflow: visible; padding-inline-end: 0; }
 }
 .rp-statistics-page > .rp-admin-list-toolbar .ant-select { min-width: 160px; max-width: 100%; }
 
@@ -2483,3 +2448,17 @@ body {
   .rp-apps-col-chevron { display: none; }
 }
 .rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
+
+/* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
+   tables scroll inside their container instead of being clipped. */
+.rp-settings-content .rp-settings-panel .ant-card .ant-card { box-shadow: none; border-color: var(--ant-color-border-secondary); }
+.rp-settings-content .ant-card > .ant-card-head { min-height: 40px; padding-inline: 16px; }
+.rp-settings-content .ant-card > .ant-card-head .ant-card-head-title { padding-block: 8px; font-size: 15px; }
+.rp-settings-content .ant-card > .ant-card-body { padding: 12px 16px; }
+.rp-settings-content .ant-card .ant-card > .ant-card-head { padding-inline: 12px; }
+.rp-settings-content .ant-card .ant-card > .ant-card-body { padding: 8px 12px; }
+.rp-settings-panel, .rp-settings-panel .ant-card, .rp-settings-panel .ant-card-body { min-width: 0; }
+.rp-settings-panel .ant-table-wrapper { max-width: 100%; }
+
+/* The back-to-top button sits above the unsaved-changes dock while it is shown. */
+body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }

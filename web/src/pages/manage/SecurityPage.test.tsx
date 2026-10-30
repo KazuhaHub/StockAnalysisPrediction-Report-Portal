@@ -52,7 +52,7 @@ describe('the login-protection page', () => {
   it('edits all five bounded forecast limits and preserves zero exploration capacity', async () => {
     mount()
     await screen.findByText('security.forecastSlotsOfficial')
-    await userEvent.click(screen.getByRole('button', { name: 'security.limitsTitle' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'security.limitsTitle' }))
     const fields = [
       ['forecastSlotsOfficial', 'forecast_slots_official', 1, 8, 3],
       ['forecastSlotsExplore', 'forecast_slots_explore', 0, 8, 0],
@@ -74,9 +74,9 @@ describe('the login-protection page', () => {
   })
   it('offers second-factor, recovery and lockout settings as named sections', async () => {
     mount()
-    expect(await screen.findByRole('button', { name: 'security.twofaTitle' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'security.recoveryTitle' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'security.lockoutTitle' })).toBeTruthy()
+    expect(await screen.findByRole('tab', { name: 'security.twofaTitle' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'security.recoveryTitle' })).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'security.lockoutTitle' })).toBeTruthy()
     // The switch means ALLOW TO ENROL, which is a reading an operator can get wrong from the label
     // alone — so the card has to say it.
     expect(screen.getByText('security.twofaLocalOnly')).toBeTruthy()
@@ -84,7 +84,7 @@ describe('the login-protection page', () => {
 
   it('saves the blocks it renders', async () => {
     mount()
-    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await screen.findByRole('tab', { name: 'security.twofaTitle' })
     await userEvent.click(screen.getByRole('switch'))
     await userEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
@@ -96,8 +96,8 @@ describe('the login-protection page', () => {
 
   it('carries a changed switch into the block it belongs to', async () => {
     mount()
-    await screen.findByRole('button', { name: 'security.twofaTitle' })
-    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
+    await screen.findByRole('tab', { name: 'security.twofaTitle' })
+    await userEvent.click(screen.getByRole('tab', { name: 'security.lockoutTitle' }))
     const switches = screen.getAllByRole('switch')
     await userEvent.click(switches[switches.length - 1]) // the last card's only switch: the lockout
     await userEvent.click(screen.getByText('common.save'))
@@ -113,7 +113,7 @@ describe('the login-protection page', () => {
 
   it('says nothing about the lockout while it is off', async () => {
     mount()
-    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await screen.findByRole('tab', { name: 'security.twofaTitle' })
     expect(screen.queryByText('security.lockoutDuration')).toBeNull()
     expect(screen.queryByText('security.lockoutAccountWarning')).toBeNull()
   })
@@ -125,15 +125,15 @@ describe('the login-protection page', () => {
 
   it('preserves a draft between sections and discards it without a server write', async () => {
     mount()
-    await screen.findByRole('button', { name: 'security.loginTitle' })
+    await screen.findByRole('tab', { name: 'security.loginTitle' })
     await userEvent.click(screen.getByRole('switch'))
-    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'security.lockoutTitle' }))
     await userEvent.click(screen.getByRole('switch'))
-    await userEvent.click(screen.getByRole('button', { name: 'security.loginTitle' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'security.loginTitle' }))
     expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true')
     await userEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
     expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
-    await userEvent.click(screen.getByRole('button', { name: 'security.lockoutTitle' }))
+    await userEvent.click(screen.getByRole('tab', { name: 'security.lockoutTitle' }))
     expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('false')
     expect(apiMock.post).not.toHaveBeenCalled()
   })
@@ -141,7 +141,7 @@ describe('the login-protection page', () => {
 
   it('sends the mandate with the methods it needs', async () => {
     mount({ twofa: { totp_enroll: true, passkey_enroll: true, require_staff: true } })
-    await screen.findByRole('button', { name: 'security.twofaTitle' })
+    await screen.findByRole('tab', { name: 'security.twofaTitle' })
     await userEvent.click(screen.getByRole('switch'))
     await userEvent.click(screen.getByText('common.save'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalled())
@@ -151,7 +151,7 @@ describe('the login-protection page', () => {
 
 it.each(['hidden','contact','email'])('shows complete recovery choices and saves %s mode', async mode => {
   mount({recovery:{enabled:mode==='hidden'}})
-  await userEvent.click(await screen.findByRole('button',{name:'security.recoveryTitle'}))
+  await userEvent.click(await screen.findByRole('tab', { name: 'security.recoveryTitle'}))
   expect(screen.getAllByRole('radio')).toHaveLength(3)
   for (const option of ['hidden','contact','email']) expect(screen.getByText(`security.recoveryModeHint.${option}`)).toBeTruthy()
   await userEvent.click(screen.getByRole('radio',{name:new RegExp(`security.recoveryMode.${mode}`)}))
