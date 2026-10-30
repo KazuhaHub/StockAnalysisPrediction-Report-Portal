@@ -1334,33 +1334,69 @@ body {
 .rp-task-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  padding: 12px 0 4px;
+  padding: 12px 0 16px;
   text-align: center;
 }
 .rp-task-stats > div + div {
   border-inline-start: 1px solid var(--ant-color-border-secondary);
 }
-/* A task in the Tasks drawer: two lines, actions muted until the row is hovered or focused. */
+/* A section of the Tasks drawer: a grouped container, rows split by an inset hairline. */
+.rp-task-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary);
+}
 .rp-task-row {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  padding: 8px;
-  border-radius: 8px;
+  padding: 10px 12px;
+}
+/* The divider starts under the text (padding 12 + dot 8 + gap 10), not under the dot. */
+.rp-task-row + .rp-task-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline: 30px 0;
+  border-top: 1px solid var(--ant-color-border-secondary);
 }
 .rp-task-row:hover,
 .rp-task-row:focus-within {
-  background: var(--ant-color-bg-text-hover);
+  background: var(--ant-color-fill-tertiary);
+}
+/* Centred on the first line (22px line box). */
+.rp-task-row__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
 }
 .rp-task-row__acts {
   display: flex;
+  flex: none;
+  align-self: center;
   gap: 2px;
-  opacity: 0.55;
+  opacity: 0;
   transition: opacity 0.15s;
 }
 .rp-task-row:hover .rp-task-row__acts,
 .rp-task-row:focus-within .rp-task-row__acts {
   opacity: 1;
+}
+@media (hover: none) {
+  .rp-task-row__acts {
+    opacity: 1;
+  }
+}
+.rp-task-row__acts .rp-task-cancel {
+  color: var(--ant-color-text-tertiary);
+}
+.rp-task-row__acts .rp-task-cancel:hover {
+  color: var(--ant-color-error);
 }
 .rp-workbench-menu {
   /* One 88px tile per destination plus the 4px gaps, and never narrower than the three-tile card.

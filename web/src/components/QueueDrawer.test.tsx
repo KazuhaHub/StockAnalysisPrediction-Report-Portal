@@ -242,6 +242,28 @@ describe('Tasks drawer Runs tab', () => {
     expect(screen.queryByRole('button', { name: 'tasks.cancel' })).toBeNull()
   })
 
+  it('draws cancel as a close-circle, not the forbidden-looking stop icon', async () => {
+    store.jobs = [job({ id: 77 })]
+    mount()
+    const cancel = await screen.findByRole('button', { name: 'tasks.cancel' })
+    expect(cancel.querySelector('.anticon-close-circle')).not.toBeNull()
+    expect(cancel.querySelector('.anticon-stop')).toBeNull()
+  })
+
+  it('puts the count in each section header', async () => {
+    store.jobs = [job(), job({ id: 2, status: 'queued', ahead: 1 }), job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount()
+    expect(await screen.findByText('tasks.section.count:{"label":"tasks.section.active","count":2}')).toBeTruthy()
+    expect(screen.getByText('tasks.section.count:{"label":"tasks.section.finished","count":1}')).toBeTruthy()
+  })
+
+  it('renders Mine / All in the drawer header extra area, not beside the title', async () => {
+    mount()
+    const mine = await screen.findByText('queue.scope.mine')
+    expect(mine.closest('.ant-drawer-extra')).not.toBeNull()
+    expect(screen.getByText('tasks.title').closest('.ant-drawer-title')?.querySelector('.ant-segmented')).toBeNull()
+  })
+
   it('links the footer to the full queue', async () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: /tasks\.openQueue/ }))

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
-import { ArrowRightOutlined, DownloadOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
@@ -158,7 +158,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     }
   }
 
-  const iconAction = (label: string, icon: ReactNode, props: { onClick?: () => void; href?: string; danger?: boolean }) => (
+  const iconAction = (label: string, icon: ReactNode, props: { onClick?: () => void; href?: string; className?: string }) => (
     <Tooltip title={label}>
       <Button type="text" size="small" icon={icon} aria-label={label} {...props} />
     </Tooltip>
@@ -175,13 +175,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     </div>
   )
 
-  const section = (label: string, aside: ReactNode, children: ReactNode) => (
-    <section style={{ marginTop: 4 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: token.colorTextSecondary, padding: '12px 8px 6px' }}>
-        <span>{label}</span>
+  const section = (label: string, aside: ReactNode, count: number, children: ReactNode) => (
+    <section style={{ marginTop: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: token.colorTextSecondary, padding: '0 12px 8px' }}>
+        <span>{t('tasks.section.count', { label, count })}</span>
         {aside && <span>{aside}</span>}
       </div>
-      <ul aria-label={label} style={{ margin: 0, padding: 0 }}>
+      <ul aria-label={label} className="rp-task-list">
         {children}
       </ul>
     </section>
@@ -253,7 +253,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
             {live && (
               <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)}>
                 <Tooltip title={t('tasks.cancel')}>
-                  <Button type="text" size="small" danger icon={<StopOutlined />} aria-label={t('tasks.cancel')} />
+                  <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
               </Popconfirm>
             )}
@@ -300,7 +300,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         time={formatTaskTime(live ? x.created_at : finishedAtOf(x), lang, undefined, t('tasks.justNow'))}
         actions={
           <>
-            {x.cancel && iconAction(t('tasks.cancel'), <StopOutlined />, { onClick: () => void cancelExport(x), danger: true })}
+            {x.cancel && iconAction(t('tasks.cancel'), <CloseCircleOutlined />, { onClick: () => void cancelExport(x), className: 'rp-task-cancel' })}
             {x.download && iconAction(t('tasks.download'), <DownloadOutlined />, { href: x.download })}
           </>
         }
@@ -326,8 +326,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         title={t('common.loadFailedContent')}
       >
         {activeJobs.length === 0 && recentJobs.length === 0 && empty(t('tasks.emptyRuns'))}
-        {activeJobs.length > 0 && section(t('tasks.section.active'), null, activeJobs.map(runRow))}
-        {recentJobs.length > 0 && section(t('tasks.section.finished'), null, recentJobs.map(runRow))}
+        {activeJobs.length > 0 && section(t('tasks.section.active'), null, activeJobs.length, activeJobs.map(runRow))}
+        {recentJobs.length > 0 && section(t('tasks.section.finished'), null, recentJobs.length, recentJobs.map(runRow))}
       </LoadGate>
     </>
   )
@@ -335,8 +335,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const exportsPane = (
     <>
       {activeExports.length === 0 && recentExports.length === 0 && empty(t('tasks.emptyExports'))}
-      {activeExports.length > 0 && section(t('tasks.section.active'), null, activeExports.map(exportRow))}
-      {recentExports.length > 0 && section(t('tasks.section.finished'), t('tasks.keptDays', { n: EXPORT_KEPT_DAYS }), recentExports.map(exportRow))}
+      {activeExports.length > 0 && section(t('tasks.section.active'), null, activeExports.length, activeExports.map(exportRow))}
+      {recentExports.length > 0 && section(t('tasks.section.finished'), t('tasks.keptDays', { n: EXPORT_KEPT_DAYS }), recentExports.length, recentExports.map(exportRow))}
     </>
   )
 
@@ -352,21 +352,19 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
 
   return (
     <Drawer
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span>{t('tasks.title')}</span>
-          {admin && showRuns && activeTab === 'runs' && (
-            <Segmented
-              size="small"
-              value={scope}
-              onChange={(v) => setScope(v as QueueScope)}
-              options={[
-                { label: t('queue.scope.mine'), value: 'mine' },
-                { label: t('queue.scope.all'), value: 'all' },
-              ]}
-            />
-          )}
-        </div>
+      title={t('tasks.title')}
+      extra={
+        admin && showRuns && activeTab === 'runs' ? (
+          <Segmented
+            size="small"
+            value={scope}
+            onChange={(v) => setScope(v as QueueScope)}
+            options={[
+              { label: t('queue.scope.mine'), value: 'mine' },
+              { label: t('queue.scope.all'), value: 'all' },
+            ]}
+          />
+        ) : null
       }
       size={420}
       open={open}

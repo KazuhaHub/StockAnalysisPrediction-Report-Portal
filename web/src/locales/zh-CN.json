@@ -3274,6 +3274,7 @@
   "tasks.tab.runs": "运行",
   "tasks.tab.exports": "导出",
   "tasks.section.active": "进行中",
+  "tasks.section.count": "{{label}} · {{count}}",
   "tasks.section.finished": "最近完成",
   "tasks.rows": "{{done}} / {{total}} 行",
   "tasks.queuedAhead": "排队中 · 前面还有 {{n}} 个",
