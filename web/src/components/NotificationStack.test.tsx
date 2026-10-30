@@ -389,11 +389,10 @@ describe('notifications across sign-in identities', () => {
   })
 })
 
-describe('notifications on a touch device', () => {
+describe('notifications with a finger', () => {
   const CARD_WIDTH = 300
-  beforeEach(() => {
-    vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
-      matches: query.includes('any-pointer: coarse'),
+  const stubHover = (hover: boolean) => vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+      matches: !hover && query.includes('(hover: none)'),
       media: query,
       onchange: null,
       addEventListener: () => {},
@@ -402,7 +401,8 @@ describe('notifications on a touch device', () => {
       removeListener: () => {},
       dispatchEvent: () => false,
     }))
-  })
+  // Gestures are judged by each pointer's own type, so they must work whichever way hover is set.
+  beforeEach(() => stubHover(true))
   afterEach(() => vi.unstubAllGlobals())
 
   const card = () => {
@@ -410,15 +410,70 @@ describe('notifications on a touch device', () => {
     el.getBoundingClientRect = () => ({ width: CARD_WIDTH, height: 60, top: 0, left: 0, right: CARD_WIDTH, bottom: 60, x: 0, y: 0, toJSON: () => ({}) })
     return el
   }
+  let pointerType = 'touch'
   const touch = (el: Element, type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y = 0) =>
     act(() => {
-      fireEvent[type](el, { pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, isPrimary: true })
+      fireEvent[type](el, { pointerId: 1, pointerType, clientX: x, clientY: y, isPrimary: true })
     })
+  beforeEach(() => { pointerType = 'touch' })
 
-  it('keeps the close button visible', () => {
+  it('keeps the close button visible only where hover does not exist', () => {
+    stubHover(false)
     mount()
     raise('success', 'done')
     expect(screen.getByRole('button', { name: 'notifications.close' }).getAttribute('data-visible')).toBe('true')
+  })
+
+  it('leaves the close button to hover and focus where hover exists', () => {
+    stubHover(true)
+    mount()
+    raise('success', 'done')
+    expect(screen.getByRole('button', { name: 'notifications.close' }).getAttribute('data-visible')).toBe('false')
+  })
+
+  it('swipes with a finger on a device that also hovers', () => {
+    stubHover(true)
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('swipes with a pen', () => {
+    pointerType = 'pen'
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('ignores a mouse drag and does not pause on a mouse press', () => {
+    pointerType = 'mouse'
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    interact()
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    touch(el, 'pointerMove', 250)
+    touch(el, 'pointerUp', 250)
+    expect(onClose).not.toHaveBeenCalled()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual([])
   })
 
   it('dismisses a card dragged to the right past the threshold', () => {

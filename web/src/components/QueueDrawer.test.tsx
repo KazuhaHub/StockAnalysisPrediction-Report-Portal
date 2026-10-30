@@ -368,9 +368,9 @@ describe('Tasks drawer Exports tab', () => {
   })
 })
 
-function stubPointer(coarse: boolean) {
+function stubHover(hover: boolean) {
   vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
-    matches: coarse && query.includes('any-pointer: coarse'),
+    matches: !hover && query.includes('(hover: none)'),
     media: query,
     onchange: null,
     addEventListener: () => {},
@@ -383,7 +383,7 @@ function stubPointer(coarse: boolean) {
 const toggleOf = (row: HTMLElement) => row.querySelector<HTMLElement>('[aria-expanded]')
 
 describe('Tasks drawer row layout', () => {
-  beforeEach(() => stubPointer(false))
+  beforeEach(() => stubHover(true))
   afterEach(() => vi.unstubAllGlobals())
 
   it('ends every row with the time, in a trailing cell that also holds the actions', async () => {
@@ -399,19 +399,20 @@ describe('Tasks drawer row layout', () => {
     }
   })
 
-  it('keeps the actions hidden by default and offers no tap toggle on a hover device', async () => {
+  it('keeps the actions hidden by default, reachable by focus, and still toggles on click', async () => {
     store.jobs = [job({ id: 1 })]
     mount()
     await screen.findByText('Deep Research')
     const row = rows('tasks.section.active')[0]
     expect(row.classList.contains('is-open')).toBe(false)
-    expect(toggleOf(row)).toBeNull()
-    expect(row.querySelector('.rp-task-row__acts')).not.toBeNull()
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(false)
+    fireEvent.click(toggleOf(row)!)
+    expect(row.classList.contains('is-open')).toBe(true)
   })
 })
 
-describe('Tasks drawer row on a touch device', () => {
-  beforeEach(() => stubPointer(true))
+describe('Tasks drawer row where hover does not exist', () => {
+  beforeEach(() => stubHover(false))
   afterEach(() => vi.unstubAllGlobals())
 
   it('reveals the actions when the row is tapped and hides them on a second tap', async () => {
@@ -421,9 +422,11 @@ describe('Tasks drawer row on a touch device', () => {
     const row = rows('tasks.section.active')[0]
     const toggle = toggleOf(row)!
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(true)
     expect(row.classList.contains('is-open')).toBe(false)
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(false)
     expect(row.classList.contains('is-open')).toBe(true)
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')

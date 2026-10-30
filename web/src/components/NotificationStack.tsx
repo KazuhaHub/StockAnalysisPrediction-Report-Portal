@@ -24,7 +24,7 @@ import {
   type NotifyKind,
 } from '../lib/notify'
 import { QUEUE_EVENT } from '../lib/shortcuts'
-import { useCoarsePointer } from '../lib/useCoarsePointer'
+import { useHoverNone } from '../lib/useHoverNone'
 import { formatTaskTime } from '../lib/taskUi'
 
 const ICONS: Record<NotifyKind, ReactNode> = {
@@ -83,8 +83,8 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
-  const coarse = useCoarsePointer()
-  const hot = hover || focus || coarse
+  const noHover = useHoverNone()
+  const hot = hover || focus || noHover
   const drag = useRef<Drag | null>(null)
   const key = item.key
   // A card that unmounts (folded into the "N more" pill) takes its pointer and focus with it; the
@@ -109,8 +109,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
     if (reason === 'manual') handOffFocus(cardRef.current)
     dismissNotification(key, reason)
   }
-  // Swipe to dismiss and press-and-hold are touch gestures; a mouse already has hover and the close button.
-  const settle = (el: HTMLElement) => {
+    const settle = (el: HTMLElement) => {
     el.style.transition = reducedMotionNow() ? '' : 'transform 0.2s ease, opacity 0.2s ease'
     el.style.transform = ''
     el.style.opacity = ''
@@ -120,10 +119,11 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
     drag.current = null
     holdNotification(key, 'press', false)
   }
-  const gesture = coarse
-    ? {
+  // Judged per gesture by the pointer that makes it, so a hybrid device swipes with a finger and hovers with a mouse.
+  const fingerDown = (e: React.PointerEvent) => e.pointerType === 'touch' || e.pointerType === 'pen'
+  const gesture = {
         onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
-          if (e.pointerType === 'mouse' || !e.isPrimary) return
+          if (!fingerDown(e) || !e.isPrimary) return
           drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), width: e.currentTarget.getBoundingClientRect().width, claimed: false }
           holdNotification(key, 'press', true)
         },
@@ -173,7 +173,6 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
           if (d?.claimed) settle(e.currentTarget)
         },
       }
-    : {}
   const color: Record<NotifyKind, string> = {
     security: token.purple,
     failure: token.colorError,

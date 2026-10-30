@@ -1,6 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { Progress, Typography, theme } from 'antd'
-import { useCoarsePointer } from '../lib/useCoarsePointer'
+import { useHoverNone } from '../lib/useHoverNone'
 
 export type TaskTone = 'running' | 'waiting' | 'ok' | 'warn' | 'fail' | 'idle'
 
@@ -17,20 +17,20 @@ export interface TaskRowProps {
   actions?: ReactNode
   /** Keeps the actions on screen, e.g. while a confirmation from one of them is open. */
   pinned?: boolean
-  /** Touch only: whether a tap has revealed the actions. Controlled by the list, so one row is open at a time. */
+  /** Whether a tap has revealed the actions. Controlled by the list, so one row is open at a time. */
   expanded?: boolean
-  /** Touch only: the row was tapped, or activated from the keyboard. */
+  /** The row was tapped, or activated from the keyboard. */
   onToggle?: () => void
 }
 
 // One task in the Tasks drawer: exactly two lines. A status dot, then the name and a muted qualifier
 // on the first line; a bar, queue position or result on the second. The time is flush with the row's
-// right edge and shares one cell with the actions: hovering or focusing the row (or tapping it on a
-// touch device) slides the actions in over the time (see .rp-task-row__end).
+// right edge and shares one cell with the actions: hovering or focusing the row (where hover exists),
+// or clicking or tapping it anywhere, slides the actions in over the time (see .rp-task-row__end).
 export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned, expanded, onToggle }: TaskRowProps) {
   const { token } = theme.useToken()
-  const coarse = useCoarsePointer()
-  const open = coarse && !!expanded
+  const noHover = useHoverNone()
+  const open = !!expanded
   const toggleKey = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
@@ -51,9 +51,11 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
     <li className={cls} style={{ listStyle: 'none' }}>
       <div
         className="rp-task-row__main"
-        {...(coarse
-          ? { role: 'button', tabIndex: 0, 'aria-expanded': open, onClick: onToggle, onKeyDown: toggleKey }
-          : {})}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={toggleKey}
       >
         <span
           aria-hidden="true"
@@ -86,7 +88,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
             </span>
           )}
           {actions && (
-            <div className="rp-task-row__acts" inert={coarse && !open && !pinned}>
+            <div className="rp-task-row__acts" inert={noHover && !open && !pinned}>
               {actions}
             </div>
           )}

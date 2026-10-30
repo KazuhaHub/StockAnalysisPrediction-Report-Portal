@@ -1420,43 +1420,27 @@ body {
   opacity: 0;
   transform: translateX(-10px);
 }
-/* Hover and focus reveal the actions... */
-.rp-task-row:hover,
-.rp-task-row:focus-within {
-  background: var(--ant-color-fill-tertiary);
-}
-.rp-task-row:hover .rp-task-row__acts,
-.rp-task-row:focus-within .rp-task-row__acts {
-  opacity: 1;
-  transform: none;
-  pointer-events: auto;
-}
-.rp-task-row:hover .rp-task-row__time,
-.rp-task-row:focus-within .rp-task-row__time {
-  opacity: 0;
-  transform: translateX(-10px);
-}
-/* ...except where hover does not exist: a touch device taps instead (is-open), and a sticky :hover
-   or the focus a tap leaves behind must not show them. */
-@media (hover: none), (any-pointer: coarse) {
-  .rp-task-row:not(.is-open):not(.is-active):hover,
-  .rp-task-row:not(.is-open):not(.is-active):focus-within {
-    background: none;
-  }
-  .rp-task-row:not(.is-open):not(.is-active):hover .rp-task-row__acts,
-  .rp-task-row:not(.is-open):not(.is-active):focus-within .rp-task-row__acts {
-    opacity: 0;
-    transform: translateX(14px);
-    pointer-events: none;
-  }
-  .rp-task-row:not(.is-open):not(.is-active):hover .rp-task-row__time,
-  .rp-task-row:not(.is-open):not(.is-active):focus-within .rp-task-row__time {
-    opacity: 1;
-    transform: none;
-  }
-  .rp-task-row.is-open {
+/* Hover and focus reveal the actions where the primary input can hover; a click or tap toggles
+   them everywhere (is-open). */
+@media (hover: hover) {
+  .rp-task-row:hover,
+  .rp-task-row:focus-within {
     background: var(--ant-color-fill-tertiary);
   }
+  .rp-task-row:hover .rp-task-row__acts,
+  .rp-task-row:focus-within .rp-task-row__acts {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  .rp-task-row:hover .rp-task-row__time,
+  .rp-task-row:focus-within .rp-task-row__time {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+.rp-task-row.is-open {
+  background: var(--ant-color-fill-tertiary);
 }
 @media (prefers-reduced-motion: reduce) {
   .rp-task-row__time,
@@ -2390,7 +2374,7 @@ body {
   cursor: pointer;
 }
 /* Touch: the close button is always there, and big enough to hit. */
-@media (hover: none), (any-pointer: coarse) {
+@media (hover: none) {
   .rp-notify-close {
     width: 28px;
     height: 28px;

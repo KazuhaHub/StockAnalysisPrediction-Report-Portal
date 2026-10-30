@@ -56,7 +56,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
   // The row whose cancel confirmation is open keeps its actions on screen.
   const [confirming, setConfirming] = useState<string | null>(null)
-  // Touch only: the one row whose actions a tap has revealed.
+  // The one row whose actions a tap or click has revealed.
   const [openRow, setOpenRow] = useState<string | null>(null)
   const toggleRow = (key: string) => setOpenRow((cur) => (cur === key ? null : key))
   useEffect(() => {
