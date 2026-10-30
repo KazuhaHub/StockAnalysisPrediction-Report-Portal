@@ -6,6 +6,7 @@ import type { TaskItem } from '../api/types'
 import { EXPORTS_CHANGED_EVENT, notifyExportsChanged } from './exportJobs'
 import NotificationStack from '../components/NotificationStack'
 import { useTaskCenter } from './useTaskCenter'
+import { closeJobDetail, useOpenJobDetail } from './jobDetailStore'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
@@ -30,7 +31,13 @@ function Probe({ enabled = true }: { enabled?: boolean }) {
 }
 function Where() {
   const loc = useLocation()
-  return <span data-testid="where">{loc.pathname + loc.search}</span>
+  const open = useOpenJobDetail()
+  return (
+    <>
+      <span data-testid="where">{loc.pathname + loc.search}</span>
+      <span data-testid="detail">{open ?? ''}</span>
+    </>
+  )
 }
 const renderProbe = (enabled = true) =>
   render(
@@ -45,6 +52,7 @@ const renderProbe = (enabled = true) =>
 const settle = () => act(async () => { await Promise.resolve() })
 
 beforeEach(() => {
+  closeJobDetail()
   tasks = []
   apiMock.get.mockReset()
   apiMock.get.mockImplementation(async () => ({ tasks }))
@@ -112,17 +120,19 @@ describe('useTaskCenter completion toasts', () => {
     expect(await screen.findByText('tasks.toast.runFailed:{"name":"Deep dive"}')).toBeTruthy()
   })
 
-  it('takes View on a failed run to that job and closes the card', async () => {
+  it('opens that job in place on View for a failed run, without navigating, and closes the card', async () => {
     await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
     fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
-    expect(screen.getByTestId('where').textContent).toBe('/queue?job=7')
+    expect(screen.getByTestId('detail').textContent).toBe('7')
+    expect(screen.getByTestId('where').textContent).toBe('/')
     await waitFor(() => expect(document.querySelector('.rp-notify-card')).toBeNull())
   })
 
-  it('takes View on a partial run to that job too', async () => {
+  it('opens a partial run in place too', async () => {
     await watchThen(run({ id: '12' }), run({ id: '12', status: 'finished', done: 3, counts: { succeeded: 1, partial: 0, failed: 2, cancelled: 0 } }))
     fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
-    expect(screen.getByTestId('where').textContent).toBe('/queue?job=12')
+    expect(screen.getByTestId('detail').textContent).toBe('12')
+    expect(screen.getByTestId('where').textContent).toBe('/')
   })
 
   it('offers a View action on a partial run', async () => {

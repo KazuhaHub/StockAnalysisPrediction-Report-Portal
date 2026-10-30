@@ -17,42 +17,42 @@ export interface TaskRowProps {
   actions?: ReactNode
   /** Keeps the actions on screen, e.g. while a confirmation from one of them is open. */
   pinned?: boolean
-  /** Whether a tap has revealed the actions. Controlled by the list, so one row is open at a time. */
-  expanded?: boolean
-  /** The row was tapped, or activated from the keyboard. */
-  onToggle?: () => void
+  /** The row's accessible name: the task and its status. */
+  label?: string
+  /** The row was clicked or tapped anywhere (an action excepted), or activated from the keyboard. */
+  onOpen?: () => void
 }
 
 // One task in the Tasks drawer: exactly two lines. A status dot, then the name and a muted qualifier
 // on the first line; a bar, queue position or result on the second. The time is flush with the row's
 // right edge and shares one cell with the actions: hovering or focusing the row (where hover exists),
-// or clicking or tapping it anywhere, slides the actions in over the time (see .rp-task-row__end).
-export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned, expanded, onToggle }: TaskRowProps) {
+// slides the actions in over the time (see .rp-task-row__end); where nothing hovers they stay away, since
+// the row itself opens the task's detail, which has them. Clicking or tapping the row anywhere opens it.
+export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned, label, onOpen }: TaskRowProps) {
   const { token } = theme.useToken()
   const noHover = useHoverNone()
-  const open = !!expanded
   // The whole row is the pointer target, the time cell included; the actions (and anything portalled out of
   // them, such as a confirmation popover, whose events still bubble through React) keep their own clicks.
   // A native listener, because the keyboard path is the row's main button: a bare onClick on this <li>
   // would be a second, mouse-only control.
   const rowRef = useRef<HTMLLIElement>(null)
-  const toggleRef = useRef(onToggle)
-  toggleRef.current = onToggle
+  const openRef = useRef(onOpen)
+  openRef.current = onOpen
   useEffect(() => {
     const row = rowRef.current
     if (!row) return
     const onClick = (e: MouseEvent) => {
       if ((e.target as Element).closest('.rp-task-row__acts')) return
-      toggleRef.current?.()
+      openRef.current?.()
     }
     row.addEventListener('click', onClick)
     return () => row.removeEventListener('click', onClick)
   }, [])
-  const toggleKey = (e: KeyboardEvent) => {
+  const openKey = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      onToggle?.()
+      onOpen?.()
     }
   }
   const color: Record<TaskTone, string> = {
@@ -63,15 +63,15 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
     fail: token.colorError,
     idle: token.colorTextQuaternary,
   }
-  const cls = ['rp-task-row', pinned && 'is-active', open && 'is-open'].filter(Boolean).join(' ')
+  const cls = ['rp-task-row', pinned && 'is-active'].filter(Boolean).join(' ')
   return (
     <li ref={rowRef} className={cls} style={{ listStyle: 'none' }}>
       <div
         className="rp-task-row__main"
         role="button"
         tabIndex={0}
-        aria-expanded={open}
-        onKeyDown={toggleKey}
+        aria-label={label}
+        onKeyDown={openKey}
       >
         <span
           aria-hidden="true"
@@ -104,7 +104,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
             </span>
           )}
           {actions && (
-            <div className="rp-task-row__acts" inert={noHover && !open && !pinned}>
+            <div className="rp-task-row__acts" inert={noHover && !pinned}>
               {actions}
             </div>
           )}

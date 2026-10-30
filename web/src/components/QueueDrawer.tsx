@@ -17,6 +17,9 @@ import { startVisiblePoll } from '../lib/visiblePoll'
 import { loadFailure } from '../lib/loadFailure'
 import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
+import RunningFor from './RunningFor'
+import ExportDetailModal from './ExportDetailModal'
+import { openJobDetail } from '../lib/jobDetailStore'
 
 export type DrawerTab = 'runs' | 'exports'
 
@@ -56,18 +59,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
   // The row whose cancel confirmation is open keeps its actions on screen.
   const [confirming, setConfirming] = useState<string | null>(null)
-  // The one row whose actions a tap or click has revealed.
-  const [openRow, setOpenRow] = useState<string | null>(null)
-  const toggleRow = (key: string) => setOpenRow((cur) => (cur === key ? null : key))
-  useEffect(() => {
-    if (openRow === null) return
-    // A press anywhere outside the task lists puts the actions away; a press on another row is that row's own toggle.
-    const away = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest('.rp-task-list')) setOpenRow(null)
-    }
-    document.addEventListener('pointerdown', away, true)
-    return () => document.removeEventListener('pointerdown', away, true)
-  }, [openRow])
+  // The export whose compact detail is open.
+  const [exportDetail, setExportDetail] = useState<string | null>(null)
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
@@ -177,7 +170,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <Button type="text" size="small" icon={icon} aria-label={label} {...props} />
     </Tooltip>
   )
-  const openAction = (label: string, to: string) => iconAction(label, <ArrowRightOutlined />, { onClick: () => { onClose(); navigate(to) } })
 
   // null = not answered yet; a dash rather than a 0, which would read as a settled idle queue.
   const stat = (label: string, value: number | null) => (
@@ -209,8 +201,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     let percent: number | undefined
     if (j.status === 'running' || j.status === 'cancelling') {
       tone = 'running'
-      percent = progress.percent
-      detail = t('tasks.rows', { done: progress.done, total: j.total })
+      if (j.status === 'running' && j.total === 1) {
+        // One row: a bar and "0 / 1 rows" say nothing, so say how long it has been going.
+        detail = <RunningFor since={j.started_at} />
+      } else {
+        percent = progress.percent
+        detail = t('tasks.rows', { done: progress.done, total: j.total })
+      }
     } else if (j.status === 'queued') {
       tone = 'waiting'
       detail = j.window_blocked
@@ -252,8 +249,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={j.id}
         pinned={confirming === `run-${j.id}`}
-        expanded={openRow === `run-${j.id}`}
-        onToggle={() => toggleRow(`run-${j.id}`)}
+        label={`${targetName(j.target_id)}, ${t(`batch.status.${j.status}`, j.status)}`}
+        onOpen={() => openJobDetail(j.id)}
         tone={tone}
         name={
           <>
@@ -274,7 +271,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
                 </Tooltip>
               </Popconfirm>
             )}
-            {openAction(t('tasks.open'), `/queue?job=${j.id}`)}
           </>
         }
       />
@@ -310,8 +306,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={taskKey(x)}
         pinned={confirming === `export-${taskKey(x)}`}
-        expanded={openRow === `export-${taskKey(x)}`}
-        onToggle={() => toggleRow(`export-${taskKey(x)}`)}
+        label={`${x.name}, ${t(`export.status.${x.status}`, x.status)}`}
+        onOpen={() => setExportDetail(taskKey(x))}
         tone={tone}
         name={x.name}
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
@@ -423,6 +419,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         />
       )}
       {activePane}
+      <ExportDetailModal
+        task={exportDetail ? (exportTasks.find((x) => taskKey(x) === exportDetail) ?? null) : null}
+        onClose={() => setExportDetail(null)}
+        onCancel={cancelExport}
+      />
     </Drawer>
   )
 }

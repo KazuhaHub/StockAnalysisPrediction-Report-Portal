@@ -1361,7 +1361,7 @@ body {
   gap: 10px;
   padding: 10px 12px;
 }
-/* The dot and the two text lines; on a touch device this is the tap target that reveals the actions. */
+/* The dot and the two text lines: the row's button, which opens the task's detail. */
 .rp-task-row__main {
   display: flex;
   flex: 1;
@@ -1415,19 +1415,17 @@ body {
   pointer-events: none;
   transition: opacity 0.16s ease, transform 0.16s ease;
 }
-.rp-task-row.is-open .rp-task-row__acts,
 .rp-task-row.is-active .rp-task-row__acts {
   opacity: 1;
   transform: none;
   pointer-events: auto;
 }
-.rp-task-row.is-open .rp-task-row__time,
 .rp-task-row.is-active .rp-task-row__time {
   opacity: 0;
   transform: translateX(-10px);
 }
-/* Hover and focus reveal the actions where the primary input can hover; a click or tap toggles
-   them everywhere (is-open). */
+/* Hover and focus reveal the actions where the primary input can hover. A click or tap anywhere on the
+   row opens the task's detail instead. */
 @media (hover: hover) {
   .rp-task-row:hover,
   .rp-task-row:has(:focus-visible) {
@@ -1445,7 +1443,7 @@ body {
     transform: translateX(-10px);
   }
 }
-.rp-task-row.is-open {
+.rp-task-row.is-active {
   background: var(--ant-color-fill-tertiary);
 }
 @media (prefers-reduced-motion: reduce) {

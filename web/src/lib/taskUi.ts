@@ -12,6 +12,15 @@ export function runOutcome(c: Pick<NonNullable<TaskItem['counts']>, 'succeeded' 
 
 const MINUTE = 60_000
 
+/** A duration as "2m 13s" / "1h 2m 3s". The h / m / s abbreviations read the same in every supported language. */
+export function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  return [h ? `${h}h` : '', h || m ? `${m}m` : '', `${sec}s`].filter(Boolean).join(' ')
+}
+
 /**
  * A short time for a task row. An instant (epoch milliseconds) under an hour old reads relatively;
  * anything else is the clock for today or "MM-DD HH:mm" for another day. A wall-clock string (what

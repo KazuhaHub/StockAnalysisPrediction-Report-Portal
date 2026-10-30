@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { formatTaskTime, runOutcome } from './taskUi'
+import { formatElapsed, formatTaskTime, runOutcome } from './taskUi'
+
+describe('formatElapsed', () => {
+  it('reads seconds, minutes and hours compactly', () => {
+    expect(formatElapsed(0)).toBe('0s')
+    expect(formatElapsed(59_400)).toBe('59s')
+    expect(formatElapsed(133_000)).toBe('2m 13s')
+    expect(formatElapsed(3_723_000)).toBe('1h 2m 3s')
+    expect(formatElapsed(3_600_000)).toBe('1h 0m 0s')
+  })
+  it('never goes negative', () => {
+    expect(formatElapsed(-5_000)).toBe('0s')
+  })
+})
 
 describe('runOutcome', () => {
   it('is ok when no row failed or came back partial', () => {

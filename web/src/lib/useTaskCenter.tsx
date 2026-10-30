@@ -1,7 +1,7 @@
-import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { notifyExportsChanged } from './exportJobs'
 import { notify, type NotifyAction } from './notify'
+import { openJobDetail } from './jobDetailStore'
 import { runOutcome } from './taskUi'
 import { taskKey, useMyTasks } from './useMyTasks'
 import type { TaskItem } from '../api/types'
@@ -11,9 +11,8 @@ import type { TaskItem } from '../api/types'
 // the returned list; nothing here draws a surface of its own.
 export function useTaskCenter(enabled: boolean) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
-  // "View" opens the thing itself: a run's detail on the queue page, the Tasks drawer's Exports tab for an export.
-  const viewRun = (task: TaskItem): NotifyAction[] => [{ label: t('tasks.toast.view'), primary: true, onClick: () => navigate(`/queue?job=${task.id}`) }]
+  // "View" opens the thing itself: a run's detail in place over the current page, the Tasks drawer's Exports tab for an export.
+  const viewRun = (task: TaskItem): NotifyAction[] => [{ label: t('tasks.toast.view'), primary: true, onClick: () => openJobDetail(Number(task.id)) }]
   const viewExports: NotifyAction[] = [{ label: t('tasks.toast.view'), primary: true, onClick: () => notifyExportsChanged({ open: true }) }]
   return useMyTasks({
     enabled,

@@ -106,7 +106,7 @@ export function jobProgressPresentation(j: BatchJob): JobProgressPresentation {
 
 // inputPairs reads a run's inputs JSON as [key, value] pairs, dropping empty values (e.g. an
 // unfilled optional field). A body that isn't a JSON object is kept as one unnamed value.
-function inputPairs(s?: string): Array<[string, string]> {
+export function inputPairs(s?: string): Array<[string, string]> {
   if (!s) return []
   let parsed: unknown
   try {

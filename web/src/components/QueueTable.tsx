@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type Key } from 'react'
 import {
-  Alert,
   App,
   Button,
   Card,
   DatePicker,
-  Descriptions,
-  Drawer,
   Empty,
   Grid,
   Input,
@@ -28,252 +25,38 @@ import {
   DeleteOutlined,
   ExportOutlined,
   EyeOutlined,
-  InfoCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined,
-  SyncOutlined,
 } from '@ant-design/icons'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
 import { exportLink, runsFilterToTree } from '../lib/exportFilter'
 import { useAuth } from '../auth'
-import type { BatchItem, BatchJob, BatchJobDetail, BatchQueueSummary, BatchTarget } from '../api/types'
+import type { BatchJob, BatchQueueSummary, BatchTarget } from '../api/types'
 import {
   BASE_MAX,
   executionTags,
   queueStatusTag,
-  clampText,
-  fmtInputs,
-  INPUT_TOTAL_MAX,
   InputsPreview,
   isTerminal,
   isUrgent,
   jobProgressPresentation,
   priorityNum,
   priorityTag,
-  statusTag,
-  TOOLTIP_STYLES,
 } from '../lib/batchUi'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import JobDetailDrawer from './JobDetailDrawer'
 import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
-
-// itemActive reports whether a run (row) can still be cancelled — it hasn't reached a
-// terminal state (succeeded / partial / failed / cancelled).
-const itemActive = (s: string) => s === 'queued' || s === 'running'
-
-// Detail drawer: a run's rows, inputs, errors + a link to the stock's reports. Rows can be
-// cancelled individually (per-row ⊘) or several at once (checkbox multi-select), by the
-// job's owner or an admin.
-function DetailDrawer({ jobId, admin, user, onClose }: { jobId: number | null; admin: boolean; user: string | null; onClose: () => void }) {
-  const { t } = useTranslation()
-  const { message } = App.useApp()
-  const fullWidth = !Grid.useBreakpoint().md // phone: the 680px drawer would overflow the screen
-  const [detail, setDetail] = useState<BatchJobDetail | null>(null)
-  const [selected, setSelected] = useState<Key[]>([])
-  const [detailItem, setDetailItem] = useState<BatchItem | null>(null)
-  // The server answers 404 for a job that does not exist or is not the reader's; a deep link can name either.
-  const [notFound, setNotFound] = useState(false)
-  const open = jobId != null
-  const load = () =>
-    jobId == null
-      ? Promise.resolve()
-      : api
-          .get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`)
-          .then((d) => {
-            setNotFound(false)
-            setDetail(d)
-          })
-          .catch((e) => {
-            if ((e as { status?: number })?.status === 404) setNotFound(true)
-          })
-  useEffect(() => {
-    if (jobId == null) return
-    setDetail(null)
-    setNotFound(false)
-    setSelected([])
-    return startVisiblePoll(load, 2500)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
-
-  const canCancel = detail != null && (admin || detail.job.created_by === user)
-  const cancelRows = async (ids: Key[]) => {
-    if (jobId == null || ids.length === 0) return
-    try {
-      await api.post(`/api/admin/batch/jobs/${jobId}/items/cancel`, { item_ids: ids.map(Number) })
-      message.success(t('batch.msg.rowsCancelled', { n: ids.length }))
-      setSelected([])
-      await load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
-
-  // A row that has a Dify handle can be reconciled: fetch its true outcome from Dify without
-  // re-running it. Rescues a run wrongly marked failed by a short timeout / dropped stream.
-  const hasHandle = (it: BatchItem) => !!(it.run_id || it.conversation_id)
-  const canReconcile = (it: BatchItem) => admin && hasHandle(it) && !itemActive(it.status) && it.status !== 'succeeded'
-  const reconcile = async (it: BatchItem) => {
-    try {
-      const r = await api.post<{ status: string; note?: string }>(`/api/admin/batch/items/${it.id}/reconcile`)
-      message.success(r.note ? t('queue.reconcileStillRunning') : t('queue.reconcileDone', { status: t(`batch.status.${r.status}`) }))
-      await load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
-  const idCell = (v: string) =>
-    v ? (
-      <Typography.Text copyable style={{ fontSize: 12 }}>
-        {v}
-      </Typography.Text>
-    ) : (
-      <Typography.Text type="secondary">—</Typography.Text>
-    )
-
-  const symbolOf = (it: BatchItem) => {
-    try {
-      const o = JSON.parse(it.inputs) as Record<string, string>
-      return o.symbol || o.code || ''
-    } catch {
-      return ''
-    }
-  }
-  const cols: ColumnsType<BatchItem> = [
-    { title: t('batch.col.row'), dataIndex: 'row_index', width: 48 },
-    { title: t('batch.col.inputs'), render: (_: unknown, it) => <InputsPreview inputs={it.inputs} rows={3} secondary={false} /> },
-    { title: t('batch.col.status'), dataIndex: 'status', width: 92, render: (s: string) => statusTag(t, s) },
-    {
-      title: t('batch.col.error'),
-      render: (_: unknown, it) =>
-        it.error ? (
-          // Same bound as the inputs preview: a raw provider error can run to thousands of
-          // characters, and an overlay that tall gets clipped by the viewport and flickers.
-          // The full text is in this row's detail modal.
-          <Typography.Paragraph
-            type="danger"
-            ellipsis={{ rows: 3, tooltip: { title: clampText(it.error, INPUT_TOTAL_MAX), styles: TOOLTIP_STYLES } }}
-            style={{ fontSize: 12, marginBottom: 0 }}
-          >
-            {it.error}
-          </Typography.Paragraph>
-        ) : it.status === 'succeeded' && symbolOf(it) ? (
-          <Link to={`/stock/${encodeURIComponent(symbolOf(it))}`}>{t('queue.viewReport')}</Link>
-        ) : (
-          ''
-        ),
-    },
-    {
-      title: '',
-      width: 96,
-      render: (_: unknown, it) => (
-        <Space size={0}>
-          <Button
-            size="small"
-            type="text"
-            icon={<InfoCircleOutlined />}
-            title={t('queue.itemDetails')}
-            onClick={() => setDetailItem(it)}
-          />
-          {canReconcile(it) ? (
-            <Popconfirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(it)}>
-              <Button size="small" type="text" icon={<SyncOutlined />} title={t('queue.reconcile')} />
-            </Popconfirm>
-          ) : null}
-          {canCancel && itemActive(it.status) ? (
-            <Popconfirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])}>
-              <Button size="small" type="text" danger icon={<StopOutlined />} title={t('queue.cancelRow')} />
-            </Popconfirm>
-          ) : null}
-        </Space>
-      ),
-    },
-  ]
-  const rowSelection = canCancel
-    ? {
-        selectedRowKeys: selected,
-        onChange: setSelected,
-        getCheckboxProps: (it: BatchItem) => ({ disabled: !itemActive(it.status) }),
-      }
-    : undefined
-  return (
-    <Drawer
-      title={detail ? t('batch.jobTitle', { id: detail.job.id }) : t('batch.jobDetail')}
-      size={fullWidth ? '100%' : 680}
-      open={open}
-      onClose={onClose}
-      destroyOnHidden
-      extra={
-        selected.length > 0 ? (
-          <Popconfirm title={t('queue.cancelRowsConfirm', { n: selected.length })} onConfirm={() => cancelRows(selected)}>
-            <Button danger size="small" icon={<StopOutlined />}>
-              {t('queue.cancelSelected', { n: selected.length })}
-            </Button>
-          </Popconfirm>
-        ) : null
-      }
-    >
-      {notFound && <Alert type="warning" showIcon title={t('batch.jobNotFound')} />}
-      {detail && <Space wrap style={{ marginBottom: 12 }}>{executionTags(t, detail.job)}</Space>}
-      {/* A job the queue calls "running" is not necessarily running HERE: after a restart the row
-          survives while the goroutine driving it does not, and the portal reconciles it by polling
-          rather than by executing. The server has always computed this; nothing rendered it, so the
-          one signal that tells an admin whether a stuck job is stuck in THIS process or merely
-          being watched was unreachable. Only said when it is worth saying — a running job. */}
-      {detail && detail.job.status === 'running' && !detail.running_in_process && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 12 }}
-          title={t('queue.notInProcess')}
-          description={t('queue.notInProcessHint')}
-        />
-      )}
-      {detail && (
-        <Table
-          rowKey="id"
-          size="small"
-          rowSelection={rowSelection}
-          dataSource={detail.items}
-          columns={cols}
-          pagination={{ pageSize: 20, size: 'small' }}
-          scroll={{ x: 560 }}
-        />
-      )}
-      <Modal open={detailItem != null} title={t('queue.itemDetails')} footer={null} width={560} onCancel={() => setDetailItem(null)}>
-        {detailItem && (
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label={t('batch.col.row')}>{detailItem.row_index}</Descriptions.Item>
-            <Descriptions.Item label={t('batch.col.status')}>{statusTag(t, detailItem.status)}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.attempts')}>{detailItem.attempts}</Descriptions.Item>
-            <Descriptions.Item label="run_id">{idCell(detailItem.run_id)}</Descriptions.Item>
-            <Descriptions.Item label="conversation_id">{idCell(detailItem.conversation_id)}</Descriptions.Item>
-            <Descriptions.Item label="task_id">{idCell(detailItem.task_id)}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.startedAt')}>{detailItem.started_at || '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.finishedAt')}>{detailItem.finished_at || '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('batch.col.inputs')}>{fmtInputs(detailItem.inputs)}</Descriptions.Item>
-            {detailItem.error ? (
-              <Descriptions.Item label={t('batch.col.error')}>
-                <Typography.Text type="danger" style={{ fontSize: 12 }}>
-                  {detailItem.error}
-                </Typography.Text>
-              </Descriptions.Item>
-            ) : null}
-          </Descriptions>
-        )}
-      </Modal>
-    </Drawer>
-  )
-}
 
 // The full run queue: filters + jobs table + all queue actions + detail drawer +
 // reschedule modal. Shared by the Run/queue page (with stats) and the batch console
@@ -721,7 +504,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </LoadGate>
       </Card>
 
-      <DetailDrawer jobId={detailId} admin={admin} user={user} onClose={() => setDetailId(null)} />
+      <JobDetailDrawer jobId={detailId} onClose={() => setDetailId(null)} />
 
       <Modal
         title={t('queue.reschedule')}

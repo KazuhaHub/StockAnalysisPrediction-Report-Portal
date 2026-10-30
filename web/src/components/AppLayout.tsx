@@ -20,6 +20,7 @@ import Omnibox from './Omnibox'
 import ScrollToTop from './ScrollToTop'
 import RunAnalysisModal from './RunAnalysisModal'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
+import JobDetailHost from './JobDetailHost'
 import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
@@ -748,6 +749,8 @@ function AppShell() {
           onTabChange={setDrawerTab}
         />
       )}
+      {/* The run detail opened in place from a Tasks row or a notification; after the Tasks drawer so it stacks over it. */}
+      {showTasks && <JobDetailHost onNavigate={() => setQueueOpen(false)} />}
 
       {!onChat && <ScrollToTop routeKey={loc.pathname + loc.search} />}
 
