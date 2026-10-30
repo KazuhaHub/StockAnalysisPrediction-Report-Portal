@@ -91,16 +91,23 @@ pin matching, idempotent bootstrap, conflicting enrollment, CLI refusal and the
 Portal environment bootstrap. Linux tests compile the concrete root/data/Docker
 service path.
 
-On source candidate `cf4084b308bb19fcea17a7e826ae80f66042f210`, full test workflow
-`41010542804` and app-runner daemon workflow `41010542824` both passed. The latter
-created a newly owned loopback XFS project-quota mount, bootstrapped and started
-the real `serve` command, observed the managed profile from the controller UID,
-stopped the service and verified socket removal, restarted it without replacing
-the journal or enrollment, observed the profile again, and confirmed the Portal
-root endpoint. Existing browser/native coverage continues to exercise current
-viewer HTTPS and SDK network paths.
+On integrated source candidate `e622c7f3`, full test workflow `41049324619`,
+quota/browser workflow `41049324669` and app-runner daemon workflow `41049324581`
+passed.
 
-A remaining H03 gate is to connect this exact long-running service to the Portal
-browser managed-installation path and record a complete managed app installation
-through the UI. The service restart drill and the separately hosted Portal
-browser acceptance are not being presented as that one combined flow.
+The app-runner daemon workflow created a newly owned loopback XFS project-quota
+mount, bootstrapped and started the real `serve` command, observed the managed
+profile from the controller UID, stopped the service, verified socket removal,
+restarted it without replacing the journal or enrollment, observed the profile
+again, and confirmed the Portal root endpoint.
+
+The quota/browser workflow now starts the same `service.Serve` boundary inside its
+managed Portal fixture. The Portal child completes install review, data
+preparation, candidate start, readiness, backend registration/RPC delivery and
+current-viewer SDK browser requests through that service. After the child
+finishes, the parent stops the service, reopens the journal and XFS root, verifies
+the running candidate and writable witness, checks full quota evidence, removes
+only owned containers and IPC storage, and confirms the Journal lock is reusable.
+
+Production deployment, external credentials, stable SDK/API freeze and market
+publication remain separate decisions.
