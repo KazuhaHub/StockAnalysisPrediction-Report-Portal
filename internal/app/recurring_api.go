@@ -101,12 +101,9 @@ func (s *Server) validateRecurring(in recurringIn, admin bool) (RecurringTask, s
 // recurringAuthorized fetches a task and confirms the caller may touch it (owner or admin).
 func (s *Server) recurringAuthorized(w http.ResponseWriter, r *http.Request, user string) (RecurringTask, bool) {
 	task, ok := s.st.GetRecurringTask(pathID(r, "id"))
-	if !ok {
+	// Someone else's task answers 404, the same as an unknown id, so ids do not leak existence.
+	if !ok || (!s.isAdmin(user) && task.CreatedBy != user) {
 		jsonError(w, http.StatusNotFound, "task not found")
-		return RecurringTask{}, false
-	}
-	if !s.isAdmin(user) && task.CreatedBy != user {
-		jsonError(w, http.StatusForbidden, "you can only manage your own tasks")
 		return RecurringTask{}, false
 	}
 	return task, true

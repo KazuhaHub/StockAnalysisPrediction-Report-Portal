@@ -38,14 +38,14 @@ func TestRecurringTaskOperationHandlers(t *testing.T) {
 	}
 
 	// A non-owner cannot read, edit, toggle or fire it.
-	if code, _ = callPath(t, s.apiRecurringDetail, http.MethodGet, ``, path, "bob"); code != http.StatusForbidden {
-		t.Fatalf("foreign detail → %d, want 403", code)
+	if code, _ = callPath(t, s.apiRecurringDetail, http.MethodGet, ``, path, "bob"); code != http.StatusNotFound {
+		t.Fatalf("foreign detail → %d, want 404", code)
 	}
-	if code, _ = callPath(t, s.apiRecurringEnable, http.MethodPost, `{"enabled":false}`, path, "bob"); code != http.StatusForbidden {
-		t.Fatalf("foreign enable → %d, want 403", code)
+	if code, _ = callPath(t, s.apiRecurringEnable, http.MethodPost, `{"enabled":false}`, path, "bob"); code != http.StatusNotFound {
+		t.Fatalf("foreign enable → %d, want 404", code)
 	}
-	if code, _ = callPath(t, s.apiRecurringRunNow, http.MethodPost, ``, path, "bob"); code != http.StatusForbidden {
-		t.Fatalf("foreign run-now → %d, want 403", code)
+	if code, _ = callPath(t, s.apiRecurringRunNow, http.MethodPost, ``, path, "bob"); code != http.StatusNotFound {
+		t.Fatalf("foreign run-now → %d, want 404", code)
 	}
 	// An unknown id 404s before the ownership check can matter.
 	if code, _ = callPath(t, s.apiRecurringDetail, http.MethodGet, ``, map[string]string{"id": "424242"}, "admin"); code != http.StatusNotFound {

@@ -525,6 +525,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.session(mux, "GET /api/exports/{id}", s.apiReaderExportGet)
 	s.session(mux, "POST /api/exports/{id}/cancel", s.apiReaderExportCancel)
 	s.session(mux, "GET /api/exports/{id}/file", s.apiReaderExportFile)
+	s.session(mux, "GET /api/tasks", s.apiMyTasks)
 
 	// ---- Downloads: MD / PDF (cookie session) ----
 	s.sessionHTML(mux, "GET /report/{id}/md", s.reportMD)

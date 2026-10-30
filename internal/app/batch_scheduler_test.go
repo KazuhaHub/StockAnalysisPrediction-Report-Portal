@@ -62,7 +62,7 @@ func TestSchedulerCapsConcurrentRunsAcrossJobs(t *testing.T) {
 	srv.scheduleTick()
 	// Two runs must fill the budget and block; the rest wait for a slot.
 	waitFor(t, "2 runs to be concurrently in flight", func() bool { return atomic.LoadInt32(&max) >= 2 })
-	if got := st.RunningItemCount(); got > 2 {
+	if got := st.RunningItemCount(""); got > 2 {
 		t.Fatalf("RunningItemCount = %d while blocked, want <= 2", got)
 	}
 	close(release) // let every wave drain

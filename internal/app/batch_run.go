@@ -510,7 +510,7 @@ type candMeta struct {
 // slots (budget − running runs) with the highest-priority runnable runs and starts them.
 func (s *Server) admitLocked() {
 	budget := s.batchBudget()
-	running := s.st.RunningItemCount()
+	running := s.st.RunningItemCount("")
 	if budget-running <= 0 {
 		return
 	}

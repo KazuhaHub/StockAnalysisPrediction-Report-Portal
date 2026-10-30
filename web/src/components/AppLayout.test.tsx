@@ -247,13 +247,22 @@ describe('AppLayout reader export entry', () => {
     answerWith(exportPolicy(true))
     renderAt('/queue')
     expect(await screen.findByText('queue-body')).toBeTruthy()
-    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'export.tray.title' })).toBeTruthy())
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'tasks.title' })).toBeTruthy())
     await user.click(screen.getByRole('button', { name: 'Alice' }))
     expect(await screen.findByRole('button', { name: /nav\.exports$/ })).toBeTruthy()
   })
 
-  it('shows neither the entry nor the tray when the policy does not allow it', async () => {
+  it('shows the tasks tray to a run_batch holder even where export is off', async () => {
+    authState.value = { ...authState.value, admin: false, can: (p) => p === 'run_batch' }
+    answerWith(exportPolicy(false))
+    renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'tasks.title' })).toBeTruthy())
+  })
+
+  it('shows neither the entry nor the tray when the policy does not allow it and there is no run permission', async () => {
     const user = userEvent.setup()
+    authState.value = { ...authState.value, admin: false, can: () => false }
     answerWith(exportPolicy(false))
     renderAt('/queue')
     expect(await screen.findByText('queue-body')).toBeTruthy()
@@ -261,7 +270,7 @@ describe('AppLayout reader export entry', () => {
     await user.click(screen.getByRole('button', { name: 'Alice' }))
     expect(await screen.findByRole('button', { name: /nav\.account$/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /nav\.exports$/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'export.tray.title' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'tasks.title' })).toBeNull()
   })
 
   it('does not ask an administrator for the reader policy', async () => {

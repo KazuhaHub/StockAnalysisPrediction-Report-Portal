@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { fmtMs, formatCell, panelToday } from './exportTime'
-import { exportDownloadUrl, jobActions, jobProgress, sortJobsForTray } from './exportJobs'
+import { exportDownloadUrl, jobActions, jobProgress } from './exportJobs'
 import type { ExportJob } from '../api/types'
 
 describe('panel time', () => {
@@ -36,9 +36,7 @@ describe('export jobs', () => {
     expect(jobProgress(job({ status: 'done', rows_done: 7, rows_estimate: 0 }))).toBe(100)
     expect(jobProgress(job({ status: 'running', rows_done: 500, rows_estimate: 100 }))).toBe(100)
   })
-  it('builds the download url and orders active tasks first', () => {
+  it('builds the download url', () => {
     expect(exportDownloadUrl('abc')).toBe('/api/admin/exports/abc/file')
-    const sorted = sortJobsForTray([job({ id: 'old', status: 'done', created_at: 1 }), job({ id: 'new', status: 'done', created_at: 5 }), job({ id: 'run', status: 'running', created_at: 3 })])
-    expect(sorted.map((j) => j.id)).toEqual(['run', 'new', 'old'])
   })
 })
