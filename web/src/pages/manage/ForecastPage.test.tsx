@@ -233,7 +233,7 @@ describe('ForecastPage', () => {
   it('shows who has access from the server\'s own resolution, with a way to the OU editor', async () => {
     show()
     expect(await screen.findByText('forecast.access.summary:{"all":2,"own":1,"none":4}')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'manage.operation.access' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'manage.operation.access' }))
     expect(apiMock.get.mock.calls.some(([u]) => u === '/api/admin/forecast/access')).toBe(true)
     expect(screen.getByRole('link', { name: 'forecast.access.edit' }).getAttribute('href')).toBe('/manage/forecast?scope=ou')
   })

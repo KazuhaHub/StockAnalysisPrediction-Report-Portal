@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import { Button, ConfigProvider, Drawer, Menu, Space, Spin, Typography, theme } from 'antd'
+import { Button, ConfigProvider, Drawer, Dropdown, Menu, Spin, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
-import { HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { DownOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
@@ -96,31 +96,34 @@ export default function ManageLayout() {
       {!railCollapsed && t('manage.search')}
     </Button>
   )
+  const relatedItems: MenuProps['items'] = (page?.related ?? []).flatMap((key) => {
+    const related = adminPage(key)
+    return related ? [{ key, label: t(related.label), icon: related.icon }] : []
+  })
   const header = (
     <header className="rp-admin-page-header">
-      <div>
-        <Typography.Text type="secondary" className="rp-admin-page-header__area">
-          {group ? t(group.label) : t('nav.manage')}
-        </Typography.Text>
-        <Typography.Title level={2}>{activeLabel}</Typography.Title>
-        {/* A page nested under a page (/manage/apps/:key) has its own breadcrumb; repeating the list's description above it adds nothing. */}
-        {!nested && (
-          <Typography.Paragraph type="secondary">
-            {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
-          </Typography.Paragraph>
+      <div className="rp-admin-page-header__row">
+        <div className="rp-admin-page-header__title">
+          <Typography.Text type="secondary" className="rp-admin-page-header__area">
+            {group ? t(group.label) : t('nav.manage')}
+          </Typography.Text>
+          <Typography.Title level={2}>{activeLabel}</Typography.Title>
+        </div>
+        {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
+        {page && relatedItems.length > 0 && (
+          <Dropdown trigger={['click']} placement="bottomRight"
+            menu={{ items: relatedItems, onClick: ({ key }) => go(`/manage/${key}`) }}>
+            <Button size="small" aria-label={t('manage.related')}>
+              {t('manage.related')} <DownOutlined />
+            </Button>
+          </Dropdown>
         )}
       </div>
-      {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
-      {page && (
-        <nav aria-label={t('manage.related')} className="rp-admin-related">
-          <Typography.Text type="secondary">{t('manage.related')}</Typography.Text>
-          <Space wrap size={[4, 4]}>
-            {page.related.map((key) => {
-              const related = adminPage(key)
-              return related && <Button key={key} size="small" onClick={() => go(`/manage/${key}`)}>{t(related.label)}</Button>
-            })}
-          </Space>
-        </nav>
+      {/* A page nested under a page (/manage/apps/:key) has its own breadcrumb; repeating the list's description above it adds nothing. */}
+      {!nested && (
+        <Typography.Paragraph type="secondary" className="rp-admin-page-header__desc">
+          {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
+        </Typography.Paragraph>
       )}
     </header>
   )

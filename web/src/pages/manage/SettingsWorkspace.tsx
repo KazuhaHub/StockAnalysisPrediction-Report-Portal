@@ -1,5 +1,5 @@
-import { createContext, useContext, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Button, Select } from 'antd'
+import { createContext, useContext, useId, type ReactNode } from 'react'
+import { Tabs } from 'antd'
 import { useTranslation } from 'react-i18next'
 
 const ActiveSection = createContext('')
@@ -11,6 +11,9 @@ export function SettingsPanel({ section, children }: { section: string; children
   return <section hidden={section !== active} className="rp-settings-panel">{children}</section>
 }
 
+// Sections are a horizontal tab bar directly under the page header; the page itself scrolls. The
+// bar scrolls sideways (with antd's overflow menu) when the sections do not fit, so narrow screens
+// need no separate picker.
 export default function SettingsWorkspace({ sections, active, onChange, children }: {
   sections: { key: string; label: string }[]
   active: string
@@ -19,41 +22,10 @@ export default function SettingsWorkspace({ sections, active, onChange, children
 }) {
   const { t } = useTranslation()
   const id = useId()
-  const workspace = useRef<HTMLDivElement>(null)
-  const [height, setHeight] = useState<number>()
-  useLayoutEffect(() => {
-    const element = workspace.current
-    if (!element) return
-    const container = element.closest('.rp-policy-content, .rp-admin-page-body')
-    const actionBars = [...(container?.querySelectorAll<HTMLElement>('.rp-settings-save-bar') ?? [])]
-      .filter((bar) => !element.contains(bar)).map((bar) => bar.parentElement!)
-    // Fix the workspace height for the viewport, independently of its active panel. Hiding a long
-    // form must not shrink the outer page and clamp its scroll position back to the top.
-    const fit = () => {
-      const bottom = container?.getBoundingClientRect().bottom || window.innerHeight
-      const reserved = Math.max(0, ...actionBars.map((bar) => bar.getBoundingClientRect().height ? bar.getBoundingClientRect().height + 8 : 0))
-      setHeight(Math.max(280, bottom - element.getBoundingClientRect().top - reserved))
-    }
-    fit()
-    const observer = new ResizeObserver(fit)
-    if (container) observer.observe(container)
-    actionBars.forEach((bar) => observer.observe(bar))
-    window.addEventListener('resize', fit)
-    return () => { observer.disconnect(); window.removeEventListener('resize', fit) }
-  }, [])
   return (
-    <div ref={workspace} className="rp-settings-workspace" style={{ height }}>
-      <div className="rp-settings-section-picker">
-        <Select aria-label={t('manage.sections')} value={active} onChange={onChange}
-          options={sections.map((section) => ({ value: section.key, label: section.label }))} />
-      </div>
-      <nav className="rp-settings-sections" aria-label={t('manage.sections')}>
-        {sections.map((section) => (
-          <Button key={section.key} type={active === section.key ? 'primary' : 'text'}
-            aria-current={active === section.key ? 'true' : undefined} aria-controls={id}
-            onClick={() => onChange(section.key)}>{section.label}</Button>
-        ))}
-      </nav>
+    <div className="rp-settings-workspace">
+      <Tabs className="rp-settings-tabs" aria-label={t('manage.sections')} size="small" activeKey={active}
+        onChange={onChange} items={sections.map((section) => ({ key: section.key, label: section.label }))} />
       <div id={id} className="rp-settings-content">
         <ActiveSection value={active}>{children}</ActiveSection>
       </div>

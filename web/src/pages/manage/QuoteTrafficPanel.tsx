@@ -26,7 +26,7 @@ export default function QuoteTrafficPanel({ traffic }: { traffic?: QuoteDisplayT
   ]
   const batch = traffic.batch
   return <Card title={t('quoteAdmin.display.title')}>
-    <Table rowKey="key" size="small" pagination={false} scroll={{ x: 1200 }} columns={columns}
+    <Table rowKey="key" size="small" pagination={false} scroll={{ x: 'max-content' }} columns={columns}
       onRow={(row) => ({ 'data-testid': `quote-traffic-${row.key}` } as React.HTMLAttributes<HTMLTableRowElement>)}
       dataSource={[{ ...traffic.live, key: 'live', label: t('quoteAdmin.display.live') }, { ...traffic.history, key: 'history', label: t('quoteAdmin.display.history') }]} />
     <Typography.Title level={5}>{t('quoteAdmin.display.batch')}</Typography.Title>

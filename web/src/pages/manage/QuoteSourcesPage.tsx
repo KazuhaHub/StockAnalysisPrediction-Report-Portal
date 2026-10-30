@@ -5,11 +5,10 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import LoadGate from '../../components/LoadGate'
-import StickyActionBar from '../../components/StickyActionBar'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
-import { usePendingSettings } from './AdminDraftBoundary'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
+import SettingsSaveBar from './SettingsSaveBar'
 import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
 import QuoteTrafficPanel, { type QuoteDisplayTraffic } from './QuoteTrafficPanel'
 
@@ -199,7 +198,6 @@ export default function QuoteSourcesPage() {
   const [savedState, setSavedState] = useState<QuoteAdminState | null>(null)
   const editable = JSON.stringify({ sources: rows.map((r) => [r.source, r.enabled]), ttlOpen, ttlClosed, ttlIntraday, homeCards, homeCardsKnown, autoRefresh, autoRefreshKnown, ratePolicies })
   const dirty = !!acknowledged && editable !== acknowledged
-  usePendingSettings(dirty, saving)
 
   const apply = (st: QuoteAdminState, updateStats = true) => {
     setRatePolicies(st.ratePolicies ?? null)
@@ -754,17 +752,7 @@ export default function QuoteSourcesPage() {
         {/* One bar for the whole page, outside the cards: one POST carries the order, the three
             TTLs and both quote switches, so a Save button inside the cache card would be a button
             that saves more than the card it sits in says it does. */}
-        <StickyActionBar>
-          <div className="rp-settings-save-bar">
-          <Typography.Text role="status" type={dirty ? 'warning' : 'secondary'}>{t(dirty ? 'manage.unsavedChanges' : 'manage.noChanges')}</Typography.Text>
-          <div>
-          <Button disabled={!dirty || saving} onClick={() => { if (savedState) apply(savedState, false) }}>{t('manage.discard')}</Button>
-          <Button type="primary" onClick={save} loading={saving} aria-label={t('common.save')}>
-            {t('common.save')}
-          </Button>
-          </div>
-          </div>
-        </StickyActionBar>
+        <SettingsSaveBar dirty={dirty} saving={saving} onSave={save} onDiscard={() => { if (savedState) apply(savedState, false) }} />
       </div>
     </LoadGate>
   )

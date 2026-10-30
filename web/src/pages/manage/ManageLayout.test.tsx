@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import ManageLayout from './ManageLayout'
 
 const navigate = vi.fn()
@@ -59,6 +59,17 @@ describe('ManageLayout — grouped rail', () => {
     expect(screen.queryByText('manage.description.apps')).toBeNull()
     // The title stays: the rail still highlights Apps and the page body has its own breadcrumb.
     expect(screen.getAllByText('nav.appsAdmin').length).toBeGreaterThan(0)
+  })
+
+  it('collapses related features into a dropdown instead of a visible row of buttons', async () => {
+    locState.pathname = '/manage/site'
+    render(<ManageLayout />)
+    const trigger = screen.getByRole('button', { name: /manage\.related/ })
+    const before = screen.getAllByRole('menuitem').length
+    // No related-feature buttons are rendered until the dropdown opens.
+    expect(screen.queryByRole('navigation', { name: 'manage.related' })?.querySelectorAll('button').length ?? 1).toBe(1)
+    fireEvent.click(trigger)
+    await waitFor(() => expect(screen.getAllByRole('menuitem').length).toBeGreaterThan(before))
   })
 
   it('renders section group headers (no Maintenance group after legacy import removal)', () => {
