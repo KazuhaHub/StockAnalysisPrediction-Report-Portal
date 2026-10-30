@@ -3,7 +3,7 @@ import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, T
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, qs, errText, ApiError } from '../api/client'
+import { api, qs, ApiError } from '../api/client'
 import { fetchQuoteWithHistory } from '../lib/quoteFetch'
 import type { PredictionSet, QuoteResp, ReportPredictions, StockResp } from '../api/types'
 import Markdown from '../components/Markdown'
@@ -18,6 +18,7 @@ import { useReaderPrefs } from '../reader'
 import { formatReportDateTime, isInstant } from '../lib/datetime'
 import { prefetch, readPrefetched, rememberPrefetched } from '../lib/prefetch'
 import { NO_ITEM_TOOLTIP } from '../lib/segmented'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import {
   quoteErrorRefreshAdvice,
   quoteRefreshDelayMs,
@@ -96,6 +97,7 @@ const sameSymbol = (a: string, b: string) => a.trim().toUpperCase() === b.trim()
 
 export default function StockPage() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { admin, forecast, forecastReader, user } = useAuth()
   const quotesOpen = useAppAccess().isOpen('builtin:quotes')
   // Older servers omit the navigation hint; preserve their existing reading-page requests.
@@ -184,6 +186,7 @@ export default function StockPage() {
       setLoading(true)
     }
     setNotFound(false)
+    let lost = false
     api
       .get<StockResp>(url)
       .then((d) => {
@@ -196,12 +199,15 @@ export default function StockPage() {
       })
       .catch((e) => {
         if (cancelled) return
-        if (e instanceof ApiError && e.status === 404) setNotFound(true)
+        // A lost connection is not an answer: the page keeps its spinner (or the report it has) and
+        // asks again when the connection returns.
+        if (failure(e) === null) lost = true
+        else if (e instanceof ApiError && e.status === 404) setNotFound(true)
       })
-      .finally(() => { if (!cancelled) { setLoading(false); setSummaryLoading(false) } })
+      .finally(() => { if (!cancelled && !lost) { setLoading(false); setSummaryLoading(false) } })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, query.date, query.kind, query.r, forecastKey])
+  }, [symbol, query.date, query.kind, query.r, forecastKey, retryKey])
 
   // The quote is deliberately NOT part of the report request. It has its own cache, its own TTL and
   // its own failure mode, and a vendor being unreachable must never keep somebody from reading the
@@ -213,6 +219,7 @@ export default function StockPage() {
   useEffect(() => {
     if (!symbol) return
     let cancelled = false
+    let lost = false
     setQuoteLoading(true)
     setQuoteError(null)
     setQuoteRefresh(null)
@@ -226,6 +233,9 @@ export default function StockPage() {
       })
       .catch((e) => {
         if (cancelled) return
+        // A lost connection is not an answer about this quote: the card keeps what it has (or its
+        // spinner) and the quote is requested again when the connection returns.
+        if (failure(e) === null) { lost = true; return }
         // The stale quote is dropped rather than left on screen under an error: a price with no
         // indication of when it stopped updating is the one thing worse than no price.
         setLoadedQuote(null)
@@ -233,12 +243,12 @@ export default function StockPage() {
         setQuoteRefresh(quoteErrorRefreshAdvice(e))
       })
       .finally(() => {
-        if (!cancelled) setQuoteLoading(false)
+        if (!cancelled && !lost) setQuoteLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [symbol, quoteRange, quoteNonce])
+  }, [symbol, quoteRange, quoteNonce, retryKey])
 
   useEffect(() => {
     const delay = quoteRefreshDelayMs(quoteRefresh)
@@ -266,13 +276,15 @@ export default function StockPage() {
         // A failed request is not "this report made no prediction". The body still renders; the
         // panel area says what happened and offers one retry.
         const unavailable = e instanceof ApiError && e.status === 403 && e.code === 'forecast_unavailable'
-        setPred({ forId, forAccess: forecastKey, sets: [], loading: false, unavailable, err: unavailable ? '' : errText(e, t) })
+        // A lost connection leaves the panel loading; it asks again when the connection returns.
+        const text = unavailable ? '' : failure(e)
+        if (text !== null) setPred({ forId, forAccess: forecastKey, sets: [], loading: false, unavailable, err: text })
       })
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repId, predNonce, forecastCardEnabled, forecastKey])
+  }, [repId, predNonce, forecastCardEnabled, forecastKey, retryKey])
 
   // What may be shown NOW. A state that belongs to another report is not shown at all, even for the
   // one render between the new report arriving and the effect above running.

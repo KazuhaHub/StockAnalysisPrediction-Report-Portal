@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Button, Result, Spin, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import WaitingForConnection from './WaitingForConnection'
 
 // What a view shows while the answer it describes is still on the wire.
 //
@@ -17,6 +18,10 @@ import { useTranslation } from 'react-i18next'
 //
 // So: a spinner until the answer is in, and if it never comes, say so and offer the retry —
 // never fall through to the defaults.
+//
+// A connection loss is not an answer either: the caller keeps `loading` true and passes no error,
+// the shell's connection strip says the connection is down, and the spinner here only adds a
+// muted line that it is waiting.
 export default function LoadGate({
   loading,
   error,
@@ -56,6 +61,7 @@ export default function LoadGate({
       <div style={{ display: 'grid', alignContent: 'center', justifyItems: 'center', gap: 12, minHeight }}>
         <Spin size="large" />
         <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
+        <WaitingForConnection />
       </div>
     )
   }

@@ -68,7 +68,7 @@ export default function AppsAdminPage() {
           <Button icon={<OrderedListOutlined aria-hidden="true" />} onClick={() => setReordering(true)} disabled={apps.length < 2}>
             {t('apps.reorder')}
           </Button>
-          <AppInstall onInstalled={reload} />
+          <AppInstall onInstalled={() => reload({ quiet: true })} />
         </Space>
         <Card styles={{ body: { padding: 0 } }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
@@ -95,7 +95,7 @@ export default function AppsAdminPage() {
           />
         </Card>
         </Space>
-        <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={reload} />
+        <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />
       </LoadGate>,
     },
     { key: 'platform', label: t('appPlatform.tab'), children: <AppPlatformInstallPanel /> },

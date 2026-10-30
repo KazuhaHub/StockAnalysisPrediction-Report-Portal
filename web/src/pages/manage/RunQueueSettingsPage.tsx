@@ -3,6 +3,8 @@ import { App, ConfigProvider, Input, InputNumber, Switch, Typography } from 'ant
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { BatchConfig } from '../../api/types'
 import RunPresetsEditor from './RunPresetsEditor'
 import LoadGate from '../../components/LoadGate'
@@ -24,6 +26,7 @@ export default function RunQueueSettingsPage() {
 
 function GlobalRunQueueSettings() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [maxJobs, setMaxJobs] = useState(1)
   // The per-job worker ceiling (ADR 0001). It has always been read and clamped against; until now
@@ -72,13 +75,13 @@ function GlobalRunQueueSettings() {
           urgentEnabled: !!r.urgent_enabled, reservedSlots: r.reserved_slots ?? 1, ticketPeriod: r.ticket_period_days ?? 7 }
         restore(next); setSaved(next)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const save = async () => {
     setSaving(true)

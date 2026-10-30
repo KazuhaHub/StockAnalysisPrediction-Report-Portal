@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { AuthProvider, useAuth } from './auth'
+import { getNotifications, notify } from './lib/notify'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 
@@ -94,5 +95,17 @@ describe('AuthProvider and a session that ends underneath it', () => {
       </AuthProvider>,
     )
     await waitFor(() => expect(show()).toBe('user=none expired=false'))
+  })
+
+  it('drops pop-ups when the signed-in identity changes, so the next reader does not inherit them', async () => {
+    mount(() => unauthorized('session_expired'))
+    await waitFor(() => expect(show()).toBe('user=alice expired=false'))
+    notify({ kind: 'security', title: 'new sign-in for alice', key: 'login-activity:alice' })
+    expect(getNotifications()).toHaveLength(1)
+
+    const { api } = await import('./api/client')
+    await api.get('/api/home').catch(() => {})
+    await waitFor(() => expect(show()).toBe('user=none expired=true'))
+    expect(getNotifications()).toHaveLength(0)
   })
 })

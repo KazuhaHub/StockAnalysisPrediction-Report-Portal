@@ -1,5 +1,4 @@
-import { createContext, useContext, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { Button, Select } from 'antd'
+import { createContext, useContext, useId, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 const ActiveSection = createContext('')
@@ -11,6 +10,9 @@ export function SettingsPanel({ section, children }: { section: string; children
   return <section hidden={section !== active} className="rp-settings-panel">{children}</section>
 }
 
+// Sections are a horizontal tab bar directly under the page header; the page itself scrolls. The
+// bar scrolls sideways when the sections do not fit, so narrow screens need no separate picker.
+// Every tab controls the one content region, which is labelled by the active tab.
 export default function SettingsWorkspace({ sections, active, onChange, children }: {
   sections: { key: string; label: string }[]
   active: string
@@ -19,42 +21,34 @@ export default function SettingsWorkspace({ sections, active, onChange, children
 }) {
   const { t } = useTranslation()
   const id = useId()
-  const workspace = useRef<HTMLDivElement>(null)
-  const [height, setHeight] = useState<number>()
-  useLayoutEffect(() => {
-    const element = workspace.current
-    if (!element) return
-    const container = element.closest('.rp-policy-content, .rp-admin-page-body')
-    const actionBars = [...(container?.querySelectorAll<HTMLElement>('.rp-settings-save-bar') ?? [])]
-      .filter((bar) => !element.contains(bar)).map((bar) => bar.parentElement!)
-    // Fix the workspace height for the viewport, independently of its active panel. Hiding a long
-    // form must not shrink the outer page and clamp its scroll position back to the top.
-    const fit = () => {
-      const bottom = container?.getBoundingClientRect().bottom || window.innerHeight
-      const reserved = Math.max(0, ...actionBars.map((bar) => bar.getBoundingClientRect().height ? bar.getBoundingClientRect().height + 8 : 0))
-      setHeight(Math.max(280, bottom - element.getBoundingClientRect().top - reserved))
-    }
-    fit()
-    const observer = new ResizeObserver(fit)
-    if (container) observer.observe(container)
-    actionBars.forEach((bar) => observer.observe(bar))
-    window.addEventListener('resize', fit)
-    return () => { observer.disconnect(); window.removeEventListener('resize', fit) }
-  }, [])
+  const tabId = (key: string) => `${id}-tab-${key}`
+  const panelId = `${id}-panel`
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const index = sections.findIndex((section) => section.key === active)
+    let next = index
+    if (event.key === 'ArrowRight') next = (index + 1) % sections.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + sections.length) % sections.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = sections.length - 1
+    else return
+    event.preventDefault()
+    onChange(sections[next].key)
+    document.getElementById(tabId(sections[next].key))?.focus()
+  }
   return (
-    <div ref={workspace} className="rp-settings-workspace" style={{ height }}>
-      <div className="rp-settings-section-picker">
-        <Select aria-label={t('manage.sections')} value={active} onChange={onChange}
-          options={sections.map((section) => ({ value: section.key, label: section.label }))} />
+    <div className="rp-settings-workspace">
+      <div role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}>
+        {sections.map((section) => {
+          const selected = section.key === active
+          return (
+            <button key={section.key} type="button" role="tab" id={tabId(section.key)} aria-selected={selected}
+              aria-controls={panelId} tabIndex={selected ? 0 : -1}
+              className={`rp-settings-tab${selected ? ' rp-settings-tab--active' : ''}`}
+              onClick={() => onChange(section.key)}>{section.label}</button>
+          )
+        })}
       </div>
-      <nav className="rp-settings-sections" aria-label={t('manage.sections')}>
-        {sections.map((section) => (
-          <Button key={section.key} type={active === section.key ? 'primary' : 'text'}
-            aria-current={active === section.key ? 'true' : undefined} aria-controls={id}
-            onClick={() => onChange(section.key)}>{section.label}</Button>
-        ))}
-      </nav>
-      <div id={id} className="rp-settings-content">
+      <div id={panelId} role="tabpanel" aria-labelledby={tabId(active)} className="rp-settings-content">
         <ActiveSection value={active}>{children}</ActiveSection>
       </div>
     </div>

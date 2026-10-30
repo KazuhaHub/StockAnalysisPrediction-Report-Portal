@@ -3,6 +3,8 @@ import { App, Button, Form, Input, Radio, Select, Space, Switch, Typography, Upl
 import { DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import type { SettingsResp, UpdatePromptPolicy, VersionDisplay } from '../../api/types'
 import { useSite } from '../../site'
 import { BrandIcon } from '../../components/icons'
@@ -32,6 +34,7 @@ const VERSION_DISPLAYS: VersionDisplay[] = ['hidden', 'footer', 'header']
 // per-field (nil = untouched), so saving here never disturbs the announcement.
 export default function SiteSettingsPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const { refresh } = useSite()
   const [form] = Form.useForm()
@@ -76,13 +79,13 @@ export default function SiteSettingsPage() {
       // The spinner covered the wait but not the failure: `finally` alone dropped the rejection
       // and left an empty form claiming this portal has no title, no logo and no public URL —
       // in a form whose Save button would write exactly that.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form])
+  }, [form, retryKey])
 
   const save = async () => {
     let v

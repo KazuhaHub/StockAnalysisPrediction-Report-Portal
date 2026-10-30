@@ -29,7 +29,7 @@ export default function ScrollToTop({ routeKey }: { routeKey: string }) {
     const onScroll = (event: Event) => {
       const next = event.target instanceof HTMLElement ? event.target : page()
       // Navigation and overlays must never redirect the page's BackTop action.
-      if (next.closest('.rp-admin-rail, .rp-policy-scope, .rp-settings-sections, .ant-modal, .ant-drawer')) return
+      if (next.closest('.rp-admin-rail, .rp-policy-scope, .rp-settings-tabs, .ant-modal, .ant-drawer')) return
       if (next !== page() && next.scrollHeight <= next.clientHeight) return
       if (active !== next) {
         active = next

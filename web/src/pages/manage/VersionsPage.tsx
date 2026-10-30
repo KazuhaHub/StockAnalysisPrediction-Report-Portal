@@ -3,6 +3,8 @@ import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Se
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
@@ -28,6 +30,7 @@ export default function VersionsPage() {
 
 function VersionRegistry() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [groups, setGroups] = useState<Principal[]>([])
@@ -44,7 +47,7 @@ function VersionRegistry() {
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(original)
   usePendingSettings(dirty, saving)
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api.get<{ versions: (Omit<VersionRow, 'grants'> & { grants: string[] | null })[]; groups: Principal[]; users: Principal[] }>('/api/admin/versions')
@@ -54,10 +57,10 @@ function VersionRegistry() {
         setUsers(result.users ?? [])
         setLoaded(true)
       })
-      .catch((error) => setLoadErr(errText(error, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (version?: VersionRow) => {
     const value: VersionRow = version ? { ...version, grants: [...version.grants] } : {
@@ -89,12 +92,12 @@ function VersionRegistry() {
         visibility: draft.visibility, grants: draft.grants })
       message.success(t('versions.saved'))
       setDraft(null)
-      await load()
+      await load({ quiet: true })
     } catch (error) { message.error(errText(error, t)) }
     finally { setSaving(false) }
   }
   const remove = async (name: string) => {
-    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load() }
+    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load({ quiet: true }) }
     catch (error) { message.error(errText(error, t)) }
   }
   const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)

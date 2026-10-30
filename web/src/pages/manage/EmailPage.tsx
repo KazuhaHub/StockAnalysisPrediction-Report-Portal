@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Button, ConfigProvider, Input, InputNumber, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsField from './SettingsField'
@@ -12,6 +14,7 @@ interface EmailConfig { enabled: boolean; host: string; port: number; user: stri
 
 export default function EmailPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const draft = useSettingsDraft({ enabled: false, host: '', port: 587, user: '', from: '', security: 'starttls' })
   const [pass, setPass] = useState('')
@@ -28,9 +31,9 @@ export default function EmailPage() {
     return api.get<EmailConfig>('/api/admin/email').then((r) => {
       draft.accept({ enabled: r.enabled, host: r.host, port: r.port || 587, user: r.user, from: r.from, security: r.security || 'starttls' })
       setHasPass(r.has_pass); setPass('')
-    }).catch((e) => setLoadErr(errText(e, t))).finally(() => setLoading(false))
+    }).then(...settleOnAnswer(() => setLoading(false))).catch(catchLoad(setLoadErr))
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
     setSaving(true)
     try {

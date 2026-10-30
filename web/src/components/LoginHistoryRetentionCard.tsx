@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Button, Card, InputNumber, Popconfirm, Space, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 
 export default function LoginHistoryRetentionCard() {
   const { t } = useTranslation()
@@ -10,13 +11,14 @@ export default function LoginHistoryRetentionCard() {
   const [keep, setKeep] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   const [saving, setSaving] = useState(false)
+  const { failure, retryKey } = useLoadFailure()
   const load = () => {
     setFailed(false)
     return api.get<{ keep: number }>('/api/admin/login-activity/retention')
       .then((r) => { setSaved(r.keep); setKeep(r.keep) })
-      .catch(() => setFailed(true))
+      .catch((e) => { if (failure(e) !== null) setFailed(true) })
   }
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load() }, [retryKey])
   const valid = keep !== null && Number.isInteger(keep) && keep >= 1 && keep <= 10000
   const save = async () => {
     if (!valid) return

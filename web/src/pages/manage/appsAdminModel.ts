@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp, AppsResp, AppSummary } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
 
@@ -78,7 +80,11 @@ export function useAppsCatalog() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const loaded = useRef(false)
-  const load = useCallback(async (): Promise<boolean> => {
+  const { failure, retryKey } = useLoadFailure()
+  const load = useCallback(async (opts?: LoadOpts): Promise<boolean> => {
+    // A lost connection before the first load keeps the page loading; it loads again when the
+    // connection returns.
+    let settled = true
     try {
       const [layout, installed] = await Promise.all([
         api.get<AppLayoutResp>('/api/admin/apps/layout'),
@@ -90,14 +96,16 @@ export function useAppsCatalog() {
       loaded.current = true
       return true
     } catch (e) {
-      if (!loaded.current) setError(errText(e, t))
+      const text = failure(e, opts)
+      if (text === null) settled = loaded.current || !!opts?.quiet
+      else if (!loaded.current) setError(text)
       return false
     } finally {
-      setLoading(false)
+      if (settled) setLoading(false)
     }
-  }, [t])
+  }, [t, failure])
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, retryKey])
   return { apps, loading, error, reload: load }
 }

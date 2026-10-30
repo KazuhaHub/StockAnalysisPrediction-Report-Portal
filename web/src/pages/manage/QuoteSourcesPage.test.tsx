@@ -13,6 +13,22 @@ import QuoteSourcesPage from './QuoteSourcesPage'
 // Dragging itself is not exercised here: dnd.test.tsx owns the dnd-kit wiring. What this file pins is
 // that save reads the ROW ORDER, which is what dragging changes.
 
+// The save bar only exists once something is unsaved, so a test that wants to observe a plain save
+// first makes one neutral edit. The open-market TTL is the cheapest field that is always present.
+async function makeDirty(user: ReturnType<typeof userEvent.setup>) {
+  const open = (await screen.findByLabelText('quoteAdmin.ttlOpen')) as HTMLInputElement
+  const current = screen.getAllByRole('tab').find((tab) => tab.getAttribute('aria-selected') === 'true')!
+  await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
+  await user.clear(open)
+  await user.type(open, '31')
+  await user.click(current)
+}
+
+async function dirtyAndSave(user: ReturnType<typeof userEvent.setup>) {
+  await makeDirty(user)
+  await user.click(await screen.findByRole('button', { name: 'common.save' }))
+}
+
 const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
@@ -143,7 +159,7 @@ describe('QuoteSourcesPage', () => {
       .mockResolvedValueOnce({ ...structuredClone(state), ratePolicies: policies, schedule: {}, displayTraffic: { ...traffic, live: { ...empty, requests: 321 } } })
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: 'quoteAdmin.traffic.title' }))
+    await user.click(await screen.findByRole('tab', { name: 'quoteAdmin.traffic.title' }))
     const total = screen.getByRole('spinbutton', { name: 'tencent quoteAdmin.traffic.total' })
     fireEvent.change(total, { target: { value: '24' } })
     await user.click(screen.getByRole('button', { name: 'quoteAdmin.display.refresh' }))
@@ -159,9 +175,9 @@ describe('QuoteSourcesPage', () => {
     apiMock.get.mockResolvedValue({ ...structuredClone(state), ratePolicies: policies, schedule: {} })
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: 'quoteAdmin.traffic.title' }))
+    await user.click(await screen.findByRole('tab', { name: 'quoteAdmin.traffic.title' }))
     fireEvent.change(screen.getByRole('spinbutton', { name: 'tencent quoteAdmin.traffic.total' }), { target: { value: '24' } })
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ ratePolicies: { ...policies, tencent: { requestsPerMinute: 24, backgroundPerMinute: 6 } } })))
   })
   it('clears cache occupancy without replacing an unsaved source order', async () => {
@@ -169,9 +185,9 @@ describe('QuoteSourcesPage', () => {
     renderPage()
     await screen.findByText('sina')
     await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
     await user.click(screen.getByText('quoteAdmin.clearCache'))
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.sources' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.sources' }))
     expect(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }).getAttribute('aria-checked')).toBe('false')
   })
   beforeEach(() => {
@@ -187,13 +203,13 @@ describe('QuoteSourcesPage', () => {
     renderPage()
     await screen.findByText('tencent')
     await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
-    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
     expect(apiMock.post).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'common.cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(apiMock.post).not.toHaveBeenCalled()
-    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
     await user.click(screen.getByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
@@ -230,11 +246,11 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     const view = renderPage()
     await screen.findByText('tencent')
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
     expect(screen.queryByRole('dialog')).toBeNull()
     await user.click(screen.getByRole('switch', { name: 'tencent quoteAdmin.enabled' }))
-    await user.click(await screen.findByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await screen.findByRole('button', { name: 'quoteAdmin.ledgerRemoveConfirm' })
     view.unmount()
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
@@ -247,7 +263,8 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('tencent')
-    const save = screen.getByRole('button', { name: 'common.save' })
+    await makeDirty(user)
+    const save = await screen.findByRole('button', { name: 'common.save' })
     await user.dblClick(save)
     expect(apiMock.post).toHaveBeenCalledTimes(1)
     rejectSave(new Error('save unavailable'))
@@ -401,7 +418,7 @@ describe('QuoteSourcesPage', () => {
     expect(screen.getByRole('switch', { name: 'yahoo quoteAdmin.enabled' }).getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(within(sourceRow('yahoo')).getByText('quoteAdmin.fallback')).toBeTruthy())
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith(
         '/api/admin/quote',
@@ -449,7 +466,7 @@ describe('QuoteSourcesPage', () => {
     expect(within(rows[2]).getByText('tencent')).toBeTruthy()
     expect(within(rows[3]).getByText('yahoo')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ order: 'sina,tencent' })),
     )
@@ -463,11 +480,11 @@ describe('QuoteSourcesPage', () => {
     // The WHOLE payload, not objectContaining: one Save writes every setting on the page, so a
     // field that stops being sent is a control the operator can move and cannot save — and the page
     // would still say "saved", because the request succeeded without it.
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', {
         order: 'sina,tencent',
-        ttlOpenSecs: 30,
+        ttlOpenSecs: 31,
         ttlClosedSecs: 300,
         ttlIntradaySecs: 60,
         homeCards: true,
@@ -486,7 +503,7 @@ describe('QuoteSourcesPage', () => {
     await waitFor(() => expect(screen.queryByText('quoteAdmin.fallback')).toBeNull())
     expect(screen.getByText('quoteAdmin.primary')).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ order: 'tencent' })),
     )
@@ -513,7 +530,7 @@ describe('QuoteSourcesPage', () => {
 
     // The switch that was legitimately turned off stays off: refusing the last one is not a reset.
     expect(screen.getByRole('switch', { name: 'sina quoteAdmin.enabled' }).getAttribute('aria-checked')).toBe('false')
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ order: 'tencent' })),
     )
@@ -532,7 +549,7 @@ describe('QuoteSourcesPage', () => {
     renderPage()
     await screen.findByText('sina')
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() => expect(document.querySelector('.ant-message')?.textContent).toContain('quoteAdmin.orderHint'))
     expect(apiMock.post).not.toHaveBeenCalled()
     expect(screen.queryByText('common.saved')).toBeNull()
@@ -557,7 +574,7 @@ describe('QuoteSourcesPage', () => {
 
     renderPage()
     await screen.findByText('sina')
-    fireEvent.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
     expect((screen.getByLabelText('quoteAdmin.ttlOpen') as HTMLInputElement).value).toBe('0')
     expect((screen.getByLabelText('quoteAdmin.ttlClosed') as HTMLInputElement).value).toBe('0')
     expect((screen.getByLabelText('quoteAdmin.ttlIntraday') as HTMLInputElement).value).toBe('0')
@@ -587,11 +604,11 @@ describe('QuoteSourcesPage', () => {
     // default-ON disclosure off in the name of an admin who never saw a decision to make, under a
     // green "saved" — the TTLs beside it survive the same round trip only because the server
     // clamps them, and this key has no clamp. The whole payload, so an unexpected key fails here.
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', {
         order: 'sina,tencent',
-        ttlOpenSecs: 30,
+        ttlOpenSecs: 31,
         ttlClosedSecs: 300,
         ttlIntradaySecs: 60,
       }),
@@ -610,12 +627,12 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
 
     await user.click(screen.getByRole('switch', { name: 'quoteAdmin.homeCards' }))
     expect(screen.getByRole('switch', { name: 'quoteAdmin.homeCards' }).getAttribute('aria-checked')).toBe('true')
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ homeCards: true })),
     )
@@ -626,7 +643,7 @@ describe('QuoteSourcesPage', () => {
     // The floor is stated up front, in the hint beside each field.
     renderPage()
     const open = (await screen.findByLabelText('quoteAdmin.ttlOpen')) as HTMLInputElement
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
     expect(screen.getByText('quoteAdmin.ttlHint ≥ 5')).toBeTruthy()
     expect(screen.getByText('quoteAdmin.ttlHint ≥ 30')).toBeTruthy()
 
@@ -635,7 +652,7 @@ describe('QuoteSourcesPage', () => {
     apiMock.post.mockResolvedValue({ ...structuredClone(state), ttlOpenSecs: 5 })
     await user.clear(open)
     await user.type(open, '2')
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await user.click(await screen.findByRole('button', { name: 'common.save' }))
 
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ ttlOpenSecs: 2 })),
@@ -649,7 +666,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     const box = (await screen.findByLabelText('quoteAdmin.ttlIntraday')) as HTMLInputElement
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
     expect(box.value).toBe('60')
     // Three floors, three different numbers, each beside its own field — and the intraday one (15)
     // is neither of the others (5 and 30), so a hint wired to the wrong state variable shows up
@@ -663,7 +680,7 @@ describe('QuoteSourcesPage', () => {
     apiMock.post.mockResolvedValue({ ...structuredClone(state), ttlIntradaySecs: 15 })
     await user.clear(box)
     await user.type(box, '3')
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
 
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ ttlIntradaySecs: 3 })),
@@ -679,7 +696,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
 
     // The sentence is on the page, not in a tooltip: showing prices on the home cards sends the
     // codes currently on screen to a third-party vendor on every home page view, which is the whole
@@ -691,7 +708,7 @@ describe('QuoteSourcesPage', () => {
     await user.click(sw)
     expect(screen.getByRole('switch', { name: 'quoteAdmin.homeCards' }).getAttribute('aria-checked')).toBe('false')
 
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ homeCards: false })),
     )
@@ -708,13 +725,13 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('sina')
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
 
     expect(screen.getByText('quoteAdmin.autoRefreshHint')).toBeTruthy()
     const sw = screen.getByRole('switch', { name: 'quoteAdmin.autoRefresh' })
     expect(sw.getAttribute('aria-checked')).toBe('true')
     await user.click(sw)
-    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await dirtyAndSave(user)
 
     await waitFor(() =>
       expect(apiMock.post).toHaveBeenCalledWith('/api/admin/quote', expect.objectContaining({ autoRefresh: false })),
@@ -725,7 +742,7 @@ describe('QuoteSourcesPage', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('33.8 KB')
-    await user.click(screen.getByRole('button', { name: 'manage.quotes.cache' }))
+    await user.click(screen.getByRole('tab', { name: 'manage.quotes.cache' }))
 
     apiMock.post.mockResolvedValue({ ...structuredClone(state), cacheEntries: 0, cacheBytes: 0 })
     await user.click(screen.getByRole('button', { name: /quoteAdmin\.clearCache/ }))

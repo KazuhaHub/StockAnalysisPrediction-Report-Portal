@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -24,7 +24,7 @@ import { DownOutlined, FilterOutlined, FolderOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { api, errText, qs } from '../api/client'
+import { api, qs } from '../api/client'
 import type { HomeResp, LinkItem } from '../api/types'
 import { SiteLogo, useSite } from '../site'
 import { useAuth } from '../auth'
@@ -34,6 +34,8 @@ import { linkIconComponent } from '../components/linkIcons'
 import { linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerShortcut } from '../lib/shortcuts'
 import { useAppAccess } from '../appAccess'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import { useLoadFailure } from '../lib/useOnReconnect'
+import { loadFailure, settleOnAnswer } from '../lib/loadFailure'
 import { useHomeQuotes } from '../lib/useHomeQuotes'
 import { versionLabel } from '../lib/versionLabel'
 import { useFavorites } from '../favorites'
@@ -43,6 +45,7 @@ const { RangePicker } = DatePicker
 
 export default function HomePage() {
   const { t } = useTranslation()
+  const { catchLoad } = useLoadFailure()
   const { title } = useSite()
   const { token } = theme.useToken()
   const navigate = useNavigate()
@@ -50,6 +53,8 @@ export default function HomePage() {
   const appAccess = useAppAccess()
   const [sp, setSp] = useSearchParams()
   const [data, setData] = useState<HomeResp | null>(null)
+  const dataRef = useRef(data)
+  dataRef.current = data
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -85,8 +90,10 @@ export default function HomePage() {
       // Without this the rejection was dropped and the page settled on a blank strip where the
       // reports go — no cards, no message, nothing to retry. The `data &&` guard below meant it
       // did not claim "no matching reports", but it did not say anything at all either.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      // A lost connection is not an answer: the page keeps what it has (or its spinner), and the
+      // poll below runs again the moment the connection returns.
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
@@ -108,8 +115,16 @@ export default function HomePage() {
         .then((r) => {
           setData(r)
           setLoadErr('')
+          setLoading(false)
         })
-        .catch(() => {})
+        // A background refetch stays silent while the page has something to show; before the first
+        // answer it settles the page like the initial load would (a connection loss still waits).
+        .catch((e) => {
+          const text = loadFailure(e, t)
+          if (text === null) return
+          setLoading(false)
+          if (!dataRef.current) setLoadErr(text)
+        })
     return startVisiblePoll(refetch, 60000, { skipLeading: true })
   }, [params])
 

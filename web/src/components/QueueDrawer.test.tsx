@@ -242,6 +242,39 @@ describe('Tasks drawer Runs tab', () => {
     expect(screen.queryByRole('button', { name: 'tasks.cancel' })).toBeNull()
   })
 
+  it('draws cancel as a close-circle, not the forbidden-looking stop icon', async () => {
+    store.jobs = [job({ id: 77 })]
+    mount()
+    const cancel = await screen.findByRole('button', { name: 'tasks.cancel' })
+    expect(cancel.querySelector('.anticon-close-circle')).not.toBeNull()
+    expect(cancel.querySelector('.anticon-stop')).toBeNull()
+  })
+
+  it('puts the count in each section header', async () => {
+    store.jobs = [job(), job({ id: 2, status: 'queued', ahead: 1 }), job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount()
+    expect(await screen.findByText('tasks.section.count:{"label":"tasks.section.active","count":2}')).toBeTruthy()
+    // The finished list is capped, so a count there would read as the total.
+    expect(screen.getByText('tasks.section.finished')).toBeTruthy()
+    expect(screen.queryByText(/tasks\.section\.count:.*finished/)).toBeNull()
+  })
+
+  it('keeps a row marked active while its cancel confirmation is open', async () => {
+    const user = userEvent.setup()
+    store.jobs = [job({ id: 77 })]
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'tasks.cancel' }))
+    await screen.findByRole('button', { name: 'OK' })
+    expect(rows('tasks.section.active')[0].classList.contains('is-active')).toBe(true)
+  })
+
+  it('renders Mine / All in the drawer header extra area, not beside the title', async () => {
+    mount()
+    const mine = await screen.findByText('queue.scope.mine')
+    expect(mine.closest('.ant-drawer-extra')).not.toBeNull()
+    expect(screen.getByText('tasks.title').closest('.ant-drawer-title')?.querySelector('.ant-segmented')).toBeNull()
+  })
+
   it('links the footer to the full queue', async () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: /tasks\.openQueue/ }))
@@ -262,6 +295,8 @@ describe('Tasks drawer Exports tab', () => {
     expect(row.textContent).toContain('Audit Q3')
     expect(row.textContent).toContain('tasks.rows:{"done":22,"total":34}')
     await user.click(within(row).getByRole('button', { name: 'tasks.cancel' }))
+    expect(apiMock.post).not.toHaveBeenCalled() // one tap is not enough
+    await user.click(await screen.findByRole('button', { name: 'OK' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/exports/e1/cancel'))
     expect(refreshTasks).toHaveBeenCalled()
   })

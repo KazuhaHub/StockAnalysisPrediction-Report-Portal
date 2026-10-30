@@ -3,6 +3,8 @@ import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, I
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import { formatReportTime } from '../../lib/datetime'
 import { startVisiblePoll } from '../../lib/visiblePoll'
 import Markdown from '../../components/Markdown'
@@ -41,6 +43,7 @@ function elapsed(startedAt: string): string {
 
 export default function ChatAdminPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [limit, setLimit] = useState(0)
   const [stream, setStream] = useState(true)
@@ -67,7 +70,7 @@ export default function ChatAdminPage() {
   const [viewTurns, setViewTurns] = useState<ChatTurn[]>([])
   const [viewLoading, setViewLoading] = useState(false)
 
-  const load = () =>
+  const load = (opts?: LoadOpts) =>
     api
       .get<ChatLive>('/api/admin/chat/live')
       .then((r) => {
@@ -85,7 +88,7 @@ export default function ChatAdminPage() {
       })
       // Only the first poll has anything to report; after that the numbers on screen are the
       // server's, and a dropped poll must not replace them.
-      .catch((e) => setCfgErr(errText(e, t)))
+      .catch(catchLoad(setCfgErr, opts))
   const loadConvs = () => {
     setConvsErr('')
     return api
@@ -94,12 +97,12 @@ export default function ChatAdminPage() {
         setConvs(r.conversations || [])
         setConvsLoaded(true)
       })
-      .catch((e) => setConvsErr(errText(e, t)))
+      .catch(catchLoad(setConvsErr))
   }
   useEffect(() => {
     loadConvs()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
   useEffect(() => {
     if (!auto) return
     return startVisiblePoll(load, 3000)
@@ -138,7 +141,7 @@ export default function ChatAdminPage() {
     try {
       await api.post(`/api/admin/chat/stop/${id}`)
       message.success(t('chatAdmin.stopped'))
-      load()
+      load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     }
@@ -215,7 +218,7 @@ export default function ChatAdminPage() {
           <Space>
             <Switch size="small" checked={auto} onChange={setAuto} />
             <Typography.Text type="secondary">{t('queue.autoRefresh')}</Typography.Text>
-            <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>
               {t('nav.refresh')}
             </Button>
           </Space>

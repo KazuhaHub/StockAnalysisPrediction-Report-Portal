@@ -10,6 +10,7 @@ import type { QuoteResp } from '../api/types'
 import QuoteStrip from '../components/QuoteStrip'
 import PriceChart, { type ChartInterval } from '../components/PriceChart'
 import { NO_ITEM_TOOLTIP } from '../lib/segmented'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import {
   quoteErrorRefreshAdvice,
   quoteRefreshDelayMs,
@@ -188,6 +189,7 @@ interface Answer {
 
 export default function QuotesApp() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const [sp, setSp] = useSearchParams()
 
   // The symbol and the range live in the URL, not in state: a chart that cannot be linked is a
@@ -262,6 +264,7 @@ export default function QuotesApp() {
     // leaves 贵州茅台 and an `sh` badge standing over an in-flight US request for as long as the
     // vendor takes. Nothing on screen admits it, and a slow vendor makes it seconds.
     if (shownSymbol.current !== symbol) setAnswer(null)
+    let lost = false
     setLoading(true)
     setError(null)
     setRefresh(null)
@@ -282,6 +285,9 @@ export default function QuotesApp() {
       })
       .catch((e) => {
         if (cancelled) return
+        // A lost connection is not an answer about this symbol: the card keeps its spinner and the
+        // quote is requested again when the connection returns.
+        if (failure(e) === null) { lost = true; return }
         // The previous symbol's numbers are dropped rather than left under an error banner: the
         // strip prints a name and a code, so keeping them would attribute one instrument's price
         // to another one's request.
@@ -291,7 +297,7 @@ export default function QuotesApp() {
         setRefresh(quoteErrorRefreshAdvice(e))
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled && !lost) setLoading(false)
       })
     return () => {
       cancelled = true
@@ -299,7 +305,7 @@ export default function QuotesApp() {
     // winKey rather than `win`: winFromParams builds a NEW object every render, so an object in this
     // list would re-run the effect — and re-hit the vendor — on every unrelated state change on the
     // page. The string is the value; the object is only its shape.
-  }, [symbol, range, winKey, nonce])
+  }, [symbol, range, winKey, nonce, retryKey])
 
   useEffect(() => {
     const delay = quoteRefreshDelayMs(refresh)

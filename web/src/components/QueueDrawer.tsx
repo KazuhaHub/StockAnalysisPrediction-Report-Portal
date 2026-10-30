@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
-import { ArrowRightOutlined, DownloadOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
@@ -14,6 +14,7 @@ import { formatTaskTime, runOutcome } from '../lib/taskUi'
 import { isActiveTask, taskKey } from '../lib/useMyTasks'
 import { useAuth } from '../auth'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import { loadFailure } from '../lib/loadFailure'
 import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
 
@@ -53,6 +54,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const showExports = canExport || admin
   const activeTab: DrawerTab = tab === 'exports' ? (showExports ? 'exports' : 'runs') : showRuns ? 'runs' : 'exports'
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
+  // The row whose cancel confirmation is open keeps its actions on screen.
+  const [confirming, setConfirming] = useState<string | null>(null)
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
@@ -96,7 +99,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     } catch (e) {
       // Read only while !loaded: a poll that fails once the list is on screen changes nothing,
       // since those runs are still the last thing the server said about the queue.
-      setLoadErr(errText(e, t))
+      const text = loadFailure(e, t)
+      if (text !== null) setLoadErr(text)
     }
     await summaryRequest
   }
@@ -156,7 +160,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     }
   }
 
-  const iconAction = (label: string, icon: ReactNode, props: { onClick?: () => void; href?: string; danger?: boolean }) => (
+  const iconAction = (label: string, icon: ReactNode, props: { onClick?: () => void; href?: string; className?: string }) => (
     <Tooltip title={label}>
       <Button type="text" size="small" icon={icon} aria-label={label} {...props} />
     </Tooltip>
@@ -173,13 +177,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     </div>
   )
 
-  const section = (label: string, aside: ReactNode, children: ReactNode) => (
-    <section style={{ marginTop: 4 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: token.colorTextSecondary, padding: '12px 8px 6px' }}>
-        <span>{label}</span>
+  const section = (label: string, aside: ReactNode, count: number | null, children: ReactNode) => (
+    <section style={{ marginTop: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: token.colorTextSecondary, padding: '0 12px 8px' }}>
+        <span>{count === null ? label : t('tasks.section.count', { label, count })}</span>
         {aside && <span>{aside}</span>}
       </div>
-      <ul aria-label={label} style={{ margin: 0, padding: 0 }}>
+      <ul aria-label={label} className="rp-task-list">
         {children}
       </ul>
     </section>
@@ -235,6 +239,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     return (
       <TaskRow
         key={j.id}
+        pinned={confirming === `run-${j.id}`}
         tone={tone}
         name={
           <>
@@ -249,9 +254,9 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         actions={
           <>
             {live && (
-              <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)}>
+              <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)} onOpenChange={(o) => setConfirming(o ? `run-${j.id}` : null)}>
                 <Tooltip title={t('tasks.cancel')}>
-                  <Button type="text" size="small" danger icon={<StopOutlined />} aria-label={t('tasks.cancel')} />
+                  <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
               </Popconfirm>
             )}
@@ -290,6 +295,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     return (
       <TaskRow
         key={taskKey(x)}
+        pinned={confirming === `export-${taskKey(x)}`}
         tone={tone}
         name={x.name}
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
@@ -298,7 +304,17 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         time={formatTaskTime(live ? x.created_at : finishedAtOf(x), lang, undefined, t('tasks.justNow'))}
         actions={
           <>
-            {x.cancel && iconAction(t('tasks.cancel'), <StopOutlined />, { onClick: () => void cancelExport(x), danger: true })}
+            {x.cancel && (
+              <Popconfirm
+                title={t('export.history.cancelConfirm')}
+                onConfirm={() => void cancelExport(x)}
+                onOpenChange={(o) => setConfirming(o ? `export-${taskKey(x)}` : null)}
+              >
+                <Tooltip title={t('tasks.cancel')}>
+                  <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
+                </Tooltip>
+              </Popconfirm>
+            )}
             {x.download && iconAction(t('tasks.download'), <DownloadOutlined />, { href: x.download })}
           </>
         }
@@ -324,8 +340,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         title={t('common.loadFailedContent')}
       >
         {activeJobs.length === 0 && recentJobs.length === 0 && empty(t('tasks.emptyRuns'))}
-        {activeJobs.length > 0 && section(t('tasks.section.active'), null, activeJobs.map(runRow))}
-        {recentJobs.length > 0 && section(t('tasks.section.finished'), null, recentJobs.map(runRow))}
+        {activeJobs.length > 0 && section(t('tasks.section.active'), null, activeJobs.length, activeJobs.map(runRow))}
+        {recentJobs.length > 0 && section(t('tasks.section.finished'), null, null, recentJobs.map(runRow))}
       </LoadGate>
     </>
   )
@@ -333,8 +349,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const exportsPane = (
     <>
       {activeExports.length === 0 && recentExports.length === 0 && empty(t('tasks.emptyExports'))}
-      {activeExports.length > 0 && section(t('tasks.section.active'), null, activeExports.map(exportRow))}
-      {recentExports.length > 0 && section(t('tasks.section.finished'), t('tasks.keptDays', { n: EXPORT_KEPT_DAYS }), recentExports.map(exportRow))}
+      {activeExports.length > 0 && section(t('tasks.section.active'), null, activeExports.length, activeExports.map(exportRow))}
+      {recentExports.length > 0 && section(t('tasks.section.finished'), t('tasks.keptDays', { n: EXPORT_KEPT_DAYS }), null, recentExports.map(exportRow))}
     </>
   )
 
@@ -350,21 +366,19 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
 
   return (
     <Drawer
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span>{t('tasks.title')}</span>
-          {admin && showRuns && activeTab === 'runs' && (
-            <Segmented
-              size="small"
-              value={scope}
-              onChange={(v) => setScope(v as QueueScope)}
-              options={[
-                { label: t('queue.scope.mine'), value: 'mine' },
-                { label: t('queue.scope.all'), value: 'all' },
-              ]}
-            />
-          )}
-        </div>
+      title={t('tasks.title')}
+      extra={
+        admin && showRuns && activeTab === 'runs' ? (
+          <Segmented
+            size="small"
+            value={scope}
+            onChange={(v) => setScope(v as QueueScope)}
+            options={[
+              { label: t('queue.scope.mine'), value: 'mine' },
+              { label: t('queue.scope.all'), value: 'all' },
+            ]}
+          />
+        ) : null
       }
       size={420}
       open={open}

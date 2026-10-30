@@ -3,6 +3,8 @@ import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select,
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { TokenRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
@@ -16,6 +18,7 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 // Scopes: all / ingest / query. A secret is shown once on creation; the table keeps only its prefix.
 export default function TokensPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [tokens, setTokens] = useState<TokenRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -29,18 +32,18 @@ export default function TokensPage() {
   const draft = useFormDraft(form, open, creating, () => setOpen(false))
   const selectedScope = Form.useWatch('scope', form)
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true); setLoadErr('')
     return api
       .get<{ tokens: TokenRow[] }>('/api/admin/tokens')
       .then((r) => { setTokens(r.tokens || []); setLoaded(true) })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   useEffect(() => {
     load()
-  }, [])
+  }, [retryKey])
 
   const openAdd = () => {
     form.resetFields()
@@ -81,7 +84,7 @@ export default function TokensPage() {
         </Space>
       ),
     })
-    load()
+    load({ quiet: true })
     } catch (e) { message.error(errText(e, t)) } finally { setCreating(false) }
   }
 
@@ -98,14 +101,14 @@ export default function TokensPage() {
 
   const remove = async (id: number) => {
     await api.del(`/api/admin/tokens/${id}`)
-    load()
+    load({ quiet: true })
   }
 
   const removeSelected = async () => {
     await Promise.all(selected.map((id) => api.del(`/api/admin/tokens/${id}`)))
     setSelected([])
     message.success(t('common.done'))
-    load()
+    load({ quiet: true })
   }
 
   return (

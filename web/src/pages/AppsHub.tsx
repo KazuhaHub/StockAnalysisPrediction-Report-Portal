@@ -11,6 +11,8 @@ import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, type BuiltinApp } from '../lib/builti
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { useAppDirectory } from '../lib/appDirectoryV2'
+import { useLoadFailure } from '../lib/useOnReconnect'
+import { settleOnAnswer } from '../lib/loadFailure'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
 // permission; the registry lives in lib/builtinApps so the entry-button picker and shortcut router
@@ -54,6 +56,7 @@ const registryKeys = () => BUILTIN_APPS.map((a) => BUILTIN_PIN_PREFIX + a.key)
 
 export default function AppsHub() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { can, user } = useAuth()
   const { lang } = usePrefs()
   const directory = useAppDirectory(user)
@@ -71,13 +74,13 @@ export default function AppsHub() {
     return api
       .get<AppsResp>('/api/apps')
       .then((r) => setResp(r))
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false)))
+      .catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // One sequence for both kinds. An older server sends no `order`: the compiled-in apps first, then
   // the installed ones, which is how the hub always read. '' perm = everyone (matches shortcutPerm's

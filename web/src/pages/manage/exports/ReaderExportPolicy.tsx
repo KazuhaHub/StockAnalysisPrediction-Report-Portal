@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Alert, Button, Card, InputNumber, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
+import { useLoadFailure } from '../../../lib/useOnReconnect'
+import type { LoadOpts } from '../../../lib/loadFailure'
 import type { ExportPolicyEntry, UserGroupRow } from '../../../api/types'
 import LoadGate from '../../../components/LoadGate'
 import { inheritedView, policyDraft, policyDraftValid, policyPatch, quotaBelowMax, type PolicyDraft } from '../../../lib/exportMode'
@@ -14,6 +16,7 @@ import OrgUnitPicker from '../OrgUnitPicker'
 // The Export page owns this policy; the OU detail page does not repeat it.
 export default function ReaderExportPolicy() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [entries, setEntries] = useState<ExportPolicyEntry[]>([])
@@ -21,8 +24,9 @@ export default function ReaderExportPolicy() {
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: LoadOpts) => {
     setError('')
+    let settled = true
     try {
       const [g, p] = await Promise.all([
         api.get<{ groups: UserGroupRow[] }>('/api/admin/groups'),
@@ -31,14 +35,16 @@ export default function ReaderExportPolicy() {
       setGroups(g?.groups ?? [])
       setEntries(p?.groups ?? [])
     } catch (e) {
-      setError(errText(e, t))
+      const text = failure(e, opts)
+      if (text === null) settled = !!opts?.quiet
+      else setError(text)
     } finally {
-      setLoading(false)
+      if (settled) setLoading(false)
     }
-  }, [t])
+  }, [t, failure])
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, retryKey])
 
   const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
   const selected = (selectedId !== null ? byId.get(selectedId) : undefined) ?? entries.find((e) => e.is_default) ?? entries[0]
@@ -69,7 +75,7 @@ export default function ReaderExportPolicy() {
               defaultId={entries.find((e) => e.is_default)?.id ?? 0}
               onSaved={() => {
                 message.success(t('common.saved'))
-                void load()
+                void load({ quiet: true })
               }}
             />
           )}

@@ -4,6 +4,7 @@ import { QuestionCircleOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../api/client'
+import { loadFailure } from '../lib/loadFailure'
 import CaptchaField, { type CaptchaValue } from '../components/CaptchaField'
 
 // Requesting a password-reset link.
@@ -24,7 +25,7 @@ export default function ForgotPage() {
   const [err, setErr] = useState('')
   const [mode, setMode] = useState<string | null>(null)
   useEffect(() => {
-    const load = () => api.get<{ mode: string }>('/api/password/config').then(r => { setMode(r.mode ?? 'email'); setErr('') }).catch(e => setErr(errText(e, t)))
+    const load = () => api.get<{ mode: string }>('/api/password/config').then(r => { setMode(r.mode ?? 'email'); setErr('') }).catch(e => { const text = loadFailure(e, t); if (text !== null) setErr(text) })
     void load()
     window.addEventListener('rp:connection-restored', load)
     return () => window.removeEventListener('rp:connection-restored', load)

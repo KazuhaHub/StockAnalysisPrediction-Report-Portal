@@ -25,6 +25,7 @@ import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
+import NotificationStack from './NotificationStack'
 import NotificationBell from './NotificationBell'
 import { useExportPolicy } from '../lib/useExportPolicy'
 import { EXPORTS_CHANGED_EVENT, type ExportsChangedDetail } from '../lib/exportJobs'
@@ -660,6 +661,9 @@ function AppShell() {
           </Popover>
         </Space>
       </Header>
+
+      {/* After the header in DOM order so the first Tab lands in the header; it is position: fixed. */}
+      <NotificationStack />
 
       {/* Connection lost: a strip pinned under the header, above the update banner. */}
       <ConnectionNotice />

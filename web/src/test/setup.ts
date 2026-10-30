@@ -1,8 +1,11 @@
 import { afterEach } from 'vitest'
+import { resetNotifications } from '../lib/notify'
 import { cleanup, configure } from '@testing-library/react'
 
 // Unmount rendered React trees after each test so queries don't see stale DOM.
 afterEach(cleanup)
+// The notification store is module-global; a pop-up must not leak into the next test.
+afterEach(resetNotifications)
 
 // Drain antd's pending debounce timers after unmount.
 //

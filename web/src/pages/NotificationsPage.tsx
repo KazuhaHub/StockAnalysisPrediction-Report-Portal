@@ -6,6 +6,7 @@ import { errText } from '../api/client'
 import LoadGate from '../components/LoadGate'
 import { INBOX_CHANGED } from '../components/NotificationBell'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import { loadFailure } from '../lib/loadFailure'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
@@ -24,12 +25,12 @@ export default function NotificationsPage() {
       setNext(result.next_cursor)
       setLoaded(true)
       setError('')
-    } catch (e) { setError(errText(e, t)) }
+    } catch (e) { const text = loadFailure(e, t); if (text !== null) setError(text) }
   }
   useEffect(() => {
     let alive = true
     const stop = startVisiblePoll(async () => {
-      try { const result = await notificationInbox.list(); if (alive) { setItems(result.items); setNext(result.next_cursor); setLoaded(true); setError('') } } catch (e) { if (alive) setError(errText(e, t)) }
+      try { const result = await notificationInbox.list(); if (alive) { setItems(result.items); setNext(result.next_cursor); setLoaded(true); setError('') } } catch (e) { const text = loadFailure(e, t); if (alive && text !== null) setError(text) }
     }, 30000)
     return () => { alive = false; stop() }
     // eslint-disable-next-line react-hooks/exhaustive-deps

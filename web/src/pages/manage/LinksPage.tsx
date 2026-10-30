@@ -6,6 +6,8 @@ import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import { useAuth } from '../../auth'
 import type { AppSummary, AppsResp, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
 import { difyModeKind } from '../../lib/batchUi'
@@ -26,6 +28,7 @@ type Row = { key: string; type: 'group'; group: LinkGroup } | { key: string; typ
 
 export default function LinksPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const { can } = useAuth()
@@ -52,7 +55,7 @@ export default function LinksPage() {
   // comment at the list below), and a second hand-rolled sensor list is how the two quietly diverge.
   const sensors = useSortableSensors()
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -65,14 +68,14 @@ export default function LinksPage() {
       // The `!loading` guard below covered the wait but not the failure: `finally` alone dropped
       // the rejection and settled the page on "No entry buttons yet", which is what a genuinely
       // empty home page looks like.
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   useEffect(() => {
     api.get<AppsResp>('/api/apps').then((r) => setAppList(r.apps || [])).catch(() => {})
@@ -125,7 +128,7 @@ export default function LinksPage() {
       })
       .catch((e) => {
         message.error(errText(e, t))
-        load()
+        load({ quiet: true })
       })
 
   // Optimistically rebuild links (group + order) and groups (order) from a new sequence.
@@ -191,19 +194,19 @@ export default function LinksPage() {
     else await api.post('/api/admin/link-groups', payload)
     setGroupOpen(false)
     message.success(t('common.saved'))
-    await load()
+    await load({ quiet: true })
     } catch (e) { message.error(errText(e, t)) } finally { setGroupSaving(false) }
   }
   const deleteGroup = async (id: number) => {
     await api.del(`/api/admin/link-groups/${id}`)
-    load()
+    load({ quiet: true })
   }
   // Home-page show/hide toggle. Reuses the edit endpoint with the group's current fields so it
   // reads as an inline binary toggle (auto-saves + toasts, per the console save conventions).
   const toggleGroupVisible = async (g: LinkGroup, visible: boolean) => {
     await api.put(`/api/admin/link-groups/${g.id}`, { name: g.name, mode: g.mode, showLabel: g.showLabel, icon: g.icon || '', visible })
     message.success(visible ? t('links.shown') : t('links.hidden'))
-    load()
+    load({ quiet: true })
   }
 
   const openAdd = () => {
@@ -240,7 +243,7 @@ export default function LinksPage() {
     else await api.post('/api/admin/links', payload)
     setOpen(false)
     message.success(t('common.saved'))
-    await load()
+    await load({ quiet: true })
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
   const onValuesChange = (changed: Record<string, unknown>) => {
@@ -258,14 +261,14 @@ export default function LinksPage() {
   }
   const remove = async (id: number) => {
     await api.del(`/api/admin/links/${id}`)
-    load()
+    load({ quiet: true })
   }
   // Home-page show/hide toggle (see toggleGroupVisible) — reuses the edit endpoint with the entry's
   // current fields so a flip is a self-contained auto-save.
   const toggleLinkVisible = async (l: LinkItem, visible: boolean) => {
     await api.put(`/api/admin/links/${l.id}`, { label: l.label, url: l.url, icon: l.icon, newTab: l.newTab !== false, visible })
     message.success(visible ? t('links.shown') : t('links.hidden'))
-    load()
+    load({ quiet: true })
   }
 
   // A link's URL rendered as a link or a shortcut tag.

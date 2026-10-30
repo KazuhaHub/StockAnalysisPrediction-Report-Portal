@@ -3,6 +3,7 @@ import { App, Button, Card, Radio, Result, Space, Tag, Typography, theme } from 
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { AppAccessOU, UserGroupRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import { useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
@@ -17,6 +18,7 @@ import OrgUnitPicker from './OrgUnitPicker'
 // only hidden by this: the server cannot gate the API behind it, which the note under the choice says.
 export default function AppAccessPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const navigate = useNavigate()
   const key = useParams().key ?? ''
   const catalog = useAppsCatalog()
@@ -27,18 +29,21 @@ export default function AppAccessPage() {
 
   const loadGroups = useCallback(async () => {
     setGroupsError('')
+    let settled = true
     try {
       const g = await api.get<{ groups: UserGroupRow[] }>('/api/admin/groups')
       setGroups(g?.groups ?? [])
     } catch (e) {
-      setGroupsError(errText(e, t))
+      const text = failure(e)
+      if (text === null) settled = false
+      else setGroupsError(text)
     } finally {
-      setGroupsLoading(false)
+      if (settled) setGroupsLoading(false)
     }
-  }, [t])
+  }, [t, failure])
   useEffect(() => {
     void loadGroups()
-  }, [loadGroups])
+  }, [loadGroups, retryKey])
 
   const app = catalog.apps.find((a) => a.key === key)
   const retry = () => {
@@ -67,7 +72,7 @@ function AccessWorkspace({
   groups: UserGroupRow[]
   selectedId: number | null
   onSelect: (id: number) => void
-  reload: () => Promise<boolean>
+  reload: (opts?: { quiet?: boolean }) => Promise<boolean>
 }) {
   const { t } = useTranslation()
   const labels = useAppLabels()
@@ -153,7 +158,7 @@ function AccessEditor({
   name: string
   group: UserGroupRow
   groups: UserGroupRow[]
-  reload: () => Promise<boolean>
+  reload: (opts?: { quiet?: boolean }) => Promise<boolean>
   onDirtyChange: (dirty: boolean) => void
 }) {
   const { t } = useTranslation()
@@ -184,7 +189,7 @@ function AccessEditor({
     setBusy(true)
     try {
       await api.put(`/api/admin/apps/${encodeURIComponent(app.key)}/access/${group.id}`, { enabled })
-      if (!(await reload())) message.warning(t('apps.access.reloadFailed'))
+      if (!(await reload({ quiet: true }))) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {
       message.error(errText(e, t))

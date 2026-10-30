@@ -3,6 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import LoginActivityNotice from './LoginActivityNotice'
+import NotificationStack from './NotificationStack'
+import { NOTIFICATION_DURATIONS, getNotifications, resetNotifications } from '../lib/notify'
 
 const apiGet = vi.hoisted(() => vi.fn())
 
@@ -44,32 +46,43 @@ describe('LoginActivityNotice', () => {
 
   it('shows the latest activity once and records the event id per account', async () => {
     const first = render(
-      <MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>,
+      <MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>,
     )
     expect(await screen.findByText('loginActivity.recentNotice')).toBeTruthy()
     expect(screen.getByText(/198\.51\.100\.•••/)).toBeTruthy()
     expect(screen.getByText('Chrome 128.0 · Android 15 · Pixel 9')).toBeTruthy()
     await waitFor(() => expect(localStorage.getItem('rp:login-activity-seen:alice')).toBe('42'))
     first.unmount()
+    resetNotifications() // the store outlives a component; this stands in for a fresh page load
 
-    render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
+    render(<MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>)
     await waitFor(() => expect(apiGet).toHaveBeenCalled())
     expect(screen.queryByText('loginActivity.recentNotice')).toBeNull()
   })
 
   it('labels a later event as a new login', async () => {
     localStorage.setItem('rp:login-activity-seen:alice', '41')
-    render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
+    render(<MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>)
     expect(await screen.findByText('loginActivity.newNotice')).toBeTruthy()
   })
 
-  it('stays visible, clears the responsive header, and uses the centred mobile placement', async () => {
-    render(<MemoryRouter><App><LoginActivityNotice user="alice" /></App></MemoryRouter>)
+  it('is a security notification that never times out and links to the sign-in activity', async () => {
+    render(<MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>)
     await screen.findByText('loginActivity.recentNotice')
-    const notice = document.querySelector<HTMLElement>('.ant-notification-notice')
-    expect(notice?.style.marginTop).toContain('var(--rp-header-h')
-    expect(notice?.classList.contains('rp-login-activity-notice')).toBe(true)
-    expect(document.querySelector('.ant-notification-top')).toBeTruthy()
-    expect(document.querySelector('.ant-notification-topRight')).toBeNull()
+    expect(document.querySelector('.rp-notify-card')?.getAttribute('data-kind')).toBe('security')
+    expect(NOTIFICATION_DURATIONS.security).toBeNull()
+    expect(screen.getByRole('button', { name: 'loginActivity.view' })).toBeTruthy()
+  })
+
+  it('raises nothing when the response arrives after the component is gone', async () => {
+    let release: (v: unknown) => void = () => {}
+    apiGet.mockReset().mockImplementation(() => new Promise((r) => { release = r }))
+    const view = render(<MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>)
+    await waitFor(() => expect(apiGet).toHaveBeenCalled())
+    view.unmount()
+    release({ items: [{ id: 7, at: '2026-09-27T19:00:00Z', ip: '198.51.100.7', method: 'password' }], total: 1, timezone: 'UTC' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(getNotifications()).toHaveLength(0)
+    expect(localStorage.getItem('rp:login-activity-seen:alice')).toBeNull()
   })
 })
