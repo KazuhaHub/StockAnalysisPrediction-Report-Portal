@@ -388,3 +388,185 @@ describe('notifications across sign-in identities', () => {
     expect(getNotifications()).toHaveLength(0)
   })
 })
+
+describe('notifications with a finger', () => {
+  const CARD_WIDTH = 300
+  let reduced = false
+  const stubHover = (hover: boolean) => vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+      matches: query.includes('prefers-reduced-motion') ? reduced : !hover && query.includes('(hover: none)'),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }))
+  // Gestures are judged by each pointer's own type, so they must work whichever way hover is set.
+  beforeEach(() => { reduced = false; stubHover(true) })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const card = () => {
+    const el = document.querySelector<HTMLElement>('.rp-notify-card')!
+    el.getBoundingClientRect = () => ({ width: CARD_WIDTH, height: 60, top: 0, left: 0, right: CARD_WIDTH, bottom: 60, x: 0, y: 0, toJSON: () => ({}) })
+    return el
+  }
+  let pointerType = 'touch'
+  const touch = (el: Element, type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y = 0) =>
+    act(() => {
+      fireEvent[type](el, { pointerId: 1, pointerType, clientX: x, clientY: y, isPrimary: true })
+    })
+  beforeEach(() => { pointerType = 'touch' })
+
+  it('keeps the close button visible only where hover does not exist', () => {
+    stubHover(false)
+    mount()
+    raise('success', 'done')
+    expect(screen.getByRole('button', { name: 'notifications.close' }).getAttribute('data-visible')).toBe('true')
+  })
+
+  it('leaves the close button to hover and focus where hover exists', () => {
+    stubHover(true)
+    mount()
+    raise('success', 'done')
+    expect(screen.getByRole('button', { name: 'notifications.close' }).getAttribute('data-visible')).toBe('false')
+  })
+
+  it('swipes with a finger on a device that also hovers', () => {
+    stubHover(true)
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('ends the enter animation when a drag starts so the card follows the finger', () => {
+    mount()
+    raise('success', 'done')
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 40)
+    expect(el.style.animation).toBe('none')
+    expect(el.style.transform).toBe('translateX(30px)')
+  })
+
+  it('keeps a swiped card off screen under reduced motion instead of snapping it back', () => {
+    reduced = true
+    mount()
+    raise('success', 'done')
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(el.style.transform).not.toBe('')
+    expect(el.style.opacity).toBe('0')
+  })
+
+  it('swipes with a pen', () => {
+    pointerType = 'pen'
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('ignores a mouse drag and does not pause on a mouse press', () => {
+    pointerType = 'mouse'
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    interact()
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    touch(el, 'pointerMove', 250)
+    touch(el, 'pointerUp', 250)
+    expect(onClose).not.toHaveBeenCalled()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+
+  it('dismisses a card dragged to the right past the threshold', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 10 + CARD_WIDTH * 0.4)
+    touch(el, 'pointerUp', 10 + CARD_WIDTH * 0.4)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+    expect(el.classList.contains('is-leaving')).toBe(true)
+  })
+
+  it('dismisses on a fast flick that is shorter than the threshold', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    advance(40)
+    touch(el, 'pointerMove', 70)
+    touch(el, 'pointerUp', 70)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('snaps a short, slow drag back', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 40)
+    advance(600)
+    touch(el, 'pointerMove', 50)
+    touch(el, 'pointerUp', 50)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(titles()).toEqual(['done'])
+    expect(el.style.transform).toBe('')
+  })
+
+  it('does not claim a vertical gesture', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10, 10)
+    touch(el, 'pointerMove', 20, 80)
+    touch(el, 'pointerMove', 10 + CARD_WIDTH, 90)
+    touch(el, 'pointerUp', 10 + CARD_WIDTH, 90)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('pauses the countdown while a card is pressed and resumes on release', () => {
+    mount()
+    raise('success', 'done')
+    interact()
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    advance(NOTIFICATION_DURATIONS.success! + 2000)
+    expect(titles()).toEqual(['done'])
+    touch(el, 'pointerUp', 10)
+    advance(NOTIFICATION_DURATIONS.success! - 200)
+    expect(titles()).toEqual(['done'])
+    advance(400)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+})

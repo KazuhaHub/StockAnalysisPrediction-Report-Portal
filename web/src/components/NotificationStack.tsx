@@ -24,6 +24,7 @@ import {
   type NotifyKind,
 } from '../lib/notify'
 import { QUEUE_EVENT } from '../lib/shortcuts'
+import { useHoverNone } from '../lib/useHoverNone'
 import { formatTaskTime } from '../lib/taskUi'
 
 const ICONS: Record<NotifyKind, ReactNode> = {
@@ -52,13 +53,39 @@ function handOffFocus(card: HTMLElement | null) {
   target?.focus()
 }
 
+// A horizontal drag is claimed once it has moved this far and is mostly sideways.
+const SWIPE_CLAIM_PX = 8
+// Dismissed at this share of the card's width, or by a flick at least this fast (px per ms) over a few pixels.
+const SWIPE_DISMISS_RATIO = 0.35
+const SWIPE_FLICK_SPEED = 0.5
+const SWIPE_FLICK_MIN_PX = 24
+
+interface Drag {
+  id: number
+  x: number
+  y: number
+  t: number
+  width: number
+  claimed: boolean
+}
+
+function reducedMotionNow(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
 function Card({ item, now }: { item: NotificationItem; now: number }) {
   const { t, i18n } = useTranslation()
   const { token } = theme.useToken()
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
-  const hot = hover || focus
+  const noHover = useHoverNone()
+  const hot = hover || focus || noHover
+  const drag = useRef<Drag | null>(null)
   const key = item.key
   // A card that unmounts (folded into the "N more" pill) takes its pointer and focus with it; the
   // enter/leave events that would release the hold never arrive.
@@ -66,6 +93,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
     () => () => {
       holdNotification(key, 'hover', false)
       holdNotification(key, 'focus', false)
+      holdNotification(key, 'press', false)
     },
     [key],
   )
@@ -80,6 +108,81 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
     // An action decides where focus goes itself (it may navigate, open a drawer, start a download).
     if (reason === 'manual') handOffFocus(cardRef.current)
     dismissNotification(key, reason)
+  }
+  // A swipe is a gesture of the finger, not of the page: the card follows it, then either leaves or settles back.
+  const settle = (el: HTMLElement) => {
+    el.style.transition = reducedMotionNow() ? '' : 'transform 0.2s ease, opacity 0.2s ease'
+    el.style.transform = ''
+    el.style.opacity = ''
+    window.setTimeout(() => { el.style.transition = '' }, 220)
+  }
+  const release = () => {
+    drag.current = null
+    holdNotification(key, 'press', false)
+  }
+  // Judged per gesture by the pointer that makes it, so a hybrid device swipes with a finger and hovers with a mouse.
+  const fingerDown = (e: React.PointerEvent) => e.pointerType === 'touch' || e.pointerType === 'pen'
+  const gesture = {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!fingerDown(e) || !e.isPrimary) return
+      drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), width: e.currentTarget.getBoundingClientRect().width, claimed: false }
+      holdNotification(key, 'press', true)
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || d.id !== e.pointerId) return
+      const dx = e.clientX - d.x
+      const dy = e.clientY - d.y
+      if (!d.claimed) {
+        if (Math.abs(dy) > SWIPE_CLAIM_PX && Math.abs(dy) >= Math.abs(dx)) {
+          // The page is scrolling under the finger: not ours.
+          release()
+          return
+        }
+        if (Math.abs(dx) < SWIPE_CLAIM_PX || Math.abs(dx) <= Math.abs(dy)) return
+        d.claimed = true
+        // An enter animation still running would override the inline transform and the card would not follow the finger.
+        e.currentTarget.style.animation = 'none'
+        try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* the pointer is already gone */ }
+      }
+      e.currentTarget.style.transform = `translateX(${Math.max(0, dx)}px)`
+      e.currentTarget.style.opacity = String(Math.max(0.3, 1 - Math.max(0, dx) / (d.width * 1.2)))
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || d.id !== e.pointerId) return
+      const el = e.currentTarget
+      const dx = e.clientX - d.x
+      const elapsed = Math.max(Date.now() - d.t, 1)
+      const far = d.width > 0 && dx >= d.width * SWIPE_DISMISS_RATIO
+      const flick = dx >= SWIPE_FLICK_MIN_PX && dx / elapsed >= SWIPE_FLICK_SPEED
+      release()
+      if (!d.claimed) return
+      if (far || flick) {
+        const end = Math.max(d.width, 1) * 1.1
+        if (reducedMotionNow()) {
+          // No exit animation: park the card off screen until it is removed, rather than snapping it back.
+          el.style.transform = `translateX(${end}px)`
+          el.style.opacity = '0'
+        } else {
+          // Carry the exit animation on from where the finger left the card.
+          el.style.setProperty('--rp-swipe-x', `${Math.max(0, dx)}px`)
+          el.style.setProperty('--rp-swipe-end', `${end}px`)
+          el.style.transform = ''
+          el.style.opacity = ''
+          el.style.animation = 'rp-notify-out 0.25s ease-in forwards'
+        }
+        handOffFocus(el)
+        dismissNotification(key, 'swipe')
+      } else {
+        settle(el)
+      }
+    },
+    onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      release()
+      if (d?.claimed) settle(e.currentTarget)
+    },
   }
   const color: Record<NotifyKind, string> = {
     security: token.purple,
@@ -97,6 +200,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
       role={live ? (assertive ? 'alert' : 'status') : 'group'}
       aria-live={live ? (assertive ? 'assertive' : 'polite') : undefined}
       data-kind={item.kind}
+      {...gesture}
       onMouseEnter={() => {
         setHover(true)
         holdNotification(item.key, 'hover', true)

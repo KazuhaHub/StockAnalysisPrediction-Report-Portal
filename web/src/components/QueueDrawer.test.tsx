@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import { MemoryRouter, useLocation } from 'react-router'
 import type { BatchJob, TaskItem } from '../api/types'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const store = vi.hoisted(() => ({
   urls: [] as string[],
@@ -53,7 +55,13 @@ type Props = Partial<React.ComponentProps<typeof QueueDrawer>>
 const refreshTasks = vi.fn()
 const onTabChange = vi.fn()
 function Where() {
-  return <span data-testid="where">{useLocation().pathname}</span>
+  const loc = useLocation()
+  return (
+    <>
+      <span data-testid="where">{loc.pathname}</span>
+      <span data-testid="search">{loc.search}</span>
+    </>
+  )
 }
 function Harness(props: Props) {
   return (
@@ -99,12 +107,28 @@ describe('Tasks drawer mine / all (ADR 0047)', () => {
 })
 
 describe('Tasks drawer tabs', () => {
-  it('shows Runs and Exports tabs with their in-progress counts', async () => {
+  // The two views switch with a full-width segmented control (like Mine / All), not small
+  // left-aligned tabs; an in-progress count is a small pill, shown only when there is one.
+  it('switches Runs and Exports with a full-width segmented control carrying count pills', async () => {
     store.jobs = [job(), job({ id: 2, status: 'queued', ahead: 1 }), job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
     mount({ tasks: [exp()] })
-    expect(await screen.findByRole('tab', { name: /tasks\.tab\.runs/ })).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('tab', { name: /tasks\.tab\.runs/ }).textContent).toContain('2'))
-    expect(screen.getByRole('tab', { name: /tasks\.tab\.exports/ }).textContent).toContain('1')
+    const views = await waitFor(() => {
+      const el = document.querySelector('.rp-task-views')
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(document.querySelector('.ant-drawer .ant-tabs')).toBeNull()
+    expect(views.classList.contains('ant-segmented-block')).toBe(true)
+    await waitFor(() => expect(within(views).getByRole('radio', { name: /tasks\.tab\.runs/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('2'))
+    expect(within(views).getByRole('radio', { name: /tasks\.tab\.exports/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('1')
+  })
+
+  it('shows no count pill on a view with nothing in progress', async () => {
+    store.jobs = [job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount({ tasks: [] })
+    const views = await waitFor(() => document.querySelector('.rp-task-views') as HTMLElement)
+    await screen.findByText('Deep Research')
+    expect(views.querySelectorAll('.rp-task-views__count')).toHaveLength(0)
   })
 
   it('lays the four figures out as a grid, one column each', async () => {
@@ -126,7 +150,7 @@ describe('Tasks drawer tabs', () => {
     store.admin = false
     mount({ canRun: false, canExport: true, tab: 'exports', tasks: [exp()] })
     expect(await screen.findByText('Audit Q3')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
     expect(store.urls).toEqual([]) // the run queue is not asked for
     expect(screen.queryByText('queue.running')).toBeNull()
   })
@@ -136,13 +160,14 @@ describe('Tasks drawer tabs', () => {
     store.jobs = [job()]
     mount({ canRun: true, canExport: false })
     expect(await screen.findByText('Deep Research')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
   })
 
   it('reports a tab change to its owner', async () => {
     const user = userEvent.setup()
     mount()
-    await user.click(await screen.findByRole('tab', { name: /tasks\.tab\.exports/ }))
+    // The radio itself is pointer-events: none in antd's Segmented; people click its label.
+    await user.click((await screen.findByRole('radio', { name: /tasks\.tab\.exports/ })).closest('label') as HTMLElement)
     expect(onTabChange).toHaveBeenCalledWith('exports' satisfies DrawerTab)
   })
 })
@@ -365,5 +390,162 @@ describe('Tasks drawer Exports tab', () => {
   it('says there are no exports', () => {
     mount({ tab: 'exports' })
     expect(screen.getByText('tasks.emptyExports')).toBeTruthy()
+  })
+})
+
+function stubHover(hover: boolean) {
+  vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+    matches: !hover && query.includes('(hover: none)'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }))
+}
+const toggleOf = (row: HTMLElement) => row.querySelector<HTMLElement>('[aria-expanded]')
+
+describe('Tasks drawer row layout', () => {
+  beforeEach(() => stubHover(true))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('ends every row with the time, in a trailing cell that also holds the actions', async () => {
+    store.jobs = [job({ id: 1 }), job({ id: 2, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount()
+    await screen.findAllByText('Deep Research')
+    const all = [...rows('tasks.section.active'), ...rows('tasks.section.finished')]
+    expect(all.length).toBe(2)
+    for (const row of all) {
+      const end = row.lastElementChild as HTMLElement
+      expect(end.classList.contains('rp-task-row__end')).toBe(true)
+      expect(end.querySelector('.rp-task-row__time')).not.toBeNull()
+    }
+  })
+
+  it('keeps the actions hidden by default, reachable by focus, and still toggles on click', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(row.classList.contains('is-open')).toBe(false)
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(false)
+    fireEvent.click(toggleOf(row)!)
+    expect(row.classList.contains('is-open')).toBe(true)
+  })
+})
+
+describe('Tasks drawer row where hover does not exist', () => {
+  beforeEach(() => stubHover(false))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reveals the actions when the row is tapped and hides them on a second tap', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    const toggle = toggleOf(row)!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(true)
+    expect(row.classList.contains('is-open')).toBe(false)
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(false)
+    expect(row.classList.contains('is-open')).toBe(true)
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it('keeps one row open: tapping another closes the first', async () => {
+    store.jobs = [job({ id: 1 }), job({ id: 2 })]
+    mount()
+    await screen.findAllByText('Deep Research')
+    const [a, b] = rows('tasks.section.active')
+    fireEvent.click(toggleOf(a)!)
+    expect(a.classList.contains('is-open')).toBe(true)
+    fireEvent.click(toggleOf(b)!)
+    expect(a.classList.contains('is-open')).toBe(false)
+    expect(b.classList.contains('is-open')).toBe(true)
+  })
+
+  it('toggles from the keyboard with Enter and Space', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    const toggle = toggleOf(row)!
+    expect(toggle.tabIndex).toBe(0)
+    fireEvent.keyDown(toggle, { key: 'Enter' })
+    expect(row.classList.contains('is-open')).toBe(true)
+    fireEvent.keyDown(toggle, { key: ' ' })
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it('hides the open row when the person taps outside the list', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    expect(row.classList.contains('is-open')).toBe(true)
+    fireEvent.pointerDown(screen.getByText('queue.budget'))
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it('does not close the row when an action inside it is pressed', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    fireEvent.pointerDown(within(row).getByRole('button', { name: 'tasks.cancel' }))
+    expect(row.classList.contains('is-open')).toBe(true)
+  })
+})
+
+describe('Tasks drawer row targets', () => {
+  beforeEach(() => stubHover(false))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('toggles from a tap on the time cell, not just the text', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(row.querySelector('.rp-task-row__time')!)
+    expect(row.classList.contains('is-open')).toBe(true)
+    fireEvent.click(row.querySelector('.rp-task-row__time')!)
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it('does not toggle the row when an action is pressed', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    fireEvent.click(within(row).getByRole('button', { name: 'tasks.open' }))
+    expect(row.classList.contains('is-open')).toBe(true)
+  })
+
+  it("opens that run's detail from the row's open action", async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    fireEvent.click(within(row).getByRole('button', { name: 'tasks.open' }))
+    expect(screen.getByTestId('where').textContent).toBe('/queue')
+    expect(screen.getByTestId('search').textContent).toBe('?job=41')
+  })
+})
+
+describe('Tasks drawer row styles', () => {
+  const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+  it('reveals the actions from the keyboard only, so a mouse click never pins them', () => {
+    expect(css).not.toMatch(/\.rp-task-row:focus-within/)
+    expect(css).toMatch(/\.rp-task-row:has\(:focus-visible\) \.rp-task-row__acts/)
   })
 })

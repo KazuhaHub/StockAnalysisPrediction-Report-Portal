@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
@@ -56,6 +56,18 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
   // The row whose cancel confirmation is open keeps its actions on screen.
   const [confirming, setConfirming] = useState<string | null>(null)
+  // The one row whose actions a tap or click has revealed.
+  const [openRow, setOpenRow] = useState<string | null>(null)
+  const toggleRow = (key: string) => setOpenRow((cur) => (cur === key ? null : key))
+  useEffect(() => {
+    if (openRow === null) return
+    // A press anywhere outside the task lists puts the actions away; a press on another row is that row's own toggle.
+    const away = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.rp-task-list')) setOpenRow(null)
+    }
+    document.addEventListener('pointerdown', away, true)
+    return () => document.removeEventListener('pointerdown', away, true)
+  }, [openRow])
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
@@ -240,6 +252,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={j.id}
         pinned={confirming === `run-${j.id}`}
+        expanded={openRow === `run-${j.id}`}
+        onToggle={() => toggleRow(`run-${j.id}`)}
         tone={tone}
         name={
           <>
@@ -260,7 +274,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
                 </Tooltip>
               </Popconfirm>
             )}
-            {openAction(t('tasks.open'), '/queue')}
+            {openAction(t('tasks.open'), `/queue?job=${j.id}`)}
           </>
         }
       />
@@ -296,6 +310,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={taskKey(x)}
         pinned={confirming === `export-${taskKey(x)}`}
+        expanded={openRow === `export-${taskKey(x)}`}
+        onToggle={() => toggleRow(`export-${taskKey(x)}`)}
         tone={tone}
         name={x.name}
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
@@ -354,12 +370,19 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     </>
   )
 
-  const count = (n: number | null) =>
-    n ? <span style={{ marginLeft: 4, fontSize: 12, color: token.colorTextSecondary }}>{n}</span> : null
+  // The two views switch with a full-width segmented control, like Mine / All. An in-progress
+  // count is a small pill, shown only when there is something in progress.
+  const viewLabel = (label: string, n: number | null) => (
+    <span className="rp-task-views__label">
+      {label}
+      {n ? <span className="rp-task-views__count">{n}</span> : null}
+    </span>
+  )
   const tabItems = [
-    ...(showRuns ? [{ key: 'runs', label: <span>{t('tasks.tab.runs')}{count(loaded ? activeJobs.length : null)}</span>, children: runsPane }] : []),
-    ...(showExports ? [{ key: 'exports', label: <span>{t('tasks.tab.exports')}{count(activeExports.length)}</span>, children: exportsPane }] : []),
+    ...(showRuns ? [{ key: 'runs' as const, label: viewLabel(t('tasks.tab.runs'), loaded ? activeJobs.length : null), children: runsPane }] : []),
+    ...(showExports ? [{ key: 'exports' as const, label: viewLabel(t('tasks.tab.exports'), activeExports.length), children: exportsPane }] : []),
   ]
+  const activePane = (tabItems.find((item) => item.key === activeTab) ?? tabItems[0])?.children
 
   const onRuns = activeTab === 'runs'
   const footerTo = onRuns ? '/queue' : admin ? '/manage/exports' : '/exports'
@@ -390,11 +413,16 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         </Button>
       }
     >
-      {tabItems.length > 1 ? (
-        <Tabs size="small" activeKey={activeTab} onChange={(k) => onTabChange(k as DrawerTab)} items={tabItems} tabBarStyle={{ margin: '0 8px' }} />
-      ) : (
-        tabItems[0]?.children
+      {tabItems.length > 1 && (
+        <Segmented
+          block
+          className="rp-task-views"
+          value={activeTab}
+          onChange={(k) => onTabChange(k as DrawerTab)}
+          options={tabItems.map((item) => ({ value: item.key, label: item.label }))}
+        />
       )}
+      {activePane}
     </Drawer>
   )
 }

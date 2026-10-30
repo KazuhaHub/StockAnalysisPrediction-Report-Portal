@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import QueueTable from './QueueTable'
 import { INPUT_VALUE_MAX } from '../lib/batchUi'
 import type { BatchJob } from '../api/types'
@@ -9,7 +9,7 @@ import type { BatchJob } from '../api/types'
 // Mutable so a test can inject jobs into the mocked API. vi.hoisted keeps it reachable from
 // the hoisted vi.mock factory below. `hold` makes every polled GET hang, which is what a slow
 // link looks like for the seconds that matter: the page is up and nothing has answered yet.
-const store = vi.hoisted(() => ({ urls: [] as string[], jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
+const store = vi.hoisted(() => ({ urls: [] as string[], jobs: [] as BatchJob[], hold: false, detail404: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
 const forgetTags = vi.hoisted(() => vi.fn())
 
 // Smoke test: the queue page must mount without crashing (it renders on load, before any
@@ -19,6 +19,10 @@ vi.mock('../api/client', () => ({
   api: {
     get: (url: string) => {
       if (url.includes('/queue')) return Promise.resolve(store.summary)
+      if (/\/jobs\/\d+$/.test(url)) {
+        if (store.detail404) return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+        return Promise.resolve({ job: job({ id: Number(url.split('/').pop()) }), counts: {}, running_in_process: true, items: [] })
+      }
       if (url.includes('/targets')) return Promise.resolve({ targets: [] })
       return Promise.resolve({ jobs: store.jobs })
     },
@@ -80,6 +84,7 @@ describe('QueueTable', () => {
   beforeEach(() => {
     store.jobs = []
     store.hold = false
+    store.detail404 = false
     store.fail = ''
     store.unchanged = false
     store.admin = true
@@ -265,6 +270,51 @@ describe('QueueTable', () => {
       await waitFor(() => expect(store.urls.length).toBeGreaterThan(0))
       expect(screen.queryByText('queue.scope.mine')).toBeNull()
       expect(store.urls.every((u) => !u.includes('scope='))).toBe(true)
+    })
+  })
+
+  describe('job deep link (?job=id)', () => {
+    const Search = () => <span data-testid="search">{useLocation().search}</span>
+    const mountAt = (entry: string) =>
+      render(
+        <App>
+          <MemoryRouter initialEntries={[entry]}>
+            <Search />
+            <QueueTable showStats />
+          </MemoryRouter>
+        </App>,
+      )
+
+    it('opens the detail drawer of the job named in the url', async () => {
+      store.jobs = [job({ id: 5 })]
+      mountAt('/queue?job=5')
+      expect(await screen.findByText('batch.jobTitle:{"id":5}')).toBeTruthy()
+    })
+
+    it("says so, without crashing, when the job is unknown or not the reader's", async () => {
+      store.detail404 = true
+      mountAt('/queue?job=999')
+      expect(await screen.findByText('batch.jobNotFound')).toBeTruthy()
+    })
+
+    it('clears the parameter when the drawer closes and keeps other parameters', async () => {
+      mountAt('/queue?job=5&tab=x')
+      await screen.findByText('batch.jobTitle:{"id":5}')
+      fireEvent.click(document.querySelector('.ant-drawer-close')!)
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?tab=x'))
+    })
+
+    it('puts the job in the url when a row is opened', async () => {
+      store.jobs = [job({ id: 8 })]
+      mountAt('/queue')
+      fireEvent.click(await screen.findByTitle('batch.view'))
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?job=8'))
+    })
+
+    it('ignores a job parameter that is not a number', async () => {
+      mountAt('/queue?job=abc')
+      await waitFor(() => expect(store.urls.length).toBeGreaterThan(0))
+      expect(document.querySelector('.ant-drawer-open')).toBeNull()
     })
   })
 })

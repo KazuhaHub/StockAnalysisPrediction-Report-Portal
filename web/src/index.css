@@ -1361,6 +1361,17 @@ body {
   gap: 10px;
   padding: 10px 12px;
 }
+/* The dot and the two text lines; on a touch device this is the tap target that reveals the actions. */
+.rp-task-row__main {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  border-radius: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.rp-task-row__main[role='button'] { cursor: pointer; }
 /* The divider starts under the text (padding 12 + dot 8 + gap 10), not under the dot. */
 .rp-task-row + .rp-task-row::before {
   content: '';
@@ -1368,10 +1379,6 @@ body {
   top: 0;
   inset-inline: 30px 0;
   border-top: 1px solid var(--ant-color-border-secondary);
-}
-.rp-task-row:hover,
-.rp-task-row:focus-within {
-  background: var(--ant-color-fill-tertiary);
 }
 /* Centred on the first line (22px line box). */
 .rp-task-row__dot {
@@ -1381,26 +1388,71 @@ body {
   margin-top: 7px;
   border-radius: 50%;
 }
-/* Hidden actions are inert but stay in the tab order: focusing one shows the row's actions. */
-.rp-task-row__acts {
-  display: flex;
+/* The time and the actions share one cell at the row end, so the time is flush with the right edge
+   on every row. The actions wait off to the right, inert; the time gives way when they arrive.
+   Hidden actions stay in the tab order on a hover device: focusing one shows the row's actions. */
+.rp-task-row__end {
+  display: grid;
   flex: none;
+  align-self: stretch;
+  justify-items: end;
+}
+.rp-task-row__time {
+  grid-area: 1 / 1;
+  align-self: start;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.rp-task-row__acts {
+  grid-area: 1 / 1;
   align-self: center;
+  display: flex;
   gap: 2px;
   opacity: 0;
+  transform: translateX(14px);
   pointer-events: none;
-  transition: opacity 0.15s;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
-.rp-task-row:hover .rp-task-row__acts,
-.rp-task-row:focus-within .rp-task-row__acts,
+.rp-task-row.is-open .rp-task-row__acts,
 .rp-task-row.is-active .rp-task-row__acts {
   opacity: 1;
+  transform: none;
   pointer-events: auto;
 }
-@media (hover: none), (any-pointer: coarse) {
-  .rp-task-row__acts {
+.rp-task-row.is-open .rp-task-row__time,
+.rp-task-row.is-active .rp-task-row__time {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+/* Hover and focus reveal the actions where the primary input can hover; a click or tap toggles
+   them everywhere (is-open). */
+@media (hover: hover) {
+  .rp-task-row:hover,
+  .rp-task-row:has(:focus-visible) {
+    background: var(--ant-color-fill-tertiary);
+  }
+  .rp-task-row:hover .rp-task-row__acts,
+  .rp-task-row:has(:focus-visible) .rp-task-row__acts {
     opacity: 1;
+    transform: none;
     pointer-events: auto;
+  }
+  .rp-task-row:hover .rp-task-row__time,
+  .rp-task-row:has(:focus-visible) .rp-task-row__time {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+.rp-task-row.is-open {
+  background: var(--ant-color-fill-tertiary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-task-row__time,
+  .rp-task-row__acts {
+    transition: none;
+    transform: none !important;
   }
 }
 /* Specific enough to beat antd's text-button hover colour. */
@@ -2266,10 +2318,13 @@ body {
   -webkit-backdrop-filter: blur(24px) saturate(160%);
   backdrop-filter: blur(24px) saturate(160%);
   animation: rp-notify-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Let the page scroll vertically; a sideways drag is the card's own swipe-to-dismiss. */
+  touch-action: pan-y;
 }
 .rp-notify-card.is-leaving { animation: rp-notify-out 0.25s ease-in forwards; }
 @keyframes rp-notify-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes rp-notify-out { to { transform: translateX(24px); opacity: 0; } }
+/* A swipe sets --rp-swipe-x / --rp-swipe-end so the exit carries on from where the finger left the card. */
+@keyframes rp-notify-out { from { transform: translateX(var(--rp-swipe-x, 0px)); } to { transform: translateX(var(--rp-swipe-end, 24px)); opacity: 0; } }
 .rp-notify-icon {
   flex: none;
   width: 34px;
@@ -2323,6 +2378,27 @@ body {
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
   cursor: pointer;
+}
+/* Touch: the close button is always there, and big enough to hit. */
+@media (hover: none) {
+  .rp-notify-close {
+    width: 28px;
+    height: 28px;
+    top: -9px;
+    right: -9px;
+    font-size: 12px;
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A phone: the stack spans the screen below the header with a 12px margin on each side. */
+@media (max-width: 575px) {
+  .rp-notify-stack {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .rp-notify-card, .rp-notify-card.is-leaving { animation: none; }
@@ -2596,3 +2672,12 @@ body {
 
 /* The back-to-top button sits above the unsaved-changes dock while it is shown. */
 body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
+
+/* Tasks drawer: Runs / Exports switch, full width like Mine / All, with a count pill. */
+.rp-task-views { margin: 12px 0 4px; }
+.rp-task-views__label { display: inline-flex; align-items: center; gap: 6px; }
+.rp-task-views__count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--ant-color-primary); color: var(--ant-color-white);
+  font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
