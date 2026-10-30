@@ -2,6 +2,10 @@
 // a cleanup function makes it fit directly into a React effect without tying the
 // scheduling behavior to React itself.
 //
+// It also runs at once when the API client reports that the connection is back
+// ('rp:connection-restored'), so a page whose last poll failed recovers with the connection strip
+// instead of waiting out its interval.
+//
 // skipLeading is for a caller that already loads once on mount: without it the poll's own
 // immediate run fires the same request a millisecond later. It suppresses ONLY that first
 // run — the interval and the become-visible refresh are unaffected.
@@ -27,12 +31,15 @@ export function startVisiblePoll(
   }
 
   if (!opts.skipLeading) void run()
+  const onRestored = () => void run()
   const timer = window.setInterval(run, intervalMs)
   document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('rp:connection-restored', onRestored)
   return () => {
     stopped = true
     window.clearInterval(timer)
     document.removeEventListener('visibilitychange', onVisible)
+    window.removeEventListener('rp:connection-restored', onRestored)
   }
 }
 

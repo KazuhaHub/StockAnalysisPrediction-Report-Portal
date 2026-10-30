@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, Result, Spin, theme } from 'antd'
 import { useLocation } from 'react-router'
+import { CheckCircleFilled } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, clearConnectionError, getConnectionError, subscribeConnection } from '../api/client'
 import { useAuth } from '../auth'
@@ -44,44 +45,71 @@ export default function ConnectionBoundary({ children }: { children: ReactNode }
   return <ConnectionContext.Provider value={{ error, blocked, busy, retry }}>{children}</ConnectionContext.Provider>
 }
 
+const RECOVERED_MS = 1500
+const LEAVE_MS = 220
+
 /**
  * A thin strip pinned right under the top bar, styled like the site-wide update banner: full-width
- * tint, one centred group of status dot (a spinner while a probe runs), message and a quiet retry.
- * The current reading surface stays mounted and usable underneath. `top` is where it sticks: under
- * the app header by default, 0 on pages that have no header.
+ * tint, one centred group of status dot, message and a quiet retry. It slides down when the
+ * connection drops, its dot pulses while it waits (a spinner while a probe runs), and on recovery it
+ * turns green for a moment before sliding away. The current reading surface stays mounted underneath.
+ * `top` is where it sticks: under the app header by default, 0 on pages that have no header.
  */
 export function ConnectionNotice({ top = 'var(--rp-header-h, 64px)' }: { top?: number | string }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { error, blocked, busy, retry } = useContext(ConnectionContext)
-  if (!error || blocked) return null
+  const down = !!error && !blocked
+  // 'idle' -> 'down' while disconnected; a recovery passes through 'recovered' and 'leaving'. A
+  // disconnect that turns into the blocked full-page state skips the confirmation: that page says it.
+  const [phase, setPhase] = useState<'idle' | 'down' | 'recovered' | 'leaving'>('idle')
+  useEffect(() => {
+    if (down) { setPhase('down'); return }
+    if (blocked) { setPhase('idle'); return }
+    setPhase((p) => (p === 'down' ? 'recovered' : p))
+  }, [down, blocked])
+  useEffect(() => {
+    if (phase !== 'recovered' && phase !== 'leaving') return
+    const timer = window.setTimeout(() => setPhase(phase === 'recovered' ? 'leaving' : 'idle'), phase === 'recovered' ? RECOVERED_MS : LEAVE_MS)
+    return () => window.clearTimeout(timer)
+  }, [phase])
+  const recovered = !down && (phase === 'recovered' || phase === 'leaving')
+  if (!down && !recovered) return null
   return (
     <div
-      role="alert"
-      className="rp-connection-strip"
+      role={recovered ? 'status' : 'alert'}
+      className={`rp-connection-strip${phase === 'leaving' ? ' rp-connection-strip--leaving' : ''}`}
       style={{
-        position: 'sticky', top, zIndex: 20, background: token.colorWarningBg,
-        borderBottom: `1px solid ${token.colorWarningBorder}`,
+        position: 'sticky', top, zIndex: 20,
+        background: recovered ? token.colorSuccessBg : token.colorWarningBg,
+        borderBottom: `1px solid ${recovered ? token.colorSuccessBorder : token.colorWarningBorder}`,
+        transition: 'background-color .3s ease, border-color .3s ease',
       }}
     >
-      <div
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-          minHeight: 36, padding: '4px 12px', fontSize: 13, color: token.colorText,
-        }}
-      >
-        <span aria-hidden style={{ display: 'inline-flex', width: 14, justifyContent: 'center', flexShrink: 0 }}>
-          {busy ? (
-            <Spin size="small" />
-          ) : (
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: token.colorWarning }} />
+      <div className="rp-connection-strip__inner">
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            minHeight: 36, padding: '4px 12px', fontSize: 13, color: token.colorText,
+          }}
+        >
+          <span aria-hidden style={{ display: 'inline-flex', width: 14, justifyContent: 'center', flexShrink: 0 }}>
+            {recovered ? (
+              <CheckCircleFilled style={{ color: token.colorSuccess, fontSize: 14 }} />
+            ) : busy ? (
+              <Spin size="small" />
+            ) : (
+              <span className="rp-connection-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: token.colorWarning, color: token.colorWarning }} />
+            )}
+          </span>
+          <span style={{ minWidth: 0 }}>{t(recovered ? 'connection.recovered' : 'connection.notice')}</span>
+          {!recovered && (
+            <Button aria-label={t('connection.retry')} type="link" size="small" disabled={busy} onClick={retry}
+              style={{ padding: 0, height: 'auto', fontSize: 13 }}>
+              {t('connection.retryNow')}
+            </Button>
           )}
-        </span>
-        <span style={{ minWidth: 0 }}>{t('connection.notice')}</span>
-        <Button aria-label={t('connection.retry')} type="link" size="small" disabled={busy} onClick={retry}
-          style={{ padding: 0, height: 'auto', fontSize: 13 }}>
-          {t('connection.retryNow')}
-        </Button>
+        </div>
       </div>
     </div>
   )

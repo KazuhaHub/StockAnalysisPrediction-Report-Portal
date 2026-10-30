@@ -77,3 +77,12 @@ it('recovers automatically when the browser comes back online', async () => {
   await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   expect(screen.getByRole('textbox', { name: 'draft' })).toBeTruthy()
 })
+it('confirms the recovery briefly, then takes the strip away', async () => {
+  mount()
+  await disconnect()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"siteTitle":"Portal"}')))
+  fireEvent.click(screen.getByRole('button', { name: 'connection.retry' }))
+  await waitFor(() => expect(screen.getByRole('status').textContent).toContain('connection.recovered'))
+  expect(screen.queryByRole('alert')).toBeNull()
+  await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 4000 })
+})

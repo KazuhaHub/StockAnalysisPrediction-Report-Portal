@@ -2349,3 +2349,29 @@ body {
  .rp-account-page .rp-settings-content { overflow: visible; padding-inline-end: 0; }
 }
 .rp-statistics-page > .rp-admin-list-toolbar .ant-select { min-width: 160px; max-width: 100%; }
+
+/* Connection strip (ConnectionBoundary): slides down from under the header, its dot pulses while it
+   waits, and it slides back up after the recovery confirmation. The 0fr -> 1fr grid row animates the
+   height without measuring it. */
+.rp-connection-strip {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: rp-connection-in 220ms cubic-bezier(.2, .7, .3, 1);
+}
+.rp-connection-strip--leaving {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  animation: rp-connection-out 220ms ease-in;
+}
+.rp-connection-strip__inner { overflow: hidden; min-height: 0; }
+@keyframes rp-connection-in { from { grid-template-rows: 0fr; opacity: 0; } to { grid-template-rows: 1fr; opacity: 1; } }
+@keyframes rp-connection-out { from { grid-template-rows: 1fr; opacity: 1; } to { grid-template-rows: 0fr; opacity: 0; } }
+.rp-connection-dot { animation: rp-connection-pulse 1.6s ease-out infinite; }
+@keyframes rp-connection-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+  70% { box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-connection-strip, .rp-connection-strip--leaving, .rp-connection-dot { animation: none; }
+}

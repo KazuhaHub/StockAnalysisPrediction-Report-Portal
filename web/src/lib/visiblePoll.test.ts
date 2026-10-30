@@ -33,6 +33,22 @@ describe('startVisiblePoll', () => {
   })
 })
 
+describe('startVisiblePoll on reconnect', () => {
+  // A page whose last poll failed would otherwise keep its error up until the next interval
+  // (a minute on the home feed) although the connection strip already says it is back.
+  it('runs at once when the connection is restored, and not after stop', async () => {
+    const task = vi.fn(() => Promise.resolve())
+    const stop = startVisiblePoll(task, 60000, { skipLeading: true })
+    window.dispatchEvent(new Event('rp:connection-restored'))
+    await Promise.resolve()
+    expect(task).toHaveBeenCalledTimes(1)
+    stop()
+    window.dispatchEvent(new Event('rp:connection-restored'))
+    await Promise.resolve()
+    expect(task).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('startVisibleDeadline', () => {
   it('runs once when a visible idle page reaches its deadline', async () => {
     vi.useFakeTimers()

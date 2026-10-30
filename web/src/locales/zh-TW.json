@@ -2853,6 +2853,7 @@
   "connection.notice": "連線已中斷，正在重新連線…",
   "connection.retry": "重新連線",
   "connection.retryNow": "立即重試",
+  "connection.recovered": "已恢復連線",
   "login.forgotRequired": "請輸入使用者名稱或郵箱",
   "login.recoveryContact": "此門戶由管理員協助找回密碼，請聯絡管理員。",
   "login.recoveryHidden": "此門戶未開放密碼自助找回。",

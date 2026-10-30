@@ -2853,6 +2853,7 @@
   "connection.notice": "Connection lost. Reconnecting…",
   "connection.retry": "Reconnect",
   "connection.retryNow": "Retry now",
+  "connection.recovered": "Connection restored",
   "login.forgotRequired": "Enter your username or email address",
   "login.recoveryContact": "Contact your administrator for help recovering your password.",
   "login.recoveryHidden": "Self-service password recovery is unavailable on this portal.",
