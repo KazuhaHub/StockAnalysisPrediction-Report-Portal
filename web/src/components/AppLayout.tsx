@@ -442,7 +442,7 @@ function AppShell() {
               <Button
                 type="text"
                 shape="circle"
-                className="rp-workbench-trigger"
+                className="rp-header-icon"
                 icon={<AppstoreOutlined />}
                 aria-label={t('nav.workbench')}
                 aria-haspopup="menu"

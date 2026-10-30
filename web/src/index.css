@@ -1315,10 +1315,14 @@ body {
 /* Desktop workbench launcher: secondary destinations open from one familiar app-grid
    control. The generous tile targets keep it easy to scan and use without adding more
    permanent buttons to the header. */
-.rp-workbench-trigger.ant-btn {
-  width: 40px;
-  height: 40px;
-  font-size: 18px;
+/* The header's icon-only buttons (apps launcher, my tasks, notifications) share one size: as tall
+   as the labelled buttons beside them, with a 16px glyph. The launcher once had its own 40px / 18px
+   size and read as the loudest control on the row. */
+.rp-header-icon.ant-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  font-size: 16px;
 }
 .rp-workbench-menu {
   /* One 88px tile per destination plus the 4px gaps, and never narrower than the three-tile card.

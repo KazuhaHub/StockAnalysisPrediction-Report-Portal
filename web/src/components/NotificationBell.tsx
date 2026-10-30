@@ -22,5 +22,5 @@ export default function NotificationBell({ user }: { user: string }) {
     window.addEventListener(INBOX_CHANGED, onChange)
     return () => { alive = false; stop(); window.removeEventListener(INBOX_CHANGED, onChange) }
   }, [user])
-  return <Tooltip title={t('inbox.title')}><Link to="/notifications"><Badge count={count} overflowCount={99}><Button type="text" shape="circle" aria-label={t('inbox.title')} icon={<BellOutlined />} /></Badge></Link></Tooltip>
+  return <Tooltip title={t('inbox.title')}><Link to="/notifications"><Badge count={count} overflowCount={99}><Button type="text" shape="circle" className="rp-header-icon" aria-label={t('inbox.title')} icon={<BellOutlined />} /></Badge></Link></Tooltip>
 }
