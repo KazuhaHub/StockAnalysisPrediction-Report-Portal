@@ -19,6 +19,11 @@ vi.mock('./FavoriteButton', () => ({
     <button aria-label={`star-${market}${symbol}`} />
   ),
 }))
+const accessState = vi.hoisted(() => ({ closed: new Set<string>() }))
+vi.mock('../appAccess', async (orig) => ({
+  ...(await orig<typeof import('../appAccess')>()),
+  useAppAccess: () => ({ ready: true, isOpen: (k: string) => !accessState.closed.has(k) }),
+}))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
 function item(index: number): FavoriteItem {
@@ -33,6 +38,7 @@ function Location() {
 describe('FavoritesGrid', () => {
   beforeEach(() => {
     quoteCalls.length = 0
+    accessState.closed.clear()
   })
 
   it('requests quotes only for the favorites on the current page', async () => {
@@ -66,6 +72,29 @@ describe('FavoritesGrid', () => {
 
     await userEvent.click(screen.getByText('AAPL'))
     expect(screen.getByTestId('location').textContent).toBe('/apps/quotes?symbol=us%3AAAPL')
+  })
+
+  // With the Quotes app closed (ADR 0048) a quote-only favorite has nowhere to go, so it is a plain
+  // card rather than a button to a page the reader may not open. A favorite with a report still opens
+  // that report.
+  it('does not link a quote-only favorite to a closed Quotes app', async () => {
+    accessState.closed.add('builtin:quotes')
+    const quoteOnly: FavoriteItem = { market: 'us', symbol: 'AAPL', key: 'usAAPL', ord: 0 }
+    const withReport: FavoriteItem = { market: 'sh', symbol: '600000', key: 'sh600000', ord: 1, report: { date: '2026-10-01' } } as FavoriteItem
+    render(
+      <AntdApp>
+        <MemoryRouter>
+          <FavoritesGrid items={[quoteOnly, withReport]} onReorder={vi.fn()} />
+          <Location />
+        </MemoryRouter>
+      </AntdApp>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'AAPL' })).toBeNull()
+    await userEvent.click(screen.getByText('AAPL'))
+    expect(screen.getByTestId('location').textContent).toBe('/')
+    await userEvent.click(screen.getByText('600000'))
+    expect(screen.getByTestId('location').textContent).toBe('/stock/600000?date=2026-10-01')
   })
 
   it('moves an item in the full list while preserving every favorite', () => {

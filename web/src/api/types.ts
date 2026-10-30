@@ -1195,7 +1195,33 @@ export interface AppSummary {
 }
 
 export interface AppsResp {
+  // The installed apps open for the caller, in the administrator's order (ADR 0048).
   apps: AppSummary[]
+  // Open built-in app slugs, in order. Absent from an older server: treat as "all open".
+  builtin_apps?: string[]
+  // Both kinds as one key sequence (`builtin:<slug>` or an installed id): how the hub interleaves them.
+  order?: string[]
+}
+
+// One OU's standing for one app in the administrator's layout (ADR 0048).
+export interface AppAccessOU {
+  ou: number
+  own: boolean | null // true open, false closed, null inherits
+  effective: boolean
+  source_ou: number // 0 = the built-in baseline (open)
+  inherited: boolean
+}
+
+export interface AppLayoutEntry {
+  key: string // `builtin:<slug>` or an installed app's id
+  name: string // an installed app's name; a built-in app's slug
+  builtin: boolean
+  icon?: string
+  access: AppAccessOU[]
+}
+
+export interface AppLayoutResp {
+  apps: AppLayoutEntry[]
 }
 
 export interface AppTokenResp {

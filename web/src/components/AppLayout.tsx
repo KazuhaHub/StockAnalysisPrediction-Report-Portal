@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
 import { useReaderPrefs } from '../reader'
 import { useAuth } from '../auth'
+import { useAppAccess } from '../appAccess'
 import { SiteLogo, useSite } from '../site'
 import { sanitizeFooterHtml } from '../lib/footerHtml'
 import { QUEUE_EVENT, RUN_ANALYSIS_EVENT } from '../lib/shortcuts'
@@ -106,6 +107,13 @@ function AppShell() {
   const [accountOpen, setAccountOpen] = useState(false)
   const canRun = can('run_batch')
   const canWrite = can('report_edit')
+  const appAccess = useAppAccess()
+  // Related run surfaces share a menu. A closed batch app (ADR 0048) is not offered in it, and a menu
+  // with nothing left in it is not drawn.
+  const runMenuItems = [
+    ...(appAccess.isOpen('builtin:batch') ? [{ key: 'batch', icon: <PlayCircleOutlined aria-hidden="true" />, label: t('nav.batch') }] : []),
+    ...(canWrite ? [{ key: 'write-report', icon: <EditOutlined aria-hidden="true" />, label: t('nav.writeReport') }] : []),
+  ]
   // The record is offered to whoever the model gives some access to. This is a navigation hint, not
   // a gate: the server decides on every request, and an absent hint (an older server) offers nothing.
   // Reader report export (ADR 0046): offered only where the resolved OU policy allows it. Administrators
@@ -318,15 +326,13 @@ function AppShell() {
               >
                 {t('nav.runAnalysis')}
               </Button>
+              {runMenuItems.length > 0 && (
               <Dropdown
                 trigger={['click']}
                 placement="bottomRight"
                 classNames={{ root: 'rp-run-actions-menu' }}
                 menu={{
-                  items: [
-                    { key: 'batch', icon: <PlayCircleOutlined aria-hidden="true" />, label: t('nav.batch') },
-                    ...(canWrite ? [{ key: 'write-report', icon: <EditOutlined aria-hidden="true" />, label: t('nav.writeReport') }] : []),
-                  ],
+                  items: runMenuItems,
                   onClick: ({ key }) => {
                     if (key === 'batch') navigate('/apps/batch')
                     if (key === 'write-report') navigate('/report/new')
@@ -340,6 +346,7 @@ function AppShell() {
                   title={t('nav.runActions')}
                 />
               </Dropdown>
+              )}
             </Space.Compact>
           )}
           {canWrite && !canRun && !chatFocus && (

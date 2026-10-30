@@ -54,13 +54,46 @@ func appJSON(a App) map[string]any {
 }
 
 // apiApps lists installed apps for the Apps hub. Any logged-in user.
+//
+// The answer is what this user may open, in the administrator's order (ADR 0048):
+//   - apps: the installed apps that are open for the caller, in order. Existing clients read this.
+//   - builtin_apps: the open built-in app slugs, in order. The server cannot gate a built-in app's own
+//     API, so the SPA hides the ones missing from this list.
+//   - order: both of the above as one sequence of keys (`builtin:<slug>` or an installed id), which
+//     is how the hub interleaves the two kinds.
+//
+// An administrator is exempt and receives everything.
 func (s *Server) apiApps(w http.ResponseWriter, r *http.Request, user string) {
-	apps := s.st.ListApps()
-	out := make([]map[string]any, 0, len(apps))
-	for _, a := range apps {
-		out = append(out, appJSON(a))
+	view, err := s.st.appAccessFor(user)
+	if err != nil {
+		jsonError(w, http.StatusServiceUnavailable, "app access unavailable")
+		return
 	}
-	writeJSON(w, map[string]any{"apps": out})
+	order, err := s.st.appOrderMap()
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	installed := s.st.ListApps()
+	byID := map[string]App{}
+	for _, a := range installed {
+		byID[a.ID] = a
+	}
+	out := make([]map[string]any, 0, len(installed))
+	builtins := []string{}
+	keys := []string{}
+	for _, key := range orderAppKeys(appLayoutKeys(installed), order) {
+		if !view.open(key) {
+			continue
+		}
+		keys = append(keys, key)
+		if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
+			builtins = append(builtins, slug)
+		} else {
+			out = append(out, appJSON(byID[key]))
+		}
+	}
+	writeJSON(w, map[string]any{"apps": out, "builtin_apps": builtins, "order": keys})
 }
 
 // apiAppInstall installs (or replaces) an app from an uploaded .zip bundle. Admin-only.
@@ -129,6 +162,10 @@ func (s *Server) apiAppToken(w http.ResponseWriter, r *http.Request, user string
 		jsonError(w, http.StatusNotFound, "app not found")
 		return
 	}
+	// An additional gate, ahead of anything the app is granted: a closed app mints nothing.
+	if _, done := s.appOpenFor(w, user, app.ID); done {
+		return
+	}
 	scopes := grantableScopes(app.Scopes)
 	// The app bridge returns the minted token to the caller's page, so a read-only user could read it
 	// off the wire and call /api/v1 directly, bypassing the sandbox. Gate the write scope on the
@@ -175,6 +212,15 @@ func (s *Server) appAssets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+	// A closed app is not served to a caller the request identifies (ADR 0048). The route is public
+	// by design and a sandboxed frame's sub-resource requests carry no cookie, so a request with no
+	// session cannot be attributed to an OU and is served as before; the token mint is the gate that
+	// matters, and a bundle holds no secrets.
+	if user := s.currentActiveUser(r); user != "" {
+		if _, done := s.appOpenFor(w, user, id); done {
+			return
+		}
 	}
 	if ctype != "" {
 		w.Header().Set("Content-Type", ctype)

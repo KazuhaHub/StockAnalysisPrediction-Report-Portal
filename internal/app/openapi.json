@@ -2738,8 +2738,11 @@
           "400": {
             "description": "Invalid path, body or policy"
           },
+          "401": {
+            "description": "The app token is unknown, expired or revoked (error code unauthorized): mint a new token and retry. A token is revoked when the app is closed for an organizational unit."
+          },
           "403": {
-            "description": "Current app or viewer is not authorized"
+            "description": "Current app or viewer is not authorized, or the app is closed for the viewer (error code app_closed)"
           },
           "429": {
             "description": "Extension capacity is full"
@@ -2797,6 +2800,9 @@
           },
           "400": {
             "description": "Invalid directory parameters"
+          },
+          "401": {
+            "description": "The app token is unknown, expired or revoked (error code unauthorized): mint a new token and retry."
           },
           "403": {
             "description": "Current app administrator permission is required"

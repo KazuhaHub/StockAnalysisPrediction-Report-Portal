@@ -5,14 +5,15 @@ import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
-import { BUILTIN_APPS } from '../lib/builtinApps'
+import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, type BuiltinApp } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
 // permission; the registry lives in lib/builtinApps so the entry-button picker and shortcut router
 // agree with it); installed iframe apps (ADR 0003) are downloaded at runtime and appear here for
-// every user. Empty by default — the "app center" fills as you install apps.
+// every user the administrator has not closed them for. What is shown, and in which order, is the
+// server's answer (ADR 0048). Empty by default — the "app center" fills as you install apps.
 const BUILTIN_ICONS: Record<string, ReactNode> = {
   batch: <PlayCircleOutlined />,
   recurring: <ClockCircleOutlined />,
@@ -44,14 +45,18 @@ function AppCard({ icon, title, desc, tag, onClick }: { icon: ReactNode; title: 
   )
 }
 
+type HubEntry = { kind: 'builtin'; app: BuiltinApp } | { kind: 'installed'; app: AppSummary }
+
+const registryKeys = () => BUILTIN_APPS.map((a) => BUILTIN_PIN_PREFIX + a.key)
+
 export default function AppsHub() {
   const { t } = useTranslation()
   const { can } = useAuth()
   const navigate = useNavigate()
-  const [apps, setApps] = useState<AppSummary[]>([])
-  // An account without the built-in apps' permission sees nothing but the installed list, so
-  // "No apps available" before /api/apps answers is the whole page making a claim for the server
-  // — and the old `.catch(() => setApps([]))` made a failed request wear that same face for good.
+  const [resp, setResp] = useState<AppsResp | null>(null)
+  // A failed request must not wear the face of "no apps available": the page would be making a claim
+  // for the server. It says so instead, and falls back to the compiled-in cards, which owe the list
+  // nothing but their own permission.
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
 
@@ -60,7 +65,7 @@ export default function AppsHub() {
     setLoadErr('')
     return api
       .get<AppsResp>('/api/apps')
-      .then((r) => setApps(r.apps || []))
+      .then((r) => setResp(r))
       .catch((e) => setLoadErr(errText(e, t)))
       .finally(() => setLoading(false))
   }
@@ -69,18 +74,28 @@ export default function AppsHub() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // '' perm = everyone (matches shortcutPerm's registry contract; can('') is false, so guard on it).
-  const builtins = BUILTIN_APPS.filter((a) => !a.perm || can(a.perm))
-  const isEmpty = builtins.length === 0 && apps.length === 0
+  // One sequence for both kinds. An older server sends no `order`: the compiled-in apps first, then
+  // the installed ones, which is how the hub always read. '' perm = everyone (matches shortcutPerm's
+  // registry contract; can('') is false, so guard on it).
+  const installed = resp?.apps ?? []
+  const keys = resp ? (resp.order ?? [...registryKeys(), ...installed.map((a) => a.id)]) : registryKeys()
+  const entries: HubEntry[] = []
+  for (const key of keys) {
+    if (key.startsWith(BUILTIN_PIN_PREFIX)) {
+      const app = BUILTIN_APPS.find((a) => a.key === key.slice(BUILTIN_PIN_PREFIX.length))
+      if (app && (!app.perm || can(app.perm))) entries.push({ kind: 'builtin', app })
+    } else {
+      const app = installed.find((a) => a.id === key)
+      if (app) entries.push({ kind: 'installed', app })
+    }
+  }
+  const isEmpty = entries.length === 0
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <Typography.Title level={4} style={{ margin: 0 }}>
         {t('nav.apps')}
       </Typography.Title>
-      {/* The built-in cards are compiled in and owe /api/apps nothing, so they are never hidden
-          behind its answer — a failed installed-apps call says so above them and leaves them
-          usable. Only the "no apps available" claim waits, since only the server can make it. */}
       {loadErr && (
         <Alert
           type="warning"
@@ -90,34 +105,35 @@ export default function AppsHub() {
           action={<Button size="small" onClick={load}>{t('common.retry')}</Button>}
         />
       )}
-      {loading && builtins.length === 0 ? (
+      {loading && !resp ? (
         <div style={{ display: 'grid', justifyItems: 'center', gap: 12, minHeight: 200, alignContent: 'center' }}>
           <Spin size="large" />
           <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
         </div>
-      ) : isEmpty && !loading && !loadErr ? (
+      ) : isEmpty && !loadErr ? (
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>
-          {builtins.map((a) => (
-            <AppCard
-              key={a.key}
-              icon={BUILTIN_ICONS[a.key] ?? <AppstoreOutlined />}
-              title={t(a.titleKey)}
-              desc={t(a.descKey)}
-              tag={t('apps.builtin')}
-              onClick={() => navigate(a.to)}
-            />
-          ))}
-          {apps.map((a) => (
-            <AppCard
-              key={a.id}
-              icon={a.icon ? <span style={{ fontSize: 28, lineHeight: 1 }}>{a.icon}</span> : <AppstoreOutlined />}
-              title={a.name}
-              desc={a.version ? `v${a.version}` : undefined}
-              onClick={() => navigate(`/apps/x/${a.id}`)}
-            />
-          ))}
+          {entries.map((e) =>
+            e.kind === 'builtin' ? (
+              <AppCard
+                key={BUILTIN_PIN_PREFIX + e.app.key}
+                icon={BUILTIN_ICONS[e.app.key] ?? <AppstoreOutlined />}
+                title={t(e.app.titleKey)}
+                desc={t(e.app.descKey)}
+                tag={t('apps.builtin')}
+                onClick={() => navigate(e.app.to)}
+              />
+            ) : (
+              <AppCard
+                key={e.app.id}
+                icon={e.app.icon ? <span style={{ fontSize: 28, lineHeight: 1 }}>{e.app.icon}</span> : <AppstoreOutlined />}
+                title={e.app.name}
+                desc={e.app.version ? `v${e.app.version}` : undefined}
+                onClick={() => navigate(`/apps/x/${e.app.id}`)}
+              />
+            ),
+          )}
         </Row>
       )}
     </Space>

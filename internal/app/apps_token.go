@@ -146,6 +146,15 @@ func (a *appTokens) bindExtension(token string, generation int64, instance strin
 	e.backendInstance = instance
 	a.m[token] = e
 }
+
+// entry returns the recorded identity of a live token.
+func (a *appTokens) entry(tok string) (appTokenEntry, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e, ok := a.m[tok]
+	return e, ok
+}
+
 func (a *appTokens) revokeApp(id string) {
 	if a == nil {
 		return

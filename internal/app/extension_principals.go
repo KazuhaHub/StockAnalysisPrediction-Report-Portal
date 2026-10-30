@@ -20,7 +20,13 @@ func (s *Server) v1ExtensionPrincipals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry, ok := s.appTok.extensionEntry(raw, time.Now())
-	if !ok || entry.appID != r.PathValue("id") || !entry.scopes["extension.manage"] || !entry.accountGenerationKnown {
+	if !ok {
+		// Unknown, expired or revoked: the 401 every /api/v1 route answers, which tells the host page
+		// to mint a new token. A live token that is not allowed stays a 403 (ADR 0048).
+		v1err(w, http.StatusUnauthorized, "unauthorized", "the app token is missing, expired or revoked: mint a new one")
+		return
+	}
+	if entry.appID != r.PathValue("id") || !entry.scopes["extension.manage"] || !entry.accountGenerationKnown {
 		deny()
 		return
 	}
