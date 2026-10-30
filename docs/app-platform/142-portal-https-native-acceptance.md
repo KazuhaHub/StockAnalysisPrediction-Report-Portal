@@ -1,8 +1,10 @@
 # Actual Portal/current-viewer HTTPS acceptance
 
-Status: isolated Linux fixture implemented; Linux test compilation and vet pass.
-Exact new-revision native execution remains required. This is development-only
-acceptance of the private coordinator, not a public SDK/API or production claim.
+Status: corrected revision `4ee32ad20ad2a979a781088dfd9c13b703554af2`
+passes native quota 40990619226/job 123851844667 with all three actual HTTPS
+markers, both current SQL markers and all eight existing SDK/browser markers.
+Its general workflow 40990619214 also passes. The initial failed revision remains
+recorded below. This is development-only acceptance, not production approval.
 
 ## 1. Why this case is required
 
@@ -106,5 +108,5 @@ Initial f3dc0f9c8e4569abe08cd4e4441880ab98a15e50 failed quota workflow
 readiness and the existing bounded readiness wait expired. The new private mount
 namespace hid IPC tmpfs mounts from the existing Docker daemon. The correction
 keeps the original mount relationship and isolates only networking, using the
-namespace-local DNS service described above. Exact corrected-revision native
-execution is required; the initial failure is not a passed HTTPS test.
+namespace-local DNS service described above. Corrected-revision native execution now passes as recorded at the top;
+the initial failure is not a passed HTTPS test.

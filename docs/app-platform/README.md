@@ -1,5 +1,8 @@
 # Application platform v2: delivery plan
 
+接手开发先读：[剩余工作与逐步交接手册（中文）](144-remaining-work-handoff.zh-CN.md)。
+包含已验证候选、单独 WIP、PR 依赖和全部 90 项验收清单。
+
 Status: implementation in progress. The original delivery design was prepared
 2026-10-24 Pacific. The owner approved initial storage D2 and runtime/trust
 candidate A for development and disposable Linux acceptance. These decisions do
