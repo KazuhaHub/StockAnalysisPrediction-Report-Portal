@@ -135,6 +135,32 @@ func TestBootstrapConfigPinsPublicKey(t *testing.T) {
 	}
 }
 
+func TestBootstrapFunctionRequiresCanonicalPinnedPublicKey(t *testing.T) {
+	for name, mutate := range map[string]func(*BootstrapConfig){
+		"noncanonical": func(c *BootstrapConfig) {
+			c.ControllerPublicKey += "="
+		},
+		"fingerprint": func(c *BootstrapConfig) {
+			c.Controller.Fingerprint = strings.Repeat("b", 64)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := canonicalTempDir(t)
+			seed := bytes.Repeat([]byte{5}, ed25519.SeedSize)
+			public := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+			sum := sha256.Sum256(public)
+			cfg := BootstrapConfig{
+				Format: BootstrapFormat, JournalDir: dir, ControllerPublicKey: base64.RawURLEncoding.EncodeToString(public),
+				Controller: Controller{DeploymentID: "10000000-0000-4000-8000-000000000001", ControllerEpoch: "20000000-0000-4000-8000-000000000002", ControlRevision: 1, Fingerprint: hex.EncodeToString(sum[:])},
+			}
+			mutate(&cfg)
+			if _, err := Bootstrap(t.Context(), cfg); err == nil {
+				t.Fatal("invalid bootstrap document accepted")
+			}
+		})
+	}
+}
+
 func TestBootstrapIsExplicitAndIdempotent(t *testing.T) {
 	dir := canonicalTempDir(t)
 	seed := bytes.Repeat([]byte{9}, ed25519.SeedSize)

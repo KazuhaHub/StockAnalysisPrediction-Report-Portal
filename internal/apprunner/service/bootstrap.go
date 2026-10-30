@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
@@ -18,8 +17,8 @@ func Bootstrap(ctx context.Context, cfg BootstrapConfig) (BootstrapResult, error
 	if ctx == nil || cfg.Format != BootstrapFormat || !validAbsolute(cfg.JournalDir) || !validController(cfg.Controller) {
 		return BootstrapResult{}, ErrConfig
 	}
-	public, err := base64.RawURLEncoding.DecodeString(cfg.ControllerPublicKey)
-	if err != nil || len(public) != 32 {
+	public, err := controllerPublicKey(cfg)
+	if err != nil {
 		return BootstrapResult{}, ErrConfig
 	}
 	store, err := journal.Open(cfg.JournalDir)

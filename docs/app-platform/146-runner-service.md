@@ -19,6 +19,12 @@ The runtime administrator creates only infrastructure:
   `0600`;
 - the `portal-app-runner` binary and systemd unit from `deploy/app-runner/`.
 
+The controller-socket ancestors must be traversable by the fixed Portal
+controller. The reference layout uses `/run/portal-app-runner` and
+`/run/portal-app-runner/control` as `root:controller-gid` mode `0750`, and the
+service-created `runner.sock` as `root:controller-gid` mode `0660`. The separate
+application IPC root remains `root:root` mode `0700`.
+
 Run the enrollment step once:
 
 ```sh

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -74,15 +75,22 @@ func LoadBootstrapConfig(path string) (BootstrapConfig, error) {
 	if err != nil || decodeStrict(raw, &cfg) != nil || cfg.Format != BootstrapFormat || !validAbsolute(cfg.JournalDir) || !validController(cfg.Controller) {
 		return BootstrapConfig{}, ErrConfig
 	}
-	key, err := base64.RawURLEncoding.DecodeString(cfg.ControllerPublicKey)
-	if err != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != cfg.ControllerPublicKey {
-		return BootstrapConfig{}, ErrConfig
-	}
-	sum := sha256.Sum256(key)
-	if cfg.Controller.Fingerprint != hex.EncodeToString(sum[:]) {
+	if _, err := controllerPublicKey(cfg); err != nil {
 		return BootstrapConfig{}, ErrConfig
 	}
 	return cfg, nil
+}
+
+func controllerPublicKey(cfg BootstrapConfig) ([]byte, error) {
+	key, err := base64.RawURLEncoding.DecodeString(cfg.ControllerPublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(key) != cfg.ControllerPublicKey {
+		return nil, ErrConfig
+	}
+	sum := sha256.Sum256(key)
+	if cfg.Controller.Fingerprint != hex.EncodeToString(sum[:]) {
+		return nil, ErrConfig
+	}
+	return key, nil
 }
 
 func readPrivateConfig(path string) ([]byte, error) {
