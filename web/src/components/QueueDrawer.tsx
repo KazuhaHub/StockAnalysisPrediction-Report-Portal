@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
 import { InputsPreview, isTerminal, jobProgressPresentation } from '../lib/batchUi'
@@ -52,6 +52,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  const loc = useLocation()
   const { admin } = useAuth()
   const showRuns = canRun
   const showExports = canExport || admin
@@ -203,7 +204,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       tone = 'running'
       if (j.status === 'running' && j.total === 1) {
         // One row: a bar and "0 / 1 rows" say nothing, so say how long it has been going.
-        detail = <RunningFor since={j.started_at} />
+        detail = <RunningFor since={j.started_at_ms ?? 0} />
       } else {
         percent = progress.percent
         detail = t('tasks.rows', { done: progress.done, total: j.total })
@@ -250,7 +251,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         key={j.id}
         pinned={confirming === `run-${j.id}`}
         label={`${targetName(j.target_id)}, ${t(`batch.status.${j.status}`, j.status)}`}
-        onOpen={() => openJobDetail(j.id)}
+        onOpen={() => {
+          // The queue page already shows this run in its own drawer: step aside rather than stack a second one.
+          if (loc.pathname === '/queue' && new URLSearchParams(loc.search).get('job') === String(j.id)) onClose()
+          else openJobDetail(j.id)
+        }}
         tone={tone}
         name={
           <>

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // My tasks (ADR 0047). The acceptance conditions are numbered as in the ADR.
@@ -26,6 +27,7 @@ type taskItem struct {
 	Error      string `json:"error"`
 	CreatedAt  int64  `json:"created_at"`
 	FinishedAt int64  `json:"finished_at"`
+	StartedAt  int64  `json:"started_at"`
 	Format     string `json:"format"`
 	Bytes      int64  `json:"bytes"`
 	Download   string `json:"download"`
@@ -376,5 +378,48 @@ func TestBatchJobsListIsOwnOnlyForNonAdmins(t *testing.T) {
 	ids, total = list("admin", "")
 	if len(ids) != 3 || total != 3 {
 		t.Fatalf("admin sees %v total %v", ids, total)
+	}
+}
+
+// A run's start is an instant on the wire: the queue stores a zoneless wall-clock string in the server's
+// zone, which a browser in another zone cannot compare with its own clock.
+func TestMyTasksRunStartIsAnInstant(t *testing.T) {
+	zone, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	old := time.Local
+	time.Local = zone
+	defer func() { time.Local = old }()
+	e := newTasksEnv(t)
+	e.addOperator("op")
+	id := e.run("op")
+	if _, err := e.s.st.exec("UPDATE batch_jobs SET status='running', started_at=? WHERE id=?", "2026-10-29 09:00:00", id); err != nil {
+		t.Fatal(err)
+	}
+	g := find(e.tasks("op", ""), "run", fmt.Sprint(id))
+	want := time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC).UnixMilli()
+	if g == nil || g.StartedAt != want {
+		t.Fatalf("started_at = %+v, want %d", g, want)
+	}
+}
+
+func TestJobJSONCarriesInstantsAlongsideTheWallClock(t *testing.T) {
+	zone, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	old := time.Local
+	time.Local = zone
+	defer func() { time.Local = old }()
+	m := jobJSON(BatchJob{ID: 1, CreatedAt: "2026-10-29 08:59:00", StartedAt: "2026-10-29 09:00:00", FinishedAt: ""})
+	if m["started_at"] != "2026-10-29 09:00:00" {
+		t.Fatalf("wall-clock field changed: %v", m["started_at"])
+	}
+	if got, want := m["started_at_ms"], time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC).UnixMilli(); got != want {
+		t.Fatalf("started_at_ms = %v, want %d", got, want)
+	}
+	if m["finished_at_ms"] != int64(0) {
+		t.Fatalf("unset finish must be 0, got %v", m["finished_at_ms"])
 	}
 }

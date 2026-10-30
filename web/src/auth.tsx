@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, onSessionLost } from './api/client'
 import { forgetTags } from './lib/conditionalGet'
+import { closeJobDetail } from './lib/jobDetailStore'
 import { resetNotifications } from './lib/notify'
 import type { Me } from './api/types'
 import type { CaptchaValue } from './components/CaptchaField'
@@ -88,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     forgetTags()
     // Pop-ups belong to the person who raised them; another reader must not inherit a security card.
     resetNotifications()
+    closeJobDetail()
   }, [identity])
 
   const value = useMemo<AuthCtx>(

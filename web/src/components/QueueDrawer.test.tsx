@@ -69,10 +69,10 @@ function Where() {
     </>
   )
 }
-function Harness(props: Props) {
+function Harness({ entry, ...props }: Props & { entry?: string }) {
   return (
     <App>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry ?? '/']}>
         <Where />
         <JobDetailHost />
         <QueueDrawer open onClose={() => {}} canRun canExport tasks={[]} refreshTasks={refreshTasks} tab="runs" onTabChange={onTabChange} {...props} />
@@ -80,7 +80,7 @@ function Harness(props: Props) {
     </App>
   )
 }
-const mount = (props: Props = {}) => render(<Harness {...props} />)
+const mount = (props: Props & { entry?: string } = {}) => render(<Harness {...props} />)
 const rows = (section: string) => within(screen.getByRole('list', { name: section })).queryAllByRole('listitem')
 
 beforeEach(() => {
@@ -449,6 +449,17 @@ describe('Tasks drawer row layout', () => {
     expect(within(row).queryByRole('button', { name: 'tasks.open' })).toBeNull()
   })
 
+  it('describes the row by its second line and time, keeping the name short', async () => {
+    store.jobs = [job({ id: 1, total: 5 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    const ids = (rowButton(row).getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
+    expect(ids.length).toBeGreaterThan(0)
+    const text = ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ')
+    expect(text).toContain('tasks.rows:{"done":2,"total":5}')
+  })
+
   it('is a button named after the task and its status', async () => {
     store.jobs = [job({ id: 1 })]
     mount()
@@ -519,6 +530,16 @@ describe('Tasks drawer rows open the run in place', () => {
     expect(row.classList.contains('is-open')).toBe(false)
   })
 
+  it("does not stack a second drawer when the page's own drawer already shows that run", async () => {
+    store.jobs = [job({ id: 41 })]
+    const onClose = vi.fn()
+    mount({ entry: '/queue?job=41', onClose })
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(onClose).toHaveBeenCalled() // the Tasks drawer steps aside for the page's detail
+    expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
+  })
+
   it('returns to the Tasks list on close, which stays mounted', async () => {
     store.jobs = [job({ id: 41 })]
     mount()
@@ -542,10 +563,9 @@ describe('Tasks drawer rows open the run in place', () => {
 })
 
 describe('Tasks drawer running row of a single run', () => {
-  it('says how long it has been running, with no progress bar', async () => {
-    const started = new Date(Date.now() - 133_000)
-    const wall = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-    store.jobs = [job({ id: 1, total: 1, succeeded: 0, started_at: wall(started) })]
+  it('says how long it has been running, from the start instant, with no progress bar', async () => {
+    // The zoneless wall-clock string is deliberately far off: only the instant may be used.
+    store.jobs = [job({ id: 1, total: 1, succeeded: 0, started_at: '2020-01-01 00:00:00', started_at_ms: Date.now() - 133_000 })]
     mount()
     await screen.findByText('Deep Research')
     const row = rows('tasks.section.active')[0]

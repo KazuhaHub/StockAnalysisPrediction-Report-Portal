@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Progress, Typography, theme } from 'antd'
 import { useHoverNone } from '../lib/useHoverNone'
 
@@ -30,6 +30,7 @@ export interface TaskRowProps {
 // the row itself opens the task's detail, which has them. Clicking or tapping the row anywhere opens it.
 export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned, label, onOpen }: TaskRowProps) {
   const { token } = theme.useToken()
+  const uid = useId()
   const noHover = useHoverNone()
   // The whole row is the pointer target, the time cell included; the actions (and anything portalled out of
   // them, such as a confirmation popover, whose events still bubble through React) keep their own clicks.
@@ -71,6 +72,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
         role="button"
         tabIndex={0}
         aria-label={label}
+        aria-describedby={`${uid}-detail ${uid}-time`}
         onKeyDown={openKey}
       >
         <span
@@ -88,7 +90,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
             </Typography.Text>
             {sub && <span style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden', fontSize: 12 }}>{sub}</span>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, fontSize: 12, color: token.colorTextSecondary, minWidth: 0 }}>
+          <div id={`${uid}-detail`} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, fontSize: 12, color: token.colorTextSecondary, minWidth: 0 }}>
             {percent !== undefined && (
               <Progress percent={percent} size={['100%', 4]} showInfo={false} style={{ flex: 1, maxWidth: 160, margin: 0, lineHeight: 1 }} />
             )}
@@ -99,7 +101,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
       {(time || actions) && (
         <div className="rp-task-row__end">
           {time && (
-            <span className="rp-task-row__time" style={{ color: token.colorTextSecondary }}>
+            <span id={`${uid}-time`} className="rp-task-row__time" style={{ color: token.colorTextSecondary }}>
               {time}
             </span>
           )}

@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
-import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { formatElapsed } from '../lib/taskUi'
 
 // "Running · 2m 13s": the time since a run started, ticking each second while the page is visible.
-// A wall-clock start (what the run queue stores) is read in the browser's zone, like the row times.
-export default function RunningFor({ since }: { since: string }) {
+// `since` is an instant (unix ms): the queue's own wall-clock strings carry no zone and cannot be
+// compared with this browser's clock.
+export default function RunningFor({ since }: { since: number }) {
   const { t } = useTranslation()
   const [now, setNow] = useState(() => Date.now())
-  const start = since ? dayjs(since) : null
-  const valid = !!start && start.isValid()
+  const valid = since > 0
   useEffect(() => {
     if (!valid) return
     setNow(Date.now())
@@ -19,5 +18,5 @@ export default function RunningFor({ since }: { since: string }) {
     return () => clearInterval(id)
   }, [valid])
   if (!valid) return <>{t('batch.status.running')}</>
-  return <>{t('tasks.runningFor', { elapsed: formatElapsed(now - start.valueOf(), t) })}</>
+  return <>{t('tasks.runningFor', { elapsed: formatElapsed(now - since, t) })}</>
 }

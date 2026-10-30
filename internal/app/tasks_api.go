@@ -45,6 +45,7 @@ type taskJSON struct {
 	Bytes      int64      `json:"bytes,omitempty"`  // exports only: the file size once done
 	Counts     *runCounts `json:"counts,omitempty"`
 	CreatedAt  int64      `json:"created_at"`
+	StartedAt  int64      `json:"started_at,omitempty"` // runs: when the run began (an instant); 0 until then
 	FinishedAt int64      `json:"finished_at"`
 	Download   string     `json:"download,omitempty"`
 	Cancel     string     `json:"cancel,omitempty"`
@@ -157,7 +158,7 @@ func (s *Server) myRunTasks(user string, limit int) []taskJSON {
 		t := taskJSON{
 			Kind: "run", ID: itoa64(j.ID), Name: name, Detail: inputsGist(firstInputs[j.ID]), Status: j.Status,
 			Done: int64(c.Succeeded + c.Partial + c.Failed + c.Cancelled), Total: int64(j.Total), Counts: &c,
-			CreatedAt: msFromLocal(j.CreatedAt), FinishedAt: msFromLocal(j.FinishedAt),
+			CreatedAt: msFromLocal(j.CreatedAt), StartedAt: msFromLocal(j.StartedAt), FinishedAt: msFromLocal(j.FinishedAt),
 		}
 		if canRun {
 			t.Link = "/queue"

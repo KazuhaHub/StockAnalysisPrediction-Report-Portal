@@ -7,11 +7,16 @@ import JobDetailDrawer from './JobDetailDrawer'
 
 const store = vi.hoisted(() => ({ detail: null as unknown, admin: true, user: 'alice' }))
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const poll = vi.hoisted(() => ({ stops: 0 }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
-vi.mock('../lib/visiblePoll', () => ({ startVisiblePoll: (fn: () => unknown) => { void fn(); return () => {} } }))
+vi.mock('../lib/visiblePoll', () => ({ startVisiblePoll: (fn: () => unknown) => { void fn(); return () => { poll.stops++ } } }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: store.admin, user: store.user }) }))
 vi.mock('react-i18next', () => {
-  const t = (k: string, o?: unknown) => (typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`)
+  const t = (k: string, o?: unknown) => {
+    const unit = /^tasks\.elapsed\.([hms])$/.exec(k)
+    if (unit) return `${(o as { n: number }).n}${unit[1]}`
+    return typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`
+  }
   return { useTranslation: () => ({ t, i18n: { language: 'en-US' } }) }
 })
 
@@ -38,6 +43,7 @@ const mount = (props: Partial<React.ComponentProps<typeof JobDetailDrawer>> = {}
 beforeEach(() => {
   store.admin = true
   store.user = 'alice'
+  poll.stops = 0
   apiMock.get.mockReset().mockImplementation(async (url: string) => {
     if (url.includes('/targets')) return { targets: [{ id: 9, name: 'Deep Research' }] }
     return store.detail
@@ -70,6 +76,29 @@ describe('single-run layout', () => {
     expect(link.getAttribute('href')).toBe('/stock/002432')
   })
 
+  it('measures duration between instants, not the zoneless wall-clock strings', async () => {
+    // 09:00:00 server time is 01:00:00Z; the browser's own zone must not matter.
+    const t0 = Date.UTC(2026, 9, 29, 1, 0, 0)
+    store.detail = detail({ status: 'finished', started_at: '2026-10-29 09:00:00', started_at_ms: t0, finished_at_ms: t0 + 133_000 }, [
+      item({ status: 'succeeded', started_at: '2026-10-29 09:00:00', finished_at: '2026-10-29 09:02:13', started_at_ms: t0, finished_at_ms: t0 + 133_000 }),
+    ])
+    mount()
+    expect(await screen.findByText('2m 13s')).toBeTruthy()
+  })
+
+  it('measures a running run against now from its start instant', async () => {
+    const t0 = Date.UTC(2026, 9, 29, 1, 0, 0)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(t0 + 65_000)
+    try {
+      store.detail = detail({ started_at: '2026-10-29 09:00:00', started_at_ms: t0 }, [item({ started_at: '2026-10-29 09:00:00', started_at_ms: t0 })])
+      mount()
+      expect(await screen.findByText('1m 5s')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('says how many are ahead of a queued run', async () => {
     store.detail = detail({ status: 'queued', ahead: 2 }, [item({ status: 'queued', started_at: '' })])
     mount()
@@ -81,7 +110,8 @@ describe('single-run layout', () => {
     fireEvent.click(await screen.findByRole('button', { name: /tasks\.cancel/ }))
     expect(apiMock.post).not.toHaveBeenCalled()
     fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/items/cancel', { item_ids: [70] }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/cancel'))
+    expect(apiMock.post).not.toHaveBeenCalledWith(expect.stringContaining('/items/cancel'), expect.anything())
   })
 
   it('offers no cancel to a reader who does not own the run', async () => {
@@ -149,6 +179,56 @@ describe('batch layout', () => {
     })
     mount()
     expect(await screen.findByText('batch.jobNotFound')).toBeTruthy()
+  })
+})
+
+describe('loading and failure', () => {
+  const detailCalls = () => apiMock.get.mock.calls.filter((c) => /jobs\/\d+$/.test(c[0])).length
+
+  it('shows a spinner until the first reply', async () => {
+    apiMock.get.mockImplementation((url: string) => (url.includes('/targets') ? Promise.resolve({ targets: [] }) : new Promise(() => {})))
+    mount()
+    await waitFor(() => expect(document.querySelector('.ant-spin')).not.toBeNull())
+    expect(screen.queryByText('batch.jobNotFound')).toBeNull()
+  })
+
+  it('treats a 403 like a 404 and stops polling', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.includes('/targets')) return { targets: [] }
+      throw Object.assign(new Error('forbidden'), { status: 403 })
+    })
+    mount()
+    expect(await screen.findByText('batch.jobNotFound')).toBeTruthy()
+    expect(poll.stops).toBeGreaterThan(0)
+    expect(document.querySelector('.ant-spin')).toBeNull()
+  })
+
+  it('shows an error with a retry for any other failure', async () => {
+    let fail = true
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.includes('/targets')) return { targets: [{ id: 9, name: 'Deep Research' }] }
+      if (fail) throw Object.assign(new Error('boom'), { status: 500 })
+      return store.detail
+    })
+    mount()
+    const retry = await screen.findByRole('button', { name: /common\.retry/ })
+    const before = detailCalls()
+    fail = false
+    fireEvent.click(retry)
+    expect(await screen.findByText('Deep Research')).toBeTruthy()
+    expect(detailCalls()).toBeGreaterThan(before)
+  })
+
+  it('keeps the spinner, with no red error, when the connection is down', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.includes('/targets')) return { targets: [] }
+      throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
+    })
+    mount()
+    await waitFor(() => expect(apiMock.get.mock.calls.some((c) => /jobs\/\d+$/.test(c[0]))).toBe(true))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole('button', { name: /common\.retry/ })).toBeNull()
+    expect(document.querySelector('.ant-spin')).not.toBeNull()
   })
 })
 

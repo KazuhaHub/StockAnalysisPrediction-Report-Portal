@@ -1,8 +1,7 @@
-import { useEffect, useState, type Key, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type Key, type ReactNode } from 'react'
 import { Alert, App, Button, Descriptions, Drawer, Grid, Modal, Popconfirm, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, InfoCircleOutlined, SyncOutlined } from '@ant-design/icons'
-import dayjs from 'dayjs'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
@@ -20,7 +19,9 @@ import {
   TOOLTIP_STYLES,
 } from '../lib/batchUi'
 import { formatElapsed } from '../lib/taskUi'
+import { loadFailure } from '../lib/loadFailure'
 import { startVisiblePoll } from '../lib/visiblePoll'
+import LoadGate from './LoadGate'
 
 // itemActive reports whether a run (row) can still be cancelled: it hasn't reached a
 // terminal state (succeeded / partial / failed / cancelled).
@@ -33,14 +34,6 @@ const symbolOf = (it: BatchItem) => {
   } catch {
     return ''
   }
-}
-
-// Wall-clock strings (what the run queue stores) to a short "1h 2m 3s".
-function fmtDuration(from: string, to: string, t: Parameters<typeof formatElapsed>[1]): string {
-  const a = dayjs(from)
-  if (!from || !a.isValid()) return ''
-  const b = to ? dayjs(to) : dayjs()
-  return formatElapsed(b.diff(a), t)
 }
 
 export interface JobDetailDrawerProps {
@@ -65,7 +58,11 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
   const [detailItem, setDetailItem] = useState<BatchItem | null>(null)
   const [targets, setTargets] = useState<BatchTarget[]>([])
   // The server answers 404 for a job that does not exist or is not the reader's; a deep link can name either.
+  // The same answer for a job that is not there and one the caller may not open (403): either way polling
+  // can never succeed, so it stops.
   const [notFound, setNotFound] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const stopPoll = useRef<(() => void) | null>(null)
   const open = jobId != null
   const load = () =>
     jobId == null
@@ -74,18 +71,33 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
           .get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`)
           .then((d) => {
             setNotFound(false)
+            setLoadErr('')
             setDetail(d)
           })
           .catch((e) => {
-            if ((e as { status?: number })?.status === 404) setNotFound(true)
+            const status = (e as { status?: number })?.status
+            if (status === 404 || status === 403) {
+              setNotFound(true)
+              stopPoll.current?.()
+              return
+            }
+            // A connection loss is not an answer: keep waiting, say nothing red.
+            const text = loadFailure(e, t)
+            if (text !== null) setLoadErr(text)
           })
   useEffect(() => {
     if (jobId == null) return
     setDetail(null)
     setNotFound(false)
+    setLoadErr('')
     setSelected([])
     api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setTargets(r?.targets || [])).catch(() => {})
-    return startVisiblePoll(load, 2500)
+    const stop = startVisiblePoll(load, 2500)
+    stopPoll.current = stop
+    return () => {
+      stop()
+      stopPoll.current = null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId])
 
@@ -102,6 +114,16 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     }
   }
 
+  const cancelJob = async () => {
+    if (jobId == null) return
+    try {
+      await api.post(`/api/admin/batch/jobs/${jobId}/cancel`)
+      message.success(t('batch.msg.cancelRequested'))
+      await load()
+    } catch (e) {
+      message.error(errText(e, t))
+    }
+  }
   // A row that has a Dify handle can be reconciled: fetch its true outcome from Dify without
   // re-running it. Rescues a run wrongly marked failed by a short timeout / dropped stream.
   const hasHandle = (it: BatchItem) => !!(it.run_id || it.conversation_id)
@@ -124,13 +146,20 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       <Typography.Text type="secondary">—</Typography.Text>
     )
 
-  const cancelButton = (it: BatchItem, labelled: boolean) => (
-    <Popconfirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])}>
-      <Button size="small" type={labelled ? 'default' : 'text'} danger icon={<CloseCircleOutlined />} title={t('queue.cancelRow')}>
-        {labelled ? t('tasks.cancel') : null}
-      </Button>
-    </Popconfirm>
-  )
+  // The footer's button on a single run cancels the JOB, like the Tasks row's quick cancel, so it ends as
+  // cancelled; cancelling just its row would leave a "finished" job and raise a "run finished" notification.
+  const cancelButton = (it: BatchItem, labelled: boolean) =>
+    labelled ? (
+      <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
+        <Button danger icon={<CloseCircleOutlined />}>
+          {t('tasks.cancel')}
+        </Button>
+      </Popconfirm>
+    ) : (
+      <Popconfirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])}>
+        <Button size="small" type="text" danger icon={<CloseCircleOutlined />} title={t('queue.cancelRow')} />
+      </Popconfirm>
+    )
 
   const cols: ColumnsType<BatchItem> = [
     { title: t('batch.col.row'), dataIndex: 'row_index', width: 48 },
@@ -190,6 +219,9 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     const pairs = inputPairs(it.inputs)
     const started = it.started_at || j.started_at
     const finished = it.finished_at || j.finished_at
+    // Durations are measured between instants: the strings above are zoneless, server-zone wall-clock.
+    const startedMs = it.started_at_ms || j.started_at_ms || 0
+    const finishedMs = it.finished_at_ms || j.finished_at_ms || 0
     let queueLine: ReactNode = null
     if (j.status === 'queued') {
       queueLine = j.scheduled
@@ -200,7 +232,8 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
             ? t('tasks.next')
             : t('tasks.queuedAhead', { n: j.ahead })
     }
-    const duration = started ? fmtDuration(started, isTerminal(j.status) ? finished : '', t) : ''
+    const end = isTerminal(j.status) ? finishedMs : Date.now()
+    const duration = startedMs && end >= startedMs ? formatElapsed(end - startedMs, t) : ''
     return (
       <>
         <Space wrap style={{ marginBottom: 12 }}>
@@ -253,16 +286,6 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     )
   }
 
-  const cancelJob = async () => {
-    if (jobId == null) return
-    try {
-      await api.post(`/api/admin/batch/jobs/${jobId}/cancel`)
-      message.success(t('batch.msg.cancelRequested'))
-      await load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
   const jobAction =
     detail && !single && canCancel && !isTerminal(detail.job.status) ? (
       <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
@@ -320,6 +343,11 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       }
     >
       {notFound && <Alert type="warning" showIcon title={t('batch.jobNotFound')} />}
+      {!detail && !notFound && (
+        <LoadGate loading={!loadErr} error={loadErr} onRetry={() => { setLoadErr(''); void load() }} minHeight={200} title={t('common.loadFailedContent')}>
+          {null}
+        </LoadGate>
+      )}
       {detail && single && singleRun(single, detail)}
       {detail && !single && (
         <>

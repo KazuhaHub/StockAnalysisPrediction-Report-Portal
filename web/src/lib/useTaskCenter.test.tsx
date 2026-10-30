@@ -135,6 +135,12 @@ describe('useTaskCenter completion toasts', () => {
     expect(screen.getByTestId('where').textContent).toBe('/')
   })
 
+  it('offers no View on a run the caller cannot open (the server sent no link)', async () => {
+    await watchThen(run({ link: '' }), run({ link: '', status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
+    expect(await screen.findByText('tasks.toast.runFailed:{"name":"Deep dive"}')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'tasks.toast.view' })).toBeNull()
+  })
+
   it('offers a View action on a partial run', async () => {
     await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 1, partial: 0, failed: 2, cancelled: 0 } }))
     expect(await screen.findByRole('button', { name: 'tasks.toast.view' })).toBeTruthy()

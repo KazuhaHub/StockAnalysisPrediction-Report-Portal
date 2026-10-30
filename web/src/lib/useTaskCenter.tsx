@@ -12,7 +12,8 @@ import type { TaskItem } from '../api/types'
 export function useTaskCenter(enabled: boolean) {
   const { t } = useTranslation()
   // "View" opens the thing itself: a run's detail in place over the current page, the Tasks drawer's Exports tab for an export.
-  const viewRun = (task: TaskItem): NotifyAction[] => [{ label: t('tasks.toast.view'), primary: true, onClick: () => openJobDetail(Number(task.id)) }]
+  // A caller without run_batch gets no link from the server, and the detail would only 403: offer nothing.
+  const viewRun = (task: TaskItem): NotifyAction[] => !task.link ? [] : [{ label: t('tasks.toast.view'), primary: true, onClick: () => openJobDetail(Number(task.id)) }]
   const viewExports: NotifyAction[] = [{ label: t('tasks.toast.view'), primary: true, onClick: () => notifyExportsChanged({ open: true }) }]
   return useMyTasks({
     enabled,

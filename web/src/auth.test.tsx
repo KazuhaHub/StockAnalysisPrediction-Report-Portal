@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, renderHook, screen, waitFor } from '@testing-library/react'
 import { AuthProvider, useAuth } from './auth'
 import { getNotifications, notify } from './lib/notify'
+import { openJobDetail, useOpenJobDetail } from './lib/jobDetailStore'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 
@@ -107,5 +108,17 @@ describe('AuthProvider and a session that ends underneath it', () => {
     await api.get('/api/home').catch(() => {})
     await waitFor(() => expect(show()).toBe('user=none expired=true'))
     expect(getNotifications()).toHaveLength(0)
+  })
+
+  it('closes an open run detail when the identity changes', async () => {
+    mount(() => unauthorized('session_expired'))
+    await waitFor(() => expect(show()).toBe('user=alice expired=false'))
+    openJobDetail(9)
+    const seen = renderHook(() => useOpenJobDetail())
+    expect(seen.result.current).toBe(9)
+    const { api } = await import('./api/client')
+    await api.get('/api/home').catch(() => {})
+    await waitFor(() => expect(show()).toBe('user=none expired=true'))
+    await waitFor(() => expect(seen.result.current).toBeNull())
   })
 })

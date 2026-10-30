@@ -420,6 +420,9 @@ func jobJSON(j BatchJob) map[string]any {
 		"total": j.Total, "succeeded": j.Succeeded, "partial": j.Partial, "failed": j.Failed, "cancelled": cancelled,
 		"created_by": j.CreatedBy, "created_at": j.CreatedAt, "started_at": j.StartedAt, "finished_at": j.FinishedAt,
 		"run_at": j.RunAt, // one-shot scheduled start ("" = ASAP; ADR 0007)
+		// The same moments as unix milliseconds: the strings above are zoneless wall-clock in the server's
+		// zone, which only another wall-clock in that zone can be compared with. 0 = unset.
+		"created_at_ms": msFromLocal(j.CreatedAt), "started_at_ms": msFromLocal(j.StartedAt), "finished_at_ms": msFromLocal(j.FinishedAt),
 	}
 }
 
@@ -845,6 +848,7 @@ func (s *Server) apiBatchJobDetail(w http.ResponseWriter, r *http.Request, user 
 			"id": it.ID, "row_index": it.RowIndex, "inputs": it.Inputs, "status": it.Status,
 			"attempts": it.Attempts, "run_id": it.RunID, "conversation_id": it.ConvID, "task_id": it.TaskID,
 			"error": it.Error, "started_at": it.StartedAt, "finished_at": it.FinishedAt,
+			"started_at_ms": msFromLocal(it.StartedAt), "finished_at_ms": msFromLocal(it.FinishedAt),
 		}
 		items = append(items, row)
 	}
