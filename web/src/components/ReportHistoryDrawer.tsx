@@ -19,8 +19,10 @@ import { api, errText } from '../api/client'
 import type { SectionDiff } from '../api/types'
 import { formatReportDateTime } from '../lib/datetime'
 import Markdown from './Markdown'
+import WaitingForConnection from './WaitingForConnection'
 import { SectionBlock } from './DiffSections'
 import { clickable } from '../lib/clickable'
+import { useLoadFailure } from '../lib/useOnReconnect'
 
 // The edit history of a hand-written report (ADR 0026).
 //
@@ -75,6 +77,7 @@ export default function ReportHistoryDrawer({
   onRestored: () => void
 }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { token: theme_ } = theme.useToken()
   const [loading, setLoading] = useState(false)
@@ -110,14 +113,18 @@ export default function ReportHistoryDrawer({
         setList(r.revisions ?? [])
         setCurrent(r.current ?? null)
         setKeep(r.keep ?? 0)
+        setLoading(false)
       })
-      .catch((e) => live && message.error(errText(e, t)))
-      .finally(() => live && setLoading(false))
+      .catch((e) => {
+        // A lost connection leaves the spinner up; the list is requested again when it returns.
+        const text = failure(e)
+        if (live && text !== null) { message.error(text); setLoading(false) }
+      })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reportId])
+  }, [open, reportId, retryKey])
 
   const pick = (id: number) => {
     setPicked(id)
@@ -156,6 +163,7 @@ export default function ReportHistoryDrawer({
 
   return (
     <Drawer title={t('reportHistory.title')} open={open} onClose={onClose} size={720} destroyOnHidden>
+      {loading && <WaitingForConnection />}
       <Spin spinning={loading}>
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           {current && (
@@ -225,7 +233,7 @@ export default function ReportHistoryDrawer({
               {detailErr ? (
                 <Alert type="error" showIcon title={detailErr} />
               ) : !detail ? (
-                <Spin />
+                <><Spin /><WaitingForConnection /></>
               ) : view === 'diff' ? (
                 detail.changed === 0 ? (
                   <Empty description={t('reportHistory.noChange')} />

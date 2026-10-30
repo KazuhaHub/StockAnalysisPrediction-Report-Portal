@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import useFormDraft from './useFormDraft'
 import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import { difyModeTag, surfaceSupportsMode } from '../../lib/batchUi'
 import { ALL_SURFACES } from '../../api/types'
 import type { Surface } from '../../api/types'
@@ -87,6 +89,7 @@ export default function BatchAdminPage() {
 
 function GlobalExecutionTargets() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
 
   const [plugins, setPlugins] = useState<BatchPlugin[]>([])
@@ -123,20 +126,23 @@ function GlobalExecutionTargets() {
   // The name + inputs section shows after a probe (create) or immediately (edit).
   const showDetails = editing || !!probed
 
-  const loadPlugins = () =>
+  const loadPlugins = (opts?: LoadOpts) =>
     api
       .get<{ plugins: BatchPlugin[] }>('/api/admin/batch/plugins')
       .then((r) => {
         setPlugins(r.plugins || [])
         setPluginsErr('')
+        setPluginsLoaded(true)
       })
       .catch((e) => {
         // Named, not swallowed: settling the flag alone would turn a failed request into
         // "no custom plugins are installed", which is the claim this sweep exists to remove.
-        setPluginsErr(errText(e, t))
+        // A lost connection is not an answer either: the flag stays down and the list loads again
+        // when the connection returns.
+        const text = failure(e, opts)
+        if (text !== null) { setPluginsErr(text); setPluginsLoaded(true) }
         throw e
       })
-      .finally(() => setPluginsLoaded(true))
   // Sequenced, because this is the one list on the page that is refetched from four places — the
   // initial load, a delete, a surfaces save and a reorder — and two GETs can be in flight at once
   // with no ordering guarantee on their answers. Whichever landed last used to win, so a slow
@@ -158,12 +164,12 @@ function GlobalExecutionTargets() {
   const load = () => {
     setLoadErr('')
     loadPlugins().catch(() => {})
-    return loadTargets().catch((e) => setLoadErr(errText(e, t)))
+    return loadTargets().catch(catchLoad(setLoadErr))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // Custom (non-Dify) plugins — the bundled "dify" adapter is hidden; it's implied.
   const customPlugins = useMemo(() => plugins.filter((p) => p.slug !== 'dify'), [plugins])
@@ -340,7 +346,7 @@ function GlobalExecutionTargets() {
       try {
         await api.post('/api/admin/batch/plugins/import', JSON.parse(String(reader.result)))
         message.success(t('batch.admin.msgImported'))
-        loadPlugins()
+        loadPlugins({ quiet: true })
       } catch (e) {
         message.error(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
       }
@@ -350,7 +356,7 @@ function GlobalExecutionTargets() {
   }
   const deletePlugin = async (slug: string) => {
     await api.del(`/api/admin/batch/plugins/${encodeURIComponent(slug)}`)
-    loadPlugins()
+    loadPlugins({ quiet: true })
   }
   // Visibility editing. Kept out of the Dify edit modal on purpose: that one edits the
   // workflow CONNECTION (base_url/api_key) and only exists for dify targets, while
@@ -391,7 +397,7 @@ function GlobalExecutionTargets() {
     api
       .post('/api/admin/batch/targets/reorder', { ids: orderedIds.map(Number) })
       .catch((e) => message.error(errText(e, t)))
-      .finally(() => loadTargets())
+      .finally(() => loadTargets().catch(() => {}))
   }
 
   const targetCols: ColumnsType<BatchTarget> = [

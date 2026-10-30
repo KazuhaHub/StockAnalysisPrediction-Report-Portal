@@ -4,9 +4,11 @@ import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText, qs } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import ScrollRegion from './ScrollRegion'
+import WaitingForConnection from '../WaitingForConnection'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -77,6 +79,7 @@ const REASONS = ['pending_baseline', 'non_standard_horizon', 'missing_mark', 'pe
 
 export default function ForecastCellDrawer({ open, onClose, mode, from, to, group, label, checkpoint, cell, rtype = '', hideCounts = false, defaultPresentation = 'table' }: Props) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { token } = theme.useToken()
   // No cell (a caller that opens the list on its own) is the scored view, as it always was.
   const membership = !!cell && cell.state !== 'mature'
@@ -117,14 +120,16 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
         }
       })
       .catch((e) => {
-        if (mine.live) setStored({ key, members: [], next: '', loading: false, error: errText(e, t), errorAt: 'first', excluded: [], scored: false, countsVisible: false })
+        // A lost connection leaves the drawer loading and asks again when it returns.
+        const text = failure(e)
+        if (mine.live && text !== null) setStored({ key, members: [], next: '', loading: false, error: text, errorAt: 'first', excluded: [], scored: false, countsVisible: false })
       })
     return () => {
       mine.live = false
     }
     // `request` closes over exactly the values in `key`; `t` is stable in the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, key, revision])
+  }, [open, key, revision, retryKey])
 
   const current: Loaded =
     stored?.key === key ? stored : { key, members: [], next: '', loading: open && !!label, error: '', errorAt: '', excluded: [], scored: false, countsVisible: false }
@@ -290,7 +295,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           {(membership || presentation === 'table') && <Typography.Title level={5} style={{ marginTop: 0 }}>
             {t('forecast.drawer.members')}
           </Typography.Title>}
-          {!membership && presentation === 'visual' && current.loading && <Spin />}
+          {!membership && presentation === 'visual' && current.loading && <><Spin /><WaitingForConnection /></>}
           {/* The list leaves out the months retention removed; the cell above it does not say so. */}
           {mode === 'custom' && current.excluded.length > 0 && (
             <div style={{ marginBottom: 8 }}>

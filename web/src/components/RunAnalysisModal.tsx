@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App,
@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
 import { visibleOn } from '../lib/batchUi'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import { formatReportDateTime } from '../lib/datetime'
 import { buildRow, inputDisplayMeta, isFileInput } from '../lib/difyInputs'
 import { readPrefetched } from '../lib/prefetch'
@@ -86,6 +87,7 @@ export default function RunAnalysisModal({
   initialTargetId?: number // pre-select this workflow when opened from a pinned entry-button shortcut
 }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { email, mailEnabled } = useAuth()
   const navigate = useNavigate()
@@ -105,6 +107,9 @@ export default function RunAnalysisModal({
   const [targetsOk, setTargetsOk] = useState(false) // …and a failed list is not an empty one
   const [queueSettled, setQueueSettled] = useState(false) // the ungated queue-depth call has come back
   const [loadErr, setLoadErr] = useState('')
+  const presetsApplied = useRef(false) // the admin's run defaults have been applied to the form
+  const loadingRef = useRef(true)
+  loadingRef.current = loading
   const [optionalExpanded, setOptionalExpanded] = useState(true)
 
   // Presets carry the admin's run-form defaults with them, so reading them warm and reading them
@@ -134,8 +139,10 @@ export default function RunAnalysisModal({
     const warmTargets = readPrefetched<{ targets: BatchTarget[] }>('/api/admin/batch/targets', WARM_MAX_AGE)
     const warmPresets = readPrefetched<RunPresetsResp>('/api/admin/batch/presets', WARM_MAX_AGE)
     setLoadErr('')
+    presetsApplied.current = false
     if (warmTargets && warmPresets) {
       setTargets(warmTargets.targets || [])
+      presetsApplied.current = true
       applyPresets(warmPresets)
       setTargetsOk(true)
       setLoading(false)
@@ -154,6 +161,7 @@ export default function RunAnalysisModal({
       // banner's "Loading…" — it just ends it by saying nothing rather than by guessing.
       .finally(() => setQueueSettled(true))
     let live = true
+    let lost = false
     const gated = [
       api
         .get<{ targets: BatchTarget[] }>('/api/admin/batch/targets')
@@ -164,21 +172,66 @@ export default function RunAnalysisModal({
         // allSettled below swallows this, and the spinner would end on "No workflows configured
         // yet. Add one under Manage → Batch." — advice for a server that never answered.
         .catch((e) => {
-          if (live) setLoadErr(errText(e, t))
+          // A lost connection is not an answer: the dialog keeps its spinner and loads again when
+          // the connection returns.
+          const text = failure(e)
+          if (text === null) lost = true
+          else if (live) setLoadErr(text)
         }),
       // Presets + the admin-set run-form defaults (default mode button + idle pre-check).
-      api.get<RunPresetsResp>('/api/admin/batch/presets').then(applyPresets),
+      api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => { presetsApplied.current = true; applyPresets(r) }),
     ]
     // allSettled, not all: a failed presets call must still open the form (with no preset
     // windows), rather than leave the modal spinning for ever on a detail.
     Promise.allSettled(gated).then(() => {
-      if (live) setLoading(false)
+      if (live && !lost) setLoading(false)
     })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // The connection came back after a request above could not connect. Only the data that failed is
+  // fetched again, and it lands in place: nothing the user has chosen or typed in the open dialog
+  // (mode, window, retries, notify, input values) is reset, and a target list that did not change
+  // keeps its identity so the form is not re-initialised.
+  const handledRetry = useRef(0)
+  useEffect(() => {
+    if (!open || retryKey === handledRetry.current) return
+    handledRetry.current = retryKey
+    // Cancelled when the dialog closes or another retry supersedes this one, so a late answer can
+    // neither touch a newer open's spinner nor repopulate a closed dialog.
+    let live = true
+    let lost = false
+    const targetsReq = api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => {
+      if (!live) return
+      const next = r.targets || []
+      setTargets((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      setTargetsOk(true)
+      setLoadErr('')
+    }).catch((e) => {
+      // Same handling as the first load: a lost connection keeps the dialog loading (and arms the
+      // next reconnect), anything else is reported.
+      const text = failure(e)
+      if (text === null) lost = true
+      else if (live) setLoadErr(text)
+    })
+    const presetsReq = api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => {
+      if (!live) return
+      if (!presetsApplied.current) {
+        presetsApplied.current = true
+        // The form was still behind the spinner, so the admin's defaults apply as on a first open.
+        if (loadingRef.current) { applyPresets(r); return }
+      }
+      setPresets(r.presets || [])
+      setDefaults(readRunDefaults(r))
+    }).catch(() => {})
+    // Loading ends only when BOTH answers are in, so the picker never flashes empty.
+    Promise.allSettled([targetsReq, presetsReq]).then(() => { if (live && !lost) setLoading(false) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, retryKey])
 
   // 运行分析 generates a report (Dify ingests it). visibleOn applies both rules: agent apps
   // are conversational and post no report (capability), and an admin may restrict a target

@@ -3,11 +3,14 @@ import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, 
 import { useTranslation } from 'react-i18next'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [data, setData] = useState<NotificationOverview>()
   const [error, setError] = useState('')
@@ -18,6 +21,9 @@ export default function NotificationsPage() {
   const [ruleForm] = Form.useForm()
   const [history, setHistory] = useState<NotificationDelivery[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  // Set once the History tab has been opened. It, not `historyLoaded`, decides whether the tab is
+  // loaded and reloaded, so a first load that failed on the connection retries on reconnect too.
+  const [historyWanted, setHistoryWanted] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [next, setNext] = useState('')
   const [state, setState] = useState<NotificationState>()
@@ -37,24 +43,24 @@ export default function NotificationsPage() {
   const ruleDraft = useFormDraft(ruleForm, rule !== undefined, busy, () => setRule(undefined))
   const retentionDraft = useFormDraft(retentionForm, retentionOpen, busy, () => setRetentionOpen(false))
 
-  const load = async () => {
+  const load = async (opts?: LoadOpts) => {
     setError('')
-    try { setData(await notifications.overview()) } catch (e) { setError(errText(e, t)) }
+    try { setData(await notifications.overview()) } catch (e) { const text = failure(e, opts); if (text !== null) setError(text) }
   }
-  const loadHistory = async (more = false) => {
+  const loadHistory = async (more = false, opts?: LoadOpts) => {
     setHistoryError('')
     try {
       const result = await notifications.history({ state, cursor: more ? next : undefined })
       setHistory(old => more ? [...old, ...result.deliveries] : result.deliveries)
       setNext(result.next_cursor)
       setHistoryLoaded(true)
-    } catch (e) { setHistoryError(errText(e, t)) }
+    } catch (e) { const text = failure(e, opts); if (text !== null) setHistoryError(text) }
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (historyLoaded) void loadHistory() }, [state]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (historyWanted) void loadHistory() }, [state, retryKey, historyWanted]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, refreshHistory = true) => {
     setBusy(true)
-    try { await fn(); await load(); if (historyLoaded && refreshHistory) await loadHistory() } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
+    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
   }
   const eventLabel = (kind: string) => t(`webhook.event.${kind}`, kind)
   const stateLabel = (value: string) => t(`notify.state.${value}`, value)
@@ -111,7 +117,7 @@ export default function NotificationsPage() {
         <span>{t('notify.queueCounts', data?.counts || {})}</span>
         <Button disabled={busy} onClick={() => data?.dispatch_paused ? setResume(true) : run(() => notifications.dispatch(true))}>{t(data?.dispatch_paused ? 'notify.resume' : 'notify.pause')}</Button>
       </Space>} />
-      <Tabs onChange={key => { if (key === 'history' && !historyLoaded) void loadHistory() }} items={[
+      <Tabs onChange={key => { if (key === 'history') setHistoryWanted(true) }} items={[
         { key: 'channels', label: t('notify.channels'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Typography.Paragraph>{t('notify.channelHelp')}</Typography.Paragraph>
           <Button type="primary" onClick={() => openChannel(null)}>{t('notify.addChannel')}</Button>

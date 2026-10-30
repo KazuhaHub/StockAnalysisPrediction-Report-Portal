@@ -3,6 +3,8 @@ import { Alert, App, Button, Card, Collapse, Form, Grid, Input, InputNumber, Sel
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { Role, SSOProviderAdmin, SSOProvidersResp, UserGroupRow, UsersResp } from '../../api/types'
 import SSORulesEditor from './SSORulesEditor'
 import SSOSetupGuide from './SSOSetupGuide'
@@ -463,6 +465,7 @@ function ProviderForm({
 
 export default function SSOPage() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [providers, setProviders] = useState<SSOProviderAdmin[]>([])
   const [groups, setGroups] = useState<UserGroupRow[]>([])
@@ -478,7 +481,7 @@ export default function SSOPage() {
 
   // `loaded` is checked separately from `loading` so that saving a provider — which calls load()
   // again through onSaved — refreshes the tabs in place instead of replacing them with a spinner.
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     api
@@ -504,13 +507,13 @@ export default function SSOPage() {
         setAllowPrivate(r.allow_private === true)
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   // A provider that has not been saved has no row, so its SP addresses come from the server's
   // derived defaults instead. Without them the setup guide — the thing an admin reads BEFORE
@@ -532,7 +535,7 @@ export default function SSOPage() {
                 provider={forKind(kind)}
                 groups={groups}
                 publicUrl={publicUrl}
-                onSaved={load}
+                onSaved={() => load({ quiet: true })}
               />
             ),
           })),

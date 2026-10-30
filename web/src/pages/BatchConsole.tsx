@@ -19,10 +19,12 @@ import {
 import RunScheduleControls from '../components/RunScheduleControls'
 import QueueTable from '../components/QueueTable'
 import LoadGate from '../components/LoadGate'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import BatchRowsEditor from '../components/BatchRowsEditor'
 
 export default function BatchConsole() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const { admin, email, mailEnabled } = useAuth()
   const [targets, setTargets] = useState<BatchTarget[]>([])
@@ -69,16 +71,22 @@ export default function BatchConsole() {
       .catch(() => {})
     // The targets call decides whether this console has anything to say at all, so its failure is
     // the one worth reporting; a failed presets call only costs the preset windows.
+    let lost = false
     return loadTargets()
-      .catch((e) => setLoadErr(errText(e, t)))
+      .catch((e) => {
+        // A lost connection keeps the console loading; it loads again when the connection returns.
+        const text = failure(e)
+        if (text === null) lost = true
+        else setLoadErr(text)
+      })
       .then(() => presetsRequest)
-      .finally(() => setLoading(false))
+      .finally(() => { if (!lost) setLoading(false) })
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const urgentEnabled = tickets?.urgent_enabled !== false
   const urgentDisabled = urgentEnabled && tickets != null && !tickets.unlimited && (tickets.remaining ?? 0) <= 0

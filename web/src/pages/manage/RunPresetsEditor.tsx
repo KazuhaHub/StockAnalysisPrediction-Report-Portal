@@ -4,6 +4,8 @@ import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from 
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import type { RunFreq, RunOverrun, RunPreset, RunPresetAnchor, RunPresetInterval, RunPresetsResp } from '../../api/types'
 import { WEEK_ORDER, parseWeeklyRows, presetSummary, weeklyIntervals, wrapsMidnight, type WeeklyRow } from '../../lib/runSchedule'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
@@ -105,6 +107,7 @@ const presetBody = (p: RunPreset) => ({
 
 export default function RunPresetsEditor() {
   const { t } = useTranslation()
+  const { catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const [presets, setPresets] = useState<RunPreset[]>([])
   const [draft, setDraft] = useState<RunPreset | null>(null)
@@ -128,7 +131,7 @@ export default function RunPresetsEditor() {
       cancelText: t('manage.stay'), okButtonProps: { danger: true }, onOk: () => setDraft(null) })
   }
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoadErr('')
     return api
       .get<RunPresetsResp>('/api/admin/batch/presets')
@@ -136,12 +139,12 @@ export default function RunPresetsEditor() {
         setPresets(r.presets || [])
         setLoaded(true)
       })
-      .catch((e) => setLoadErr(errText(e, t)))
+      .catch(catchLoad(setLoadErr, opts))
   }
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   const ids = useMemo(() => presets.map((p) => String(p.id)), [presets])
 
@@ -159,15 +162,15 @@ export default function RunPresetsEditor() {
 
   const toggleEnabled = async (p: RunPreset, enabled: boolean) => {
     await api.put(`/api/admin/batch/presets/${p.id}`, { ...presetBody(p), enabled })
-    load()
+    load({ quiet: true })
   }
   const remove = async (id: number) => {
     await api.del(`/api/admin/batch/presets/${id}`)
-    load()
+    load({ quiet: true })
   }
   const onReorder = (orderedIds: string[]) => {
     setPresets((cur) => orderedIds.map((id) => cur.find((p) => String(p.id) === id)).filter((p): p is RunPreset => Boolean(p)))
-    api.post('/api/admin/batch/presets/reorder', { ids: orderedIds.map(Number) }).catch(() => load())
+    api.post('/api/admin/batch/presets/reorder', { ids: orderedIds.map(Number) }).catch(() => load({ quiet: true }))
   }
 
   const save = async () => {
@@ -192,7 +195,7 @@ export default function RunPresetsEditor() {
       else await api.post('/api/admin/batch/presets', presetBody(draft))
       message.success(t('common.saved'))
       setDraft(null)
-      load()
+      load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     } finally {

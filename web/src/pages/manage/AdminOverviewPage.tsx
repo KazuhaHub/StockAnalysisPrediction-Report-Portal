@@ -4,7 +4,9 @@ import { ArrowRightOutlined, ControlOutlined, FileTextOutlined, FundProjectionSc
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
-import { api, errText } from '../../api/client'
+import { api } from '../../api/client'
+import { loadFailure } from '../../lib/loadFailure'
+import { useOnReconnect } from '../../lib/useOnReconnect'
 import type { BatchQueueSummary, ForecastSettings } from '../../api/types'
 import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
 import { MetricChart, ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
@@ -24,7 +26,10 @@ function useSnapshot<T>(url: string, revision: number, enabled = true) {
     api.get<T>(url).then((data) => {
       if (!cancelled) setSnapshot({ data, loading: false, at: new Date().toISOString() })
     }).catch((error) => {
-      if (!cancelled) setSnapshot((previous) => ({ ...previous, loading: false, error: errText(error, t) }))
+      // A connection loss is not an answer: keep the card as it was (still loading when it has no
+      // data yet); the connection strip says the connection is down, and the next refresh retries.
+      const failure = loadFailure(error, t)
+      if (!cancelled && failure !== null) setSnapshot((previous) => ({ ...previous, loading: false, error: failure }))
     })
     return () => { cancelled = true }
   }, [url, revision, enabled]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -41,7 +46,10 @@ export default function AdminOverviewPage() {
     let cancelled = false
     api.get<DashboardLayout>('/api/admin/dashboard/layout').then((next) => {
       if (!cancelled) { setLayout(next); setLayoutError('') }
-    }).catch((error) => { if (!cancelled) setLayoutError(errText(error, t)) })
+    }).catch((error) => {
+      const failure = loadFailure(error, t)
+      if (!cancelled && failure !== null) setLayoutError(failure)
+    })
     return () => { cancelled = true }
   }, [revision]) // eslint-disable-line react-hooks/exhaustive-deps
   const blocks = previewBlocks ?? layout?.blocks ?? []
@@ -50,6 +58,7 @@ export default function AdminOverviewPage() {
   const reports = useSnapshot<ReportOverview>('/api/admin/reports/overview', revision, selected(['reports', 'trend', 'kinds', 'report-bars', 'report-donut']))
   const forecast = useSnapshot<ForecastSettings>('/api/admin/forecast', revision, selected(['forecast']))
   const [now, setNow] = useState(Date.now)
+  useOnReconnect(() => refresh((value) => value + 1))
   // Refresh foreground snapshots without starting an evaluator or vendor request.
   useEffect(() => {
     const update = () => {

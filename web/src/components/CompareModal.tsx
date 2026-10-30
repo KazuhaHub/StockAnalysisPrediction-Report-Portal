@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Empty, Modal, Select, Space, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../api/client'
+import { api } from '../api/client'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import type { ComparableReport, ReportDiff } from '../api/types'
 import { SectionBlock } from './DiffSections'
+import WaitingForConnection from './WaitingForConnection'
 import { clickable } from '../lib/clickable'
 
 // Comparing this report with another edition of the same analysis.
@@ -22,6 +24,11 @@ export default function CompareModal({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  // One retry per load: a lost connection on the diff must not re-run the list (which would
+  // reset the edition the reader picked), and the other way round.
+  const { failure: listFailure, retryKey: listRetry } = useLoadFailure()
+  const { failure: diffFailure, retryKey: diffRetry } = useLoadFailure()
+  const diffReq = useRef(0)
   // null until the comparable-editions list has actually come back: "there is no earlier edition
   // to compare with" is the reason this dialog would have nothing to do, and it must be the
   // server's answer rather than the state's starting value.
@@ -43,27 +50,36 @@ export default function CompareModal({
         const items = r.items || []
         setCandidates(items)
         // The previous edition is the comparison people want; the rest are one click away.
-        setAgainst(items[0]?.id)
+        // A reload keeps the edition already chosen when it is still on offer.
+        setAgainst((current) => (items.some((i) => i.id === current) ? current : items[0]?.id))
       })
-      .catch((e) => setErr(errText(e, t)))
+      .catch((e) => { const text = listFailure(e); if (text !== null) setErr(text) })
     // `t` is deliberately not a dependency: it is used only to word an error, and re-running this
     // effect for a new `t` identity re-fetches the list — which, since the answer replaces state,
     // re-renders and asks again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reportId])
+  }, [open, reportId, listRetry])
 
   const load = useCallback(() => {
     if (!against) return
     setLoading(true)
     setErr('')
+    // Only the newest request may land: two overlapping answers (a pick followed by a reconnect
+    // retry) can arrive in either order.
+    const req = ++diffReq.current
     api
       .get<ReportDiff>(`/api/reports/diff?a=${against}&b=${reportId}`)
-      .then(setDiff)
-      .catch((e) => setErr(errText(e, t)))
-      .finally(() => setLoading(false))
+      .then((d) => { if (req === diffReq.current) { setDiff(d); setLoading(false) } })
+      .catch((e) => {
+        // A lost connection leaves the spinner up; the diff is requested again when it returns.
+        const text = diffFailure(e)
+        if (text === null || req !== diffReq.current) return
+        setErr(text)
+        setLoading(false)
+      })
     // `t` omitted for the same reason as above — it only words the error.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [against, reportId])
+  }, [against, reportId, diffRetry])
   useEffect(load, [load])
 
   const shown = useMemo(
@@ -78,6 +94,7 @@ export default function CompareModal({
           <div style={{ display: 'grid', justifyItems: 'center', gap: 12, padding: 24 }}>
             <Spin />
             <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
+            <WaitingForConnection />
           </div>
         ) : (candidates?.length ?? 0) === 0 && !err ? (
           <Empty description={t('compare.noneToCompare')} />
@@ -102,7 +119,7 @@ export default function CompareModal({
         {err && <Alert type="error" showIcon title={err} />}
 
         {loading ? (
-          <Spin />
+          <><Spin /><WaitingForConnection /></>
         ) : diff ? (
           <>
             <Typography.Text type="secondary">

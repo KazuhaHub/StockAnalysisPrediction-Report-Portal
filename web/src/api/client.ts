@@ -1,5 +1,7 @@
 // Lightweight fetch wrapper: same-origin cookie session, JSON encode/decode, throws ApiError(status, message) on error.
 
+import { setConnectionError } from './connection'
+
 export class ApiError extends Error {
   status: number
   /**
@@ -61,22 +63,9 @@ export function noteSessionLost(status: number, code?: string) {
   if (status === 401 && code === SESSION_GONE) sessionLost?.()
 }
 
-let connectionError: string | null = null
-const connectionListeners = new Set<() => void>()
-export const getConnectionError = () => connectionError
-export function subscribeConnection(listener: () => void) {
-  connectionListeners.add(listener)
-  return () => { connectionListeners.delete(listener) }
-}
-export function clearConnectionError() {
-  const recovering = connectionError !== null
-  connectionError = null
-  connectionListeners.forEach(listener => listener())
-  if (recovering && typeof window !== 'undefined') window.dispatchEvent(new Event('rp:connection-restored'))
-}
+export { getConnectionError, subscribeConnection, clearConnectionError, isConnectionError } from './connection'
 function unavailable(status: number, code: string): never {
-  connectionError = code
-  connectionListeners.forEach(listener => listener())
+  setConnectionError(code)
   throw new ApiError(status, code, code)
 }
 async function checkedFetch(url: string, options: RequestInit): Promise<Response> {

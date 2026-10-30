@@ -4,6 +4,7 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
+import { useLoadFailure } from '../../../lib/useOnReconnect'
 import type { ExportJob, ExportStatus } from '../../../api/types'
 import { EXPORTS_CHANGED_EVENT, exportDownloadUrl, fmtBytes, isActiveJob, jobActions, jobProgress, notifyExportsChanged } from '../../../lib/exportJobs'
 import { exportBase, type ExportMode } from '../../../lib/exportMode'
@@ -25,6 +26,7 @@ export const STATUS_COLOR: Record<ExportStatus, string> = {
 export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: { tz: string; labels: ExportLabels; onReuse: (j: ExportJob) => void; mode?: ExportMode }) {
   const base = exportBase(mode)
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [loading, setLoading] = useState(true)
@@ -32,22 +34,26 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
   const anyActive = jobs.some(isActiveJob)
 
   const load = useCallback(async () => {
+    let settled = true
     try {
       const r = await api.get<{ jobs: ExportJob[] }>(`${base}?limit=50`)
       setJobs(r?.jobs ?? [])
       setError('')
     } catch (e) {
-      setError(errText(e, t))
+      // A lost connection keeps the list as it was (or loading, before the first answer).
+      const text = failure(e)
+      if (text === null) settled = false
+      else setError(text)
     } finally {
-      setLoading(false)
+      if (settled) setLoading(false)
     }
-  }, [base, t])
+  }, [base, t, failure])
 
   useEffect(() => {
     void load()
     window.addEventListener(EXPORTS_CHANGED_EVENT, load)
     return () => window.removeEventListener(EXPORTS_CHANGED_EVENT, load)
-  }, [load])
+  }, [load, retryKey])
 
   useEffect(() => {
     if (!anyActive) return

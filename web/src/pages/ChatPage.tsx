@@ -11,6 +11,9 @@ import LoadGate from '../components/LoadGate'
 import { difyModeTag } from '../lib/batchUi'
 import type { ChatConversation, ChatTarget, ChatTurn } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { loadFailure } from '../lib/loadFailure'
+import { useOnReconnect } from '../lib/useOnReconnect'
+import { useLoadFailure } from '../lib/useOnReconnect'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -98,6 +101,7 @@ const sortConvs = (cs: ChatConversation[]) => [...cs].sort((a, b) => Number(b.st
 // rename, star (pin to top), or delete it.
 export default function ChatPage() {
   const { t } = useTranslation()
+  const { failure, catchLoad, retryKey } = useLoadFailure()
   const { message, modal } = App.useApp()
   const { token } = theme.useToken()
   const { name, admin, user } = useAuth()
@@ -181,17 +185,19 @@ export default function ChatPage() {
         // fall back to the first target if it's absent, unknown, or no longer accessible.
         const want = Number(sp.get('target'))
         const initial = r.targets?.find((tg) => tg.id === want) ?? r.targets?.[0]
-        if (initial) setTargetId(initial.id)
+        // Only fills an empty choice: a reload after a lost connection must never replace the
+        // assistant the user is already on (that would reset the open conversation).
+        if (initial) setTargetId((current) => current ?? initial.id)
       })
       // Swallowing this used to leave "no chat or agent apps yet" on screen for good — a failed
       // request wearing the face of a configuration answer.
-      .catch((e) => setTargetsErr(errText(e, t)))
+      .catch(catchLoad(setTargetsErr))
   }
   useEffect(() => {
     loadTargets()
     // Read ?target once on mount (the intended "open pre-selected" UX); later manual switching wins.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [retryKey])
 
   useEffect(() => {
     api
@@ -243,9 +249,22 @@ export default function ChatPage() {
       // on screen to lose. A background refresh that fails after a sent message must leave the
       // rail exactly as it is; the rows in it are still the last thing the server said.
       .catch((e) => {
-        if (!quiet) setConvsErr(errText(e, t))
+        const text = loadFailure(e, t)
+        if (text !== null) {
+          if (!quiet) setConvsErr(text)
+        } else if (!quiet) {
+          // Only a rail that is waiting for its first answer is reloaded on reconnect; a background
+          // refresh that failed leaves the rail as it is.
+          convsStale.current = true
+        }
       })
   }
+  const convsStale = useRef(false)
+  useOnReconnect(() => {
+    if (!convsStale.current) return
+    convsStale.current = false
+    loadConvs(targetId)
+  })
   useEffect(() => {
     setConvId(undefined)
     setMsgs([])

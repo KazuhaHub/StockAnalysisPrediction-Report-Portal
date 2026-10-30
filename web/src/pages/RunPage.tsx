@@ -3,7 +3,7 @@ import { Alert, Button, Card, Empty, Result, Segmented, Space, Spin, Tag, Typogr
 import { ArrowLeftOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, qs, ApiError, errText } from '../api/client'
+import { api, qs, ApiError } from '../api/client'
 import type { ReportPredictions, RunResp, SubTab } from '../api/types'
 import Markdown from '../components/Markdown'
 import EditReportButton from '../components/EditReportButton'
@@ -12,12 +12,14 @@ import VersionSwitcher from '../components/VersionSwitcher'
 import { ExportPdfButton } from '../components/ExportButtons'
 import { useReaderPrefs } from '../reader'
 import { NO_ITEM_TOOLTIP } from '../lib/segmented'
+import { useLoadFailure } from '../lib/useOnReconnect'
 import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
 
 export default function RunPage() {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { user, admin, forecast, forecastReader } = useAuth()
   const forecastEnabled = forecast === undefined || forecast.scope !== 'none'
   const forecastCardEnabled = forecastEnabled && (admin || forecastReader === undefined || forecastReader === 'card' || forecastReader === 'full')
@@ -43,16 +45,20 @@ export default function RunPage() {
     let cancelled = false
     setLoading(true)
     setNotFound(false)
+    let lost = false
     api
       .get<RunResp>(`/api/run/${encodeURIComponent(key)}${qs({ r })}`)
       .then((next) => { if (!cancelled) { setData(next); setDataAccess(accessKey) } })
       .catch((e) => {
         if (cancelled) return
-        if (e instanceof ApiError && e.status === 404) setNotFound(true)
+        // A lost connection is not an answer: the page keeps its spinner (or the run it has) and
+        // asks again when the connection returns.
+        if (failure(e) === null) lost = true
+        else if (e instanceof ApiError && e.status === 404) setNotFound(true)
       })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .finally(() => { if (!cancelled && !lost) setLoading(false) })
     return () => { cancelled = true }
-  }, [key, r, accessKey])
+  }, [key, r, accessKey, retryKey])
 
   const reportId = data?.rep?.id
   useEffect(() => {
@@ -64,13 +70,15 @@ export default function RunPage() {
       .catch((error) => {
         if (cancelled) return
         const unavailable = error instanceof ApiError && error.status === 403 && error.code === 'forecast_unavailable'
-        setPrediction({ reportId, accessKey, unavailable, error: unavailable ? '' : errText(error, t) })
+        // A lost connection leaves the card loading; it asks again when the connection returns.
+        const text = unavailable ? '' : failure(error)
+        if (text !== null) setPrediction({ reportId, accessKey, unavailable, error: text })
       })
     return () => { cancelled = true }
     // `t` is intentionally not a dependency: language changes remount the translated shell, while
     // this request is keyed only by the report, access stage and an explicit retry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportId, forecastCardEnabled, predictionNonce, accessKey])
+  }, [reportId, forecastCardEnabled, predictionNonce, accessKey, retryKey])
 
   if (notFound) {
     return (

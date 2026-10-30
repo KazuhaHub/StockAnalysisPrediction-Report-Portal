@@ -62,6 +62,7 @@ import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
@@ -338,7 +339,10 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       // Only the first load has anything to report. Once rows are on screen a failed poll is
       // not news — they are still the last thing the server said, and swapping them for an
       // error page would be the worse answer. The render below reads this only while !loaded.
-      setLoadErr(errText(e, t))
+      // A lost connection is not news either: the table keeps its spinner and the next poll (which
+      // also runs when the connection returns) asks again.
+      const text = loadFailure(e, t)
+      if (text !== null) setLoadErr(text)
     }
     await summaryRequest
   }
