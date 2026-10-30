@@ -23,6 +23,11 @@ describe('what the browser tab says', () => {
     expect(routeTitle('/stock/%E4%B8', t)).toBe('%E4%B8')
   })
 
+  it('gives an app administration subpage the Apps title instead of the bare section', () => {
+    expect(routeTitle('/manage/apps/builtin%3Aquotes', t)).toBe('nav.appsAdmin')
+    expect(routeTitle('/manage/apps/hello/access', t)).toBe('nav.appsAdmin')
+  })
+
   it('falls back to the section rather than going blank on an unknown manage tab', () => {
     expect(routeTitle('/manage/something-added-later', t)).toBe('nav.manage')
     expect(routeTitle('/manage', t)).toBe('nav.manage')

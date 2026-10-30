@@ -1,304 +1,96 @@
-import { useEffect, useState } from 'react'
-import { App, Button, Card, Empty, Input, Popconfirm, Space, Table, Tag, Typography, Upload } from 'antd'
+import { useMemo, useState } from 'react'
+import { Button, Card, Input, Space, Table, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { AppstoreOutlined, CloudDownloadOutlined, DeleteOutlined, ShopOutlined, UploadOutlined } from '@ant-design/icons'
+import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
+import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api, errText } from '../../api/client'
-import type { AppMarketEntry, AppMarketResp, AppPreviewResp, AppsResp, AppSummary } from '../../api/types'
-import AppBackendModal from '../../components/AppBackendModal'
-import ScopePermissionModal from '../../components/ScopePermissionModal'
-import AppLayoutAdmin from './AppLayoutAdmin'
+import LoadGate from '../../components/LoadGate'
+import AppInstall from './AppInstall'
+import AppReorderModal from './AppReorderModal'
+import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
+import { AppIcon, ServiceStatus } from './appsAdminParts'
 
-// A pending install awaiting the admin's permission confirmation. `run` performs the
-// actual install once the scopes are approved.
-interface PendingInstall {
-  appName?: string
-  scopes: string[]
-  run: () => Promise<void>
-}
-
+// The Apps list: every built-in and installed app with where it is switched on, in the administrator's
+// order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
+// and installation are occasional jobs, so they live behind the two buttons above the table.
 export default function AppsAdminPage() {
   const { t } = useTranslation()
-  const { message } = App.useApp()
-  const [apps, setApps] = useState<AppSummary[]>([])
-  const [backendApp, setBackendApp] = useState<AppSummary | null>(null)
-  const [loaded, setLoaded] = useState(false) // [] is the starting state, not "nothing is installed"
-  const [loadErr, setLoadErr] = useState('')
-
-  const [uploading, setUploading] = useState(false)
-  const [market, setMarket] = useState<AppMarketEntry[] | null>(null)
-  const [marketLoading, setMarketLoading] = useState(false)
-  // Where the market reads its index. The constant behind it has promised since the market shipped
-  // that an admin could repoint it; nothing could write the setting, and the value was never shown.
-  const [indexUrl, setIndexUrl] = useState('')
-  const [savingIndex, setSavingIndex] = useState(false)
-  const [pending, setPending] = useState<PendingInstall | null>(null)
-  const [confirming, setConfirming] = useState(false)
+  const { token } = theme.useToken()
+  const navigate = useNavigate()
+  const labels = useAppLabels()
+  const { apps, loading, error, reload } = useAppsCatalog()
   const [search, setSearch] = useState('')
-  const matches = (app: AppMarketEntry) => `${app.id} ${app.name} ${app.version || ''} ${app.description || ''} ${(app.scopes || []).join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
+  const [reordering, setReordering] = useState(false)
 
-  const load = () =>
-    api
-      .get<AppsResp>('/api/apps')
-      .then((r) => {
-        setApps(r.apps || [])
-        setLoadErr('')
-      })
-      .catch((e) => setLoadErr(errText(e, t)))
-      // In the finally, not the then: a flag that never settles leaves the table masked for ever,
-      // which is a worse answer than an empty one — but an empty one on its own would be a false
-      // claim, so the failure is named in the table's empty slot below.
-      .finally(() => setLoaded(true))
-  useEffect(() => {
-    load()
-  }, [])
+  // The muted line under a name: what a built-in app is for, or which build of an installed app this is.
+  const subtitle = (a: AdminApp) => (a.builtin ? labels.description(a) : [a.version && `v${a.version}`, a.key].filter(Boolean).join(' · '))
+  const shown = useMemo(() => {
+    const q = search.trim().toLocaleLowerCase()
+    if (!q) return apps
+    return apps.filter((a) => `${labels.title(a)} ${a.key} ${subtitle(a)}`.toLocaleLowerCase().includes(q))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apps, search, t])
 
-  // Post a "bundle" multipart form to the install endpoint. The api client only
-  // speaks JSON, so use a raw fetch (the same-origin session cookie carries auth).
-  // preview=1 parses without persisting so we can show the permission prompt first.
-  const postBundle = async (file: File, preview: boolean) => {
-    const fd = new FormData()
-    fd.append('bundle', file)
-    const url = preview ? '/api/admin/apps/install?preview=1' : '/api/admin/apps/install'
-    const res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error || String(res.status))
-    return data as AppPreviewResp
-  }
-
-  const fetchMarket = async () => {
-    setMarketLoading(true)
-    try {
-      const r = await api.get<AppMarketResp>('/api/admin/apps/market')
-      setMarket(r.apps || [])
-      setIndexUrl(r.index_url || '')
-    } catch (e) {
-      message.error(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
-    } finally {
-      setMarketLoading(false)
-    }
-  }
-
-  // Manual upload: preview the bundle to learn its scopes, then queue a confirmed install.
-  const install = async (file: File) => {
-    setUploading(true)
-    try {
-      const { app } = await postBundle(file, true)
-      setPending({
-        appName: app.name,
-        scopes: app.scopes || [],
-        run: async () => {
-          await postBundle(file, false)
-          message.success(t('apps.msgInstalled'))
-          load()
-          if (market) fetchMarket()
-        },
-      })
-    } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  // Bind the confirmation to these declarations; the server also checks the ZIP.
-  const marketInstall = (entry: AppMarketEntry) => {
-    const reviewed = { id: entry.id, version: entry.version, scopes: [...(entry.scopes || [])] }
-    setPending({
-      appName: entry.name,
-      scopes: entry.scopes || [],
-      run: async () => {
-        await api.post('/api/admin/apps/market/install', reviewed)
-        message.success(t('apps.msgInstalled'))
-        load()
-        fetchMarket()
-      },
-    })
-  }
-
-  const confirmInstall = async () => {
-    if (!pending) return
-    setConfirming(true)
-    try {
-      await pending.run()
-      setPending(null)
-    } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
-    } finally {
-      setConfirming(false)
-    }
-  }
-
-  const remove = async (id: string) => {
-    await api.del(`/api/admin/apps/${id}`)
-    load()
-    if (market) fetchMarket()
-  }
-
-  const scopeTags = (s?: string[]) => (s && s.length ? s.map((x) => <Tag key={x}>{x}</Tag>) : <Tag>—</Tag>)
-
-  const cols: ColumnsType<AppSummary> = [
+  const columns: ColumnsType<AdminApp> = [
     {
-      title: t('common.name'),
-      render: (_: unknown, a: AppSummary) => (
-        <Space>
-          {a.icon && <span>{a.icon}</span>}
-          <span>{a.name}</span>
-          <Typography.Text type="secondary" copyable>
-            {a.id}
-          </Typography.Text>
+      title: t('apps.col.app'),
+      render: (_: unknown, a: AdminApp) => (
+        <Space size={12}>
+          <AppIcon app={a} />
+          <div style={{ minWidth: 0 }}>
+            {/* A real link: it is what a keyboard reaches, while the whole row is the mouse target. */}
+            <Link to={appPath(a.key)} onClick={(e) => e.stopPropagation()}>
+              {labels.title(a)}
+            </Link>
+            <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{subtitle(a)}</div>
+          </div>
         </Space>
       ),
     },
-    { title: t('apps.version'), dataIndex: 'version', width: 100, render: (v: string) => v || '—' },
-    { title: t('apps.scopes'), dataIndex: 'scopes', width: 180, render: scopeTags },
+    { title: t('apps.col.status'), render: (_: unknown, a: AdminApp) => <ServiceStatus app={a} /> },
     {
-      title: t('batch.col.actions'),
-      width: 180,
-      render: (_: unknown, a: AppSummary) => (
-        <Space>
-        <Button size="small" onClick={() => setBackendApp(a)}>{t('apps.backendButton')}</Button>
-        <Popconfirm title={t('apps.deleteConfirm')} onConfirm={() => remove(a.id)}>
-          <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
-        </Space>
-      ),
+      title: t('apps.col.type'),
+      className: 'rp-apps-col-type',
+      render: (_: unknown, a: AdminApp) => (a.builtin ? t('apps.type.builtin') : t('apps.type.installed')),
     },
-  ]
-
-  const marketCols: ColumnsType<AppMarketEntry> = [
-    {
-      title: t('common.name'),
-      render: (_: unknown, e: AppMarketEntry) => (
-        <Space orientation="vertical" size={0}>
-          <Space>
-            {e.icon && <span>{e.icon}</span>}
-            <span>{e.name}</span>
-            {e.version && <Typography.Text type="secondary">v{e.version}</Typography.Text>}
-          </Space>
-          {e.description && (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {e.description}
-            </Typography.Text>
-          )}
-        </Space>
-      ),
-    },
-    { title: t('apps.scopes'), dataIndex: 'scopes', width: 160, render: scopeTags },
-    {
-      title: t('batch.col.actions'),
-      width: 120,
-      render: (_: unknown, e: AppMarketEntry) =>
-        e.installed ? (
-          <Tag color="green">{t('apps.installedTag')}</Tag>
-        ) : (
-          <Button size="small" type="primary" icon={<CloudDownloadOutlined />} onClick={() => marketInstall(e)}>
-            {t('apps.marketInstall')}
-          </Button>
-        ),
-    },
+    { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-      <AppBackendModal app={backendApp} onClose={() => setBackendApp(null)} />
-      {/* Order and per-OU access for every app, built-in and installed (ADR 0048). */}
-      <AppLayoutAdmin />
-      <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
-      <Card
-        title={
-          <Space>
-            <AppstoreOutlined />
-            {t('apps.adminTitle')}
-          </Space>
-        }
-        extra={
-          <Upload
-            accept=".zip"
-            showUploadList={false}
-            beforeUpload={(file) => {
-              install(file as File)
-              return Upload.LIST_IGNORE
-            }}
-          >
-            <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-              {t('apps.upload')}
-            </Button>
-          </Upload>
-        }
-      >
-        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          <Typography.Text type="secondary">{t('apps.adminHint')}</Typography.Text>
-          <Table
-            rowKey="id"
-            size="small"
-            loading={!loaded}
-            locale={loadErr ? { emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadErr} /> } : undefined}
-            dataSource={apps.filter(matches)}
-            columns={cols}
-            pagination={false}
-            scroll={{ x: 'max-content' }}
-          />
-        </Space>
-      </Card>
-
-      {/* App market — one-click install from a GitHub-hosted index (ADR 0003 phase 2). */}
-      <Card
-        title={
-          <Space>
-            <ShopOutlined />
-            {t('apps.market')}
-          </Space>
-        }
-        extra={
-          <Button icon={<CloudDownloadOutlined />} loading={marketLoading} onClick={fetchMarket}>
-            {t('apps.marketFetch')}
+    <LoadGate loading={loading} error={error} onRetry={reload}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+        <Space wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
+          <Button icon={<OrderedListOutlined aria-hidden="true" />} onClick={() => setReordering(true)} disabled={apps.length < 2}>
+            {t('apps.reorder')}
           </Button>
-        }
-      >
-        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          <Typography.Text type="secondary">{t('apps.marketHint')}</Typography.Text>
-          <Space.Compact style={{ width: '100%', maxWidth: 720 }}>
-            <Input
-              value={indexUrl}
-              onChange={(e) => setIndexUrl(e.target.value)}
-              placeholder={t('apps.marketIndexHint')}
-              aria-label={t('apps.marketIndex')}
-            />
-            <Button
-              loading={savingIndex}
-              onClick={() => {
-                setSavingIndex(true)
-                api
-                  .post<{ index_url: string }>('/api/admin/apps/market/index', { index_url: indexUrl })
-                  .then((r) => {
-                    setIndexUrl(r.index_url || '')
-                    message.success(t('common.saved'))
-                    if (market) fetchMarket()
-                  })
-                  .catch((e) => message.error(errText(e, t)))
-                  .finally(() => setSavingIndex(false))
-              }}
-            >
-              {t('common.save')}
-            </Button>
-          </Space.Compact>
-          {market === null ? null : market.length === 0 ? (
-            <Empty description={t('apps.marketEmpty')} />
-          ) : (
-            <Table rowKey="id" size="small" dataSource={market.filter(matches)} columns={marketCols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
-          )}
+          <AppInstall onInstalled={reload} />
         </Space>
-      </Card>
-
-      <ScopePermissionModal
-        open={!!pending}
-        appName={pending?.appName}
-        scopes={pending?.scopes || []}
-        confirmLoading={confirming}
-        onConfirm={confirmInstall}
-        onCancel={() => setPending(null)}
-      />
-    </Space>
+        <Card styles={{ body: { padding: 0 } }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+            <Input.Search
+              allowClear
+              style={{ maxWidth: 320 }}
+              aria-label={t('apps.search')}
+              placeholder={t('apps.search')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto' }}>
+              {t('apps.count', { count: shown.length })}
+            </Typography.Text>
+          </div>
+          <Table
+            className="rp-apps-table"
+            rowKey="key"
+            dataSource={shown}
+            columns={columns}
+            pagination={false}
+            locale={{ emptyText: t('apps.empty') }}
+            onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
+          />
+        </Card>
+      </Space>
+      <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={reload} />
+    </LoadGate>
   )
 }

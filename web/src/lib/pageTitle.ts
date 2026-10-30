@@ -79,7 +79,9 @@ export function routeTitle(pathname: string, t: (k: string) => string): string {
   }
   if (p === '/manage') return t('nav.manage')
   if (p.startsWith('/manage/')) {
-    const key = MANAGE[p.slice('/manage/'.length)]
+    const rest = p.slice('/manage/'.length)
+    // An app's own name is not known here, so its subpages carry the section's title.
+    const key = MANAGE[rest.startsWith('apps/') ? 'apps' : rest]
     return t(key ?? 'nav.manage')
   }
   return ''

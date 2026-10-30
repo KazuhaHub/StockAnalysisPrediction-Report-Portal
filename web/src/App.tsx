@@ -60,6 +60,8 @@ const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
 const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
+const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
+const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
 const QueuePage = lazyRetry(() => import('./pages/QueuePage'))
@@ -246,6 +248,8 @@ function AppRoutes() {
           <Route path="rundefaults" element={<RunDefaultsPage />} />
           <Route path="assistant" element={<ChatAdminPage />} />
           <Route path="apps" element={<AppsAdminPage />} />
+          <Route path="apps/:key" element={<AppDetailPage />} />
+          <Route path="apps/:key/access" element={<AppAccessPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="quotes" element={<QuoteSourcesPage />} />

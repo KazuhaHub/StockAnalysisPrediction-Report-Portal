@@ -3,13 +3,14 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import ManageLayout from './ManageLayout'
 
 const navigate = vi.fn()
+const locState = vi.hoisted(() => ({ pathname: '/manage/site' }))
 const siteState = vi.hoisted(() => ({ settings: {versionDisplay:'footer'} }))
 vi.mock('../../site', () => ({ useSite: () => siteState }))
 
 // The layout reads the active key off the path and navigates on menu click.
 vi.mock('react-router', () => ({
   useNavigate: () => navigate,
-  useLocation: () => ({ pathname: '/manage/site' }),
+  useLocation: () => ({ pathname: locState.pathname }),
   Outlet: () => null,
 }))
 
@@ -41,11 +42,24 @@ describe('ManageLayout — grouped rail', () => {
     navigate.mockReset()
     siteState.settings.versionDisplay = 'footer'
     prefetched.length = 0
+    locState.pathname = '/manage/site'
     localStorage.removeItem(COLLAPSE_KEY)
     localStorage.removeItem('rp.manage.sider.open')
     vi.stubEnv('VITE_BUILD_VERSION', 'v2026.38')
   })
   afterEach(() => vi.unstubAllEnvs())
+
+  it('keeps the page description on a page and drops it on a page nested under it', () => {
+    locState.pathname = '/manage/apps'
+    const first = render(<ManageLayout />)
+    expect(screen.getAllByText('manage.description.apps').length).toBeGreaterThan(0)
+    first.unmount()
+    locState.pathname = '/manage/apps/builtin%3Aquotes/access'
+    render(<ManageLayout />)
+    expect(screen.queryByText('manage.description.apps')).toBeNull()
+    // The title stays: the rail still highlights Apps and the page body has its own breadcrumb.
+    expect(screen.getAllByText('nav.appsAdmin').length).toBeGreaterThan(0)
+  })
 
   it('renders section group headers (no Maintenance group after legacy import removal)', () => {
     render(<ManageLayout />)
