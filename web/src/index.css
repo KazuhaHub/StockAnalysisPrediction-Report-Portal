@@ -1375,27 +1375,34 @@ body {
   margin-top: 7px;
   border-radius: 50%;
 }
+/* Hidden actions are inert but stay in the tab order: focusing one shows the row's actions. */
 .rp-task-row__acts {
   display: flex;
   flex: none;
   align-self: center;
   gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.15s;
 }
 .rp-task-row:hover .rp-task-row__acts,
-.rp-task-row:focus-within .rp-task-row__acts {
+.rp-task-row:focus-within .rp-task-row__acts,
+.rp-task-row.is-active .rp-task-row__acts {
   opacity: 1;
+  pointer-events: auto;
 }
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
   .rp-task-row__acts {
     opacity: 1;
+    pointer-events: auto;
   }
 }
-.rp-task-row__acts .rp-task-cancel {
+/* Specific enough to beat antd's text-button hover colour. */
+.rp-task-row__acts .ant-btn.rp-task-cancel {
   color: var(--ant-color-text-tertiary);
 }
-.rp-task-row__acts .rp-task-cancel:hover {
+.rp-task-row__acts .ant-btn.rp-task-cancel:hover,
+.rp-task-row__acts .ant-btn.rp-task-cancel:focus-visible {
   color: var(--ant-color-error);
 }
 .rp-workbench-menu {

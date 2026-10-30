@@ -14,12 +14,14 @@ export interface TaskRowProps {
   percent?: number
   time?: string
   actions?: ReactNode
+  /** Keeps the actions on screen, e.g. while a confirmation from one of them is open. */
+  pinned?: boolean
 }
 
 // One task in the Tasks drawer: exactly two lines. A status dot, then the name, a muted qualifier
 // and the time on the first line; a bar, queue position or result on the second. Actions sit in
 // their own column at the row end, hidden until the row is hovered or focused (see .rp-task-row).
-export default function TaskRow({ tone, name, sub, detail, percent, time, actions }: TaskRowProps) {
+export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned }: TaskRowProps) {
   const { token } = theme.useToken()
   const color: Record<TaskTone, string> = {
     running: token.colorPrimary,
@@ -30,7 +32,7 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
     idle: token.colorTextQuaternary,
   }
   return (
-    <li className="rp-task-row" style={{ listStyle: 'none' }}>
+    <li className={pinned ? 'rp-task-row is-active' : 'rp-task-row'} style={{ listStyle: 'none' }}>
       <span
         aria-hidden="true"
         className="rp-task-row__dot"
