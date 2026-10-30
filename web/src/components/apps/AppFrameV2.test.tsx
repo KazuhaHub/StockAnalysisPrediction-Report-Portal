@@ -60,6 +60,15 @@ test('only an advertised own-backend channel receives the parent transport and c
  expect(sessions[1].options.onBackendRequest).toBeTypeOf('function')
 })
 
+test('network transport exists only for a granted network capability and capability changes retire the frame',()=>{
+ const view=render(<AppFrameV2 {...props}/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.onNetworkRequest).toBeUndefined()
+ view.rerender(<AppFrameV2 {...props} capabilities={['network.http']}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(old);expect(sessions[0].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[1].options.onNetworkRequest).toBeTypeOf('function')
+})
+
 test('document reveal waits for height and content can grow and shrink in one iframe',()=>{
  render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame)
  act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')

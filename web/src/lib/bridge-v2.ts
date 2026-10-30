@@ -26,7 +26,7 @@ export interface BridgeNavigationOptions {
   readonly replace?: boolean;
   readonly query?: RouteQueryValues;
 }
-export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.7";
+export const BRIDGE_PROTOCOL = "portal.app.bridge/2-dev.8";
 export const BRIDGE_DOCUMENT_MAX_HEIGHT = 100_000;
 export const BRIDGE_DEADLINE_MS = 10_000;
 const RETRY_MS = 200;

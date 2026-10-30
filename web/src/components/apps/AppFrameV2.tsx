@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation, type PageActionSnapshot } from '../../lib/bridge-v2'
 import './AppFrameV2.css'
 import { createAppBackendTransport } from '../../lib/appBackendV2'
+import { createAppNetworkTransport } from '../../lib/appNetworkV2'
 
 export interface AppFrameV2Props {
   source: string
@@ -93,6 +94,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       presentation: latest.current,
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
+      onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
       onNavigate: (path,replace,search)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search)},
       onPageChange: value=>{if(live.current&&epoch.current===generation)pageObserver.current?.(value)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },

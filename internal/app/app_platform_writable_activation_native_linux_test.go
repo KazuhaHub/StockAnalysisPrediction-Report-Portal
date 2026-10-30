@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"os"
 	"testing"
 
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
@@ -61,7 +63,21 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, lease.installationID) != 1 {
 		t.Fatal("native install lost reviewed network grant")
 	}
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	launch := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+lease.installationID+"/launch", cookie, "")
+	var metadata struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if launch.Code != 200 || json.Unmarshal(launch.Body.Bytes(), &metadata) != nil || len(metadata.Capabilities) != 1 || metadata.Capabilities[0] != "network.http" {
+		t.Fatalf("current network capability was not advertised: %d %s", launch.Code, launch.Body.String())
+	}
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, lease.installationID)
+	launch = sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+lease.installationID+"/launch", cookie, "")
+	if launch.Code == 200 {
+		t.Fatalf("revoked network capability remained advertised: %d %s", launch.Code, launch.Body.String())
+	}
 	denied, err := s.preparePlatformWritableBackendAccess(ctx, actor, lease.installationID)
 	if err == nil {
 		denied.Close()
@@ -192,4 +208,14 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("viewer admission changed completed history")
 	}
 	t.Log("PORTAL_WRITABLE_POST_IO_OU_REVOKED")
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		browserHost := &Server{st: s.st, cfg: s.cfg, loginThr: newLoginThrottle(), v1Rate: newRateLimiter()}
+		if err := browserHost.bindPlatformBackendHTTP(endpoint); err != nil {
+			t.Fatal("browser network runtime bootstrap", err)
+		}
+		mux := http.NewServeMux()
+		browserHost.wireRoutes(mux)
+		testNativeSDKBackendBrowser(t, browserHost, actor, lease.installationID, mux, true)
+		t.Log("PORTAL_NETWORK_BROWSER_SDK")
+	}
 }

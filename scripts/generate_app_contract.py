@@ -251,6 +251,25 @@ def main():
                 for key,path in (("protocol_sha256",sdk/"src/bridge-v2.ts"),("test_sha256",sdk/"tests/bridge-v2.test.ts")):
                     if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
                         raise ValueError("bridge source differs; regenerate from the Portal checkout")
+        network_pin = sdk/"tests/fixtures/network-v2-source.json"
+        if PORTAL_MODE and (ROOT/"web/src/lib/network-v2.ts").is_file():
+            source = (ROOT/"web/src/lib/network-v2.ts").read_bytes()
+            tests = (ROOT/"web/src/lib/network-v2.test.ts").read_text()
+            tests = tests.replace('from "./network-v2"','from "../src/network-v2"').encode()
+            outputs[sdk/"src/network-v2.ts"] = source
+            outputs[sdk/"tests/network-v2.test.ts"] = tests
+            outputs[network_pin] = (json.dumps({
+                "format":"portal.network.source/1",
+                "source_sha256":hashlib.sha256(source).hexdigest(),
+                "test_sha256":hashlib.sha256(tests).hexdigest(),
+            },indent=2)+"\n").encode()
+        elif not PORTAL_MODE and (network_pin.exists() or (sdk/"src/network-v2.ts").exists() or ((sdk/"src/bridge-v2.ts").exists() and b"./network-v2" in (sdk/"src/bridge-v2.ts").read_bytes())):
+            pin = json.loads(network_pin.read_bytes(),object_pairs_hook=unique_object)
+            if set(pin)!={"format","source_sha256","test_sha256"} or pin["format"]!="portal.network.source/1":
+                raise ValueError("invalid network source pin")
+            for key,path in (("source_sha256",sdk/"src/network-v2.ts"),("test_sha256",sdk/"tests/network-v2.test.ts")):
+                if hashlib.sha256(path.read_bytes()).hexdigest()!=pin[key]:
+                    raise ValueError("network source differs; regenerate from the Portal checkout")
         query_pin = sdk/"tests/fixtures/route-query-v2-source.json"
         if PORTAL_MODE and (ROOT/"web/src/lib/route-query-v2.ts").is_file():
             source = (ROOT/"web/src/lib/route-query-v2.ts").read_bytes()
