@@ -11,11 +11,17 @@ vi.mock('../../lib/csv', async importOriginal => ({...await importOriginal<typeo
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string, options?: unknown) => `${key}:${JSON.stringify(options)}` }) }))
 let resize: ResizeObserverCallback
 const disconnect = vi.fn()
+const layout = HTMLElement.prototype.getBoundingClientRect
+let hostSize: {width: number; height: number}
 beforeEach(() => {
   vi.clearAllMocks()
   engine.init.mockReturnValue(chart)
   vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { resize = callback } observe() {} disconnect = disconnect })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width:600,height:280 } as DOMRect)
+  hostSize = { width:600,height:280 }
+  // Only the chart host gets a size; every other element keeps jsdom's empty layout (see the wave test).
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('rp-dashboard-echart-host') ? hostSize as DOMRect : layout.call(this)
+  })
 })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const renderChart = (node: React.ReactNode) => render(node, {wrapper:({children}) => <DashboardChartCard title="Reports">{children}</DashboardChartCard>})
@@ -46,7 +52,7 @@ it('updates data without replacing the instance and supplies complete tooltip va
   expect(screen.getByRole('table').textContent).toContain('75.0%')
 })
 it('changes the legend layout for narrow containers', () => {
-  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({width:320,height:220} as DOMRect)
+  hostSize = {width:320,height:220}
   renderChart(<DashboardChart {...props} series={{type:'pie'}} total={28} />)
   expect(chart.setOption.mock.lastCall![0].legend.orient).toBe('horizontal')
   expect(chart.setOption.mock.lastCall![0].tooltip.confine).toBe(true)
@@ -69,6 +75,19 @@ it('places the data action in the header, paginates rows and exports all filtere
   expect(screen.getAllByRole('row')).toHaveLength(2)
   fireEvent.click(screen.getByRole('button', {name:/manage.dashboard.downloadChartCSV/}))
   expect(vi.mocked(downloadCSV).mock.lastCall![1]).not.toContain('Item 0,0')
+})
+
+// antd renders a Button's click wave into a React root of its own, which testing-library's cleanup
+// never unmounts. Its frame-delayed renders then outlive the test file, and on a loaded runner they
+// land after jsdom is torn down as "ReferenceError: window is not defined". antd skips the wave for
+// buttons with no layout, so only the chart host may report a size.
+it('gives only the chart host a layout, so clicking a button starts no wave root', async () => {
+  renderChart(<DashboardChart {...props} />)
+  const action = screen.getByRole('button', {name:/manage.dashboard.viewChartData/})
+  fireEvent.click(action)
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)) })
+  // The wave mounts its root into a bare <div> it inserts as the button's first child.
+  expect(action.querySelector(':scope > div')).toBeNull()
 })
 
 it('keeps the opened data snapshot stable while dashboard refreshes', () => {
