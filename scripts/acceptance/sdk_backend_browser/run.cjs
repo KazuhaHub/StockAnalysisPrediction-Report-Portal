@@ -70,7 +70,7 @@ async function main(){
   await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
   await page.goForward();await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
   await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
-  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;
+  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;reportsIssued=0;
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
   await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
   const restored=JSON.parse(await frame.getByTestId('app-query').innerText());
