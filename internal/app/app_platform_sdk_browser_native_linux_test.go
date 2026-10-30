@@ -147,6 +147,12 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 			log.Printf("SDK fixture backend HTTP status=%d", recorded.status)
 			return
 		}
+		if r.URL.Path == "/api/app-platform/installations/"+installation+"/reports" {
+			recorded := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			fixture.ServeHTTP(recorded, r)
+			log.Printf("SDK fixture reports HTTP status=%d", recorded.status)
+			return
+		}
 		fixture.ServeHTTP(w, r)
 	})
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 10 * time.Second}

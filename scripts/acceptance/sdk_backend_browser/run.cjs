@@ -113,7 +113,8 @@ async function main(){
    if(await result.innerText()!=='error:unavailable')throw new Error('revoked network remained available');
   }
   if(reportsReady==='true'){
-   stage='reports-revoked';if(await dispatchReports()!=='error:unavailable')throw new Error('revoked reports remained available');
+   stage='reports-revoked';const revokedReport=await dispatchReports();
+   if(revokedReport!=='error:unavailable')throw new Error('revoked reports returned '+revokedReport);
   }
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
   stage='draft-edit';await frame.getByRole('button',{name:'Edit draft',exact:true}).click();
