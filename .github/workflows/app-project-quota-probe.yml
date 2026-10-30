@@ -234,9 +234,12 @@ jobs:
         if: always() && env.APP_SDK_BROWSER_PUBLIC_ROOT != ''
         run: python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --cleanup "$APP_SDK_BROWSER_PUBLIC_ROOT"
       - name: Preserve redacted enforcement evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: project-quota-evidence
-          path: project-quota-evidence.json
-          if-no-files-found: error
+          path: |
+            project-quota-evidence.json
+            portal-quota-failure.txt
+          if-no-files-found: warn
           retention-days: 14

@@ -372,6 +372,10 @@ def main(args):
                     portal_limit = 140 if browser_enabled else 100
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=" + str(portal_limit) + "s"], env=portal_env, capture_output=True, text=True, timeout=portal_limit + 10)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
+                        output = result.stdout + result.stderr
+                        diagnostic = Path.cwd() / "portal-quota-failure.txt"
+                        diagnostic.write_text(output[-262144:])
+                        print("Portal data stage output:\n" + diagnostic.read_text(), file=sys.stderr, flush=True)
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-32768:])
                     if browser_enabled:
                         for marker in ("SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
