@@ -33,7 +33,8 @@ type Config struct {
 	DockerSocket   string     `json:"docker_socket"`
 	JournalDir     string     `json:"journal_dir"`
 	DataRoot       string     `json:"data_root"`
-	SocketRoot     string     `json:"socket_root"`
+	IPCRoot        string     `json:"ipc_root"`
+	ControlRoot    string     `json:"control_root"`
 	ControlSocket  string     `json:"control_socket"`
 	ControllerUID  uint32     `json:"controller_uid"`
 	ControllerGID  uint32     `json:"controller_gid"`
@@ -56,11 +57,12 @@ func LoadConfig(path string) (Config, error) {
 	raw, err := readPrivateConfig(path)
 	if err != nil || decodeStrict(raw, &cfg) != nil || !validController(cfg.Controller) || cfg.Format != ConfigFormat ||
 		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) ||
-		!validAbsolute(cfg.SocketRoot) || !validAbsolute(cfg.ControlSocket) ||
-		filepath.Dir(cfg.ControlSocket) != cfg.SocketRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
+		!validAbsolute(cfg.IPCRoot) || !validAbsolute(cfg.ControlRoot) || !validAbsolute(cfg.ControlSocket) ||
+		filepath.Dir(cfg.ControlSocket) != cfg.ControlRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
 		cfg.NetworkActive < 1 || cfg.NetworkActive > 16 || cfg.NetworkEntries < 16 || cfg.NetworkEntries > 4096 ||
 		cfg.MinimumCPUs < 1 || cfg.MinimumCPUs > 1024 || cfg.MinimumMemory < 64<<20 || cfg.MinimumMemory > 1<<50 ||
-		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.SocketRoot) || overlap(cfg.DataRoot, cfg.SocketRoot) {
+		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
+		overlap(cfg.DataRoot, cfg.IPCRoot) || overlap(cfg.DataRoot, cfg.ControlRoot) || overlap(cfg.IPCRoot, cfg.ControlRoot) {
 		return Config{}, ErrConfig
 	}
 	return cfg, nil

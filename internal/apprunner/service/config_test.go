@@ -23,8 +23,8 @@ func controllerFixture() Controller {
 func configFixture(canonical string) Config {
 	return Config{
 		Format: ConfigFormat, DockerSocket: "/run/docker.sock", JournalDir: filepath.Join(canonical, "journal"),
-		DataRoot: filepath.Join(canonical, "data"), SocketRoot: filepath.Join(canonical, "run"),
-		ControlSocket: filepath.Join(canonical, "run", "control.sock"), ControllerUID: 41001, ControllerGID: 41001,
+		DataRoot: filepath.Join(canonical, "data"), IPCRoot: filepath.Join(canonical, "ipc"), ControlRoot: filepath.Join(canonical, "control"),
+		ControlSocket: filepath.Join(canonical, "control", "runner.sock"), ControllerUID: 41001, ControllerGID: 41001,
 		NetworkActive: 4, NetworkEntries: 1024, MinimumCPUs: 2, MinimumMemory: 2 << 30, Controller: controllerFixture(),
 	}
 }

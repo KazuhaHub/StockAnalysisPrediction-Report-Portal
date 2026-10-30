@@ -69,9 +69,10 @@ jobs:
           trap 'sudo -n rm -rf "$root"' EXIT
           journal="$root/journal"
           data="$root/data"
-          run="$root/run"
-          sudo -n install -d -m 0700 -o root -g root "$journal" "$data"
-          sudo -n install -d -m 0750 -o root -g root "$run"
+          ipc="$root/ipc"
+          control="$root/control"
+          sudo -n install -d -m 0700 -o root -g root "$journal" "$data" "$ipc"
+          sudo -n install -d -m 0750 -o root -g root "$control"
           runner="$RUNNER_TEMP/app-runner-service"
           go build -o "$runner" ./cmd/app-runner
           openssl genpkey -algorithm ED25519 -out "$root/controller-private.pem"
@@ -96,15 +97,17 @@ jobs:
           jq -n \
             --arg journal "$journal" \
             --arg data "$data" \
-            --arg run "$run" \
-            --arg control "$run/control.sock" \
+            --arg ipc "$ipc" \
+            --arg control_root "$control" \
+            --arg control "$control/runner.sock" \
             --arg fingerprint "$fingerprint" \
             '{
               format:"portal.app-runner.config/1-dev.1",
               docker_socket:"/run/docker.sock",
               journal_dir:$journal,
               data_root:$data,
-              socket_root:$run,
+              ipc_root:$ipc,
+              control_root:$control_root,
               control_socket:$control,
               controller_uid:41001,
               controller_gid:41001,

@@ -61,7 +61,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady
 	}
-	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.SocketRoot, root, pin)
+	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.IPCRoot, root, pin)
 	if err != nil {
 		return ErrNotReady
 	}

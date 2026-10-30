@@ -11,8 +11,9 @@ The runtime administrator creates only infrastructure:
 
 - a dedicated rootful Linux host or VM;
 - the fixed Portal controller UID and runner endpoint GID;
-- private existing journal, XFS data-root and socket directories with the modes
-  required by the existing journal/data/transport adapters;
+- private existing journal, XFS data-root, root-only application IPC root and
+  separately provisioned controller-socket root with the modes required by the
+  existing journal/data/transport adapters;
 - the canonical Docker Unix socket;
 - `/etc/portal-app-runner/bootstrap.json` and `service.json`, root-owned and mode
   `0600`;
