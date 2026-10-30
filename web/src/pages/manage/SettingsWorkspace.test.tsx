@@ -42,4 +42,13 @@ describe('SettingsWorkspace', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Alpha' }))
     expect(a.closest('section')!.hidden).toBe(false)
   })
+
+  it('labels the tablist and points every tab at the real content region', () => {
+    render(<Harness />)
+    expect(screen.getByRole('tablist', { name: 'manage.sections' })).toBeTruthy()
+    const panel = screen.getByRole('tabpanel')
+    for (const tab of screen.getAllByRole('tab')) expect(tab.getAttribute('aria-controls')).toBe(panel.id)
+    expect(panel.getAttribute('aria-labelledby')).toBe(screen.getByRole('tab', { name: 'Alpha' }).id)
+    expect(panel.querySelectorAll('section')).toHaveLength(2)
+  })
 })

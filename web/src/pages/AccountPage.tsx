@@ -84,7 +84,7 @@ export default function AccountPage() {
 
       {activeTab === 'login-activity' ? (
         <SettingsWorkspace active={activitySection} onChange={setActivitySection} sections={[
-          {key:'sessions',label:t('account.sessionsTab')},{key:'activity',label:t('account.loginActivityTab')},
+          {key:'sessions',label:t('account.sessionsTab')},{key:'activity',label:t('account.loginHistoryTab')},
         ]}>
           <SettingsPanel section="sessions"><AccountSessionsPanel /></SettingsPanel>
           <SettingsPanel section="activity"><LoginActivityPanel /></SettingsPanel>

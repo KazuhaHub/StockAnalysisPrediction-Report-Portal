@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Button, Typography } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -14,7 +15,14 @@ export default function SettingsSaveBar({ dirty, saving, onSave, onDiscard, scop
 }) {
   const { t } = useTranslation()
   usePendingSettings(dirty, saving)
-  if (!dirty && !saving) return null
+  const shown = dirty || saving
+  // Lets the back-to-top button lift above the dock while it is on screen.
+  useEffect(() => {
+    if (!shown) return
+    document.body.classList.add('rp-has-save-dock')
+    return () => document.body.classList.remove('rp-has-save-dock')
+  }, [shown])
+  if (!shown) return null
   return (
     <div className="rp-settings-save-dock">
       <div className="rp-settings-save-bar">

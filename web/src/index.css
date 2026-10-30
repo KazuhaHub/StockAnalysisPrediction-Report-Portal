@@ -319,6 +319,7 @@ body {
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 .rp-admin-page-header__title { min-width: 0; flex: 1 1 auto; }
 .rp-admin-page-header h2.ant-typography {
@@ -459,8 +460,28 @@ body {
   min-width: 0;
   overflow-anchor: none;
 }
-.rp-settings-tabs { min-width: 0; }
-.rp-settings-tabs > .ant-tabs-nav { margin-bottom: 0; }
+.rp-settings-tabs {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+.rp-settings-tab {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rp-settings-tab:hover { color: var(--ant-color-text); }
+.rp-settings-tab--active { color: var(--ant-color-primary); border-bottom-color: var(--ant-color-primary); }
+.rp-settings-tab:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-admin-list-page {
   display: flex;
   flex-direction: column;
@@ -2227,7 +2248,7 @@ body {
 
 .rp-sso-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-.rp-admin-page-header > .rp-admin-page-actions { flex: 0 1 auto; align-self: center; }
+.rp-admin-page-header__row > .rp-admin-page-actions { flex: 0 1 auto; align-self: center; }
 .rp-dashboard-layout-tools[hidden] { display: none; }
 .rp-dashboard-header-tools { display: flex; justify-content: flex-end; }
 .rp-admin-content--directory { padding: 16px 20px; }
@@ -2247,7 +2268,7 @@ body {
 .rp-users-table .ant-table-cell .ant-space { flex-wrap: nowrap; }
 .rp-sso-page { gap: 0; }
 .rp-sso-network { max-width: 960px; padding-block: 8px; }
-@media (max-width: 767px) { .rp-users-directory { flex-direction: column; } .rp-admin-page-header > .rp-admin-page-actions { flex-basis: 100%; } }
+@media (max-width: 767px) { .rp-users-directory { flex-direction: column; } .rp-admin-page-header__row > .rp-admin-page-actions { flex-basis: 100%; align-self: stretch; } }
 
 .rp-dashboard-palette-groups { margin-top: 16px; }
 .rp-dashboard-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -2438,3 +2459,6 @@ body {
 .rp-settings-content .ant-card .ant-card > .ant-card-body { padding: 8px 12px; }
 .rp-settings-panel, .rp-settings-panel .ant-card, .rp-settings-panel .ant-card-body { min-width: 0; }
 .rp-settings-panel .ant-table-wrapper { max-width: 100%; }
+
+/* The back-to-top button sits above the unsaved-changes dock while it is shown. */
+body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }

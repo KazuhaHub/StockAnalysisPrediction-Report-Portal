@@ -26,4 +26,11 @@ describe('SettingsSaveBar', () => {
     render(<SettingsSaveBar dirty saving onSave={vi.fn()} onDiscard={vi.fn()} />)
     expect((screen.getByRole('button', { name: /manage\.discard/ }) as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('marks the body while shown so floating buttons can clear it', () => {
+    const { rerender } = render(<SettingsSaveBar dirty saving={false} onSave={vi.fn()} onDiscard={vi.fn()} />)
+    expect(document.body.classList.contains('rp-has-save-dock')).toBe(true)
+    rerender(<SettingsSaveBar dirty={false} saving={false} onSave={vi.fn()} onDiscard={vi.fn()} />)
+    expect(document.body.classList.contains('rp-has-save-dock')).toBe(false)
+  })
 })

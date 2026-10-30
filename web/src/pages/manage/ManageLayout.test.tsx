@@ -72,6 +72,13 @@ describe('ManageLayout — grouped rail', () => {
     await waitFor(() => expect(screen.getAllByRole('menuitem').length).toBeGreaterThan(before))
   })
 
+  it('keeps the page actions slot inside the header title row so it can wrap', () => {
+    locState.pathname = '/manage'
+    const { container } = render(<ManageLayout />)
+    const slot = container.querySelector('#rp-admin-page-actions')!
+    expect(slot.parentElement!.classList.contains('rp-admin-page-header__row')).toBe(true)
+  })
+
   it('renders section group headers (no Maintenance group after legacy import removal)', () => {
     render(<ManageLayout />)
     for (const header of [
