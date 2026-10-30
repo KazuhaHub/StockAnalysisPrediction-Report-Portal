@@ -88,6 +88,7 @@ func platformRemovalGrantsDigest(e migExec, installation string) (string, error)
 	for _, q := range []string{
 		`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`,
 		`SELECT id,principal_type,username,account_created,account_generation,group_id,group_created,revision FROM app_platform_access_grants WHERE installation_id=? ORDER BY id`,
+		`SELECT id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,revoked_ms FROM app_platform_secret_bindings WHERE installation_id=? ORDER BY id`,
 	} {
 		h.Write([]byte(q))
 		rows, err := e.query(q, installation)
@@ -110,7 +111,7 @@ func platformRemovalGrantsDigest(e migExec, installation string) (string, error)
 				return "", err
 			}
 			// Normalize driver TEXT representations before hashing. BYTEA/BLOB
-			// and arbitrary provider data are not part of either projection.
+			// and arbitrary provider data are not part of these projections.
 			for index, value := range values {
 				if text, ok := value.([]byte); ok {
 					values[index] = string(text)
@@ -378,6 +379,14 @@ func (s *Server) consumePlatformRemovalReview(session platformActorSession, plan
 		if err := platformLeaseCAS(updated, err); err != nil {
 			return err
 		}
+
+		revokedBindings := 0
+		if action == appplatform.ActionUninstall {
+			revokedBindings, err = revokePlatformUninstallSecretBindings(e, p.InstallationID, control.nowMS)
+			if err != nil {
+				return err
+			}
+		}
 		if _, err := e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=? WHERE installation_id=? AND state='active'`, control.nowMS, p.InstallationID); err != nil {
 			return err
 		}
@@ -394,9 +403,10 @@ func (s *Server) consumePlatformRemovalReview(session platformActorSession, plan
 			return err
 		}
 		detail, _ := json.Marshal(struct {
-			Plan, Action string
-			Generation   int64
-		}{planID, string(action), p.TargetGeneration})
+			Plan, Action          string
+			Generation            int64
+			RevokedSecretBindings int `json:"revoked_secret_bindings,omitempty"`
+		}{planID, string(action), p.TargetGeneration, revokedBindings})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.operation_admitted','app_platform_operation',?,?,'')`, time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, id, string(detail)); err != nil {
 			return err
 		}

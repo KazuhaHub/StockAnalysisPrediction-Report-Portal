@@ -2402,3 +2402,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   unavailable to HTTP callers. Parsing is not grant admission or credential use;
   exact permission review/current SQL resolution and private use remain pending.
   See [binding policy](137-secret-binding-policy.md).
+
+- Integrated denial-only binding revocation into the existing reviewed uninstall
+  admission transaction. The exact removal digest includes binding metadata,
+  revision exhaustion and affected-set checks refuse atomically, operation audit
+  counts the revoked bindings, and replay does not mutate them again. Shared
+  custody, neighbor installations and retained data remain unchanged; physical
+  cleanup and all credential-use authority still require separate enforcement.
+  Driver-paired actual review/consume tests cover these boundaries. See
+  [uninstall revocation](138-uninstall-secret-binding-revocation.md).
