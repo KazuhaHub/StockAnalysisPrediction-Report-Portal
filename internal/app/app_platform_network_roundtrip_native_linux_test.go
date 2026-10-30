@@ -115,7 +115,7 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 	var count atomic.Int32
 	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := count.Add(1)
-		if err := os.WriteFile(filepath.Join(childData, "network-count"), []byte(strconv.Itoa(int(n))), 0444); err != nil {
+		if err := writePlatformNetworkFixtureFile(filepath.Join(childData, "network-count"), []byte(strconv.Itoa(int(n))), 0444); err != nil {
 			t.Error(err)
 			w.WriteHeader(500)
 			return
@@ -129,7 +129,7 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 		switch r.URL.Path {
 		case "/v1/success":
 		case "/v1/revoke":
-			if err := os.WriteFile(filepath.Join(childData, "network-arrived"), []byte("1"), 0444); err != nil {
+			if err := writePlatformNetworkFixtureFile(filepath.Join(childData, "network-arrived"), []byte("1"), 0444); err != nil {
 				t.Error(err)
 				w.WriteHeader(500)
 				return
@@ -182,6 +182,47 @@ func waitPlatformNetworkFixtureFile(ctx context.Context, path string) error {
 		}
 	}
 }
+
+func writePlatformNetworkFixtureFile(path string, value []byte, mode os.FileMode) error {
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	temp := file.Name()
+	defer os.Remove(temp)
+	if _, err := file.Write(value); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Chmod(mode); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp, path)
+}
+
+func TestPlatformNetworkFixtureFilePublishesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ack")
+	if err := writePlatformNetworkFixtureFile(path, []byte("first"), 0444); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePlatformNetworkFixtureFile(path, []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	info, statErr := os.Stat(path)
+	if err != nil || statErr != nil || string(raw) != "1" || info.Mode().Perm() != 0600 {
+		t.Fatal("fixture acknowledgement was not replaced atomically", err, statErr)
+	}
+	if matches, err := filepath.Glob(filepath.Join(dir, ".ack.tmp-*")); err != nil || len(matches) != 0 {
+		t.Fatal("fixture acknowledgement left temporary files", matches, err)
+	}
+}
+
 func platformNetworkFixtureCount(t *testing.T) int {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(os.Getenv("TMPDIR"), "network-count"))
@@ -382,7 +423,7 @@ func beginPlatformNetworkFixtureWithdrawal(t *testing.T, s *Server, installation
 			}
 		}
 		if err == nil {
-			err = os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "network-revoked"), []byte("1"), 0600)
+			err = writePlatformNetworkFixtureFile(filepath.Join(os.Getenv("TMPDIR"), "network-revoked"), []byte("1"), 0600)
 		}
 		done <- err
 	}()
