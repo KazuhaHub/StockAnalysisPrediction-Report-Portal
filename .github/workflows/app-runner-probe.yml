@@ -58,6 +58,80 @@ jobs:
           go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
           go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
 
+      - name: Verify explicit bootstrap and fail-closed service startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          root=$(mktemp -d "$RUNNER_TEMP/portal-runner-bootstrap.XXXXXXXX")
+          trap 'sudo -n rm -rf "$root"' EXIT
+          journal="$root/journal"
+          data="$root/data"
+          run="$root/run"
+          sudo -n install -d -m 0700 -o root -g root "$journal" "$data"
+          sudo -n install -d -m 0750 -o root -g root "$run"
+          runner="$RUNNER_TEMP/app-runner-service"
+          go build -o "$runner" ./cmd/app-runner
+          openssl genpkey -algorithm ED25519 -out "$root/controller-private.pem"
+          openssl pkey -in "$root/controller-private.pem" -pubout -outform DER | tail -c 32 > "$root/controller-public.raw"
+          public=$(base64 -w0 "$root/controller-public.raw" | tr '+/' '-_' | tr -d '=')
+          fingerprint=$(sha256sum "$root/controller-public.raw" | awk '{print $1}')
+          jq -n \
+            --arg journal "$journal" \
+            --arg public "$public" \
+            --arg fingerprint "$fingerprint" \
+            '{
+              format:"portal.app-runner.bootstrap/1-dev.1",
+              journal_dir:$journal,
+              controller_public_key:$public,
+              controller:{
+                deployment_id:"10000000-0000-4000-8000-000000000001",
+                controller_epoch:"20000000-0000-4000-8000-000000000002",
+                control_revision:1,
+                fingerprint:$fingerprint
+              }
+            }' | sudo -n tee "$root/bootstrap.json" >/dev/null
+          jq -n \
+            --arg journal "$journal" \
+            --arg data "$data" \
+            --arg run "$run" \
+            --arg control "$run/control.sock" \
+            --arg fingerprint "$fingerprint" \
+            '{
+              format:"portal.app-runner.config/1-dev.1",
+              docker_socket:"/run/docker.sock",
+              journal_dir:$journal,
+              data_root:$data,
+              socket_root:$run,
+              control_socket:$control,
+              controller_uid:41001,
+              controller_gid:41001,
+              network_active:4,
+              network_entries:1024,
+              minimum_reported_cpus:2,
+              minimum_reported_memory_bytes:2147483648,
+              controller:{
+                deployment_id:"10000000-0000-4000-8000-000000000001",
+                controller_epoch:"20000000-0000-4000-8000-000000000002",
+                control_revision:1,
+                fingerprint:$fingerprint
+              }
+            }' | sudo -n tee "$root/service.json" >/dev/null
+          sudo -n chown root:root "$root/bootstrap.json" "$root/service.json"
+          sudo -n chmod 0600 "$root/bootstrap.json" "$root/service.json"
+          first=$(sudo -n "$runner" bootstrap --config "$root/bootstrap.json")
+          test "$(jq -r .created <<<"$first")" = true
+          second=$(sudo -n "$runner" bootstrap --config "$root/bootstrap.json")
+          test "$(jq -r .created <<<"$second")" = false
+          test ! -s "$run/control.sock"
+          if serve_output=$(sudo -n "$runner" serve --config "$root/service.json" 2>&1); then
+            echo "service started on a non-XFS fixture" >&2
+            exit 1
+          fi
+          test "$serve_output" = "runner service is not ready"
+
       - name: Verify closed candidate container policy on the disposable daemon
         shell: bash
         env:

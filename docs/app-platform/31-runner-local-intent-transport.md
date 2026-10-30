@@ -3,10 +3,11 @@
 Status: internal P03/P04 development under approved D1/D3/D4 candidate A.
 This is a Linux-only, same-OS-user development transport, not a production
 controller deployment or the completed application framework. The separate-UID
-internal profile is specified in [document 32](32-runner-controller-identity.md). No command-line flag,
-Portal startup hook, HTTP route or deployment configuration enables it. The
-production controller UID/group provisioning, physical providers and dispatch
-remain future work. No database shape or server beta setting changes.
+internal profile is specified in [document 32](32-runner-controller-identity.md).
+Only the explicit H03 service command and fixed deployment configuration can
+combine it with physical providers; no HTTP route or app payload enables it. The
+production controller UID/group provisioning and full deployment drill remain
+open. No database shape or server beta setting changes.
 
 ## Source and use
 
