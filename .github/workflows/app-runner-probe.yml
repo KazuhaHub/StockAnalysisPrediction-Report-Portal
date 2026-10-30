@@ -128,7 +128,7 @@ jobs:
           test "$(jq -r .created <<<"$first")" = true
           second=$(sudo -n "$runner" bootstrap --config "$root/bootstrap.json")
           test "$(jq -r .created <<<"$second")" = false
-          test ! -s "$run/control.sock"
+          test ! -s "$control/runner.sock"
           if serve_output=$(sudo -n "$runner" serve --config "$root/service.json" 2>&1); then
             echo "service started on a non-XFS fixture" >&2
             exit 1
