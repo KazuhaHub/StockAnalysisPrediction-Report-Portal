@@ -135,3 +135,18 @@ current-viewer network command/online confirmation, private exchange/result rele
 and typed SDK/HTTP adapter before exposing that path. Credential binding review,
 shared rotation, private use and response projection remain separate next work.
 No production service, real credential, Status adoption or beta setting changed.
+
+## Initial native result and correction
+
+Initial 5416055830521ab5f74d45fdbf9b5d5535a110bf passes the new actual PostgreSQL
+review/publication group, but quota workflow 40982774476/job 123826562053 fails:
+the Portal data-install fixture still bootstrapped a data/candidate-only listener,
+so the required network observation correctly refused before admission. The
+earlier combined candidate/network fixture was a different endpoint.
+
+Add an explicit `ListenNetworkManagedController` composition that preserves the
+checked shared data root/pin and candidate runtime while adding one bounded pool
+to the same enrolled journal/endpoint. Existing constructors stay narrower. The
+Portal fixture uses this complete composition. Linux compilation first failed
+without the new constructor and then succeeds; exact corrected native/full CI is
+still required. Do not count the initial failed quota run as passed.

@@ -30,3 +30,26 @@ func ListenManagedController(ctx context.Context, path string, controllerUID, co
 	server.candidateExecution = &candidateExecutionProvider{store: store, native: native}
 	return server, nil
 }
+
+// ListenNetworkManagedController explicitly combines data, candidate and one
+// bounded network pool on the same checked root, journal and protected endpoint.
+// The caller owns all providers until Serve stops; enrollment is never created
+// here. Existing constructors retain their original narrower capability sets.
+func ListenNetworkManagedController(ctx context.Context, path string, uid, gid uint32, store *journal.Store, root *data.Root, pin data.RootIdentity, native *driver.CandidateRuntime, active, entries int) (*Server, error) {
+	if ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || store == nil || root == nil || native == nil {
+		return nil, ErrUnsafeEndpoint
+	}
+	if _, err := store.ControllerDeployment(ctx); err != nil {
+		return nil, ErrUnsafeEndpoint
+	}
+	network, err := newNetworkProvider(store, active, entries)
+	if err != nil {
+		return nil, ErrUnsafeEndpoint
+	}
+	server, err := ListenManagedController(ctx, path, uid, gid, store, root, pin, native)
+	if err != nil {
+		return nil, err
+	}
+	server.network = network
+	return server, nil
+}
