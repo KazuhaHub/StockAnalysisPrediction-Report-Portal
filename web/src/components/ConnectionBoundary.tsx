@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Alert, Button, Result } from 'antd'
+import { Button, Result, Spin, theme } from 'antd'
 import { useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, clearConnectionError, getConnectionError, subscribeConnection } from '../api/client'
@@ -44,13 +44,38 @@ export default function ConnectionBoundary({ children }: { children: ReactNode }
   return <ConnectionContext.Provider value={{ error, blocked, busy, retry }}>{children}</ConnectionContext.Provider>
 }
 
-/** A compact notice in the shell; the current reading surface remains mounted and usable. */
+/**
+ * A compact floating status in the shell: it never pushes the page down, so the current reading
+ * surface stays mounted, in place and usable. The dot turns into a spinner while a probe runs.
+ */
 export function ConnectionNotice() {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const { error, blocked, busy, retry } = useContext(ConnectionContext)
   if (!error || blocked) return null
-  return <Alert style={{ width: '100%' }} type="warning" showIcon banner title={t('connection.notice')}
-    action={<Button aria-label={t('connection.retry')} size="small" loading={busy} onClick={retry}>{t('connection.retry')}</Button>} />
+  return (
+    <div
+      role="alert"
+      style={{
+        position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: token.zIndexPopupBase + 10,
+        display: 'flex', alignItems: 'center', gap: 10, maxWidth: 'calc(100vw - 32px)',
+        padding: '6px 6px 6px 14px', borderRadius: 999, background: token.colorBgElevated,
+        border: `1px solid ${token.colorBorderSecondary}`, boxShadow: token.boxShadowSecondary,
+        fontSize: token.fontSizeSM, lineHeight: '20px', color: token.colorText, whiteSpace: 'nowrap',
+      }}
+    >
+      {busy ? (
+        <Spin size="small" />
+      ) : (
+        <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: token.colorWarning, boxShadow: `0 0 0 3px ${token.colorWarningBg}` }} />
+      )}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('connection.notice')}</span>
+      <Button aria-label={t('connection.retry')} type="text" size="small" disabled={busy} onClick={retry}
+        style={{ borderRadius: 999, color: token.colorPrimary, fontSize: token.fontSizeSM }}>
+        {t('connection.retryNow')}
+      </Button>
+    </div>
+  )
 }
 
 /** Only the destination content is unavailable. The signed-in navigation stays outside this boundary. */
