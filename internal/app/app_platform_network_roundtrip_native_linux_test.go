@@ -192,7 +192,7 @@ func platformNetworkFixtureCount(t *testing.T) int {
 		t.Fatal(err)
 	}
 	count, err := strconv.Atoi(string(raw))
-	if err != nil || count < 1 || count > 2 {
+	if err != nil || count < 1 || count > 4 {
 		t.Fatal("invalid HTTPS fixture count", err)
 	}
 	return count
@@ -225,27 +225,8 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 	t.Log("PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED")
 	// No SQL lock is held across request IO. The server waits for this exact
 	// withdrawal before returning, making the post-IO denial deterministic.
-	revokeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	cancel, done := beginPlatformNetworkFixtureWithdrawal(t, s, installation)
 	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		err := waitPlatformNetworkFixtureFile(revokeCtx, filepath.Join(os.Getenv("TMPDIR"), "network-arrived"))
-		if err == nil {
-			var resultErr error
-			result, resultErr := s.st.db.ExecContext(revokeCtx, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
-			err = resultErr
-			if err == nil {
-				n, e := result.RowsAffected()
-				if e != nil || n != 1 {
-					err = fmt.Errorf("withdrawal affected %d rows: %v", n, e)
-				}
-			}
-		}
-		if err == nil {
-			err = os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "network-revoked"), []byte("1"), 0600)
-		}
-		done <- err
-	}()
 	status, body, err = request("/v1/revoke")
 	cancel()
 	withdrawalErr := <-done
@@ -254,6 +235,7 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 		t.Fatal("post-IO withdrawal released response or retried", withdrawalErr, err)
 	}
 	t.Log("PORTAL_NETWORK_HTTPS_POST_IO_REVOKED")
+	testNativePlatformNetworkHTTP(t, s, actor, installation, binding, endpoint)
 }
 
 // Namespace-local DNS answers only the fixed fixture name. Nameserver addresses
@@ -375,4 +357,34 @@ func startPlatformNetworkDNSFixture(t *testing.T) {
 			}
 		}()
 	}
+}
+
+func beginPlatformNetworkFixtureWithdrawal(t *testing.T, s *Server, installation string) (context.CancelFunc, <-chan error) {
+	t.Helper()
+	for _, name := range []string{"network-arrived", "network-revoked"} {
+		if err := os.Remove(filepath.Join(os.Getenv("TMPDIR"), name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal("reset owned fixture handshake", err)
+		}
+	}
+	revokeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	done := make(chan error, 1)
+	go func() {
+		err := waitPlatformNetworkFixtureFile(revokeCtx, filepath.Join(os.Getenv("TMPDIR"), "network-arrived"))
+		if err == nil {
+			var resultErr error
+			result, resultErr := s.st.db.ExecContext(revokeCtx, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
+			err = resultErr
+			if err == nil {
+				n, e := result.RowsAffected()
+				if e != nil || n != 1 {
+					err = fmt.Errorf("withdrawal affected %d rows: %v", n, e)
+				}
+			}
+		}
+		if err == nil {
+			err = os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "network-revoked"), []byte("1"), 0600)
+		}
+		done <- err
+	}()
+	return cancel, done
 }

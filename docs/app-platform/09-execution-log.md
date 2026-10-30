@@ -2484,3 +2484,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   that mount relationship and use only a new network namespace with a local
   bounded DNS service answering the unchanged resolver configuration. Corrected
   native proof is still required; no sandbox constraint was removed.
+
+- Added the session-only network HTTP gateway with current page binding, existing
+  enrolment/origin/session checks, strict bounded canonical Base64 bodies, a
+  separate two-slot budget, trusted immutable runtime bootstrap and full current-
+  viewer coordinator dispatch. Uncertain results carry no remote body and are
+  never retryable. Added paired refusal/codec tests and actual native HTTP success,
+  stale-page/absent-runtime zero-IO and post-IO withdrawal assertions; exact new
+  native/PG proof remains pending. The SDK/launch/browser path is still pending.
+  See [network session gateway](143-network-session-http-gateway.md).

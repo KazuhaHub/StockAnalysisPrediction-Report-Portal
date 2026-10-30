@@ -113,7 +113,7 @@ jobs:
       - name: Current viewer network request authority
         run: |
           test -n "$TEST_POSTGRES_DSN"
-          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetworkRequest'
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetwork(Request|HTTP)'
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"
