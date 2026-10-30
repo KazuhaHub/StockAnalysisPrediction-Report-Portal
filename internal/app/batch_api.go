@@ -1048,17 +1048,17 @@ func (s *Server) apiBatchQueue(w http.ResponseWriter, r *http.Request, user stri
 	if running < 0 {
 		running = 0
 	}
-	waiting := 0
-	if owner == "" {
-		waiting = len(s.queuedItems()) // due, awaiting admission (excludes not-yet-due)
-	} else {
+	queuedAll := s.queuedItems() // due, awaiting admission (excludes not-yet-due)
+	waiting := len(queuedAll)
+	if owner != "" {
+		waiting = 0
 		mine := map[int64]bool{}
 		for _, j := range s.st.QueuedJobs() {
 			if j.CreatedBy == owner {
 				mine[j.ID] = true
 			}
 		}
-		for _, it := range s.queuedItems() {
+		for _, it := range queuedAll {
 			if mine[it.ID] {
 				waiting++
 			}
@@ -1069,11 +1069,15 @@ func (s *Server) apiBatchQueue(w http.ResponseWriter, r *http.Request, user stri
 		"waiting":      waiting,
 		"running":      running,
 		"running_rows": s.st.RunningItemCount(owner), // concurrent runs (rows) — what the run cap governs
-		"scheduled":    scheduled,
-		"budget":       s.batchBudget(),
-		"reserved":     s.batchReserved(),
-		"my_priority":  s.resolveBasePriority(user),                           // the caller's resolved base priority (0..100, ADR 0008)
-		"done_today":   s.st.CountFinishedOn(now.Format("2006-01-02"), owner), // server-side count (exact under the paginated job list)
+		// Capacity is not the caller's own: whether a new run starts at once depends on the whole
+		// queue, so these two are global for everyone (numbers only, no identities).
+		"queue_running_rows": s.st.RunningItemCount(""),
+		"queue_waiting":      len(queuedAll),
+		"scheduled":          scheduled,
+		"budget":             s.batchBudget(),
+		"reserved":           s.batchReserved(),
+		"my_priority":        s.resolveBasePriority(user),                           // the caller's resolved base priority (0..100, ADR 0008)
+		"done_today":         s.st.CountFinishedOn(now.Format("2006-01-02"), owner), // server-side count (exact under the paginated job list)
 	})
 }
 

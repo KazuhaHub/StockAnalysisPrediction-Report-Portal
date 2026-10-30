@@ -549,7 +549,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         <span style={{ fontSize: 12 }}>
           <Typography.Text type="secondary">{t('queue.budget')}</Typography.Text>{' '}
           <Tag>
-            {summary.running_rows ?? summary.running ?? 0} / {summary.budget}
+            {summary.queue_running_rows ?? summary.running_rows ?? summary.running ?? 0} / {summary.budget}
           </Tag>
         </span>
       )}

@@ -70,7 +70,12 @@ recurring routes previously answered 403 to a non-owner; they answer 404 now.
 
 `GET /api/admin/batch/queue` keeps its shape. For an administrator it is the whole queue. For anyone
 else `waiting`, `running`, `running_rows`, `scheduled` and `done_today` count their own jobs, so the
-summary agrees with the list under it; `budget`, `reserved` and `my_priority` are unchanged. The queue
+summary agrees with the list under it; `budget`, `reserved` and `my_priority` are unchanged. Capacity is
+not the caller's own, though: whether a new run starts at once depends on the whole queue. So the
+summary also carries `queue_running_rows` and `queue_waiting`, the whole queue's concurrent runs and
+due waiting jobs, for everyone (numbers only, no identities; for an administrator they equal
+`running_rows` and `waiting`). The run dialog's idle/full banner and the "Max at once" tag compare
+these with `budget`; the summary tiles keep the own counts. The queue
 page hides the submitter filter from a non-administrator, whose list holds only their own runs.
 
 This is a behaviour change for operators: the queue page now shows an operator their own runs rather
@@ -189,7 +194,11 @@ Each is covered by a test in `internal/app/tasks_api_test.go` unless noted.
     partial-only run never reads "0 failed" — `TaskTray.test.tsx`.
 17. The own-filtered listings and the export "ahead" count run on Postgres —
     `TestPostgresMyTasksQueries` (skipped unless `TEST_POSTGRES_DSN` is set).
-18. The tray lists both kinds, shows "N tasks ahead" and "scheduled", uses each item's own download and
+18. A non-administrator's summary carries the whole queue's capacity next to their own tiles, and the
+    run dialog and the "Max at once" tag use it (a cap filled by others is never "idle") —
+    `TestBatchQueueSummaryCarriesGlobalCapacityForEveryone`, `RunAnalysisModal.queue.test.tsx`,
+    `QueueTable.test.tsx`.
+19. The tray lists both kinds, shows "N tasks ahead" and "scheduled", uses each item's own download and
     cancel URLs, toasts once on in-flight to finished, and is absent for a user with no task
     capability — `web/src/components/TaskTray.test.tsx`, `web/src/lib/useMyTasks.test.tsx`,
     `web/src/components/AppLayout.test.tsx`.
