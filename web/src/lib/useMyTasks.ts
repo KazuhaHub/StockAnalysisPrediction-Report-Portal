@@ -6,7 +6,7 @@ import { startVisiblePoll } from './visiblePoll'
 
 export const ACTIVE_POLL_MS = 3000
 export const IDLE_POLL_MS = 30000
-const LIMIT = 10
+const LIMIT = 20
 
 export const taskKey = (t: Pick<TaskItem, 'kind' | 'id'>): string => `${t.kind}:${t.id}`
 

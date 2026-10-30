@@ -1315,14 +1315,66 @@ body {
 /* Desktop workbench launcher: secondary destinations open from one familiar app-grid
    control. The generous tile targets keep it easy to scan and use without adding more
    permanent buttons to the header. */
-/* The header's icon-only buttons (apps launcher, my tasks, notifications) share one size: as tall
-   as the labelled buttons beside them, with a 16px glyph. The launcher once had its own 40px / 18px
-   size and read as the loudest control on the row. */
+/* The header's quiet tool group (Tasks, the apps launcher, notifications) is one kind of button: a
+   text button 32px tall with an 8px radius, secondary text colour and a hover wash, with 16px
+   glyphs. The icon-only ones are 32px square; Tasks adds its label (--label). Only Run analysis
+   keeps the accent, and without the raised shadow a primary button carries elsewhere. */
+.rp-header-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .rp-header-icon.ant-btn {
   width: 32px;
   min-width: 32px;
   height: 32px;
+  padding: 0;
+  border-radius: 8px;
   font-size: 16px;
+  color: var(--ant-color-text-secondary);
+}
+.rp-header-icon.ant-btn:not(:disabled):hover {
+  color: var(--ant-color-text);
+}
+.rp-header-icon--label.ant-btn {
+  width: auto;
+  padding: 0 10px;
+  font-size: 14px;
+}
+.rp-header-icon--label.ant-btn .anticon {
+  font-size: 16px;
+}
+.rp-header-sep {
+  display: inline-block;
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--ant-color-border);
+}
+.rp-app-header .ant-btn.ant-btn-primary {
+  box-shadow: none;
+}
+/* A task in the Tasks drawer: two lines, actions muted until the row is hovered or focused. */
+.rp-task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+}
+.rp-task-row:hover,
+.rp-task-row:focus-within {
+  background: var(--ant-color-bg-text-hover);
+}
+.rp-task-row__acts {
+  display: flex;
+  gap: 2px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.rp-task-row:hover .rp-task-row__acts,
+.rp-task-row:focus-within .rp-task-row__acts {
+  opacity: 1;
 }
 .rp-workbench-menu {
   /* One 88px tile per destination plus the 4px gaps, and never narrower than the three-tile card.

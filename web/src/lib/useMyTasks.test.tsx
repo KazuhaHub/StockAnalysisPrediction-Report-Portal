@@ -28,7 +28,7 @@ describe('useMyTasks polling', () => {
   it('asks for the caller\'s own tasks, ten at a time', async () => {
     renderHook(() => useMyTasks({ enabled: true }))
     await tick(0)
-    expect(apiMock.get).toHaveBeenCalledWith('/api/tasks?limit=10')
+    expect(apiMock.get).toHaveBeenCalledWith('/api/tasks?limit=20')
   })
 
   it('polls slowly while idle', async () => {

@@ -19,15 +19,17 @@ import { startVisiblePoll } from '../lib/visiblePoll'
 import Omnibox from './Omnibox'
 import ScrollToTop from './ScrollToTop'
 import RunAnalysisModal from './RunAnalysisModal'
-import QueueDrawer from './QueueDrawer'
+import QueueDrawer, { type DrawerTab } from './QueueDrawer'
 import { AnnouncementPopup, AnnouncementStrip } from './SiteAnnouncement'
 import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
 import NotificationBell from './NotificationBell'
-import TaskTray from './TaskTray'
 import { useExportPolicy } from '../lib/useExportPolicy'
+import { EXPORTS_CHANGED_EVENT, type ExportsChangedDetail } from '../lib/exportJobs'
+import { isActiveTask } from '../lib/useMyTasks'
+import { useTaskCenter } from '../lib/useTaskCenter'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
 
@@ -99,7 +101,9 @@ function AppShell() {
   const suspenseKey = loc.pathname.startsWith('/manage') ? '/manage' : loc.pathname
   const [runOpen, setRunOpen] = useState(false)
   const [runTargetId, setRunTargetId] = useState<number | undefined>() // pinned workflow from an entry-button shortcut
+  // The Tasks drawer (runs and exports) and the tab it is on.
   const [queueOpen, setQueueOpen] = useState(false)
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>('runs')
   const [queue, setQueue] = useState<BatchQueueSummary | null>(null)
   // Whether the badge is holding a summary at all. The ETag store is module-global, so if a queue
   // view tagged this URL first, the badge's own first poll would be answered "nothing changed"
@@ -122,6 +126,11 @@ function AppShell() {
   // have the console instead.
   const { policy: exportPolicy } = useExportPolicy(!admin && !!user)
   const canExport = !admin && !!exportPolicy?.allowed
+  // One Tasks entry for whoever can submit runs or exports (ADR 0047). Its feed also drives the
+  // completion toasts, so it runs wherever the header does.
+  const showTasks = canRun || canExport
+  const { tasks: myTasks, active: myActive, refresh: refreshTasks } = useTaskCenter(showTasks)
+  const activeExports = myActive.filter((x) => x.kind === 'export' && isActiveTask(x)).length
   const canForecast = admin || forecast?.scope === 'all' || forecast?.scope === 'own'
 
   // "New version" prompt: once a deploy lands under this open tab, the shared coordinator says so
@@ -207,14 +216,25 @@ function AppShell() {
       setRunTargetId(detail?.targetId)
       setRunOpen(true)
     }
-    const openQueue = () => setQueueOpen(true)
+    const openQueue = () => {
+      setDrawerTab(canRun ? 'runs' : 'exports')
+      setQueueOpen(true)
+    }
+    // A page that just submitted an export asks the shell to show it.
+    const openExports = (e: Event) => {
+      if (!(e as CustomEvent<ExportsChangedDetail>).detail?.open) return
+      setDrawerTab('exports')
+      setQueueOpen(true)
+    }
+    window.addEventListener(EXPORTS_CHANGED_EVENT, openExports)
     window.addEventListener(RUN_ANALYSIS_EVENT, openRun)
     window.addEventListener(QUEUE_EVENT, openQueue)
     return () => {
       window.removeEventListener(RUN_ANALYSIS_EVENT, openRun)
       window.removeEventListener(QUEUE_EVENT, openQueue)
+      window.removeEventListener(EXPORTS_CHANGED_EVENT, openExports)
     }
-  }, [])
+  }, [canRun])
   const footerText = settings.footerText || title
   const footerHtml = settings.footerText ? sanitizeFooterHtml(settings.footerText) : ''
   const showFooterInfo = settings.footerShowInfo
@@ -364,29 +384,40 @@ function AppShell() {
               {t('nav.writeReport')}
             </Button>
           )}
-          {canRun && !chatFocus && (
-            // Queue glance with a live badge (everything not yet done: running + waiting
-            // + scheduled). Icon-only on mobile.
+          {/* The quiet tool group: Tasks, the apps launcher and notifications share one button
+              style (.rp-header-icon); only Run analysis keeps the accent. */}
+          <div className="rp-header-tools">
+          {showTasks && !chatFocus && (
+            // Tasks glance with a live badge: the runs not yet done (running + waiting +
+            // scheduled, following an administrator's mine/all pick) plus the caller's own
+            // active exports. Icon-only on mobile.
             //
-            // A count of 0 draws no badge, and so did a count nobody had asked for yet — which
+            // A run count of 0 draws no badge, and so did a count nobody had asked for yet — which
             // made "nothing is queued" and "the summary has not arrived" the same picture, and on
             // a summary that never arrives it is the first of those, permanently. Until the count
             // is real the badge is a muted dot: enough that the header is not claiming zero, quiet
-            // enough not to read as an alert.
+            // enough not to read as an alert. (Only for someone who can run; an export-only reader
+            // has no summary to wait for.)
             <Badge
-              {...(queue
-                ? { count: queue.running + queue.waiting + queue.scheduled }
-                : { dot: true, color: token.colorTextQuaternary })}
+              {...(canRun && !queue && activeExports === 0
+                ? { dot: true, color: token.colorTextQuaternary }
+                : { count: (canRun && queue ? queue.running + queue.waiting + queue.scheduled : 0) + activeExports })}
               size="small"
               overflowCount={99}
               offset={[-4, 3]}
             >
               <Button
+                type="text"
+                className={compact ? 'rp-header-icon' : 'rp-header-icon rp-header-icon--label'}
                 icon={<UnorderedListOutlined />}
-                onClick={() => setQueueOpen(true)}
-                title={queue ? t('nav.queue') : `${t('nav.queue')} · ${t('common.loading')}`}
+                aria-label={t('nav.tasks')}
+                onClick={() => {
+                  setDrawerTab(canRun ? 'runs' : 'exports')
+                  setQueueOpen(true)
+                }}
+                title={canRun && !queue ? `${t('nav.tasks')} · ${t('common.loading')}` : t('nav.tasks')}
               >
-                {!compact && t('nav.queue')}
+                {!compact && t('nav.tasks')}
               </Button>
             </Badge>
           )}
@@ -445,7 +476,6 @@ function AppShell() {
             >
               <Button
                 type="text"
-                shape="circle"
                 className="rp-header-icon"
                 icon={<AppstoreOutlined />}
                 aria-label={t('nav.workbench')}
@@ -455,8 +485,9 @@ function AppShell() {
               />
             </Popover>
           )}
-          {user && !chatFocus && (canRun || canExport) && <TaskTray key={user} canRun={canRun} canExport={canExport} admin={admin} />}
           {user && <NotificationBell key={user} user={user} />}
+          </div>
+          <span className="rp-header-sep" role="separator" aria-orientation="vertical" />
           <Popover
             trigger="click"
             placement="bottomRight"
@@ -693,7 +724,18 @@ function AppShell() {
           initialTargetId={runTargetId}
         />
       )}
-      {canRun && <QueueDrawer open={queueOpen} onClose={() => setQueueOpen(false)} />}
+      {showTasks && (
+        <QueueDrawer
+          open={queueOpen}
+          onClose={() => setQueueOpen(false)}
+          canRun={canRun}
+          canExport={canExport}
+          tasks={myTasks}
+          refreshTasks={refreshTasks}
+          tab={drawerTab}
+          onTabChange={setDrawerTab}
+        />
+      )}
 
       {!onChat && <ScrollToTop routeKey={loc.pathname + loc.search} />}
 
