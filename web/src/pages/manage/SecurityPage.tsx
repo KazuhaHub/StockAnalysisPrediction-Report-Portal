@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import { quietly } from '../../lib/loadFailure'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
@@ -177,7 +178,7 @@ function GlobalSecuritySettings() {
         lockout,
       })
       message.success(t('common.saved'))
-      await load()
+      await quietly(load)
     } catch (e) {
       message.error(errText(e, t))
     } finally {

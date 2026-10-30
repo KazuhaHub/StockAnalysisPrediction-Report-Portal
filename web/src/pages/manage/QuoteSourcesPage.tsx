@@ -5,7 +5,7 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
@@ -336,7 +336,7 @@ export default function QuoteSourcesPage() {
       // "saved" is this page telling an admin the cache holds a quote for 1 second while the server
       // holds it for 5 — a setting that reads as accepted and was not.
       if (st && Array.isArray(st.sources)) apply(st)
-      else await load()
+      else await quietly(load)
     } catch (e) {
       message.error(errText(e, t))
     } finally {

@@ -1,8 +1,8 @@
-import { useSyncExternalStore, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Button, Result, Spin, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { getConnectionError, subscribeConnection } from '../api/connection'
+import WaitingForConnection from './WaitingForConnection'
 
 // What a view shows while the answer it describes is still on the wire.
 //
@@ -38,7 +38,6 @@ export default function LoadGate({
   title?: string
 }) {
   const { t } = useTranslation()
-  const connectionDown = useSyncExternalStore(subscribeConnection, getConnectionError) !== null
   if (error) {
     return (
       <Result
@@ -62,7 +61,7 @@ export default function LoadGate({
       <div style={{ display: 'grid', alignContent: 'center', justifyItems: 'center', gap: 12, minHeight }}>
         <Spin size="large" />
         <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        {connectionDown && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('common.waitingForConnection')}</Typography.Text>}
+        <WaitingForConnection />
       </div>
     )
   }

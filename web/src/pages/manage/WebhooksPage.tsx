@@ -5,7 +5,7 @@ import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-de
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
@@ -57,7 +57,7 @@ export default function WebhooksPage() {
       await api.post('/api/admin/webhooks', { url: v.url, events: v.events, secret: v.secret || '' })
       setOpen(false)
       message.success(t('webhook.msgAdded'))
-      await load()
+      await quietly(load)
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 

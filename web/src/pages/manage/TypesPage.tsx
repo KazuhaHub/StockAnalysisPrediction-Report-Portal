@@ -20,7 +20,7 @@ import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOut
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
@@ -201,7 +201,7 @@ export default function TypesPage() {
       setSavedGroups((gs) => gs.map((g) => g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g))
     }).catch(async (e) => {
       message.error(errText(e, t))
-      await load()
+      await quietly(load)
     }).finally(() => setOrdering(false))
   }
 
@@ -219,7 +219,7 @@ export default function TypesPage() {
       await api.post('/api/admin/types/save', { rows })
       message.success(t('common.saved'))
       setSavedGroups(groups)
-      await load()
+      await quietly(load)
     } catch (e) {
       message.error(errText(e, t))
     } finally {

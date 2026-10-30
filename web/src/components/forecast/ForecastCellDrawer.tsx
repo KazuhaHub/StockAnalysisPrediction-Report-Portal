@@ -8,6 +8,7 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import ScrollRegion from './ScrollRegion'
+import WaitingForConnection from '../WaitingForConnection'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -294,7 +295,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           {(membership || presentation === 'table') && <Typography.Title level={5} style={{ marginTop: 0 }}>
             {t('forecast.drawer.members')}
           </Typography.Title>}
-          {!membership && presentation === 'visual' && current.loading && <Spin />}
+          {!membership && presentation === 'visual' && current.loading && <><Spin /><WaitingForConnection /></>}
           {/* The list leaves out the months retention removed; the cell above it does not say so. */}
           {mode === 'custom' && current.excluded.length > 0 && (
             <div style={{ marginBottom: 8 }}>

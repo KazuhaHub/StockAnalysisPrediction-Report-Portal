@@ -19,6 +19,7 @@ import { api, errText } from '../api/client'
 import type { SectionDiff } from '../api/types'
 import { formatReportDateTime } from '../lib/datetime'
 import Markdown from './Markdown'
+import WaitingForConnection from './WaitingForConnection'
 import { SectionBlock } from './DiffSections'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
@@ -162,6 +163,7 @@ export default function ReportHistoryDrawer({
 
   return (
     <Drawer title={t('reportHistory.title')} open={open} onClose={onClose} size={720} destroyOnHidden>
+      {loading && <WaitingForConnection />}
       <Spin spinning={loading}>
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           {current && (
@@ -231,7 +233,7 @@ export default function ReportHistoryDrawer({
               {detailErr ? (
                 <Alert type="error" showIcon title={detailErr} />
               ) : !detail ? (
-                <Spin />
+                <><Spin /><WaitingForConnection /></>
               ) : view === 'diff' ? (
                 detail.changed === 0 ? (
                   <Empty description={t('reportHistory.noChange')} />

@@ -63,7 +63,9 @@ export default function RecurringConsole() {
       // Settled either way: load() swallows this rejection, and gating New on the flag alone
       // would leave the button disabled for good on a server that failed to answer once.
       .finally(() => setTargetsLoaded(true))
-  const loadTasks = () => {
+  // `refresh` is a reload behind an action: it keeps the list it has when the request fails and
+  // always ends its own spinner, so a lost connection cannot leave the table loading.
+  const loadTasks = (refresh = false) => {
     setLoading(true)
     return api
       .get<RecurringTasksResp>('/api/admin/batch/recurring')
@@ -74,7 +76,7 @@ export default function RecurringConsole() {
         if (r.maxConcurrency) setMaxConcurrency(r.maxConcurrency)
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
+      .then(...(refresh ? ([() => setLoading(false), (e: unknown) => { setLoading(false); throw e }] as const) : settleOnAnswer(() => setLoading(false))))
   }
 
   // Two claims this console must not make before its two GETs land: "no run targets yet" (with
@@ -189,7 +191,7 @@ export default function RecurringConsole() {
       else await api.put(`/api/admin/batch/recurring/${editingId}`, body)
       message.success(t('common.saved'))
       setModalOpen(false)
-      loadTasks()
+      loadTasks(true).catch(() => {})
     } catch (e) {
       message.error(errText(e, t) || t('recurring.errSave'))
     } finally {
@@ -200,7 +202,7 @@ export default function RecurringConsole() {
   const toggle = async (task: RecurringTask, enabled: boolean) => {
     try {
       await api.post(`/api/admin/batch/recurring/${task.id}/enable`, { enabled })
-      loadTasks()
+      loadTasks(true).catch(() => {})
     } catch (e) {
       message.error(errText(e, t))
     }
@@ -215,7 +217,7 @@ export default function RecurringConsole() {
       onOk: async () => {
         const r = await api.post<{ job_id: number }>(`/api/admin/batch/recurring/${task.id}/run`, {})
         message.success(t('recurring.firedJob', { id: r.job_id }))
-        loadTasks()
+        loadTasks(true).catch(() => {})
       },
     })
 
@@ -229,7 +231,7 @@ export default function RecurringConsole() {
       onOk: async () => {
         await api.del(`/api/admin/batch/recurring/${task.id}`)
         message.success(t('recurring.deleted'))
-        loadTasks()
+        loadTasks(true).catch(() => {})
       },
     })
 

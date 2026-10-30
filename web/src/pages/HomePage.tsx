@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -35,7 +35,7 @@ import { linkDisplayLabel, shortcutAppKey, shortcutOfUrl, shortcutPerm, triggerS
 import { useAppAccess } from '../appAccess'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import { useLoadFailure } from '../lib/useOnReconnect'
-import { settleOnAnswer } from '../lib/loadFailure'
+import { loadFailure, settleOnAnswer } from '../lib/loadFailure'
 import { useHomeQuotes } from '../lib/useHomeQuotes'
 import { versionLabel } from '../lib/versionLabel'
 import { useFavorites } from '../favorites'
@@ -53,6 +53,8 @@ export default function HomePage() {
   const appAccess = useAppAccess()
   const [sp, setSp] = useSearchParams()
   const [data, setData] = useState<HomeResp | null>(null)
+  const dataRef = useRef(data)
+  dataRef.current = data
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -115,7 +117,14 @@ export default function HomePage() {
           setLoadErr('')
           setLoading(false)
         })
-        .catch(() => {})
+        // A background refetch stays silent while the page has something to show; before the first
+        // answer it settles the page like the initial load would (a connection loss still waits).
+        .catch((e) => {
+          const text = loadFailure(e, t)
+          if (text === null) return
+          setLoading(false)
+          if (!dataRef.current) setLoadErr(text)
+        })
     return startVisiblePoll(refetch, 60000, { skipLeading: true })
   }, [params])
 

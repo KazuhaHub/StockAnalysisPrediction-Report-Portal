@@ -1441,6 +1441,7 @@
   "ou.sectionTenancy": "Tenancy and visibility",
   "ou.single": "Single select",
   "ou.systemDefault": "the system default",
+  "ou.previewPending": "Checking what this move would inherit. Save is available once the preview arrives.",
   "ou.targetEnabled": "Allowed",
   "ou.targetName": "Workflow",
   "ou.title": "All organizations",

@@ -4,7 +4,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
@@ -92,12 +92,12 @@ function VersionRegistry() {
         visibility: draft.visibility, grants: draft.grants })
       message.success(t('versions.saved'))
       setDraft(null)
-      await load()
+      await quietly(load)
     } catch (error) { message.error(errText(error, t)) }
     finally { setSaving(false) }
   }
   const remove = async (name: string) => {
-    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load() }
+    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await quietly(load) }
     catch (error) { message.error(errText(error, t)) }
   }
   const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)

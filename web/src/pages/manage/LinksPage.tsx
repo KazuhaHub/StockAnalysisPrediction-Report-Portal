@@ -7,7 +7,7 @@ import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifi
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import { useAuth } from '../../auth'
 import type { AppSummary, AppsResp, BatchTarget, ChatTarget, LinkGroup, LinkGroupMode, LinkItem } from '../../api/types'
 import { difyModeKind } from '../../lib/batchUi'
@@ -194,7 +194,7 @@ export default function LinksPage() {
     else await api.post('/api/admin/link-groups', payload)
     setGroupOpen(false)
     message.success(t('common.saved'))
-    await load()
+    await quietly(load)
     } catch (e) { message.error(errText(e, t)) } finally { setGroupSaving(false) }
   }
   const deleteGroup = async (id: number) => {
@@ -243,7 +243,7 @@ export default function LinksPage() {
     else await api.post('/api/admin/links', payload)
     setOpen(false)
     message.success(t('common.saved'))
-    await load()
+    await quietly(load)
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
   const onValuesChange = (changed: Record<string, unknown>) => {

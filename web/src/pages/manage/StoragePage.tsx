@@ -5,6 +5,7 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import { quietly } from '../../lib/loadFailure'
 import type { CleanupConfig, CleanupResult, CleanupRun, CleanupUsage, CleanupUsageCategory } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
@@ -199,8 +200,8 @@ export default function StoragePage() {
       await api.post('/api/admin/cleanup/config', values)
       setCfg((current) => current && ({ ...current, ...values }))
       message.success(t('common.saved'))
-      await loadConfig()
-      await loadUsage().catch(() => {})
+      await quietly(loadConfig)
+      await quietly(loadUsage).catch(() => {})
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 

@@ -4,6 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { loadFailure } from '../../lib/loadFailure'
+import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { ForecastScope, GroupTargetRow, GroupTargetsResp, OUPolicyResults, UserGroupRow } from '../../api/types'
 import InheritField from './InheritField'
 import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSettings'
@@ -129,6 +130,7 @@ export default function OrgUnitDetail({
   onMembers?: () => void
 }) {
   const { t } = useTranslation()
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const def = groups.find((g) => g.is_default)
   const isDefault = !!group.is_default
@@ -168,6 +170,9 @@ export default function OrgUnitDetail({
   const [d, setD] = useState<Draft>(() => draftOf(group, def, groups))
   const [saving, setSaving] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  // A parent move whose preview has not been answered (still in flight, or the connection was down):
+  // the panel must not present the current parent's inheritance as the result, and Save waits.
+  const [previewPending, setPreviewPending] = useState(false)
   const [impact, setImpact] = useState<AffectedAnnouncement[] | null>(null)
   const [orphanChoice, setOrphanChoice] = useState<'disable' | 'keep'>('disable')
   const [deleting, setDeleting] = useState(false)
@@ -186,17 +191,20 @@ export default function OrgUnitDetail({
   useEffect(() => {
     setPreviewPolicies(null)
     setPreviewError('')
+    setPreviewPending(false)
     if (!group.policy_results || d.parent_id === (group.parent_id ?? 0)) return
     let current = true
+    setPreviewPending(true)
     const timer = setTimeout(() => {
       api.post<{ inherited_policy_results: OUPolicyResults }>(`/api/admin/groups/${group.id}/preview`, {
         ...Object.fromEntries(Object.entries(group).filter(([key]) => POLICY_FIELDS.has(key))),
         name: d.name, parent_id: d.parent_id,
-      }).then((r) => { if (current) setPreviewPolicies(r.inherited_policy_results) })
-        .catch((e) => { const text = loadFailure(e, t); if (current && text !== null) setPreviewError(text) })
+      }).then((r) => { if (current) { setPreviewPolicies(r.inherited_policy_results); setPreviewPending(false) } })
+        // A lost connection leaves the preview pending and asks again when the connection returns.
+        .catch((e) => { const text = failure(e); if (current && text !== null) { setPreviewError(text); setPreviewPending(false) } })
     }, 150)
     return () => { current = false; clearTimeout(timer) }
-  }, [group.id, group.parent_id, group.policy_results, d.parent_id])
+  }, [group.id, group.parent_id, group.policy_results, d.parent_id, retryKey])
 
   // Who the inherited values come from. Run governance falls back to the Default group; the OU tree
   // is not involved, which is a distinction the old screen never drew and this label has to.
@@ -295,6 +303,7 @@ export default function OrgUnitDetail({
     <div className={`rp-ou-detail${show('directory') ? '' : ' rp-ou-detail--policy'}`}>
       <ConfigProvider componentDisabled={saving}>
       {(group.policy_available === false || previewError) && <Alert type="error" showIcon title={previewError || t('err.ou_invalid_topology')} />}
+      {previewPending && !previewError && <Alert type="info" showIcon title={t('ou.previewPending')} />}
       <Card
         className="rp-ou-profile-card"
         size="small"
@@ -314,7 +323,7 @@ export default function OrgUnitDetail({
           sections.some((section) => SECTION_FIELDS[section].length > 0 && !(section === 'access' && isDefault)) &&
           <Space wrap>
           {dirty && <Button size="small" onClick={() => setD(acknowledged)}>{t('manage.discard')}</Button>}
-          <Button type="primary" size="small" loading={saving} disabled={group.policy_available === false || !!previewError} onClick={save}>
+          <Button type="primary" size="small" loading={saving} disabled={group.policy_available === false || !!previewError || previewPending} onClick={save}>
             {t('common.save')}
           </Button>
           </Space>

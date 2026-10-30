@@ -4,7 +4,7 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, quietly } from '../../lib/loadFailure'
 import type { Role, SSOProviderAdmin, SSORuleRow, SSORulesResp, UserGroupRow } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
@@ -97,7 +97,7 @@ export default function SSORulesEditor({
       setSavedRules(rules)
       setDirty(false)
       message.success(t('common.saved'))
-      await load()
+      await quietly(load)
     } catch (e) {
       message.error(errText(e, t))
     } finally {

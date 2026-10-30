@@ -11,6 +11,8 @@ import LoadGate from '../components/LoadGate'
 import { difyModeTag } from '../lib/batchUi'
 import type { ChatConversation, ChatTarget, ChatTurn } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { loadFailure } from '../lib/loadFailure'
+import { useOnReconnect } from '../lib/useOnReconnect'
 import { useLoadFailure } from '../lib/useOnReconnect'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
@@ -183,7 +185,9 @@ export default function ChatPage() {
         // fall back to the first target if it's absent, unknown, or no longer accessible.
         const want = Number(sp.get('target'))
         const initial = r.targets?.find((tg) => tg.id === want) ?? r.targets?.[0]
-        if (initial) setTargetId(initial.id)
+        // Only fills an empty choice: a reload after a lost connection must never replace the
+        // assistant the user is already on (that would reset the open conversation).
+        if (initial) setTargetId((current) => current ?? initial.id)
       })
       // Swallowing this used to leave "no chat or agent apps yet" on screen for good — a failed
       // request wearing the face of a configuration answer.
@@ -245,15 +249,22 @@ export default function ChatPage() {
       // on screen to lose. A background refresh that fails after a sent message must leave the
       // rail exactly as it is; the rows in it are still the last thing the server said.
       .catch((e) => {
-        const text = failure(e)
-        if (!quiet && text !== null) setConvsErr(text)
+        const text = loadFailure(e, t)
+        if (text !== null) {
+          if (!quiet) setConvsErr(text)
+        } else if (!quiet) {
+          // Only a rail that is waiting for its first answer is reloaded on reconnect; a background
+          // refresh that failed leaves the rail as it is.
+          convsStale.current = true
+        }
       })
   }
-  // The rail that could not load because the connection was down loads when it returns.
-  useEffect(() => {
-    if (retryKey > 0 && !convsLoaded) loadConvs(targetId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [retryKey])
+  const convsStale = useRef(false)
+  useOnReconnect(() => {
+    if (!convsStale.current) return
+    convsStale.current = false
+    loadConvs(targetId)
+  })
   useEffect(() => {
     setConvId(undefined)
     setMsgs([])

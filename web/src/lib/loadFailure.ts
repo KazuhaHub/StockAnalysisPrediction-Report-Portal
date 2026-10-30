@@ -1,6 +1,16 @@
 import { errText } from '../api/client'
 import { isConnectionError } from '../api/connection'
 
+// A refresh that follows a successful user action (save, delete…) is not a load the view is waiting
+// on: the user's change already landed, so a connection failure there must not flag the view for a
+// reload on reconnect (which would overwrite whatever they have typed since) or leave a spinner up.
+let quietDepth = 0
+export const isQuiet = () => quietDepth > 0
+export async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  quietDepth++
+  try { return await fn() } finally { quietDepth-- }
+}
+
 /**
  * What a failed data load should show: null when the cause is the connection (the connection strip
  * already says so and the view keeps its previous state), otherwise the user-facing text.
@@ -29,5 +39,5 @@ export function onLoadFailure(t: (k: string, o?: Record<string, unknown>) => str
  * keeps its spinner) and the rejection continues to the caller's catch.
  */
 export function settleOnAnswer(done: () => void): [() => void, (e: unknown) => never] {
-  return [done, (e) => { if (!isConnectionError(e)) done(); throw e }]
+  return [done, (e) => { if (!isConnectionError(e) || isQuiet()) done(); throw e }]
 }

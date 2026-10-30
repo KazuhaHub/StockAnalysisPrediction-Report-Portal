@@ -3,6 +3,7 @@ import { Alert, App, Button, Form, Input, Modal, Popconfirm, Space, Switch, Typo
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../api/client'
 import type { AppSummary } from '../api/types'
+import WaitingForConnection from './WaitingForConnection'
 import { useLoadFailure } from '../lib/useOnReconnect'
 
 interface Connection {
@@ -65,7 +66,7 @@ export default function AppBackendModal({ app, onClose }: { app: AppSummary | nu
     setSaving(true)
     try { await api.del(endpoint, { revision: connection.revision }); onClose() } catch (e) { setError(errText(e, t)) } finally { setSaving(false) }
   }
-  return <Modal open={!!app} title={t('apps.backendTitle', { name: app?.name })} onCancel={onClose} onOk={save} confirmLoading={saving} loading={loading} width={720} destroyOnHidden>
+  return <Modal open={!!app} title={<>{t('apps.backendTitle', { name: app?.name })}{loading && <WaitingForConnection />}</>} onCancel={onClose} onOk={save} confirmLoading={saving} loading={loading} width={720} destroyOnHidden>
     <Space orientation="vertical" style={{ width: '100%' }}>
       <Alert type="info" showIcon title={t('apps.backendHint')} />
       {error && <Alert type="error" showIcon title={error} />}

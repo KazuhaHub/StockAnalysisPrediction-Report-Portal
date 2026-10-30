@@ -7,7 +7,6 @@ import DashboardChart from './DashboardChart'
 import DashboardChartCard from './DashboardChartCard'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
 
 type Dataset = 'reports' | 'runs' | 'accounts'
 interface Result {
@@ -48,9 +47,9 @@ export default function StatisticsPage() {
     setError('')
     setResult(undefined)
     api.get<Result>(`/api/admin/statistics?${applied}&page=${page}&page_size=${size}${view === 'chart' ? '&view=chart' : ''}`)
-      .then(value => { if (live) setResult(value) })
-      .catch(err => { const text = failure(err); if (live && text !== null) setError(text) })
-      .then(...settleOnAnswer(() => { if (live) setBusy(false) }))
+      .then(value => { if (live) { setResult(value); setBusy(false) } })
+      // A lost connection keeps busy up (no empty state) and the query runs again on reconnect.
+      .catch(err => { const text = failure(err); if (live && text !== null) { setError(text); setBusy(false) } })
     return () => { live = false }
   }, [applied, page, size, revision, view, t, retryKey])
 
