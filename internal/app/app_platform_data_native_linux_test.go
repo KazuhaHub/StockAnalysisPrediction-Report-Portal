@@ -323,8 +323,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 					t.Error("managed service candidate IPC cleanup", err)
 				}
 			}
-			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
+			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			if err := os.RemoveAll(serviceFixture.root); err != nil {
 				t.Error("remove service fixture root", err)
 			}
