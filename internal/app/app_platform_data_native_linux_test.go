@@ -436,12 +436,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_CANDIDATE_PROBE")) {
 			t.Fatal("Portal did not settle actual native candidate", output.String())
 		}
-		candidatePath := filepath.Join(childData, "candidate-command.json")
-		nativeID := checkPlatformFixtureCandidate(t, candidatePath, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), false)
-		message := readPlatformFixtureCandidate(t, candidatePath, authority)
-		proof, err := store.ReadCandidateRunningReceipt(ctx, message.Raw, message.Signature)
-		if err != nil || nativeID == "" || proof.NativeID != nativeID {
-			t.Fatal("Portal candidate lost actual native identity", err)
+		if !useService {
+			candidatePath := filepath.Join(childData, "candidate-command.json")
+			nativeID := checkPlatformFixtureCandidate(t, candidatePath, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), false)
+			message := readPlatformFixtureCandidate(t, candidatePath, authority)
+			proof, err := store.ReadCandidateRunningReceipt(ctx, message.Raw, message.Signature)
+			if err != nil || nativeID == "" || proof.NativeID != nativeID {
+				t.Fatal("Portal candidate lost actual native identity", err)
+			}
 		}
 		t.Log("MANAGED_INSTALL_CANDIDATE_PROBE")
 		if os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
