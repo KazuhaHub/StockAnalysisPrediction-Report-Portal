@@ -480,8 +480,10 @@ body {
 .rp-settings-content {
   min-width: 0;
 }
+/* Settings panels use the full content width now that sections are tabs rather than a side
+   column; individual fields keep their own widths through .rp-settings-field. */
 .rp-settings-panel {
-  max-width: 960px;
+  min-width: 0;
 }
 .rp-settings-field {
   display: grid;
@@ -2245,7 +2247,6 @@ body {
 .rp-users-table .ant-table-cell .ant-space { flex-wrap: nowrap; }
 .rp-sso-page { gap: 0; }
 .rp-sso-network { max-width: 960px; padding-block: 8px; }
-.rp-sso-provider-form .rp-settings-panel { max-width: none; }
 @media (max-width: 767px) { .rp-users-directory { flex-direction: column; } .rp-admin-page-header > .rp-admin-page-actions { flex-basis: 100%; } }
 
 .rp-dashboard-palette-groups { margin-top: 16px; }
@@ -2350,7 +2351,6 @@ body {
 .rp-statistics-filters .ant-select, .rp-statistics-filters .ant-picker { width: 100%; }
 .rp-account-page { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; }
 .rp-account-security { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.rp-account-page .rp-settings-panel { max-width: none; }
 .rp-account-page .rp-settings-panel > .ant-card { border: 0; box-shadow: none; background: transparent; }
 .rp-account-page .rp-settings-panel > .ant-card > .ant-card-head { padding-inline: 0; }
 .rp-account-page .rp-settings-panel > .ant-card > .ant-card-body { padding: 20px 0; }
