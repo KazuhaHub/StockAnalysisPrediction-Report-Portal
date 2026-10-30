@@ -129,11 +129,12 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 }
 
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
-	if len(m.Capabilities.Required) == 0 {
-		return true
+	seen := make(map[string]bool, len(m.Capabilities.Required))
+	for _, capability := range m.Capabilities.Required {
+		if seen[capability] || (capability != "network.http" && capability != "reports.read") {
+			return false
+		}
+		seen[capability] = true
 	}
-	if len(m.Capabilities.Required) != 1 {
-		return false
-	}
-	return m.Capabilities.Required[0] == "network.http" || m.Capabilities.Required[0] == "reports.read"
+	return len(seen) <= 2
 }

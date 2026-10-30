@@ -52,6 +52,15 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if err != nil || len(reports) != 2 || reports[0].capability != "reports.read" || !reports[0].granted || reports[0].policy != "{}" || reports[1].granted {
 		t.Fatal("host reports capability was not selected exactly", reports, err)
 	}
+	m.Capabilities.Required = []string{"network.http", "reports.read"}
+	m.Capabilities.Optional = []string{"storage.files"}
+	combined, err := platformInstallCapabilitySelection(m, target)
+	if err != nil || len(combined) != 3 || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("combined managed and report capabilities were refused", combined, err)
+	}
+	if combined[0].capability != "network.http" || !combined[0].granted || combined[1].capability != "reports.read" || !combined[1].granted || combined[2].granted {
+		t.Fatal("combined capability selection changed", combined)
+	}
 	m.Capabilities.Required = []string{}
 	m.Capabilities.Optional = []string{"network.http", "storage.files"}
 	selected, err := platformInstallCapabilitySelection(m, target)
