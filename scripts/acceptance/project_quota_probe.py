@@ -172,7 +172,7 @@ def main(args):
             native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
             native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess)$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
-                raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-4096:])
+                raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-32768:])
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
             if "NATIVE_DATA_WRITE_ACCESS_TRANSITION_VERIFIED" not in native.stdout:
@@ -185,13 +185,13 @@ def main(args):
                 candidate_env = dict(native_env, APP_CANDIDATE_NATIVE_ROOT=str(candidate_root), APP_CANDIDATE_NATIVE_INODE=str(candidate_root.stat().st_ino), APP_CANDIDATE_NATIVE_IMAGE=candidate_image, APP_CANDIDATE_DOCKER_SOCKET=candidate_socket)
                 result = subprocess.run([binary, "-test.run=^TestNativeCandidateRuntime$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/driver", env=candidate_env, capture_output=True, text=True, timeout=70)
                 if result.returncode or "--- PASS: TestNativeCandidateRuntime" not in result.stdout:
-                    raise RuntimeError("native candidate runtime failed: " + (result.stdout+result.stderr)[-4096:])
+                    raise RuntimeError("native candidate runtime failed: " + (result.stdout+result.stderr)[-32768:])
                 report["native_candidate_quota_mount_start_once"] = True
                 if ready_image:
                     writer_env = dict(candidate_env, APP_WRITER_NATIVE_IMAGE=ready_image)
                     writer = subprocess.run([binary, "-test.run=^TestNativeDataWriterContainer$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/driver", env=writer_env, capture_output=True, text=True, timeout=70)
                     if writer.returncode or "NATIVE_FILTERED_DATA_WRITER_VERIFIED" not in writer.stdout:
-                        raise RuntimeError("actual filtered data writer failed: " + (writer.stdout+writer.stderr)[-4096:])
+                        raise RuntimeError("actual filtered data writer failed: " + (writer.stdout+writer.stderr)[-32768:])
                     report["native_filtered_data_writer_verified"] = True
                     if "NATIVE_DATA_WRITER_ADAPTER_VERIFIED" not in writer.stdout or "NATIVE_WRITER_RECOVERY_PARTIAL_PERMISSION_REFUSED" not in writer.stdout or "NATIVE_WRITABLE_CANDIDATE_DRIVER_START_VERIFIED" not in writer.stdout:
                         raise RuntimeError("actual writer adapter/reference exclusion missing")
@@ -211,7 +211,7 @@ def main(args):
                 journal_env = dict(native_env, APP_DATA_NATIVE_PHASE=phase, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode)
                 result = subprocess.run([args[6], "-test.run=^TestNativeJournalDataExecution$", "-test.v", "-test.timeout=45s"], env=journal_env, capture_output=True, text=True, timeout=55)
                 if result.returncode or "--- PASS: TestNativeJournalDataExecution" not in result.stdout:
-                    raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
+                    raise RuntimeError("native journal " + phase + " failed: " + (result.stdout+result.stderr)[-32768:])
                 if phase == "inspect":
                     if "NATIVE_DATA_WRITER_INTENT_VERIFIED" not in result.stdout:
                         raise RuntimeError("actual prepared-data writer admission/claim verification missing")
@@ -227,7 +227,7 @@ def main(args):
                     receipt_env = dict(native_env, APP_DATA_NATIVE_PHASE=phase, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_RECEIPT_FIXTURE=str(receipt_fixture))
                     result = subprocess.run([args[8], "-test.run=^TestNativeReceiptTransport$", "-test.v", "-test.timeout=60s"], env=receipt_env, capture_output=True, text=True, timeout=60)
                     if result.returncode or "--- PASS: TestNativeReceiptTransport" not in result.stdout:
-                        raise RuntimeError("native receipt transport " + phase + " failed: " + (result.stdout+result.stderr)[-4096:])
+                        raise RuntimeError("native receipt transport " + phase + " failed: " + (result.stdout+result.stderr)[-32768:])
 
                 run_transport("prepared")
                 report["native_receipt_cross_uid_transport"] = True
@@ -287,7 +287,7 @@ def main(args):
             native_env["APP_DATA_NATIVE_PHASE"] = "inspect"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
-                raise RuntimeError("native data reopen inspection failed: " + (native.stdout+native.stderr)[-4096:])
+                raise RuntimeError("native data reopen inspection failed: " + (native.stdout+native.stderr)[-32768:])
             report["native_go_reopen_after_remount"] = True
             if journal_root is not None:
                 run_journal("inspect")
@@ -301,7 +301,7 @@ def main(args):
                     writer_journal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_WRITER_NATIVE_IMAGE=ready_image, APP_CANDIDATE_DOCKER_SOCKET=candidate[2])
                     executed = subprocess.run([args[6], "-test.run=^TestNativeJournalDataWriterExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=writer_journal_env, capture_output=True, text=True, timeout=70)
                     if executed.returncode or "NATIVE_JOURNAL_DATA_WRITER_EXECUTION_VERIFIED" not in executed.stdout or "NATIVE_WRITER_SETTLEMENT_FAILURE_PRESERVED_UNKNOWN" not in executed.stdout or "NATIVE_DATA_WRITER_RECOVERY_AFTER_EXPIRY_VERIFIED" not in executed.stdout or "NATIVE_WRITER_RECOVERY_WITHOUT_PERMISSION_MUTATION" not in executed.stdout or "NATIVE_WRITER_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED" not in executed.stdout or "NATIVE_WRITABLE_CANDIDATE_INTENT_ACTUAL_SOURCES_VERIFIED" not in executed.stdout or "NATIVE_WRITABLE_CANDIDATE_CLAIM_ACTUAL_SOURCES_VERIFIED" not in executed.stdout:
-                        raise RuntimeError("actual journal writer execution failed: " + (executed.stdout+executed.stderr)[-4096:])
+                        raise RuntimeError("actual journal writer execution failed: " + (executed.stdout+executed.stderr)[-32768:])
                     report["native_journal_data_writer_execution_verified"] = True
                     report["native_writer_settlement_failure_preserves_unknown"] = True
                     report["native_data_writer_recovery_after_expiry_verified"] = True
@@ -311,7 +311,7 @@ def main(args):
                     report["native_writable_candidate_claim_actual_sources_verified"] = True
                     started = subprocess.run([args[6], "-test.run=^TestNativeJournalWritableCandidateExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=writer_journal_env, capture_output=True, text=True, timeout=70)
                     if started.returncode or "NATIVE_WRITABLE_JOURNAL_PROCESS_SETTLEMENT_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_PROCESS_COMMIT_FAILURE_PRESERVES_UNKNOWN" not in started.stdout or "NATIVE_WRITABLE_PREFLIGHT_COMMIT_PRECEDES_PROCESS" not in started.stdout or "NATIVE_WRITABLE_START_RECOVERY_AFTER_EXPIRY_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_RECOVERY_WITHOUT_PROCESS_RESTART" not in started.stdout or "NATIVE_WRITABLE_RECOVERY_METADATA_FAILURE_RETRY_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_CURRENT_READINESS_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_RECOVERED_READINESS_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_READINESS_PRESERVES_JOURNAL" not in started.stdout or "NATIVE_WRITABLE_STOPPED_READINESS_REFUSED" not in started.stdout or "NATIVE_WRITABLE_REGISTRATION_INTENT_ACTUAL_SOURCES_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_REGISTRATION_DELIVERY_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_REGISTRATION_RECOVERY_PRESERVES_FILE" not in started.stdout or "NATIVE_WRITABLE_REGISTRATION_MISSING_FILE_NOT_CREATED" not in started.stdout or "NATIVE_WRITABLE_REGISTRATION_STOPPED_DELIVERY_REFUSED" not in started.stdout or "NATIVE_WRITABLE_HANDSHAKE_POSSESSION_VERIFIED" not in started.stdout or "NATIVE_WRITABLE_HANDSHAKE_FILE_REPLACEMENT_REFUSED" not in started.stdout or "NATIVE_WRITABLE_HANDSHAKE_PRESERVES_JOURNAL" not in started.stdout or "NATIVE_WRITABLE_STOPPED_HANDSHAKE_REFUSED" not in started.stdout:
-                        raise RuntimeError("actual writable journal process settlement failed: " + (started.stdout+started.stderr)[-4096:])
+                        raise RuntimeError("actual writable journal process settlement failed: " + (started.stdout+started.stderr)[-32768:])
                     report["native_writable_journal_process_settlement_verified"] = True
                     report["native_writable_process_commit_failure_preserves_unknown"] = True
                     report["native_writable_preflight_commit_precedes_process"] = True
@@ -342,13 +342,13 @@ def main(args):
                         handshake_env = dict(writer_journal_env, APP_WRITABLE_HANDSHAKE_TRANSPORT="1", APP_CANDIDATE_NATIVE_IMAGE=ready_image)
                         handshake = subprocess.run([args[8], "-test.run=^TestNativeWritableHandshakeTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=handshake_env, capture_output=True, text=True, timeout=70)
                         if handshake.returncode or "NATIVE_WRITABLE_HANDSHAKE_CROSS_UID_VERIFIED" not in handshake.stdout or "NATIVE_WRITABLE_HANDSHAKE_CONTROLLER_PEER_DENIAL_VERIFIED" not in handshake.stdout:
-                            raise RuntimeError("native writable handshake transport failed: " + (handshake.stdout+handshake.stderr)[-4096:])
+                            raise RuntimeError("native writable handshake transport failed: " + (handshake.stdout+handshake.stderr)[-32768:])
                         report["native_writable_handshake_cross_uid_verified"] = True
                         report["native_writable_handshake_controller_peer_denial_verified"] = True
                         lifecycle_env = dict(writer_journal_env, APP_WRITABLE_LIFECYCLE_TRANSPORT="1", APP_CANDIDATE_NATIVE_IMAGE=ready_image)
                         lifecycle = subprocess.run([args[8], "-test.run=^TestNativeWritableLifecycleTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=lifecycle_env, capture_output=True, text=True, timeout=70)
                         if lifecycle.returncode or "NATIVE_WRITABLE_LIFECYCLE_CROSS_UID_VERIFIED" not in lifecycle.stdout or "NATIVE_WRITABLE_LIFECYCLE_IDEMPOTENT_REPLAYS_VERIFIED" not in lifecycle.stdout:
-                            raise RuntimeError("native writable lifecycle transport failed: " + (lifecycle.stdout+lifecycle.stderr)[-4096:])
+                            raise RuntimeError("native writable lifecycle transport failed: " + (lifecycle.stdout+lifecycle.stderr)[-32768:])
                         report["native_writable_lifecycle_cross_uid_verified"] = True
                         report["native_writable_lifecycle_idempotent_replays_verified"] = True
                 if len(args) in (9,11):
@@ -372,7 +372,7 @@ def main(args):
                     portal_limit = 140 if browser_enabled else 100
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=" + str(portal_limit) + "s"], env=portal_env, capture_output=True, text=True, timeout=portal_limit + 10)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
-                        raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-4096:])
+                        raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-32768:])
                     if browser_enabled:
                         for marker in ("SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
                             if marker not in result.stdout:
@@ -500,7 +500,7 @@ def main(args):
                     candidate_journal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_CANDIDATE_NATIVE_IMAGE=candidate_image, APP_CANDIDATE_DOCKER_SOCKET=candidate_socket)
                     result = subprocess.run([args[6], "-test.run=^TestNativeJournalCandidateExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=candidate_journal_env, capture_output=True, text=True, timeout=70)
                     if result.returncode or "--- PASS: TestNativeJournalCandidateExecution" not in result.stdout:
-                        raise RuntimeError("native candidate journal failed: " + (result.stdout+result.stderr)[-4096:])
+                        raise RuntimeError("native candidate journal failed: " + (result.stdout+result.stderr)[-32768:])
                     report["native_candidate_journal_running_receipt"] = True
                     report["native_candidate_journal_atomic_failure_unknown"] = True
                     report["native_candidate_receipt_restart_renewal_replay"] = True
@@ -511,12 +511,12 @@ def main(args):
                         candidate_transport_env = dict(candidate_journal_env, APP_CANDIDATE_RECEIPT_FIXTURE=str(candidate_receipt_fixture))
                         result = subprocess.run([args[8], "-test.run=^TestNativeCandidateReceiptTransport$", "-test.v", "-test.timeout=45s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=candidate_transport_env, capture_output=True, text=True, timeout=55)
                         if result.returncode or "--- PASS: TestNativeCandidateReceiptTransport" not in result.stdout:
-                            raise RuntimeError("native candidate receipt channel failed: " + (result.stdout+result.stderr)[-4096:])
+                            raise RuntimeError("native candidate receipt channel failed: " + (result.stdout+result.stderr)[-32768:])
                         report["native_candidate_receipt_cross_uid_and_journal_dac"] = True
                         candidate_execution_env = dict(candidate_journal_env, APP_CANDIDATE_EXECUTION_FIXTURE=str(candidate_receipt_fixture))
                         result = subprocess.run([args[8], "-test.run=^TestNativeCandidateExecutionTransport$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/transport", env=candidate_execution_env, capture_output=True, text=True, timeout=70)
                         if result.returncode or "--- PASS: TestNativeCandidateExecutionTransport" not in result.stdout:
-                            raise RuntimeError("native candidate execution channel failed: " + (result.stdout+result.stderr)[-4096:])
+                            raise RuntimeError("native candidate execution channel failed: " + (result.stdout+result.stderr)[-32768:])
                         report["native_candidate_execution_cross_uid_actual_start"] = True
                         report["native_candidate_execution_replay_same_native_id"] = True
                         report["native_managed_endpoint_shared_provider_refusal"] = True
@@ -525,7 +525,7 @@ def main(args):
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
-                raise RuntimeError("native data accepted disabled enforcement: " + (native.stdout+native.stderr)[-4096:])
+                raise RuntimeError("native data accepted disabled enforcement: " + (native.stdout+native.stderr)[-32768:])
             command("xfs_quota", "-x", "-c", "enable -p", str(mountpoint))
             report["native_go_detects_disabled_enforcement"] = True
         # Keep the original exhausted files. A raised project limit, rather than
@@ -544,7 +544,7 @@ def main(args):
             native_env["APP_DATA_NATIVE_PHASE"] = "replaced"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
-                raise RuntimeError("native data accepted replaced filesystem identity: " + (native.stdout+native.stderr)[-4096:])
+                raise RuntimeError("native data accepted replaced filesystem identity: " + (native.stdout+native.stderr)[-32768:])
             report["native_go_rejects_changed_filesystem_uuid"] = True
             if journal_root is not None:
                 run_journal("replaced")
