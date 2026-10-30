@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
+import { App, Button, Drawer, Empty, Popconfirm, Progress, Segmented, Space, Tag, Typography } from 'antd'
 import { ArrowRightOutlined, ClockCircleOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
@@ -8,6 +8,8 @@ import type { BatchJob, BatchQueueSummary, BatchTarget } from '../api/types'
 import { InputsPreview, isTerminal, executionTags, jobProgressPresentation, queueStatusTag } from '../lib/batchUi'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
+import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
+import { useAuth } from '../auth'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
 
@@ -17,6 +19,9 @@ export default function QueueDrawer({ open, onClose }: { open: boolean; onClose:
   const { t } = useTranslation()
   const { message } = App.useApp()
   const navigate = useNavigate()
+  const { admin } = useAuth()
+  // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
+  const [scope, setScope] = useQueueScope(admin)
   const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
   const [jobs, setJobs] = useState<BatchJob[]>([])
   const [targets, setTargets] = useState<BatchTarget[]>([])
@@ -27,27 +32,30 @@ export default function QueueDrawer({ open, onClose }: { open: boolean; onClose:
   // What this drawer is actually holding. The tag store is module-global, and the header badge
   // polls the same summary URL — so on the first open a 304 would answer "unchanged" about a
   // summary the drawer has never seen, leaving all four tiles on a dash for good.
-  const heldSummary = useRef(false)
-  const heldJobs = useRef(false)
+  // The URLs whose answers the drawer holds (they change with the scope).
+  const heldSummary = useRef<string | null>(null)
+  const heldJobs = useRef<string | null>(null)
 
   const load = async () => {
-    if (!heldSummary.current) forgetTags('/api/admin/batch/queue')
-    if (!heldJobs.current) forgetTags('/api/admin/batch/jobs')
-    const summaryRequest = getIfChanged<BatchQueueSummary>('/api/admin/batch/queue')
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
+    const jobsUrl = withQueueScope('/api/admin/batch/jobs', scope, admin)
+    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
+    if (heldJobs.current !== jobsUrl) forgetTags(jobsUrl)
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
       .then((r) => {
         if (r === UNCHANGED) return
         setSummary(r)
-        heldSummary.current = true
+        heldSummary.current = summaryUrl
       })
       .catch(() => {})
-    const jobsRequest = getIfChanged<{ jobs: BatchJob[] }>('/api/admin/batch/jobs').then((r) => {
+    const jobsRequest = getIfChanged<{ jobs: BatchJob[] }>(jobsUrl).then((r) => {
       if (r === UNCHANGED) return
       setJobs(r.jobs || [])
-      heldJobs.current = true
+      heldJobs.current = jobsUrl
     })
     try {
       await jobsRequest
-      if (heldJobs.current) {
+      if (heldJobs.current === jobsUrl) {
         setLoaded(true)
         setLoadErr('')
       }
@@ -72,7 +80,7 @@ export default function QueueDrawer({ open, onClose }: { open: boolean; onClose:
       unwatch()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, scope])
 
   const targetName = (id: number) => targets.find((tg) => tg.id === id)?.name || `#${id}`
   // Active runs first: running, then waiting, then scheduled. Terminal ones live on the full page.
@@ -107,6 +115,18 @@ export default function QueueDrawer({ open, onClose }: { open: boolean; onClose:
       }
     >
       <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+        {admin && (
+          <Segmented
+            block
+            size="small"
+            value={scope}
+            onChange={(v) => setScope(v as QueueScope)}
+            options={[
+              { label: t('queue.scope.mine'), value: 'mine' },
+              { label: t('queue.scope.all'), value: 'all' },
+            ]}
+          />
+        )}
         <Space style={{ width: '100%', justifyContent: 'space-around' }} split={<span style={{ color: 'var(--rp-border)' }}>|</span>}>
           {stat(t('queue.running'), summary?.running ?? null)}
           {stat(t('queue.waiting'), summary?.waiting ?? null)}

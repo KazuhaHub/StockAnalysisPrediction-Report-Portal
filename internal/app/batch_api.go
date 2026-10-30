@@ -525,6 +525,16 @@ func clampRunes(v string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+// queueOwner is whose runs a queue view covers: "" for the whole queue, otherwise a username. A
+// non-administrator is always scoped to their own runs; an administrator sees the whole queue
+// unless the request carries scope=mine (ADR 0047).
+func (s *Server) queueOwner(r *http.Request, user string) string {
+	if !s.isAdmin(user) || r.URL.Query().Get("scope") == "mine" {
+		return user
+	}
+	return ""
+}
+
 func (s *Server) apiBatchJobs(w http.ResponseWriter, r *http.Request, user string) {
 	waiting := s.queuedItems() // for the live "N ahead" of each queued job
 	// Bound the poll: all active jobs + the most recent `limit` terminal jobs (default 300), so a
@@ -539,14 +549,14 @@ func (s *Server) apiBatchJobs(w http.ResponseWriter, r *http.Request, user strin
 	// The search box reaches the whole queue here rather than filtering the page it was sent —
 	// see queueSearchClause. `total` stays the size of the unfiltered queue, which is what the
 	// "showing the most recent N of M" line is about.
-	// Anyone below administrator sees only the runs they created (ADR 0047); `total` and the
-	// search follow the same boundary.
+	// Anyone below administrator sees only the runs they created (ADR 0047); an administrator may
+	// ask for the same view with scope=mine. `total` and the search follow the same boundary.
 	var jobs []BatchJob
 	var total int
-	if s.isAdmin(user) {
+	if owner := s.queueOwner(r, user); owner == "" {
 		jobs, total = s.st.ListQueueJobs(limit, r.URL.Query().Get("q"))
 	} else {
-		jobs, total = s.st.ListOwnQueueJobs(user, limit, r.URL.Query().Get("q"))
+		jobs, total = s.st.ListOwnQueueJobs(owner, limit, r.URL.Query().Get("q"))
 	}
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
@@ -1022,12 +1032,10 @@ func (s *Server) apiBatchJobReprioritize(w http.ResponseWriter, r *http.Request,
 // because no work is executing and presenting it as running would be misleading.
 func (s *Server) apiBatchQueue(w http.ResponseWriter, r *http.Request, user string) {
 	now := time.Now()
-	// An administrator sees the whole queue. Anyone else sees their own counts: the page they are
-	// looking at lists only their runs, and totals that ignore that would contradict it (ADR 0047).
-	owner := ""
-	if !s.isAdmin(user) {
-		owner = user
-	}
+	// An administrator sees the whole queue unless they asked for scope=mine. Anyone else sees their
+	// own counts: the page they are looking at lists only their runs, and totals that ignore that
+	// would contradict it (ADR 0047). Capacity below stays global either way.
+	owner := s.queueOwner(r, user)
 	scheduled := 0
 	blockedRunning := 0
 	loc := s.panelLocation()

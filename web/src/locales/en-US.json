@@ -1476,6 +1476,8 @@
   "preset.untitled": "(untitled)",
   "preset.viewRule": "View the full rule",
   "preset.windows": "Windows",
+  "queue.scope.mine": "Mine",
+  "queue.scope.all": "All",
   "queue.attempts": "Attempts",
   "queue.autoRefresh": "Auto-refresh",
   "queue.budget": "Max at once",
