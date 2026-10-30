@@ -43,7 +43,7 @@ export default function RunDefaultsPage() {
 }
 function RunDefaultsEditor({ ou }: { ou?: number }) {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const draft = useSettingsDraft({ targetId: 0, mode: 'now' as RunMode, presetId: 0, idle: false, retries: 0, notify: false, showRule: false, inherit: {} as Record<string, boolean> })
   const { targetId, mode, presetId, idle, retries, notify, showRule } = draft.value

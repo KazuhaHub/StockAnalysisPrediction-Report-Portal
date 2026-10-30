@@ -465,7 +465,7 @@ function ProviderForm({
 
 export default function SSOPage() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [providers, setProviders] = useState<SSOProviderAdmin[]>([])
   const [groups, setGroups] = useState<UserGroupRow[]>([])

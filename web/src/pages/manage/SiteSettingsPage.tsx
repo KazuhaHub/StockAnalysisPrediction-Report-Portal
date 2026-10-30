@@ -34,7 +34,7 @@ const VERSION_DISPLAYS: VersionDisplay[] = ['hidden', 'footer', 'header']
 // per-field (nil = untouched), so saving here never disturbs the announcement.
 export default function SiteSettingsPage() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const { refresh } = useSite()
   const [form] = Form.useForm()

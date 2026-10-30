@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { loadFailure, type LoadOpts } from './loadFailure'
-import { hasPendingDrafts } from './pendingDrafts'
+import { hasPendingDrafts, subscribeDrafts } from './pendingDrafts'
 
 /** Runs `fn` whenever the API client reports the connection is back ('rp:connection-restored'). */
 export function useOnReconnect(fn: () => void) {
@@ -19,23 +19,33 @@ export function useOnReconnect(fn: () => void) {
  * connection loss (leave state untouched) and the error text otherwise. After a connection loss,
  * `retryKey` changes when the connection returns, so adding it to the load effect's dependencies
  * re-runs the load. A view whose load never failed on the connection is not reloaded, so edits in
- * progress are not overwritten by a refresh nobody needed.
+ * progress are not overwritten by a refresh nobody needed. Pass `{ guardDrafts: true }` for a load
+ * that writes into a form.
  */
-export function useLoadFailure(options: { ignoreDrafts?: boolean } = {}) {
+export function useLoadFailure(options: { guardDrafts?: boolean } = {}) {
   const { t } = useTranslation()
   const tRef = useRef(t)
-  const ignoreDrafts = useRef(!!options.ignoreDrafts)
+  const guardDrafts = !!options.guardDrafts
   tRef.current = t
   const stale = useRef(false)
   const [retryKey, setRetryKey] = useState(0)
+  // A load that writes into a form (`guardDrafts`) must not run while the form holds unsaved edits:
+  // it would overwrite them. It is held until the form is clean (saved or discarded) instead.
+  const held = useRef(false)
   useOnReconnect(() => {
     if (!stale.current) return
     stale.current = false
-    // Reloading a form from the server while it holds unsaved edits would overwrite them.
-    // (A request derived from the draft itself, like a preview of it, opts out: it must be asked again.)
-    if (!ignoreDrafts.current && hasPendingDrafts()) return
+    if (guardDrafts && hasPendingDrafts()) { held.current = true; return }
     setRetryKey((n) => n + 1)
   })
+  useEffect(() => {
+    if (!guardDrafts) return
+    return subscribeDrafts(() => {
+      if (!held.current || hasPendingDrafts()) return
+      held.current = false
+      setRetryKey((n) => n + 1)
+    })
+  }, [guardDrafts])
   const failure = useCallback((e: unknown, opts?: LoadOpts): string | null => {
     const text = loadFailure(e, tRef.current)
     if (text === null && !opts?.quiet) stale.current = true

@@ -95,7 +95,7 @@ export default function SecurityPage() {
 
 function GlobalSecuritySettings() {
   const { t } = useTranslation()
-  const { failure, catchLoad, retryKey } = useLoadFailure()
+  const { failure, catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [captcha, setCaptcha] = useState<CaptchaCfg | null>(null)
   const [reg, setReg] = useState<RegCfg | null>(null)

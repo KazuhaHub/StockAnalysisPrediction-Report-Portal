@@ -68,7 +68,7 @@ function isDarkSurface(c: string): boolean {
 
 export default function StoragePage() {
   const { t } = useTranslation()
-  const { failure, retryKey } = useLoadFailure()
+  const { failure, retryKey } = useLoadFailure({ guardDrafts: true })
   // The history table has its own retry: a failed history request must never reload the retention
   // and schedule form (which may hold unsaved edits).
   const { catchLoad: catchHistory, retryKey: historyRetry } = useLoadFailure()

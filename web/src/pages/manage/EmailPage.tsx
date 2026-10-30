@@ -14,7 +14,7 @@ interface EmailConfig { enabled: boolean; host: string; port: number; user: stri
 
 export default function EmailPage() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const draft = useSettingsDraft({ enabled: false, host: '', port: 587, user: '', from: '', security: 'starttls' })
   const [pass, setPass] = useState('')

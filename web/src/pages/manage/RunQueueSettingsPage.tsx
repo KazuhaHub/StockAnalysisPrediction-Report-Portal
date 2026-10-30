@@ -26,7 +26,7 @@ export default function RunQueueSettingsPage() {
 
 function GlobalRunQueueSettings() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [maxJobs, setMaxJobs] = useState(1)
   // The per-job worker ceiling (ADR 0001). It has always been read and clamped against; until now

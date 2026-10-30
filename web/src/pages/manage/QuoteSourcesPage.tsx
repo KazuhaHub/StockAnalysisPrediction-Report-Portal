@@ -162,7 +162,7 @@ function fmtBytes(n: number): string {
 
 export default function QuoteSourcesPage() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message, modal } = App.useApp()
   const [ledger, setLedger] = useState<QuoteLedgerState | null>(null)
   const [saving, setSaving] = useState(false)

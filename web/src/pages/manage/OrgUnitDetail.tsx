@@ -130,7 +130,7 @@ export default function OrgUnitDetail({
   onMembers?: () => void
 }) {
   const { t } = useTranslation()
-  const { failure, retryKey } = useLoadFailure({ ignoreDrafts: true })
+  const { failure, retryKey } = useLoadFailure()
   const { message } = App.useApp()
   const def = groups.find((g) => g.is_default)
   const isDefault = !!group.is_default

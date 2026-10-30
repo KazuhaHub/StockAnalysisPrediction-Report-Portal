@@ -47,7 +47,7 @@ export default function SSORulesEditor({
   roles: Role[]
 }) {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [rules, setRules] = useState<SSORuleRow[]>([])
   const [shadowed, setShadowed] = useState<number[]>([])

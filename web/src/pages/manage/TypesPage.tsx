@@ -134,7 +134,7 @@ function KindColorPicker({ color, onChange }: { color: string; onChange: (color:
 
 export default function TypesPage() {
   const { t } = useTranslation()
-  const { catchLoad, retryKey } = useLoadFailure()
+  const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
   const { message } = App.useApp()
   const [groups, setGroups] = useState<TypeGroup[]>([])
   const [kinds, setKinds] = useState<string[]>([])
