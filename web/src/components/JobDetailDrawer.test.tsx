@@ -119,6 +119,29 @@ describe('batch layout', () => {
     expect(document.querySelector('.anticon-stop')).toBeNull()
   })
 
+  it('cancels the whole job from the footer after confirming, through the queue endpoint', async () => {
+    store.detail = two()
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: /queue\.cancelJob/ }))
+    expect(apiMock.post).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/cancel'))
+  })
+
+  it('offers no job cancel on a finished job or to a reader who does not own it', async () => {
+    store.detail = detail({ total: 2, status: 'finished' }, [item({ status: 'succeeded' }), item({ id: 71, row_index: 1, status: 'succeeded' })])
+    const first = mount()
+    await waitFor(() => expect(document.querySelector('.ant-table')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: /queue\.cancelJob/ })).toBeNull()
+    first.unmount()
+    store.admin = false
+    store.user = 'bob'
+    store.detail = two()
+    mount()
+    await waitFor(() => expect(document.querySelector('.ant-table')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: /queue\.cancelJob/ })).toBeNull()
+  })
+
   it('says so when the job is unknown', async () => {
     apiMock.get.mockImplementation(async (url: string) => {
       if (url.includes('/targets')) return { targets: [] }

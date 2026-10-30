@@ -3,7 +3,11 @@ import { act, render, screen } from '@testing-library/react'
 import RunningFor from './RunningFor'
 
 vi.mock('react-i18next', () => {
-  const t = (k: string, o?: unknown) => (typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`)
+  const t = (k: string, o?: unknown) => {
+    const unit = /^tasks\.elapsed\.([hms])$/.exec(k)
+    if (unit) return `${(o as { n: number }).n}${unit[1]}`
+    return typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`
+  }
   return { useTranslation: () => ({ t, i18n: { language: 'en-US' } }) }
 })
 

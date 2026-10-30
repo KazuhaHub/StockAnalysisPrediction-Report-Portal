@@ -39,7 +39,11 @@ vi.mock('../lib/visiblePoll', () => ({
 }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: store.admin, user: 'alice' }) }))
 vi.mock('react-i18next', () => {
-  const t = (k: string, o?: unknown) => (typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`)
+  const t = (k: string, o?: unknown) => {
+    const unit = /^tasks\.elapsed\.([hms])$/.exec(k)
+    if (unit) return `${(o as { n: number }).n}${unit[1]}`
+    return typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`
+  }
   const hook = { t, i18n: { language: 'en-US' } }
   return { useTranslation: () => hook }
 })

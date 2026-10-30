@@ -36,11 +36,11 @@ const symbolOf = (it: BatchItem) => {
 }
 
 // Wall-clock strings (what the run queue stores) to a short "1h 2m 3s".
-function fmtDuration(from: string, to: string): string {
+function fmtDuration(from: string, to: string, t: Parameters<typeof formatElapsed>[1]): string {
   const a = dayjs(from)
   if (!from || !a.isValid()) return ''
   const b = to ? dayjs(to) : dayjs()
-  return formatElapsed(b.diff(a))
+  return formatElapsed(b.diff(a), t)
 }
 
 export interface JobDetailDrawerProps {
@@ -200,7 +200,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
             ? t('tasks.next')
             : t('tasks.queuedAhead', { n: j.ahead })
     }
-    const duration = started ? fmtDuration(started, isTerminal(j.status) ? finished : '') : ''
+    const duration = started ? fmtDuration(started, isTerminal(j.status) ? finished : '', t) : ''
     return (
       <>
         <Space wrap style={{ marginBottom: 12 }}>
@@ -253,6 +253,24 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     )
   }
 
+  const cancelJob = async () => {
+    if (jobId == null) return
+    try {
+      await api.post(`/api/admin/batch/jobs/${jobId}/cancel`)
+      message.success(t('batch.msg.cancelRequested'))
+      await load()
+    } catch (e) {
+      message.error(errText(e, t))
+    }
+  }
+  const jobAction =
+    detail && !single && canCancel && !isTerminal(detail.job.status) ? (
+      <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
+        <Button danger icon={<CloseCircleOutlined />}>
+          {t('queue.cancelJob')}
+        </Button>
+      </Popconfirm>
+    ) : null
   const rowActions = single && (
     <Space wrap>
       <Button icon={<InfoCircleOutlined />} onClick={() => setDetailItem(single)}>
@@ -267,7 +285,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     </Space>
   )
   const footer =
-    onOpenInQueue || rowActions ? (
+    onOpenInQueue || rowActions || jobAction ? (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {onOpenInQueue ? (
           <Button type="link" icon={<ArrowRightOutlined />} iconPlacement="end" onClick={onOpenInQueue} style={{ padding: 0 }}>
@@ -277,6 +295,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
           <span />
         )}
         {rowActions}
+        {jobAction}
       </div>
     ) : undefined
 

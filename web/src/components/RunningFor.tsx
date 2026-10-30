@@ -19,5 +19,5 @@ export default function RunningFor({ since }: { since: string }) {
     return () => clearInterval(id)
   }, [valid])
   if (!valid) return <>{t('batch.status.running')}</>
-  return <>{t('tasks.runningFor', { elapsed: formatElapsed(now - start.valueOf()) })}</>
+  return <>{t('tasks.runningFor', { elapsed: formatElapsed(now - start.valueOf(), t) })}</>
 }

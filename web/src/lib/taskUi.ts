@@ -12,13 +12,25 @@ export function runOutcome(c: Pick<NonNullable<TaskItem['counts']>, 'succeeded' 
 
 const MINUTE = 60_000
 
-/** A duration as "2m 13s" / "1h 2m 3s". The h / m / s abbreviations read the same in every supported language. */
-export function formatElapsed(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  return [h ? `${h}h` : '', h || m ? `${m}m` : '', `${sec}s`].filter(Boolean).join(' ')
+/**
+ * A duration as "2m 13s" or, from an hour up, "1h 5m" (seconds no longer matter). The unit wording comes
+ * from the locale through `t` (tasks.elapsed.h / .m / .s, each taking {{n}}).
+ */
+export function formatElapsed(ms: number, t: (key: string, o: { n: number }) => string): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const parts: string[] = []
+  if (h > 0) {
+    parts.push(t('tasks.elapsed.h', { n: h }))
+    if (m > 0) parts.push(t('tasks.elapsed.m', { n: m }))
+  } else if (m > 0) {
+    parts.push(t('tasks.elapsed.m', { n: m }), t('tasks.elapsed.s', { n: s }))
+  } else {
+    parts.push(t('tasks.elapsed.s', { n: s }))
+  }
+  return parts.join(' ')
 }
 
 /**

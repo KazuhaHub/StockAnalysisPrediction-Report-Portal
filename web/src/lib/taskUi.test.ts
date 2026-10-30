@@ -1,16 +1,33 @@
 import { describe, expect, it } from 'vitest'
+import enJson from '../locales/en-US.json'
+import zhCNJson from '../locales/zh-CN.json'
+import zhTWJson from '../locales/zh-TW.json'
 import { formatElapsed, formatTaskTime, runOutcome } from './taskUi'
 
+// The unit strings come from the locale files, so the test reads the real ones.
+const tFor = (strings: Record<string, string>) => (key: string, o: { n: number }) => strings[key].replace('{{n}}', String(o.n))
+const en = tFor(enJson as Record<string, string>)
+const zhCN = tFor(zhCNJson as Record<string, string>)
+const zhTW = tFor(zhTWJson as Record<string, string>)
+
 describe('formatElapsed', () => {
-  it('reads seconds, minutes and hours compactly', () => {
-    expect(formatElapsed(0)).toBe('0s')
-    expect(formatElapsed(59_400)).toBe('59s')
-    expect(formatElapsed(133_000)).toBe('2m 13s')
-    expect(formatElapsed(3_723_000)).toBe('1h 2m 3s')
-    expect(formatElapsed(3_600_000)).toBe('1h 0m 0s')
+  it('reads seconds, minutes and hours compactly in English', () => {
+    expect(formatElapsed(0, en)).toBe('0s')
+    expect(formatElapsed(59_400, en)).toBe('59s')
+    expect(formatElapsed(133_000, en)).toBe('2m 13s')
+    expect(formatElapsed(3_900_000, en)).toBe('1h 5m')
+    expect(formatElapsed(3_723_000, en)).toBe('1h 2m')
+    expect(formatElapsed(3_600_000, en)).toBe('1h')
+  })
+  it('is localised in Simplified and Traditional Chinese', () => {
+    expect(formatElapsed(133_000, zhCN)).toBe('2 分 13 秒')
+    expect(formatElapsed(3_900_000, zhCN)).toBe('1 小时 5 分')
+    expect(formatElapsed(45_000, zhCN)).toBe('45 秒')
+    expect(formatElapsed(133_000, zhTW)).toBe('2 分 13 秒')
+    expect(formatElapsed(3_900_000, zhTW)).toBe('1 小時 5 分')
   })
   it('never goes negative', () => {
-    expect(formatElapsed(-5_000)).toBe('0s')
+    expect(formatElapsed(-5_000, en)).toBe('0s')
   })
 })
 
