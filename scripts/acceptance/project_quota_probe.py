@@ -355,7 +355,7 @@ def main(args):
                     run_transport("recovered")
                     report["native_recovered_receipt_cross_uid_transport"] = True
                 if len(args) == 11:
-                    portal_env = dict(native_env, APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_PORTAL_FIXTURE=str(receipt_fixture), APP_DATA_PORTAL_DESCRIPTOR=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors/static.json"))
+                    portal_env = dict(native_env, APP_DATA_USE_SERVICE="1", APP_DATA_JOURNAL_ROOT=str(journal_root), APP_DATA_JOURNAL_CONTROL=str(journal_control), APP_DATA_JOURNAL_INODE=journal_inode, APP_DATA_PORTAL_FIXTURE=str(receipt_fixture), APP_DATA_PORTAL_DESCRIPTOR=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors/static.json"))
                     if candidate:
                         portal_env["APP_CANDIDATE_DOCKER_SOCKET"] = candidate[2]
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = candidate[1]

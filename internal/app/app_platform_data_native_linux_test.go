@@ -9,8 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	goruntime "runtime"
 	"strconv"
@@ -25,6 +27,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
@@ -39,6 +42,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if platformNetworkNamespaceFixture(t, fixture) {
 		return
 	}
+	ctx := context.Background()
+	useService := os.Getenv("APP_DATA_USE_SERVICE") == "1"
 	input, err := os.Open(os.Getenv("APP_DATA_JOURNAL_ROOT"))
 	if err != nil {
 		t.Fatal(err)
@@ -136,12 +141,25 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if err := os.Chmod(descriptorPath, 0444); err != nil {
 		t.Fatal(err)
 	}
+	managed := os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != ""
 	path := filepath.Join(endpoint, "data.sock")
 	var server *transport.Server
 	var native *driver.CandidateRuntime
 	var managedSocketRoot string
-	managed := os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != ""
-	if managed {
+	var serviceFixture *platformServiceFixture
+	if useService {
+		if !managed {
+			t.Fatal("managed service acceptance requires the candidate runtime")
+		}
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := root.Close(); err != nil {
+			t.Fatal(err)
+		}
+		serviceFixture = startPlatformServiceFixture(t, binaryPath, dir, deployment)
+		path = serviceFixture.socket
+	} else if managed {
 		sockets, openErr := os.MkdirTemp("/run", "portal-pf-")
 		if openErr != nil {
 			t.Fatal(openErr)
@@ -164,19 +182,24 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	} else {
 		server, err = transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx) }()
-	stopServer := sync.OnceFunc(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Error(err)
+	var stopServer func()
+	if useService {
+		stopServer = func() { serviceFixture.stop(t) }
+	} else {
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	defer stopServer()
+		serveCtx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- server.Serve(serveCtx) }()
+		stopServer = sync.OnceFunc(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		})
+		defer stopServer()
+	}
 	publicReader, publicWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +243,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		if os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
 			child.Env = append(child.Env, "PORTAL_MANAGED_READY=1")
 		}
+	}
+	if managed && !useService {
 		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 		defer func() {
 			stopServer()
@@ -243,7 +268,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 		}()
 	}
-	if managed {
+	if managed && !useService {
 		defer func() {
 			stopServer()
 			fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
@@ -254,6 +279,42 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Log("PORTAL_WRITABLE_BACKGROUND_NEIGHBOR_PRESERVED")
 			}
 			t.Log("PORTAL_WRITABLE_BACKGROUND_OWNED_CLEANUP")
+		}()
+	}
+	if useService {
+		fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
+		defer func() {
+			stopServer()
+			input, err := os.Open(os.Getenv("APP_DATA_JOURNAL_ROOT"))
+			if err != nil {
+				t.Error("reopen service data root", err)
+				return
+			}
+			defer input.Close()
+			reopenedRoot, err := data.Open(input)
+			if err != nil {
+				t.Error("reopen service data root", err)
+				return
+			}
+			defer reopenedRoot.Close()
+			reopenedStore, err := journal.Open(os.Getenv("APP_DATA_JOURNAL_CONTROL"))
+			if err != nil {
+				t.Error("reopen service journal", err)
+				return
+			}
+			defer reopenedStore.Close()
+			native, err := driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), serviceFixture.ipcRoot, reopenedRoot, pin)
+			if err != nil {
+				t.Error("reopen service native runtime", err)
+				return
+			}
+			defer native.Close()
+			checkPlatformFixtureCandidate(t, filepath.Join(childData, "candidate-command.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), true)
+			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			if err := os.RemoveAll(serviceFixture.root); err != nil {
+				t.Error("remove service fixture root", err)
+			}
 		}()
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
@@ -293,7 +354,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	var checkRegistrationRPC func()
-	if managed && os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
+	if managed && !useService && os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
 		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, managedSocketRoot, authority, store)
 	}
 	readyWriter.Close()
@@ -338,14 +399,16 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Log(marker)
 			}
 		}
-		checkPlatformWritableAutoFixture(t, childData, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
-		// Preserve verified public evidence, then exercise cleanup when the normal
-		// completed-controller snapshot is unavailable after an interruption.
-		if err := os.Rename(filepath.Join(childData, "writable-auto-start.json"), filepath.Join(childData, "writable-auto-start.verified.json")); err != nil {
-			t.Fatal(err)
+		if !useService {
+			checkPlatformWritableAutoFixture(t, childData, authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
+			// Preserve verified public evidence, then exercise cleanup when the normal
+			// completed-controller snapshot is unavailable after an interruption.
+			if err := os.Rename(filepath.Join(childData, "writable-auto-start.json"), filepath.Join(childData, "writable-auto-start.verified.json")); err != nil {
+				t.Fatal(err)
+			}
+			t.Log("PORTAL_WRITABLE_BACKGROUND_NATIVE_WITNESS")
+			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 		}
-		t.Log("PORTAL_WRITABLE_BACKGROUND_NATIVE_WITNESS")
-		checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), authority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 		t.Log("MANAGED_PROFILE_OBSERVED")
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_INSTALL_DATA_READY")) {
 			t.Fatal("Portal did not complete managed data stage", output.String())
@@ -412,6 +475,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if !bytes.Contains(output.Bytes(), []byte("STATIC_ACTIVATION_READY")) {
 		t.Fatal("child did not prove activation/launch", output.String())
 	}
+	if useService {
+		t.Log("PORTAL_MANAGED_SERVICE_UI_INSTALL_VERIFIED")
+		return
+	}
 	receipt, err := store.ReadDataPreparationReceipt(ctx, message.Raw, message.Signature)
 	if err != nil || !receipt.MatchesCommand(verified.Command()) {
 		t.Fatal("dispatched receipt does not match original logical intent", err)
@@ -425,6 +492,135 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal("Portal stage lost native resource", err)
 	}
 }
+
+type platformServiceFixture struct {
+	cmd     *exec.Cmd
+	done    chan error
+	root    string
+	ipcRoot string
+	socket  string
+	output  bytes.Buffer
+	once    sync.Once
+}
+
+func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, deployment journal.Deployment) *platformServiceFixture {
+	t.Helper()
+	root, err := os.MkdirTemp("/run", "portal-service-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlRoot := filepath.Join(root, "control")
+	ipcRoot := filepath.Join(root, "ipc")
+	if err := os.Chmod(root, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(root, 0, 41001); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(controlRoot, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(controlRoot, 0, 41001); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ipcRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(controlRoot, "runner.sock")
+	cfg := service.Config{
+		Format:         service.ConfigFormat,
+		DockerSocket:   os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"),
+		JournalDir:     os.Getenv("APP_DATA_JOURNAL_CONTROL"),
+		DataRoot:       os.Getenv("APP_DATA_JOURNAL_ROOT"),
+		IPCRoot:        ipcRoot,
+		ControlRoot:    controlRoot,
+		ControlSocket:  socket,
+		ControllerUID:  41001,
+		ControllerGID:  41001,
+		NetworkActive:  2,
+		NetworkEntries: 16,
+		MinimumCPUs:    1,
+		MinimumMemory:  512 << 20,
+		Controller: service.Controller{
+			DeploymentID:    deployment.DeploymentID,
+			ControllerEpoch: deployment.ControllerEpoch,
+			ControlRevision: deployment.ControlRevision,
+			Fingerprint:     deployment.Fingerprint,
+		},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(fixtureDir, "service.json")
+	if err := os.WriteFile(configPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	fixture := &platformServiceFixture{cmd: exec.Command(binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout=10m"), done: make(chan error, 1), root: root, ipcRoot: ipcRoot, socket: socket}
+	fixture.cmd.Env = append(os.Environ(), "PORTAL_RUNNER_SERVICE_CHILD=1", "PORTAL_RUNNER_SERVICE_CONFIG="+configPath)
+	fixture.cmd.Stdout = &fixture.output
+	fixture.cmd.Stderr = &fixture.output
+	if err := fixture.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { fixture.done <- fixture.cmd.Wait() }()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Lstat(socket); err == nil {
+			return fixture
+		}
+		select {
+		case err := <-fixture.done:
+			t.Fatalf("managed service exited before listening: %v\n%s", err, fixture.output.String())
+		default:
+		}
+		if time.Now().After(deadline) {
+			_ = fixture.cmd.Process.Kill()
+			<-fixture.done
+			t.Fatalf("managed service startup deadline\n%s", fixture.output.String())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func (f *platformServiceFixture) stop(t *testing.T) {
+	t.Helper()
+	f.once.Do(func() {
+		if err := f.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Error(err)
+		}
+		select {
+		case err := <-f.done:
+			if err != nil {
+				t.Errorf("managed service stopped with an error: %v\n%s", err, f.output.String())
+			}
+		case <-time.After(10 * time.Second):
+			_ = f.cmd.Process.Kill()
+			<-f.done
+			t.Errorf("managed service did not stop")
+		}
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+			if _, err := os.Lstat(f.socket); os.IsNotExist(err) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Errorf("managed service socket remained after shutdown")
+	})
+}
+
+func TestPlatformRunnerServiceChild(t *testing.T) {
+	if os.Getenv("PORTAL_RUNNER_SERVICE_CHILD") != "1" {
+		t.Skip("isolated managed service child only")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	logger := log.New(os.Stderr, "", log.LstdFlags)
+	if err := service.Serve(ctx, os.Getenv("PORTAL_RUNNER_SERVICE_CONFIG"), logger); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if os.Getenv("PORTAL_DATA_CHILD") != "1" {
 		t.Skip("isolated Portal data child only")
