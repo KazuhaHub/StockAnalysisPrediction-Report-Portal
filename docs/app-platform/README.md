@@ -35,7 +35,8 @@ and activation](113-writable-install-worker.md) and
 [canonical binding restrictions](137-secret-binding-policy.md), and
 [uninstall binding revocation](138-uninstall-secret-binding-revocation.md), and
 [current network provider observation](139-current-network-provider-observation.md), and
-[reviewed network installation](140-reviewed-network-installation.md).
+[reviewed network installation](140-reviewed-network-installation.md), and
+[current-viewer network request authority](141-current-viewer-network-request.md).
 The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
 is now owner-approved for development/isolated implementation; production and
 later job/event products remain separate decisions.

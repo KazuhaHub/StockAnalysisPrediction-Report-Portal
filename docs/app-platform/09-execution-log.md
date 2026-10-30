@@ -2449,3 +2449,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   cases, staticcheck, zero reachable vulnerabilities and ordinary full Go tests
   (internal/app 666.278s). This does not prove the new installation
   selection/publication slice.
+
+- Corrected installation revision 3a5e5ea1d17158c17852758c2eaa250817ea92fe
+  passes general 40984401099/job 123831927134, including actual PG capability
+  publication and full tests; quota/browser 40984401120/job 123831905094 and
+  daemon 40984401330/job 123831906193 pass. The original missing-composer native
+  failure remains recorded in document 140 rather than counted as success.
+- Added a private current-viewer network request coordinator: derive the exact
+  consumed network grant from current SQL/history, sign a bounded request, repeat
+  the current viewer/grant checks for each root challenge and recheck before
+  releasing a provenance-verified response. No SQL transaction holds network IO.
+  Added paired denied-grant cases and native signing/withdrawal assertions after
+  actual activation. Exact new native/PG execution remains required; neither an
+  actual Portal-mediated HTTPS exchange nor a public SDK route is claimed. See
+  [current-viewer network requests](141-current-viewer-network-request.md).
