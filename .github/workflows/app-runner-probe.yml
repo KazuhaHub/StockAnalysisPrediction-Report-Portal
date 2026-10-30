@@ -241,7 +241,7 @@ jobs:
               "$runner" "$root/service.json" "$root/service.log" &
             service_pid=$!
             for _ in $(seq 1 100); do
-              test -S "$service_root/control/runner.sock" && return 0
+              sudo -n test -S "$service_root/control/runner.sock" && return 0
               sudo -n kill -0 "$service_pid" 2>/dev/null || {
                 sudo -n cat "$root/service.log"
                 return 1
@@ -254,7 +254,7 @@ jobs:
             sudo -n kill -TERM "$service_pid"
             wait "$service_pid"
             service_pid=
-            test ! -e "$service_root/control/runner.sock"
+            sudo -n test ! -e "$service_root/control/runner.sock"
           }
           observe_service() {
             sudo -n env -i \
