@@ -51,6 +51,8 @@ export interface NotifyOptions {
 }
 
 export interface NotificationItem {
+  /** Unique per raise: a replacement under the same key gets a new id. */
+  id: number
   key: string
   kind: NotifyKind
   title: ReactNode
@@ -74,11 +76,14 @@ let snapshot: readonly NotificationItem[] = items
 const timers = new Map<string, Timer>()
 const exitTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 const listeners = new Set<() => void>()
+const announced = new Set<number>()
 let mounted = 0
 let tickHandle: ReturnType<typeof setInterval> | null = null
 let lastTick = 0
 
-const INTERACTION_EVENTS = ['pointermove', 'pointerdown', 'mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'wheel']
+// Scroll is deliberately absent: pages scroll themselves (chat auto-scroll), which is not a person
+// looking at the screen. Only trusted (user-originated) events count.
+const INTERACTION_EVENTS = ['pointermove', 'pointerdown', 'mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel']
 
 function reducedMotion(): boolean {
   try {
@@ -116,15 +121,17 @@ export function getNotifications(): readonly NotificationItem[] {
 
 /** Raise a notification; returns its key. */
 export function notify(opts: NotifyOptions): string {
-  const key = opts.key ?? `notify-${++seq}`
+  const key = opts.key ?? `notify-${seq + 1}`
   const prev = items.findIndex((i) => i.key === key)
   if (prev >= 0) items.splice(prev, 1)
+  const held = timers.get(key)
   const pending = exitTimeouts.get(key)
   if (pending) {
     clearTimeout(pending)
     exitTimeouts.delete(key)
   }
   items.unshift({
+    id: ++seq,
     key,
     kind: opts.kind,
     title: opts.title,
@@ -134,7 +141,8 @@ export function notify(opts: NotifyOptions): string {
     leaving: false,
     onClose: opts.onClose,
   })
-  timers.set(key, { remaining: NOTIFICATION_DURATIONS[opts.kind], seen: false, hover: false, focus: false })
+  // A replacement keeps the holds of the card it replaces: the pointer is still over it.
+  timers.set(key, { remaining: NOTIFICATION_DURATIONS[opts.kind], seen: false, hover: held?.hover ?? false, focus: held?.focus ?? false })
   publish()
   return key
 }
@@ -166,11 +174,28 @@ export function holdNotification(key: string, source: 'hover' | 'focus', on: boo
   if (timer) timer[source] = on
 }
 
+/** Mark the cards that are on screen as seen. A card folded into the "N more" pill has not been. */
 function markSeen() {
   if (!pageVisible()) return
-  timers.forEach((t) => {
-    t.seen = true
+  visibleKeys().forEach((key) => {
+    const t = timers.get(key)
+    if (t) t.seen = true
   })
+}
+
+/** How an input event is judged to come from a person. A seam so tests, whose events are never trusted, can stand in. */
+export const notifyInput = { isUserEvent: (e: Event): boolean => e.isTrusted }
+
+function onInteract(e: Event) {
+  if (notifyInput.isUserEvent(e)) markSeen()
+}
+
+export function isAnnounced(id: number): boolean {
+  return announced.has(id)
+}
+
+export function markAnnounced(id: number): void {
+  announced.add(id)
 }
 
 function tick() {
@@ -194,16 +219,16 @@ function onVisibility() {
 }
 
 function syncRuntime() {
-  const wanted = items.length > 0
+  const wanted = items.length > 0 && mounted > 0
   if (wanted && tickHandle === null) {
     lastTick = Date.now()
     tickHandle = setInterval(tick, TICK_MS)
-    INTERACTION_EVENTS.forEach((e) => window.addEventListener(e, markSeen, { passive: true, capture: true }))
+    INTERACTION_EVENTS.forEach((e) => window.addEventListener(e, onInteract, { passive: true, capture: true }))
     document.addEventListener('visibilitychange', onVisibility)
   } else if (!wanted && tickHandle !== null) {
     clearInterval(tickHandle)
     tickHandle = null
-    INTERACTION_EVENTS.forEach((e) => window.removeEventListener(e, markSeen, { capture: true }))
+    INTERACTION_EVENTS.forEach((e) => window.removeEventListener(e, onInteract, { capture: true }))
     document.removeEventListener('visibilitychange', onVisibility)
   }
 }
@@ -211,8 +236,10 @@ function syncRuntime() {
 /** Called by the stack on mount: countdowns only run while something is drawing the notifications. */
 export function attachNotificationStack(): () => void {
   mounted++
+  syncRuntime()
   return () => {
     mounted--
+    syncRuntime()
   }
 }
 
@@ -221,6 +248,7 @@ export function resetNotifications(): void {
   exitTimeouts.forEach((h) => clearTimeout(h))
   exitTimeouts.clear()
   timers.clear()
+  announced.clear()
   items = []
   publish()
 }

@@ -259,7 +259,6 @@ function AppShell() {
 
   return (
     <Layout style={{ minHeight: onChat ? undefined : '100vh', height: onChat ? '100dvh' : undefined, background: token.colorBgLayout }}>
-      <NotificationStack />
       {user && <LoginActivityNotice user={user} />}
       <Header
         id="rp-app-header"
@@ -658,6 +657,9 @@ function AppShell() {
           </Popover>
         </Space>
       </Header>
+
+      {/* After the header in DOM order so the first Tab lands in the header; it is position: fixed. */}
+      <NotificationStack />
 
       {/* Connection lost: a strip pinned under the header, above the update banner. */}
       <ConnectionNotice />

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import NotificationStack from './NotificationStack'
-import { NOTIFICATION_DURATIONS, notify, resetNotifications, type NotifyKind } from '../lib/notify'
+import { NOTIFICATION_DURATIONS, getNotifications, notifyInput, notify, resetNotifications, type NotifyKind } from '../lib/notify'
 import { QUEUE_EVENT } from '../lib/shortcuts'
 
 vi.mock('react-i18next', () => {
@@ -16,15 +16,25 @@ const setVisibility = (v: 'visible' | 'hidden') => {
   document.dispatchEvent(new Event('visibilitychange'))
 }
 const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms) })
-const interact = () => act(() => { window.dispatchEvent(new Event('pointermove')) })
+// jsdom's isTrusted cannot be forged, so the notifier's seam reads a flag the helper sets instead.
+const fire = (type: string, trusted: boolean) =>
+  act(() => {
+    const e = new Event(type) as Event & { fromPerson?: boolean }
+    e.fromPerson = trusted
+    window.dispatchEvent(e)
+  })
+const interact = () => fire('pointermove', true)
 const titles = () => Array.from(document.querySelectorAll('.rp-notify-title')).map((e) => e.textContent)
 
+const realIsUserEvent = notifyInput.isUserEvent
 beforeEach(() => {
+  notifyInput.isUserEvent = (e) => (e as Event & { fromPerson?: boolean }).fromPerson === true
   vi.useFakeTimers()
   visibility = 'visible'
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
 })
 afterEach(() => {
+  notifyInput.isUserEvent = realIsUserEvent
   act(() => resetNotifications())
   vi.useRealTimers()
 })
@@ -200,13 +210,136 @@ describe('notification stack limit', () => {
     interact()
     advance(NOTIFICATION_DURATIONS.success! + 1_000) // old is hidden: no time passes for it
     expect(titles()).toEqual(['4', '3', '2'])
-    advance(NOTIFICATION_DURATIONS.failure! - 9_000 + 100) // the three expire; old has counted ~0.1s
+    advance(NOTIFICATION_DURATIONS.failure! - 9_000 + 100) // the three expire
     advance(400)
     expect(titles()).toEqual(['old'])
+    interact() // it was folded away when the person last interacted; it needs a fresh look
     advance(NOTIFICATION_DURATIONS.success! - 1_000)
     expect(titles()).toEqual(['old'])
     advance(1_500)
     advance(400)
     expect(titles()).toEqual([])
+  })
+})
+
+describe('notification countdown, edge cases', () => {
+  it('releases a hover hold when the card is folded into the pill while hovered', () => {
+    mount()
+    raise('success', 'old')
+    interact()
+    fireEvent.mouseEnter(document.querySelector('.rp-notify-card')!)
+    for (const n of ['a', 'b', 'c']) raise('success', n) // pushes "old" out; no mouseleave ever fires
+    interact()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual(['old'])
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+
+  it('does not mark a card seen while it is folded into the pill', () => {
+    mount()
+    raise('success', 'old')
+    for (const n of ['a', 'b', 'c']) raise('success', n)
+    interact()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual(['old']) // moved up, but nobody has looked at it yet
+    advance(10 * 60_000)
+    expect(titles()).toEqual(['old'])
+    interact()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+
+  it('ignores scroll and untrusted events', () => {
+    mount()
+    raise('success', 'done')
+    fire('scroll', true)
+    fire('pointermove', false)
+    fire('keydown', false)
+    advance(60_000)
+    expect(titles()).toEqual(['done'])
+    fire('keydown', true)
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+
+  it('keeps the hover hold across a replacement under the same key', () => {
+    mount()
+    raise('success', 'one', { key: 'k' })
+    interact()
+    fireEvent.mouseEnter(document.querySelector('.rp-notify-card')!)
+    raise('success', 'two', { key: 'k' })
+    interact()
+    advance(60_000)
+    expect(titles()).toEqual(['two'])
+  })
+
+  it('runs no timer or listener while no stack is mounted', () => {
+    raise('success', 'orphan')
+    expect(vi.getTimerCount()).toBe(0)
+    const view = mount()
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('notification announcements and focus', () => {
+  it('hides the relative time from assistive technology', () => {
+    mount()
+    raise('success', 'done')
+    expect(document.querySelector('.rp-notify-time')!.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('announces a card once: not again when it returns from the pill, but again when replaced', () => {
+    mount()
+    raise('failure', 'old', { key: 'old' })
+    for (const n of ['a', 'b', 'c']) raise('success', n)
+    interact()
+    advance(NOTIFICATION_DURATIONS.success! + 500)
+    advance(400)
+    const card = document.querySelector('.rp-notify-card')!
+    expect(card.textContent).toContain('old')
+    expect(card.getAttribute('aria-live')).toBeNull()
+    expect(card.getAttribute('role')).not.toBe('alert')
+    raise('failure', 'old again', { key: 'old' })
+    expect(document.querySelector('.rp-notify-card')!.getAttribute('aria-live')).toBe('assertive')
+  })
+
+  it('moves keyboard focus to the next card when the focused one closes', () => {
+    mount()
+    raise('success', 'lower')
+    raise('success', 'upper')
+    act(() => { fire('keydown', true) })
+    const closes = screen.getAllByRole('button', { name: 'notifications.close' })
+    closes[0].focus()
+    fireEvent.click(closes[0])
+    expect(document.activeElement!.closest('.rp-notify-card')!.textContent).toContain('lower')
+  })
+
+  it('gives focus back to where it came from when the last card closes', () => {
+    render(<button>before</button>)
+    mount()
+    raise('success', 'only')
+    const before = screen.getByText('before')
+    before.focus()
+    fire('keydown', true)
+    const close = screen.getByRole('button', { name: 'notifications.close' })
+    close.focus()
+    fireEvent.click(close)
+    expect(document.activeElement).toBe(before)
+  })
+})
+
+describe('notifications across sign-in identities', () => {
+  it('resetNotifications drops every card', () => {
+    raise('security', 'alice only')
+    act(() => resetNotifications())
+    expect(getNotifications()).toHaveLength(0)
   })
 })

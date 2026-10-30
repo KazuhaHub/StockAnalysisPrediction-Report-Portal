@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { Button, theme } from 'antd'
 import {
   CheckCircleOutlined,
@@ -15,6 +15,8 @@ import {
   attachNotificationStack,
   dismissNotification,
   getNotifications,
+  isAnnounced,
+  markAnnounced,
   holdNotification,
   subscribeNotifications,
   visibleKeys,
@@ -32,12 +34,49 @@ const ICONS: Record<NotifyKind, ReactNode> = {
   success: <CheckCircleOutlined />,
 }
 
+// Whether the last input was the keyboard: only then does closing a card hand focus on, so a
+// mouse click never makes the next card's close button appear.
+let keyboardInput = false
+// Where focus was before it entered the stack, to give it back when the last card closes.
+let focusOrigin: Element | null = null
+
+/** Focus left on a card that is closing goes to the next card, or back where the person came from. */
+function handOffFocus(card: HTMLElement | null) {
+  if (!card || !keyboardInput || !card.contains(document.activeElement)) return
+  let next = card.nextElementSibling
+  while (next && !next.matches('.rp-notify-card:not(.is-leaving)')) next = next.nextElementSibling
+  const target = next?.querySelector<HTMLElement>('.rp-notify-close') ?? (focusOrigin instanceof HTMLElement && focusOrigin.isConnected ? focusOrigin : null)
+  target?.focus()
+}
+
 function Card({ item, now }: { item: NotificationItem; now: number }) {
   const { t, i18n } = useTranslation()
   const { token } = theme.useToken()
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
   const hot = hover || focus
+  const key = item.key
+  // A card that unmounts (folded into the "N more" pill) takes its pointer and focus with it; the
+  // enter/leave events that would release the hold never arrive.
+  useEffect(
+    () => () => {
+      holdNotification(key, 'hover', false)
+      holdNotification(key, 'focus', false)
+    },
+    [key],
+  )
+  // Announce a raise once. A card that comes back from the pill was announced when it first showed,
+  // and the relative-time tick must not re-announce it, so only the first render of an id is live.
+  const liveId = useRef<number | null>(null)
+  if (liveId.current === null && !isAnnounced(item.id)) liveId.current = item.id
+  if (liveId.current !== null && liveId.current !== item.id && !isAnnounced(item.id)) liveId.current = item.id
+  const live = liveId.current === item.id
+  useEffect(() => markAnnounced(item.id), [item.id])
+  const close = (reason: 'manual' | 'action') => {
+    handOffFocus(cardRef.current)
+    dismissNotification(key, reason)
+  }
   const color: Record<NotifyKind, string> = {
     security: token.purple,
     failure: token.colorError,
@@ -50,8 +89,9 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
   return (
     <div
       className={`rp-notify-card${item.leaving ? ' is-leaving' : ''}`}
-      role={assertive ? 'alert' : 'status'}
-      aria-live={assertive ? 'assertive' : 'polite'}
+      ref={cardRef}
+      role={live ? (assertive ? 'alert' : 'status') : 'group'}
+      aria-live={live ? (assertive ? 'assertive' : 'polite') : undefined}
       data-kind={item.kind}
       onMouseEnter={() => {
         setHover(true)
@@ -76,7 +116,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
         className="rp-notify-close"
         aria-label={t('notifications.close')}
         data-visible={hot ? 'true' : 'false'}
-        onClick={() => dismissNotification(item.key, 'manual')}
+        onClick={() => close('manual')}
       >
         <CloseOutlined />
       </button>
@@ -86,7 +126,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
       <div className="rp-notify-body">
         <div className="rp-notify-top">
           <span className="rp-notify-title">{item.title}</span>
-          {time && <span className="rp-notify-time">{time}</span>}
+          {time && <span className="rp-notify-time" aria-hidden="true">{time}</span>}
         </div>
         {item.description && <div className="rp-notify-desc">{item.description}</div>}
         {item.actions.length > 0 && (
@@ -99,7 +139,7 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
                 href={a.href}
                 onClick={() => {
                   a.onClick?.()
-                  if (!a.keepOpen) dismissNotification(item.key, 'action')
+                  if (!a.keepOpen) close('action')
                 }}
               >
                 {a.label}
@@ -120,6 +160,16 @@ export default function NotificationStack() {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => attachNotificationStack(), [])
   useEffect(() => {
+    const key = () => { keyboardInput = true }
+    const pointer = () => { keyboardInput = false }
+    window.addEventListener('keydown', key, true)
+    window.addEventListener('pointerdown', pointer, true)
+    return () => {
+      window.removeEventListener('keydown', key, true)
+      window.removeEventListener('pointerdown', pointer, true)
+    }
+  }, [])
+  useEffect(() => {
     if (items.length === 0) return
     setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 30_000)
@@ -138,7 +188,11 @@ export default function NotificationStack() {
     '--rp-n-shadow': token.boxShadowSecondary,
   } as CSSProperties
   return (
-    <div className="rp-notify-stack" role="region" aria-label={t('notifications.region')} style={vars}>
+    <div className="rp-notify-stack" role="region" aria-label={t('notifications.region')} style={vars}
+      onFocus={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) focusOrigin = e.relatedTarget as Element | null
+      }}
+    >
       {items
         .filter((i) => shown.has(i.key) || i.leaving)
         .map((i) => (
