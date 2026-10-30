@@ -619,8 +619,10 @@ function AppShell() {
             </Button>
           </Popover>
         </Space>
-        <ConnectionNotice />
       </Header>
+
+      {/* Connection lost: a strip pinned under the header, above the update banner. */}
+      <ConnectionNotice />
 
       {/* New-version banner: sticky right under the header, driven by the shared coordinator. The
           info-colored bar spans full width while the notice itself — icon, text, actions — is one

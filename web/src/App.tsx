@@ -117,7 +117,7 @@ function PasswordResetRoute() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route element={<><ConnectionNotice /><ConnectionContent><Outlet /></ConnectionContent></>}>
+      <Route element={<><ConnectionNotice top={0} /><ConnectionContent><Outlet /></ConnectionContent></>}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/reset" element={<PasswordResetRoute />} />
         <Route path="/register" element={<RegisterPage />} />

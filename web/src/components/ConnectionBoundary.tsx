@@ -45,10 +45,12 @@ export default function ConnectionBoundary({ children }: { children: ReactNode }
 }
 
 /**
- * A compact floating status in the shell: it never pushes the page down, so the current reading
- * surface stays mounted, in place and usable. The dot turns into a spinner while a probe runs.
+ * A thin strip pinned right under the top bar, styled like the site-wide update banner: full-width
+ * tint, one centred group of status dot (a spinner while a probe runs), message and a quiet retry.
+ * The current reading surface stays mounted and usable underneath. `top` is where it sticks: under
+ * the app header by default, 0 on pages that have no header.
  */
-export function ConnectionNotice() {
+export function ConnectionNotice({ top = 'var(--rp-header-h, 64px)' }: { top?: number | string }) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { error, blocked, busy, retry } = useContext(ConnectionContext)
@@ -56,24 +58,31 @@ export function ConnectionNotice() {
   return (
     <div
       role="alert"
+      className="rp-connection-strip"
       style={{
-        position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: token.zIndexPopupBase + 10,
-        display: 'flex', alignItems: 'center', gap: 10, maxWidth: 'calc(100vw - 32px)',
-        padding: '6px 6px 6px 14px', borderRadius: 999, background: token.colorBgElevated,
-        border: `1px solid ${token.colorBorderSecondary}`, boxShadow: token.boxShadowSecondary,
-        fontSize: token.fontSizeSM, lineHeight: '20px', color: token.colorText, whiteSpace: 'nowrap',
+        position: 'sticky', top, zIndex: 20, background: token.colorWarningBg,
+        borderBottom: `1px solid ${token.colorWarningBorder}`,
       }}
     >
-      {busy ? (
-        <Spin size="small" />
-      ) : (
-        <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: token.colorWarning, boxShadow: `0 0 0 3px ${token.colorWarningBg}` }} />
-      )}
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t('connection.notice')}</span>
-      <Button aria-label={t('connection.retry')} type="text" size="small" disabled={busy} onClick={retry}
-        style={{ borderRadius: 999, color: token.colorPrimary, fontSize: token.fontSizeSM }}>
-        {t('connection.retryNow')}
-      </Button>
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          minHeight: 36, padding: '4px 12px', fontSize: 13, color: token.colorText,
+        }}
+      >
+        <span aria-hidden style={{ display: 'inline-flex', width: 14, justifyContent: 'center', flexShrink: 0 }}>
+          {busy ? (
+            <Spin size="small" />
+          ) : (
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: token.colorWarning }} />
+          )}
+        </span>
+        <span style={{ minWidth: 0 }}>{t('connection.notice')}</span>
+        <Button aria-label={t('connection.retry')} type="link" size="small" disabled={busy} onClick={retry}
+          style={{ padding: 0, height: 'auto', fontSize: 13 }}>
+          {t('connection.retryNow')}
+        </Button>
+      </div>
     </div>
   )
 }
