@@ -65,8 +65,11 @@ jobs:
           test "$GITHUB_ACTIONS" = true
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$(uname -s)" = Linux
-          root=$(mktemp -d "$RUNNER_TEMP/portal-runner-bootstrap.XXXXXXXX")
-          trap 'sudo -n rm -rf "$root"' EXIT
+          root=$(mktemp -d /tmp/portal-runner-bootstrap.XXXXXXXX)
+          work=$(mktemp -d "$RUNNER_TEMP/portal-runner-keys.XXXXXXXX")
+          trap 'sudo -n rm -rf "$root"; rm -rf "$work"' EXIT
+          sudo -n chown root:root "$root"
+          sudo -n chmod 0700 "$root"
           journal="$root/journal"
           data="$root/data"
           ipc="$root/ipc"
@@ -75,10 +78,10 @@ jobs:
           sudo -n install -d -m 0750 -o root -g root "$control"
           runner="$RUNNER_TEMP/app-runner-service"
           go build -o "$runner" ./cmd/app-runner
-          openssl genpkey -algorithm ED25519 -out "$root/controller-private.pem"
-          openssl pkey -in "$root/controller-private.pem" -pubout -outform DER | tail -c 32 > "$root/controller-public.raw"
-          public=$(base64 -w0 "$root/controller-public.raw" | tr '+/' '-_' | tr -d '=')
-          fingerprint=$(sha256sum "$root/controller-public.raw" | awk '{print $1}')
+          openssl genpkey -algorithm ED25519 -out "$work/controller-private.pem"
+          openssl pkey -in "$work/controller-private.pem" -pubout -outform DER | tail -c 32 > "$work/controller-public.raw"
+          public=$(base64 -w0 "$work/controller-public.raw" | tr '+/' '-_' | tr -d '=')
+          fingerprint=$(sha256sum "$work/controller-public.raw" | awk '{print $1}')
           jq -n \
             --arg journal "$journal" \
             --arg public "$public" \
