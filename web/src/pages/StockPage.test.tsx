@@ -10,6 +10,11 @@ import StockPage from './StockPage'
 // blank the page. This mounts through that transition to guard against the regression.
 // The reading pages render an "edit this report" button, which asks the session what it may do.
 // In the app they only ever mount inside <Protected>, so the context is always there; here it is not.
+const accessState = vi.hoisted(() => ({ closed: new Set<string>() }))
+vi.mock('../appAccess', async (orig) => ({
+  ...(await orig<typeof import('../appAccess')>()),
+  useAppAccess: () => ({ ready: true, isOpen: (k: string) => !accessState.closed.has(k) }),
+}))
 vi.mock('../auth', () => ({
   useAuth: () => ({ user: 'alice', name: 'Alice', admin: true, forecast: { scope: 'all', external: false }, can: () => true, logout: vi.fn() }),
 }))
@@ -127,6 +132,7 @@ vi.mock('../components/ExportButtons', () => ({
 // The open/closed choice is persisted per browser, so without this one test's click decides the
 // next test's first render.
 beforeEach(() => {
+  accessState.closed.clear()
   chartProps.length = 0
   // Counted per test below ("expanding costs no second fetch"), so it cannot be cumulative.
   quoteCalls.length = 0
@@ -304,6 +310,14 @@ describe('StockPage', () => {
     render(<StockPage />)
     const link = await screen.findByText('quote.openInApp')
     expect(link.closest('a')?.getAttribute('href')).toBe('/apps/quotes?symbol=001238')
+  })
+
+  // A closed Quotes app (ADR 0048) leaves no dead link: the panel just has no "open in app" line.
+  it('offers no Quotes link when the Quotes app is closed for the reader', async () => {
+    accessState.closed.add('builtin:quotes')
+    render(<StockPage />)
+    await screen.findByText('001238 Test Co Report Title')
+    expect(screen.queryByText('quote.openInApp')).toBeNull()
   })
 
   // Three labelled export buttons ate a row on desktop too. One menu everywhere — the same control

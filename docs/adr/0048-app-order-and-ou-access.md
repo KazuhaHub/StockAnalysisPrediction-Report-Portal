@@ -67,7 +67,16 @@ change.
 
 - The apps listing returns only the apps open for the caller, in order.
 - `POST /api/apps/{id}/token` answers `403 {"error":"app_closed","code":"app_closed"}` for a closed
-  app and mints nothing, so the app can never reach `/api/v1` through the bridge.
+  app and mints nothing.
+- **Tokens already minted are cut off too** (a token lives 30 minutes). Two mechanisms, because
+  neither covers the other. (a) Any access change for an app revokes that app's outstanding tokens
+  (`revokeApp`), so an open frame's next call fails and its re-mint answers `app_closed`. (b) Every
+  request authenticated by an app token re-checks access for the token's recorded app and user: the
+  bridge credential check (`tokenOK`, behind every `/api/v1` read) and the backend-connection proxy
+  (`v1ExtensionRequest`). That is what cuts off a user moved into a closed OU, or an access row
+  changed without going through the API. The bridge check refuses only on a definite "closed"
+  answer, leaving an unreadable policy to the handler behind it, which needs the same store; the
+  proxy, which forwards to a backend, fails closed.
 - `GET /app-assets/{id}/{path}` answers the same 403 when the request carries a session whose OU has
   the app closed. The route is public by design (the bundle holds no secrets) and the sandboxed
   frame's own sub-resource requests carry no cookie, so a request with **no session cannot be
@@ -80,8 +89,10 @@ change.
 close: the quotes endpoints are shared with the reading pages and with the entry search, and the batch
 and recurring APIs are already gated by `run_batch` and used by pages other than the app. Blocking
 them per OU would break those pages. So for built-in apps the server **reports** which keys are open
-and the SPA hides the closed ones: the hub card, the entry button pinned to it, and the route, which
-shows a not-available result instead of the console (`RequireAppOpen`). A reader who types the URL of
+and the SPA hides the closed ones: the hub card, the entry button pinned to it, every other link that
+advertises it (the header run menu's batch item, the "open in app" quote link on the reading page, the
+quote-only favourite card, which becomes a plain card), and the route, which shows a not-available
+result instead of the console (`RequireAppOpen`). A reader who types the URL of
 a closed built-in app, or calls its API directly, is not stopped by this feature. That is the stated
 limit: closing a built-in app is a visibility control, not a security boundary, and the console says so
 under the access card. A reader's real limits on those APIs remain their permissions and, for quotes,
@@ -90,13 +101,25 @@ nothing more than any signed-in reader already has.
 The SPA's answer fails open: if the list cannot be read the built-in cards and buttons stay, because
 the server still refuses what it can refuse.
 
+**Intentional change to entry buttons.** The list is the whole set of apps the reader may open, so an
+entry button pinned to an app that is not installed, or to a built-in slug that does not exist, is now
+hidden for everyone. Before, it was shown and led to a not-found page. (`appAccess.test.tsx`)
+
+Writes validate the key inside their own transaction (`requireApp`): a built-in key against the
+compiled list, an installed key against the `apps` row, locked `FOR UPDATE` on Postgres, the lock
+`DeleteApp` takes first. A concurrent uninstall therefore either completes before the write (the key
+is refused, 404 or 400) or waits for it (and then deletes the rows it wrote); no orphan row is left.
+Clearing a row never needs the app to exist.
+
 ### Audit
 
 Two new actions, each recorded with `recordChange` in the `{"field","from","to"}` shape of ADR 0046:
 
 - `app.access` — target `app/<key>`, detail `{"field":"access","ou":<id>,"from":null|bool,"to":null|bool}`,
   written only when the stored value actually changes.
-- `app.order` — detail `{"field":"order","from":[keys...],"to":[keys...]}`.
+- `app.order` — detail `{"field":"order","from":[keys...],"to":[keys...]}`, where both lists are the
+  resolved order readers see (ranked apps, then the rest). Written only when that resolved order
+  changes, so repeating the list already in effect is not an event.
 
 ## API
 
@@ -157,6 +180,20 @@ value and the source, with an open/closed switch. The hub, entry buttons and rou
 15. A closed built-in app's route shows a not-available result, never the console, and does not flash
     it while the answer loads; the answer fails open. Entry buttons pinned to a closed app are hidden.
     (`appAccess.test.tsx`)
+
+16. Closing an app revokes its outstanding tokens and leaves other apps' tokens alone; every bridge
+    call re-checks the token's user, so a closed row or a move into a closed OU cuts it off, a
+    reopened app works again with the same token, and the backend proxy refuses likewise.
+    (`TestClosingAnAppRevokesItsOutstandingTokens`, `TestEveryBridgeCallRechecksAccess...`,
+    `TestExtensionProxyEnforcesCurrentAuthority/app-closed`)
+17. An unchanged order writes no audit row. (`TestAnUnchangedOrderIsNotAudited`)
+18. Order and access writes refuse a key that is not an app inside their transaction and leave no
+    rows. (`TestWritesValidateTheAppInsideTheirTransaction`)
+19. The header run menu, the reading page's quote link and the quote-only favourite card do not
+    advertise a closed built-in app. (`AppLayout.test.tsx`, `StockPage.test.tsx`,
+    `FavoritesGrid.test.tsx`)
+20. An older dump with no sections for the two tables restores into empty tables.
+    (`TestMigration0014OlderDumpRestoresWithEmptyTables`)
 
 ## Consequences
 

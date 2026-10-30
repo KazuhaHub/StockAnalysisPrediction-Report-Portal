@@ -82,6 +82,13 @@ func (s *Store) ReplaceAppOrder(keys []string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck // a no-op once committed
 	e := migExec{s: s, ex: tx}
+	// Validated here, inside the write, so an uninstall that lands after the handler's check cannot
+	// leave a position row behind for an app that is gone.
+	for _, k := range keys {
+		if err := s.requireApp(e, k); err != nil {
+			return err
+		}
+	}
 	if _, err := e.exec(`DELETE FROM app_order`); err != nil {
 		return err
 	}
@@ -91,6 +98,46 @@ func (s *Store) ReplaceAppOrder(keys []string) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// errUnknownApp is a key that names neither a built-in app nor an installed one.
+var errUnknownApp = errors.New("unknown app")
+
+// requireApp checks, inside the caller's transaction, that key names a built-in app or an installed
+// one. On Postgres the installed row is locked FOR UPDATE, which is the lock DeleteApp takes first, so
+// a concurrent uninstall either finishes before this reads (and the key is refused) or waits for this
+// transaction (and then deletes the rows it wrote). SQLite has one writer, so it serializes anyway.
+func (s *Store) requireApp(e migExec, key string) error {
+	if slug, ok := strings.CutPrefix(key, builtinAppPrefix); ok {
+		if slices.Contains(builtinAppKeys, slug) {
+			return nil
+		}
+		return errUnknownApp
+	}
+	q := `SELECT id FROM apps WHERE id=?`
+	if s.driver == "postgres" {
+		q += ` FOR UPDATE`
+	}
+	var id string
+	switch err := e.queryRow(q, key).Scan(&id); {
+	case err == nil:
+		return nil
+	case errors.Is(err, sql.ErrNoRows):
+		return errUnknownApp
+	default:
+		return err
+	}
+}
+
+// setAppAccess is setAppAccessRow with the app checked in the same transaction. Clearing a row never
+// needs the app to exist: it is cleanup, and refusing it would strand the row.
+func (s *Store) setAppAccess(e migExec, key string, ou int64, enabled *bool) error {
+	if enabled != nil {
+		if err := s.requireApp(e, key); err != nil {
+			return err
+		}
+	}
+	return s.setAppAccessRow(e, key, ou, enabled)
 }
 
 // appAccessRows reads app_ou_access as key -> OU -> enabled.
@@ -188,6 +235,21 @@ func (s *Store) appAccessFor(user string) (appAccessView, error) {
 }
 
 // ---------- reader-facing ----------
+
+// appOpenQuiet is the access check for a caller that has no response to write: it fails closed.
+func (s *Store) appOpenQuiet(user, key string) bool {
+	view, err := s.appAccessFor(user)
+	return err == nil && view.open(key)
+}
+
+// appClosedFor is true only on a definite answer: the app is closed for the user. The bridge credential
+// check uses it so an unreadable policy leaves that check as it was (the handler behind it needs the
+// same store and fails on its own), where the extension proxy, which forwards to a backend, uses
+// appOpenQuiet and fails closed.
+func (s *Store) appClosedFor(user, key string) bool {
+	view, err := s.appAccessFor(user)
+	return err == nil && !view.open(key)
+}
 
 // closeApp answers a closed app. 403 with a stable code: the SPA tells "this app is switched off for
 // your organization" from a permission failure by the code, not by the wording.
@@ -318,12 +380,24 @@ func (s *Server) apiAdminAppsOrder(w http.ResponseWriter, r *http.Request, user 
 		jsonError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	before := orderAppKeys(known, order)
 	if err := s.st.ReplaceAppOrder(in.Keys); err != nil {
+		if errors.Is(err, errUnknownApp) {
+			jsonError(w, http.StatusBadRequest, "unknown app key")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	s.recordChange(r, user, AuditAppOrder, "app", "", map[string]any{"field": "order", "from": before, "to": in.Keys})
+	// Audited on a change to the order readers see, not on a change to the stored rows: writing the
+	// list that is already in effect is not an event.
+	before := orderAppKeys(known, order)
+	next := make(map[string]int, len(in.Keys))
+	for i, k := range in.Keys {
+		next[k] = i + 1
+	}
+	if after := orderAppKeys(known, next); !slices.Equal(before, after) {
+		s.recordChange(r, user, AuditAppOrder, "app", "", map[string]any{"field": "order", "from": before, "to": after})
+	}
 	apps, err := s.appLayout()
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "database error")
@@ -378,9 +452,12 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		return s.st.setAppAccessRow(e, key, ou, enabled)
+		return s.st.setAppAccess(e, key, ou, enabled)
 	})
 	switch {
+	case errors.Is(err, errUnknownApp):
+		jsonError(w, http.StatusNotFound, "app not found")
+		return
 	case err != nil:
 		jsonError(w, http.StatusInternalServerError, "database error")
 		return
@@ -388,6 +465,8 @@ func (s *Server) apiAdminAppAccess(w http.ResponseWriter, r *http.Request, user 
 		jsonError(w, http.StatusNotFound, "group not found")
 		return
 	}
+	// Whatever was minted before this change was minted under the old answer.
+	s.appTok.revokeApp(key)
 	if (from == nil) != (enabled == nil) || (from != nil && *from != *enabled) {
 		s.recordChange(r, user, AuditAppAccess, "app", key, map[string]any{"field": "access", "ou": ou, "from": from, "to": enabled})
 	}

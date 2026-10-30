@@ -25,6 +25,7 @@ import type { FavoriteItem } from '../api/types'
 import { fenToYuan, signedFenToYuan } from '../lib/money'
 import { useHomeQuotes, type CardQuote } from '../lib/useHomeQuotes'
 import { clickable } from '../lib/clickable'
+import { useAppAccess } from '../appAccess'
 import { FavoriteButton } from './FavoriteButton'
 
 const PAGE_SIZE = 20
@@ -40,6 +41,7 @@ function FavoriteCard({ item, quote, disabled }: { item: FavoriteItem; quote?: C
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { token } = theme.useToken()
+  const quotesOpen = useAppAccess().isOpen('builtin:quotes')
   const sortable = useSortable({ id: item.key, disabled })
   const style = {
     height: '100%',
@@ -51,18 +53,20 @@ function FavoriteCard({ item, quote, disabled }: { item: FavoriteItem; quote?: C
   const name = quote?.name || item.report?.name || item.symbol
   const destination = item.report
     ? `/stock/${encodeURIComponent(item.symbol)}?date=${encodeURIComponent(item.report.date)}`
-    : `/apps/quotes?symbol=${encodeURIComponent(`${item.market}:${item.symbol}`)}`
+    : quotesOpen
+      ? `/apps/quotes?symbol=${encodeURIComponent(`${item.market}:${item.symbol}`)}`
+      : undefined // the Quotes app is closed for this reader (ADR 0048): a plain card, no dead link
   const direction = quote ? Math.sign(Math.trunc(quote.change)) : 0
   const moveColor = direction > 0 ? token.colorError : direction < 0 ? token.colorSuccess : token.colorText
 
   return (
     <div ref={sortable.setNodeRef} style={style}>
       <Card
-        hoverable
+        hoverable={!!destination}
         size="small"
         style={{ height: '100%' }}
         styles={{ body: { padding: 16 } }}
-        {...clickable(() => navigate(destination), name)}
+        {...(destination ? clickable(() => navigate(destination), name) : {})}
       >
         <Space orientation="vertical" size={10} style={{ width: '100%' }}>
           <Space align="start" style={{ justifyContent: 'space-between', width: '100%' }}>

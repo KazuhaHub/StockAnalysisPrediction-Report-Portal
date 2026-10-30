@@ -2,6 +2,8 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -75,17 +77,59 @@ func TestMigration0014RefusesADatabaseMissingItsTables(t *testing.T) {
 	}
 }
 
+// withoutSections rewrites a dump the way a release before a step wrote it: no section for the named
+// tables, and neither the tables nor the step in the header.
+func withoutSections(t *testing.T, dump []byte, tables []string, step string) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	skipping := false
+	for i, line := range bytes.Split(bytes.TrimRight(dump, "\n"), []byte("\n")) {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			for _, key := range []string{"tables", "migrations"} {
+				var list []string
+				if err := json.Unmarshal(m[key], &list); err != nil {
+					t.Fatal(err)
+				}
+				kept := []string{}
+				for _, v := range list {
+					if v != step && !slices.Contains(tables, v) {
+						kept = append(kept, v)
+					}
+				}
+				m[key], _ = json.Marshal(kept)
+			}
+			line, _ = json.Marshal(m)
+		} else if raw, ok := m["table"]; ok {
+			var name string
+			json.Unmarshal(raw, &name)
+			skipping = slices.Contains(tables, name)
+		}
+		if skipping {
+			continue
+		}
+		out.Write(line)
+		out.WriteByte('\n')
+	}
+	return out.Bytes()
+}
+
 func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
 	src := newTestStore(t)
-	// A database before the step: no ledger row. A dump carries the build's tables, not the ledger's,
-	// so they are empty.
-	if _, err := src.exec(`DELETE FROM meta WHERE k=?`, migrationLedgerKey("0014")); err != nil {
-		t.Fatal(err)
+	dump := withoutSections(t, dumpOf(t, src), []string{"app_order", "app_ou_access"}, "0014")
+	if bytes.Contains(dump, []byte("app_order")) || bytes.Contains(dump, []byte("app_ou_access")) || bytes.Contains(dump, []byte(`"0014"`)) {
+		t.Fatal("the fixture still mentions the step's tables or the step")
 	}
-	dump := dumpOf(t, src)
 
 	dst := newTestStore(t)
+	ou := seedOU(t, dst, 0, nil)
 	if _, err := dst.exec(`INSERT INTO app_order(app_key,position) VALUES('builtin:batch',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dst.exec(`INSERT INTO app_ou_access(app_key,group_id,enabled) VALUES('builtin:batch',?,0)`, ou); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
@@ -93,6 +137,9 @@ func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
 	}
 	if n := scalar[int](t, dst, `SELECT COUNT(*) FROM app_order`); n != 0 {
 		t.Fatalf("the restore left %d rows in app_order", n)
+	}
+	if n := scalar[int](t, dst, `SELECT COUNT(*) FROM app_ou_access`); n != 0 {
+		t.Fatalf("the restore left %d rows in app_ou_access", n)
 	}
 	if !recorded(dst, "0014") {
 		t.Fatal("0014 is not recorded after restoring an older dump")
@@ -131,6 +178,10 @@ func TestPostgresAppLayoutStore(t *testing.T) {
 		st.exec(`DELETE FROM app_ou_access`)
 		st.exec(`DELETE FROM app_order`)
 	}()
+	if err := st.InstallApp(App{ID: "hello", Name: "Hello", Entry: "index.html"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	defer st.DeleteApp("hello")
 	if err := st.ReplaceAppOrder([]string{"builtin:quotes", "hello"}); err != nil {
 		t.Fatal(err)
 	}

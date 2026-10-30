@@ -317,6 +317,10 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 	if in.Method != "GET" {
 		need = "extension.manage"
 	}
+	if !s.st.appOpenQuiet(entry.username, entry.appID) { // ADR 0048: re-checked on every request
+		deny()
+		return
+	}
 	app, installed := s.st.GetApp(entry.appID)
 	if !installed || !entry.scopes[need] || !slices.Contains(app.Scopes, need) {
 		deny()

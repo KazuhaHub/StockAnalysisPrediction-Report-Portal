@@ -146,7 +146,7 @@ func extensionRequest(s *Server, token, method, app string) *httptest.ResponseRe
 	return w
 }
 func TestExtensionProxyEnforcesCurrentAuthority(t *testing.T) {
-	for _, mode := range []string{"read", "manage", "machine", "wrong-app", "demoted", "inactive", "expired", "session", "reinstall", "disabled", "changed-before-send", "OU"} {
+	for _, mode := range []string{"read", "manage", "machine", "wrong-app", "demoted", "inactive", "expired", "session", "reinstall", "disabled", "changed-before-send", "OU", "app-closed"} {
 		t.Run(mode, func(t *testing.T) {
 			s := extensionFixture(t)
 			key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
@@ -160,7 +160,7 @@ func TestExtensionProxyEnforcesCurrentAuthority(t *testing.T) {
 			backend := &extensionFakeBackend{signer: protocol.Signer{Issuer: issuer, Audience: c.Audience, AppID: c.AppID, InstanceID: c.InstanceID, KeyID: secret.KeyID, Key: secret.SigningKey}}
 			s.extensions.clientForTest = func(extensionConnection, extensionPolicy) (extensionBackend, error) { return backend, nil }
 			user := "admin"
-			if mode == "read" || mode == "manage" || mode == "OU" {
+			if mode == "read" || mode == "manage" || mode == "OU" || mode == "app-closed" {
 				user = "viewer"
 			}
 			token := extensionMint(t, s, user)
@@ -190,6 +190,12 @@ func TestExtensionProxyEnforcesCurrentAuthority(t *testing.T) {
 			case "changed-before-send":
 				backend.beforeSend = func() {
 					s.st.exec(`UPDATE app_backend_connections SET enabled=0,revision=revision+1 WHERE app_id='status'`)
+				}
+			case "app-closed":
+				// Closed for the viewer's OU after the token was minted (ADR 0048): the next request is refused.
+				def := s.st.DefaultGroupID()
+				if _, err := s.st.exec(`INSERT INTO app_ou_access(app_key,group_id,enabled) VALUES('status',?,0)`, def); err != nil {
+					t.Fatal(err)
 				}
 			case "OU":
 				id, err := s.st.CreateUserGroup("New OU", "", 1)

@@ -40,6 +40,18 @@ describe('useAppAccess', () => {
     expect(apiMock.get).toHaveBeenCalledWith('/api/apps')
   })
 
+  // Intentional change (ADR 0048): an entry button pinned to an app that is not installed, or to a
+  // built-in slug nobody has heard of, used to be shown and lead nowhere. It is now hidden for
+  // everyone, because the list is the whole set of apps the reader may open.
+  it('hides an entry pinned to an uninstalled app or an unknown built-in app', async () => {
+    render(
+      <AppAccessProvider user="rita">
+        <Probe keys={['uninstalled-app', 'builtin:nonesuch']} />
+      </AppAccessProvider>,
+    )
+    expect(await screen.findByText('uninstalled-app=false,builtin:nonesuch=false')).toBeTruthy()
+  })
+
   it('fails open when the list cannot be read: the server still gates installed apps', async () => {
     apiMock.get.mockRejectedValue(new Error('down'))
     render(

@@ -54,6 +54,11 @@ vi.mock('../prefs', () => ({
 }))
 vi.mock('../reader', () => ({ useReaderPrefs: () => ({ wide: false }) }))
 vi.mock('../auth', () => ({ useAuth: () => authState.value }))
+const accessState = vi.hoisted(() => ({ closed: new Set<string>() }))
+vi.mock('../appAccess', async (orig) => ({
+  ...(await orig<typeof import('../appAccess')>()),
+  useAppAccess: () => ({ ready: true, isOpen: (k: string) => !accessState.closed.has(k) }),
+}))
 vi.mock('../api/client', () => ({
   api: { get: apiGet },
   // The record page is mounted for real in one test below; it needs the client's other exports.
@@ -103,6 +108,7 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  accessState.closed.clear()
   updateState.value = noUpdate
   authState.value = { user: 'alice', name: 'Alice', admin: true, forecast: undefined, can: () => true, logout: () => undefined }
   apiGet.mockReset().mockImplementation(() => Promise.resolve({ version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10' }))
@@ -217,6 +223,17 @@ describe('AppLayout desktop navigation', () => {
     await user.click(screen.getByRole('menuitem', { name: 'nav.writeReport' }))
 
     expect(await screen.findByText('write-report-body')).toBeTruthy()
+  })
+
+  // Closing the batch app (ADR 0048) takes it out of the header menu as well as the hub.
+  it('leaves a closed batch app out of the run-analysis dropdown', async () => {
+    accessState.closed.add('builtin:batch')
+    const user = userEvent.setup()
+    renderAt('/queue')
+
+    await user.click(await screen.findByRole('button', { name: 'nav.runActions' }))
+    expect(screen.queryByRole('menuitem', { name: 'nav.batch' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'nav.writeReport' })).toBeTruthy()
   })
 
   it('opens batch execution from the run-analysis dropdown', async () => {
