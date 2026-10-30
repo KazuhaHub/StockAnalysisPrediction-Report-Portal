@@ -72,7 +72,7 @@ change.
   neither covers the other. (a) An access change that **closes** the app somewhere it was open
   (resolved before and after, per OU) revokes that app's outstanding tokens (`revokeApp`); an opening
   or a no-op revokes nothing, since that would force every open frame to re-mint for no reason. A
-  revoked token is answered 401 by the bridge and by the backend proxy (`token_invalid`), the signal
+  revoked token is answered 401 by the bridge, by the backend proxy and by the principals directory (error code `unauthorized`, the code every `/api/v1` 401 uses; documented in `openapi.json` for the request and principals routes), the signal
   the host page already uses to mint a new one, and the mint then answers 403 `app_closed`. A token
   that is live but not allowed stays a 403 (the proxy's `app_closed` for a definite close,
   `extension_forbidden` otherwise). (b) Every request authenticated by an app token re-checks access
@@ -211,6 +211,10 @@ value and the source, with an open/closed switch. The hub, entry buttons and rou
 22. A deleted user's token is closed at the bridge; an app with no rows, and an administrator, cost no
     OU snapshot; write locks are taken in sorted order. (`TestADeletedUsersTokenIsClosedAtTheBridge`,
     `TestAnAppWithNoAccessRowsCostsNoSnapshot`, `TestAppLockOrderIsSortedAndDeduplicated`)
+23. Closing a parent OU revokes tokens of users in a child that inherits it; a child's `null` that
+    re-inherits a closed parent revokes; a user with no group under a closed Default OU is closed;
+    the principals directory answers a revoked token 401 and a refused live one 403; the OpenAPI
+    document lists the 401. (`apps_layout_tree_test.go`)
 
 ## Consequences
 

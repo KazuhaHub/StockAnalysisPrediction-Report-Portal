@@ -304,7 +304,7 @@ func (s *Server) v1ExtensionRequest(w http.ResponseWriter, r *http.Request) {
 		// Unknown, expired or revoked (an app closed for the viewer revokes its tokens): the same 401
 		// the bridge answers, which is the signal for the host page to mint a new token. A token that
 		// is live but not allowed stays a 403.
-		v1err(w, http.StatusUnauthorized, "token_invalid", "the app token is missing, expired or revoked")
+		v1err(w, http.StatusUnauthorized, "unauthorized", "the app token is missing, expired or revoked: mint a new one")
 		return
 	}
 	if entry.appID != r.PathValue("id") || !entry.accountGenerationKnown {
