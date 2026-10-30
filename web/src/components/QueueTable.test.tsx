@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import QueueTable from './QueueTable'
@@ -9,7 +9,7 @@ import type { BatchJob } from '../api/types'
 // Mutable so a test can inject jobs into the mocked API. vi.hoisted keeps it reachable from
 // the hoisted vi.mock factory below. `hold` makes every polled GET hang, which is what a slow
 // link looks like for the seconds that matter: the page is up and nothing has answered yet.
-const store = vi.hoisted(() => ({ jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
+const store = vi.hoisted(() => ({ urls: [] as string[], jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
 const forgetTags = vi.hoisted(() => vi.fn())
 
 // Smoke test: the queue page must mount without crashing (it renders on load, before any
@@ -36,6 +36,7 @@ vi.mock('../lib/conditionalGet', () => ({
   UNCHANGED,
   forgetTags,
   getIfChanged: (url: string) => {
+    store.urls.push(String(url))
     if (store.hold) return new Promise(() => {})
     if (store.fail) return Promise.reject(new Error(store.fail))
     if (store.unchanged) return Promise.resolve(UNCHANGED)
@@ -240,5 +241,30 @@ describe('QueueTable', () => {
     expect(screen.getByText('boom')).toBeTruthy()
     expect(screen.getByText('common.retry')).toBeTruthy()
     expect(screen.queryByText('queue.empty')).toBeNull()
+  })
+
+  describe('mine / all (ADR 0047)', () => {
+    beforeEach(() => {
+      store.urls = []
+      localStorage.clear()
+    })
+
+    it('lets an administrator switch to their own runs, for the list and the tiles', async () => {
+      store.admin = true
+      mount()
+      await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs'))).toBe(true))
+      expect(store.urls.every((u) => !u.includes('scope=mine'))).toBe(true)
+      fireEvent.click(screen.getByText('queue.scope.mine'))
+      await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs') && u.includes('scope=mine'))).toBe(true))
+      await waitFor(() => expect(store.urls.some((u) => u.includes('/queue') && u.includes('scope=mine'))).toBe(true))
+    })
+
+    it('offers no toggle to a non-administrator', async () => {
+      store.admin = false
+      mount()
+      await waitFor(() => expect(store.urls.length).toBeGreaterThan(0))
+      expect(screen.queryByText('queue.scope.mine')).toBeNull()
+      expect(store.urls.every((u) => !u.includes('scope='))).toBe(true)
+    })
   })
 })

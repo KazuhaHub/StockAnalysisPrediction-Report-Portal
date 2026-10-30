@@ -14,6 +14,7 @@ import {
   Modal,
   Popconfirm,
   Progress,
+  Segmented,
   Select,
   Space,
   Switch,
@@ -58,6 +59,7 @@ import {
 } from '../lib/batchUi'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
+import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
 import { useTableView } from './TableView'
@@ -266,6 +268,8 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const { t } = useTranslation()
   const { message } = App.useApp()
   const { admin, user } = useAuth()
+  // Whose runs this view covers; only an administrator gets to choose (ADR 0047).
+  const [scope, setScope] = useQueueScope(admin)
   const mobile = !Grid.useBreakpoint().md
   const navigate = useNavigate()
   const [jobs, setJobs] = useState<BatchJob[]>([])
@@ -292,7 +296,8 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   // back to a URL tagged before the current rows, is answered "nothing changed" about data this
   // component does not have. Refs, not state: `load` is captured by a poll started in an effect.
   const heldJobsUrl = useRef('')
-  const heldSummary = useRef(false)
+  // The summary URL whose answer this view holds (it changes with the scope).
+  const heldSummary = useRef<string | null>(null)
 
   const load = async () => {
     // Bounded poll: the server returns every active job + the most recent terminal jobs (not the whole
@@ -302,21 +307,22 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     // whole.
     // Conditional: a queue in which nothing happened answers 304, and keeping the objects we
     // already have is what stops a 3-second poll from re-rendering the table for no reason.
-    const jobsUrl = `/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`
+    const jobsUrl = withQueueScope(`/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`, scope, admin)
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
     // Drop the tag for anything we are not holding, so this request has to come back as an answer.
     if (heldJobsUrl.current !== jobsUrl) forgetTags(jobsUrl)
-    if (!heldSummary.current) forgetTags('/api/admin/batch/queue')
+    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
     const jobsRequest = getIfChanged<{ jobs: BatchJob[]; total?: number }>(jobsUrl).then((r) => {
       if (r === UNCHANGED) return
       setJobs(r.jobs || [])
       setTotal(r.total ?? (r.jobs || []).length)
       heldJobsUrl.current = jobsUrl
     })
-    const summaryRequest = getIfChanged<BatchQueueSummary>('/api/admin/batch/queue')
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
       .then((r) => {
         if (r === UNCHANGED) return
         setSummary(r)
-        heldSummary.current = true
+        heldSummary.current = summaryUrl
       })
       .catch(() => {})
     try {
@@ -351,7 +357,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     if (!auto) return
     return startVisiblePoll(load, 3000)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, search])
+  }, [auto, search, scope])
 
   // Typing must not fire a request per keystroke, and with auto-refresh off nothing else would
   // refetch at all, so a paused queue still answers the search box.
@@ -359,7 +365,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     const timer = window.setTimeout(() => void load(), 300)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
+  }, [search, scope])
 
   const targetName = (id: number) => targets.find((tg) => tg.id === id)?.name || `#${id}`
   const submitters = useMemo(() => [...new Set(jobs.map((j) => j.created_by).filter(Boolean))], [jobs])
@@ -545,6 +551,17 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   // desktop; on a phone that corner is too cramped, so they move to a full-width body row.
   const queueControls = (
     <Space wrap>
+      {admin && (
+        <Segmented
+          size="small"
+          value={scope}
+          onChange={(v) => setScope(v as QueueScope)}
+          options={[
+            { label: t('queue.scope.mine'), value: 'mine' },
+            { label: t('queue.scope.all'), value: 'all' },
+          ]}
+        />
+      )}
       {summary?.budget != null && (
         <span style={{ fontSize: 12 }}>
           <Typography.Text type="secondary">{t('queue.budget')}</Typography.Text>{' '}

@@ -81,6 +81,18 @@ page hides the submitter filter from a non-administrator, whose list holds only 
 This is a behaviour change for operators: the queue page now shows an operator their own runs rather
 than the whole queue. The "N ahead" on their own queued runs still reflects the whole queue, as a count.
 
+### An administrator chooses mine or all (2026-10-30)
+
+An administrator can narrow the queue views to their own runs. `GET /api/admin/batch/jobs` and
+`GET /api/admin/batch/queue` accept `scope=mine`; for an administrator it applies the same owner
+boundary an operator always has (list, `total`, search and summary tiles), while the capacity fields
+stay whole-queue. Without it an administrator still sees everything. For anyone else the parameter is
+ignored: they are always scoped to their own runs and cannot widen it.
+
+The queue page, the queue drawer and the header badge share one pick, a "Mine / All" switch shown
+only to administrators. It is a per-browser convenience kept in `localStorage` (default All), so the
+three views never disagree.
+
 ### Export ownership follows ADR 0046
 
 A non-administrator sees an export in the tray only if `requested_by == user` **and** the job was
@@ -202,3 +214,9 @@ Each is covered by a test in `internal/app/tasks_api_test.go` unless noted.
     cancel URLs, toasts once on in-flight to finished, and is absent for a user with no task
     capability — `web/src/components/TaskTray.test.tsx`, `web/src/lib/useMyTasks.test.tsx`,
     `web/src/components/AppLayout.test.tsx`.
+20. An administrator's `scope=mine` narrows the jobs list, its `total` and the summary tiles to their
+    own runs while capacity stays whole-queue; without it they see everything; an operator cannot
+    widen their scope — `internal/app/queue_scope_test.go`. The switch is offered only to
+    administrators and drives the page, the drawer and the badge alike —
+    `web/src/components/QueueTable.test.tsx`, `web/src/components/QueueDrawer.test.tsx`,
+    `web/src/lib/queueScope.test.ts`.

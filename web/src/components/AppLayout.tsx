@@ -14,6 +14,7 @@ import { QUEUE_EVENT, RUN_ANALYSIS_EVENT } from '../lib/shortcuts'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
 import { prefetch } from '../lib/prefetch'
 import { queueOnScreen } from '../lib/queueWatch'
+import { useQueueScope, withQueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import Omnibox from './Omnibox'
 import ScrollToTop from './ScrollToTop'
@@ -49,6 +50,7 @@ function AppShell() {
   const { settings, title } = useSite()
   const { mode, setMode, lang, setLang, langs } = usePrefs()
   const { user, name, admin, forecast, can, logout } = useAuth()
+  const [queueScope] = useQueueScope(admin)
   const navigate = useNavigate()
   const loc = useLocation()
   const { token } = theme.useToken()
@@ -102,7 +104,7 @@ function AppShell() {
   // Whether the badge is holding a summary at all. The ETag store is module-global, so if a queue
   // view tagged this URL first, the badge's own first poll would be answered "nothing changed"
   // about a count it has never had — and an absent badge is how this header says "nothing queued".
-  const heldQueue = useRef(false)
+  const heldQueue = useRef<string | null>(null)
   const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const canRun = can('run_batch')
@@ -183,17 +185,19 @@ function AppShell() {
       // Nothing to add while a queue view is open: it polls the same endpoint four times as often
       // and shows the queue itself, so this would be a slower, staler copy of what is on screen.
       if (queueOnScreen()) return Promise.resolve()
-      if (!heldQueue.current) forgetTags('/api/admin/batch/queue')
-      return getIfChanged<BatchQueueSummary>('/api/admin/batch/queue')
+      // The badge counts what the queue views would list: an administrator's mine/all pick applies.
+      const url = withQueueScope('/api/admin/batch/queue', queueScope, admin)
+      if (heldQueue.current !== url) forgetTags(url)
+      return getIfChanged<BatchQueueSummary>(url)
         .then((r) => {
           if (r === UNCHANGED) return
           setQueue(r)
-          heldQueue.current = true
+          heldQueue.current = url
         })
         .catch(() => {})
     }
     return startVisiblePoll(load, 12000)
-  }, [canRun, queueOpen])
+  }, [canRun, queueOpen, queueScope, admin])
 
   // Run Analysis + the queue live here as a modal/drawer, but an entry-link shortcut (from
   // the home page) needs to open them — it fires a window event we listen for.

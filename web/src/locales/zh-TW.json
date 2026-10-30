@@ -1476,6 +1476,8 @@
   "preset.untitled": "（未命名）",
   "preset.viewRule": "檢視完整規則",
   "preset.windows": "時段",
+  "queue.scope.mine": "我的",
+  "queue.scope.all": "全部",
   "queue.attempts": "嘗試次數",
   "queue.autoRefresh": "自動刷新",
   "queue.budget": "同時上限",
