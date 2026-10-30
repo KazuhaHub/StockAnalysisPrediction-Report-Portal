@@ -422,7 +422,7 @@ func jobJSON(j BatchJob) map[string]any {
 		"run_at": j.RunAt, // one-shot scheduled start ("" = ASAP; ADR 0007)
 		// The same moments as unix milliseconds: the strings above are zoneless wall-clock in the server's
 		// zone, which only another wall-clock in that zone can be compared with. 0 = unset.
-		"created_at_ms": msFromLocal(j.CreatedAt), "started_at_ms": msFromLocal(j.StartedAt), "finished_at_ms": msFromLocal(j.FinishedAt),
+		"started_at_ms": msFromLocal(j.StartedAt), "finished_at_ms": msFromLocal(j.FinishedAt),
 	}
 }
 

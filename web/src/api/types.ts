@@ -179,7 +179,6 @@ export interface BatchJob {
   started_at: string
   finished_at: string
   /** The same moments as unix milliseconds (0 = unset); the strings are zoneless server wall-clock. */
-  created_at_ms?: number
   started_at_ms?: number
   finished_at_ms?: number
 }
@@ -2020,8 +2019,6 @@ export interface TaskItem {
   bytes?: number
   counts?: { succeeded: number; partial: number; failed: number; cancelled: number }
   created_at: number
-  /** Runs only: when the run began (unix ms); absent until then. */
-  started_at?: number
   finished_at: number
   download?: string
   cancel?: string

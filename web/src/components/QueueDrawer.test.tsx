@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
-import { MemoryRouter, useLocation } from 'react-router'
+import { Link, MemoryRouter, useLocation } from 'react-router'
 import type { BatchJob, TaskItem } from '../api/types'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
 import JobDetailHost from './JobDetailHost'
@@ -74,6 +74,7 @@ function Harness({ entry, ...props }: Props & { entry?: string }) {
     <App>
       <MemoryRouter initialEntries={[entry ?? '/']}>
         <Where />
+        <Link to="/elsewhere">go-elsewhere</Link>
         <JobDetailHost />
         <QueueDrawer open onClose={() => {}} canRun canExport tasks={[]} refreshTasks={refreshTasks} tab="runs" onTabChange={onTabChange} {...props} />
       </MemoryRouter>
@@ -540,6 +541,16 @@ describe('Tasks drawer rows open the run in place', () => {
     expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
   })
 
+  it("also steps aside on the batch console's own ?job= drawer", async () => {
+    store.jobs = [job({ id: 41 })]
+    const onClose = vi.fn()
+    mount({ entry: '/apps/batch?job=41', onClose })
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(onClose).toHaveBeenCalled()
+    expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
+  })
+
   it('returns to the Tasks list on close, which stays mounted', async () => {
     store.jobs = [job({ id: 41 })]
     mount()
@@ -593,6 +604,8 @@ describe('Tasks drawer rows open the export in place', () => {
     filter: { op: 'and', items: [{ field: 'symbol', operator: 'is', values: ['1'] }, { field: 'kind', operator: 'is', values: ['x'] }] }, ...over,
   })
   const modalEl = () => document.querySelector('.ant-modal') as HTMLElement
+  // antd keeps a closed modal's DOM until its leave animation ends (never, under jsdom): closed = leaving.
+  const modalShut = () => !document.querySelector('.ant-modal') || modalEl().classList.contains('ant-zoom-leave')
   const withExport = (job: Record<string, unknown>) => {
     const base = apiMock.get.getMockImplementation()!
     apiMock.get.mockImplementation(async (url: string) => (/\/exports\/e\d$/.test(url) ? job : base(url)))
@@ -623,6 +636,59 @@ describe('Tasks drawer rows open the export in place', () => {
     const dl = await within(modalEl()).findByRole('link', { name: /tasks\.download/ })
     expect(dl.getAttribute('href')).toBe('/api/admin/exports/e1/file')
     expect(within(modalEl()).queryByRole('button', { name: /tasks\.cancel/ })).toBeNull()
+  })
+
+  it('closes the export detail when the Tasks drawer closes', async () => {
+    withExport(exportJob())
+    const view = mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    view.rerender(<Harness tab="exports" tasks={[exp({ link: '/exports' })]} open={false} />)
+    await waitFor(() => expect(modalShut()).toBe(true))
+    view.rerender(<Harness tab="exports" tasks={[exp({ link: '/exports' })]} open />)
+    await screen.findAllByText('Audit Q3')
+    expect(modalShut()).toBe(true) // reopening does not resurrect it
+  })
+
+  it('closes the export detail on a route change', async () => {
+    withExport(exportJob())
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    fireEvent.click(screen.getByRole('link', { name: 'go-elsewhere' }))
+    await waitFor(() => expect(modalShut()).toBe(true))
+  })
+
+  it('says so with a retry when the export record cannot be read, and recovers', async () => {
+    let fail = true
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) {
+        if (fail) throw Object.assign(new Error('boom'), { status: 500 })
+        return exportJob()
+      }
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    const retry = await within(modalEl()).findByRole('button', { name: /common\.retry/ })
+    fail = false
+    fireEvent.click(retry)
+    expect(await within(modalEl()).findByText('export.source.reports')).toBeTruthy()
+  })
+
+  it('keeps a spinner, with no error, while the connection is down', async () => {
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(within(modalEl()).queryByRole('button', { name: /common\.retry/ })).toBeNull()
+    expect(modalEl().querySelector('.ant-spin')).not.toBeNull()
   })
 
   it('shows the failure reason', async () => {

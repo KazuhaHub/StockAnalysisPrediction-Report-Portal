@@ -19,7 +19,7 @@ import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
 import RunningFor from './RunningFor'
 import ExportDetailModal from './ExportDetailModal'
-import { openJobDetail } from '../lib/jobDetailStore'
+import { openJobDetail, pageShowsJob } from '../lib/jobDetailStore'
 
 export type DrawerTab = 'runs' | 'exports'
 
@@ -62,6 +62,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const [confirming, setConfirming] = useState<string | null>(null)
   // The export whose compact detail is open.
   const [exportDetail, setExportDetail] = useState<string | null>(null)
+  // It belongs to this open of the drawer and this page: closing the drawer or changing route puts it away.
+  const here = loc.pathname + loc.search
+  useEffect(() => {
+    setExportDetail(null)
+  }, [open, here])
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
@@ -253,7 +258,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         label={`${targetName(j.target_id)}, ${t(`batch.status.${j.status}`, j.status)}`}
         onOpen={() => {
           // The queue page already shows this run in its own drawer: step aside rather than stack a second one.
-          if (loc.pathname === '/queue' && new URLSearchParams(loc.search).get('job') === String(j.id)) onClose()
+          if (pageShowsJob(loc, j.id)) onClose()
           else openJobDetail(j.id)
         }}
         tone={tone}

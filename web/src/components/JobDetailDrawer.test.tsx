@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import type { BatchItem, BatchJob, BatchJobDetail } from '../api/types'
@@ -179,6 +179,63 @@ describe('batch layout', () => {
     })
     mount()
     expect(await screen.findByText('batch.jobNotFound')).toBeTruthy()
+  })
+})
+
+describe('switching jobs', () => {
+  const tree = (id: number) => (
+    <App>
+      <MemoryRouter>
+        <JobDetailDrawer jobId={id} onClose={() => {}} />
+      </MemoryRouter>
+    </App>
+  )
+  const setup = () => {
+    const late: { resolve: (v: unknown) => void; reject: (e: unknown) => void } = { resolve: () => {}, reject: () => {} }
+    apiMock.get.mockImplementation((url: string) => {
+      if (url.includes('/targets')) return Promise.resolve({ targets: [{ id: 9, name: 'Deep Research' }] })
+      if (url.endsWith('/jobs/7')) return new Promise((resolve, reject) => { late.resolve = resolve; late.reject = reject })
+      return Promise.resolve(detail({ id: 8 }, [item({ id: 80 })]))
+    })
+    return late
+  }
+
+  it('ignores a late answer for the job it was showing before', async () => {
+    const late = setup()
+    const view = render(tree(7))
+    view.rerender(tree(8))
+    expect(await screen.findByText('batch.jobTitle:{"id":8}')).toBeTruthy()
+    await act(async () => late.resolve(detail({ id: 7 }, [item({ id: 70 })])))
+    expect(screen.getByText('batch.jobTitle:{"id":8}')).toBeTruthy()
+    expect(screen.queryByText('batch.jobTitle:{"id":7}')).toBeNull()
+  })
+
+  it("does not let the previous job's late 403 stop the new job's polling or hide it", async () => {
+    const late = setup()
+    const view = render(tree(7))
+    view.rerender(tree(8))
+    await screen.findByText('batch.jobTitle:{"id":8}')
+    const stops = poll.stops
+    await act(async () => late.reject(Object.assign(new Error('forbidden'), { status: 403 })))
+    expect(poll.stops).toBe(stops)
+    expect(screen.queryByText('batch.jobNotFound')).toBeNull()
+    expect(screen.getByText('batch.jobTitle:{"id":8}')).toBeTruthy()
+  })
+})
+
+describe('a job that is being cancelled', () => {
+  it('offers no Cancel job on a batch that is already cancelling', async () => {
+    store.detail = detail({ total: 2, status: 'cancelling' }, [item(), item({ id: 71, row_index: 1 })])
+    mount()
+    await waitFor(() => expect(document.querySelector('.ant-table')).not.toBeNull())
+    expect(screen.queryByRole('button', { name: /queue\.cancelJob/ })).toBeNull()
+  })
+
+  it('offers no Cancel on a single run that is already cancelling', async () => {
+    store.detail = detail({ status: 'cancelling' })
+    mount()
+    await screen.findByText('Deep Research')
+    expect(screen.queryByRole('button', { name: /tasks\.cancel/ })).toBeNull()
   })
 })
 

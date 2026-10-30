@@ -63,6 +63,9 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
   const [notFound, setNotFound] = useState(false)
   const [loadErr, setLoadErr] = useState('')
   const stopPoll = useRef<(() => void) | null>(null)
+  // The job this drawer is showing now; an answer for any other job (a request that was in flight when the
+  // drawer moved on) is dropped before it can touch state or stop the new job's poll.
+  const current = useRef<number | null>(null)
   const open = jobId != null
   const load = () =>
     jobId == null
@@ -70,11 +73,13 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       : api
           .get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`)
           .then((d) => {
+            if (current.current !== jobId) return
             setNotFound(false)
             setLoadErr('')
             setDetail(d)
           })
           .catch((e) => {
+            if (current.current !== jobId) return
             const status = (e as { status?: number })?.status
             if (status === 404 || status === 403) {
               setNotFound(true)
@@ -91,12 +96,14 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
     setNotFound(false)
     setLoadErr('')
     setSelected([])
+    current.current = jobId
     api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setTargets(r?.targets || [])).catch(() => {})
     const stop = startVisiblePoll(load, 2500)
     stopPoll.current = stop
     return () => {
       stop()
       stopPoll.current = null
+      current.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId])
@@ -287,7 +294,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
   }
 
   const jobAction =
-    detail && !single && canCancel && !isTerminal(detail.job.status) ? (
+    detail && !single && canCancel && !isTerminal(detail.job.status) && detail.job.status !== 'cancelling' ? (
       <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
         <Button danger icon={<CloseCircleOutlined />}>
           {t('queue.cancelJob')}
@@ -304,7 +311,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
           <Button icon={<SyncOutlined />}>{t('queue.reconcile')}</Button>
         </Popconfirm>
       )}
-      {canCancel && itemActive(single.status) && cancelButton(single, true)}
+      {canCancel && itemActive(single.status) && detail?.job.status !== 'cancelling' && cancelButton(single, true)}
     </Space>
   )
   const footer =

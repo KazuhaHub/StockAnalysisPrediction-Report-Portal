@@ -12,6 +12,14 @@ function set(id: number | null) {
   listeners.forEach((l) => l())
 }
 
+/**
+ * Whether the page itself already shows this run in its own ?job= drawer (the queue page and the batch
+ * console both embed the queue table), so opening the global detail would stack a second one.
+ */
+export function pageShowsJob(loc: { pathname: string; search: string }, id: number): boolean {
+  return (loc.pathname === '/queue' || loc.pathname === '/apps/batch') && new URLSearchParams(loc.search).get('job') === String(id)
+}
+
 export const openJobDetail = (id: number): void => set(id)
 export const closeJobDetail = (): void => set(null)
 

@@ -39,10 +39,10 @@ function Where() {
     </>
   )
 }
-const renderProbe = (enabled = true) =>
+const renderProbe = (enabled = true, entry = '/') =>
   render(
     <App>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry]}>
         <Where />
         <NotificationStack />
         <Probe enabled={enabled} />
@@ -139,6 +139,17 @@ describe('useTaskCenter completion toasts', () => {
     await watchThen(run({ link: '' }), run({ link: '', status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
     expect(await screen.findByText('tasks.toast.runFailed:{"name":"Deep dive"}')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'tasks.toast.view' })).toBeNull()
+  })
+
+  it.each(['/queue?job=7', '/apps/batch?job=7'])('does not stack a second drawer when %s already shows that run', async (entry) => {
+    tasks = [run()]
+    renderProbe(true, entry)
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalled())
+    await settle()
+    tasks = [run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } })]
+    act(() => notifyExportsChanged())
+    fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
+    expect(screen.getByTestId('detail').textContent).toBe('')
   })
 
   it('offers a View action on a partial run', async () => {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Button, Descriptions, Modal, Popconfirm, Space, Typography } from 'antd'
+import { useCallback, useEffect, useState } from 'react'
+import { Alert, Button, Descriptions, Modal, Popconfirm, Space, Spin, Typography } from 'antd'
 import { CloseCircleOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
@@ -8,6 +8,7 @@ import { countConditions } from '../lib/exportFilter'
 import { exportBase } from '../lib/exportMode'
 import { fmtBytes } from '../lib/exportJobs'
 import { fmtMs } from '../lib/exportTime'
+import { loadFailure } from '../lib/loadFailure'
 
 export interface ExportDetailModalProps {
   /** The export's row from /api/tasks; null keeps the modal closed. */
@@ -26,19 +27,28 @@ export default function ExportDetailModal({ task, onClose, onCancel }: ExportDet
   const id = task?.id
   const status = task?.status
   const link = task?.link
+  const [loadErr, setLoadErr] = useState('')
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     setJob(null)
+    setLoadErr('')
     if (!id) return
     let live = true
     const base = exportBase(link?.startsWith('/manage') ? 'admin' : 'reader')
     api
       .get<ExportJob>(`${base}/${encodeURIComponent(id)}`)
       .then((j) => live && setJob(j))
-      .catch(() => {})
+      .catch((e) => {
+        // A connection loss is not an answer: keep waiting, say nothing red.
+        const text = loadFailure(e, t)
+        if (live && text !== null) setLoadErr(text)
+      })
     return () => {
       live = false
     }
-  }, [id, status, link])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, status, link, attempt])
+  const retry = useCallback(() => setAttempt((n) => n + 1), [])
 
   const dash = <Typography.Text type="secondary">—</Typography.Text>
   const time = (ms?: number) => (ms ? fmtMs(ms, '') : dash)
@@ -79,6 +89,24 @@ export default function ExportDetailModal({ task, onClose, onCancel }: ExportDet
         ) : null
       }
     >
+      {task && !job && (
+        <div style={{ marginBottom: 12 }}>
+          {loadErr ? (
+            <Alert
+              type="warning"
+              showIcon
+              title={t('common.loadFailedContent')}
+              description={loadErr}
+              action={<Button size="small" onClick={retry}>{t('common.retry')}</Button>}
+            />
+          ) : (
+            <Space>
+              <Spin size="small" />
+              <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
+            </Space>
+          )}
+        </div>
+      )}
       {task && (
         <Descriptions bordered size="small" column={1} styles={{ label: { width: 120 } }}>
           <Descriptions.Item label={t('export.history.name')}>{task.name}</Descriptions.Item>

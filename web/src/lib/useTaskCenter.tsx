@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { notifyExportsChanged } from './exportJobs'
 import { notify, type NotifyAction } from './notify'
-import { openJobDetail } from './jobDetailStore'
+import { useRef } from 'react'
+import { useLocation } from 'react-router'
+import { openJobDetail, pageShowsJob } from './jobDetailStore'
 import { runOutcome } from './taskUi'
 import { taskKey, useMyTasks } from './useMyTasks'
 import type { TaskItem } from '../api/types'
@@ -11,9 +13,13 @@ import type { TaskItem } from '../api/types'
 // the returned list; nothing here draws a surface of its own.
 export function useTaskCenter(enabled: boolean) {
   const { t } = useTranslation()
+  // The callbacks below outlive the render that made them (a toast's button), so read the page from a ref.
+  const loc = useLocation()
+  const locRef = useRef(loc)
+  locRef.current = loc
   // "View" opens the thing itself: a run's detail in place over the current page, the Tasks drawer's Exports tab for an export.
   // A caller without run_batch gets no link from the server, and the detail would only 403: offer nothing.
-  const viewRun = (task: TaskItem): NotifyAction[] => !task.link ? [] : [{ label: t('tasks.toast.view'), primary: true, onClick: () => openJobDetail(Number(task.id)) }]
+  const viewRun = (task: TaskItem): NotifyAction[] => !task.link ? [] : [{ label: t('tasks.toast.view'), primary: true, onClick: () => { if (!pageShowsJob(locRef.current, Number(task.id))) openJobDetail(Number(task.id)) } }]
   const viewExports: NotifyAction[] = [{ label: t('tasks.toast.view'), primary: true, onClick: () => notifyExportsChanged({ open: true }) }]
   return useMyTasks({
     enabled,
