@@ -1,10 +1,17 @@
 import { Badge, Breadcrumb, theme } from 'antd'
-import { AppstoreOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, ClockCircleOutlined, LineChartOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { appPath, serviceStatus, type AdminApp } from './appsAdminModel'
 
-/** The app's own icon (an emoji the manifest declares) on a tinted tile, or a generic glyph. */
+// The glyphs the apps hub and the header use for each built-in app.
+const BUILTIN_GLYPHS: Record<string, React.ReactNode> = {
+  batch: <PlayCircleOutlined />,
+  recurring: <ClockCircleOutlined />,
+  quotes: <LineChartOutlined />,
+}
+
+/** The icon the manifest declares for an installed app; a built-in app has its hub glyph, else a generic one. */
 export function AppIcon({ app, size = 36 }: { app: AdminApp; size?: number }) {
   const { token } = theme.useToken()
   return (
@@ -19,11 +26,11 @@ export function AppIcon({ app, size = 36 }: { app: AdminApp; size?: number }) {
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: Math.round(size / 2),
-        background: token.colorFillSecondary,
-        color: token.colorTextSecondary,
+        background: app.builtin ? token.colorPrimaryBg : token.colorFillSecondary,
+        color: app.builtin ? token.colorPrimary : token.colorTextSecondary,
       }}
     >
-      {app.icon || <AppstoreOutlined />}
+      {app.icon || (app.builtinDef && BUILTIN_GLYPHS[app.builtinDef.key]) || <AppstoreOutlined />}
     </span>
   )
 }

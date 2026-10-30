@@ -29,6 +29,7 @@ export default function ManageLayout() {
   const [searchOpen, setSearchOpen] = useState(false)
   const active = loc.pathname.split('/')[2] || 'overview'
   const page = adminPage(active)
+  const nested = loc.pathname.split('/').filter(Boolean).length > 2
   const group = ADMIN_GROUPS.find((entry) => entry.pages.some((item) => item.key === active))
   const activeLabel = page ? t(page.label) : t('manage.overview')
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
@@ -102,9 +103,12 @@ export default function ManageLayout() {
           {group ? t(group.label) : t('nav.manage')}
         </Typography.Text>
         <Typography.Title level={2}>{activeLabel}</Typography.Title>
-        <Typography.Paragraph type="secondary">
-          {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
-        </Typography.Paragraph>
+        {/* A page nested under a page (/manage/apps/:key) has its own breadcrumb; repeating the list's description above it adds nothing. */}
+        {!nested && (
+          <Typography.Paragraph type="secondary">
+            {t(page ? `manage.description.${page.key}` : 'manage.overviewDescription')}
+          </Typography.Paragraph>
+        )}
       </div>
       {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
       {page && (

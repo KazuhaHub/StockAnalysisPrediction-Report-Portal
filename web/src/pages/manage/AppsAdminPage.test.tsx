@@ -78,6 +78,15 @@ describe('Apps list', () => {
     expect(within(rowOf('Hello')).getByText(/1\.2\.0/)).toBeTruthy()
   })
 
+  it('gives each built-in app its own icon, as the apps hub does, and an installed app its manifest icon', async () => {
+    renderPage()
+    await screen.findByText('nav.batch')
+    expect(rowOf('nav.batch').querySelector('[data-icon="play-circle"]')).not.toBeNull()
+    expect(rowOf('nav.quotes').querySelector('[data-icon="line-chart"]')).not.toBeNull()
+    expect(rowOf('Hello').querySelector('[data-icon="appstore"]')).toBeNull()
+    expect(within(rowOf('Hello')).getByText('H')).toBeTruthy()
+  })
+
   it('fits a phone: no fixed column widths, and Type and the chevron are marked to hide when narrow', async () => {
     const { container } = renderPage()
     await screen.findByText('nav.batch')
