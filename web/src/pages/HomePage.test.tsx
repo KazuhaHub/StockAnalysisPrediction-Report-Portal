@@ -50,8 +50,20 @@ vi.mock('../api/client', () => ({
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 vi.mock('../auth', () => ({ useAuth: () => ({ can: () => true }) }))
 vi.mock('../site', () => ({ useSite: () => ({ title: 'Portal' }), SiteLogo: () => null }))
+// The real Omnibox is an antd Input, whose affix wrapper takes focus on any click inside it. React
+// events from the popover's portal bubble to that wrapper, so the mock records what reaches it.
+const omniboxEvents = vi.hoisted(() => ({ seen: [] as string[] }))
 vi.mock('../components/Omnibox', () => ({
-  default: ({ suffix }: { suffix?: ReactNode }) => <div data-testid="omnibox">{suffix}</div>,
+  default: ({ suffix }: { suffix?: ReactNode }) => (
+    <div
+      data-testid="omnibox"
+      onClick={() => omniboxEvents.seen.push('click')}
+      onMouseDown={() => omniboxEvents.seen.push('mousedown')}
+      onKeyDown={() => omniboxEvents.seen.push('keydown')}
+    >
+      {suffix}
+    </div>
+  ),
 }))
 vi.mock('../favorites', () => ({
   useFavorites: () => ({
@@ -613,5 +625,18 @@ describe('the entry buttons', () => {
     renderHome()
     expect(await screen.findByText('nav.batch')).toBeTruthy()
     expect(screen.getByText('Research desk')).toBeTruthy()
+  })
+
+  // Clicking a Select inside the popover used to bubble to the search field, which took focus and
+  // closed the Select's dropdown at once; Enter in the keyword box reached the search field too.
+  it('keeps clicks and keys inside the popover from reaching the search field', async () => {
+    renderHome()
+    await waitFor(() => expect(state.urls.length).toBeGreaterThan(0))
+    await userEvent.click(await screen.findByRole('button', { name: 'home.advanced' }))
+    omniboxEvents.seen = []
+    const popover = document.querySelector('.rp-home-advanced-popover') as HTMLElement
+    await userEvent.click(within(popover).getAllByRole('combobox')[0])
+    await userEvent.type(within(popover).getByPlaceholderText('home.keyword'), 'x{Enter}')
+    expect(omniboxEvents.seen).toEqual([])
   })
 })

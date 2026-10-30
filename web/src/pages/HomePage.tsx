@@ -278,8 +278,12 @@ export default function HomePage() {
   // own line below), computed once so the triggers row only renders when there is at least one.
   const groupTriggers = linkGroups.filter((g) => g.mode !== 'row').map(renderTrigger).filter(Boolean)
 
+  // The popover hangs off the search field's suffix, so React events from its portal bubble into
+  // that antd Input, whose wrapper takes focus on any click inside it: a Select opened here lost
+  // focus at once and closed, and Enter in the keyword box reached the search field too.
+  const keepInPopover = (e: { stopPropagation: () => void }) => e.stopPropagation()
   const advancedSearch = (
-    <div className="rp-home-advanced-popover">
+    <div className="rp-home-advanced-popover" onClick={keepInPopover} onMouseDown={keepInPopover} onKeyDown={keepInPopover}>
       <Form form={form} layout="vertical" onFinish={applyFilters}>
         <Row gutter={16}>
           <Col xs={24} md={8}>

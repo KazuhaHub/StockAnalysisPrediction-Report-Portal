@@ -1159,6 +1159,8 @@ body {
   width: min(620px, calc(100vw - 48px));
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+  /* The form row's gutter reaches 8px past the edge; with overflow-y set, that would scroll sideways. */
+  overflow-x: hidden;
   padding-top: 4px;
 }
 .rp-home-advanced-popover .ant-form-item {
