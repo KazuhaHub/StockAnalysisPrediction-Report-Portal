@@ -233,6 +233,7 @@ describe('notification countdown, edge cases', () => {
     advance(NOTIFICATION_DURATIONS.success! + 500)
     advance(400)
     expect(titles()).toEqual(['old'])
+    interact() // it came back from the pill: a fresh look starts its countdown
     advance(NOTIFICATION_DURATIONS.success! + 500)
     advance(400)
     expect(titles()).toEqual([])
@@ -333,6 +334,50 @@ describe('notification announcements and focus', () => {
     close.focus()
     fireEvent.click(close)
     expect(document.activeElement).toBe(before)
+  })
+})
+
+describe('notification re-review cases', () => {
+  it('restarts a seen card that was folded into the pill, and needs a fresh look', () => {
+    mount()
+    raise('success', 'old')
+    interact()
+    advance(7_500) // almost expired
+    for (const n of ['a', 'b', 'c']) raise('success', n) // old is folded into the pill
+    interact()
+    advance(NOTIFICATION_DURATIONS.success! + 500) // a, b, c expire
+    advance(400)
+    expect(titles()).toEqual(['old'])
+    advance(60_000) // no interaction since it came back: still there
+    expect(titles()).toEqual(['old'])
+    interact()
+    advance(7_500) // a full duration again, not the 0.5 s it had left
+    expect(titles()).toEqual(['old'])
+    advance(1_000)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+
+  it('does not hand focus to another card when an action closes the card', () => {
+    mount()
+    raise('success', 'lower')
+    raise('actionable', 'upper', { actions: [{ label: 'Go', primary: true }] })
+    fire('keydown', true)
+    const go = screen.getByRole('button', { name: 'Go' })
+    go.focus()
+    fireEvent.click(go)
+    expect(document.activeElement!.closest('.rp-notify-card')?.textContent ?? '').not.toContain('lower')
+  })
+
+  it('falls back to the header when focus entered the stack from nowhere', () => {
+    render(<header id="rp-app-header"><button>Tasks</button></header>)
+    mount()
+    raise('success', 'only')
+    fire('keydown', true)
+    const close = screen.getByRole('button', { name: 'notifications.close' })
+    close.focus()
+    fireEvent.click(close)
+    expect(document.activeElement).toBe(screen.getByText('Tasks'))
   })
 })
 

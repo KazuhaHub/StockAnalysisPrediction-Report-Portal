@@ -4,7 +4,7 @@ import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import LoginActivityNotice from './LoginActivityNotice'
 import NotificationStack from './NotificationStack'
-import { NOTIFICATION_DURATIONS, resetNotifications } from '../lib/notify'
+import { NOTIFICATION_DURATIONS, getNotifications, resetNotifications } from '../lib/notify'
 
 const apiGet = vi.hoisted(() => vi.fn())
 
@@ -72,5 +72,17 @@ describe('LoginActivityNotice', () => {
     expect(document.querySelector('.rp-notify-card')?.getAttribute('data-kind')).toBe('security')
     expect(NOTIFICATION_DURATIONS.security).toBeNull()
     expect(screen.getByRole('button', { name: 'loginActivity.view' })).toBeTruthy()
+  })
+
+  it('raises nothing when the response arrives after the component is gone', async () => {
+    let release: (v: unknown) => void = () => {}
+    apiGet.mockReset().mockImplementation(() => new Promise((r) => { release = r }))
+    const view = render(<MemoryRouter><App><><NotificationStack /><LoginActivityNotice user="alice" /></></App></MemoryRouter>)
+    await waitFor(() => expect(apiGet).toHaveBeenCalled())
+    view.unmount()
+    release({ items: [{ id: 7, at: '2026-09-27T19:00:00Z', ip: '198.51.100.7', method: 'password' }], total: 1, timezone: 'UTC' })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(getNotifications()).toHaveLength(0)
+    expect(localStorage.getItem('rp:login-activity-seen:alice')).toBeNull()
   })
 })

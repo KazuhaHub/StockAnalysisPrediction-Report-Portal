@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { DesktopOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -24,13 +24,18 @@ export default function LoginActivityNotice({ user }: { user: string }) {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
 
+  // Bumped whenever the poll stops (unmount, or a new identity or language builds a new check), so a
+  // response that was in flight then cannot raise a card for a reader who is no longer here.
+  const generation = useRef(0)
   const check = useCallback(async () => {
+    const started = generation.current
     let data: LoginActivityResponse
     try {
       data = await api.get<LoginActivityResponse>('/api/me/login-activity?limit=10')
     } catch {
       return
     }
+    if (started !== generation.current) return
     const latest = data.items?.[0]
     if (!latest || !Number.isFinite(latest.id)) return
 
@@ -76,6 +81,12 @@ export default function LoginActivityNotice({ user }: { user: string }) {
     })
   }, [i18n?.language, i18n?.resolvedLanguage, navigate, t, user])
 
-  useEffect(() => startVisiblePoll(check, POLL_MS), [check])
+  useEffect(() => {
+    const stop = startVisiblePoll(check, POLL_MS)
+    return () => {
+      generation.current++
+      stop()
+    }
+  }, [check])
   return null
 }

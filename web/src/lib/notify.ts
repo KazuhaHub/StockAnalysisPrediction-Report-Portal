@@ -99,6 +99,16 @@ function pageVisible(): boolean {
 
 function publish() {
   snapshot = items.slice()
+  // A card that is not drawn is not being read: when it is drawn again it is new to the reader, so
+  // it starts its full duration over and waits for a fresh interaction.
+  const drawn = visibleKeys(snapshot)
+  items.forEach((i) => {
+    const t = timers.get(i.key)
+    if (t && !drawn.has(i.key)) {
+      t.seen = false
+      t.remaining = NOTIFICATION_DURATIONS[i.kind]
+    }
+  })
   listeners.forEach((l) => l())
   syncRuntime()
 }

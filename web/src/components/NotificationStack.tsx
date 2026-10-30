@@ -45,7 +45,10 @@ function handOffFocus(card: HTMLElement | null) {
   if (!card || !keyboardInput || !card.contains(document.activeElement)) return
   let next = card.nextElementSibling
   while (next && !next.matches('.rp-notify-card:not(.is-leaving)')) next = next.nextElementSibling
-  const target = next?.querySelector<HTMLElement>('.rp-notify-close') ?? (focusOrigin instanceof HTMLElement && focusOrigin.isConnected ? focusOrigin : null)
+  const origin = focusOrigin instanceof HTMLElement && focusOrigin.isConnected ? focusOrigin : null
+  // Focus that entered from nowhere (a script, or the page itself) goes to the header, not to body.
+  const landmark = document.querySelector<HTMLElement>('#rp-app-header button, #rp-app-header a[href]')
+  const target = next?.querySelector<HTMLElement>('.rp-notify-close') ?? origin ?? landmark
   target?.focus()
 }
 
@@ -74,7 +77,8 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
   const live = liveId.current === item.id
   useEffect(() => markAnnounced(item.id), [item.id])
   const close = (reason: 'manual' | 'action') => {
-    handOffFocus(cardRef.current)
+    // An action decides where focus goes itself (it may navigate, open a drawer, start a download).
+    if (reason === 'manual') handOffFocus(cardRef.current)
     dismissNotification(key, reason)
   }
   const color: Record<NotifyKind, string> = {
