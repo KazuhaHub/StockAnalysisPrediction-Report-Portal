@@ -21,4 +21,9 @@ describe('NotificationBell', () => {
     act(() => { window.dispatchEvent(new Event(INBOX_CHANGED)); document.dispatchEvent(new Event('visibilitychange')) })
     expect(mock.unread).toHaveBeenCalledTimes(2)
   })
+  it('uses the shared header icon size', async () => {
+    render(<MemoryRouter><NotificationBell user="alice" /></MemoryRouter>)
+    await waitFor(() => expect(mock.unread).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'inbox.title' }).classList.contains('rp-header-icon')).toBe(true)
+  })
 })

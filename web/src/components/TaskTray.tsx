@@ -201,7 +201,7 @@ export default function TaskTray({ canRun, canExport, admin }: TaskTrayProps) {
   return (
     <Popover trigger="click" placement="bottomRight" destroyOnHidden open={open} onOpenChange={setOpen} content={content} styles={{ container: { padding: 14 } }}>
       <Badge count={active.length} size="small" overflowCount={99} offset={[-4, 4]}>
-        <Button type="text" shape="circle" icon={<HourglassOutlined />} aria-label={t('tasks.title')} aria-haspopup="dialog" aria-expanded={open} title={t('tasks.title')} />
+        <Button type="text" shape="circle" className="rp-header-icon" icon={<HourglassOutlined />} aria-label={t('tasks.title')} aria-haspopup="dialog" aria-expanded={open} title={t('tasks.title')} />
       </Badge>
     </Popover>
   )

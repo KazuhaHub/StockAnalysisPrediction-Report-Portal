@@ -186,6 +186,13 @@ describe('AppLayout desktop navigation', () => {
     expect(screen.queryByRole('menuitem', { name: 'nav.manage' })).toBeNull()
   })
 
+  // The launcher once had its own, larger size and stood out next to the task tray and the bell.
+  it('sizes the launcher like the other header icon buttons', async () => {
+    renderAt('/queue')
+    const trigger = await screen.findByRole('button', { name: 'nav.workbench' })
+    expect(trigger.classList.contains('rp-header-icon')).toBe(true)
+  })
+
   it('navigates from the launcher and closes it', async () => {
     const user = userEvent.setup()
     renderAt('/queue')

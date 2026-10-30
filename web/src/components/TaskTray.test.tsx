@@ -225,3 +225,8 @@ describe('TaskTray completion toasts', () => {
     expect(document.querySelector('.ant-notification-notice')).toBeNull()
   })
 })
+
+it('uses the shared header icon size', () => {
+  renderTray()
+  expect(screen.getByRole('button', { name: 'tasks.title' }).classList.contains('rp-header-icon')).toBe(true)
+})
