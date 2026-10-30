@@ -13,11 +13,12 @@ controller public key. The separate-UID local transport can authenticate both OS
 peers. Portal previously had only the approved `runtime_bindings` columns, without
 a writer for its sealed control seed or reproducible public enrollment material.
 
-`internal/app/app_platform_runtime.go` now provides the private administration
+`internal/app/app_platform_runtime.go` provides the private administration
 repository `Server.preparePlatformRuntimeBinding(session, deploymentUUID)`.
 It reuses the existing actor/session/OU lifecycle boundary, existing DEK and the
-already-approved runtime table. There is no schema, migration, master key,
-bootstrap configuration or server version change.
+already-approved runtime table. There is no schema, migration, master key or
+server version change. H03 adds a separate fixed environment bootstrap for the
+already-created local socket endpoint; it does not create or enable this binding.
 
 The result contains only:
 

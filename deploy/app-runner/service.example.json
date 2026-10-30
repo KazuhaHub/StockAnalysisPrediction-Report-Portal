@@ -1,0 +1,21 @@
+{
+  "format": "portal.app-runner.config/1-dev.1",
+  "docker_socket": "/run/docker.sock",
+  "journal_dir": "/var/lib/portal-app-runner/journal",
+  "data_root": "/srv/portal-apps/data",
+  "ipc_root": "/run/portal-app-runner/ipc",
+  "control_root": "/run/portal-app-runner/control",
+  "control_socket": "/run/portal-app-runner/control/runner.sock",
+  "controller_uid": 41001,
+  "controller_gid": 41001,
+  "network_active": 4,
+  "network_entries": 1024,
+  "minimum_reported_cpus": 2,
+  "minimum_reported_memory_bytes": 2147483648,
+  "controller": {
+    "deployment_id": "10000000-0000-4000-8000-000000000001",
+    "controller_epoch": "20000000-0000-4000-8000-000000000002",
+    "control_revision": 1,
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

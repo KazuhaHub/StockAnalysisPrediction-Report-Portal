@@ -65,15 +65,23 @@ network SDK browser is requested, the fixture is installed as the real managed
 network application and exercises iframe/MessagePort/host fetch/session HTTP,
 the isolated HTTPS fixture, current viewer authority, revoked audience, and no
 automatic retry. The Go test requires the `SDK_NATIVE_BROWSER_NETWORK` marker only
-in that invocation. It still must run on a pushed commit in the disposable Linux
-workflow.
+in that invocation.
+
+The paired development candidates passed their pushed CI:
+
+- Portal `a57aaf8389195775094fe10d078f1bb9df2079c5`: test workflow
+  `41004183082` and disposable application quota/browser workflow
+  `41004183946`;
+- Apps `415c66d1811d1b6636307fd2bb0fc8aca0946256`: check workflow
+  `41002023666`; and
+- the quota workflow checked out the paired Apps fixture pinned by the Portal
+  candidate. Its native/browser job exercised managed SDK requests through the
+  real Portal session and HTTPS gateway.
 
 ## Remaining gates
 
-- Run the pushed candidate through the Linux native/browser workflow and record
-  exact run IDs and artifact/package digests.
 - The current-main integration candidate renumbers the unpublished application
   control and credential migrations to `0015` and `0016`; verify its full CI
   before treating the paired SDK commit as stable.
-- Do not treat the WIP chain or this local branch as a release, production
+- Do not treat the WIP chain or this candidate as a release, production
   approval, credential-use approval, or market publication.

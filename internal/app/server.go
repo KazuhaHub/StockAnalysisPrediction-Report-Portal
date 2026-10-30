@@ -227,6 +227,7 @@ func RunServer(cfgPath string) {
 	}
 	s := &Server{cfg: cfg, st: st, appTok: newAppTokens(30 * time.Minute), loginThr: newLoginThrottle(), v1Rate: newRateLimiter(),
 		trustedNets: trustedNets, captchaSvc: captcha.New()}
+	configurePlatformRuntimeEndpoint(s)
 	// The failed-login ceiling and its window are settings (limits.go); handing the throttle the
 	// reader rather than the numbers is what makes a change on the settings page apply to the next
 	// attempt instead of at the next restart.

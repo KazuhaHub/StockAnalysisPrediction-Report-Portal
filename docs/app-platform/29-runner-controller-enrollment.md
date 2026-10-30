@@ -26,9 +26,9 @@ integrity; it never generates a controller key or calls enrollment automatically
 The fingerprint must be obtained through trusted runtime-administrator setup. A
 package, app, broker message or catalogue cannot enroll its own key. Merely hashing
 an untrusted incoming key and passing that hash is not an independent trust grant.
-This internal method has no network caller or CLI in this slice. A future explicit
-runtime-administrator setup command must enforce its filesystem/OS authority and
-operator confirmation boundary; command/control endpoints must never expose it.
+The journal primitive itself has no network caller. H03 adds the separate explicit
+`app-runner bootstrap --config` administrator command, which reads only a private
+public-enrollment document. Command/control endpoints must never expose enrollment.
 
 Store only the public key. The Portal control private key still belongs in the
 approved purpose-sealed Portal keyring and is not added to runner storage. The

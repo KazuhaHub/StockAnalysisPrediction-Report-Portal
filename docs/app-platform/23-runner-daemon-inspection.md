@@ -4,6 +4,9 @@ Status: first P04 adapter step, development only. Candidate A permits isolated
 Linux acceptance; it does not authorize production enrollment or deployment.
 This adds `cmd/app-runner` and `internal/apprunner/driver`, without changing Portal
 startup, database shape, installed apps or server `beta` configuration.
+The later H03 service/bootstrap commands are documented in
+[146-runner-service.md](146-runner-service.md); this file remains the
+inspection-slice record.
 
 ## Command and meaning
 
@@ -17,7 +20,8 @@ The socket argument is mandatory and must be canonical. If an administrator's
 configured path is `/var/run/docker.sock`, obtain its canonical path with
 `readlink -f /var/run/docker.sock`; the program deliberately refuses a symlink
 alias. It never reads `DOCKER_HOST`, Docker contexts or registry credentials.
-There is no serve/enroll/start/exec/container/image/volume command yet.
+There is no arbitrary start/exec/container/image/volume command. The separate H03
+`bootstrap` and `serve` commands accept only their closed configuration formats.
 
 Exit 0 means diagnostic collection completed, including a possibly incompatible
 daemon. Inspect the JSON `metadata_compatible` and findings; **execution_ready is

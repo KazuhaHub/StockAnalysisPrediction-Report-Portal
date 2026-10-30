@@ -29,7 +29,7 @@ concurrency:
 jobs:
   inspect-disposable-daemon:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -57,6 +57,231 @@ jobs:
           echo "PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE=$probe_image" >> "$GITHUB_ENV"
           go test -p 2 -race -count=1 -v ./internal/apprunner/... ./cmd/app-runner
           go run ./cmd/app-runner inspect-daemon --socket "$probe_socket"
+
+      - name: Verify explicit bootstrap and fail-closed service startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          test "$(sed -n 's/^RP_APP_RUNNER_SOCKET=//p' deploy/app-runner/portal.env.example)" = \
+            "$(jq -r .control_socket deploy/app-runner/service.example.json)"
+          root=$(mktemp -d /tmp/portal-runner-bootstrap.XXXXXXXX)
+          work=$(mktemp -d "$RUNNER_TEMP/portal-runner-keys.XXXXXXXX")
+          trap 'sudo -n rm -rf "$root"; rm -rf "$work"' EXIT
+          sudo -n chown root:root "$root"
+          sudo -n chmod 0700 "$root"
+          journal="$root/journal"
+          data="$root/data"
+          ipc="$root/ipc"
+          control="$root/control"
+          sudo -n install -d -m 0700 -o root -g root "$journal" "$data" "$ipc"
+          sudo -n install -d -m 0750 -o root -g root "$control"
+          runner="$RUNNER_TEMP/app-runner-service"
+          go build -o "$runner" ./cmd/app-runner
+          openssl genpkey -algorithm ED25519 -out "$work/controller-private.pem"
+          openssl pkey -in "$work/controller-private.pem" -pubout -outform DER | tail -c 32 > "$work/controller-public.raw"
+          public=$(base64 -w0 "$work/controller-public.raw" | tr '+/' '-_' | tr -d '=')
+          fingerprint=$(sha256sum "$work/controller-public.raw" | awk '{print $1}')
+          jq -n \
+            --arg journal "$journal" \
+            --arg public "$public" \
+            --arg fingerprint "$fingerprint" \
+            '{
+              format:"portal.app-runner.bootstrap/1-dev.1",
+              journal_dir:$journal,
+              controller_public_key:$public,
+              controller:{
+                deployment_id:"10000000-0000-4000-8000-000000000001",
+                controller_epoch:"20000000-0000-4000-8000-000000000002",
+                control_revision:1,
+                fingerprint:$fingerprint
+              }
+            }' | sudo -n tee "$root/bootstrap.json" >/dev/null
+          jq -n \
+            --arg journal "$journal" \
+            --arg data "$data" \
+            --arg ipc "$ipc" \
+            --arg control_root "$control" \
+            --arg control "$control/runner.sock" \
+            --arg fingerprint "$fingerprint" \
+            '{
+              format:"portal.app-runner.config/1-dev.1",
+              docker_socket:"/run/docker.sock",
+              journal_dir:$journal,
+              data_root:$data,
+              ipc_root:$ipc,
+              control_root:$control_root,
+              control_socket:$control,
+              controller_uid:41001,
+              controller_gid:41001,
+              network_active:4,
+              network_entries:1024,
+              minimum_reported_cpus:2,
+              minimum_reported_memory_bytes:2147483648,
+              controller:{
+                deployment_id:"10000000-0000-4000-8000-000000000001",
+                controller_epoch:"20000000-0000-4000-8000-000000000002",
+                control_revision:1,
+                fingerprint:$fingerprint
+              }
+            }' | sudo -n tee "$root/service.json" >/dev/null
+          sudo -n chown root:root "$root/bootstrap.json" "$root/service.json"
+          sudo -n chmod 0600 "$root/bootstrap.json" "$root/service.json"
+          first=$(sudo -n "$runner" bootstrap --config "$root/bootstrap.json")
+          test "$(jq -r .created <<<"$first")" = true
+          second=$(sudo -n "$runner" bootstrap --config "$root/bootstrap.json")
+          test "$(jq -r .created <<<"$second")" = false
+          test ! -s "$control/runner.sock"
+          if serve_output=$(sudo -n "$runner" serve --config "$root/service.json" 2>&1); then
+            echo "service started on a non-XFS fixture" >&2
+            exit 1
+          fi
+          test "$serve_output" = "runner service is not ready"
+
+      - name: Start the managed service on an owned XFS project-quota mount
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs
+          root=$(mktemp -d /tmp/portal-runner-service.XXXXXXXX)
+          service_root=/run/portal-app-runner-service
+          image="$root/owned.xfs"
+          mountpoint="$root/mount"
+          loop=
+          service_pid=
+          work=$(mktemp -d "$RUNNER_TEMP/portal-runner-service-keys.XXXXXXXX")
+          cleanup() {
+            if [ -n "$service_pid" ]; then
+              sudo -n kill -TERM "$service_pid" 2>/dev/null || true
+              for _ in $(seq 1 50); do
+                sudo -n kill -0 "$service_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              sudo -n kill -KILL "$service_pid" 2>/dev/null || true
+              wait "$service_pid" 2>/dev/null || true
+            fi
+            if [ -n "$loop" ]; then
+              sudo -n umount "$mountpoint" 2>/dev/null || true
+              sudo -n losetup --detach "$loop" 2>/dev/null || true
+            fi
+            sudo -n rm -rf "$root" "$service_root"
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          truncate -s 1G "$image"
+          loop=$(sudo -n losetup --find --show "$image")
+          test -n "$loop"
+          sudo -n mkfs.xfs -f "$loop" >/dev/null
+          sudo -n install -d -m 0700 -o root -g root "$mountpoint" "$root/journal"
+          sudo -n mount -t xfs -o prjquota,nodev,nosuid,noexec "$loop" "$mountpoint"
+          sudo -n install -d -m 0700 -o root -g root "$mountpoint/data"
+          sudo -n install -d -m 0750 -o root -g 41001 "$service_root"
+          sudo -n install -d -m 0750 -o root -g 41001 "$service_root/control"
+          sudo -n install -d -m 0700 -o root -g root "$service_root/ipc"
+          sudo -n chown root:root "$root"
+          sudo -n chmod 0700 "$root"
+          runner="$RUNNER_TEMP/app-runner-service-live"
+          observer="$RUNNER_TEMP/app-runner-service-observer"
+          go build -o "$runner" ./cmd/app-runner
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$observer" ./internal/apprunner/service
+          chmod 0555 "$runner" "$observer"
+          openssl genpkey -algorithm ED25519 -out "$work/controller-private.pem"
+          openssl pkey -in "$work/controller-private.pem" -pubout -outform DER | tail -c 32 > "$work/controller-public.raw"
+          public=$(base64 -w0 "$work/controller-public.raw" | tr '+/' '-_' | tr -d '=')
+          fingerprint=$(sha256sum "$work/controller-public.raw" | awk '{print $1}')
+          deployment=10000000-0000-4000-8000-000000000001
+          epoch=20000000-0000-4000-8000-000000000002
+          jq -n \
+            --arg journal "$root/journal" \
+            --arg public "$public" \
+            --arg fingerprint "$fingerprint" \
+            --arg deployment "$deployment" \
+            --arg epoch "$epoch" \
+            '{
+              format:"portal.app-runner.bootstrap/1-dev.1",
+              journal_dir:$journal,
+              controller_public_key:$public,
+              controller:{deployment_id:$deployment,controller_epoch:$epoch,control_revision:1,fingerprint:$fingerprint}
+            }' | sudo -n tee "$root/bootstrap.json" >/dev/null
+          jq -n \
+            --arg journal "$root/journal" \
+            --arg data "$mountpoint/data" \
+            --arg socket "$service_root/control/runner.sock" \
+            --arg fingerprint "$fingerprint" \
+            --arg deployment "$deployment" \
+            --arg epoch "$epoch" \
+            --arg docker "$(readlink -f /var/run/docker.sock)" \
+            '{
+              format:"portal.app-runner.config/1-dev.1",
+              docker_socket:$docker,
+              journal_dir:$journal,
+              data_root:$data,
+              ipc_root:"/run/portal-app-runner-service/ipc",
+              control_root:"/run/portal-app-runner-service/control",
+              control_socket:$socket,
+              controller_uid:41001,
+              controller_gid:41001,
+              network_active:1,
+              network_entries:16,
+              minimum_reported_cpus:1,
+              minimum_reported_memory_bytes:536870912,
+              controller:{deployment_id:$deployment,controller_epoch:$epoch,control_revision:1,fingerprint:$fingerprint}
+            }' | sudo -n tee "$root/service.json" >/dev/null
+          sudo -n chown root:root "$root/bootstrap.json" "$root/service.json"
+          sudo -n chmod 0600 "$root/bootstrap.json" "$root/service.json"
+          sudo -n "$runner" bootstrap --config "$root/bootstrap.json" >/dev/null
+          start_service() {
+            sudo -n sh -c 'exec "$1" serve --config "$2" >"$3" 2>&1' sh \
+              "$runner" "$root/service.json" "$root/service.log" &
+            service_pid=$!
+            for _ in $(seq 1 100); do
+              sudo -n test -S "$service_root/control/runner.sock" && return 0
+              sudo -n kill -0 "$service_pid" 2>/dev/null || {
+                sudo -n cat "$root/service.log"
+                return 1
+              }
+              sleep 0.1
+            done
+            return 1
+          }
+          stop_service() {
+            sudo -n kill -TERM "$service_pid"
+            wait "$service_pid"
+            service_pid=
+            sudo -n test ! -e "$service_root/control/runner.sock"
+          }
+          observe_service() {
+            sudo -n env -i \
+              PATH=/usr/bin:/bin \
+              GITHUB_ACTIONS=true \
+              RUNNER_ENVIRONMENT=github-hosted \
+              GOARCH="$(go env GOARCH)" \
+              PORTAL_APP_RUNNER_SERVICE_ACCEPTANCE=1 \
+              PORTAL_APP_RUNNER_SERVICE_UID=41001 \
+              PORTAL_APP_RUNNER_SERVICE_GID=41001 \
+              PORTAL_APP_RUNNER_SERVICE_SOCKET="$service_root/control/runner.sock" \
+              PORTAL_APP_RUNNER_SERVICE_PUBLIC_KEY="$public" \
+              PORTAL_APP_RUNNER_SERVICE_DEPLOYMENT_ID="$deployment" \
+              PORTAL_APP_RUNNER_SERVICE_CONTROLLER_EPOCH="$epoch" \
+              PORTAL_APP_RUNNER_SERVICE_FINGERPRINT="$fingerprint" \
+              setpriv --reuid=41001 --regid=41001 --clear-groups --no-new-privs \
+              "$observer" -test.v -test.timeout=20s -test.run='^TestNativeManagedServiceProfile$'
+          }
+          start_service
+          observe_service | sudo -n tee "$root/observer-first.log"
+          sudo -n grep -q NATIVE_MANAGED_SERVICE_PROFILE_VERIFIED "$root/observer-first.log"
+          stop_service
+          start_service
+          observe_service | sudo -n tee "$root/observer-second.log"
+          sudo -n grep -q NATIVE_MANAGED_SERVICE_PROFILE_VERIFIED "$root/observer-second.log"
+          stop_service
+          sudo -n grep -q 'app-runner ready profile=linux-docker-rootful-projectquota/v1-dev platform=linux/' "$root/service.log"
 
       - name: Verify closed candidate container policy on the disposable daemon
         shell: bash

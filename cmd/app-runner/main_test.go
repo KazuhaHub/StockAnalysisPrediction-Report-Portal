@@ -9,10 +9,22 @@ import (
 )
 
 func TestExplicitSocketAndClosedCommandSurface(t *testing.T) {
-	for _, args := range [][]string{nil, {"serve"}, {"inspect-daemon"}, {"inspect-daemon", "--socket", "x", "extra"}, {"inspect-daemon", "--token", "fixture-sensitive"}} {
+	for _, args := range [][]string{nil, {"serve"}, {"serve", "--config"}, {"bootstrap"}, {"inspect-daemon"}, {"inspect-daemon", "--socket", "x", "extra"}, {"inspect-daemon", "--token", "fixture-sensitive"}} {
 		var out bytes.Buffer
 		if code := run(context.Background(), args, &out); code != 2 || strings.Contains(out.String(), "fixture-sensitive") {
 			t.Fatalf("unsafe command parse: code=%d output=%s", code, out.String())
+		}
+	}
+}
+
+func TestServiceCommandsRefusePrivatePathDiagnostics(t *testing.T) {
+	for _, command := range []string{"bootstrap", "serve"} {
+		var out bytes.Buffer
+		if code := run(context.Background(), []string{command, "--config", "/fixture-sensitive/config.json"}, &out); code != 1 {
+			t.Fatalf("%s accepted missing config: %d", command, code)
+		}
+		if strings.Contains(out.String(), "fixture-sensitive") || (command == "bootstrap" && !strings.Contains(out.String(), "configuration is invalid")) {
+			t.Fatalf("%s leaked path or omitted refusal: %s", command, out.String())
 		}
 	}
 }
