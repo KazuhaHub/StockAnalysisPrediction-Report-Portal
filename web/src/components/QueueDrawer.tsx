@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
@@ -370,12 +370,19 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     </>
   )
 
-  const count = (n: number | null) =>
-    n ? <span style={{ marginLeft: 4, fontSize: 12, color: token.colorTextSecondary }}>{n}</span> : null
+  // The two views switch with a full-width segmented control, like Mine / All. An in-progress
+  // count is a small pill, shown only when there is something in progress.
+  const viewLabel = (label: string, n: number | null) => (
+    <span className="rp-task-views__label">
+      {label}
+      {n ? <span className="rp-task-views__count">{n}</span> : null}
+    </span>
+  )
   const tabItems = [
-    ...(showRuns ? [{ key: 'runs', label: <span>{t('tasks.tab.runs')}{count(loaded ? activeJobs.length : null)}</span>, children: runsPane }] : []),
-    ...(showExports ? [{ key: 'exports', label: <span>{t('tasks.tab.exports')}{count(activeExports.length)}</span>, children: exportsPane }] : []),
+    ...(showRuns ? [{ key: 'runs' as const, label: viewLabel(t('tasks.tab.runs'), loaded ? activeJobs.length : null), children: runsPane }] : []),
+    ...(showExports ? [{ key: 'exports' as const, label: viewLabel(t('tasks.tab.exports'), activeExports.length), children: exportsPane }] : []),
   ]
+  const activePane = (tabItems.find((item) => item.key === activeTab) ?? tabItems[0])?.children
 
   const onRuns = activeTab === 'runs'
   const footerTo = onRuns ? '/queue' : admin ? '/manage/exports' : '/exports'
@@ -406,11 +413,16 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         </Button>
       }
     >
-      {tabItems.length > 1 ? (
-        <Tabs size="small" activeKey={activeTab} onChange={(k) => onTabChange(k as DrawerTab)} items={tabItems} tabBarStyle={{ margin: '0 8px' }} />
-      ) : (
-        tabItems[0]?.children
+      {tabItems.length > 1 && (
+        <Segmented
+          block
+          className="rp-task-views"
+          value={activeTab}
+          onChange={(k) => onTabChange(k as DrawerTab)}
+          options={tabItems.map((item) => ({ value: item.key, label: item.label }))}
+        />
       )}
+      {activePane}
     </Drawer>
   )
 }

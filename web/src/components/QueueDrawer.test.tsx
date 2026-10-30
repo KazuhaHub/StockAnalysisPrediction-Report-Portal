@@ -107,12 +107,28 @@ describe('Tasks drawer mine / all (ADR 0047)', () => {
 })
 
 describe('Tasks drawer tabs', () => {
-  it('shows Runs and Exports tabs with their in-progress counts', async () => {
+  // The two views switch with a full-width segmented control (like Mine / All), not small
+  // left-aligned tabs; an in-progress count is a small pill, shown only when there is one.
+  it('switches Runs and Exports with a full-width segmented control carrying count pills', async () => {
     store.jobs = [job(), job({ id: 2, status: 'queued', ahead: 1 }), job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
     mount({ tasks: [exp()] })
-    expect(await screen.findByRole('tab', { name: /tasks\.tab\.runs/ })).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('tab', { name: /tasks\.tab\.runs/ }).textContent).toContain('2'))
-    expect(screen.getByRole('tab', { name: /tasks\.tab\.exports/ }).textContent).toContain('1')
+    const views = await waitFor(() => {
+      const el = document.querySelector('.rp-task-views')
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(document.querySelector('.ant-drawer .ant-tabs')).toBeNull()
+    expect(views.classList.contains('ant-segmented-block')).toBe(true)
+    await waitFor(() => expect(within(views).getByRole('radio', { name: /tasks\.tab\.runs/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('2'))
+    expect(within(views).getByRole('radio', { name: /tasks\.tab\.exports/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('1')
+  })
+
+  it('shows no count pill on a view with nothing in progress', async () => {
+    store.jobs = [job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount({ tasks: [] })
+    const views = await waitFor(() => document.querySelector('.rp-task-views') as HTMLElement)
+    await screen.findByText('Deep Research')
+    expect(views.querySelectorAll('.rp-task-views__count')).toHaveLength(0)
   })
 
   it('lays the four figures out as a grid, one column each', async () => {
@@ -134,7 +150,7 @@ describe('Tasks drawer tabs', () => {
     store.admin = false
     mount({ canRun: false, canExport: true, tab: 'exports', tasks: [exp()] })
     expect(await screen.findByText('Audit Q3')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
     expect(store.urls).toEqual([]) // the run queue is not asked for
     expect(screen.queryByText('queue.running')).toBeNull()
   })
@@ -144,13 +160,14 @@ describe('Tasks drawer tabs', () => {
     store.jobs = [job()]
     mount({ canRun: true, canExport: false })
     expect(await screen.findByText('Deep Research')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
   })
 
   it('reports a tab change to its owner', async () => {
     const user = userEvent.setup()
     mount()
-    await user.click(await screen.findByRole('tab', { name: /tasks\.tab\.exports/ }))
+    // The radio itself is pointer-events: none in antd's Segmented; people click its label.
+    await user.click((await screen.findByRole('radio', { name: /tasks\.tab\.exports/ })).closest('label') as HTMLElement)
     expect(onTabChange).toHaveBeenCalledWith('exports' satisfies DrawerTab)
   })
 })

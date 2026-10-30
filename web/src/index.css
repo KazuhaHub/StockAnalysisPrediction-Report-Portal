@@ -2666,3 +2666,12 @@ body {
 
 /* The back-to-top button sits above the unsaved-changes dock while it is shown. */
 body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
+
+/* Tasks drawer: Runs / Exports switch, full width like Mine / All, with a count pill. */
+.rp-task-views { margin: 12px 0 4px; }
+.rp-task-views__label { display: inline-flex; align-items: center; gap: 6px; }
+.rp-task-views__count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--ant-color-primary); color: var(--ant-color-white);
+  font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
