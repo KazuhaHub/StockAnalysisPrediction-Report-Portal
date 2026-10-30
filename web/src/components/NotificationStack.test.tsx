@@ -388,3 +388,105 @@ describe('notifications across sign-in identities', () => {
     expect(getNotifications()).toHaveLength(0)
   })
 })
+
+describe('notifications on a touch device', () => {
+  const CARD_WIDTH = 300
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+      matches: query.includes('any-pointer: coarse'),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  const card = () => {
+    const el = document.querySelector<HTMLElement>('.rp-notify-card')!
+    el.getBoundingClientRect = () => ({ width: CARD_WIDTH, height: 60, top: 0, left: 0, right: CARD_WIDTH, bottom: 60, x: 0, y: 0, toJSON: () => ({}) })
+    return el
+  }
+  const touch = (el: Element, type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y = 0) =>
+    act(() => {
+      fireEvent[type](el, { pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, isPrimary: true })
+    })
+
+  it('keeps the close button visible', () => {
+    mount()
+    raise('success', 'done')
+    expect(screen.getByRole('button', { name: 'notifications.close' }).getAttribute('data-visible')).toBe('true')
+  })
+
+  it('dismisses a card dragged to the right past the threshold', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 10 + CARD_WIDTH * 0.4)
+    touch(el, 'pointerUp', 10 + CARD_WIDTH * 0.4)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+    expect(el.classList.contains('is-leaving')).toBe(true)
+  })
+
+  it('dismisses on a fast flick that is shorter than the threshold', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    advance(40)
+    touch(el, 'pointerMove', 70)
+    touch(el, 'pointerUp', 70)
+    expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('snaps a short, slow drag back', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 40)
+    advance(600)
+    touch(el, 'pointerMove', 50)
+    touch(el, 'pointerUp', 50)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(titles()).toEqual(['done'])
+    expect(el.style.transform).toBe('')
+  })
+
+  it('does not claim a vertical gesture', () => {
+    const onClose = vi.fn()
+    mount()
+    raise('success', 'done', { onClose })
+    const el = card()
+    touch(el, 'pointerDown', 10, 10)
+    touch(el, 'pointerMove', 20, 80)
+    touch(el, 'pointerMove', 10 + CARD_WIDTH, 90)
+    touch(el, 'pointerUp', 10 + CARD_WIDTH, 90)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('pauses the countdown while a card is pressed and resumes on release', () => {
+    mount()
+    raise('success', 'done')
+    interact()
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    advance(NOTIFICATION_DURATIONS.success! + 2000)
+    expect(titles()).toEqual(['done'])
+    touch(el, 'pointerUp', 10)
+    advance(NOTIFICATION_DURATIONS.success! - 200)
+    expect(titles()).toEqual(['done'])
+    advance(400)
+    advance(400)
+    expect(titles()).toEqual([])
+  })
+})
