@@ -95,6 +95,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("actual writable viewer request", err)
 	}
 	count, viewer := decode(response)
+	testNativePlatformNetworkAuthority(t, s, actor, lease.installationID, endpoint)
 	if count != 3 {
 		t.Fatal("viewer request omitted or repeated write")
 	}

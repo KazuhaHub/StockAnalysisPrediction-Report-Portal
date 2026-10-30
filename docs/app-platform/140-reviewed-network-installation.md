@@ -1,8 +1,10 @@
 # Review and publish a restricted HTTP capability with installation
 
 Status: internal managed installation review/consume, exact grant rows and atomic
-activation implemented. Local common tests pass; exact revision PostgreSQL and
-Linux native acceptance are still required. This is one P07 integration slice.
+activation implemented. Corrected revision
+`3a5e5ea1d17158c17852758c2eaa250817ea92fe` passes general workflow
+40984401099/job 123831927134 (including actual PostgreSQL), native quota/browser
+40984401120/job 123831905094 and daemon 40984401330/job 123831906193. This is one P07 integration slice.
 It does not complete the network SDK/HTTP dispatch adapter or the full platform.
 
 ## 1. Administrative selection and current runtime

@@ -110,6 +110,10 @@ jobs:
         run: |
           test -n "$TEST_POSTGRES_DSN"
           GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=2m -v ./internal/app -run '^TestPlatformNetworkRuntimeNoAuthority'
+      - name: Current viewer network request authority
+        run: |
+          test -n "$TEST_POSTGRES_DSN"
+          GOMAXPROCS=2 go test -race -p 2 -count=1 -timeout=3m -v ./internal/app -run '^TestPlatformNetworkRequest'
       - name: Writable application review and writer storage
         run: |
           test -n "$TEST_POSTGRES_DSN"
