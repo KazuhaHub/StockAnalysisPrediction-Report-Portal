@@ -532,7 +532,7 @@ function GlobalExecutionTargets() {
             key: 'targets',
             label: t('batch.admin.targets'),
             children: (
-              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+              <Space className="rp-batch-targets-section" orientation="vertical" size={12} style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                   <Button icon={<CloudDownloadOutlined />} loading={refreshing} onClick={() => pullUpdate()}>
                     {t('batch.refresh.all')}

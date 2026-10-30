@@ -7,12 +7,12 @@ import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
 import VersionLabel from '../../components/VersionLabel'
 import { useSite } from '../../site'
+import { useNarrow } from '../../lib/useNarrow'
 import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const OPEN_KEY = 'rp.manage.sider.open'
-const NARROW_QUERY = '(max-width: 767px)'
 const HEADER_VAR = 'var(--rp-header-h, 64px)'
 
 export default function ManageLayout() {
@@ -24,7 +24,7 @@ export default function ManageLayout() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
   })
-  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
+  const narrow = useNarrow()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const active = loc.pathname.split('/')[2] || 'overview'
@@ -49,13 +49,6 @@ export default function ManageLayout() {
       rememberOpen([`group.${group.key}`])
     }
   }, [group, rememberOpen])
-
-  useEffect(() => {
-    const mq = window.matchMedia(NARROW_QUERY)
-    const onChange = () => setNarrow(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
 
   const toggle = () => setCollapsed((current) => {
     const next = !current

@@ -84,21 +84,54 @@ describe('Feature-owned organizational policy', () => {
   })
 })
 
-describe('Phone scope rail', () => {
+describe('Scope rail across breakpoints', () => {
   const realMatchMedia = window.matchMedia
+  let listeners: Array<() => void> = []
+  let matches = true
   beforeEach(() => {
+    matches = true
+    listeners = []
     Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query: string) => ({
-      matches: query.includes('767'), media: query, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {},
+      get matches() { return matches && query.includes('767') }, media: query,
+      addEventListener: (_: string, fn: () => void) => { listeners.push(fn) }, removeEventListener: () => {},
     }) })
   })
   afterEach(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: realMatchMedia }) })
-  it('starts compact, expands inline on demand and folds back after choosing a unit', async () => {
-    const router = mount('/manage/security?scope=ou&ou=1')
+  const toggle = () => screen.getByRole('button', { name: /Research|Default|ou.unitScope/ })
+
+  it('starts compact, names the current unit, and reports its state with aria-expanded', async () => {
+    mount('/manage/security?scope=ou&ou=7')
     await screen.findByText('ou.sectionSecurity')
     expect(screen.queryByRole('tree')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'ou.expand' }))
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    expect(toggle().getAttribute('aria-controls')).toBe(document.querySelector('.rp-policy-scope [hidden]')?.id)
+    fireEvent.click(toggle())
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(await screen.findByRole('tree')).toBeTruthy()
+  })
+  it('folds back after choosing a unit, including the one already shown', async () => {
+    const router = mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
     fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
     await waitFor(() => expect(router.state.location.search).toContain('ou=7'))
     await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+    fireEvent.click(toggle())
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+  })
+  it('switches to the desktop rail when the viewport widens while open, and desktop collapse still works', async () => {
+    mount('/manage/security?scope=ou&ou=7')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    matches = false
+    act(() => { listeners.forEach((fn) => fn()) })
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ou.collapse' }))
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(document.querySelector('.rp-policy-workspace--collapsed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ou.expand' }))
+    expect(await screen.findByRole('tree')).toBeTruthy()
   })
 })

@@ -692,6 +692,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
         // only appeared once the workflow was switched on, so you could not see what a workflow
         // WOULD offer; and there was no way to compare one column across workflows, which is the
         // question an admin actually has ("who can use 批量?").
+        <div className="rp-table-scroll">
         <Table
           size="small"
           rowKey="id"
@@ -796,6 +797,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
             }),
           ]}
         />
+        </div>
       )}
       </fieldset>
     </Card>
