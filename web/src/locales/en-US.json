@@ -3274,6 +3274,7 @@
   "tasks.tab.runs": "Runs",
   "tasks.tab.exports": "Exports",
   "tasks.section.active": "In progress",
+  "tasks.section.count": "{{label}} · {{count}}",
   "tasks.section.finished": "Recently finished",
   "tasks.rows": "{{done}} / {{total}} rows",
   "tasks.queuedAhead": "Queued · {{n}} ahead",
