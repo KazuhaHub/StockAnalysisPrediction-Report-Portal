@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"golang.org/x/net/dns/dnsmessage"
 	"io"
 	"math/big"
 	"net"
@@ -21,40 +22,35 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// Re-enter only in new mount/network namespaces, before opening the journal or
-// daemon. Resolver, routes and CA changes never affect the host namespace.
+// Re-enter only in a new network namespace. Keep the runtime and Docker daemon
+// in the same mount namespace so their owned IPC tmpfs mounts remain visible.
+// A local DNS fixture serves the unchanged system resolver configuration.
 func platformNetworkNamespaceFixture(t *testing.T, fixture string) bool {
 	t.Helper()
 	if os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") == "" || os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
 		return false
 	}
-	dir, err := os.MkdirTemp(fixture, "portal-network-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-	hosts := filepath.Join(dir, "hosts")
-	if err := os.WriteFile(hosts, []byte("127.0.0.1 localhost\n8.8.8.8 api.example.com\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	dnsIPs := platformNetworkDNSAddresses(t)
 	binary, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := `set -eu
-mount --make-rprivate /
 ip link set lo up
 ip addr add 8.8.8.8/32 dev lo
-mount --bind "$PORTAL_NETWORK_HOSTS" /etc/hosts
+for address in $PORTAL_NETWORK_DNS; do
+  if [ "$address" != "8.8.8.8" ]; then ip addr add "$address/32" dev lo; fi
+done
 exec "$PORTAL_NETWORK_BINARY" -test.v -test.run='^TestPlatformInstallDataEndpointAcceptance$' -test.timeout=135s
 `
-	cmd := exec.Command("unshare", "--mount", "--net", "--fork", "--", "sh", "-c", script)
-	cmd.Env = append(os.Environ(), "PORTAL_NETWORK_NAMESPACE=1", "PORTAL_NETWORK_HOSTS="+hosts, "PORTAL_NETWORK_BINARY="+binary, "GODEBUG=netdns=go")
+	cmd := exec.Command("unshare", "--net", "--fork", "--", "sh", "-c", script)
+	cmd.Env = append(os.Environ(), "PORTAL_NETWORK_NAMESPACE=1", "PORTAL_NETWORK_DNS="+strings.Join(dnsIPs, " "), "PORTAL_NETWORK_BINARY="+binary, "GODEBUG=netdns=go")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Portal isolated HTTPS lifecycle: %v\n%s", err, output)
@@ -100,6 +96,7 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") != "1" || os.Geteuid() != 0 {
 		t.Fatal("isolated root network namespace required")
 	}
+	startPlatformNetworkDNSFixture(t)
 	cert, ca := platformNetworkCertificate(t)
 	caFile := filepath.Join(dir, "network-ca.pem")
 	if err := os.WriteFile(caFile, ca, 0644); err != nil {
@@ -257,4 +254,125 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 		t.Fatal("post-IO withdrawal released response or retried", withdrawalErr, err)
 	}
 	t.Log("PORTAL_NETWORK_HTTPS_POST_IO_REVOKED")
+}
+
+// Namespace-local DNS answers only the fixed fixture name. Nameserver addresses
+// come from the unchanged system resolver file and are validated before shell
+// arguments or listeners are created. No packet can leave this namespace.
+func platformNetworkDNSAddresses(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil || len(raw) > 8192 {
+		t.Fatal("system resolver fixture unavailable", err)
+	}
+	var ips []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		ip := net.ParseIP(fields[1])
+		if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsMulticast() {
+			continue
+		}
+		value := ip.To4().String()
+		found := false
+		for _, prior := range ips {
+			if prior == value {
+				found = true
+			}
+		}
+		if !found {
+			ips = append(ips, value)
+		}
+	}
+	if len(ips) == 0 || len(ips) > 3 {
+		t.Fatal("fixture requires one to three IPv4 system nameservers")
+	}
+	return ips
+}
+func platformNetworkDNSReply(raw []byte) ([]byte, error) {
+	var query dnsmessage.Message
+	if len(raw) > 1024 || query.Unpack(raw) != nil || query.Response || len(query.Questions) != 1 {
+		return nil, errors.New("invalid fixture DNS question")
+	}
+	q := query.Questions[0]
+	response := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true, Authoritative: true, RecursionDesired: query.RecursionDesired, RecursionAvailable: true}, Questions: query.Questions}
+	if strings.ToLower(q.Name.String()) != "api.example.com." || q.Class != dnsmessage.ClassINET {
+		response.RCode = dnsmessage.RCodeNameError
+	} else if q.Type == dnsmessage.TypeA {
+		response.Answers = []dnsmessage.Resource{{Header: dnsmessage.ResourceHeader{Name: q.Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 0}, Body: &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}}}}
+	}
+	return response.Pack()
+}
+func startPlatformNetworkDNSFixture(t *testing.T) {
+	t.Helper()
+	addresses := platformNetworkDNSAddresses(t)
+	if strings.Join(addresses, " ") != os.Getenv("PORTAL_NETWORK_DNS") {
+		t.Fatal("system resolver changed before fixture startup")
+	}
+	for _, address := range addresses {
+		address := net.JoinHostPort(address, "53")
+		udp, err := net.ListenPacket("udp4", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { udp.Close() })
+		go func() {
+			var buf [1024]byte
+			for {
+				n, peer, err := udp.ReadFrom(buf[:])
+				if err != nil {
+					return
+				}
+				answer, err := platformNetworkDNSReply(buf[:n])
+				if err == nil {
+					_, _ = udp.WriteTo(answer, peer)
+				}
+			}
+		}()
+		tcp, err := net.Listen("tcp4", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { tcp.Close() })
+		slots := make(chan struct{}, 8)
+		go func() {
+			for {
+				c, err := tcp.Accept()
+				if err != nil {
+					return
+				}
+				select {
+				case slots <- struct{}{}:
+				default:
+					c.Close()
+					continue
+				}
+				go func() {
+					defer c.Close()
+					defer func() { <-slots }()
+					_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+					var prefix [2]byte
+					if _, err := io.ReadFull(c, prefix[:]); err != nil {
+						return
+					}
+					n := int(prefix[0])<<8 | int(prefix[1])
+					if n < 12 || n > 1024 {
+						return
+					}
+					raw := make([]byte, n)
+					if _, err := io.ReadFull(c, raw); err != nil {
+						return
+					}
+					answer, err := platformNetworkDNSReply(raw)
+					if err != nil {
+						return
+					}
+					packet := append([]byte{byte(len(answer) >> 8), byte(len(answer))}, answer...)
+					_, _ = c.Write(packet)
+				}()
+			}
+		}()
+	}
 }

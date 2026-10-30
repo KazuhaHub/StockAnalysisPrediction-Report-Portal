@@ -21,11 +21,20 @@ eight SDK browser markers remain mandatory.
 ## 2. Disposable namespace and TLS
 
 Before opening the root journal or daemon, the managed Portal fixture re-enters
-its existing test through `unshare --mount --net --fork`. Mount propagation is
-private. Only that namespace brings loopback up, assigns 8.8.8.8/32 and bind-mounts
-an owned hosts fixture mapping api.example.com to that address. No host interface,
-route, resolver or trust store is changed. The Docker daemon remains reachable
-through its existing Unix socket; no daemon configuration changes are made.
+its existing test through `unshare --net --fork`. Only that network namespace
+brings loopback up and assigns 8.8.8.8/32 plus the validated IPv4 nameserver
+addresses from the unchanged system resolver file. A namespace-local bounded
+UDP/TCP DNS fixture answers only api.example.com with 8.8.8.8 and returns no
+external data. The actual default Go resolver still reads the system configuration;
+there is no broker resolver injection. No host interface, route, hosts/resolver
+file or trust store is changed.
+
+The runtime retains its existing mount namespace with the Docker daemon. Its
+normal owned IPC tmpfs mounts must remain visible to the daemon's bind mounts.
+An initial attempt to isolate mounts too made that requirement false and caused
+readiness refusal before HTTPS. Preserving mount visibility is not a relaxed
+sandbox policy; workload/data/IPC hard quotas and all native ownership checks
+remain mandatory. Docker stays on its existing Unix socket/configuration.
 
 The root fixture generates one temporary Ed25519 CA and server certificate valid
 for api.example.com, serves HTTPS on namespace-local port 443 and configures the
@@ -89,3 +98,13 @@ path through the real browser fixture. Credential-bearing HTTP remains denied
 until exact binding/operation policy and private-use enforcement are implemented.
 No Status migration, catalogue publication, production activation, SDK freeze,
 storage layout or server beta configuration is part of this slice.
+
+## 5. Initial native failure and correction
+
+Initial f3dc0f9c8e4569abe08cd4e4441880ab98a15e50 failed quota workflow
+40989307256/job 123847581442 before HTTPS: the writable backend never reached
+readiness and the existing bounded readiness wait expired. The new private mount
+namespace hid IPC tmpfs mounts from the existing Docker daemon. The correction
+keeps the original mount relationship and isolates only networking, using the
+namespace-local DNS service described above. Exact corrected-revision native
+execution is required; the initial failure is not a passed HTTPS test.

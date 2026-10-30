@@ -2469,11 +2469,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   assertions. General 40987519779/job 123841898193 passed focused PG cases but
   failed staticcheck U1000 on the coordinator not called in tests; b6c3cbd7 adds
   paired real-coordinator denied-grant coverage and awaits corrected general CI.
-- Added mandatory actual Portal/current-SQL HTTPS scenarios inside fresh Linux
-  mount/network namespaces after actual writable activation: standard TLS success,
+- Added mandatory actual Portal/current-SQL HTTPS scenarios inside a fresh Linux
+  network namespace after actual writable activation: standard TLS success,
   grant withdrawal before IO with no extra request, and withdrawal after server
   arrival with empty uncertain result and exactly one additional request. All
-  network/hosts/CA changes are isolated to the child process; root peer and
+  route/DNS-service/CA changes are isolated to the child process; root peer and
   ordinary user identity remain real. Native markers and quota report fields
   require these cases; new-revision Linux execution remains required. See
   [Portal HTTPS acceptance](142-portal-https-native-acceptance.md).
+
+- Initial HTTPS fixture f3dc0f9c failed quota 40989307256/job 123847581442
+  before HTTPS: isolating the mount namespace hid newly provisioned IPC tmpfs
+  mounts from the existing Docker daemon, so readiness correctly refused. Keep
+  that mount relationship and use only a new network namespace with a local
+  bounded DNS service answering the unchanged resolver configuration. Corrected
+  native proof is still required; no sandbox constraint was removed.
