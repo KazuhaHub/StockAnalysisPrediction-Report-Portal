@@ -171,7 +171,7 @@ func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
 		if !wire[name] {
 			t.Errorf("IngestRequest.properties.%s is documented but v1IngestRequest does not decode it", name)
 		}
-	}	// The localized blocks describe the same fields: a field missing from one reads, in that
+	} // The localized blocks describe the same fields: a field missing from one reads, in that
 	// language, as a field the endpoint does not take (issue #115).
 	i18n, _ := schema["x-i18n"].(map[string]any)
 	if len(i18n) == 0 {
