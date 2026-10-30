@@ -209,14 +209,13 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	}
 	t.Log("PORTAL_WRITABLE_POST_IO_OU_REVOKED")
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
-		if s.platformBackendEndpoint.Load() == nil {
-			if err := s.bindPlatformBackendHTTP(endpoint); err != nil {
-				t.Fatal("browser network runtime bootstrap", err)
-			}
+		browserHost := &Server{st: s.st, cfg: s.cfg, loginThr: newLoginThrottle(), v1Rate: newRateLimiter()}
+		if err := browserHost.bindPlatformBackendHTTP(endpoint); err != nil {
+			t.Fatal("browser network runtime bootstrap", err)
 		}
 		mux := http.NewServeMux()
-		s.wireRoutes(mux)
-		testNativeSDKBackendBrowser(t, s, actor, lease.installationID, mux, true)
+		browserHost.wireRoutes(mux)
+		testNativeSDKBackendBrowser(t, browserHost, actor, lease.installationID, mux, true)
 		t.Log("PORTAL_NETWORK_BROWSER_SDK")
 	}
 }
