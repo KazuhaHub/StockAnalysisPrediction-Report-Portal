@@ -196,17 +196,28 @@ export default function RunAnalysisModal({
   // fetched again, and it lands in place: nothing the user has chosen or typed in the open dialog
   // (mode, window, retries, notify, input values) is reset, and a target list that did not change
   // keeps its identity so the form is not re-initialised.
+  const handledRetry = useRef(0)
   useEffect(() => {
-    if (!open || retryKey === 0) return
+    if (!open || retryKey === handledRetry.current) return
+    handledRetry.current = retryKey
+    // Cancelled when the dialog closes or another retry supersedes this one, so a late answer can
+    // neither touch a newer open's spinner nor repopulate a closed dialog.
     let live = true
-    api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => {
+    let lost = false
+    const targetsReq = api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => {
       if (!live) return
       const next = r.targets || []
       setTargets((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
       setTargetsOk(true)
       setLoadErr('')
-    }).catch(() => {})
-    api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => {
+    }).catch((e) => {
+      // Same handling as the first load: a lost connection keeps the dialog loading (and arms the
+      // next reconnect), anything else is reported.
+      const text = failure(e)
+      if (text === null) lost = true
+      else if (live) setLoadErr(text)
+    })
+    const presetsReq = api.get<RunPresetsResp>('/api/admin/batch/presets').then((r) => {
       if (!live) return
       if (!presetsApplied.current) {
         presetsApplied.current = true
@@ -215,10 +226,12 @@ export default function RunAnalysisModal({
       }
       setPresets(r.presets || [])
       setDefaults(readRunDefaults(r))
-    }).catch(() => {}).finally(() => { if (live) setLoading(false) })
+    }).catch(() => {})
+    // Loading ends only when BOTH answers are in, so the picker never flashes empty.
+    Promise.allSettled([targetsReq, presetsReq]).then(() => { if (live && !lost) setLoading(false) })
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [retryKey])
+  }, [open, retryKey])
 
   // 运行分析 generates a report (Dify ingests it). visibleOn applies both rules: agent apps
   // are conversational and post no report (capability), and an admin may restrict a target

@@ -24,6 +24,9 @@ describe('StoragePage on reconnect', () => {
     })
     render(<App><StoragePage /></App>)
     await screen.findAllByText('storage.cat.batch')
+    // The usage cards can paint before the config answer lands; edit only once the form holds it.
+    await waitFor(() => expect((document.body.querySelector('.ant-input-number input') as HTMLInputElement).value).not.toBe(''))
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
     const days = document.body.querySelector('.ant-input-number input') as HTMLInputElement
     fireEvent.change(days, { target: { value: '120' } })
     await act(async () => { await Promise.resolve() })
