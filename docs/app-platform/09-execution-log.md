@@ -2411,3 +2411,17 @@ daemon workflow 40455635317 passed on the functional source as well.
   cleanup and all credential-use authority still require separate enforcement.
   Driver-paired actual review/consume tests cover these boundaries. See
   [uninstall revocation](138-uninstall-secret-binding-revocation.md).
+
+- Added current-administrator/SQL/runtime provenance checks around the protected
+  network-provider observation. Probe IO runs outside SQL locks, with complete
+  source/session comparison and freshness checks before returning private facts.
+  Extended the actual root/non-root Portal acceptance with a required marker and
+  current SQL/role denial cases; exact new revision Linux/PG CI remains required.
+  This prepares actual grant review and does not activate a provider. See
+  [current provider observation](139-current-network-provider-observation.md).
+- Runtime observation predecessor 4bd40ba4b2f0ac5148f2ba9ffc5c417327afbe00 now
+  passes full general workflow 40975335253/job 123801850458, including staticcheck,
+  zero reachable vulnerabilities and ordinary full PostgreSQL Go tests
+  (internal/app 639.531s), plus daemon 40975335250/job 123801849748 and quota/browser
+  40975335287/job 123801849873. This corrects the earlier test nil-Context failure
+  without counting that original failed general run as passed.
