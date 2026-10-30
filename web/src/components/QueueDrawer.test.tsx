@@ -5,6 +5,8 @@ import { App } from 'antd'
 import { MemoryRouter, useLocation } from 'react-router'
 import type { BatchJob, TaskItem } from '../api/types'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const store = vi.hoisted(() => ({
   urls: [] as string[],
@@ -53,7 +55,13 @@ type Props = Partial<React.ComponentProps<typeof QueueDrawer>>
 const refreshTasks = vi.fn()
 const onTabChange = vi.fn()
 function Where() {
-  return <span data-testid="where">{useLocation().pathname}</span>
+  const loc = useLocation()
+  return (
+    <>
+      <span data-testid="where">{loc.pathname}</span>
+      <span data-testid="search">{loc.search}</span>
+    </>
+  )
 }
 function Harness(props: Props) {
   return (
@@ -477,5 +485,50 @@ describe('Tasks drawer row where hover does not exist', () => {
     fireEvent.click(toggleOf(row)!)
     fireEvent.pointerDown(within(row).getByRole('button', { name: 'tasks.cancel' }))
     expect(row.classList.contains('is-open')).toBe(true)
+  })
+})
+
+describe('Tasks drawer row targets', () => {
+  beforeEach(() => stubHover(false))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('toggles from a tap on the time cell, not just the text', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(row.querySelector('.rp-task-row__time')!)
+    expect(row.classList.contains('is-open')).toBe(true)
+    fireEvent.click(row.querySelector('.rp-task-row__time')!)
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it('does not toggle the row when an action is pressed', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    fireEvent.click(within(row).getByRole('button', { name: 'tasks.open' }))
+    expect(row.classList.contains('is-open')).toBe(true)
+  })
+
+  it("opens that run's detail from the row's open action", async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    fireEvent.click(toggleOf(row)!)
+    fireEvent.click(within(row).getByRole('button', { name: 'tasks.open' }))
+    expect(screen.getByTestId('where').textContent).toBe('/queue')
+    expect(screen.getByTestId('search').textContent).toBe('?job=41')
+  })
+})
+
+describe('Tasks drawer row styles', () => {
+  const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+  it('reveals the actions from the keyboard only, so a mouse click never pins them', () => {
+    expect(css).not.toMatch(/\.rp-task-row:focus-within/)
+    expect(css).toMatch(/\.rp-task-row:has\(:focus-visible\) \.rp-task-row__acts/)
   })
 })

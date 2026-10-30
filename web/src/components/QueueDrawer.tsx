@@ -274,7 +274,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
                 </Tooltip>
               </Popconfirm>
             )}
-            {openAction(t('tasks.open'), '/queue')}
+            {openAction(t('tasks.open'), `/queue?job=${j.id}`)}
           </>
         }
       />

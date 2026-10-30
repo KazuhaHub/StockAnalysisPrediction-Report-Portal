@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
+import { MemoryRouter, useLocation } from 'react-router'
 import type { TaskItem } from '../api/types'
 import { EXPORTS_CHANGED_EVENT, notifyExportsChanged } from './exportJobs'
-import { QUEUE_EVENT } from './shortcuts'
 import NotificationStack from '../components/NotificationStack'
 import { useTaskCenter } from './useTaskCenter'
 
@@ -28,11 +28,18 @@ function Probe({ enabled = true }: { enabled?: boolean }) {
   const { active } = useTaskCenter(enabled)
   return <span data-testid="active">{active.length}</span>
 }
+function Where() {
+  const loc = useLocation()
+  return <span data-testid="where">{loc.pathname + loc.search}</span>
+}
 const renderProbe = (enabled = true) =>
   render(
     <App>
-      <NotificationStack />
-      <Probe enabled={enabled} />
+      <MemoryRouter>
+        <Where />
+        <NotificationStack />
+        <Probe enabled={enabled} />
+      </MemoryRouter>
     </App>,
   )
 const settle = () => act(async () => { await Promise.resolve() })
@@ -105,14 +112,17 @@ describe('useTaskCenter completion toasts', () => {
     expect(await screen.findByText('tasks.toast.runFailed:{"name":"Deep dive"}')).toBeTruthy()
   })
 
-  it('offers a View action on a failed run that opens the Tasks drawer and closes the card', async () => {
-    const opened = vi.fn()
-    window.addEventListener(QUEUE_EVENT, opened)
+  it('takes View on a failed run to that job and closes the card', async () => {
     await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 0, partial: 0, failed: 3, cancelled: 0 } }))
     fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
-    expect(opened).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('where').textContent).toBe('/queue?job=7')
     await waitFor(() => expect(document.querySelector('.rp-notify-card')).toBeNull())
-    window.removeEventListener(QUEUE_EVENT, opened)
+  })
+
+  it('takes View on a partial run to that job too', async () => {
+    await watchThen(run({ id: '12' }), run({ id: '12', status: 'finished', done: 3, counts: { succeeded: 1, partial: 0, failed: 2, cancelled: 0 } }))
+    fireEvent.click(await screen.findByRole('button', { name: 'tasks.toast.view' }))
+    expect(screen.getByTestId('where').textContent).toBe('/queue?job=12')
   })
 
   it('offers a View action on a partial run', async () => {

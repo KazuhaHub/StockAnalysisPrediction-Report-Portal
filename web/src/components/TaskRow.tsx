@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Progress, Typography, theme } from 'antd'
 import { useHoverNone } from '../lib/useHoverNone'
 
@@ -31,6 +31,23 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
   const { token } = theme.useToken()
   const noHover = useHoverNone()
   const open = !!expanded
+  // The whole row is the pointer target, the time cell included; the actions (and anything portalled out of
+  // them, such as a confirmation popover, whose events still bubble through React) keep their own clicks.
+  // A native listener, because the keyboard path is the row's main button: a bare onClick on this <li>
+  // would be a second, mouse-only control.
+  const rowRef = useRef<HTMLLIElement>(null)
+  const toggleRef = useRef(onToggle)
+  toggleRef.current = onToggle
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    const onClick = (e: MouseEvent) => {
+      if ((e.target as Element).closest('.rp-task-row__acts')) return
+      toggleRef.current?.()
+    }
+    row.addEventListener('click', onClick)
+    return () => row.removeEventListener('click', onClick)
+  }, [])
   const toggleKey = (e: KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
@@ -48,13 +65,12 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
   }
   const cls = ['rp-task-row', pinned && 'is-active', open && 'is-open'].filter(Boolean).join(' ')
   return (
-    <li className={cls} style={{ listStyle: 'none' }}>
+    <li ref={rowRef} className={cls} style={{ listStyle: 'none' }}>
       <div
         className="rp-task-row__main"
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={onToggle}
         onKeyDown={toggleKey}
       >
         <span

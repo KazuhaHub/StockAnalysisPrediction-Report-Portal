@@ -391,8 +391,9 @@ describe('notifications across sign-in identities', () => {
 
 describe('notifications with a finger', () => {
   const CARD_WIDTH = 300
+  let reduced = false
   const stubHover = (hover: boolean) => vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
-      matches: !hover && query.includes('(hover: none)'),
+      matches: query.includes('prefers-reduced-motion') ? reduced : !hover && query.includes('(hover: none)'),
       media: query,
       onchange: null,
       addEventListener: () => {},
@@ -402,7 +403,7 @@ describe('notifications with a finger', () => {
       dispatchEvent: () => false,
     }))
   // Gestures are judged by each pointer's own type, so they must work whichever way hover is set.
-  beforeEach(() => stubHover(true))
+  beforeEach(() => { reduced = false; stubHover(true) })
   afterEach(() => vi.unstubAllGlobals())
 
   const card = () => {
@@ -443,6 +444,30 @@ describe('notifications with a finger', () => {
     touch(el, 'pointerMove', 200)
     touch(el, 'pointerUp', 200)
     expect(onClose).toHaveBeenCalledWith('swipe')
+  })
+
+  it('ends the enter animation when a drag starts so the card follows the finger', () => {
+    mount()
+    raise('success', 'done')
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 40)
+    expect(el.style.animation).toBe('none')
+    expect(el.style.transform).toBe('translateX(30px)')
+  })
+
+  it('keeps a swiped card off screen under reduced motion instead of snapping it back', () => {
+    reduced = true
+    mount()
+    raise('success', 'done')
+    const el = card()
+    touch(el, 'pointerDown', 10)
+    touch(el, 'pointerMove', 60)
+    advance(600)
+    touch(el, 'pointerMove', 200)
+    touch(el, 'pointerUp', 200)
+    expect(el.style.transform).not.toBe('')
+    expect(el.style.opacity).toBe('0')
   })
 
   it('swipes with a pen', () => {

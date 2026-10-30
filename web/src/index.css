@@ -1424,17 +1424,17 @@ body {
    them everywhere (is-open). */
 @media (hover: hover) {
   .rp-task-row:hover,
-  .rp-task-row:focus-within {
+  .rp-task-row:has(:focus-visible) {
     background: var(--ant-color-fill-tertiary);
   }
   .rp-task-row:hover .rp-task-row__acts,
-  .rp-task-row:focus-within .rp-task-row__acts {
+  .rp-task-row:has(:focus-visible) .rp-task-row__acts {
     opacity: 1;
     transform: none;
     pointer-events: auto;
   }
   .rp-task-row:hover .rp-task-row__time,
-  .rp-task-row:focus-within .rp-task-row__time {
+  .rp-task-row:has(:focus-visible) .rp-task-row__time {
     opacity: 0;
     transform: translateX(-10px);
   }

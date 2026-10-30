@@ -546,6 +546,7 @@
   "batch.editor.submitReady": "{{n}} 列資料待提交。",
   "batch.inputsMore": "…還有 {{n}} 項",
   "batch.jobDetail": "任務詳情",
+  "batch.jobNotFound": "找不到這個任務，或者你無權查看。",
   "batch.jobTitle": "任務 #{{id}}",
   "batch.maxRetries": "失敗重試",
   "batch.msg.cancelRequested": "已請求取消",

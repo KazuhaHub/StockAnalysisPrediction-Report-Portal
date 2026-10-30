@@ -546,6 +546,7 @@
   "batch.editor.submitReady": "{{n}} row(s) ready to submit.",
   "batch.inputsMore": "…+{{n}} more",
   "batch.jobDetail": "Job detail",
+  "batch.jobNotFound": "This job was not found, or it is not yours to view.",
   "batch.jobTitle": "Job #{{id}}",
   "batch.maxRetries": "Retries",
   "batch.msg.cancelRequested": "Cancellation requested",

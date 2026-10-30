@@ -109,7 +109,8 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
     if (reason === 'manual') handOffFocus(cardRef.current)
     dismissNotification(key, reason)
   }
-    const settle = (el: HTMLElement) => {
+  // A swipe is a gesture of the finger, not of the page: the card follows it, then either leaves or settles back.
+  const settle = (el: HTMLElement) => {
     el.style.transition = reducedMotionNow() ? '' : 'transform 0.2s ease, opacity 0.2s ease'
     el.style.transform = ''
     el.style.opacity = ''
@@ -122,57 +123,67 @@ function Card({ item, now }: { item: NotificationItem; now: number }) {
   // Judged per gesture by the pointer that makes it, so a hybrid device swipes with a finger and hovers with a mouse.
   const fingerDown = (e: React.PointerEvent) => e.pointerType === 'touch' || e.pointerType === 'pen'
   const gesture = {
-        onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
-          if (!fingerDown(e) || !e.isPrimary) return
-          drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), width: e.currentTarget.getBoundingClientRect().width, claimed: false }
-          holdNotification(key, 'press', true)
-        },
-        onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
-          const d = drag.current
-          if (!d || d.id !== e.pointerId) return
-          const dx = e.clientX - d.x
-          const dy = e.clientY - d.y
-          if (!d.claimed) {
-            if (Math.abs(dy) > SWIPE_CLAIM_PX && Math.abs(dy) >= Math.abs(dx)) {
-              // The page is scrolling under the finger: not ours.
-              release()
-              return
-            }
-            if (Math.abs(dx) < SWIPE_CLAIM_PX || Math.abs(dx) <= Math.abs(dy)) return
-            d.claimed = true
-            try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* the pointer is already gone */ }
-          }
-          e.currentTarget.style.transform = `translateX(${Math.max(0, dx)}px)`
-          e.currentTarget.style.opacity = String(Math.max(0.3, 1 - Math.max(0, dx) / (d.width * 1.2)))
-        },
-        onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
-          const d = drag.current
-          if (!d || d.id !== e.pointerId) return
-          const el = e.currentTarget
-          const dx = e.clientX - d.x
-          const elapsed = Math.max(Date.now() - d.t, 1)
-          const far = d.width > 0 && dx >= d.width * SWIPE_DISMISS_RATIO
-          const flick = dx >= SWIPE_FLICK_MIN_PX && dx / elapsed >= SWIPE_FLICK_SPEED
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!fingerDown(e) || !e.isPrimary) return
+      drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(), width: e.currentTarget.getBoundingClientRect().width, claimed: false }
+      holdNotification(key, 'press', true)
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || d.id !== e.pointerId) return
+      const dx = e.clientX - d.x
+      const dy = e.clientY - d.y
+      if (!d.claimed) {
+        if (Math.abs(dy) > SWIPE_CLAIM_PX && Math.abs(dy) >= Math.abs(dx)) {
+          // The page is scrolling under the finger: not ours.
           release()
-          if (!d.claimed) return
-          if (far || flick) {
-            // Hand the exit animation the card's current offset so it carries on from there.
-            el.style.setProperty('--rp-swipe-x', `${Math.max(0, dx)}px`)
-            el.style.setProperty('--rp-swipe-end', `${Math.max(d.width, 1) * 1.1}px`)
-            el.style.transform = ''
-            el.style.opacity = ''
-            handOffFocus(el)
-            dismissNotification(key, 'swipe')
-          } else {
-            settle(el)
-          }
-        },
-        onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => {
-          const d = drag.current
-          release()
-          if (d?.claimed) settle(e.currentTarget)
-        },
+          return
+        }
+        if (Math.abs(dx) < SWIPE_CLAIM_PX || Math.abs(dx) <= Math.abs(dy)) return
+        d.claimed = true
+        // An enter animation still running would override the inline transform and the card would not follow the finger.
+        e.currentTarget.style.animation = 'none'
+        try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* the pointer is already gone */ }
       }
+      e.currentTarget.style.transform = `translateX(${Math.max(0, dx)}px)`
+      e.currentTarget.style.opacity = String(Math.max(0.3, 1 - Math.max(0, dx) / (d.width * 1.2)))
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || d.id !== e.pointerId) return
+      const el = e.currentTarget
+      const dx = e.clientX - d.x
+      const elapsed = Math.max(Date.now() - d.t, 1)
+      const far = d.width > 0 && dx >= d.width * SWIPE_DISMISS_RATIO
+      const flick = dx >= SWIPE_FLICK_MIN_PX && dx / elapsed >= SWIPE_FLICK_SPEED
+      release()
+      if (!d.claimed) return
+      if (far || flick) {
+        const end = Math.max(d.width, 1) * 1.1
+        if (reducedMotionNow()) {
+          // No exit animation: park the card off screen until it is removed, rather than snapping it back.
+          el.style.transform = `translateX(${end}px)`
+          el.style.opacity = '0'
+        } else {
+          // Carry the exit animation on from where the finger left the card.
+          el.style.setProperty('--rp-swipe-x', `${Math.max(0, dx)}px`)
+          el.style.setProperty('--rp-swipe-end', `${end}px`)
+          el.style.transform = ''
+          el.style.opacity = ''
+          el.style.animation = 'rp-notify-out 0.25s ease-in forwards'
+        }
+        handOffFocus(el)
+        dismissNotification(key, 'swipe')
+      } else {
+        settle(el)
+      }
+    },
+    onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      release()
+      if (d?.claimed) settle(e.currentTarget)
+    },
+  }
   const color: Record<NotifyKind, string> = {
     security: token.purple,
     failure: token.colorError,

@@ -34,7 +34,7 @@ import {
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
@@ -81,11 +81,25 @@ function DetailDrawer({ jobId, admin, user, onClose }: { jobId: number | null; a
   const [detail, setDetail] = useState<BatchJobDetail | null>(null)
   const [selected, setSelected] = useState<Key[]>([])
   const [detailItem, setDetailItem] = useState<BatchItem | null>(null)
+  // The server answers 404 for a job that does not exist or is not the reader's; a deep link can name either.
+  const [notFound, setNotFound] = useState(false)
   const open = jobId != null
-  const load = () => (jobId == null ? Promise.resolve() : api.get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`).then(setDetail).catch(() => {}))
+  const load = () =>
+    jobId == null
+      ? Promise.resolve()
+      : api
+          .get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`)
+          .then((d) => {
+            setNotFound(false)
+            setDetail(d)
+          })
+          .catch((e) => {
+            if ((e as { status?: number })?.status === 404) setNotFound(true)
+          })
   useEffect(() => {
     if (jobId == null) return
     setDetail(null)
+    setNotFound(false)
     setSelected([])
     return startVisiblePoll(load, 2500)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,6 +222,7 @@ function DetailDrawer({ jobId, admin, user, onClose }: { jobId: number | null; a
         ) : null
       }
     >
+      {notFound && <Alert type="warning" showIcon title={t('batch.jobNotFound')} />}
       {detail && <Space wrap style={{ marginBottom: 12 }}>{executionTags(t, detail.job)}</Space>}
       {/* A job the queue calls "running" is not necessarily running HERE: after a restart the row
           survives while the goroutine driving it does not, and the portal reconciles it by polling
@@ -282,7 +297,20 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const [fUser, setFUser] = useState<string>('')
   const [fTarget, setFTarget] = useState<number | undefined>()
   const [search, setSearch] = useState('')
-  const [detailId, setDetailId] = useState<number | null>(null)
+  // The open job lives in the url (?job=id) so a link, a reload and the back button all land on it.
+  const [params, setParams] = useSearchParams()
+  const jobParam = Number(params.get('job'))
+  const detailId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : null
+  const setDetailId = (id: number | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (id === null) next.delete('job')
+        else next.set('job', String(id))
+        return next
+      },
+      { replace: id === null },
+    )
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedAt, setReschedAt] = useState<Dayjs | null>(null)
   const [selectedJobs, setSelectedJobs] = useState<Key[]>([])
