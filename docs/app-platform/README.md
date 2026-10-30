@@ -33,7 +33,8 @@ and activation](113-writable-install-worker.md) and
 [network runtime support observation](135-network-runtime-observation.md), and
 [credential storage and custody](136-credential-schema-and-custody.md), and
 [canonical binding restrictions](137-secret-binding-policy.md), and
-[uninstall binding revocation](138-uninstall-secret-binding-revocation.md).
+[uninstall binding revocation](138-uninstall-secret-binding-revocation.md), and
+[current network provider observation](139-current-network-provider-observation.md).
 The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
 is now owner-approved for development/isolated implementation; production and
 later job/event products remain separate decisions.

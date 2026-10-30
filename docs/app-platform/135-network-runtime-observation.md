@@ -1,7 +1,8 @@
 # Observe network support before permission admission
 
-Status: internal read-only runtime observation implemented and locally verified;
-exact Linux and combined native acceptance remain pending CI. The credential
+Status: internal read-only runtime observation implemented and verified at
+4bd40ba4b2f0ac5148f2ba9ffc5c417327afbe00 by full general CI and both native
+workflows. The credential
 storage extension is now owner-approved separately in document 131; no credential
 table or persistent implementation is included in this change.
 
@@ -114,3 +115,15 @@ for these checks. The app-facing route remains closed until that chain exists.
 
 No baseline, migration, credential value, new persistent side store, Status,
 catalogue, production startup or server beta configuration is changed here.
+
+## Exact revision acceptance
+
+Initial 461be7c9 passed native workflows but general staticcheck rejected a test
+passing nil Context (SA1012). The explicit-context correction is
+4bd40ba4b2f0ac5148f2ba9ffc5c417327afbe00. General workflow 40975335253/job
+123801850458 passes staticcheck, govulncheck with no reachable vulnerabilities,
+and ordinary full PostgreSQL Go tests (internal/app 639.531s). Daemon workflow
+40975335250/job 123801849748 passes actual root/non-root TLS network and current
+endpoint acceptance; quota/browser workflow 40975335287/job 123801849873 passes
+the combined native lifecycle and SDK acceptance. Production execution remains
+unapproved. These results do not prove later Portal grant/source adapters.

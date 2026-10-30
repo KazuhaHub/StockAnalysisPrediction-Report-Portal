@@ -94,7 +94,7 @@ func TestPlatformRuntimeEndpointAcceptance(t *testing.T) {
 	defer readyReader.Close()
 	defer readyWriter.Close()
 	path := filepath.Join(control, "control.sock")
-	child := exec.Command(binary, "-test.run=^TestPlatformRuntimeEndpointChild$", "-test.timeout=30s")
+	child := exec.Command(binary, "-test.v", "-test.run=^TestPlatformRuntimeEndpointChild$", "-test.timeout=30s")
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_RUNTIME_CONFIRM_CHILD=1", "RUNTIME_CONFIRM_SOCKET=" + path, "TMPDIR=" + childData}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
@@ -125,7 +125,7 @@ func TestPlatformRuntimeEndpointAcceptance(t *testing.T) {
 	if _, created, err := store.EnrollController(context.Background(), enrollment); err != nil || !created {
 		t.Fatalf("explicit isolated enrollment: %v", err)
 	}
-	server, err := transport.ListenController(path, 41001, 41001, store)
+	server, err := transport.ListenNetworkController(context.Background(), path, 41001, 41001, store, 2, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +145,10 @@ func TestPlatformRuntimeEndpointAcceptance(t *testing.T) {
 	if err := child.Wait(); err != nil {
 		t.Fatalf("Portal endpoint confirmation failed: %v\n%s", err, result.String())
 	}
+	if !bytes.Contains(result.Bytes(), []byte("CURRENT_SQL_NETWORK_PROFILE_CROSS_UID_VERIFIED")) {
+		t.Fatal("child did not verify current SQL network observation")
+	}
+	t.Log("CURRENT_SQL_NETWORK_PROFILE_CROSS_UID_VERIFIED")
 	t.Log("non-root Portal registration -> explicit root journal enrollment -> authenticated nonce probe -> transactional binding confirmation passed")
 }
 func TestPlatformRuntimeEndpointChild(t *testing.T) {
@@ -182,6 +186,37 @@ func TestPlatformRuntimeEndpointChild(t *testing.T) {
 	if err != nil || confirmed.revision != 2 || scalar[int](t, s.st, `SELECT enabled FROM app_platform_runtime_bindings`) != 1 {
 		t.Fatalf("live endpoint did not confirm: %v", err)
 	}
+
+	before := dumpOf(t, s.st)
+	network, err := s.observePlatformNetworkRuntime(ctx, session, endpoint)
+	if err != nil || !samePlatformManagedRuntime(network.runtime, confirmed) || !validPlatformNetworkRuntimeObservation(network.observation, confirmed, endpoint) || network.observation.Profile().ActiveRequests != 2 || network.observation.Profile().CacheEntries != 3 || network.observation.Profile().WritableBackend {
+		t.Fatalf("current SQL network observation: %v", err)
+	}
+	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
+		t.Fatal("network observation changed authority")
+	}
+	if validPlatformNetworkRuntimeObservation(network.observation, confirmed, platformRuntimeEndpoint{path: endpoint.path, controllerUID: 41002, controllerGID: 41001}) {
+		t.Fatal("observation moved to different controller")
+	}
+	changed := confirmed
+	changed.controlRevision++
+	if validPlatformNetworkRuntimeObservation(network.observation, changed, endpoint) {
+		t.Fatal("observation survived control revision change")
+	}
+	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0 WHERE id=?`, confirmed.id)
+	before = dumpOf(t, s.st)
+	if _, err := s.observePlatformNetworkRuntime(ctx, session, endpoint); err == nil {
+		t.Fatal("disabled SQL runtime reused observed network provider")
+	}
+	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
+		t.Fatal("disabled observation refusal wrote")
+	}
+	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1 WHERE id=?`, confirmed.id)
+	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, session.username)
+	if _, err := s.observePlatformNetworkRuntime(ctx, session, endpoint); err == nil {
+		t.Fatal("demoted administrator sampled live network runtime")
+	}
+	t.Log("CURRENT_SQL_NETWORK_PROFILE_CROSS_UID_VERIFIED")
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 {
 		t.Fatal("control confirmation admitted an app")
 	}
