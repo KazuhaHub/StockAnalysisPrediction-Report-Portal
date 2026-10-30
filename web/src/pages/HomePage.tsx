@@ -283,8 +283,8 @@ export default function HomePage() {
   // focus at once and closed, and Enter in the keyword box reached the search field too.
   const keepInPopover = (e: { stopPropagation: () => void }) => e.stopPropagation()
   const advancedSearch = (
-    <div className="rp-home-advanced-popover" onClick={keepInPopover} onMouseDown={keepInPopover} onKeyDown={keepInPopover}>
-      <Form form={form} layout="vertical" onFinish={applyFilters}>
+    <div className="rp-home-advanced-popover">
+      <Form form={form} layout="vertical" onFinish={applyFilters} onClick={keepInPopover} onMouseDown={keepInPopover} onKeyDown={keepInPopover}>
         <Row gutter={16}>
           <Col xs={24} md={8}>
             <Form.Item name="q" label={t('home.keyword')}>
