@@ -27,15 +27,15 @@ export default function ScopeFold({ label, children }: { label: string; children
   const [open, setOpen] = useState(false)
   const id = useId()
   const toggle = useRef<HTMLButtonElement>(null)
-  if (!narrow) return <>{children(() => {}, false)}</>
   const fold = () => {
     setOpen(false)
     toggle.current?.focus()
   }
+  // The same element structure at both widths, so crossing the breakpoint does not remount the tree.
   return (
-    <div className="rp-scope-fold">
-      <ScopeFoldToggle buttonRef={toggle} open={open} label={label} controls={id} onClick={() => setOpen((value) => !value)} />
-      <div id={id} className="rp-scope-fold__body" hidden={!open}>{children(fold, true)}</div>
+    <div className={narrow ? 'rp-scope-fold' : 'rp-scope-fold rp-scope-fold--inline'}>
+      {narrow && <ScopeFoldToggle buttonRef={toggle} open={open} label={label} controls={id} onClick={() => setOpen((value) => !value)} />}
+      <div id={id} className="rp-scope-fold__body" hidden={narrow && !open}>{children(narrow ? fold : () => {}, narrow)}</div>
     </div>
   )
 }

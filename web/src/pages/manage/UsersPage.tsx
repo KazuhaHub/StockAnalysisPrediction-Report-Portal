@@ -564,7 +564,8 @@ function GroupsPanel({
       <Typography.Paragraph type="secondary">{t('ou.directoryHint')}</Typography.Paragraph>
       <div className="rp-ou-console">
         <ScopeFold label={sel?.name ?? t('ou.title')}>
-          {(fold) => <OrgUnitPicker
+          {(fold, folded) => <OrgUnitPicker
+          collapsible={!folded}
           mode="manage"
           groups={groups}
           loading={groupsLoading}

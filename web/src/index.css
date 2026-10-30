@@ -558,11 +558,14 @@ body {
   margin-inline-start: auto;
 }
 .rp-reader-export-policy { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
-.rp-batch-targets-section > .ant-space-item { min-width: 0; }
 .rp-table-scroll { max-width: 100%; }
 .rp-scope-fold { min-width: 0; width: 100%; }
 .rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
 .rp-scope-fold__body { margin-top: 8px; }
+.rp-policy-scope-header > .rp-policy-scope-global--idle { background: transparent; border-color: transparent; box-shadow: none; }
+.rp-policy-scope-header > .rp-policy-scope-global--idle:hover { background: var(--ant-color-bg-text-hover); }
+/* Wide screens: the fold wrappers vanish so the tree is laid out exactly as if they were not there. */
+.rp-scope-fold--inline, .rp-scope-fold--inline > .rp-scope-fold__body { display: contents; }
 .rp-policy-scope-toggle { min-width: 0; }
 .rp-policy-scope-toggle__label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {
@@ -574,6 +577,7 @@ body {
   .rp-policy-content { padding-inline-end: 0; scrollbar-gutter: auto; }
   .rp-policy-scope-header > .rp-policy-scope-toggle { max-width: 60%; }
   .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
+  .rp-batch-targets-section > .ant-space-item { min-width: 0; }
   .rp-table-scroll { overflow-x: auto; }
   .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
   .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
@@ -2510,7 +2514,7 @@ body {
 .rp-dashboard-shortcut-options > .ant-btn { justify-content: flex-start; white-space: normal; height: auto; min-height: 36px; text-align: start; }
 .rp-sso-page > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
 @media (max-width: 767px) { .rp-dashboard-shortcut-options { grid-template-columns: minmax(0, 1fr); } }
-@media (min-width: 768px) { .rp-users-directory > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
+@media (min-width: 768px) { .rp-users-directory > .rp-scope-fold--inline > .rp-scope-fold__body > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
 .rp-users-page > .ant-tabs-nav { margin-bottom: 12px; }
 
 .rp-dashboard-catalog-modal .rp-dashboard-preview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

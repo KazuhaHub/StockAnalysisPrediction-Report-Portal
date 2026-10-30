@@ -86,8 +86,12 @@ function rulesOf(list: Item[]): Rule[] {
 }
 // Only the layout this change owns: the stylesheet has other phone rules for unrelated pages.
 const OWNED = /\.rp-(policy-|scope-fold|reader-export|table-scroll|ou-targets|app-access|export-type-tree|admin-page-body|ou-console|ou-picker--manage)/
-// Rules scoped to other regions of the app, which can never match the same element.
-const UNRELATED = /\.rp-(fc-scroll|settings-field)\b/
+// Specific pairs that sit in different regions of the app and can never match the same element.
+const UNRELATED = new Set([
+  '.rp-table-scroll .ant-table table | .rp-fc-scroll .ant-table-content > table',
+  '.rp-ou-targets .ant-table table | .rp-fc-scroll .ant-table-content > table',
+  '.rp-policy-scope > .ant-typography | .rp-settings-field > div > .ant-typography',
+])
 const phoneRules = rulesOf(phoneBlocks.flatMap((b) => topLevel(b.body, b.bodyAt))).filter((r) => OWNED.test(r.sel))
 const otherRules = rulesOf(
   items.filter((it) => !it.header.startsWith('@')).concat(items.filter((it) => appliesOnPhone(it.header)).flatMap((it) => topLevel(it.body, it.bodyAt))),
@@ -103,7 +107,7 @@ describe('phone layout has a single vertical scroll region', () => {
     for (const p of phoneRules) {
       for (const o of otherRules) {
         if (o.sel === p.sel && o.at < p.at) continue
-        if (UNRELATED.test(o.sel)) continue
+        if (UNRELATED.has(`${p.sel} | ${o.sel}`)) continue
         if (subject(o.sel) !== subject(p.sel)) continue
         for (const [prop, value] of p.props) {
           // Agreeing values cannot cancel each other, whichever element both end up matching.

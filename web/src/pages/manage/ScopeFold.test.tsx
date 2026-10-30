@@ -56,4 +56,12 @@ describe('ScopeFold', () => {
     act(() => viewport.set(false))
     expect(screen.getByRole('list', { name: 'units' })).toBeTruthy()
   })
+
+  it('does not remount the tree when the viewport crosses the breakpoint', () => {
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'Research, Sales' }))
+    fireEvent.click(screen.getByRole('button', { name: 'count 0' }))
+    act(() => viewport.set(false))
+    expect(screen.getByRole('button', { name: 'count 1' })).toBeTruthy()
+  })
 })

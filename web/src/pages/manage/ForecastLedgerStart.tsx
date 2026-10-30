@@ -158,6 +158,7 @@ export default function ForecastLedgerStart({
             )}
 
             <Typography.Text>{t('forecast.population.candidates')}</Typography.Text>
+            <div className="rp-table-scroll">
             <Table<ForecastPopulationCandidate>
               rowKey="id"
               size="small"
@@ -165,8 +166,8 @@ export default function ForecastLedgerStart({
               columns={candidateColumns}
               dataSource={value.candidates}
               locale={{ emptyText: t('forecast.population.no_candidates') }}
-              scroll={{ x: 'max-content' }}
             />
+            </div>
 
             {err && <Alert type="error" showIcon title={err} />}
 
