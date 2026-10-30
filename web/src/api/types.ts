@@ -2008,6 +2008,10 @@ export interface TaskItem {
   ahead?: number
   scheduled?: boolean
   error?: string
+  /** Exports only: md_zip | csv | jsonl. */
+  format?: string
+  /** Exports only: the file size once done. */
+  bytes?: number
   counts?: { succeeded: number; partial: number; failed: number; cancelled: number }
   created_at: number
   finished_at: number

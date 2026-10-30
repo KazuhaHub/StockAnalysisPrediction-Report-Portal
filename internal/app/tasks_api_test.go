@@ -26,6 +26,8 @@ type taskItem struct {
 	Error      string `json:"error"`
 	CreatedAt  int64  `json:"created_at"`
 	FinishedAt int64  `json:"finished_at"`
+	Format     string `json:"format"`
+	Bytes      int64  `json:"bytes"`
 	Download   string `json:"download"`
 	Cancel     string `json:"cancel"`
 	Link       string `json:"link"`
@@ -62,6 +64,9 @@ func (e *tasksEnv) export(user string, reader bool, status string, createdAt int
 		Status: status, RowsEstimate: 10, RowsDone: 4, CreatedAt: createdAt}
 	if status == exportDone || status == exportFailed {
 		j.FinishedAt = createdAt + 1
+		if status == exportDone {
+			j.Bytes = 3400
+		}
 	}
 	if err := e.s.st.insertExportJob(j); err != nil {
 		e.t.Fatal(err)
@@ -116,6 +121,40 @@ func TestMyTasksListsOnlyTheCallersOwnRunsAndExports(t *testing.T) {
 	if len(ts) != 2 {
 		t.Fatalf("got %d tasks, want 2", len(ts))
 	}
+}
+
+// An export item says its format, and its size once the file exists; a run carries neither.
+func TestMyTasksExportItemsCarryFormatAndBytesRunsDoNot(t *testing.T) {
+	e := newTasksEnv(t)
+	e.addOperator("op")
+	runID := e.run("op")
+	done := e.export("op", true, exportDone, 100)
+	live := e.export("op", true, exportRunning, 101)
+	ts := e.tasks("op", "")
+	if x := find(ts, "export", done); x == nil || x.Format != "md_zip" || x.Bytes != 3400 {
+		t.Fatalf("done export = %+v, want format md_zip and 3400 bytes", x)
+	}
+	if x := find(ts, "export", live); x == nil || x.Format != "md_zip" || x.Bytes != 0 {
+		t.Fatalf("running export = %+v, want format md_zip and no bytes", x)
+	}
+	var raw struct {
+		Tasks []map[string]any `json:"tasks"`
+	}
+	if err := json.Unmarshal(e.do("op", "GET", "/api/tasks", "").Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range raw.Tasks {
+		if m["kind"] != "run" {
+			continue
+		}
+		if _, ok := m["format"]; ok {
+			t.Errorf("run %v carries format", m["id"])
+		}
+		if _, ok := m["bytes"]; ok {
+			t.Errorf("run %v carries bytes", m["id"])
+		}
+	}
+	_ = runID
 }
 
 // 2. A non-admin sees an export only if it is theirs AND was submitted through the reader endpoints.

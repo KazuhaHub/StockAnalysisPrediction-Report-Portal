@@ -7,7 +7,7 @@ import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
 import { InputsPreview, isTerminal, jobProgressPresentation } from '../lib/batchUi'
 import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
-import { notifyExportsChanged } from '../lib/exportJobs'
+import { fmtBytes, notifyExportsChanged } from '../lib/exportJobs'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { formatTaskTime, runOutcome } from '../lib/taskUi'
@@ -272,7 +272,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       detail = x.ahead === undefined ? t('export.status.queued') : x.ahead === 0 ? t('tasks.next') : t('tasks.queuedAhead', { n: x.ahead })
     } else if (x.status === 'done') {
       tone = 'ok'
-      detail = x.done > 0 ? t('tasks.result.exportDone', { n: x.done }) : t('export.status.done')
+      detail = x.done > 0
+        ? x.bytes
+          ? t('tasks.result.exportDone', { n: x.done, size: fmtBytes(x.bytes) })
+          : t('tasks.result.exportDoneNoSize', { n: x.done })
+        : t('export.status.done')
     } else if (x.status === 'failed') {
       tone = 'fail'
       detail = x.error ? t('tasks.result.failedWhy', { error: x.error }) : t('export.status.failed')
@@ -284,6 +288,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         key={taskKey(x)}
         tone={tone}
         name={x.name}
+        sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
         percent={percent}
         detail={detail}
         time={formatTaskTime(live ? x.created_at : finishedAtOf(x), lang)}

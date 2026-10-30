@@ -248,6 +248,21 @@ describe('Tasks drawer Exports tab', () => {
     expect(screen.queryByText('A run')).toBeNull()
   })
 
+  it('names the export format beside the name, and a finished export its reports and size', () => {
+    mount({
+      tab: 'exports',
+      tasks: [
+        exp({ id: 'a', status: 'done', done: 120, total: 120, format: 'md_zip', bytes: 3_400_000, download: '/d', cancel: undefined, finished_at: 9 }),
+        exp({ id: 'b', name: 'Live', format: 'csv' }),
+      ],
+    })
+    const [live] = rows('tasks.section.active')
+    expect(live.textContent).toContain('export.format.csv')
+    const [done] = rows('tasks.section.finished')
+    expect(done.textContent).toContain('export.format.md_zip')
+    expect(done.textContent).toContain('tasks.result.exportDone:{"n":120,"size":"3.2 MB"}')
+  })
+
   it('notes how long finished files are kept', () => {
     mount({ tab: 'exports', tasks: [exp({ status: 'done', download: '/d', cancel: undefined, finished_at: 5 })] })
     expect(screen.getByText('tasks.keptDays:{"n":7}')).toBeTruthy()
