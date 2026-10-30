@@ -495,6 +495,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /api/app-platform/installations/{installation}/launch", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformLaunch)))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/backend", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformBackend)))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/network", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformNetwork)))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/reports", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformReports)))
 	s.route(mux, "GET /app-documents/{installation}/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.platformAppDocument)))
 	s.public(mux, "GET /site-assets/{name}", s.siteAsset)
 

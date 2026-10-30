@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -58,8 +59,11 @@ func (s *Server) withPlatformLaunchAccountReadContext(ctx context.Context, sessi
 
 func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, session platformActorSession, installationID string, read func(migExec, platformLaunchAccess, appplatform.Manifest, platformActorAccount) error) (platformLaunchAccess, error) {
 	var zero platformLaunchAccess
+	fail := func(stage string) (platformLaunchAccess, error) {
+		return zero, fmt.Errorf("application launch %s: %w", stage, errAppPlatformLaunchUnavailable)
+	}
 	if !platformValidUUID(installationID) {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("identity")
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -77,22 +81,22 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	}
 	account, err := platformReadSessionAccount(e, session, now, true, false)
 	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("session")
 	}
 	if err := lockPlatformPublisherTrust(e); err != nil {
 		return zero, err
 	}
 	trust, err := loadPlatformPublisherTrust(e)
 	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("trust")
 	}
 	var epoch string
 	var markers int
 	if err := e.queryRow(`SELECT v FROM meta WHERE k='app_platform_controller_epoch'`).Scan(&epoch); err != nil || !platformValidUUID(epoch) {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("epoch")
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE k='app_platform_restore_paused' AND v='0'`).Scan(&markers); err != nil || markers != 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("restore-pause")
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
@@ -103,14 +107,14 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	var generation, policy int64
 	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,controller_epoch,runtime_id,generation,policy_revision FROM app_platform_installations WHERE id=?`+lock, installationID).
 		Scan(&appID, &publisherID, &desired, &phase, &installationEpoch, &runtime, &generation, &policy); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("installation")
 	}
 	// This branch remains static-only; runtime-bound reads use their typed history.
 	if desired != "enabled" || phase != "ready" || installationEpoch != epoch || runtime.Valid || generation < 1 || policy < 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("installation-state")
 	}
 	if err := platformLaunchAudience(e, account, installationID); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("audience")
 	}
 	var releaseSHA, evidence string
 	var activationGeneration, activationPolicy, dataFormat int64
@@ -118,37 +122,38 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	var observed sql.NullInt64
 	if err := e.queryRow(`SELECT release_sha256,generation,policy_revision,data_namespace_id,data_format,observed_ms,readiness_evidence FROM app_platform_activations WHERE installation_id=? AND state='active'`+lock, installationID).
 		Scan(&releaseSHA, &activationGeneration, &activationPolicy, &namespace, &dataFormat, &observed, &evidence); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("activation")
 	}
 	if activationGeneration != generation || activationPolicy != policy || !observed.Valid || observed.Int64 < 0 || !platformValidSHA(releaseSHA) {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("activation-state")
 	}
 	if namespace.Valid {
 		if !platformValidUUID(namespace.String) {
-			return zero, errAppPlatformLaunchUnavailable
+			return fail("namespace-identity")
 		}
 		var owner sql.NullString
 		var namespaceState string
 		var namespaceFormat, writerFence int64
 		if err := e.queryRow(`SELECT owner_installation_id,state,data_format,writer_fence FROM app_platform_data_namespaces WHERE id=?`+lock, namespace.String).
 			Scan(&owner, &namespaceState, &namespaceFormat, &writerFence); err != nil {
-			return zero, errAppPlatformLaunchUnavailable
+			return fail("namespace")
 		}
 		if !owner.Valid || owner.String != installationID || namespaceState != "active" || namespaceFormat != dataFormat || writerFence < 1 {
-			return zero, errAppPlatformLaunchUnavailable
+			return fail("namespace-state")
 		}
 	} else if dataFormat != 0 || generation != 1 || policy != 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("frontend-format")
 	}
 	var unsafe int
 	if err := e.queryRow(`SELECT
  (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (completed_ms IS NULL OR stage='recovery_required'))+
  (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND (granted<>0 OR policy_revision<>?))`, installationID, installationID, installationID, policy).Scan(&unsafe); err != nil {
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability<>'reports.read')`, installationID, installationID, installationID, policy, installationID).Scan(&unsafe); err != nil {
 		return zero, err
 	}
 	if unsafe != 0 {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("unsafe-effects")
 	}
 	var trustRevision int64
 	for _, publisher := range trust.Publishers {
@@ -158,7 +163,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	}
 	verified, err := platformVerifyStoredRelease(e, releaseSHA, trustRevision, trust, now)
 	if err != nil || verified.appID != appID || verified.publisherID != publisherID {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("stored-release")
 	}
 	var raw, signature []byte
 	if err := e.queryRow(`SELECT descriptor,signature FROM app_platform_releases WHERE sha256=?`, releaseSHA).Scan(&raw, &signature); err != nil {
@@ -166,7 +171,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	}
 	parsed, err := appplatform.ParseDescriptor(raw)
 	if err != nil || parsed.Manifest.Backend != nil || platformInstallRequirements(parsed.Manifest) != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("requirements")
 	}
 
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, releaseSHA, epoch, policy, parsed.Manifest); err != nil {
@@ -175,7 +180,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 
 	if namespace.Valid {
 		if int64(parsed.Manifest.Data.Schema) != dataFormat {
-			return zero, errAppPlatformLaunchUnavailable
+			return fail("data-schema")
 		}
 	} else {
 		if err := verifyPlatformFrontendActivation(e, installationID, releaseSHA, epoch, observed.Int64, evidence, parsed.Manifest); err != nil {
@@ -197,14 +202,14 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	}
 	current, err := platformReadSessionAccount(e, session, now, true, false)
 	if err != nil || current != account || observed.Int64 > now {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("final-session")
 	}
 	signed, err := appplatform.VerifyPublisherDescriptor(raw, signature, trust, strconv.FormatInt(now, 10))
 	if err != nil || signed.Descriptor.SHA256 != releaseSHA {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("final-release")
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE (k='app_platform_controller_epoch' AND v=?) OR (k='app_platform_restore_paused' AND v='0')`, epoch).Scan(&markers); err != nil || markers != 2 {
-		return zero, errAppPlatformLaunchUnavailable
+		return fail("final-markers")
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err

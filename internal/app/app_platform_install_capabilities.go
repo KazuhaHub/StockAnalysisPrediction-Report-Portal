@@ -52,12 +52,12 @@ func platformInstallCapabilitySelection(m appplatform.Manifest, target *platform
 				return nil, errAppPlatformInstallUnavailable
 			}
 			seen[name] = true
-			grant := name == "network.http" && policy != ""
+			grant := (name == "network.http" && policy != "") || (required && name == "reports.read")
 			if required && !grant {
 				return nil, errAppPlatformInstallUnavailable
 			}
 			restriction := "{}"
-			if grant {
+			if grant && name == "network.http" {
 				restriction = policy
 			}
 			result = append(result, platformSelectedCapability{capability: name, granted: grant, policy: restriction})
@@ -129,5 +129,11 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 }
 
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
-	return len(m.Capabilities.Required) == 0 || (len(m.Capabilities.Required) == 1 && m.Capabilities.Required[0] == "network.http")
+	if len(m.Capabilities.Required) == 0 {
+		return true
+	}
+	if len(m.Capabilities.Required) != 1 {
+		return false
+	}
+	return m.Capabilities.Required[0] == "network.http" || m.Capabilities.Required[0] == "reports.read"
 }

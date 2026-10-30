@@ -46,6 +46,12 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if _, err := platformInstallCapabilitySelection(m, nil); err == nil {
 		t.Fatal("required provider absent")
 	}
+	m.Capabilities.Required = []string{"reports.read"}
+	m.Capabilities.Optional = []string{"storage.files"}
+	reports, err := platformInstallCapabilitySelection(m, nil)
+	if err != nil || len(reports) != 2 || reports[0].capability != "reports.read" || !reports[0].granted || reports[0].policy != "{}" || reports[1].granted {
+		t.Fatal("host reports capability was not selected exactly", reports, err)
+	}
 	m.Capabilities.Required = []string{}
 	m.Capabilities.Optional = []string{"network.http", "storage.files"}
 	selected, err := platformInstallCapabilitySelection(m, target)

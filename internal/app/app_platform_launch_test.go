@@ -37,8 +37,12 @@ func platformLaunchFixtureWithArchive(t *testing.T, pg bool, archive []byte) (*S
 			t.Fatal(err)
 		}
 	}
+	return completePlatformLaunchFixture(t, s, session, release.sha256)
+}
 
-	review, err := s.createPlatformNativeInstallReview(session, release.sha256, 1)
+func completePlatformLaunchFixture(t *testing.T, s *Server, session platformActorSession, releaseSHA string) (*Server, platformActorSession, string) {
+	t.Helper()
+	review, err := s.createPlatformNativeInstallReview(session, releaseSHA, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +54,7 @@ func platformLaunchFixtureWithArchive(t *testing.T, pg bool, archive []byte) (*S
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='complete',completed_ms=1,lease_owner=NULL,lease_until_ms=NULL WHERE installation_id=?`, id)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='ready' WHERE id=?`, id)
 	platformTestInsert(t, s.st.poolExec(), "data_namespaces", map[string]any{"id": platformFixtureID(611), "origin_installation_id": id, "owner_installation_id": id, "state": "active", "data_format": 1, "quota_bytes": 256 << 20, "observed_bytes": 0, "writer_fence": 1, "revision": 1, "retained_ms": nil, "deleted_ms": nil, "created_ms": 1, "updated_ms": 1})
-	platformTestInsert(t, s.st.poolExec(), "activations", map[string]any{"id": platformFixtureID(612), "installation_id": id, "release_sha256": release.sha256, "generation": 1, "policy_revision": 1, "data_namespace_id": platformFixtureID(611), "data_format": 1, "state": "active", "readiness_evidence": "{}", "observed_ms": 1, "created_ms": 1, "updated_ms": 1})
+	platformTestInsert(t, s.st.poolExec(), "activations", map[string]any{"id": platformFixtureID(612), "installation_id": id, "release_sha256": releaseSHA, "generation": 1, "policy_revision": 1, "data_namespace_id": platformFixtureID(611), "data_format": 1, "state": "active", "readiness_evidence": "{}", "observed_ms": 1, "created_ms": 1, "updated_ms": 1})
 	// The reader is a normal user, not the administrator who admitted the fixture.
 	user := "platform-launch-reader"
 	if err := s.st.UpsertUser(User{Username: user, PasswordHash: "fixture", Role: "user", Active: true}); err != nil {

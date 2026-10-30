@@ -140,6 +140,13 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		if networkGranted == 1 {
 			capabilities = append(capabilities, "network.http")
 		}
+		var reportsGranted int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='reports.read' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&reportsGranted); err != nil {
+			return err
+		}
+		if reportsGranted == 1 {
+			capabilities = append(capabilities, "reports.read")
+		}
 		display = m.Presentation.Display
 		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
 		for _, route := range routes {

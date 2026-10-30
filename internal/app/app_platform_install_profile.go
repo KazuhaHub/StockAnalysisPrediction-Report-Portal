@@ -19,7 +19,7 @@ func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (
 	case platformNativeInstallFormat:
 		return 256 << 20, nil
 	case platformFrontendInstallFormat:
-		if manifest.Backend != nil || len(manifest.Capabilities.Required) != 0 || manifest.Data.WritesOnStartup {
+		if manifest.Backend != nil || !platformFrontendRequiredCapabilities(manifest) || manifest.Data.WritesOnStartup {
 			return 0, errAppPlatformInstallUnavailable
 		}
 		return 0, nil

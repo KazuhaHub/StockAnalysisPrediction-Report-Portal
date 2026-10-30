@@ -40,10 +40,15 @@ type platformInstallProjection struct {
 // still declines providers; explicit managed review selects narrow restrictions.
 func platformInstallRequirements(manifest appplatform.Manifest) error {
 	compatibility, err := appplatform.EvaluateCompatibility(manifest, appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI})
-	if err != nil || !compatibility.Compatible || len(manifest.Capabilities.Required) != 0 {
+	if err != nil || !compatibility.Compatible || !platformFrontendRequiredCapabilities(manifest) {
 		return errAppPlatformInstallUnavailable
 	}
 	return nil
+}
+
+func platformFrontendRequiredCapabilities(manifest appplatform.Manifest) bool {
+	required := manifest.Capabilities.Required
+	return len(required) == 0 || (len(required) == 1 && required[0] == "reports.read")
 }
 
 func platformNoPriorInstall(e migExec, appID string) error {
