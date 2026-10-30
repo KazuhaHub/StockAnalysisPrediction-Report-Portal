@@ -44,6 +44,7 @@ const cookieName = "rp_session"
 
 type Server struct {
 	platformBackendRequests platformDocumentBudget
+	platformNetworkRequests platformDocumentBudget
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
 
 	platformInstaller     platformFrontendInstallRuntime
