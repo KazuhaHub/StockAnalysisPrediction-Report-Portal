@@ -25,6 +25,7 @@ import { UpdateBanner, UpdateProvider } from './UpdateProvider'
 import VersionLabel from './VersionLabel'
 import UserAvatar from './UserAvatar'
 import LoginActivityNotice from './LoginActivityNotice'
+import NotificationStack from './NotificationStack'
 import NotificationBell from './NotificationBell'
 import { useExportPolicy } from '../lib/useExportPolicy'
 import { EXPORTS_CHANGED_EVENT, type ExportsChangedDetail } from '../lib/exportJobs'
@@ -258,6 +259,7 @@ function AppShell() {
 
   return (
     <Layout style={{ minHeight: onChat ? undefined : '100vh', height: onChat ? '100dvh' : undefined, background: token.colorBgLayout }}>
+      <NotificationStack />
       {user && <LoginActivityNotice user={user} />}
       <Header
         id="rp-app-header"

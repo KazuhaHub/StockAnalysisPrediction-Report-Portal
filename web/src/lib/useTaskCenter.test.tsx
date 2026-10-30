@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import type { TaskItem } from '../api/types'
 import { notifyExportsChanged } from './exportJobs'
+import NotificationStack from '../components/NotificationStack'
 import { useTaskCenter } from './useTaskCenter'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
@@ -29,6 +30,7 @@ function Probe({ enabled = true }: { enabled?: boolean }) {
 const renderProbe = (enabled = true) =>
   render(
     <App>
+      <NotificationStack />
       <Probe enabled={enabled} />
     </App>,
   )
@@ -107,6 +109,6 @@ describe('useTaskCenter completion toasts', () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
     })
-    expect(document.querySelector('.ant-notification-notice')).toBeNull()
+    expect(document.querySelector('.rp-notify-card')).toBeNull()
   })
 })

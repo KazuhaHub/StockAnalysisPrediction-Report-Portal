@@ -3357,5 +3357,9 @@
   "apps.access.discardOk": "放弃",
   "apps.access.reloadFailed": "已保存，但页面未能刷新。请重新加载以查看当前状态。",
   "apps.detail.installedFailed": "无法读取已安装应用列表，因此不显示版本、入口文件和权限范围。",
-  "apps.perm.run_batch": "运行批量任务"
+  "apps.perm.run_batch": "运行批量任务",
+  "notifications.region": "通知",
+  "notifications.close": "关闭通知",
+  "notifications.more_one": "还有 {{count}} 条通知",
+  "notifications.more_other": "还有 {{count}} 条通知"
 }

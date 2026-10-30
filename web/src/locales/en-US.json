@@ -3357,5 +3357,9 @@
   "apps.access.discardOk": "Discard",
   "apps.access.reloadFailed": "Saved, but the page could not refresh. Reload it to see the current state.",
   "apps.detail.installedFailed": "The installed app list could not be read, so version, entry file and permission scopes are not shown.",
-  "apps.perm.run_batch": "Run batch jobs"
+  "apps.perm.run_batch": "Run batch jobs",
+  "notifications.region": "Notifications",
+  "notifications.close": "Close notification",
+  "notifications.more_one": "{{count}} more notification",
+  "notifications.more_other": "{{count}} more notifications"
 }
