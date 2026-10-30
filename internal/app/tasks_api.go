@@ -49,6 +49,14 @@ type taskJSON struct {
 	Link       string     `json:"link"`
 }
 
+// rank orders tasks: in flight ones by when they were submitted, finished ones by when they finished.
+func (t *taskJSON) rank() int64 {
+	if !t.active() && t.FinishedAt > 0 {
+		return t.FinishedAt
+	}
+	return t.CreatedAt
+}
+
 func (t *taskJSON) active() bool {
 	switch t.Status {
 	case "queued", "running", "cancelling":
@@ -76,8 +84,9 @@ func (s *Server) apiMyTasks(w http.ResponseWriter, r *http.Request, user string)
 		if ai, aj := all[i].active(), all[j].active(); ai != aj {
 			return ai
 		}
-		if all[i].CreatedAt != all[j].CreatedAt {
-			return all[i].CreatedAt > all[j].CreatedAt
+		ki, kj := all[i].rank(), all[j].rank()
+		if ki != kj {
+			return ki > kj
 		}
 		return all[i].ID > all[j].ID
 	})
@@ -104,10 +113,13 @@ func msFromLocal(ts string) int64 {
 }
 
 func (s *Server) myRunTasks(user string, limit int) []taskJSON {
-	jobs, _ := s.st.ListOwnQueueJobs(user, limit, "")
+	jobs := s.st.ListOwnTaskJobs(user, limit)
 	if len(jobs) == 0 {
 		return nil
 	}
+	// Cancelling and opening a run go through run_batch routes; a caller who no longer holds the
+	// permission still sees the run's history, without actions that would be refused.
+	canRun := s.isAdmin(user) || s.hasPerm(user, PermRunBatch)
 	ids := make([]int64, len(jobs))
 	for i, j := range jobs {
 		ids[i] = j.ID
@@ -143,9 +155,12 @@ func (s *Server) myRunTasks(user string, limit int) []taskJSON {
 		t := taskJSON{
 			Kind: "run", ID: itoa64(j.ID), Name: name, Detail: inputsGist(firstInputs[j.ID]), Status: j.Status,
 			Done: int64(c.Succeeded + c.Partial + c.Failed + c.Cancelled), Total: int64(j.Total), Counts: &c,
-			CreatedAt: msFromLocal(j.CreatedAt), FinishedAt: msFromLocal(j.FinishedAt), Link: "/queue",
+			CreatedAt: msFromLocal(j.CreatedAt), FinishedAt: msFromLocal(j.FinishedAt),
 		}
-		if j.Status == "queued" || j.Status == "running" {
+		if canRun {
+			t.Link = "/queue"
+		}
+		if canRun && (j.Status == "queued" || j.Status == "running") {
 			t.Cancel = "/api/admin/batch/jobs/" + itoa64(j.ID) + "/cancel"
 		}
 		if j.Status == "queued" {
@@ -167,6 +182,13 @@ func (s *Server) myExportTasks(user string, limit int) ([]taskJSON, error) {
 	if err != nil {
 		return nil, err
 	}
+	admin := s.isAdmin(user)
+	exportAllowed := admin
+	if !admin {
+		if pol, err := s.st.readerExportPolicy(user); err == nil {
+			exportAllowed = pol.Allowed
+		}
+	}
 	out := make([]taskJSON, 0, len(jobs))
 	for _, j := range jobs {
 		base, link := "/api/admin/exports/", "/manage/exports"
@@ -181,7 +203,8 @@ func (s *Server) myExportTasks(user string, limit int) ([]taskJSON, error) {
 			Kind: "export", ID: j.ID, Name: name, Status: j.Status, Done: j.RowsDone, Total: j.RowsEstimate,
 			Error: j.Error, CreatedAt: j.CreatedAt, FinishedAt: j.FinishedAt, Link: link,
 		}
-		if j.Status == exportDone {
+		// A reader's finished file is served only while their policy allows export (ADR 0046).
+		if j.Status == exportDone && (exportAllowed || !j.isReader()) {
 			t.Download = base + j.ID + "/file"
 		}
 		if j.Status == exportQueued || j.Status == exportRunning {

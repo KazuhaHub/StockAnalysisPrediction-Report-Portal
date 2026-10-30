@@ -201,7 +201,7 @@ func (s *Store) claimNextExportJob(now int64) (*exportJob, error) {
 }
 
 // listOwnExportTasks backs the my-tasks tray (ADR 0047): every queued or running job of one requester
-// plus their most recent finished ones, bounded by termLimit. A requester who is not an administrator
+// plus their most recently finished ones (ranked by finish time), bounded by termLimit. A requester who is not an administrator
 // only ever owns jobs submitted through the reader endpoints, so for them the listing is narrowed to
 // those (the SQL prefilter is a cheap superset; isReader is the exact test, as in serveExportList).
 func (s *Store) listOwnExportTasks(user string, readerOnly bool, termLimit int) ([]*exportJob, error) {
@@ -212,7 +212,7 @@ func (s *Store) listOwnExportTasks(user string, readerOnly bool, termLimit int) 
 	var out []*exportJob
 	for _, q := range []string{
 		`status IN ('queued','running')` + extra + ` ORDER BY created_at DESC, id DESC`,
-		`status NOT IN ('queued','running')` + extra + ` ORDER BY created_at DESC, id DESC LIMIT ` + itoa64(int64(termLimit)),
+		`status NOT IN ('queued','running')` + extra + ` ORDER BY CASE WHEN finished_at>0 THEN finished_at ELSE created_at END DESC, id DESC LIMIT ` + itoa64(int64(termLimit)),
 	} {
 		rows, err := s.query(`SELECT `+exportJobCols+` FROM export_jobs WHERE requested_by=? AND `+q, user)
 		if err != nil {

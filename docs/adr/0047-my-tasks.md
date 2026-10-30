@@ -58,8 +58,20 @@ is implied.
 
 For a caller who is not an administrator (`PermManage`), `GET /api/admin/batch/jobs` returns only the
 jobs they created, and `total` counts only theirs. The search `q` still works, within their own jobs.
-Administrators are unchanged. Job detail and cancel already check ownership and are untouched.
-`GET /api/admin/batch/queue` returns aggregate counts only and is left as it was.
+Administrators are unchanged.
+
+The list was not the only leak. `GET /api/admin/batch/jobs/{id}` (detail) had no ownership check at
+all, so an operator could enumerate ids and read other users' jobs: submitter, every row's inputs,
+errors and Dify run ids. Every `run_batch` route that takes a job or recurring-task id now applies one
+rule: the creator or an administrator is served, anyone else is answered **404**, the same answer as
+an unknown id (as ADR 0046 does), so ids do not leak existence. The routes are job detail, job cancel,
+row cancel, and recurring-task detail, update, enable, run-now and delete. Cancel, row cancel and the
+recurring routes previously answered 403 to a non-owner; they answer 404 now.
+
+`GET /api/admin/batch/queue` keeps its shape. For an administrator it is the whole queue. For anyone
+else `waiting`, `running`, `running_rows`, `scheduled` and `done_today` count their own jobs, so the
+summary agrees with the list under it; `budget`, `reserved` and `my_priority` are unchanged. The queue
+page hides the submitter filter from a non-administrator, whose list holds only their own runs.
 
 This is a behaviour change for operators: the queue page now shows an operator their own runs rather
 than the whole queue. The "N ahead" on their own queued runs still reflects the whole queue, as a count.
@@ -83,7 +95,10 @@ per-job deep link, so a run opens the queue page.
 
 `GET /api/tasks?limit=N`, cookie session. `limit` defaults to 10 and is capped at 50. It bounds the
 finished tasks only: every active task of the caller is always returned, plus the most recent finished
-ones up to `limit` in total across both kinds. Ordered active first, then newest first. The queries are
+ones up to `limit` in total across both kinds. Active tasks come first, newest submitted first; finished
+tasks follow ranked by finish time (creation time when none was recorded), newest first. Ranking happens
+in the query, before the `limit` cut, so an old run that has just finished is not displaced by newer ones
+that finished earlier, and still raises its completion toast. The queries are
 bounded to the caller's own rows, in the store, not filtered in Go over a global list.
 
 ```json
@@ -112,8 +127,19 @@ bounded to the caller's own rows, in the store, not filtered in Go over a global
   written over its estimate.
 - `counts` is present on runs, so the client can tell a clean finish from one with failures.
 - Times are unix milliseconds for both kinds (run timestamps are stored as local strings and converted).
+- A run carries `cancel` and `link` only when the caller holds `run_batch` (an administrator does); a
+  caller who lost the permission still sees the run's history without actions the server would refuse.
+- A reader export carries `download` only while the caller's resolved export policy allows export, the
+  condition `GET /api/exports/{id}/file` enforces. An administrator's own admin export keeps its download.
 - An expired export has no `download`, as in ADR 0045; only a `done` export is downloadable.
 - A user with no tasks, or no ability to have any, gets `{"tasks":[]}`.
+
+The run listing behind the tray reads only the caller's rows, with no total, and no index is added.
+
+The browser applies poll replies in request order: a reply that arrives after a newer one was applied
+describes an older state and is dropped, so overlapping polls cannot announce a completion twice. A run
+that finished with failures says how many failed; one with only partial results says that instead, and
+never "0 failed".
 
 The browser polls `/api/tasks?limit=10` every 3 s while anything is in flight and every 30 s otherwise,
 and refreshes on window focus and when a page announces an export change. A task seen in flight that
@@ -147,7 +173,23 @@ Each is covered by a test in `internal/app/tasks_api_test.go` unless noted.
 10. A non-administrator's `GET /api/admin/batch/jobs` lists only their own jobs, `total` counts only
     theirs, search stays inside them; an administrator is unchanged —
     `TestBatchJobsListIsOwnOnlyForNonAdmins`.
-11. The tray lists both kinds, shows "N tasks ahead" and "scheduled", uses each item's own download and
+11. Every `run_batch` route taking a job or recurring-task id answers a non-owner 404 and changes
+    nothing; owner and administrator are served — `TestRunBatchRoutesAnswer404ToNonOwners`, plus the
+    404 expectations in `batch_ops_api_test.go`, `recurring_ops_api_test.go` and `recurring_test.go`.
+12. Finished tasks are ranked by finish time before the limit —
+    `TestMyTasksTerminalRankedByFinishTime`.
+13. A non-administrator's queue summary reports their own counts; an administrator's stays global —
+    `TestBatchQueueSummaryIsOwnForNonAdmins`; the submitter filter is hidden from a non-administrator —
+    `QueueTable.test.tsx`.
+14. A run item has no `cancel` or `link` for a caller without `run_batch` —
+    `TestMyTasksRunActionsNeedRunBatch`.
+15. A reader export loses its `download` when export is switched off; an administrator's own export
+    keeps it — `TestMyTasksReaderDownloadNeedsExportPolicy`.
+16. A stale poll reply is dropped and no completion is announced twice — `useMyTasks.test.tsx`; a
+    partial-only run never reads "0 failed" — `TaskTray.test.tsx`.
+17. The own-filtered listings and the export "ahead" count run on Postgres —
+    `TestPostgresMyTasksQueries` (skipped unless `TEST_POSTGRES_DSN` is set).
+18. The tray lists both kinds, shows "N tasks ahead" and "scheduled", uses each item's own download and
     cancel URLs, toasts once on in-flight to finished, and is absent for a user with no task
     capability — `web/src/components/TaskTray.test.tsx`, `web/src/lib/useMyTasks.test.tsx`,
     `web/src/components/AppLayout.test.tsx`.

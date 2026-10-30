@@ -23,11 +23,17 @@ export function useMyTasks(opts: { enabled: boolean; onFinished?: (task: TaskIte
   const onFinished = useRef(opts.onFinished)
   onFinished.current = opts.onFinished
   const alive = useRef(true)
+  // Polls can overlap (a focus event during a slow reply). Replies are applied in request order: one
+  // that arrives after a newer one was applied describes an older state and is dropped.
+  const issued = useRef(0)
+  const applied = useRef(0)
 
   const refresh = useCallback(async () => {
+    const seq = ++issued.current
     try {
       const r = await api.get<{ tasks: TaskItem[] }>(`/api/tasks?limit=${LIMIT}`)
-      if (!alive.current) return
+      if (!alive.current || seq < applied.current) return
+      applied.current = seq
       const list = r?.tasks ?? []
       setTasks(list)
       const byKey = new Map(list.map((t) => [taskKey(t), t]))

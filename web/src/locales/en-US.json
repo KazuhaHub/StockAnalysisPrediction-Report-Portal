@@ -3281,5 +3281,6 @@
   "tasks.toast.runFinished": "“{{name}}” finished",
   "tasks.toast.runPartial": "“{{name}}” finished with {{failed}} failed",
   "tasks.toast.runFailed": "“{{name}}” failed",
-  "tasks.toast.runExpired": "“{{name}}” expired before it could run"
+  "tasks.toast.runExpired": "“{{name}}” expired before it could run",
+  "tasks.toast.runPartialOnly": "“{{name}}” finished with {{partial}} partial results"
 }

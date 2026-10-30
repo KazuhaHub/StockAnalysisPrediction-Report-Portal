@@ -17,8 +17,8 @@ func TestQueueStoreContract(t *testing.T) {
 	if q := st.QueuedJobs(); len(q) != 2 {
 		t.Fatalf("QueuedJobs = %d, want 2", len(q))
 	}
-	if st.RunningJobCount() != 0 {
-		t.Fatalf("RunningJobCount = %d, want 0", st.RunningJobCount())
+	if st.RunningJobCount("") != 0 {
+		t.Fatalf("RunningJobCount = %d, want 0", st.RunningJobCount(""))
 	}
 	if jb, _ := st.GetBatchJob(j2); jb.Priority != "urgent" || jb.Status != "queued" {
 		t.Fatalf("j2 = {priority:%q status:%q}, want urgent/queued", jb.Priority, jb.Status)
@@ -31,8 +31,8 @@ func TestQueueStoreContract(t *testing.T) {
 	if st.MarkJobRunning(j1) {
 		t.Fatal("second MarkJobRunning on the same job must fail")
 	}
-	if st.RunningJobCount() != 1 {
-		t.Fatalf("RunningJobCount after admit = %d, want 1", st.RunningJobCount())
+	if st.RunningJobCount("") != 1 {
+		t.Fatalf("RunningJobCount after admit = %d, want 1", st.RunningJobCount(""))
 	}
 	if q := st.QueuedJobs(); len(q) != 1 || q[0].ID != j2 {
 		t.Fatalf("QueuedJobs after admit = %v, want just [%d]", q, j2)

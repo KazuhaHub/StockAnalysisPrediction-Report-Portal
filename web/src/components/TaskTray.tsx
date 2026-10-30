@@ -21,10 +21,11 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 // A finished run is only as good as its rows: some failures make it a partial result, all of them a failure.
-function runOutcome(t: TaskItem): 'ok' | 'partial' | 'failed' {
+function runOutcome(t: TaskItem): 'ok' | 'someFailed' | 'partialOnly' | 'failed' {
   const c = t.counts
   if (!c || c.failed + c.partial === 0) return 'ok'
-  return c.succeeded === 0 && c.partial === 0 ? 'failed' : 'partial'
+  if (c.failed === 0) return 'partialOnly'
+  return c.succeeded === 0 && c.partial === 0 ? 'failed' : 'someFailed'
 }
 
 export interface TaskTrayProps {
@@ -71,7 +72,8 @@ export default function TaskTray({ canRun, canExport, admin }: TaskTrayProps) {
       if (task.status === 'finished') {
         const outcome = runOutcome(task)
         if (outcome === 'ok') notification.success({ key, title: t('tasks.toast.runFinished', { name }) })
-        else if (outcome === 'partial') notification.warning({ key, title: t('tasks.toast.runPartial', { name, failed: task.counts?.failed ?? 0 }) })
+        else if (outcome === 'someFailed') notification.warning({ key, title: t('tasks.toast.runPartial', { name, failed: task.counts?.failed ?? 0 }) })
+        else if (outcome === 'partialOnly') notification.warning({ key, title: t('tasks.toast.runPartialOnly', { name, partial: task.counts?.partial ?? 0 }) })
         else notification.error({ key, title: t('tasks.toast.runFailed', { name }) })
       } else if (task.status === 'expired') {
         notification.warning({ key, title: t('tasks.toast.runExpired', { name }) })
@@ -167,9 +169,11 @@ export default function TaskTray({ canRun, canExport, admin }: TaskTrayProps) {
                       {t('tasks.cancel')}
                     </Button>
                   )}
-                  <Link to={task.link} onClick={() => setOpen(false)} style={{ fontSize: 12 }}>
-                    {t('tasks.open')}
-                  </Link>
+                  {task.link && (
+                    <Link to={task.link} onClick={() => setOpen(false)} style={{ fontSize: 12 }}>
+                      {t('tasks.open')}
+                    </Link>
+                  )}
                 </Space>
               </li>
             )

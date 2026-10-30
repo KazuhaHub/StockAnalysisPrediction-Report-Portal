@@ -111,6 +111,14 @@ describe('TaskTray', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/cancel'))
   })
 
+  it('offers no Open link where the server gave none', async () => {
+    tasks = [run({ link: '' })]
+    renderTray()
+    await openTray()
+    await screen.findByText('Deep dive')
+    expect(screen.queryByRole('link', { name: 'tasks.open' })).toBeNull()
+  })
+
   it('offers no cancel or download where the server gave no url', async () => {
     tasks = [exp({ status: 'failed', error: 'disk full' })]
     renderTray()
@@ -191,6 +199,12 @@ describe('TaskTray completion toasts', () => {
   it('toasts a clean run finish', async () => {
     await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 3, partial: 0, failed: 0, cancelled: 0 } }))
     expect(await screen.findByText('tasks.toast.runFinished:{"name":"Deep dive"}')).toBeTruthy()
+  })
+
+  it('never says "0 failed": a run with only partial results gets its own message', async () => {
+    await watchThen(run(), run({ status: 'finished', done: 3, counts: { succeeded: 2, partial: 1, failed: 0, cancelled: 0 } }))
+    expect(await screen.findByText('tasks.toast.runPartialOnly:{"name":"Deep dive","partial":1}')).toBeTruthy()
+    expect(screen.queryByText(/tasks\.toast\.runPartial:/)).toBeNull()
   })
 
   it('says so when a finished run had failures', async () => {

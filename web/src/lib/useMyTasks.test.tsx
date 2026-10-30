@@ -106,6 +106,30 @@ describe('useMyTasks completion', () => {
     expect(onFinished).toHaveBeenCalledTimes(1)
   })
 
+  it('drops a reply that arrives after a newer one, so a stale snapshot cannot announce twice', async () => {
+    const onFinished = vi.fn()
+    tasks = [task()]
+    renderHook(() => useMyTasks({ enabled: true, onFinished }))
+    await tick(0)
+    // Two polls overlap: the older one is answered last, with the state from before the task finished.
+    const replies: Array<(v: { tasks: TaskItem[] }) => void> = []
+    apiMock.get.mockImplementation(() => new Promise((res) => replies.push(res)))
+    act(() => notifyExportsChanged())
+    act(() => notifyExportsChanged())
+    expect(replies).toHaveLength(2)
+    await act(async () => {
+      replies[1]({ tasks: [task({ status: 'done' })] })
+    })
+    await act(async () => {
+      replies[0]({ tasks: [task()] })
+    })
+    expect(onFinished).toHaveBeenCalledTimes(1)
+    // The next poll still sees it finished; the stale reply must not have put it back on the watch list.
+    apiMock.get.mockImplementation(async () => ({ tasks: [task({ status: 'done' })] }))
+    await tick(IDLE_POLL_MS)
+    expect(onFinished).toHaveBeenCalledTimes(1)
+  })
+
   it('refreshes at once when an export is submitted', async () => {
     renderHook(() => useMyTasks({ enabled: true }))
     await tick(0)

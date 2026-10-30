@@ -3281,5 +3281,6 @@
   "tasks.toast.runFinished": "「{{name}}」執行完成",
   "tasks.toast.runPartial": "「{{name}}」執行完成，其中 {{failed}} 項失敗",
   "tasks.toast.runFailed": "「{{name}}」執行失敗",
-  "tasks.toast.runExpired": "「{{name}}」已過期，未能執行"
+  "tasks.toast.runExpired": "「{{name}}」已過期，未能執行",
+  "tasks.toast.runPartialOnly": "「{{name}}」執行完成，其中 {{partial}} 項為部分結果"
 }

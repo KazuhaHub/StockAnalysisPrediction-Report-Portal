@@ -200,8 +200,8 @@ func TestBatchJobOperationHandlers(t *testing.T) {
 	}
 
 	// A non-owner cannot cancel rows or the job; the owner can.
-	if code, _ = callPath(t, s.apiBatchItemsCancel, http.MethodPost, `{"item_ids":[1]}`, map[string]string{"id": fmt.Sprint(ownerJob)}, "mallory"); code != http.StatusForbidden {
-		t.Fatalf("foreign row cancel → %d, want 403", code)
+	if code, _ = callPath(t, s.apiBatchItemsCancel, http.MethodPost, `{"item_ids":[1]}`, map[string]string{"id": fmt.Sprint(ownerJob)}, "mallory"); code != http.StatusNotFound {
+		t.Fatalf("foreign row cancel → %d, want 404", code)
 	}
 	rowID := int64(items[0].(map[string]any)["id"].(float64))
 	code, out = callPath(t, s.apiBatchItemsCancel, http.MethodPost, fmt.Sprintf(`{"item_ids":[%d,999999]}`, rowID),
@@ -213,8 +213,8 @@ func TestBatchJobOperationHandlers(t *testing.T) {
 		t.Fatalf("row status = %q, want cancelled", status)
 	}
 
-	if code, _ = callPath(t, s.apiBatchJobCancel, http.MethodPost, ``, map[string]string{"id": fmt.Sprint(ownerJob)}, "mallory"); code != http.StatusForbidden {
-		t.Fatalf("foreign job cancel → %d, want 403", code)
+	if code, _ = callPath(t, s.apiBatchJobCancel, http.MethodPost, ``, map[string]string{"id": fmt.Sprint(ownerJob)}, "mallory"); code != http.StatusNotFound {
+		t.Fatalf("foreign job cancel → %d, want 404", code)
 	}
 	if code, _ = callPath(t, s.apiBatchJobCancel, http.MethodPost, ``, map[string]string{"id": fmt.Sprint(ownerJob)}, "alice"); code != http.StatusOK {
 		t.Fatalf("owner job cancel → %d", code)
