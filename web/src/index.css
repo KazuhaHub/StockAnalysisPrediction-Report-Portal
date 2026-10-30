@@ -460,17 +460,21 @@ body {
   min-width: 0;
   overflow-anchor: none;
 }
+/* The bar scrolls sideways on narrow screens. The baseline is an inset shadow rather than a border
+   so the active tab's underline can sit on it without a negative margin: with one, every tab stood
+   1px taller than the bar, and overflow-x: auto turned that pixel into a vertical scrollbar. */
 .rp-settings-tabs {
   display: flex;
   gap: 4px;
   min-width: 0;
   overflow-x: auto;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  box-shadow: inset 0 -1px 0 var(--ant-color-border-secondary);
 }
 .rp-settings-tab {
   flex: 0 0 auto;
   padding: 8px 12px;
-  margin-bottom: -1px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
