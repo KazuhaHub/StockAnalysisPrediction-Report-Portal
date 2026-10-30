@@ -7,6 +7,7 @@ import useFormDraft from './useFormDraft'
 import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import { difyModeTag, surfaceSupportsMode } from '../../lib/batchUi'
 import { ALL_SURFACES } from '../../api/types'
 import type { Surface } from '../../api/types'
@@ -125,7 +126,7 @@ function GlobalExecutionTargets() {
   // The name + inputs section shows after a probe (create) or immediately (edit).
   const showDetails = editing || !!probed
 
-  const loadPlugins = () =>
+  const loadPlugins = (opts?: LoadOpts) =>
     api
       .get<{ plugins: BatchPlugin[] }>('/api/admin/batch/plugins')
       .then((r) => {
@@ -138,7 +139,7 @@ function GlobalExecutionTargets() {
         // "no custom plugins are installed", which is the claim this sweep exists to remove.
         // A lost connection is not an answer either: the flag stays down and the list loads again
         // when the connection returns.
-        const text = failure(e)
+        const text = failure(e, opts)
         if (text !== null) { setPluginsErr(text); setPluginsLoaded(true) }
         throw e
       })
@@ -345,7 +346,7 @@ function GlobalExecutionTargets() {
       try {
         await api.post('/api/admin/batch/plugins/import', JSON.parse(String(reader.result)))
         message.success(t('batch.admin.msgImported'))
-        loadPlugins()
+        loadPlugins({ quiet: true })
       } catch (e) {
         message.error(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
       }
@@ -355,7 +356,7 @@ function GlobalExecutionTargets() {
   }
   const deletePlugin = async (slug: string) => {
     await api.del(`/api/admin/batch/plugins/${encodeURIComponent(slug)}`)
-    loadPlugins()
+    loadPlugins({ quiet: true })
   }
   // Visibility editing. Kept out of the Dify edit modal on purpose: that one edits the
   // workflow CONNECTION (base_url/api_key) and only exists for dify targets, while
@@ -396,7 +397,7 @@ function GlobalExecutionTargets() {
     api
       .post('/api/admin/batch/targets/reorder', { ids: orderedIds.map(Number) })
       .catch((e) => message.error(errText(e, t)))
-      .finally(() => loadTargets())
+      .finally(() => loadTargets().catch(() => {}))
   }
 
   const targetCols: ColumnsType<BatchTarget> = [

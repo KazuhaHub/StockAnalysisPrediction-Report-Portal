@@ -1,15 +1,13 @@
 import { errText } from '../api/client'
 import { isConnectionError } from '../api/connection'
 
-// A refresh that follows a successful user action (save, delete…) is not a load the view is waiting
-// on: the user's change already landed, so a connection failure there must not flag the view for a
-// reload on reconnect (which would overwrite whatever they have typed since) or leave a spinner up.
-let quietDepth = 0
-export const isQuiet = () => quietDepth > 0
-export async function quietly<T>(fn: () => Promise<T>): Promise<T> {
-  quietDepth++
-  try { return await fn() } finally { quietDepth-- }
-}
+/**
+ * Options for a load. `quiet` marks a refresh that follows a successful user action (save, delete…):
+ * the user's change already landed, so a connection failure there must not flag the view for a
+ * reload on reconnect (which would overwrite whatever they have typed since) or leave a spinner up.
+ * It is passed per call, so a concurrent unrelated load is never affected.
+ */
+export type LoadOpts = { quiet?: boolean }
 
 /**
  * What a failed data load should show: null when the cause is the connection (the connection strip
@@ -38,6 +36,6 @@ export function onLoadFailure(t: (k: string, o?: Record<string, unknown>) => str
  * except when the cause is the connection: that is not an answer, so the flag stays up (the view
  * keeps its spinner) and the rejection continues to the caller's catch.
  */
-export function settleOnAnswer(done: () => void): [() => void, (e: unknown) => never] {
-  return [done, (e) => { if (!isConnectionError(e) || isQuiet()) done(); throw e }]
+export function settleOnAnswer(done: () => void, opts?: LoadOpts): [() => void, (e: unknown) => never] {
+  return [done, (e) => { if (!isConnectionError(e) || opts?.quiet) done(); throw e }]
 }

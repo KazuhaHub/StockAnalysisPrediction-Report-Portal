@@ -20,7 +20,7 @@ import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOut
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer, quietly } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
@@ -155,7 +155,7 @@ export default function TypesPage() {
   const [restoring, setRestoring] = useState(false)
   const [addForm] = Form.useForm()
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -170,8 +170,8 @@ export default function TypesPage() {
       // Not optional here: save() posts every row this page holds, so a swallowed failure would
       // leave an empty `groups` under a live Save button — one click from writing "no types at
       // all" over the real configuration.
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   const saveColor = async (kind: string, color: string) => {
@@ -201,13 +201,13 @@ export default function TypesPage() {
       setSavedGroups((gs) => gs.map((g) => g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g))
     }).catch(async (e) => {
       message.error(errText(e, t))
-      await quietly(load)
+      await load({ quiet: true })
     }).finally(() => setOrdering(false))
   }
 
   const remove = async (name: string) => {
     await api.del(`/api/admin/types/${encodeURIComponent(name)}`)
-    load()
+    load({ quiet: true })
   }
 
   const save = async () => {
@@ -219,7 +219,7 @@ export default function TypesPage() {
       await api.post('/api/admin/types/save', { rows })
       message.success(t('common.saved'))
       setSavedGroups(groups)
-      await quietly(load)
+      await load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     } finally {
@@ -232,7 +232,7 @@ export default function TypesPage() {
     await api.post('/api/admin/types/add', { ...v, summary: !!v.summary })
     setOpen(false)
     message.success(t('common.done'))
-    load()
+    load({ quiet: true })
   }
 
   const openAdd = () => {
@@ -246,7 +246,7 @@ export default function TypesPage() {
     try {
       const r = await api.post<{ updated: number }>('/api/admin/types/recompute', {})
       message.success(t('types.reclassifyDone', { n: r.updated }))
-      load()
+      load({ quiet: true })
     } finally {
       setReclassifying(false)
     }
@@ -259,7 +259,7 @@ export default function TypesPage() {
     try {
       const r = await api.post<{ restored: number }>('/api/admin/types/restore-defaults', {})
       message.success(t('types.restoreDefaultsDone', { n: r.restored }))
-      load()
+      load({ quiet: true })
     } finally {
       setRestoring(false)
     }
@@ -269,7 +269,7 @@ export default function TypesPage() {
     await Promise.all(selected.map((name) => api.del(`/api/admin/types/${encodeURIComponent(name)}`)))
     setSelected([])
     message.success(t('common.done'))
-    load()
+    load({ quiet: true })
   }
 
   const kindOptions = kinds.map((k) => ({ value: k, label: k }))

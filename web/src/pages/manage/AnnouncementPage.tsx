@@ -25,7 +25,7 @@ import useFormDraft from './useFormDraft'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import { forgetTags } from '../../lib/conditionalGet'
 import { useAnnouncements } from '../../announcements'
 import type {
@@ -102,7 +102,7 @@ export default function AnnouncementPage() {
   const [form] = Form.useForm<FormValues>()
   const draft = useFormDraft(form, open, saving, () => setOpen(false))
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -124,8 +124,8 @@ export default function AnnouncementPage() {
       // Not a `finally`-only settle: a failed GET that renders as "no announcements yet" looks
       // exactly like a portal that has none, and the drag handler would then be able to send
       // "replace the whole order" from a list that was never there.
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   useEffect(() => {
@@ -143,7 +143,7 @@ export default function AnnouncementPage() {
   }
   const refreshed = () => {
     feedChanged()
-    return load()
+    return load({ quiet: true })
   }
 
   const ids = items.map((a) => String(a.id))
@@ -160,7 +160,7 @@ export default function AnnouncementPage() {
       // reverts on the next visit.
       .catch((e) => {
         message.error(errText(e, t))
-        load()
+        load({ quiet: true })
       })
   }
 
@@ -226,7 +226,7 @@ export default function AnnouncementPage() {
       feedChanged()
     } catch (e) {
       message.error(errText(e, t))
-      load()
+      load({ quiet: true })
     }
   }
 

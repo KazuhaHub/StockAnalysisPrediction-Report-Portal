@@ -5,7 +5,7 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { quietly } from '../../lib/loadFailure'
+import type { LoadOpts } from '../../lib/loadFailure'
 import type { CleanupConfig, CleanupResult, CleanupRun, CleanupUsage, CleanupUsageCategory } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
@@ -130,7 +130,7 @@ export default function StoragePage() {
   // The schedule fields start at this file's defaults — cleanup off, 365-day audit retention —
   // and the form is live, so until the server has answered nothing here may be shown as if it
   // were the configured policy.
-  const loadConfig = () => {
+  const loadConfig = (opts?: LoadOpts) => {
     setLoadErr('')
     return api
       .get<CleanupConfig>('/api/admin/cleanup/config')
@@ -161,13 +161,13 @@ export default function StoragePage() {
         setPredictionsFloor(r.predictions_floor)
       })
       .then(() => setLoaded(true))
-      .catch(onFail)
+      .catch((e) => onFail(e, opts))
   }
   // A lost connection is not an answer: the page keeps its spinner and loads again when the
   // connection returns.
   const offline = useRef(false)
-  const onFail = (e: unknown) => {
-    const text = failure(e)
+  const onFail = (e: unknown, opts?: LoadOpts) => {
+    const text = failure(e, opts)
     if (text === null) offline.current = true
     else setLoadErr(text)
   }
@@ -200,8 +200,8 @@ export default function StoragePage() {
       await api.post('/api/admin/cleanup/config', values)
       setCfg((current) => current && ({ ...current, ...values }))
       message.success(t('common.saved'))
-      await quietly(loadConfig)
-      await quietly(loadUsage).catch(() => {})
+      await loadConfig({ quiet: true })
+      await loadUsage().catch(() => {})
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 

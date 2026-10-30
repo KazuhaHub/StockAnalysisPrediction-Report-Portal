@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import type { AppAccessOU, AppLayoutEntry, AppLayoutResp, AppsResp, AppSummary } from '../../api/types'
 import { BUILTIN_PIN_PREFIX, builtinAppByKey, type BuiltinApp } from '../../lib/builtinApps'
 
@@ -80,7 +81,7 @@ export function useAppsCatalog() {
   const [error, setError] = useState('')
   const loaded = useRef(false)
   const { failure, retryKey } = useLoadFailure()
-  const load = useCallback(async (): Promise<boolean> => {
+  const load = useCallback(async (opts?: LoadOpts): Promise<boolean> => {
     // A lost connection before the first load keeps the page loading; it loads again when the
     // connection returns.
     let settled = true
@@ -95,8 +96,8 @@ export function useAppsCatalog() {
       loaded.current = true
       return true
     } catch (e) {
-      const text = failure(e)
-      if (text === null) settled = loaded.current
+      const text = failure(e, opts)
+      if (text === null) settled = loaded.current || !!opts?.quiet
       else if (!loaded.current) setError(text)
       return false
     } finally {

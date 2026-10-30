@@ -5,7 +5,7 @@ import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-de
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer, quietly } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
@@ -30,7 +30,7 @@ export default function WebhooksPage() {
   const [saving, setSaving] = useState(false)
   const draft = useFormDraft(form, open, saving, () => setOpen(false))
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -40,8 +40,8 @@ export default function WebhooksPage() {
         setEvents(r.events || [])
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
   useEffect(() => {
     load()
@@ -57,7 +57,7 @@ export default function WebhooksPage() {
       await api.post('/api/admin/webhooks', { url: v.url, events: v.events, secret: v.secret || '' })
       setOpen(false)
       message.success(t('webhook.msgAdded'))
-      await quietly(load)
+      await load({ quiet: true })
     } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
   }
 
@@ -65,12 +65,12 @@ export default function WebhooksPage() {
     const r = await api.post<{ ok: boolean; status: number; error: string }>(`/api/admin/webhooks/${id}/test`)
     if (r.ok) message.success(t('webhook.msgTested', { status: r.status }))
     else message.error(t('webhook.msgTestFailed', { error: r.error || r.status }))
-    load()
+    load({ quiet: true })
   }
 
   const remove = async (id: number) => {
     await api.del(`/api/admin/webhooks/${id}`)
-    load()
+    load({ quiet: true })
   }
 
   const statusTag = (h: Webhook) => {

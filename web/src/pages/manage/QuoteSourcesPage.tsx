@@ -5,7 +5,7 @@ import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer, quietly } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import QuoteLedgerStatus, { type QuoteLedgerHealth, type QuoteLedgerState } from './QuoteLedgerStatus'
@@ -250,7 +250,7 @@ export default function QuoteSourcesPage() {
       homeCards: st.homeCards === true, homeCardsKnown: typeof st.homeCards === 'boolean', autoRefresh: st.autoRefresh === true, autoRefreshKnown: typeof st.autoRefresh === 'boolean', ratePolicies: st.ratePolicies ?? null }))
   }
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api
@@ -259,8 +259,8 @@ export default function QuoteSourcesPage() {
         apply(st)
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
 
   useEffect(() => {
@@ -336,7 +336,7 @@ export default function QuoteSourcesPage() {
       // "saved" is this page telling an admin the cache holds a quote for 1 second while the server
       // holds it for 5 — a setting that reads as accepted and was not.
       if (st && Array.isArray(st.sources)) apply(st)
-      else await quietly(load)
+      else await load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     } finally {

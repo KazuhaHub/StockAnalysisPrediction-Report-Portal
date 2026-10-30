@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { isQuiet, loadFailure } from './loadFailure'
+import { loadFailure, type LoadOpts } from './loadFailure'
 
 /** Runs `fn` whenever the API client reports the connection is back ('rp:connection-restored'). */
 export function useOnReconnect(fn: () => void) {
@@ -31,15 +31,15 @@ export function useLoadFailure() {
     stale.current = false
     setRetryKey((n) => n + 1)
   })
-  const failure = useCallback((e: unknown, fallbackKey?: string): string | null => {
-    const text = loadFailure(e, tRef.current, fallbackKey)
-    if (text === null && !isQuiet()) stale.current = true
+  const failure = useCallback((e: unknown, opts?: LoadOpts): string | null => {
+    const text = loadFailure(e, tRef.current)
+    if (text === null && !opts?.quiet) stale.current = true
     return text
   }, [])
   // `.catch(catchLoad(setLoadErr))`: report a real failure, stay silent on a connection loss.
   const catchLoad = useCallback(
-    (report: (text: string) => void, fallbackKey?: string) => (e: unknown) => {
-      const text = failure(e, fallbackKey)
+    (report: (text: string) => void, opts?: LoadOpts) => (e: unknown) => {
+      const text = failure(e, opts)
       if (text !== null) report(text)
     },
     [failure],

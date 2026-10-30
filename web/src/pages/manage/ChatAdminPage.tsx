@@ -4,6 +4,7 @@ import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { LoadOpts } from '../../lib/loadFailure'
 import { formatReportTime } from '../../lib/datetime'
 import { startVisiblePoll } from '../../lib/visiblePoll'
 import Markdown from '../../components/Markdown'
@@ -69,7 +70,7 @@ export default function ChatAdminPage() {
   const [viewTurns, setViewTurns] = useState<ChatTurn[]>([])
   const [viewLoading, setViewLoading] = useState(false)
 
-  const load = () =>
+  const load = (opts?: LoadOpts) =>
     api
       .get<ChatLive>('/api/admin/chat/live')
       .then((r) => {
@@ -87,7 +88,7 @@ export default function ChatAdminPage() {
       })
       // Only the first poll has anything to report; after that the numbers on screen are the
       // server's, and a dropped poll must not replace them.
-      .catch(catchLoad(setCfgErr))
+      .catch(catchLoad(setCfgErr, opts))
   const loadConvs = () => {
     setConvsErr('')
     return api
@@ -140,7 +141,7 @@ export default function ChatAdminPage() {
     try {
       await api.post(`/api/admin/chat/stop/${id}`)
       message.success(t('chatAdmin.stopped'))
-      load()
+      load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     }
@@ -217,7 +218,7 @@ export default function ChatAdminPage() {
           <Space>
             <Switch size="small" checked={auto} onChange={setAuto} />
             <Typography.Text type="secondary">{t('queue.autoRefresh')}</Typography.Text>
-            <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void load()}>
               {t('nav.refresh')}
             </Button>
           </Space>

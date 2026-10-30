@@ -72,7 +72,7 @@ function AccessWorkspace({
   groups: UserGroupRow[]
   selectedId: number | null
   onSelect: (id: number) => void
-  reload: () => Promise<boolean>
+  reload: (opts?: { quiet?: boolean }) => Promise<boolean>
 }) {
   const { t } = useTranslation()
   const labels = useAppLabels()
@@ -158,7 +158,7 @@ function AccessEditor({
   name: string
   group: UserGroupRow
   groups: UserGroupRow[]
-  reload: () => Promise<boolean>
+  reload: (opts?: { quiet?: boolean }) => Promise<boolean>
   onDirtyChange: (dirty: boolean) => void
 }) {
   const { t } = useTranslation()
@@ -189,7 +189,7 @@ function AccessEditor({
     setBusy(true)
     try {
       await api.put(`/api/admin/apps/${encodeURIComponent(app.key)}/access/${group.id}`, { enabled })
-      if (!(await reload())) message.warning(t('apps.access.reloadFailed'))
+      if (!(await reload({ quiet: true }))) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {
       message.error(errText(e, t))

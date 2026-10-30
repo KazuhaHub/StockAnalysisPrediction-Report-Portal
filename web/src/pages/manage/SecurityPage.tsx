@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Alert, App, Card, ConfigProvider, Divider, Input, InputNumber, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
-import { quietly } from '../../lib/loadFailure'
+import type { LoadOpts } from '../../lib/loadFailure'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
@@ -114,7 +114,7 @@ function GlobalSecuritySettings() {
   const currentValues: SecurityDraft = { captcha, registration: reg, login, limits, twofa, recovery, lockout }
   const dirty = savedValues !== null && (secret !== null || JSON.stringify(currentValues) !== JSON.stringify(savedValues))
 
-  const load = useCallback(() => {
+  const load = useCallback((opts?: LoadOpts) => {
     setLoadErr('')
     return api
       .get<{
@@ -144,7 +144,7 @@ function GlobalSecuritySettings() {
       })
       .catch((e) => {
         // A lost connection keeps the spinner and loads again when the connection returns.
-        const text = failure(e)
+        const text = failure(e, opts)
         if (text === null) return
         setLoadErr(text)
         message.error(text)
@@ -178,7 +178,7 @@ function GlobalSecuritySettings() {
         lockout,
       })
       message.success(t('common.saved'))
-      await quietly(load)
+      await load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     } finally {

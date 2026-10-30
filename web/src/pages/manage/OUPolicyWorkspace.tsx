@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { UserGroupRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import OrgUnitPicker from './OrgUnitPicker'
@@ -22,11 +22,11 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setError('')
     return api.get<{ groups: UserGroupRow[] }>('/api/admin/groups')
       .then((result) => setGroups(result.groups ?? []))
-      .then(...settleOnAnswer(() => setLoading(false))).catch(catchLoad(setError))
+      .then(...settleOnAnswer(() => setLoading(false), opts)).catch(catchLoad(setError, opts))
   }
   useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const scoped = params.get('scope') === 'ou'
@@ -56,7 +56,7 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
     <div className="rp-policy-content">
       {scoped ? <LoadGate loading={loading} error={error} onRetry={load}>
         {selected ? renderOU ? renderOU(selected, groups) : <OrgUnitDetail key={`${section}:${selected.id}`} sections={[section]} group={selected} groups={groups}
-          onChanged={() => { void load() }} onDeleted={() => {}} /> : <Alert type="warning" showIcon title={t('ou.scopeMissing')} />}
+          onChanged={() => { void load({ quiet: true }) }} onDeleted={() => {}} /> : <Alert type="warning" showIcon title={t('ou.scopeMissing')} />}
       </LoadGate> : children}
     </div>
   </div>

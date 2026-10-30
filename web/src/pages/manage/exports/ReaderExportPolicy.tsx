@@ -3,6 +3,7 @@ import { App, Alert, Button, Card, InputNumber, Space, Switch, Typography } from
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
 import { useLoadFailure } from '../../../lib/useOnReconnect'
+import type { LoadOpts } from '../../../lib/loadFailure'
 import type { ExportPolicyEntry, UserGroupRow } from '../../../api/types'
 import LoadGate from '../../../components/LoadGate'
 import { inheritedView, policyDraft, policyDraftValid, policyPatch, quotaBelowMax, type PolicyDraft } from '../../../lib/exportMode'
@@ -23,7 +24,7 @@ export default function ReaderExportPolicy() {
   const [error, setError] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: LoadOpts) => {
     setError('')
     let settled = true
     try {
@@ -34,8 +35,8 @@ export default function ReaderExportPolicy() {
       setGroups(g?.groups ?? [])
       setEntries(p?.groups ?? [])
     } catch (e) {
-      const text = failure(e)
-      if (text === null) settled = false
+      const text = failure(e, opts)
+      if (text === null) settled = !!opts?.quiet
       else setError(text)
     } finally {
       if (settled) setLoading(false)
@@ -74,7 +75,7 @@ export default function ReaderExportPolicy() {
               defaultId={entries.find((e) => e.is_default)?.id ?? 0}
               onSaved={() => {
                 message.success(t('common.saved'))
-                void load()
+                void load({ quiet: true })
               }}
             />
           )}

@@ -4,7 +4,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { settleOnAnswer, quietly } from '../../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
@@ -47,7 +47,7 @@ function VersionRegistry() {
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(original)
   usePendingSettings(dirty, saving)
 
-  const load = () => {
+  const load = (opts?: LoadOpts) => {
     setLoading(true)
     setLoadErr('')
     return api.get<{ versions: (Omit<VersionRow, 'grants'> & { grants: string[] | null })[]; groups: Principal[]; users: Principal[] }>('/api/admin/versions')
@@ -57,8 +57,8 @@ function VersionRegistry() {
         setUsers(result.users ?? [])
         setLoaded(true)
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setLoadErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setLoadErr, opts))
   }
   useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -92,12 +92,12 @@ function VersionRegistry() {
         visibility: draft.visibility, grants: draft.grants })
       message.success(t('versions.saved'))
       setDraft(null)
-      await quietly(load)
+      await load({ quiet: true })
     } catch (error) { message.error(errText(error, t)) }
     finally { setSaving(false) }
   }
   const remove = async (name: string) => {
-    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await quietly(load) }
+    try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load({ quiet: true }) }
     catch (error) { message.error(errText(error, t)) }
   }
   const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)

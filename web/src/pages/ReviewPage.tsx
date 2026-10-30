@@ -8,7 +8,7 @@ import { api, errText } from '../api/client'
 import type { TrackingResp, TrackingRow } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
-import { settleOnAnswer } from '../lib/loadFailure'
+import { settleOnAnswer, type LoadOpts } from '../lib/loadFailure'
 
 // The review queue: what the reports ASSUMED, and whether it held.
 //
@@ -44,7 +44,7 @@ export default function ReviewPage() {
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<'due' | ''>('due')
 
-  const load = useCallback(() => {
+  const load = useCallback((opts?: LoadOpts) => {
     setLoading(true)
     const qs = new URLSearchParams()
     if (status) qs.set('status', status)
@@ -57,8 +57,8 @@ export default function ReviewPage() {
         setData(r)
         setErr('')
       })
-      .then(...settleOnAnswer(() => setLoading(false)))
-      .catch(catchLoad(setErr))
+      .then(...settleOnAnswer(() => setLoading(false), opts))
+      .catch(catchLoad(setErr, opts))
   }, [status, itype, q, sort, t, retryKey])
   useEffect(load, [load])
 
@@ -66,7 +66,7 @@ export default function ReviewPage() {
     try {
       await api.patch(`/api/tracking/${row.id}`, { status: verdict })
       message.success(t('common.saved'))
-      load()
+      load({ quiet: true })
     } catch (e) {
       message.error(errText(e, t))
     }

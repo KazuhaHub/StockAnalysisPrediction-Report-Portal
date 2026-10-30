@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
-import { quietly } from '../../lib/loadFailure'
+import type { LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
 
@@ -43,24 +43,24 @@ export default function NotificationsPage() {
   const ruleDraft = useFormDraft(ruleForm, rule !== undefined, busy, () => setRule(undefined))
   const retentionDraft = useFormDraft(retentionForm, retentionOpen, busy, () => setRetentionOpen(false))
 
-  const load = async () => {
+  const load = async (opts?: LoadOpts) => {
     setError('')
-    try { setData(await notifications.overview()) } catch (e) { const text = failure(e); if (text !== null) setError(text) }
+    try { setData(await notifications.overview()) } catch (e) { const text = failure(e, opts); if (text !== null) setError(text) }
   }
-  const loadHistory = async (more = false) => {
+  const loadHistory = async (more = false, opts?: LoadOpts) => {
     setHistoryError('')
     try {
       const result = await notifications.history({ state, cursor: more ? next : undefined })
       setHistory(old => more ? [...old, ...result.deliveries] : result.deliveries)
       setNext(result.next_cursor)
       setHistoryLoaded(true)
-    } catch (e) { const text = failure(e); if (text !== null) setHistoryError(text) }
+    } catch (e) { const text = failure(e, opts); if (text !== null) setHistoryError(text) }
   }
   useEffect(() => { void load() }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (historyWanted) void loadHistory() }, [state, retryKey, historyWanted]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, refreshHistory = true) => {
     setBusy(true)
-    try { await fn(); await quietly(load); if (historyLoaded && refreshHistory) await quietly(loadHistory) } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
+    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
   }
   const eventLabel = (kind: string) => t(`webhook.event.${kind}`, kind)
   const stateLabel = (value: string) => t(`notify.state.${value}`, value)
