@@ -2375,3 +2375,14 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rp-connection-strip, .rp-connection-strip--leaving, .rp-connection-dot { animation: none; }
 }
+.rp-connection-shake { animation: rp-connection-shake 320ms ease-in-out; }
+@keyframes rp-connection-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-connection-shake { animation: none; }
+}

@@ -2854,6 +2854,7 @@
   "connection.retry": "重新连接",
   "connection.retryNow": "立即重试",
   "connection.recovered": "已恢复连接",
+  "connection.stillDown": "仍无法连接，将自动重试",
   "login.forgotRequired": "请输入用户名或邮箱",
   "login.recoveryContact": "此门户由管理员协助找回密码，请联系管理员。",
   "login.recoveryHidden": "此门户未开放密码自助找回。",

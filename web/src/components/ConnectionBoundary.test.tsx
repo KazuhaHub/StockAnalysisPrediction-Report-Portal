@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Link, MemoryRouter, useLocation } from 'react-router'
@@ -85,4 +86,22 @@ it('confirms the recovery briefly, then takes the strip away', async () => {
   await waitFor(() => expect(screen.getByRole('status').textContent).toContain('connection.recovered'))
   expect(screen.queryByRole('alert')).toBeNull()
   await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 4000 })
+})
+it('keeps a manual retry visibly busy, then says it still cannot connect', async () => {
+  mount()
+  await disconnect()
+  const started = Date.now()
+  fireEvent.click(screen.getByRole('button', { name: 'connection.retry' }))
+  expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(true)
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('connection.stillDown'))
+  expect(Date.now() - started).toBeGreaterThanOrEqual(550)
+  expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(false)
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('connection.notice'), { timeout: 4500 })
+})
+it('ends a failed manual retry under StrictMode too', async () => {
+  render(<StrictMode><MemoryRouter><ConnectionBoundary><Page /></ConnectionBoundary></MemoryRouter></StrictMode>)
+  await disconnect()
+  fireEvent.click(screen.getByRole('button', { name: 'connection.retry' }))
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('connection.stillDown'))
+  expect(screen.getByRole('button', { name: 'connection.retry' }).hasAttribute('disabled')).toBe(false)
 })
