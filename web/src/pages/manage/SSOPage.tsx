@@ -14,6 +14,7 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 // SSO administration (ADR 0023). One SAML tab and one OIDC tab; the API is row-shaped, so adding
 // more providers later is a change here and nowhere else.
@@ -76,7 +77,7 @@ function IconPicker({ kind, value, onChange }: { kind: 'oidc' | 'saml'; value?: 
       onChange?.(r.url)
       message.success(t('common.saved'))
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -270,7 +271,7 @@ function ProviderForm({
       message.success(t('common.saved'))
       await onSaved()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -290,7 +291,7 @@ function ProviderForm({
       // reloading is exactly what discarded the form.
       setFetched({ entity_id: r.entity_id })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -467,7 +468,6 @@ function ProviderForm({
 export default function SSOPage() {
   const { t } = useTranslation()
   const { catchLoad, retryKey } = useLoadFailure({ guardDrafts: true })
-  const { message } = App.useApp()
   const [providers, setProviders] = useState<SSOProviderAdmin[]>([])
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [roles, setRoles] = useState<Role[]>([])
@@ -551,7 +551,7 @@ export default function SSOPage() {
             api
               .post('/api/admin/sso/allow-private', { allow: next })
               .catch((e) => {
-                message.error(errText(e, t))
+                notifyError(errText(e, t))
                 setAllowPrivate(!next) // the server is the arbiter; put the switch back
               })
               .finally(() => setSavingPrivate(false))

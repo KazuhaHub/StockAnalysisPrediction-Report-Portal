@@ -10,6 +10,7 @@ import type { AccountSessionsResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { clientLabel } from '../lib/clientInfo'
 import { formatRegion } from '../lib/geo'
+import { notifyError } from '../lib/notify'
 
 export default function AccountSessionsPanel() {
   const { t, i18n } = useTranslation()
@@ -42,7 +43,7 @@ export default function AccountSessionsPanel() {
       }
       message.success(t('sessions.revoked'))
       await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) }
+    } catch (e) { notifyError(errText(e, t)) }
     finally { setBusy(false) }
   }
 

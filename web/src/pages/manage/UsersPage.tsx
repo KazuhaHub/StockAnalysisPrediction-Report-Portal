@@ -38,6 +38,8 @@ import OrgUnitDetail from './OrgUnitDetail'
 import { usePendingSettings } from './AdminDraftBoundary'
 import type { Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
 
@@ -138,7 +140,7 @@ export default function UsersPage() {
       message.success(t('users.unlinked'))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -196,7 +198,7 @@ export default function UsersPage() {
       message.success(t('common.saved'))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const resetPw = async () => {
@@ -295,7 +297,7 @@ export default function UsersPage() {
             <Typography.Text style={{ fontSize: 12 }} type={expired ? 'danger' : undefined}>
               {v}
             </Typography.Text>
-            {expired && <Tag color="red">{t('users.expired')}</Tag>}
+            {expired && <StatusTag tone="error">{t('users.expired')}</StatusTag>}
           </Space>
         )
       },
@@ -553,7 +555,7 @@ function GroupsPanel({
       setNewParent(0)
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

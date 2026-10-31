@@ -3,6 +3,7 @@ import { App, Button, Modal, Select, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
+import { notifyError } from '../../lib/notify'
 
 // The evaluator's settings, as a modal opened from the verification page's header.
 //
@@ -61,7 +62,7 @@ export default function ForecastSettingsModal({
     } catch (e) {
       // The server owns the benchmark vocabulary (an index with a daily series), so its refusal is
       // shown with its own code — err.forecast_bad_bench — rather than a generic failure.
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -75,7 +76,7 @@ export default function ForecastSettingsModal({
       onSaved()
       onClose()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

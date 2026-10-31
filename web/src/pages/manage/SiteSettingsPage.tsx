@@ -12,6 +12,7 @@ import LoadGate from '../../components/LoadGate'
 import GeoSection from './GeoSection'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
+import { notifyError } from '../../lib/notify'
 
 // tzOptions lists the panel-timezone choices: a "follow system" default plus the
 // browser's full IANA zone list (Intl.supportedValuesOf, guarded for older engines).
@@ -115,7 +116,7 @@ export default function SiteSettingsPage() {
       setSavedValues({ ...v })
       message.success(t('common.saved'))
     } catch (error) {
-      message.error(errText(error, t))
+      notifyError(errText(error, t))
     } finally {
       setSaving(false)
     }
@@ -132,27 +133,27 @@ export default function SiteSettingsPage() {
 
   const uploadLogo = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      message.error(t('settings.logoTypeInvalid'))
+      notifyError(t('settings.logoTypeInvalid'))
       return false
     }
     if (file.size > 512 * 1024) {
-      message.error(t('settings.logoTooLarge'))
+      notifyError(t('settings.logoTooLarge'))
       return false
     }
-    uploadAsset('logo', file, 'siteLogoUrl').catch((e) => message.error(e instanceof Error ? e.message : t('settings.logoReadFailed')))
+    uploadAsset('logo', file, 'siteLogoUrl').catch((e) => notifyError(e instanceof Error ? e.message : t('settings.logoReadFailed')))
     return false
   }
 
   const uploadPwaIcon = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      message.error(t('settings.logoTypeInvalid'))
+      notifyError(t('settings.logoTypeInvalid'))
       return false
     }
     if (file.size > 512 * 1024) {
-      message.error(t('settings.pwaIconTooLarge'))
+      notifyError(t('settings.pwaIconTooLarge'))
       return false
     }
-    uploadAsset('pwaIcon', file, 'pwaIconUrl').catch((e) => message.error(e instanceof Error ? e.message : t('settings.logoReadFailed')))
+    uploadAsset('pwaIcon', file, 'pwaIconUrl').catch((e) => notifyError(e instanceof Error ? e.message : t('settings.logoReadFailed')))
     return false
   }
 

@@ -15,6 +15,7 @@ import { clickable } from '../lib/clickable'
 import { loadFailure } from '../lib/loadFailure'
 import { useOnReconnect } from '../lib/useOnReconnect'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -411,7 +412,7 @@ export default function ChatPage() {
       setConvId(c.id)
       return c.id
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       return undefined
     }
   }
@@ -550,7 +551,7 @@ export default function ChatPage() {
       setConvs((cs) => cs.filter((c) => c.id !== id))
       if (convId === id) newConv()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -569,7 +570,7 @@ export default function ChatPage() {
       await api.post(`/api/chat/conversations/${c.id}/star`, { starred: next })
     } catch (e) {
       setConvs((cs) => sortConvs(cs.map((x) => (x.id === c.id ? { ...x, starred: c.starred } : x))))
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -587,7 +588,7 @@ export default function ChatPage() {
       await api.post(`/api/chat/conversations/${id}/rename`, { title })
       setConvs((cs) => cs.map((x) => (x.id === id ? { ...x, title } : x)))
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

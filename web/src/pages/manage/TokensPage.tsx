@@ -10,6 +10,7 @@ import type { TokenRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 const SCOPE_COLORS: Record<string, string> = { all: 'gold', ingest: 'blue', query: 'green' }
 
@@ -87,7 +88,7 @@ export default function TokensPage() {
       ),
     })
     load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setCreating(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setCreating(false) }
   }
 
   // navigator.clipboard needs a secure context; where it is unavailable the field above is still

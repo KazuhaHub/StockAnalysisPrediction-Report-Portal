@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
 
 export default function LoginHistoryRetentionCard() {
   const { t } = useTranslation()
@@ -28,7 +29,7 @@ export default function LoginHistoryRetentionCard() {
       await api.put('/api/admin/login-activity/retention', { keep })
       setSaved(keep)
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) }
+    } catch (e) { notifyError(errText(e, t)) }
     finally { setSaving(false) }
   }
   return <Card title={t('storage.loginHistoryTitle')}>

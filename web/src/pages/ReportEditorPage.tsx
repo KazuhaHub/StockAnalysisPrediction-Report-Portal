@@ -34,6 +34,7 @@ import type { Principal } from '../api/types'
 import Markdown from '../components/Markdown'
 import { principalOptions } from '../components/principals'
 import ReportHistoryDrawer from '../components/ReportHistoryDrawer'
+import { notifyError } from '../lib/notify'
 
 // The report editor (ADR 0026).
 //
@@ -163,7 +164,7 @@ export default function ReportEditorPage() {
         // A lost connection keeps the editor loading and loads it again when the connection returns.
         const text = failure(e)
         if (text === null) lost = true
-        else if (live) message.error(text)
+        else if (live) notifyError(text)
       })
       .finally(() => { if (live && !lost) setLoading(false) })
     return () => {
@@ -251,7 +252,7 @@ export default function ReportEditorPage() {
       }
       setPane('write')
     }
-    reader.onerror = () => message.error(t('reportEditor.importFailed'))
+    reader.onerror = () => notifyError(t('reportEditor.importFailed'))
     reader.readAsText(file)
     return false // never let antd upload it
   }
@@ -259,7 +260,7 @@ export default function ReportEditorPage() {
   const save = async () => {
     const v = await form.validateFields()
     if (!body.trim()) {
-      message.error(t('reportEditor.bodyRequired'))
+      notifyError(t('reportEditor.bodyRequired'))
       setPane('write')
       return
     }
@@ -302,7 +303,7 @@ export default function ReportEditorPage() {
           onOk: () => navigate(`/report/${other}/edit`),
         }, t)
       } else {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
       }
     } finally {
       setSaving(false)
@@ -316,7 +317,7 @@ export default function ReportEditorPage() {
       message.success(t('reportEditor.deleted'))
       navigate('/')
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

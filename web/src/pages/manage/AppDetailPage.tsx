@@ -11,6 +11,7 @@ import LoadGate from '../../components/LoadGate'
 import { clickable } from '../../lib/clickable'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, AppsBreadcrumb, ServiceStatus } from './appsAdminParts'
+import { notifyError } from '../../lib/notify'
 
 // One section of the detail page: a title, a line saying what it controls, its current value and a
 // chevron. With `onOpen` the whole card is the control; without it the card only reports a value.
@@ -93,7 +94,7 @@ function AppDetail({ app }: { app: AdminApp }) {
           message.success(t('apps.section.uninstall.done'))
           navigate('/manage/apps')
         } catch (e) {
-          message.error(errText(e, t))
+          notifyError(errText(e, t))
         }
       },
     }, t)

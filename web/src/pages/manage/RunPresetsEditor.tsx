@@ -13,6 +13,7 @@ import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import { usePendingSettings } from './AdminDraftBoundary'
+import { notifyError } from '../../lib/notify'
 
 // Admin editor for preset low-peak scheduling windows (docs/adr/0014). An ordered, drag-sortable
 // list (like LinksPage / TypesPage); each preset is edited in a modal whose anchor fields adapt to
@@ -176,17 +177,17 @@ export default function RunPresetsEditor() {
   const save = async () => {
     if (!draft) return
     if (!draft.label.trim()) {
-      message.error(t('preset.needLabel'))
+      notifyError(t('preset.needLabel'))
       return
     }
     // A row with no weekday picked expands to nothing. Saying so beats saving a preset that
     // quietly lost a window the admin thought they had configured.
     if (rows?.some((r) => r.days.length === 0)) {
-      message.error(t('preset.needWeekday'))
+      notifyError(t('preset.needWeekday'))
       return
     }
     if (draft.intervals.length === 0) {
-      message.error(t('preset.needWindow'))
+      notifyError(t('preset.needWindow'))
       return
     }
     setSaving(true)
@@ -197,7 +198,7 @@ export default function RunPresetsEditor() {
       setDraft(null)
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }

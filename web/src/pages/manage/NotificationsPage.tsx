@@ -9,6 +9,7 @@ import type { LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
@@ -62,7 +63,7 @@ export default function NotificationsPage() {
   useEffect(() => { if (historyWanted) void loadHistory() }, [state, retryKey, historyWanted]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, refreshHistory = true) => {
     setBusy(true)
-    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
+    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { notifyError(errText(e, t)) } finally { setBusy(false) }
   }
   const eventLabel = (kind: string) => t(`webhook.event.${kind}`, kind)
   const stateLabel = (value: string) => t(`notify.state.${value}`, value)

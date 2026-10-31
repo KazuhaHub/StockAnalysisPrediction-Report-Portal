@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import { api, errText } from '../../api/client'
 import type { ForecastPopulation, ForecastPopulationCandidate } from '../../api/types'
 import CardTable from '../../components/CardTable'
+import StatusTag from '../../components/StatusTag'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -89,7 +90,7 @@ export default function ForecastLedgerStart({
       title: t('forecast.population.col_orphan'),
       dataIndex: 'orphan',
       key: 'orphan',
-      render: (v: boolean) => (v ? <Tag color="warning">{t('forecast.population.orphan')}</Tag> : null),
+      render: (v: boolean) => (v ? <StatusTag tone="warning">{t('forecast.population.orphan')}</StatusTag> : null),
     },
   ]
 

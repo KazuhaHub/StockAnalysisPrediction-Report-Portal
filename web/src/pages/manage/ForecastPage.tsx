@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Descriptions, Space, Typography } from 'antd'
 import { SettingOutlined } from '@ant-design/icons'
 import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -18,6 +18,7 @@ import ForecastLedgerStart from './ForecastLedgerStart'
 import ForecastDiagnostics from './ForecastDiagnostics'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import { PolicyPage } from './OUPolicyWorkspace'
+import StatusTag from '../../components/StatusTag'
 
 // Forecast operations: the administrator's page for running the prediction ledger
 // (ADR 0029).
@@ -127,12 +128,12 @@ function GlobalForecastOperations() {
                 {row(t('forecast.eval.pending'), settings.pending)}
                 {row(
                   t('forecast.eval.refused'),
-                  settings.refused > 0 ? <Tag color="red">{settings.refused}</Tag> : 0,
+                  settings.refused > 0 ? <StatusTag tone="error">{settings.refused}</StatusTag> : 0,
                 )}
                 {row(
                   t('forecast.eval.unsettled'),
                   settings.unsettled_baseline > 0 ? (
-                    <Tag color="orange">{settings.unsettled_baseline}</Tag>
+                    <StatusTag tone="warning">{settings.unsettled_baseline}</StatusTag>
                   ) : (
                     0
                   ),

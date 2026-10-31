@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import AccountSessionsPanel from './AccountSessionsPanel'
+import { findFailure } from '../test/notifications'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
@@ -60,6 +61,6 @@ describe('AccountSessionsPanel while the connection is down', () => {
     await screen.findByText('sessions.current')
     fireEvent.click(screen.getByRole('button', { name: 'sessions.revoke' }))
     fireEvent.click(await confirmBtn('sessions.revokeAction'))
-    expect(await screen.findByText('Request failed')).toBeTruthy()
+    expect(await findFailure('Request failed')).toBeTruthy()
   })
 })

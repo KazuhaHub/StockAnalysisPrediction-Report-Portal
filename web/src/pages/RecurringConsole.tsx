@@ -13,6 +13,7 @@ import LoadGate from '../components/LoadGate'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import CardTable from '../components/CardTable'
+import { notifyError } from '../lib/notify'
 
 // Recurring-tasks console (计划任务; docs/adr/0018-recurring-tasks.md). A first-party app card
 // (gated by run_batch) that manages saved job templates + a daily/weekly/monthly cadence the server
@@ -167,11 +168,11 @@ export default function RecurringConsole() {
 
   const save = async () => {
     if (!draft.name.trim()) {
-      message.error(t('recurring.errName'))
+      notifyError(t('recurring.errName'))
       return
     }
     if (!draft.targetId || rows.length === 0) {
-      message.error(t('recurring.errRows'))
+      notifyError(t('recurring.errRows'))
       return
     }
     setSaving(true)
@@ -195,7 +196,7 @@ export default function RecurringConsole() {
       setModalOpen(false)
       loadTasks(true).catch(() => {})
     } catch (e) {
-      message.error(errText(e, t) || t('recurring.errSave'))
+      notifyError(errText(e, t) || t('recurring.errSave'))
     } finally {
       setSaving(false)
     }
@@ -206,7 +207,7 @@ export default function RecurringConsole() {
       await api.post(`/api/admin/batch/recurring/${task.id}/enable`, { enabled })
       loadTasks(true).catch(() => {})
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

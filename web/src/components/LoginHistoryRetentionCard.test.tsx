@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import LoginHistoryRetentionCard from './LoginHistoryRetentionCard'
+import { findFailure } from '../test/notifications'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
@@ -39,7 +40,7 @@ describe('Administrator login history retention', () => {
     fireEvent.blur(input)
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }))
     fireEvent.click(await confirmBtn('storage.loginHistoryAction'))
-    expect(await screen.findByText('Request failed')).toBeTruthy()
+    expect(await findFailure('Request failed')).toBeTruthy()
     expect(apiMock.get).toHaveBeenCalledTimes(1)
   })
   it('does not offer an editable default when loading the global policy failed', async () => {

@@ -9,6 +9,7 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsField from './SettingsField'
 import SettingsSaveBar from './SettingsSaveBar'
 import useSettingsDraft from './useSettingsDraft'
+import { notifyError } from '../../lib/notify'
 
 interface EmailConfig { enabled: boolean; host: string; port: number; user: string; from: string; security: string; has_pass: boolean }
 
@@ -42,14 +43,14 @@ export default function EmailPage() {
       if (pass) setHasPass(true)
       setPass('')
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
   const sendTest = async () => {
     setTesting(true)
     try {
       await api.post('/api/admin/email/test', { to: testTo })
       message.success(t('email.testSent'))
-    } catch (e) { message.error(errText(e, t)) } finally { setTesting(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setTesting(false) }
   }
   const v = draft.value
   return <LoadGate loading={loading} error={loadErr} onRetry={load}>

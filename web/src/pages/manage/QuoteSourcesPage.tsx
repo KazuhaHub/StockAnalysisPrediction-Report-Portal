@@ -15,6 +15,8 @@ import SettingsSaveBar from './SettingsSaveBar'
 import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
 import QuoteTrafficPanel, { type QuoteDisplayTraffic } from './QuoteTrafficPanel'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -339,7 +341,7 @@ export default function QuoteSourcesPage() {
       if (st && Array.isArray(st.sources)) apply(st)
       else await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       savePending.current = false
       if (active.current) setSaving(false)
@@ -358,7 +360,7 @@ export default function QuoteSourcesPage() {
       setCacheBytes(wireNumber(st.cacheBytes))
       setDisplayTraffic(st.displayTraffic)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -372,7 +374,7 @@ export default function QuoteSourcesPage() {
       setCacheEntries(wireNumber(st.cacheEntries))
       setCacheBytes(wireNumber(st.cacheBytes))
     } catch (e) {
-      if (active.current) message.error(errText(e, t))
+      if (active.current) notifyError(errText(e, t))
     } finally {
       if (active.current) setRefreshingTraffic(false)
     }
@@ -526,12 +528,12 @@ export default function QuoteSourcesPage() {
       width: 130,
       render: (_: unknown, r: QuoteAdminSource) =>
         r.consecutiveFailures > 0 ? (
-          <Tag color="red">{r.consecutiveFailures}</Tag>
+          <StatusTag tone="error">{r.consecutiveFailures}</StatusTag>
         ) : stampOrNever(r.lastSuccess) ? (
           // Both halves are required for OK. A source nobody has called yet has no failures either,
           // and a green OK beside "last success: never" is this page inventing a health check that
           // never ran — which is the state a source switched off months ago is actually in.
-          <Tag color="green">{t('quoteAdmin.ok')}</Tag>
+          <StatusTag tone="success">{t('quoteAdmin.ok')}</StatusTag>
         ) : null,
     },
     {

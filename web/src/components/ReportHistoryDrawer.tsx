@@ -23,6 +23,7 @@ import WaitingForConnection from './WaitingForConnection'
 import { SectionBlock } from './DiffSections'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
 
 // The edit history of a hand-written report (ADR 0026).
 //
@@ -118,7 +119,7 @@ export default function ReportHistoryDrawer({
       .catch((e) => {
         // A lost connection leaves the spinner up; the list is requested again when it returns.
         const text = failure(e)
-        if (live && text !== null) { message.error(text); setLoading(false) }
+        if (live && text !== null) { notifyError(text); setLoading(false) }
       })
     return () => {
       live = false
@@ -153,7 +154,7 @@ export default function ReportHistoryDrawer({
       onRestored()
       onClose()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setRestoring(false)
     }

@@ -7,6 +7,7 @@ import { api, errText } from '../../api/client'
 import type { AppMarketEntry, AppMarketResp, AppPreviewResp } from '../../api/types'
 import ScopePermissionModal from '../../components/ScopePermissionModal'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
 // actual install once the scopes are approved.
@@ -56,7 +57,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
       setMarket(r.apps || [])
       setIndexUrl(r.index_url || '')
     } catch (e) {
-      message.error(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setMarketLoading(false)
     }
@@ -78,7 +79,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
         },
       })
     } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setUploading(false)
     }
@@ -106,7 +107,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
       await pending.run()
       setPending(null)
     } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setConfirming(false)
     }
@@ -196,7 +197,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
                     message.success(t('common.saved'))
                     if (market) void fetchMarket()
                   })
-                  .catch((e) => message.error(errText(e, t)))
+                  .catch((e) => notifyError(errText(e, t)))
                   .finally(() => setSavingIndex(false))
               }}
             >

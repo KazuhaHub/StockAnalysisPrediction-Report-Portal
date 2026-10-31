@@ -14,6 +14,8 @@ import SettingsSaveBar from './SettingsSaveBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // Storage management console (docs/adr/0017-storage-cleanup.md): a per-category usage dashboard (icon
 // cards + a proportion bar), a self-explanatory manual cleanup (the button names what and how old),
@@ -211,7 +213,7 @@ export default function StoragePage() {
       message.success(t('common.saved'))
       await loadConfig({ quiet: true })
       await loadUsage().catch(() => {})
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   const doRun = async (targets: string[]) => {
@@ -393,7 +395,7 @@ export default function StoragePage() {
     {
       title: t('storage.histStatus'),
       dataIndex: 'ok',
-      render: (ok: boolean, r: CleanupRun) => (ok ? <Tag color="green">{t('storage.statusOk')}</Tag> : <Tag color="red">{r.error || t('storage.statusFailed')}</Tag>),
+      render: (ok: boolean, r: CleanupRun) => (ok ? <StatusTag tone="success">{t('storage.statusOk')}</StatusTag> : <StatusTag tone="error">{r.error || t('storage.statusFailed')}</StatusTag>),
     },
   ]
 

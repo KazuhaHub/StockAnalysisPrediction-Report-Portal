@@ -21,6 +21,7 @@ import QueueTable from '../components/QueueTable'
 import LoadGate from '../components/LoadGate'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import BatchRowsEditor from '../components/BatchRowsEditor'
+import { notifyError } from '../lib/notify'
 
 export default function BatchConsole() {
   const { t } = useTranslation()
@@ -115,7 +116,7 @@ export default function BatchConsole() {
     if (!targetId || rows.length === 0) return
     const err = scheduleError(schedule)
     if (err) {
-      message.error(t(err))
+      notifyError(t(err))
       return
     }
     setSubmitting(true)
@@ -144,7 +145,7 @@ export default function BatchConsole() {
       setNotify(false)
       loadTickets() // an urgent run may have spent a ticket; the embedded queue self-refreshes
     } catch (e) {
-      message.error(errText(e, t) || t('batch.msg.startFailed'))
+      notifyError(errText(e, t) || t('batch.msg.startFailed'))
     } finally {
       setSubmitting(false)
     }

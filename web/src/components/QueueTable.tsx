@@ -55,6 +55,7 @@ import JobDetailDrawer from './JobDetailDrawer'
 import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
 import CardTable from './CardTable'
+import { notifyError } from '../lib/notify'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
@@ -213,7 +214,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       if (okMsg) message.success(okMsg)
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const cancel = (id: number) => act(() => api.post(`/api/admin/batch/jobs/${id}/cancel`), t('batch.msg.cancelRequested'))
@@ -242,7 +243,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       message.success(t('queue.clearedN', { n: r.n }))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

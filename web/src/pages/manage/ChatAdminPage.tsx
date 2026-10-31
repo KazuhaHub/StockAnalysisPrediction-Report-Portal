@@ -16,6 +16,8 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsField from './SettingsField'
 import SettingsSaveBar from './SettingsSaveBar'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // Assistant admin (docs/adr/0012-interactive-chat.md). Two independent controls:
 //  1. A concurrency ceiling on in-flight chat turns — chat is interactive, so it does NOT
@@ -116,7 +118,7 @@ export default function ChatAdminPage() {
       await api.post('/api/admin/chat/config', values)
       setSaved(values)
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   // Open one user's conversation read-only: pull its messages from Dify (keyed by the owner, so the
@@ -129,7 +131,7 @@ export default function ChatAdminPage() {
     api
       .get<{ turns: ChatTurn[] }>(`/api/admin/chat/conversations/${c.id}/messages`)
       .then((r) => setViewTurns(r.turns || []))
-      .catch((e) => message.error(errText(e, t)))
+      .catch((e) => notifyError(errText(e, t)))
       .finally(() => setViewLoading(false))
   }
   const filteredConvs = useMemo(() => {
@@ -145,7 +147,7 @@ export default function ChatAdminPage() {
       message.success(t('chatAdmin.stopped'))
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -213,7 +215,7 @@ export default function ChatAdminPage() {
             {t('chatAdmin.liveCard')}
             {/* No count until the first poll: "0 running" is a claim, and this tag is the only
                 place on the page that makes it in one glance. */}
-            {liveLoaded && <Tag color={turns.length ? 'processing' : 'default'}>{t('chatAdmin.liveCount', { n: turns.length })}</Tag>}
+            {liveLoaded && <StatusTag tone={turns.length ? 'processing' : 'neutral'}>{t('chatAdmin.liveCount', { n: turns.length })}</StatusTag>}
           </Space>
         }
         extra={

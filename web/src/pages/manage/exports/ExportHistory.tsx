@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Alert, Button, Card, Progress, Space, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Progress, Space, Tooltip, Typography } from 'antd'
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
@@ -14,14 +14,16 @@ import { useTableView } from '../../../components/TableView'
 import { startVisiblePoll } from '../../../lib/visiblePoll'
 import type { ExportLabels } from './labels'
 import CardTable from '../../../components/CardTable'
+import StatusTag, { type StatusTone } from '../../../components/StatusTag'
+import { notifyError } from '../../../lib/notify'
 
-export const STATUS_COLOR: Record<ExportStatus, string> = {
-  queued: 'default',
+export const STATUS_TONE: Record<ExportStatus, StatusTone> = {
+  queued: 'waiting',
   running: 'processing',
   done: 'success',
   failed: 'error',
   canceled: 'warning',
-  expired: 'default',
+  expired: 'neutral',
 }
 
 // Recent tasks of every administrator (a reader's page lists their own). It refreshes quickly while any task is active, and when the
@@ -30,7 +32,6 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
   const base = exportBase(mode)
   const { t } = useTranslation()
   const { failure, catchLoad, retryKey } = useLoadFailure()
-  const { message } = App.useApp()
   const [jobs, setJobs] = useState<ExportJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -68,7 +69,7 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
       await api.post(`${base}/${encodeURIComponent(j.id)}/cancel`)
       notifyExportsChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       void load()
     }
   }
@@ -94,7 +95,7 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
         return (
           <Space orientation="vertical" size={2} style={{ width: '100%' }}>
             <Tooltip title={j.status === 'failed' && j.error ? j.error : undefined}>
-              <Tag color={STATUS_COLOR[j.status]} style={{ marginInlineEnd: 0 }}>{labels.status(j.status)}</Tag>
+              <StatusTag tone={STATUS_TONE[j.status]} style={{ marginInlineEnd: 0 }}>{labels.status(j.status)}</StatusTag>
             </Tooltip>
             {j.status === 'running' && pct !== null && <Progress percent={pct} size="small" showInfo={false} />}
             {j.status === 'failed' && j.error && (

@@ -10,6 +10,7 @@ import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../lib/loadFailure'
 import CardTable from '../components/CardTable'
+import { notifyError } from '../lib/notify'
 
 // The review queue: what the reports ASSUMED, and whether it held.
 //
@@ -69,7 +70,7 @@ export default function ReviewPage() {
       message.success(t('common.saved'))
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

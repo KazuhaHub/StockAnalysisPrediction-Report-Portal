@@ -10,6 +10,7 @@ import { inheritedView, policyDraft, policyDraftValid, policyPatch, quotaBelowMa
 import InheritField from '../InheritField'
 import ScopeFold from '../ScopeFold'
 import OrgUnitPicker from '../OrgUnitPicker'
+import { notifyError } from '../../../lib/notify'
 
 // The reader-export policy console (ADR 0046), the section at the foot of the administrator's Export
 // page: the OU tree on the left, and for the chosen OU three settings that each either inherit or are
@@ -92,7 +93,6 @@ export default function ReaderExportPolicy() {
 
 function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPolicyEntry; entries: Map<number, ExportPolicyEntry>; defaultId: number; onSaved: () => void }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [draft, setDraft] = useState<PolicyDraft>(() => policyDraft(entry))
   const [busy, setBusy] = useState(false)
   const patch = policyPatch(entry, draft)
@@ -114,7 +114,7 @@ function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPol
       await api.put(`/api/admin/exports/policy/${entry.id}`, patch)
       onSaved()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

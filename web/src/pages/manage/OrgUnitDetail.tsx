@@ -12,6 +12,8 @@ import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSet
 import { subtreeOf } from './OrgUnitPicker'
 import { usePendingSettings } from './AdminDraftBoundary'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 const RUN_SURFACES = ['run', 'batch', 'recurring', 'chat'] as const
 const FORECAST_SCOPES = ['all', 'own', 'none'] as const
@@ -260,7 +262,7 @@ export default function OrgUnitDetail({
       onChanged()
       setAcknowledged(d)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -286,7 +288,7 @@ export default function OrgUnitDetail({
       }
       await doRemove()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -298,7 +300,7 @@ export default function OrgUnitDetail({
       setImpact(null)
       onDeleted()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setDeleting(false)
     }
@@ -587,7 +589,7 @@ export default function OrgUnitDetail({
               <Space key={a.id} size={6}>
                 <Typography.Text>{a.title || t('announcementAdmin.untitled')}</Typography.Text>
                 {a.orphaned ? (
-                  <Tag color="red">{t('ou.announcementOrphaned')}</Tag>
+                  <StatusTag tone="error">{t('ou.announcementOrphaned')}</StatusTag>
                 ) : (
                   <Tag>{t('ou.announcementKeepsWorking')}</Tag>
                 )}
@@ -641,7 +643,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
       // the table waits for `data`, a failure has to settle the wait too — otherwise the pane
       // spins for ever after a message the admin has already scrolled past.
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         setLoadFailed(true)
       })
   }, [group.id])
@@ -656,7 +658,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
       message.success(t('common.saved'))
       setSaved({ inherit, granted })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }

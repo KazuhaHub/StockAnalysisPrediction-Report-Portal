@@ -2,6 +2,7 @@ import { Alert, Card, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ForecastDiagnostics as Diagnostics } from '../../api/types'
 import CardTable from '../../components/CardTable'
+import StatusTag from '../../components/StatusTag'
 
 // Missing, unreadable and measured-zero telemetry are different states. These retained samples
 // describe comparison only; agreement does not grant a candidate permission to settle anything.
@@ -46,7 +47,7 @@ export default function ForecastDiagnostics({ value, fallback }: { value?: Diagn
             <summary style={{ cursor: 'pointer' }}>
               <Space wrap>
                 <Typography.Text>{result.at} · {result.target.market}{result.target.code} · {result.primary} → {result.candidate || '—'}</Typography.Text>
-                <Tag color={result.status === 'mismatch' ? 'warning' : undefined}>{t(`forecast.diagnostics.${result.status === 'unavailable' ? 'comparisonUnavailable' : result.status}`)}</Tag>
+                <StatusTag tone={result.status === 'mismatch' ? 'warning' : result.status === 'match' ? 'success' : 'neutral'}>{t(`forecast.diagnostics.${result.status === 'unavailable' ? 'comparisonUnavailable' : result.status}`)}</StatusTag>
               </Space>
             </summary>
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>

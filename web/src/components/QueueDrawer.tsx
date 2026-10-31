@@ -21,6 +21,7 @@ import TaskRow, { type TaskTone } from './TaskRow'
 import RunningFor from './RunningFor'
 import ExportDetailModal from './ExportDetailModal'
 import { openJobDetail, pageShowsJob } from '../lib/jobDetailStore'
+import { notifyError } from '../lib/notify'
 
 export type DrawerTab = 'runs' | 'exports'
 
@@ -168,7 +169,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       message.success(t('batch.msg.cancelRequested'))
       void load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const cancelExport = async (task: TaskItem) => {
@@ -178,7 +179,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       void refreshTasks()
       notifyExportsChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 

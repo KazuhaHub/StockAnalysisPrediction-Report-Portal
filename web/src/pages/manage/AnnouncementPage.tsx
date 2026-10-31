@@ -41,6 +41,8 @@ import type { Principal } from '../../api/types'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import { principalName, principalOptions } from '../../components/principals'
 import LoadGate from '../../components/LoadGate'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 const { RangePicker } = DatePicker
 const ANNOUNCEMENT_LEVELS: AnnouncementLevel[] = ['notice', 'success', 'warning', 'error']
@@ -159,7 +161,7 @@ export default function AnnouncementPage() {
       // the honest response — better a list that visibly refreshes than an order that silently
       // reverts on the next visit.
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         load({ quiet: true })
       })
   }
@@ -225,7 +227,7 @@ export default function AnnouncementPage() {
       await api.patch(`/api/admin/announcements/${a.id}`, patch)
       feedChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       load({ quiet: true })
     }
   }
@@ -239,7 +241,7 @@ export default function AnnouncementPage() {
       feedChanged()
     } catch (e) {
       setCollapse(!on)
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -265,7 +267,7 @@ export default function AnnouncementPage() {
       .get<{ items: Announcement[] }>(`/api/admin/announcements/preview?principal=${encodeURIComponent(principal)}`)
       .then((r) => setPreview(r.items || []))
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         setPreviewAs(undefined)
       })
   }
@@ -276,12 +278,12 @@ export default function AnnouncementPage() {
   const unreachable = (a: AdminAnnouncement) => a.audience === 'grant' && a.grants.length === 0
 
   const statusOf = (a: AdminAnnouncement) => {
-    if (!a.enabled) return { key: 'draft', color: undefined }
-    if (unreachable(a)) return { key: 'unreachable', color: 'red' }
+    if (!a.enabled) return { key: 'draft', tone: 'neutral' as const }
+    if (unreachable(a)) return { key: 'unreachable', tone: 'error' as const }
     const now = Date.now()
-    if (a.startsAt && Date.parse(a.startsAt) > now) return { key: 'scheduled', color: 'blue' }
-    if (a.endsAt && Date.parse(a.endsAt) <= now) return { key: 'expired', color: undefined }
-    return { key: 'live', color: 'green' }
+    if (a.startsAt && Date.parse(a.startsAt) > now) return { key: 'scheduled', tone: 'waiting' as const }
+    if (a.endsAt && Date.parse(a.endsAt) <= now) return { key: 'expired', tone: 'neutral' as const }
+    return { key: 'live', tone: 'success' as const }
   }
 
   const liveCount = items.filter((a) => statusOf(a).key === 'live').length
@@ -329,10 +331,10 @@ export default function AnnouncementPage() {
         </Typography.Text>
         {status.key === 'unreachable' ? (
           <Tooltip title={t('announcementAdmin.unreachableHint')}>
-            <Tag color="red">{t('announcementAdmin.status.unreachable')}</Tag>
+            <StatusTag tone="error">{t('announcementAdmin.status.unreachable')}</StatusTag>
           </Tooltip>
         ) : (
-          <Tag color={status.color}>{t(`announcementAdmin.status.${status.key}`)}</Tag>
+          <StatusTag tone={status.tone}>{t(`announcementAdmin.status.${status.key}`)}</StatusTag>
         )}
         {a.scope === 'app' && <Tag color="geekblue">{t('announcementAdmin.scope.app')}</Tag>}
         {a.audience === 'grant' && (
@@ -347,7 +349,7 @@ export default function AnnouncementPage() {
         {a.display !== 'strip' && <Tag color="purple">{t('announcementAdmin.popupTag')}</Tag>}
         {stale > 0 && (
           <Tooltip title={t('announcementAdmin.staleHint')}>
-            <Tag color="orange">{t('announcementAdmin.stale', { count: stale })}</Tag>
+            <StatusTag tone="warning">{t('announcementAdmin.stale', { count: stale })}</StatusTag>
           </Tooltip>
         )}
         <Tooltip title={t('announcementAdmin.enabled')}>

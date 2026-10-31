@@ -11,6 +11,7 @@ import { useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppsBreadcrumb } from './appsAdminParts'
 import OrgUnitPicker from './OrgUnitPicker'
 import ScopeFold from './ScopeFold'
+import { notifyError } from '../../lib/notify'
 
 // The service status of one app by organizational unit (ADR 0048), modelled on the Google Workspace
 // Admin console: pick an OU on the left, set that one app on or off on the right. An OU inherits its
@@ -197,7 +198,7 @@ function AccessEditor({
       if (!(await reload({ quiet: true }))) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

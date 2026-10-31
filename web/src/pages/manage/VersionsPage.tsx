@@ -11,6 +11,7 @@ import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 interface VersionRow {
   name: string
@@ -95,12 +96,12 @@ function VersionRegistry() {
       message.success(t('versions.saved'))
       setDraft(null)
       await load({ quiet: true })
-    } catch (error) { message.error(errText(error, t)) }
+    } catch (error) { notifyError(errText(error, t)) }
     finally { setSaving(false) }
   }
   const remove = async (name: string) => {
     try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load({ quiet: true }) }
-    catch (error) { message.error(errText(error, t)) }
+    catch (error) { notifyError(errText(error, t)) }
   }
   const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)
   const principalOptions = [

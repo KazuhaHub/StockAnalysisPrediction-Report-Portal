@@ -37,6 +37,7 @@ import {
 import DifyFileInput from './DifyFileInput'
 import RunScheduleControls from './RunScheduleControls'
 import type { BatchQueueSummary, BatchTarget, BatchTickets, PluginInput, RunPreset, RunPresetsResp, RunQuota } from '../api/types'
+import { notifyError } from '../lib/notify'
 
 // The home-page run-analysis modal (docs/adr/0007 + 0014): pick a Dify workflow, fill its
 // discovered inputs, choose when to run (now / a preset low-peak window / an explicit 定时 time)
@@ -293,7 +294,7 @@ export default function RunAnalysisModal({
 
   const submit = async () => {
     if (!targetId) {
-      message.error(t('run.selectWorkflow'))
+      notifyError(t('run.selectWorkflow'))
       return
     }
     let vals: Record<string, unknown>
@@ -305,7 +306,7 @@ export default function RunAnalysisModal({
     }
     const err = scheduleError(schedule)
     if (err) {
-      message.error(t(err))
+      notifyError(t(err))
       return
     }
     setSubmitting(true)
@@ -349,7 +350,7 @@ export default function RunAnalysisModal({
       reset()
       onClose()
     } catch (e) {
-      message.error(errText(e, t) || t('run.startFailed'))
+      notifyError(errText(e, t) || t('run.startFailed'))
     } finally {
       setSubmitting(false)
     }

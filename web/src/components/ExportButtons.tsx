@@ -5,6 +5,7 @@ import type { MenuProps } from 'antd'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { exportReportPdf, exportDayZip, DayExportEmptyError, isAbortError, type ReportForPrint } from '../lib/exportPdf'
+import { notifyError } from '../lib/notify'
 
 // Server-side PDF rendering (wkhtmltopdf) streams back a single finished blob with no
 // real progress %, so exports show an honest indeterminate spinner. It lives in a small
@@ -75,7 +76,8 @@ function pdfTask(t: TFunction, message: Message, id: number, report: ReportForPr
         t(result === 'printed' ? 'export.pdfPrinted' : 'export.pdfReady'),
       )
     } catch (e) {
-      message[isAbortError(e) ? 'info' : 'error'](t(isAbortError(e) ? 'export.cancelled' : 'export.pdfFailed'))
+      if (isAbortError(e)) message.info(t('export.cancelled'))
+      else notifyError(t('export.pdfFailed'))
     }
   }
 }
@@ -87,8 +89,8 @@ function dayTask(t: TFunction, message: Message, symbol: string, date: string, n
       message.success(t('export.dayReady'))
     } catch (e) {
       if (isAbortError(e)) message.info(t('export.cancelled'))
-      else if (e instanceof DayExportEmptyError) message.error(t('export.dayEmpty'))
-      else message.error(t('export.dayFailed'))
+      else if (e instanceof DayExportEmptyError) notifyError(t('export.dayEmpty'))
+      else notifyError(t('export.dayFailed'))
     }
   }
 }

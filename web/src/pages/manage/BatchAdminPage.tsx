@@ -17,6 +17,7 @@ import type { BatchPlugin, BatchTarget, DifyInput, DifyRefreshResult, DifyTarget
 import DifyRefreshModal from './DifyRefreshModal'
 import LoadGate from '../../components/LoadGate'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 const INPUT_PREVIEW_LIMIT = 3
 
@@ -211,7 +212,7 @@ function GlobalExecutionTargets() {
       setEditingId(tg.id)
       setTargetOpen(true)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -249,7 +250,7 @@ function GlobalExecutionTargets() {
       else message.success(t('batch.dify.probed', { name: r.name }))
     } catch (e) {
       setProbed(null)
-      message.error(t('batch.dify.probeFailed', { error: errText(e, t) }))
+      notifyError(t('batch.dify.probeFailed', { error: errText(e, t) }))
     } finally {
       setProbing(false)
     }
@@ -263,7 +264,7 @@ function GlobalExecutionTargets() {
       setRefreshResults(r.results || [])
       setRefreshOpen(true)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setRefreshing(false)
     }
@@ -286,7 +287,7 @@ function GlobalExecutionTargets() {
       setRefreshOpen(false)
       loadTargets()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -310,7 +311,7 @@ function GlobalExecutionTargets() {
       return
     }
     if (inputs.length === 0) {
-      message.error(t('batch.dify.needInputs'))
+      notifyError(t('batch.dify.needInputs'))
       return
     }
     setSaving(true)
@@ -336,7 +337,7 @@ function GlobalExecutionTargets() {
       setTargetOpen(false)
       loadTargets()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -350,7 +351,7 @@ function GlobalExecutionTargets() {
         message.success(t('batch.admin.msgImported'))
         loadPlugins({ quiet: true })
       } catch (e) {
-        message.error(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
+        notifyError(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
       }
     }
     reader.readAsText(file)
@@ -398,7 +399,7 @@ function GlobalExecutionTargets() {
     setTargets(orderedIds.map((id) => byId.get(id)!).filter(Boolean))
     api
       .post('/api/admin/batch/targets/reorder', { ids: orderedIds.map(Number) })
-      .catch((e) => message.error(errText(e, t)))
+      .catch((e) => notifyError(errText(e, t)))
       .finally(() => loadTargets().catch(() => {}))
   }
 

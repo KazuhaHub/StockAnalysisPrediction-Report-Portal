@@ -11,6 +11,8 @@ import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 export default function WebhooksPage() {
   const { t } = useTranslation()
@@ -60,13 +62,13 @@ export default function WebhooksPage() {
       setOpen(false)
       message.success(t('webhook.msgAdded'))
       await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   const test = async (id: number) => {
     const r = await api.post<{ ok: boolean; status: number; error: string }>(`/api/admin/webhooks/${id}/test`)
     if (r.ok) message.success(t('webhook.msgTested', { status: r.status }))
-    else message.error(t('webhook.msgTestFailed', { error: r.error || r.status }))
+    else notifyError(t('webhook.msgTestFailed', { error: r.error || r.status }))
     load({ quiet: true })
   }
 
@@ -80,9 +82,9 @@ export default function WebhooksPage() {
     const ok = h.last_status >= 200 && h.last_status < 400
     const label = h.last_status ? String(h.last_status) : h.last_error || '—'
     return (
-      <Tag color={ok ? 'success' : 'error'} title={h.last_error}>
+      <StatusTag tone={ok ? 'success' : 'error'} title={h.last_error}>
         {label}
-      </Tag>
+      </StatusTag>
     )
   }
 

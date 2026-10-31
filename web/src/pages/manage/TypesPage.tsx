@@ -25,6 +25,7 @@ import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 // antd's Tag preset colors (https://ant.design/components/tag) — "default" maps
 // to no color prop (the neutral grey Tag).
@@ -200,7 +201,7 @@ export default function TypesPage() {
     api.post('/api/admin/types/reorder', { names: orderedNames }).then(() => {
       setSavedGroups((gs) => gs.map((g) => g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g))
     }).catch(async (e) => {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       await load({ quiet: true })
     }).finally(() => setOrdering(false))
   }
@@ -221,7 +222,7 @@ export default function TypesPage() {
       setSavedGroups(groups)
       await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }

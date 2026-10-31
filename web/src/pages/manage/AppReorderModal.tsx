@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { App, Modal, Space, Typography } from 'antd'
+import { Modal, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { AppLayoutResp } from '../../api/types'
 import { useAppLabels, type AdminApp } from './appsAdminModel'
 import { AppIcon } from './appsAdminParts'
 import { DragHandle, SortableItem, SortableWrapper } from './dnd'
+import { notifyError } from '../../lib/notify'
 
 // The one shared order of built-in and installed apps (ADR 0048). Dragging only rearranges a local copy:
 // the order is written when Done is pressed, so Cancel really discards, and a mis-drag costs nothing.
@@ -21,7 +22,6 @@ export default function AppReorderModal({
   onSaved: () => void
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const labels = useAppLabels()
   const [keys, setKeys] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
@@ -38,7 +38,7 @@ export default function AppReorderModal({
       onSaved()
       onClose()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }

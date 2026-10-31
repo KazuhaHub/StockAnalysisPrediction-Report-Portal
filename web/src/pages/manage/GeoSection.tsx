@@ -4,6 +4,7 @@ import { Alert, App, Button, Divider, Input, InputNumber, Select, Space, Switch,
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { GeoStatus, GeoUpdateState } from '../../api/types'
+import { notifyError } from '../../lib/notify'
 
 /**
  * A source is described by what it needs, not by what it is called: the form asks for an edition
@@ -129,7 +130,7 @@ export default function GeoSection() {
       message.success(t('common.saved'))
       poll()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -145,7 +146,7 @@ export default function GeoSection() {
       await api.post('/api/admin/geoip/update', {})
       poll()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

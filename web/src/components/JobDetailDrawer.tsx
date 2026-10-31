@@ -24,6 +24,7 @@ import { loadFailure } from '../lib/loadFailure'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
 import CardTable from './CardTable'
+import { notifyError } from '../lib/notify'
 
 // itemActive reports whether a run (row) can still be cancelled: it hasn't reached a
 // terminal state (succeeded / partial / failed / cancelled).
@@ -119,7 +120,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       setSelected([])
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -130,7 +131,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       message.success(t('batch.msg.cancelRequested'))
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   // A row that has a Dify handle can be reconciled: fetch its true outcome from Dify without
@@ -143,7 +144,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       message.success(r.note ? t('queue.reconcileStillRunning') : t('queue.reconcileDone', { status: t(`batch.status.${r.status}`) }))
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const idCell = (v: string) =>

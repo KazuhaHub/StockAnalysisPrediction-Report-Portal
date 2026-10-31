@@ -10,7 +10,6 @@ import {
   Radio,
   Select,
   Space,
-  Tag,
   Typography,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
@@ -19,8 +18,10 @@ import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import type { ForecastDrySample, ForecastReadinessItem, ForecastSettings } from '../../api/types'
 import ForecastBacklog from './ForecastBacklog'
-import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
+import { evaluatorStatus, EVALUATOR_TAG_TONE } from '../../lib/forecastEvaluator'
 import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
 //
@@ -93,7 +94,7 @@ export default function ForecastEvaluatorStatus({
       if (success) message.success(success)
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       throw e
     } finally {
       setBusy(false)
@@ -132,7 +133,7 @@ export default function ForecastEvaluatorStatus({
       await api.post('/api/admin/forecast/evaluate', {})
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -161,7 +162,7 @@ export default function ForecastEvaluatorStatus({
       title={
         <Space wrap>
           <span>{t('forecast.eval.status.title')}</span>
-          <Tag color={EVALUATOR_TAG_COLOR[status]}>{t(`forecast.eval.status.${status}`)}</Tag>
+          <StatusTag tone={EVALUATOR_TAG_TONE[status]}>{t(`forecast.eval.status.${status}`)}</StatusTag>
           {hb && <Typography.Text type="secondary">{t('forecast.eval.lastTick', { at: dayjs(hb.last_tick_at).format('YYYY-MM-DD HH:mm') })}</Typography.Text>}
           {!hb && <Typography.Text type="secondary">{t('forecast.eval.never')}</Typography.Text>}
         </Space>

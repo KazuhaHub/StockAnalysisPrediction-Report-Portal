@@ -18,6 +18,7 @@ import LoadGate from '../../components/LoadGate'
 import { APP_SHORTCUTS, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
 import { BUILTIN_PIN_PREFIX } from '../../lib/builtinApps'
 import useFormDraft from './useFormDraft'
+import { notifyError } from '../../lib/notify'
 
 const iconSelectOptions = LINK_ICON_OPTIONS.map(({ value }) => {
   const Icon = linkIconComponent(value)
@@ -128,7 +129,7 @@ export default function LinksPage() {
         items: orderedIds.map((k) => ({ kind: k.startsWith('g:') ? 'group' : 'link', id: Number(k.slice(2)) })),
       })
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         load({ quiet: true })
       })
 
@@ -196,7 +197,7 @@ export default function LinksPage() {
     setGroupOpen(false)
     message.success(t('common.saved'))
     await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setGroupSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setGroupSaving(false) }
   }
   const deleteGroup = async (id: number) => {
     await api.del(`/api/admin/link-groups/${id}`)
@@ -245,7 +246,7 @@ export default function LinksPage() {
     setOpen(false)
     message.success(t('common.saved'))
     await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
   const onValuesChange = (changed: Record<string, unknown>) => {
     // Changing the shortcut type invalidates any pinned target (its options come from the old type) —

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Alert, Input, Modal, Radio, Select, Space, Switch, Typography } from 'antd'
+import { Alert, Input, Modal, Radio, Select, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
 import type { ExportFilter, ExportFormat, ExportJob, ExportSource } from '../../../api/types'
@@ -7,6 +7,7 @@ import { buildExportRequest } from '../../../lib/exportFilter'
 import { exportBase, exportBlock, type ExportMode } from '../../../lib/exportMode'
 import type { ExportPolicy } from '../../../api/types'
 import type { ExportLabels } from './labels'
+import { notifyError } from '../../../lib/notify'
 
 export const NAME_MAX = 80
 type Layout = 'flat' | 'date' | 'symbol'
@@ -45,7 +46,6 @@ export default function ExportDialog({
   onCreated: (job: ExportJob) => void
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [name, setName] = useState(defaultName)
   const [format, setFormat] = useState<ExportFormat>(source.formats[0])
   const [tz, setTz] = useState<'panel' | 'utc'>('panel')
@@ -85,7 +85,7 @@ export default function ExportDialog({
     } catch (e) {
       const text = errText(e, t)
       setError(text)
-      message.error(text)
+      notifyError(text)
     } finally {
       setBusy(false)
     }
