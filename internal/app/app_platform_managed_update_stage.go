@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -355,26 +356,36 @@ func validPlatformManagedUpdateQuiesceObservation(observation platformManagedUpd
 func (s *Server) executePlatformManagedUpdateQuiesce(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
 	intent, err := s.preparePlatformManagedUpdateQuiesce(ctx, expected)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"managed update quiesce prepare: %w", err)
 	}
 	if err := s.checkPlatformManagedOperationRoot(
 		ctx, expected.id, intent.runtime, intent.authority,
 		endpoint); err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"managed update quiesce root: %w", err)
 	}
 	observation, err := platformRunManagedRemoval(
 		ctx, endpoint, appplatform.StageStop, intent.raw,
 		intent.signature, intent.authority, intent.descriptor)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"managed update quiesce runner: %w", err)
 	}
 	receipt, ok := validPlatformManagedUpdateQuiesceObservation(
 		observation, intent, endpoint)
 	if !ok {
-		return platformOperationLease{}, errAppPlatformStageEvidence
+		return platformOperationLease{}, fmt.Errorf(
+			"managed update quiesce observation: %w",
+			errAppPlatformStageEvidence)
 	}
-	return s.commitPlatformManagedUpdateQuiesce(
+	result, err := s.commitPlatformManagedUpdateQuiesce(
 		ctx, expected, intent, receipt)
+	if err != nil {
+		return platformOperationLease{}, fmt.Errorf(
+			"managed update quiesce commit: %w", err)
+	}
+	return result, nil
 }
 
 func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expected platformOperationLease, intent platformManagedUpdateQuiesceIntent, receipt journal.ManagedRemovalReceipt) (platformOperationLease, error) {
