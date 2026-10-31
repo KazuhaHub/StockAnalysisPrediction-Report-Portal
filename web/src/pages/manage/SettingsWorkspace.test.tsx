@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 
@@ -50,5 +50,85 @@ describe('SettingsWorkspace', () => {
     for (const tab of screen.getAllByRole('tab')) expect(tab.getAttribute('aria-controls')).toBe(panel.id)
     expect(panel.getAttribute('aria-labelledby')).toBe(screen.getByRole('tab', { name: 'Alpha' }).id)
     expect(panel.querySelectorAll('section')).toHaveLength(2)
+  })
+
+  // The underline is one element that moves under the selected tab, so a switch slides it across
+  // like antd's ink bar instead of jumping. jsdom lays nothing out, so the tabs' boxes are stubbed.
+  describe('sliding underline', () => {
+    const boxes: Record<string, { left: number; width: number }> = { Alpha: { left: 0, width: 60 }, Beta: { left: 64, width: 48 } }
+    const stub = (prop: 'offsetLeft' | 'offsetWidth', pick: (b: { left: number; width: number }) => number) =>
+      vi.spyOn(HTMLElement.prototype, prop, 'get').mockImplementation(function (this: HTMLElement) {
+        const box = boxes[this.textContent ?? '']
+        return this.getAttribute('role') === 'tab' && box ? pick(box) : 0
+      })
+    afterEach(() => {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+      boxes.Beta = { left: 64, width: 48 }
+    })
+
+    it('sits under the selected tab and follows it to the next one', () => {
+      stub('offsetLeft', (b) => b.left)
+      stub('offsetWidth', (b) => b.width)
+      const { container } = render(<Harness />)
+      const bar = container.querySelector('.rp-settings-tab-ink') as HTMLElement
+      expect(bar.getAttribute('aria-hidden')).toBe('true')
+      expect(bar.style.transform).toBe('translateX(0px)')
+      expect(bar.style.width).toBe('60px')
+      fireEvent.click(screen.getByRole('tab', { name: 'Beta' }))
+      expect(bar.style.transform).toBe('translateX(64px)')
+      expect(bar.style.width).toBe('48px')
+    })
+
+    it('appears in place on first paint and slides only on later switches', () => {
+      stub('offsetLeft', (b) => b.left)
+      stub('offsetWidth', (b) => b.width)
+      const { container } = render(<Harness />)
+      const bar = container.querySelector('.rp-settings-tab-ink') as HTMLElement
+      expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(false)
+      fireEvent.click(screen.getByRole('tab', { name: 'Beta' }))
+      expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
+    })
+
+    it('follows a resize without sliding, and is not rebuilt by a re-render with the same tabs', () => {
+      stub('offsetLeft', (b) => b.left)
+      stub('offsetWidth', (b) => b.width)
+      const observers: (() => void)[] = []
+      let created = 0
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(cb: () => void) { created++; observers.push(cb) }
+        observe() {}
+        disconnect() {}
+      })
+      const sections = () => [{ key: 'a', label: 'Alpha' }, { key: 'b', label: 'Beta' }]
+      const view = (active: string) => (
+        <SettingsWorkspace active={active} onChange={() => {}} sections={sections()}>
+          <SettingsPanel section="a">a</SettingsPanel>
+          <SettingsPanel section="b">b</SettingsPanel>
+        </SettingsWorkspace>
+      )
+      const { container, rerender } = render(view('a'))
+      rerender(view('b'))
+      const bar = container.querySelector('.rp-settings-tab-ink') as HTMLElement
+      expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
+      rerender(view('b'))
+      expect(created).toBe(1)
+      // A callback that finds the tab unmoved (only the list changed) leaves the slide running.
+      observers[0]()
+      expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
+      boxes.Beta = { left: 70, width: 52 }
+      observers[0]()
+      expect(bar.style.transform).toBe('translateX(70px)')
+      expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(false)
+    })
+
+    it('underlines nothing when the selection has no tab', () => {
+      const { container } = render(
+        <SettingsWorkspace active="gone" onChange={() => {}} sections={[{ key: 'a', label: 'Alpha' }]}>
+          <SettingsPanel section="a">a</SettingsPanel>
+        </SettingsWorkspace>,
+      )
+      expect((container.querySelector('.rp-settings-tab-ink') as HTMLElement).style.visibility).toBe('hidden')
+    })
   })
 })
