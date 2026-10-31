@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -132,13 +133,13 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 	sourceDigest := sha256.Sum256([]byte(sourceRaw))
 	if sourceOperation != c.Payload.SourceOperationID || sourceKind != "start-candidate" || sourceState != "applied" ||
 		!dataSHA(sourcePayload) || hex.EncodeToString(sourceDigest[:]) != c.Payload.SourceReceiptSHA256 || result.sourceFence < 1 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal source command", ErrFenceReconciliation)
 	}
 	var format struct {
 		Format string `json:"format"`
 	}
 	if json.Unmarshal([]byte(sourceRaw), &format) != nil {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal source receipt format", ErrFenceReconciliation)
 	}
 	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	switch format.Format {
@@ -154,7 +155,7 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 			source.Claim.Preflight == nil ||
 			source.Claim.Preflight.Platform != c.Payload.Platform ||
 			source.Claim.AdmittedFence != strconv.FormatInt(result.sourceFence, 10) {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal ordinary source receipt", ErrFenceReconciliation)
 		}
 		result.source = source
 		result.generation, _ = strconv.ParseInt(source.Generation, 10, 64)
@@ -171,12 +172,12 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 			writable.Claim.AdmittedFence != strconv.FormatInt(result.sourceFence, 10) ||
 			writable.Claim.Preflight.Native.Platform != c.Payload.Platform ||
 			writable.Claim.SandboxProfile != control.WritableCandidateSandboxProfile {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal writable source receipt", ErrFenceReconciliation)
 		}
 		revision, _ := strconv.ParseInt(writable.Claim.ControlRevision, 10, 64)
 		current, _ := strconv.ParseInt(c.ControlRevision, 10, 64)
 		if revision < 1 || current < revision {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal writable control revision", ErrFenceReconciliation)
 		}
 		result.writable = &writable
 		result.generation = target - 1
@@ -184,10 +185,10 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		result.platform = writable.Claim.Preflight.Native.Platform
 		result.ownership = writable.Claim.OwnershipSHA256
 	default:
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal source receipt profile", ErrFenceReconciliation)
 	}
 	if target != result.generation+1 || result.generation < 1 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal target generation", ErrFenceReconciliation)
 	}
 
 	var dataRaw, dataKind, dataState string
@@ -205,18 +206,18 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		data.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
 		data.Generation != strconv.FormatInt(result.generation, 10) ||
 		data.Claim.ResourceID != c.Payload.DataNamespaceID {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal data receipt", ErrFenceReconciliation)
 	}
 	if result.writable != nil {
 		if result.writable.Claim.DataReceiptSHA256 != hex.EncodeToString(dataDigest[:]) {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal writable data digest", ErrFenceReconciliation)
 		}
 		result.writerFence = mustDataInt(data.WriterFence)
 	} else if data.WriterFence != result.source.WriterFence || data.DataFormat != result.source.DataFormat {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal ordinary data receipt", ErrFenceReconciliation)
 	}
 	if result.writerFence < 1 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal writer fence", ErrFenceReconciliation)
 	}
 	result.data = data
 	var nativeID, observed, desired, release, namespace, epoch, ownership sql.NullString
@@ -235,26 +236,26 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		result.resource.generation != result.generation ||
 		result.resource.controlFence != result.sourceFence ||
 		result.resource.writerFence != result.writerFence {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal resource identity", ErrFenceReconciliation)
 	}
 	switch c.Stage {
 	case "stop":
 		if result.resource.revision != 2 || result.resource.observed != "running" || result.resource.desired != "present" {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal stop resource state", ErrFenceReconciliation)
 		}
 	case "remove_code":
 		if result.resource.revision != 3 || result.resource.observed != "stopped" || result.resource.desired != "stopped" {
-			return result, ErrFenceReconciliation
+			return result, fmt.Errorf("%w: managed removal remove-code resource state", ErrFenceReconciliation)
 		}
 	default:
 		return result, ErrManagedRemovalUnavailable
 	}
 	var pending int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil || pending != 0 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal pending command", ErrFenceReconciliation)
 	}
 	if now <= 0 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf("%w: managed removal clock", ErrFenceReconciliation)
 	}
 	return result, nil
 }
@@ -427,17 +428,17 @@ func (s *Store) checkManagedRemovalPrepared(ctx context.Context, source managedR
 		return err
 	}
 	if !current.preflightMatches(snapshot) {
-		return ErrFenceReconciliation
+		return fmt.Errorf("%w: managed removal prepared preflight", ErrFenceReconciliation)
 	}
 	if current.writable != nil && (writable == nil || writable.Launch != snapshot || writable.Binding != *current.writableBinding()) {
-		return ErrFenceReconciliation
+		return fmt.Errorf("%w: managed removal writable prepared binding", ErrFenceReconciliation)
 	}
 	if current.writable == nil && writable != nil {
-		return ErrFenceReconciliation
+		return fmt.Errorf("%w: managed removal prepared profile", ErrFenceReconciliation)
 	}
 	var state, receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, source.command.EffectID).Scan(&state, &receipt); err != nil || state != "unknown" || receipt != "{}" {
-		return ErrFenceReconciliation
+		return fmt.Errorf("%w: managed removal unknown intent", ErrFenceReconciliation)
 	}
 	return tx.Commit()
 }
