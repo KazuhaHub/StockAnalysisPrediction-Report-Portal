@@ -23,7 +23,10 @@ type platformCheckpointSource struct {
 	sourceReceiptSHA256, sourceDataReceiptSHA256  string
 	resourceID, namespaceID, releaseSHA256        string
 	projectID, namespaceInode, device, dataFormat string
-	writerFence                                   string
+	quotaBytes, quotaInodes                       string
+	rootFilesystemUUID, rootInode                 string
+	writerFence, platform, sandboxProfile         string
+	appID, publisherID                            string
 	descriptor                                    []byte
 }
 
@@ -126,7 +129,12 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 	source := platformCheckpointSource{
 		operationID: sourceOperation, resourceID: activation, namespaceID: activeNamespace.String,
 		releaseSHA256: sourceRelease, dataFormat: strconv.FormatInt(activeFormat, 10),
-		writerFence: "1", descriptor: descriptor,
+		writerFence: "1", descriptor: descriptor, platform: plan.Runtime.Profile.Platform,
+		sandboxProfile: control.CandidateSandboxProfile, appID: plan.AppID,
+		publisherID: plan.PublisherID,
+	}
+	if plan.Format == platformWritableInstallFormat {
+		source.sandboxProfile = control.WritableCandidateSandboxProfile
 	}
 	var origin, owner, namespaceState string
 	var namespaceFormat, quota, observedBytes, writerFence int64
@@ -230,6 +238,8 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 	source.sourceReceiptSHA256 = platformDigest([]byte(startEffect.receipt))
 	source.sourceDataReceiptSHA256 = platformDigest([]byte(dataEffect.receipt))
 	source.projectID, source.namespaceInode, source.device = data.ProjectID, data.NamespaceInode, data.Device
+	source.quotaBytes, source.quotaInodes = data.QuotaBytes, data.QuotaInodes
+	source.rootFilesystemUUID, source.rootInode = data.Claim.RootFilesystemUUID, data.Claim.RootInode
 	var pending int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND completed_ms IS NULL`, expected.installationID).Scan(&pending); err != nil || pending != 1 {
 		return zero, errAppPlatformStageEvidence

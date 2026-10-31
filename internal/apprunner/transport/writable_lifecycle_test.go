@@ -177,6 +177,69 @@ func restoreTransportFixture(t *testing.T) (control.Authority, control.RestoreCo
 	return a, command, raw, signature, descriptor, receipt
 }
 
+func updateStartTransportFixture(t *testing.T) (control.Authority, control.UpdateStartCommand, []byte, []byte, []byte, journal.UpdateStartReservation) {
+	t.Helper()
+	a, checkpoint, _, _, descriptor, checkpointReceipt := checkpointTransportFixture(t)
+	checkpointRaw, err := json.Marshal(checkpointReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	command := control.UpdateStartCommand{
+		Format: control.UpdateStartFormat, DeploymentID: a.DeploymentID,
+		ControllerEpoch: a.ControllerEpoch, ControlRevision: strconv.FormatInt(a.ControlRevision, 10),
+		InstallationID: checkpoint.InstallationID, OperationID: checkpoint.OperationID,
+		TargetGeneration: checkpoint.TargetGeneration, Stage: "start", EffectNumber: "1",
+		EffectID: "11111111-1111-4111-8111-111111119970", Kind: "update-start",
+		InstallationFence: "2",
+		Payload: control.UpdateStartPayload{
+			ResourceID:                  "11111111-1111-4111-8111-111111119971",
+			NamespaceID:                 checkpoint.Payload.NamespaceID,
+			SourceOperationID:           checkpoint.Payload.SourceOperationID,
+			SourceStartEffectID:         checkpoint.Payload.SourceStartEffectID,
+			SourceStartReceiptSHA256:    checkpoint.Payload.SourceReceiptSHA256,
+			SourceDataEffectID:          checkpoint.Payload.SourceDataEffectID,
+			SourceDataReceiptSHA256:     checkpoint.Payload.SourceDataReceiptSHA256,
+			SourceCheckpointOperationID: checkpoint.OperationID,
+			SourceCheckpointEffectID:    checkpoint.EffectID,
+			SourceCheckpointReceiptSHA256: func() string {
+				sum := sha256.Sum256(checkpointRaw)
+				return hex.EncodeToString(sum[:])
+			}(),
+			CheckpointID:             checkpoint.Payload.CheckpointID,
+			CheckpointManifestSHA256: checkpointReceipt.ManifestSHA256,
+			CheckpointArchiveBytes:   checkpointReceipt.ArchiveBytes,
+			SourceReleaseSHA256:      checkpoint.Payload.ReleaseSHA256,
+			TargetReleaseSHA256:      checkpoint.Payload.ReleaseSHA256,
+			SourceGeneration:         "1", TargetPolicyRevision: "2",
+			ProjectID: checkpoint.Payload.ProjectID, NamespaceInode: checkpoint.Payload.NamespaceInode,
+			Device: checkpoint.Payload.Device, QuotaBytes: "268435456", QuotaInodes: "65536",
+			RootFilesystemUUID: "11111111-1111-4111-8111-111111119972", RootInode: "12",
+			DataFormat: checkpoint.Payload.DataFormat, SourceWriterFence: checkpoint.Payload.WriterFence,
+			TargetWriterFence: "2", Platform: "linux/amd64",
+			SandboxProfile: control.CandidateSandboxProfile,
+		},
+	}
+	command.PayloadSHA256, err = control.UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.IssuedMS, command.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+	signed, signature, err := control.SignUpdateStart(command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := journal.UpdateStartReservation{
+		ResourceID: command.Payload.ResourceID, InstallationID: command.InstallationID,
+		NamespaceID: command.Payload.NamespaceID, EffectID: command.EffectID,
+		OwnershipSHA256: strings.Repeat("d", 64), SourceGeneration: 1, TargetGeneration: 2,
+		SourceReleaseSHA256: command.Payload.SourceReleaseSHA256,
+		TargetReleaseSHA256: command.Payload.TargetReleaseSHA256,
+		ControlFence:        2, SourceWriterFence: 1, TargetWriterFence: 2,
+	}
+	return a, command, signed, signature, descriptor, reservation
+}
+
 func TestWritableLifecycleIndependentActionReferences(t *testing.T) {
 	a, c, raw, sig, descriptor, _ := writableHandshakeRequestFixture(t)
 	v, err := control.VerifyWritableBackendRegistration(raw, sig, a, time.Now().UnixMilli())
@@ -360,6 +423,46 @@ func TestWritableLifecycleRestoreReferenceAndReply(t *testing.T) {
 	}
 }
 
+func TestWritableLifecycleUpdateStartReferenceAndReply(t *testing.T) {
+	a, command, raw, sig, descriptor, reservation := updateStartTransportFixture(t)
+	now := time.Now().UnixMilli()
+	for _, action := range []WritableLifecycleAction{UpdateStartReserve, UpdateStartRead} {
+		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		if err != nil || ref.updateStart.EffectID != command.EffectID ||
+			ref.release != command.Payload.TargetReleaseSHA256 {
+			t.Fatal("update-start reference", action, err)
+		}
+		body, _ := json.Marshal(reservation)
+		if !validWritableLifecycleReply(action, body, ref, time.Now().Add(-time.Second), time.Now()) {
+			t.Fatal("exact update-start reservation refused", action)
+		}
+	}
+	ref, err := verifyWritableLifecycle(UpdateStartReserve, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*journal.UpdateStartReservation){
+		"resource":       func(v *journal.UpdateStartReservation) { v.ResourceID = "11111111-1111-4111-8111-111111119980" },
+		"effect":         func(v *journal.UpdateStartReservation) { v.EffectID = "11111111-1111-4111-8111-111111119981" },
+		"namespace":      func(v *journal.UpdateStartReservation) { v.NamespaceID = "11111111-1111-4111-8111-111111119982" },
+		"source gen":     func(v *journal.UpdateStartReservation) { v.SourceGeneration = 2; v.TargetGeneration = 3 },
+		"source release": func(v *journal.UpdateStartReservation) { v.SourceReleaseSHA256 = strings.Repeat("a", 64) },
+		"target release": func(v *journal.UpdateStartReservation) { v.TargetReleaseSHA256 = strings.Repeat("b", 64) },
+		"fence":          func(v *journal.UpdateStartReservation) { v.ControlFence = 3 },
+		"source writer":  func(v *journal.UpdateStartReservation) { v.SourceWriterFence = 2; v.TargetWriterFence = 3 },
+		"target writer":  func(v *journal.UpdateStartReservation) { v.TargetWriterFence = 3 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := reservation
+			mutate(&changed)
+			body, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(UpdateStartReserve, body, ref, time.Now().Add(-time.Second), time.Now()) {
+				t.Fatal("changed update-start reservation accepted")
+			}
+		})
+	}
+}
+
 func TestWritableLifecycleOpaqueTypedEvidence(t *testing.T) {
 	var proof WritableLifecycleObservation
 	if _, err := json.Marshal(proof); err == nil {
@@ -421,6 +524,16 @@ func TestWritableLifecycleOpaqueTypedEvidence(t *testing.T) {
 	proof.action = CheckpointRead
 	if _, err := proof.RestoreReceipt(); err == nil {
 		t.Fatal("checkpoint used as restore")
+	}
+	a, _, _, _, _, reservation := updateStartTransportFixture(t)
+	reservationBody, _ := json.Marshal(reservation)
+	proof = WritableLifecycleObservation{action: UpdateStartRead, body: string(reservationBody), authority: a}
+	if got, err := proof.UpdateStartReservation(); err != nil || got != reservation {
+		t.Fatal("update-start reservation evidence", got, err)
+	}
+	proof.action = RestoreRead
+	if _, err := proof.UpdateStartReservation(); err == nil {
+		t.Fatal("restore used as update-start")
 	}
 	copy := proof.Controller()
 	copy.PublicKey[0] ^= 1

@@ -32,13 +32,15 @@ const (
 	CheckpointRead
 	RestoreExecute
 	RestoreRead
+	UpdateStartReserve
+	UpdateStartRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= RestoreRead
+	return a >= WritableWriterExecute && a <= UpdateStartRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -111,6 +113,12 @@ func (o WritableLifecycleObservation) RestoreReceipt() (journal.RestoreReceipt, 
 	}
 	return journal.ParseRestoreReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) UpdateStartReservation() (journal.UpdateStartReservation, error) {
+	if o.action < UpdateStartReserve || o.action > UpdateStartRead {
+		return journal.UpdateStartReservation{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseUpdateStartReservation([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer       control.DataWriterCommand
@@ -119,6 +127,7 @@ type writableLifecycleReference struct {
 	removal      control.ManagedRemovalCommand
 	checkpoint   control.CheckpointCommand
 	restore      control.RestoreCommand
+	updateStart  control.UpdateStartCommand
 	index        control.Command
 	release      string
 }
@@ -170,13 +179,20 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		}
 		r.checkpoint = v.Command()
 		r.release = r.checkpoint.Payload.ReleaseSHA256
-	default:
+	case action <= RestoreRead:
 		v, err := control.VerifyRestore(raw, sig, a, now)
 		if err != nil {
 			return r, err
 		}
 		r.restore = v.Command()
 		r.release = r.restore.Payload.ReleaseSHA256
+	default:
+		v, err := control.VerifyUpdateStart(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.updateStart = v.Command()
+		r.release = r.updateStart.Payload.TargetReleaseSHA256
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != r.release {
@@ -291,11 +307,31 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return false
 		}
 		settled = v.SettledMS
+	case action >= UpdateStartReserve && action <= UpdateStartRead:
+		v, e := journal.ParseUpdateStartReservation(body)
+		c := r.updateStart
+		if e != nil || v.ResourceID != c.Payload.ResourceID ||
+			v.InstallationID != c.InstallationID || v.NamespaceID != c.Payload.NamespaceID ||
+			v.EffectID != c.EffectID || v.SourceGeneration != mustLifecycleInt(c.Payload.SourceGeneration) ||
+			v.TargetGeneration != mustLifecycleInt(c.TargetGeneration) ||
+			v.SourceReleaseSHA256 != c.Payload.SourceReleaseSHA256 ||
+			v.TargetReleaseSHA256 != c.Payload.TargetReleaseSHA256 ||
+			v.ControlFence != mustLifecycleInt(c.InstallationFence) ||
+			v.SourceWriterFence != mustLifecycleInt(c.Payload.SourceWriterFence) ||
+			v.TargetWriterFence != mustLifecycleInt(c.Payload.TargetWriterFence) {
+			return false
+		}
+		return true
 	default:
 		return false
 	}
 	n, e := strconv.ParseInt(settled, 10, 64)
 	return e == nil && n <= received.UnixMilli()
+}
+
+func mustLifecycleInt(value string) int64 {
+	parsed, _ := strconv.ParseInt(value, 10, 64)
+	return parsed
 }
 
 func lifecycleRevisionWithin(value, current string) bool {

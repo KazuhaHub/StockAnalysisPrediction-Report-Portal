@@ -163,7 +163,7 @@ func loadWritableCandidateFacts(ctx context.Context, tx *sql.Tx, v control.Verif
 		return zero, ErrFenceReconciliation
 	}
 	f := writableCandidateFacts{verified: v, stored: stored, authority: a, raw: raw, signature: signature, source: source, receipt: current, created: created, updated: updated, now: now, started: started}
-	resource, err := existingCandidateResourcePrefix(ctx, tx, c, writableCandidatePendingPrefix)
+	resource, err := existingCandidateResourcePrefix(ctx, tx, candidateIndex(c), writableCandidatePendingPrefix, c.Payload.ResourceID)
 	if err != nil {
 		return zero, err
 	}

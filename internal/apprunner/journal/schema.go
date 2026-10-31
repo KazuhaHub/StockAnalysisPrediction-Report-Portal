@@ -23,7 +23,7 @@ func schemaProducts() []schemaProduct {
 			"PRIMARY KEY(effect_id),UNIQUE(operation_id,stage,effect_number)", []string{"effect_number<=32",
 				enumCondition("state", "prepared", "applied", "reverted", "unknown"),
 				enumCondition("stage", "validate", "download", "stage", "prepare_data", "quiesce", "snapshot", "migrate", "start", "probe", "activate", "revoke", "stop", "remove_code", "remove_data", "restore_data"),
-				enumCondition("kind", "stage", "verify", "prepare-data", "start-candidate", "probe", "activate", "stop", "snapshot", "restore", "remove-code", "delete-data"),
+				enumCondition("kind", "stage", "verify", "prepare-data", "start-candidate", "update-start", "probe", "activate", "stop", "snapshot", "restore", "remove-code", "delete-data"),
 				"ack_attempted_ms IS NULL OR state<>'prepared'"}},
 		{"runner_resources", "id:ID installation_id:ID data_namespace_id:ID? kind:T24 native_id:T512 release_sha256:SHA? generation:N controller_epoch:ID control_fence:N writer_fence:N desired_state:T16 observed_state:T24 ownership_sha256:SHA revision:R observed_ms:MS? created_ms:MS updated_ms:MS",
 			"PRIMARY KEY(id),UNIQUE(kind,native_id)", []string{enumCondition("kind", "container", "volume", "socket", "artifact"),
