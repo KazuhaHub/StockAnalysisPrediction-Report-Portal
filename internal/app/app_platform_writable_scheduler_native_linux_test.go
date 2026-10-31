@@ -191,6 +191,21 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		selected.lease.snapshot.Stage != appplatform.StageQueued {
 		t.Fatal("managed update queue claim", selected, err)
 	}
+	lease := selected.lease
+	for range 4 {
+		lease, err = s.advancePlatformManagedUpdateStage(ctx, lease)
+		if err != nil {
+			t.Fatal("managed update staging", lease.snapshot.Stage, err)
+		}
+	}
+	if lease.snapshot.Stage != appplatform.StageQuiesce {
+		t.Fatal("managed update did not reach quiesce", lease.snapshot)
+	}
+	snapshot, err := s.executePlatformManagedUpdateQuiesce(
+		ctx, lease, endpoint)
+	if err != nil || snapshot.snapshot.Stage != appplatform.StageSnapshot {
+		t.Fatal("managed update source quiesce", snapshot.snapshot, err)
+	}
 	mustExec(t, s.st, `UPDATE app_platform_operations
 		SET lease_until_ms=1 WHERE id=?`, admitted.OperationID)
 	worker, err := newPlatformWritableInstallScheduler(
