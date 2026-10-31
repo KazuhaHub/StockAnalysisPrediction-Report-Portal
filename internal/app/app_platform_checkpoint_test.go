@@ -351,6 +351,24 @@ func TestPlatformCheckpointCommitRollbackAndPausePostgres(t *testing.T) {
 	testPlatformCheckpointCommitRollbackAndPause(t, true)
 }
 
+func TestPlatformCheckpointEndpointRefusesUnverifiedRuntimeSQLite(t *testing.T) {
+	endpoint := platformRuntimeEndpoint{path: "/run/portal-test/missing-checkpoint.sock", controllerUID: 1000, controllerGID: 1001}
+	s, dispatchLease := platformCheckpointUpdateFixture(t, false)
+	if _, err := s.dispatchPlatformCheckpoint(context.Background(), dispatchLease, endpoint); err == nil {
+		t.Fatal("checkpoint dispatch accepted an unverified runtime endpoint")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot' AND state='prepared'`, dispatchLease.id) != 1 {
+		t.Fatal("failed endpoint dispatch lost its durable prepared intent")
+	}
+	s, readLease := platformCheckpointUpdateFixture(t, false)
+	if _, err := s.readPlatformCheckpoint(context.Background(), readLease, endpoint); err == nil {
+		t.Fatal("checkpoint receipt read accepted an unverified runtime endpoint")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot' AND state='prepared'`, readLease.id) != 1 {
+		t.Fatal("failed endpoint read lost its durable prepared intent")
+	}
+}
+
 func testPlatformCheckpointRejectsChangedDurableIntent(t *testing.T, pg bool) {
 	for name, mutate := range map[string]string{
 		"effect digest":       `UPDATE app_platform_operation_effects SET payload_sha256=? WHERE operation_id=? AND stage='snapshot'`,
