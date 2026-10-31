@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import BalancedSequencer from './src/test/balancedSequencer.ts'
 
 // In dev, proxy API / downloads / health check to the Go backend (:8790). The
 // production build is written to ../internal/web/dist for //go:embed.
@@ -55,6 +56,9 @@ export default defineConfig({
     // failures roamed — Markdown, site settings, types, version-check — which is the signature of
     // CPU contention rather than of any one test being wrong.
     maxWorkers: 4,
+    // CI deals the files over shards by recorded duration instead of vitest's equal-count hash
+    // slices (see src/test/balancedSequencer.ts; refresh with `npm run test:durations`).
+    sequence: { sequencer: BalancedSequencer },
     // The other half of the same problem. Raising testing-library's async budget stopped assertions
     // reporting a pre-update value, but each TEST still had vitest's 5s ceiling — and under a
     // contended pool a whole test can legitimately take longer than that, which reports as
