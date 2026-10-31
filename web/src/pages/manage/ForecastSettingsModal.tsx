@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
 import { notifyError } from '../../lib/notify'
+import useLeaveGuard from './useLeaveGuard'
 
 // The evaluator's settings, as a modal opened from the verification page's header.
 //
@@ -38,6 +39,11 @@ export default function ForecastSettingsModal({
       setFallback(value.fallback || 'off')
     }
   }, [open, value.bench, value.bench_next, value.fallback])
+
+  // Dirty means the draft differs from what the page last loaded, so a save that the page then
+  // reloads (or a close) leaves it clean without any baseline to keep in step.
+  const dirty = open && (bench !== (value.bench_next || value.bench) || fallback !== (value.fallback || 'off'))
+  const close = useLeaveGuard(dirty, open && busy, onClose)
 
   const benchOptions = value.bench_codes.map((code) => ({
     value: code,
@@ -86,7 +92,7 @@ export default function ForecastSettingsModal({
     <Modal
       title={t('forecast.settings.title')}
       open={open}
-      onCancel={onClose}
+      onCancel={close}
       onOk={save}
       confirmLoading={busy}
       okText={t('common.save')}

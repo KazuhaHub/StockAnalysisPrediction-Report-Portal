@@ -12,6 +12,7 @@ import { AppsBreadcrumb } from './appsAdminParts'
 import OrgUnitPicker from './OrgUnitPicker'
 import ScopeFold from './ScopeFold'
 import { notifyError } from '../../lib/notify'
+import { usePendingSettings } from './AdminDraftBoundary'
 
 // The service status of one app by organizational unit (ADR 0048), modelled on the Google Workspace
 // Admin console: pick an OU on the left, set that one app on or off on the right. An OU inherits its
@@ -178,7 +179,11 @@ function AccessEditor({
   const [choice, setChoice] = useState<boolean | null>(null)
   const draft = choice ?? mine.effective
   const [busy, setBusy] = useState(false)
-  const dirty = choice !== null && choice !== mine.own
+  // The override as last loaded or saved. A save moves it at once, so the editor is clean even if
+  // the refresh that follows fails and `mine` is still the old row.
+  const [savedOwn, setSavedOwn] = useState<boolean | null>(mine.own)
+  const dirty = choice !== null && choice !== savedOwn
+  usePendingSettings(dirty, busy)
   useEffect(() => {
     onDirtyChange(dirty)
     return () => onDirtyChange(false)
@@ -195,6 +200,8 @@ function AccessEditor({
     setBusy(true)
     try {
       await api.put(`/api/admin/apps/${encodeURIComponent(app.key)}/access/${group.id}`, { enabled })
+      setSavedOwn(enabled)
+      if (enabled === null) setChoice(null)
       if (!(await reload({ quiet: true }))) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {

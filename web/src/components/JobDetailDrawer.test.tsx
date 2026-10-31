@@ -250,10 +250,10 @@ describe('a job that is being cancelled', () => {
 describe('loading and failure', () => {
   const detailCalls = () => apiMock.get.mock.calls.filter((c) => /jobs\/\d+$/.test(c[0])).length
 
-  it('shows a spinner until the first reply', async () => {
+  it('says it is loading until the first reply', async () => {
     apiMock.get.mockImplementation((url: string) => (url.includes('/targets') ? Promise.resolve({ targets: [] }) : new Promise(() => {})))
     mount()
-    await waitFor(() => expect(document.querySelector('.ant-spin')).not.toBeNull())
+    expect(await screen.findByText('common.loading')).toBeTruthy()
     expect(screen.queryByText('batch.jobNotFound')).toBeNull()
   })
 
@@ -284,7 +284,7 @@ describe('loading and failure', () => {
     expect(detailCalls()).toBeGreaterThan(before)
   })
 
-  it('keeps the spinner, with no red error, when the connection is down', async () => {
+  it('keeps loading, with no red error, when the connection is down', async () => {
     apiMock.get.mockImplementation(async (url: string) => {
       if (url.includes('/targets')) return { targets: [] }
       throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
@@ -293,7 +293,7 @@ describe('loading and failure', () => {
     await waitFor(() => expect(apiMock.get.mock.calls.some((c) => /jobs\/\d+$/.test(c[0]))).toBe(true))
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByRole('button', { name: /common\.retry/ })).toBeNull()
-    expect(document.querySelector('.ant-spin')).not.toBeNull()
+    expect(screen.getByText('common.loading')).toBeTruthy()
   })
 })
 

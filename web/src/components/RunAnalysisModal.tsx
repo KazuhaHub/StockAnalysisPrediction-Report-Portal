@@ -11,7 +11,6 @@ import {
   Popover,
   Select,
   Space,
-  Spin,
   Tooltip,
   Typography,
 } from 'antd'
@@ -38,6 +37,7 @@ import DifyFileInput from './DifyFileInput'
 import RunScheduleControls from './RunScheduleControls'
 import type { BatchQueueSummary, BatchTarget, BatchTickets, PluginInput, RunPreset, RunPresetsResp, RunQuota } from '../api/types'
 import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 // The home-page run-analysis modal (docs/adr/0007 + 0014): pick a Dify workflow, fill its
 // discovered inputs, choose when to run (now / a preset low-peak window / an explicit 定时 time)
@@ -448,13 +448,10 @@ export default function RunAnalysisModal({
       className="rp-run-analysis-modal"
     >
       {loading ? (
-        // A spinner is the honest answer while the workflow list is on the wire. What used to be
+        // A placeholder is the honest answer while the workflow list is on the wire. What used to be
         // here — an empty Select under "no workflows are configured" — described a server that
         // had not spoken yet.
-        <div style={{ display: 'grid', alignContent: 'center', justifyItems: 'center', minHeight: 180, gap: 12 }}>
-          <Spin size="large" />
-          <Typography.Text type="secondary">{t('run.loading')}</Typography.Text>
-        </div>
+        <LoadingPlaceholder minHeight={180} rows={4} label={t('run.loading')} />
       ) : !targetsOk && loadErr ? (
         <Alert type="error" showIcon title={t('common.loadFailedContent')} description={loadErr} />
       ) : (

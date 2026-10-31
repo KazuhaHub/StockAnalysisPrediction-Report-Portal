@@ -141,7 +141,7 @@ export default function WebhooksPage() {
         <Typography.Text type="secondary">{t('webhook.hint')}</Typography.Text>
         <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
         <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={180} title={t('common.loadFailedContent')}>
-          <CardTable rowKey="id" size="small" dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
+          <CardTable rowKey="id" size="small" filtered={!!search.trim()} onClearFilters={() => setSearch('')} dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
         </LoadGate>
       </Space>
 

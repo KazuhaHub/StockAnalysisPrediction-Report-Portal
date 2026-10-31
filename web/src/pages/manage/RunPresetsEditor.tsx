@@ -3,7 +3,7 @@ import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Select, 
 import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
-import Confirm, { confirmAction } from '../../components/Confirm'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -14,6 +14,7 @@ import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import { usePendingSettings } from './AdminDraftBoundary'
 import { notifyError } from '../../lib/notify'
+import { confirmLeave } from './useLeaveGuard'
 
 // Admin editor for preset low-peak scheduling windows (docs/adr/0014). An ordered, drag-sortable
 // list (like LinksPage / TypesPage); each preset is edited in a modal whose anchor fields adapt to
@@ -129,7 +130,7 @@ export default function RunPresetsEditor() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'), okText: t('manage.leave'), cancelText: t('manage.stay'), onOk: () => setDraft(null) }, t)
+    confirmLeave(modal, t, () => setDraft(null))
   }
 
   const load = (opts?: LoadOpts) => {

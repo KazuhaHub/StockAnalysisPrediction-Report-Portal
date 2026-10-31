@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Empty, Input, Pagination, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Input, Pagination, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import Markdown from '../../components/Markdown'
 import { usePrefs } from '../../prefs'
 import { specToEndpoints, type ApiEndpoint, type ApiParam, type ApiError } from './openapiDoc'
-import CardTable from '../../components/CardTable'
+import CardTable, { NoMatches } from '../../components/CardTable'
+import { LoadingPlaceholder } from '../../components/LoadGate'
 
 const METHOD_COLORS: Record<string, string> = {
   GET: 'green',
@@ -120,7 +121,7 @@ export default function ApiDocPage() {
   }, [apiDocURL, retry])
 
   if (failed) return <Space orientation="vertical"><Typography.Text type="danger">{t('apidoc.loadFailed')}</Typography.Text><Button onClick={() => setRetry((v) => v + 1)}>{t('common.retry')}</Button></Space>
-  if (!doc) return <Spin />
+  if (!doc) return <LoadingPlaceholder minHeight="40vh" />
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   const endpoints = doc.endpoints.filter((e) => terms.every((term) => `${e.method} ${e.path} ${e.summary} ${e.scope}`.toLocaleLowerCase().includes(term)))
   const currentPage = Math.min(page, Math.max(1, Math.ceil(endpoints.length / 10)))
@@ -140,7 +141,9 @@ export default function ApiDocPage() {
       {endpoints.slice((currentPage - 1) * 10, currentPage * 10).map((e) => (
         <EndpointCard key={`${e.method} ${e.path}`} e={e} />
       ))}
-      {endpoints.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.noResults')} />}
+      {endpoints.length === 0 && (query.trim()
+        ? <NoMatches onClear={() => { setQuery(''); setPage(1) }} />
+        : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />)}
       <Pagination current={currentPage} pageSize={10} total={endpoints.length} onChange={setPage} showSizeChanger={false} hideOnSinglePage />
     </Space>
   )

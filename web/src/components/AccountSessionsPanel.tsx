@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Empty, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, Empty, Space, Tag, Typography } from 'antd'
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Confirm from './Confirm'
@@ -11,6 +11,7 @@ import { auditTime } from '../lib/auditTime'
 import { clientLabel } from '../lib/clientInfo'
 import { formatRegion } from '../lib/geo'
 import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 export default function AccountSessionsPanel() {
   const { t, i18n } = useTranslation()
@@ -59,7 +60,7 @@ export default function AccountSessionsPanel() {
           <Button danger disabled={busy}>{t('sessions.logoutAll')}</Button>
         </Confirm>
       </Space>
-      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <Spin /> : !data.items.length ? <Empty /> : (
+      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <LoadingPlaceholder rows={3} /> : !data.items.length ? <Empty /> : (
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           {data.items.map((item) => {
             const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)

@@ -136,6 +136,8 @@ export default function TokensPage() {
         rowKey="id"
         size="small"
         loading={loading}
+        filtered={!!search.trim()}
+        onClearFilters={() => setSearch('')}
         dataSource={tokens.filter((token) => `${token.name} ${token.scope} ${t(`scope.${token.scope}`, token.scope)} ${token.prefix}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
         pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }}
         scroll={{ x: 'max-content' }}

@@ -24,7 +24,7 @@ import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
-import CardTable from '../../components/CardTable'
+import CardTable, { NoMatches } from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
 
 // antd's Tag preset colors (https://ant.design/components/tag) — "default" maps
@@ -330,6 +330,8 @@ export default function TypesPage() {
     },
   ]
 
+  const matchesSearch = (r: TypeRow) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
+
   return (
     // A plain flex column (not antd Space) so the sticky save bar's parent is a tall block it can
     // pin against — Space wraps each child in an item box only as tall as the bar itself.
@@ -363,7 +365,8 @@ export default function TypesPage() {
       </Space>
       <Typography.Text type="secondary">{t('manage.typesSaveScope')}</Typography.Text>
       <ConfigProvider componentDisabled={busy}>
-      {groups.filter((g) => g.rows.some((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))).map((g) => {
+      {search.trim() && !groups.some((g) => g.rows.some(matchesSearch)) && <NoMatches onClear={() => setSearch('')} />}
+      {groups.filter((g) => g.rows.some(matchesSearch)).map((g) => {
         const groupNames = g.rows.map((r) => r.name)
         return (
           <div key={g.kind}>
@@ -378,7 +381,7 @@ export default function TypesPage() {
                 rowKey="name"
                 size="small"
                 loading={loading}
-                dataSource={g.rows.filter((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
+                dataSource={g.rows.filter(matchesSearch)}
                 pagination={false}
                 scroll={{ x: 700 }}
                 components={sortableTableComponents}

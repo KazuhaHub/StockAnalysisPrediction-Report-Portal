@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { App } from 'antd'
+import { App, ConfigProvider } from 'antd'
 import { MemoryRouter } from 'react-router'
 import ForecastSettingsModal from './ForecastSettingsModal'
 import type { ForecastSettings } from '../../api/types'
@@ -16,6 +17,10 @@ vi.mock('../../api/client', () => ({
   api: apiMock,
   errText: (_e: unknown, t: (k: string) => string) => t('err.forecast_bad_bench'),
 }))
+
+const pending = vi.hoisted(() => vi.fn())
+vi.mock('./AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
+const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 
@@ -40,11 +45,13 @@ function show(value: Partial<ForecastSettings> = {}) {
   const onSaved = vi.fn()
   const onClose = vi.fn()
   render(
-    <App>
-      <MemoryRouter>
-        <ForecastSettingsModal open value={{ ...base, ...value }} onClose={onClose} onSaved={onSaved} />
-      </MemoryRouter>
-    </App>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <App>
+        <MemoryRouter>
+          <ForecastSettingsModal open value={{ ...base, ...value }} onClose={onClose} onSaved={onSaved} />
+        </MemoryRouter>
+      </App>
+    </ConfigProvider>,
   )
   return { onSaved, onClose }
 }
@@ -87,5 +94,60 @@ describe('ForecastSettingsModal', () => {
     save()
     expect(apiMock.post).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  describe('unsaved changes', () => {
+    beforeEach(() => pending.mockReset())
+
+    it('is not pending after load', () => {
+      show()
+      expect(lastPending()).toEqual([false, false])
+    })
+
+    it('is pending once a field differs from the loaded value, and clean again when put back', async () => {
+      show({ fallback: 'off' })
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.fallback' }))
+      fireEvent.click(await screen.findByText('forecast.settings.fallbackShadow'))
+      expect(lastPending()).toEqual([true, false])
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.fallback' }))
+      fireEvent.click(await screen.findByText('forecast.settings.fallbackOff'))
+      expect(lastPending()).toEqual([false, false])
+    })
+
+    it('closes without asking when nothing changed', () => {
+      const { onClose } = show()
+      fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
+      expect(onClose).toHaveBeenCalledOnce()
+      expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0)
+    })
+
+    it('asks before closing with edits, keeps them on stay and closes on leave', async () => {
+      const { onClose } = show({ fallback: 'off' })
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.fallback' }))
+      fireEvent.click(await screen.findByText('forecast.settings.fallbackShadow'))
+      fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
+      expect((await screen.findAllByText('manage.leaveTitle')).length).toBeGreaterThan(0)
+      expect(onClose).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: 'manage.stay' }))
+      await waitFor(() => expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0))
+      expect(onClose).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'manage.leave' }))
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    })
+
+    it('is clean again after a successful save refreshes the value', async () => {
+      function Harness() {
+        const [value, setValue] = useState<ForecastSettings>({ ...base, fallback: 'off' })
+        return <ForecastSettingsModal open value={value} onClose={() => {}} onSaved={() => setValue((v) => ({ ...v, fallback: 'shadow' }))} />
+      }
+      render(<App><MemoryRouter><Harness /></MemoryRouter></App>)
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'forecast.settings.fallback' }))
+      fireEvent.click(await screen.findByText('forecast.settings.fallbackShadow'))
+      expect(lastPending()).toEqual([true, false])
+      save()
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/forecast', { fallback: 'shadow' }))
+      await waitFor(() => expect(lastPending()).toEqual([false, false]))
+    })
   })
 })

@@ -8,7 +8,6 @@ import {
   Input,
   Modal,
   Space,
-  Spin,
   Tag,
   Tabs,
   Typography,
@@ -28,6 +27,7 @@ import LoginActivityPanel from '../components/LoginActivityPanel'
 import AccountSessionsPanel from '../components/AccountSessionsPanel'
 import { notifyError } from '../lib/notify'
 import StatusTag from '../components/StatusTag'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // Self-service account security (ADR 0023). The 2FA, recovery-code and passkey endpoints existed
 // with no way for a user to reach them: enrolment was an admin errand. Security settings remain one
@@ -564,10 +564,7 @@ function ProofModal({
         // read, but drawn straight away it also hides the SSO buttons — so an account whose only
         // way through is a provider is shown a password box and nothing else, until the answer
         // lands. A moment's spinner says the same thing without deciding it.
-        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, padding: 24 }}>
-          <Spin />
-          <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        </div>
+        <LoadingPlaceholder rows={3} />
       ) : (
       <>
       <Typography.Paragraph type="secondary">

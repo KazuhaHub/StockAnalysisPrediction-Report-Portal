@@ -5,7 +5,6 @@ import { CloseOutlined, HolderOutlined, PlusOutlined, SettingOutlined, MoreOutli
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, AutoScrollActivator, MeasuringStrategy, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable'
 import { useTranslation } from 'react-i18next'
-import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import DashboardWidgetPreview from './DashboardWidgetPreview'
 import { ADMIN_GROUPS } from './adminNavigation'
@@ -14,6 +13,7 @@ import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import { animateDashboardChange, animateDashboardModeChange } from './dashboardMotion'
 import { dashboardCollision, snapshotDashboardWidget } from './dashboardDrag'
 import { newDashboardInstanceID, dashboardBlockKind, dashboardChartType, dashboardChartTypes, defaultDashboardChart, isDashboardChart, dashboardBlockLabel, dashboardBlockCategory, dashboardCatalog, defaultDashboardBlocks, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
+import { confirmLeave } from './useLeaveGuard'
 
 function SizeLabel({ width }: { width: DashboardBlock['width'] }) {
   const { t } = useTranslation()
@@ -117,7 +117,7 @@ export default function DashboardLayoutEditor({ layout, error, onSaved, onPrevie
   const stop = () => animateDashboardModeChange(() => { setBase(null); setSaveError(''); setPalette(false) }, gridRef.current)
   const start = () => animateDashboardModeChange(() => { setBase(layout); setDraft(layout!.blocks) }, gridRef.current)
   const cancel = () => {
-    if (dirty) confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'), okText: t('manage.discard'), cancelText: t('manage.stay'), onOk: stop }, t)
+    if (dirty) confirmLeave(modal, t, stop, t('manage.discard'))
     else stop()
   }
   const save = async () => {

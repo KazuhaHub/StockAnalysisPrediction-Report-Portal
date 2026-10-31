@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Segmented, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Drawer, Segmented, Space, Tag, Typography, theme } from 'antd'
 import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -8,7 +8,6 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import { forecastLinkColor, forecastPalette, formatSigned } from '../../lib/forecastPresentation'
 import { MetricsTable, SlicesTable } from './ForecastDrawerMetrics'
 import ScrollRegion from './ScrollRegion'
-import WaitingForConnection from '../WaitingForConnection'
 import type {
   ForecastCell,
   ForecastCheckpoint,
@@ -24,6 +23,7 @@ import Quiet from './Quiet'
 import WarnTag from './WarnTag'
 import ForecastVisibleResults from './ForecastVisibleResults'
 import CardTable from '../CardTable'
+import { LoadingPlaceholder } from '../LoadGate'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
@@ -296,7 +296,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
           {(membership || presentation === 'table') && <Typography.Title level={5} style={{ marginTop: 0 }}>
             {t('forecast.drawer.members')}
           </Typography.Title>}
-          {!membership && presentation === 'visual' && current.loading && <><Spin /><WaitingForConnection /></>}
+          {!membership && presentation === 'visual' && current.loading && <LoadingPlaceholder />}
           {/* The list leaves out the months retention removed; the cell above it does not say so. */}
           {mode === 'custom' && current.excluded.length > 0 && (
             <div style={{ marginBottom: 8 }}>

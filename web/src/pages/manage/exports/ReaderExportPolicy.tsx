@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { App, Alert, Button, Card, InputNumber, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../../api/client'
@@ -11,6 +11,8 @@ import InheritField from '../InheritField'
 import ScopeFold from '../ScopeFold'
 import OrgUnitPicker from '../OrgUnitPicker'
 import { notifyError } from '../../../lib/notify'
+import { usePendingSettings } from '../AdminDraftBoundary'
+import { confirmLeave } from '../useLeaveGuard'
 
 // The reader-export policy console (ADR 0046), the section at the foot of the administrator's Export
 // page: the OU tree on the left, and for the chosen OU three settings that each either inherit or are
@@ -19,7 +21,7 @@ import { notifyError } from '../../../lib/notify'
 export default function ReaderExportPolicy() {
   const { t } = useTranslation()
   const { failure, catchLoad, retryKey } = useLoadFailure()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [groups, setGroups] = useState<UserGroupRow[]>([])
   const [entries, setEntries] = useState<ExportPolicyEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,6 +50,19 @@ export default function ReaderExportPolicy() {
     void load()
   }, [load, retryKey])
 
+  // Whether the open editor holds an unsaved draft; switching to another OU would drop it.
+  const editorDirty = useRef(false)
+  const setEditorDirty = useCallback((d: boolean) => {
+    editorDirty.current = d
+  }, [])
+  const requestSelect = (id: number) => {
+    if (!editorDirty.current) {
+      setSelectedId(id)
+      return
+    }
+    confirmLeave(modal, t, () => setSelectedId(id))
+  }
+
   const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
   const selected = (selectedId !== null ? byId.get(selectedId) : undefined) ?? entries.find((e) => e.is_default) ?? entries[0]
 
@@ -66,7 +81,7 @@ export default function ReaderExportPolicy() {
             selected={selected ? [selected.id] : []}
             onManage={() => {}}
             onSelect={(ids) => {
-              if (ids[0]) setSelectedId(ids[0])
+              if (ids[0] && ids[0] !== selected?.id) requestSelect(ids[0])
             }}
             onPick={fold}
           />
@@ -79,6 +94,7 @@ export default function ReaderExportPolicy() {
               entry={selected}
               entries={byId}
               defaultId={entries.find((e) => e.is_default)?.id ?? 0}
+              onDirtyChange={setEditorDirty}
               onSaved={() => {
                 message.success(t('common.saved'))
                 void load({ quiet: true })
@@ -91,12 +107,30 @@ export default function ReaderExportPolicy() {
   )
 }
 
-function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPolicyEntry; entries: Map<number, ExportPolicyEntry>; defaultId: number; onSaved: () => void }) {
+function PolicyEditor({ entry, entries, defaultId, onSaved, onDirtyChange }: {
+  entry: ExportPolicyEntry
+  entries: Map<number, ExportPolicyEntry>
+  defaultId: number
+  onSaved: () => void
+  onDirtyChange: (dirty: boolean) => void
+}) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState<PolicyDraft>(() => policyDraft(entry))
   const [busy, setBusy] = useState(false)
+  // The draft as last loaded or saved. Dirty is any difference from it, valid or not, so a half-typed
+  // value still guards the page; saving additionally needs a valid draft that changes something.
+  const [baseline, setBaseline] = useState(() => JSON.stringify(policyDraft(entry)))
   const patch = policyPatch(entry, draft)
-  const dirty = Object.keys(patch).length > 0 && policyDraftValid(entry, draft)
+  // An edit that changes nothing in effect (an explicit value equal to the inherited one) is not
+  // unsaved work; a half-typed, invalid value is.
+  const valid = policyDraftValid(entry, draft)
+  const dirty = JSON.stringify(draft) !== baseline && (Object.keys(patch).length > 0 || !valid)
+  const saveable = dirty && Object.keys(patch).length > 0 && valid
+  usePendingSettings(dirty, busy)
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
   const setField = <K extends keyof PolicyDraft>(key: K, next: Partial<PolicyDraft[K]>) => setDraft((d) => ({ ...d, [key]: { ...d[key], ...next } }))
   const parent = entries.get(entry.parent_id || defaultId)
   const from = (id: number) => (id === 0 ? t('ou.systemDefault') : (entries.get(id)?.name ?? String(id)))
@@ -112,6 +146,7 @@ function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPol
     setBusy(true)
     try {
       await api.put(`/api/admin/exports/policy/${entry.id}`, patch)
+      setBaseline(JSON.stringify(draft))
       onSaved()
     } catch (e) {
       notifyError(errText(e, t))
@@ -164,7 +199,7 @@ function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPol
       </InheritField>
       {quotaBelowMax(effectiveMax, effectiveQuota) && <Alert type="info" showIcon title={t('export.reader.quotaBelowMax', { quota: effectiveQuota, max: effectiveMax })} />}
       <div>
-        <Button type="primary" disabled={!dirty} loading={busy} onClick={save}>
+        <Button type="primary" disabled={!saveable} loading={busy} onClick={save}>
           {t('common.save')}
         </Button>
       </div>

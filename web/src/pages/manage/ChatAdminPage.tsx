@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Confirm from '../../components/Confirm'
@@ -9,7 +9,7 @@ import type { LoadOpts } from '../../lib/loadFailure'
 import { formatReportTime } from '../../lib/datetime'
 import { startVisiblePoll } from '../../lib/visiblePoll'
 import Markdown from '../../components/Markdown'
-import LoadGate from '../../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../../components/LoadGate'
 import type { ChatTurn } from '../../api/types'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
@@ -267,6 +267,8 @@ export default function ChatAdminPage() {
           pagination={{ pageSize: 15, size: 'small' }}
           scroll={{ x: 560 }}
           loading={!convsLoaded && !convsErr}
+          filtered={!!convSearch.trim() && !convsErr}
+          onClearFilters={() => setConvSearch('')}
           locale={{
             emptyText: convsErr ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.loadFailedContent')} />
@@ -322,9 +324,7 @@ export default function ChatAdminPage() {
         }
       >
         {viewLoading ? (
-          <div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}>
-            <Spin />
-          </div>
+          <LoadingPlaceholder minHeight="40vh" />
         ) : viewConv && !viewConv.started ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('chatAdmin.notStarted')} />
         ) : viewTurns.length === 0 ? (

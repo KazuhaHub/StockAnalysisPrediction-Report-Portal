@@ -12,7 +12,6 @@ import {
   Segmented,
   Select,
   Space,
-  Spin,
   Tag,
   Typography,
   Upload,
@@ -35,6 +34,7 @@ import Markdown from '../components/Markdown'
 import { principalOptions } from '../components/principals'
 import ReportHistoryDrawer from '../components/ReportHistoryDrawer'
 import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // The report editor (ADR 0026).
 //
@@ -323,9 +323,7 @@ export default function ReportEditorPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 80, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
   if (!data) return null

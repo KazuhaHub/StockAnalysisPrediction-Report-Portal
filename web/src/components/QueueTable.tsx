@@ -207,6 +207,13 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, fStatus, fUser, fTarget, search, targets])
+  const filtering = !!(search.trim() || fStatus || fUser || fTarget)
+  const clearFilters = () => {
+    setSearch('')
+    setFStatus('')
+    setFUser('')
+    setFTarget(undefined)
+  }
 
   const act = async (fn: () => Promise<unknown>, okMsg?: string) => {
     try {
@@ -483,12 +490,15 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           minHeight={220}
           title={t('common.loadFailedContent')}
         >
-        {rows.length === 0 ? (
+        {rows.length === 0 && !filtering ? (
           <Empty description={t('queue.empty')} />
         ) : (
           <CardTable
+            key={scope}
             rowKey="id"
             size="small"
+            filtered={filtering}
+            onClearFilters={clearFilters}
             rowSelection={{
               selectedRowKeys: selectedJobs,
               onChange: setSelectedJobs,

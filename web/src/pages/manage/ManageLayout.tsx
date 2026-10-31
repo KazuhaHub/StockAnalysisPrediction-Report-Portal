@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import { Button, ConfigProvider, Drawer, Dropdown, Menu, Spin, Typography, theme } from 'antd'
+import { Button, ConfigProvider, Drawer, Dropdown, Menu, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import { DownOutlined, ExportOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
@@ -11,6 +11,7 @@ import { useNarrow } from '../../lib/useNarrow'
 import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
 import { RADIUS } from '../../theme/radius'
+import { LoadingPlaceholder } from '../../components/LoadGate'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const OPEN_KEY = 'rp.manage.sider.open'
@@ -129,7 +130,7 @@ export default function ManageLayout() {
     <div className={`rp-admin-content${active === 'users' ? ' rp-admin-content--directory' : ''}`} id="rp-admin-content">
       {header}
       <div className="rp-admin-page-body" key={loc.pathname}>
-      <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
+      <Suspense fallback={<LoadingPlaceholder minHeight="40vh" />}>
         <Outlet />
       </Suspense>
       </div>

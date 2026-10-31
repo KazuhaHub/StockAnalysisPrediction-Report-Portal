@@ -33,6 +33,7 @@ import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
 import { useAppAccess } from '../appAccess'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
@@ -373,9 +374,7 @@ export default function StockPage() {
 
   if (loading && !data) {
     return (
-      <div style={{ padding: 80, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
   if (!data) return null

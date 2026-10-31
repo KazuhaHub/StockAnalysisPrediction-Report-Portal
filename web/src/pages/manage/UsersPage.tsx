@@ -28,7 +28,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import Confirm, { confirmAction } from '../../components/Confirm'
+import Confirm from '../../components/Confirm'
 import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
@@ -40,6 +40,7 @@ import type { Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
 import CardTable from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
 import StatusTag from '../../components/StatusTag'
+import { confirmLeave } from './useLeaveGuard'
 
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
 
@@ -405,6 +406,12 @@ export default function UsersPage() {
         rowKey="username"
         loading={loading}
         dataSource={filtered}
+        filtered={!!(search.trim() || roleFilter || ouScope)}
+        onClearFilters={() => {
+          setSearch('')
+          setRoleFilter(undefined)
+          setOuScoped(false)
+        }}
         columns={tableView.columns}
         size="small"
         className={`${tableView.className} rp-users-table`}
@@ -579,9 +586,7 @@ function GroupsPanel({
             if (next === selId) return
             if (detailPending.saving) { message.info(t('manage.saveInProgress')); return }
             if (!detailPending.dirty) { setSelId(next); return }
-            confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'),
-              okText: t('manage.leave'), cancelText: t('manage.stay'),
-              onOk: () => setSelId(next) }, t)
+            confirmLeave(modal, t, () => setSelId(next))
           }}
           onManage={() => {}}
           onAdd={() => setAdding(true)}

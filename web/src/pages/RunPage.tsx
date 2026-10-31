@@ -16,6 +16,7 @@ import { useLoadFailure } from '../lib/useOnReconnect'
 import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 export default function RunPage() {
   const { t } = useTranslation()
@@ -95,9 +96,7 @@ export default function RunPage() {
   }
   if (loading && !data) {
     return (
-      <div style={{ padding: 80, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
   if (!data) return null

@@ -48,6 +48,8 @@ vi.mock('../lib/conditionalGet', () => ({
     if (store.hold) return new Promise(() => {})
     if (store.fail) return Promise.reject(new Error(store.fail))
     if (store.unchanged) return Promise.resolve(UNCHANGED)
+    // The server applies the search; this one matches nothing against it.
+    if (String(url).includes('q=nothing-matches-this')) return Promise.resolve({ jobs: [] })
     return String(url).includes('/queue')
       ? Promise.resolve(store.summary)
       : Promise.resolve({ jobs: store.jobs })
@@ -215,6 +217,18 @@ describe('QueueTable', () => {
     expect(screen.queryByText('0')).toBeNull()
   })
 
+  // A search that matches nothing is not an empty queue: it says so and offers the way back.
+  it('tells a filtered-out queue from an empty one, and clears the filters', async () => {
+    store.jobs = [job({ id: 1, target_id: 71 })]
+    mount()
+    await screen.findAllByText('#71')
+    fireEvent.change(screen.getByPlaceholderText('queue.search'), { target: { value: 'nothing-matches-this' } })
+    expect(await screen.findByText('table.noMatches')).toBeTruthy()
+    expect(screen.queryByText('queue.empty')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'table.clearFilters' }))
+    expect((await screen.findAllByText('#71')).length).toBeGreaterThan(0)
+  })
+
   it('shows the empty state once the server has actually answered with no runs', async () => {
     mount()
     expect(await screen.findByText('queue.empty')).toBeTruthy()
@@ -269,7 +283,7 @@ describe('QueueTable', () => {
       localStorage.clear()
     })
 
-    it("shows a spinner, not the other scope's runs, until the picked scope has answered", async () => {
+    it("says it is loading, not the other scope's runs, until the picked scope has answered", async () => {
       store.admin = true
       store.jobs = [job({ id: 1, target_id: 71 })]
       store.pendMine = true
@@ -277,7 +291,7 @@ describe('QueueTable', () => {
       await screen.findAllByText('#71')
       fireEvent.click(screen.getByText('queue.scope.mine'))
       expect(screen.queryAllByText('#71')).toHaveLength(0)
-      expect(document.querySelector('.ant-spin-spinning')).not.toBeNull()
+      expect(screen.getByText('common.loading')).toBeTruthy()
     })
 
     it('shows a scope it has already loaded at once when switched back', async () => {

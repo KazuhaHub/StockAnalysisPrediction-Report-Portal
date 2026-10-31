@@ -8,7 +8,7 @@ import { confirmAction } from '../components/Confirm'
 import { api, ApiError, errText } from '../api/client'
 import { useAuth } from '../auth'
 import Markdown from '../components/Markdown'
-import LoadGate from '../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../components/LoadGate'
 import { difyModeTag } from '../lib/batchUi'
 import type { ChatConversation, ChatTarget, ChatTurn } from '../api/types'
 import { clickable } from '../lib/clickable'
@@ -938,9 +938,7 @@ export default function ChatPage() {
 
         <div ref={scrollRef} onScroll={onThreadScroll} style={{ flex: 1, overflowY: 'auto' }}>
           {loadingHist ? (
-            <div style={{ textAlign: 'center', paddingTop: 60 }}>
-              <Spin />
-            </div>
+            <LoadingPlaceholder />
           ) : showHero ? (
             // New conversation: a centered greeting hero with the composer in the middle and
             // the assistant's opening line (Dify's greeting) above it.

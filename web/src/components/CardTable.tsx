@@ -1,6 +1,8 @@
-import { Button, Empty, Grid, Table, type TableProps } from 'antd'
+import { useRef } from 'react'
+import { Button, Empty, Grid, Skeleton, Table, type TableProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ColumnType } from 'antd/es/table'
+import useDelayedFlag from '../lib/useDelayedFlag'
 
 /** A column may name itself for the phone card when its title is not plain text. */
 export type CardColumn<T> = ColumnType<T> & { phoneLabel?: string }
@@ -34,15 +36,50 @@ export default function CardTable<T>({
   // A vertical scroll still bounds a long list; only the sideways one goes.
   const scroll = phone ? (props.scroll?.y ? { y: props.scroll.y } : undefined) : props.scroll
   // Nothing matching is not nothing there [Carbon search / empty states].
-  const locale = filtered
+  // A first load has no rows to dim under a spinner, so it shows skeleton rows (after a short delay,
+  // so a fast answer flashes nothing); a refresh keeps its rows under antd's own spinner, delayed
+  // the same way [Primer loading; Geist skeleton].
+  const loadingFlag = typeof props.loading === 'object' ? props.loading.spinning !== false : !!props.loading
+  // Only before the first answer: a reload of a list that is genuinely empty (or filtered to
+  // nothing) keeps its empty state under the spinner. A different list (another scope) remounts.
+  const answered = useRef(false)
+  if (!loadingFlag) answered.current = true
+  const firstLoad = loadingFlag && !props.dataSource?.length && !answered.current
+  const skeleton = useDelayedFlag(firstLoad)
+  const loading = firstLoad
+    ? false
+    : typeof props.loading === 'object'
+      ? { delay: 300, ...props.loading }
+      : props.loading && { spinning: true, delay: 300 }
+  const locale = firstLoad
     ? {
         ...props.locale,
         emptyText: (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('table.noMatches')}>
-            {onClearFilters && <Button size="small" onClick={onClearFilters}>{t('table.clearFilters')}</Button>}
-          </Empty>
+          <div aria-busy>
+            <span role="status" className="rp-sr-only">{t('common.loading')}</span>
+            {skeleton && <Skeleton active title={false} paragraph={{ rows: 5 }} />}
+          </div>
         ),
       }
+    : filtered
+    ? {
+        ...props.locale,
+        emptyText: <NoMatches onClear={onClearFilters} />,
+      }
     : props.locale
-  return <Table<T> {...props} locale={locale} columns={columns} className={className} scroll={scroll} />
+  return <Table<T> {...props} loading={loading} locale={locale} columns={columns} className={className} scroll={scroll} />
+}
+
+/**
+ * Nothing matching is not nothing there: the empty state for a list narrowed by a search or filters,
+ * with the way back [Carbon search / empty states]. CardTable shows it itself when `filtered`; a view
+ * that hides whole sections on a filter shows it where the sections would be.
+ */
+export function NoMatches({ onClear }: { onClear?: () => void }) {
+  const { t } = useTranslation()
+  return (
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('table.noMatches')}>
+      {onClear && <Button size="small" onClick={onClear}>{t('table.clearFilters')}</Button>}
+    </Empty>
+  )
 }

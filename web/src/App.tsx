@@ -199,7 +199,10 @@ function AppRoutes() {
           element={
             <RequirePerm perm="run_batch">
               <RequireAppOpen appKey="builtin:recurring">
-                <RecurringConsole />
+                {/* Its task editor guards unsaved edits; the boundary carries that to route changes. */}
+                <AdminDraftBoundary>
+                  <RecurringConsole />
+                </AdminDraftBoundary>
               </RequireAppOpen>
             </RequirePerm>
           }

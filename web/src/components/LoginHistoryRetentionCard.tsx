@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, InputNumber, Space, Spin, Typography } from 'antd'
+import { Alert, App, Button, Card, InputNumber, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 export default function LoginHistoryRetentionCard() {
   const { t } = useTranslation()
@@ -33,7 +34,7 @@ export default function LoginHistoryRetentionCard() {
     finally { setSaving(false) }
   }
   return <Card title={t('storage.loginHistoryTitle')}>
-    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <Spin /> : <>
+    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <LoadingPlaceholder rows={2} /> : <>
       <Space wrap>
         <Typography.Text>{t('loginActivity.keep')}</Typography.Text>
         <InputNumber aria-label={t('loginActivity.keep')} min={1} max={10000} precision={0} value={keep} onChange={setKeep} disabled={saving} />

@@ -21,3 +21,19 @@ it('says it is waiting for the connection, still without children, while the con
   expect(screen.getByText('common.waitingForConnection')).toBeTruthy()
   expect(screen.queryByText('defaults')).toBeNull()
 })
+
+// Nothing flashes for an answer that arrives at once; a slow one gets a skeleton in the shape of
+// the page, not a spinner [Primer loading; Geist skeleton]. The words stay for assistive tech.
+it('shows a skeleton only after a short delay, and keeps an accessible loading status', () => {
+  vi.useFakeTimers()
+  try {
+    const { container } = render(<LoadGate loading><span>defaults</span></LoadGate>)
+    expect(screen.getByRole('status').textContent).toBe('common.loading')
+    expect(container.querySelector('.ant-skeleton')).toBeNull()
+    expect(container.querySelector('.ant-spin')).toBeNull()
+    act(() => vi.advanceTimersByTime(300))
+    expect(container.querySelector('.ant-skeleton')).not.toBeNull()
+  } finally {
+    vi.useRealTimers()
+  }
+})

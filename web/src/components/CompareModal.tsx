@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Empty, Modal, Select, Space, Spin, Typography } from 'antd'
+import { Alert, Empty, Modal, Select, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import type { ComparableReport, ReportDiff } from '../api/types'
 import { SectionBlock } from './DiffSections'
-import WaitingForConnection from './WaitingForConnection'
 import { clickable } from '../lib/clickable'
+import { LoadingPlaceholder } from './LoadGate'
 
 // Comparing this report with another edition of the same analysis.
 //
@@ -91,11 +91,7 @@ export default function CompareModal({
     <Modal open={open} onCancel={onClose} footer={null} width={860} title={t('compare.title')} destroyOnHidden>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         {candidates == null && !err ? (
-          <div style={{ display: 'grid', justifyItems: 'center', gap: 12, padding: 24 }}>
-            <Spin />
-            <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-            <WaitingForConnection />
-          </div>
+          <LoadingPlaceholder rows={3} />
         ) : (candidates?.length ?? 0) === 0 && !err ? (
           <Empty description={t('compare.noneToCompare')} />
         ) : (
@@ -119,7 +115,7 @@ export default function CompareModal({
         {err && <Alert type="error" showIcon title={err} />}
 
         {loading ? (
-          <><Spin /><WaitingForConnection /></>
+          <LoadingPlaceholder />
         ) : diff ? (
           <>
             <Typography.Text type="secondary">

@@ -89,6 +89,8 @@ export default function AppsAdminPage() {
             columns={columns}
             pagination={false}
             locale={{ emptyText: t('apps.empty') }}
+            filtered={!!search.trim()}
+            onClearFilters={() => setSearch('')}
             onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
           />
           </div>

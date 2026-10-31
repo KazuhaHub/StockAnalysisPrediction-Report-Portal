@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Popover, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Alert, App, Button, Checkbox, Form, Input, Modal, Popover, Select, Space, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, CloudDownloadOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -15,7 +15,7 @@ import type { Surface } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import type { BatchPlugin, BatchTarget, DifyInput, DifyRefreshResult, DifyTargetEdit, PluginInput } from '../../api/types'
 import DifyRefreshModal from './DifyRefreshModal'
-import LoadGate from '../../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../../components/LoadGate'
 import CardTable from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
 
@@ -580,7 +580,7 @@ function GlobalExecutionTargets() {
                   </Upload>
                 </div>
                 {!pluginsLoaded ? (
-                  <Spin />
+                  <LoadingPlaceholder rows={3} />
                 ) : pluginsErr ? (
                   <Typography.Text type="danger">{pluginsErr}</Typography.Text>
                 ) : customPlugins.length === 0 ? (

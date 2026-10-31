@@ -24,6 +24,7 @@ import { SectionBlock } from './DiffSections'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 // The edit history of a hand-written report (ADR 0026).
 //
@@ -234,7 +235,7 @@ export default function ReportHistoryDrawer({
               {detailErr ? (
                 <Alert type="error" showIcon title={detailErr} />
               ) : !detail ? (
-                <><Spin /><WaitingForConnection /></>
+                <LoadingPlaceholder />
               ) : view === 'diff' ? (
                 detail.changed === 0 ? (
                   <Empty description={t('reportHistory.noChange')} />

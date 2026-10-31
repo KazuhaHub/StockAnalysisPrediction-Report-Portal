@@ -14,6 +14,7 @@ import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import CardTable from '../components/CardTable'
 import { notifyError } from '../lib/notify'
+import useLeaveGuard from './manage/useLeaveGuard'
 
 // Recurring-tasks console (计划任务; docs/adr/0018-recurring-tasks.md). A first-party app card
 // (gated by run_batch) that manages saved job templates + a daily/weekly/monthly cadence the server
@@ -55,6 +56,11 @@ export default function RecurringConsole() {
   // back on) — derived from the stored template so editing an orphaned task never blanks its rows.
   const [fallbackKeys, setFallbackKeys] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  // The editor's values as opened (blank, or the task as fetched). Dirty is any difference from it,
+  // so a failed save stays dirty and a successful one closes the editor.
+  const [baseline, setBaseline] = useState('')
+  const dirty = modalOpen && JSON.stringify(draft) !== baseline
+  const closeEditor = useLeaveGuard(dirty, modalOpen && saving, () => setModalOpen(false))
 
   const [history, setHistory] = useState<{ task: RecurringTask; runs: RecurringRun[] } | null>(null)
 
@@ -135,6 +141,7 @@ export default function RecurringConsole() {
   const openCreate = () => {
     setEditingId(null)
     setDraft(emptyDraft)
+    setBaseline(JSON.stringify(emptyDraft))
     setFallbackKeys([])
     setModalOpen(true)
   }
@@ -150,7 +157,7 @@ export default function RecurringConsole() {
     const csvText = toCSV(keys, (d.rows || []).map((r) => keys.map((k) => r[k] ?? '')))
     setFallbackKeys(keys)
     setEditingId(task.id)
-    setDraft({
+    const opened: Draft = {
       name: d.name,
       targetId: d.target_id,
       freq: d.freq as RecurringTask['freq'],
@@ -162,7 +169,9 @@ export default function RecurringConsole() {
       maxRetries: d.max_retries || 0,
       enabled: d.enabled,
       csvText,
-    })
+    }
+    setDraft(opened)
+    setBaseline(JSON.stringify(opened))
     setModalOpen(true)
   }
 
@@ -344,7 +353,7 @@ export default function RecurringConsole() {
       <Modal
         open={modalOpen}
         title={editingId == null ? t('recurring.new') : t('recurring.edit')}
-        onCancel={() => setModalOpen(false)}
+        onCancel={closeEditor}
         onOk={save}
         okText={t('common.save')}
         cancelText={t('common.cancel')}

@@ -8,6 +8,7 @@ import type { AppMarketEntry, AppMarketResp, AppPreviewResp } from '../../api/ty
 import ScopePermissionModal from '../../components/ScopePermissionModal'
 import CardTable from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
+import useLeaveGuard from './useLeaveGuard'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
 // actual install once the scopes are approved.
@@ -48,14 +49,31 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
   const [marketLoading, setMarketLoading] = useState(false)
   // Where the market reads its index. Blank means the built-in one.
   const [indexUrl, setIndexUrl] = useState('')
+  // What the server holds, as last loaded or saved: the input is dirty when it differs from this.
+  const [savedIndex, setSavedIndex] = useState('')
+  const savedIndexRef = useRef('')
   const [savingIndex, setSavingIndex] = useState(false)
+  const dirty = marketOpen && indexUrl !== savedIndex
+  const adoptIndex = (url: string) => {
+    savedIndexRef.current = url
+    setSavedIndex(url)
+  }
+  // Closing the drawer with an unsaved index asks first; leaving drops the edit so it cannot linger.
+  const closeMarket = useLeaveGuard(dirty, savingIndex, () => {
+    setIndexUrl(savedIndexRef.current)
+    setMarketOpen(false)
+  })
 
   const fetchMarket = async () => {
     setMarketLoading(true)
     try {
       const r = await api.get<AppMarketResp>('/api/admin/apps/market')
       setMarket(r.apps || [])
-      setIndexUrl(r.index_url || '')
+      // A reload must not replace an index the admin is still typing.
+      const loaded = r.index_url || ''
+      const previous = savedIndexRef.current
+      setIndexUrl((cur) => (cur === previous ? loaded : cur))
+      adoptIndex(loaded)
     } catch (e) {
       notifyError(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
@@ -181,7 +199,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
         }}
       />
 
-      <Drawer open={marketOpen} onClose={() => setMarketOpen(false)} title={t('apps.market')} size={720}>
+      <Drawer open={marketOpen} onClose={closeMarket} title={t('apps.market')} size={720}>
         <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary">{t('apps.marketHint')}</Typography.Text>
           <Space.Compact style={{ width: '100%' }}>
@@ -194,6 +212,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
                   .post<{ index_url: string }>('/api/admin/apps/market/index', { index_url: indexUrl })
                   .then((r) => {
                     setIndexUrl(r.index_url || '')
+                    adoptIndex(r.index_url || '')
                     message.success(t('common.saved'))
                     if (market) void fetchMarket()
                   })

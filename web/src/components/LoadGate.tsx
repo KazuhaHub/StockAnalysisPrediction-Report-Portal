@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
-import { Button, Result, Spin, Typography } from 'antd'
+import { Button, Result, Skeleton, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import WaitingForConnection from './WaitingForConnection'
+import useDelayedFlag from '../lib/useDelayedFlag'
 
 // What a view shows while the answer it describes is still on the wire.
 //
@@ -16,12 +17,16 @@ import WaitingForConnection from './WaitingForConnection'
 // "queue is empty" / "no apps available" rendered off it is a claim nobody made. Such a view
 // passes `title` to say what failed to load in its own words instead of the settings wording.
 //
-// So: a spinner until the answer is in, and if it never comes, say so and offer the retry —
+// So: a placeholder until the answer is in, and if it never comes, say so and offer the retry —
 // never fall through to the defaults.
 //
 // A connection loss is not an answer either: the caller keeps `loading` true and passes no error,
 // the shell's connection strip says the connection is down, and the spinner here only adds a
 // muted line that it is waiting.
+//
+// The placeholder is a skeleton, not a spinner, and it appears only after a short delay: an answer
+// that arrives at once flashes nothing, and a slow one shows the shape of a page rather than a
+// wheel [Primer loading; Geist skeleton]. The loading status is announced from the first frame.
 export default function LoadGate({
   loading,
   error,
@@ -55,15 +60,31 @@ export default function LoadGate({
     )
   }
   if (loading) {
-    // Spinner + label as two siblings rather than antd's `tip`, which only renders in Spin's
-    // nest mode and would need a dummy child to wrap.
-    return (
-      <div style={{ display: 'grid', alignContent: 'center', justifyItems: 'center', gap: 12, minHeight }}>
-        <Spin size="large" />
-        <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        <WaitingForConnection />
-      </div>
-    )
+    return <LoadingPlaceholder minHeight={minHeight} />
   }
   return <>{children}</>
+}
+
+/**
+ * The placeholder LoadGate shows, for a view that loads in its own way: a skeleton after a short
+ * delay, the loading status announced from the first frame, and the waiting-for-connection line.
+ */
+export function LoadingPlaceholder({
+  minHeight,
+  rows = 6,
+  label,
+}: {
+  minHeight?: number | string
+  rows?: number
+  label?: string
+}) {
+  const { t } = useTranslation()
+  const shown = useDelayedFlag(true)
+  return (
+    <div aria-busy style={{ minHeight }}>
+      <Typography.Text role="status" className="rp-sr-only">{label ?? t('common.loading')}</Typography.Text>
+      {shown && <Skeleton active title paragraph={{ rows }} />}
+      <WaitingForConnection />
+    </div>
+  )
 }

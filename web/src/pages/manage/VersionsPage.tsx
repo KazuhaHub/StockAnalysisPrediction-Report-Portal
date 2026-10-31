@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Select, Space, Tag, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import Confirm, { confirmAction } from '../../components/Confirm'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -12,6 +12,7 @@ import { usePendingSettings } from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
 import CardTable from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
+import { confirmLeave } from './useLeaveGuard'
 
 interface VersionRow {
   name: string
@@ -77,9 +78,7 @@ function VersionRegistry() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'),
-      okText: t('manage.leave'), cancelText: t('manage.stay'),
-      onOk: () => setDraft(null) }, t)
+    confirmLeave(modal, t, () => setDraft(null))
   }
   const save = async () => {
     if (!draft) return
@@ -124,6 +123,7 @@ function VersionRegistry() {
           <Button type="primary" icon={<PlusOutlined />} aria-label={t('versions.add')} onClick={() => open()}>{t('versions.add')}</Button>
         </div>
         <CardTable<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
+          filtered={!!query.trim()} onClearFilters={() => setQuery('')}
           pagination={{ pageSize: 12, hideOnSinglePage: true, showSizeChanger: false }} columns={[
             { title: t('versions.name'), render: (_, version) => <Space orientation="vertical" size={2}>
               <Space wrap size={4}><Typography.Text strong>{version.label || version.name}</Typography.Text>
