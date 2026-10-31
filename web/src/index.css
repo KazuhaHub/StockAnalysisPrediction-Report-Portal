@@ -2843,6 +2843,9 @@ body {
 
 .rp-dashboard-echart { container-type: inline-size; }
 .rp-dashboard-chart-visual { width: 100%; min-width: 0; }
+/* No rows: the empty state sits in the middle of the space the chart would take, both ways. */
+.rp-dashboard-chart-visual.is-empty { display: flex; flex: 1; align-items: center; justify-content: center; min-height: clamp(220px, 46cqw, 340px); }
+.rp-dashboard-chart-visual.is-empty .ant-empty { margin: 0; }
 .rp-dashboard-echart-host { width: 100%; height: clamp(220px, 46cqw, 340px); }
 .rp-dashboard-echart-host svg { width: auto; height: auto; }
 .rp-dashboard-chart-card .rp-dashboard-echart-host svg { min-height: 0; }
