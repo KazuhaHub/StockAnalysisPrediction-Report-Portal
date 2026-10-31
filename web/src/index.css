@@ -35,13 +35,16 @@ body {
   color: var(--ant-color-text-secondary);
   white-space: nowrap;
 }
-.rp-table-view-options { display: flex; flex-direction: column; gap: 12px; width: min(380px, 85vw); }
-.rp-table-column-option { display: grid; grid-template-columns: 24px minmax(70px, 1fr) 76px 48px; gap: 6px; align-items: center; padding-block: 4px; }
-.rp-table-column-option .ant-input-number { width: 76px; }
-.rp-table-column-move { display: flex; }
+.rp-column-menu { display: flex; flex-direction: column; gap: 10px; width: min(280px, 85vw); padding: 12px;
+  background: var(--ant-color-bg-elevated); border-radius: var(--ant-border-radius-lg); box-shadow: var(--ant-box-shadow-secondary); }
+.rp-column-menu-list { display: flex; flex-direction: column; gap: 6px; max-height: min(320px, 50vh); overflow-y: auto; }
+.rp-column-menu-trigger { flex: none; margin-inline-start: auto; }
+/* Headers drag after a short press on touch screens; a plain swipe still scrolls the table. */
+.rp-adaptive-table .ant-table-thead > tr > th[aria-roledescription] { touch-action: manipulation; }
+.rp-column-menu-trigger .ant-btn { cursor: pointer; }
 /* Resizable headers own their separator; suppress the table's decorative duplicate. */
 .rp-adaptive-table .ant-table-thead > tr > th:has(.rp-table-resize-handle)::before { display: none; }
-.rp-table-column-title { padding-inline-end: 8px; }
+.rp-table-column-title { display: flex; align-items: center; gap: 4px; padding-inline-end: 8px; }
 .rp-table-resize-handle { position: absolute; inset-inline-end: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; z-index: 2; }
 .rp-table-resize-handle::after { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 3px; width: 1px; border-radius: var(--ant-border-radius-xs); background: var(--ant-color-border-secondary); }
 .rp-table-resize-handle:hover::after, .rp-table-resize-handle:focus-visible::after { width: 2px; background: var(--ant-color-primary); }
@@ -50,7 +53,6 @@ body {
 .rp-audit-card > .ant-card-head .ant-card-head-title { flex: none; overflow: visible; white-space: normal; text-overflow: clip; }
 .rp-audit-card > .ant-card-head .ant-card-extra { flex: 1 1 720px; min-width: 0; margin-inline-start: auto; }
 .rp-audit-card > .ant-card-head .ant-card-extra > .ant-space { display: flex; justify-content: flex-end; }
-.rp-table-view-options .ant-checkbox-group { display: flex; flex-direction: column; gap: 8px; }
 .rp-table-view-fit { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .rp-adaptive-table :is(th, td) { overflow-wrap: anywhere; white-space: normal; }
 .rp-adaptive-table :is(.ant-space, .ant-tag, .ant-typography) { max-width: 100%; overflow-wrap: anywhere; }
@@ -70,6 +72,17 @@ body {
     overflow: hidden;
     box-shadow: var(--ant-box-shadow-secondary);
   }
+}
+
+/* Dark mode elevation: on a black page a shadow is all but invisible, so a floating surface would
+   read as a hole rather than a layer. antd already lifts overlays to colorBgElevated; a hairline on
+   their edge supplies the missing separation [Atlassian elevation; Apple dark mode]. Drawers and
+   sheets carry the same border above. An inset outline, not a border, so no overlay changes size. */
+:root[data-theme='dark'] :is(.ant-popover-inner, .ant-dropdown-menu, .rp-column-menu, .ant-select-dropdown,
+  .ant-picker-dropdown .ant-picker-panel-container, .ant-modal-container, .ant-notification-notice,
+  .ant-message-notice-content) {
+  outline: 1px solid var(--ant-color-border-secondary);
+  outline-offset: -1px;
 }
 
 /* OU management follows the directory-console model: one persistent tree scopes a wide settings

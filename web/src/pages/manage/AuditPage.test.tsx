@@ -702,14 +702,16 @@ describe('AuditPage', () => {
     })
   })
 
-  // Export and the column control act on the results, so they sit with them, not with the filters.
-  it('puts the count, the columns and Export above the results', async () => {
+  // Export acts on the results, so it sits with them, not with the filters; the column menu lives in
+  // the table's own header.
+  it('puts the count and Export above the results, the column menu in the header', async () => {
     mount()
     await screen.findByText('客户A')
     const bar = document.querySelector('.rp-audit-results') as HTMLElement
     expect(within(bar).getByText('audit.total')).toBeTruthy()
     expect(within(bar).getByRole('button', { name: /audit\.export/ })).toBeTruthy()
-    expect(within(bar).getByRole('button', { name: /table\.display/ })).toBeTruthy()
+    expect(within(bar).queryByRole('button', { name: /table\.columnMenu/ })).toBeNull()
+    expect(within(document.querySelector('.ant-table-thead') as HTMLElement).getByRole('button', { name: /table\.columnMenu/ })).toBeTruthy()
     expect(document.querySelector('.ant-card-extra')).toBeNull()
   })
 

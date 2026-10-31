@@ -323,6 +323,7 @@ export default function UsersPage() {
     {
       title: '',
       key: 'actions', minWidth: 96,
+      fixed: 'right',
       width: 120,
       align: 'right',
       render: (_, u) => (
@@ -364,7 +365,7 @@ export default function UsersPage() {
             options={roles.map((r) => ({ value: r.code, label: r.name }))}
           />
         </Space>
-        <Space wrap>{tableView.controls}<Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
+        <Space wrap><Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
           {t('users.add')}
         </Button></Space>
       </Space>
@@ -413,6 +414,7 @@ export default function UsersPage() {
           setOuScoped(false)
         }}
         columns={tableView.columns}
+        components={tableView.components}
         size="small"
         className={`${tableView.className} rp-users-table`}
         tableLayout="fixed"

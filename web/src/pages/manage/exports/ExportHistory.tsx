@@ -152,7 +152,6 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
       title={t('export.history.title')}
       extra={
         <Space size={4}>
-          {tableView.controls}
           <Button type="text" icon={<ReloadOutlined />} aria-label={t('common.refresh')} title={t('common.refresh')} onClick={() => void load()} />
         </Space>
       }
@@ -163,6 +162,7 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
         rowKey="id"
         loading={loading}
         columns={tableView.columns}
+        components={tableView.components}
         className={tableView.className}
         tableLayout="fixed"
         dataSource={jobs}

@@ -813,7 +813,6 @@ export default function AuditPage() {
       <div className="rp-audit-results">
         <Typography.Text type="secondary">{data ? t('audit.total', { n: data.total }) : null}</Typography.Text>
         <Space>
-          {!mobile && tableView.controls}
           {exportButton}
         </Space>
       </div>
@@ -833,6 +832,7 @@ export default function AuditPage() {
           loading={loading}
           dataSource={items}
           columns={tableView.columns}
+          components={tableView.components}
           className={tableView.className}
           // `fixed` is load-bearing, not a preference. Left on auto, the browser sizes the detail
           // column to its content — so ONE row carrying a machine snapshot (a run window, a nested

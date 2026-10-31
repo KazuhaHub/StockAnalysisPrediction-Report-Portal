@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next'
 export type ColumnWidths = Record<string, number>
 export type ResizeColumn = (key: string, width: number, commit?: boolean, snapshot?: ColumnWidths) => void
 
-export default function TableColumnHeader({ id, name, children, onMeasure, onResize, onCancel }: {
-  id: string; name: string; children: ReactNode
+export default function TableColumnHeader({ id, name, children, extra, onMeasure, onResize, onCancel }: {
+  id: string; name: string; children: ReactNode; extra?: ReactNode
   onMeasure: (key: string, width: number) => void
   onResize: ResizeColumn
   onCancel: () => void
@@ -35,6 +35,7 @@ export default function TableColumnHeader({ id, name, children, onMeasure, onRes
   }
   return <div className="rp-table-column-title" ref={title} data-resize-column={id}>
     <span>{children}</span>
+    {extra}
     <span role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={64} aria-valuemax={1200}
       aria-valuenow={width} aria-label={t('table.resizeColumn', { name })} title={t('table.resizeColumn', { name })}
       className="rp-table-resize-handle"
@@ -62,9 +63,11 @@ export default function TableColumnHeader({ id, name, children, onMeasure, onRes
       onPointerCancel={() => { drag.current = null; onCancel() }}
       onLostPointerCapture={() => { if (drag.current) { drag.current = null; onCancel() } }}
       onKeyDown={(event) => {
+        // Keys on the handle resize; none of them reaches the header, where Space would pick it up.
+        event.stopPropagation()
         if (event.key === 'Escape') { drag.current = null; onCancel(); return }
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-        event.preventDefault(); event.stopPropagation()
+        event.preventDefault()
         onResize(id, width + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? 50 : 10), true, snapshot())
       }} />
   </div>

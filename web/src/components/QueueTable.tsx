@@ -332,6 +332,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     {
       title: t('batch.col.actions'),
       key: 'actions', minWidth: 100,
+      fixed: 'right',
       width: 150,
       render: (_: unknown, j) => (
         <Space size={[2, 2]} wrap>
@@ -474,7 +475,6 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           {admin && <Select showSearch optionFilterProp="label" allowClear placeholder={t('batch.col.createdBy')} style={{ width: 140 }} value={fUser || undefined} onChange={(v) => setFUser(v || '')} options={submitters.map((u) => ({ value: u, label: u }))} />}
           {/* loading, not an empty dropdown: "no workflows" is not something this filter knows. */}
           <Select showSearch optionFilterProp="label" allowClear loading={!targetsLoaded} placeholder={t('run.workflow')} style={{ width: 200 }} value={fTarget} onChange={setFTarget} options={targets.map((tg) => ({ value: tg.id, label: tg.name }))} />
-          {tableView.controls}
         </Space>
         {total > jobs.length && (
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
@@ -508,6 +508,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
             }}
             dataSource={rows}
             columns={tableView.columns}
+            components={tableView.components}
             className={tableView.className}
             tableLayout="fixed"
             pagination={{ pageSize: 15 }}
