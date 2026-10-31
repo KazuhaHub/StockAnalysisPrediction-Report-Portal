@@ -109,7 +109,7 @@ func pinCandidateMounts(ctx context.Context, plan containerPlan, data candidateD
 		switch mount.Target {
 		case "/data":
 			mode = 0700
-			if plan.writable != nil {
+			if plan.writable != nil || !mount.ReadOnly {
 				gid, mode = 65532, 02770
 			}
 		case "/run/portal-app/http":
