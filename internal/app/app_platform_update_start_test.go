@@ -875,8 +875,39 @@ func testPlatformUpdateTargetRemoval(t *testing.T, pg bool) {
 	if err != nil || restoreData.snapshot.Stage != appplatform.StageRestoreData {
 		t.Fatal("restore snapshot progression", restoreData, err)
 	}
+	restoreIntent, err := s.preparePlatformRestore(
+		context.Background(), restoreData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreProof := platformRestoreObservationFixture(
+		restoreIntent, endpoint)
+	startLease, err := s.commitPlatformRestore(
+		context.Background(), restoreData, restoreIntent,
+		endpoint, restoreProof)
+	if err != nil || startLease.snapshot.Stage != appplatform.StageStart {
+		t.Fatal("restore data did not advance to start", startLease, err)
+	}
+	startIntent, err := s.preparePlatformRestoreStart(
+		context.Background(), startLease)
+	if err != nil || startIntent.command.Kind != "restore-start" ||
+		startIntent.command.OperationID != startLease.id ||
+		startIntent.command.Payload.SourceCheckpointOperationID ==
+			startLease.id ||
+		startIntent.command.Payload.TargetReleaseSHA256 !=
+			startIntent.checkpoint.ReleaseSHA256 {
+		t.Fatal("restore-start intent", startIntent, err)
+	}
+	again, err := s.preparePlatformRestoreStart(
+		context.Background(), startLease)
+	if err != nil || again.effectID != startIntent.effectID ||
+		again.resourceID != startIntent.resourceID ||
+		again.command.PayloadSHA256 !=
+			startIntent.command.PayloadSHA256 {
+		t.Fatal("restore-start replay", again, err)
+	}
 	if err := s.finishPlatformManagedRestoreForReview(
-		context.Background(), restoreData); err != nil {
+		context.Background(), startLease); err != nil {
 		t.Fatal(err)
 	}
 	if scalar[string](t, s.st, `SELECT stage||':'||error_code

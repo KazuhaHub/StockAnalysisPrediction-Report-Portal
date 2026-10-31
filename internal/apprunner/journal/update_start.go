@@ -77,12 +77,16 @@ type updateStartFacts struct {
 }
 
 func updateStartIndex(c control.UpdateStartCommand) control.Command {
+	kind := c.Kind
+	if kind == "restore-start" {
+		kind = "update-start"
+	}
 	return control.Command{
 		Format: c.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
 		ControlRevision: c.ControlRevision, InstallationID: c.InstallationID,
 		OperationID: c.OperationID, TargetGeneration: c.TargetGeneration,
 		Stage: c.Stage, EffectNumber: c.EffectNumber, EffectID: c.EffectID,
-		Kind: c.Kind, InstallationFence: c.InstallationFence,
+		Kind: kind, InstallationFence: c.InstallationFence,
 		PayloadSHA256: c.PayloadSHA256, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS,
 		Payload: control.PrepareDataPayload{
 			DataNamespaceID: c.Payload.NamespaceID,
@@ -128,14 +132,21 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 		p.SourceCheckpointEffectID).Scan(&operation, &installation, &state, &payload, &raw); err != nil {
 		return zero, ErrUpdateStartUnavailable
 	}
-	if operation != c.OperationID || operation != p.SourceCheckpointOperationID ||
+	if operation != p.SourceCheckpointOperationID ||
 		installation != c.InstallationID || state != "applied" ||
 		candidateHash([]byte(raw)) != p.SourceCheckpointReceiptSHA256 {
 		return zero, ErrFenceReconciliation
 	}
+	if c.Kind == "update-start" && operation != c.OperationID {
+		return zero, ErrFenceReconciliation
+	}
+	if c.Kind == "restore-start" && operation == c.OperationID {
+		return zero, ErrFenceReconciliation
+	}
 	checkpoint, err := ParseCheckpointReceipt([]byte(raw))
 	if err != nil || checkpoint.EffectID != p.SourceCheckpointEffectID ||
-		checkpoint.PayloadSHA256 != payload || checkpoint.OperationID != c.OperationID ||
+		checkpoint.PayloadSHA256 != payload ||
+		checkpoint.OperationID != p.SourceCheckpointOperationID ||
 		checkpoint.TargetGeneration != c.TargetGeneration ||
 		checkpoint.InstallationID != c.InstallationID ||
 		checkpoint.CheckpointID != p.CheckpointID ||
@@ -158,7 +169,7 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	checkpointCommand := control.CheckpointCommand{
 		Format: control.CheckpointFormat, DeploymentID: c.DeploymentID,
 		ControllerEpoch: c.ControllerEpoch, ControlRevision: "1",
-		InstallationID: c.InstallationID, OperationID: c.OperationID,
+		InstallationID: c.InstallationID, OperationID: checkpoint.OperationID,
 		TargetGeneration: c.TargetGeneration, Stage: "snapshot",
 		EffectNumber: "1", EffectID: checkpoint.EffectID, Kind: "snapshot",
 		InstallationFence: "1", PayloadSHA256: checkpoint.PayloadSHA256,
@@ -185,7 +196,7 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	var archiveBytes int64
 	if err := tx.QueryRowContext(ctx, `SELECT state,revision,manifest_sha256,bytes
 		FROM runner_checkpoints WHERE id=? AND operation_id=? AND data_namespace_id=?`,
-		checkpoint.CheckpointID, c.OperationID, checkpoint.NamespaceID).
+		checkpoint.CheckpointID, checkpoint.OperationID, checkpoint.NamespaceID).
 		Scan(&checkpointState, &revision, &manifest, &archiveBytes); err != nil ||
 		checkpointState != "verified" || (revision != 2 && revision != 4) ||
 		manifest != checkpoint.ManifestSHA256 ||
@@ -359,9 +370,10 @@ func (s *Store) ReserveUpdateStart(ctx context.Context, raw, signature []byte) (
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(p.TargetWriterFence, 10, 64)
 	slot, _ := strconv.ParseInt(c.EffectNumber, 10, 64)
+	kind := updateStartIndex(c).Kind
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
 		VALUES(?,?,?,?,?,?,?,?,?,?,'prepared','{}',NULL,?,?)`,
-		c.EffectID, c.OperationID, c.InstallationID, c.Stage, slot, c.Kind,
+		c.EffectID, c.OperationID, c.InstallationID, c.Stage, slot, kind,
 		c.PayloadSHA256, generation, c.ControllerEpoch, fence, f.now, f.now); err != nil {
 		return zero, err
 	}

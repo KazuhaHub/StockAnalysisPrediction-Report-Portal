@@ -106,6 +106,41 @@ func TestUpdateStartReservesExactTargetResource(t *testing.T) {
 	}
 }
 
+func TestRestoreStartReservesFromSeparateCheckpointOperation(t *testing.T) {
+	f, _, command, _, _ := updateStartJournalFixture(t)
+	command.Kind = "restore-start"
+	command.OperationID = fixtureID(1534)
+	command.Payload.TargetReleaseSHA256 =
+		command.Payload.SourceReleaseSHA256
+	var err error
+	command.PayloadSHA256, err = control.UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	command.IssuedMS = strconv.FormatInt(now, 10)
+	command.ExpiresMS = strconv.FormatInt(now+25000, 10)
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID:    enrollment.DeploymentID,
+		ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision,
+		PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+	}
+	raw, signature, err := control.SignUpdateStart(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := f.store.ReserveUpdateStart(
+		context.Background(), raw, signature)
+	if err != nil || reservation.TargetReleaseSHA256 !=
+		command.Payload.SourceReleaseSHA256 {
+		t.Fatal("restore-start reservation", reservation, err)
+	}
+}
+
 func TestUpdateStartRefusesChangedCheckpointAndSources(t *testing.T) {
 	for _, mode := range []string{"checkpoint state", "running source", "source receipt", "resource alias"} {
 		t.Run(mode, func(t *testing.T) {

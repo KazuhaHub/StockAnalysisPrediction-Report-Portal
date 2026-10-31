@@ -74,7 +74,8 @@ func (v VerifiedUpdateStartCommand) Command() UpdateStartCommand { return v.comm
 
 func validUpdateStartLogical(c UpdateStartCommand) bool {
 	p := c.Payload
-	if c.Format != UpdateStartFormat || c.Stage != "start" || c.Kind != "update-start" ||
+	if c.Format != UpdateStartFormat || c.Stage != "start" ||
+		(c.Kind != "update-start" && c.Kind != "restore-start") ||
 		!shaPattern.MatchString(p.SourceStartReceiptSHA256) ||
 		!shaPattern.MatchString(p.SourceDataReceiptSHA256) ||
 		!shaPattern.MatchString(p.SourceCheckpointReceiptSHA256) ||
@@ -115,7 +116,12 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 	archive, _ := strconv.ParseInt(p.CheckpointArchiveBytes, 10, 64)
 	quota, _ := strconv.ParseInt(p.QuotaBytes, 10, 64)
 	slot, _ := counter(c.EffectNumber, true)
-	return p.SourceCheckpointOperationID == c.OperationID &&
+	operationRelation := p.SourceCheckpointOperationID == c.OperationID
+	if c.Kind == "restore-start" {
+		operationRelation = p.SourceCheckpointOperationID != c.OperationID &&
+			p.TargetReleaseSHA256 == p.SourceReleaseSHA256
+	}
+	return operationRelation &&
 		p.SourceCheckpointReceiptSHA256 != p.SourceStartReceiptSHA256 &&
 		p.SourceStartReceiptSHA256 != p.SourceDataReceiptSHA256 &&
 		source >= 1 && target == source+1 && sourceWriter >= 1 &&

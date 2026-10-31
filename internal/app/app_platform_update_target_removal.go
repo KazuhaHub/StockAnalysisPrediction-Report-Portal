@@ -39,7 +39,9 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 	var zeroSource platformCheckpointSource
 	if lease.snapshot.Action != appplatform.ActionRestore ||
 		!lease.snapshot.Managed ||
-		lease.snapshot.Stage != appplatform.StageQuiesce ||
+		!((lease.snapshot.Stage == appplatform.StageQuiesce &&
+			checkpoint.OperationID != "") ||
+			lease.snapshot.Stage == appplatform.StageStart) ||
 		lease.snapshot.Generation < 2 {
 		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
 	}

@@ -143,3 +143,32 @@ func TestUpdateStartCommandRejectsAuthorityAndTime(t *testing.T) {
 		t.Fatal("changed update-start bytes accepted")
 	}
 }
+
+func TestRestoreStartBindsSeparateOperationAndCheckpoint(t *testing.T) {
+	command, key, authority, now := updateStartFixture(t)
+	command.Kind = "restore-start"
+	command.OperationID = "d0000000-0000-4000-8000-000000000000"
+	command.Payload.TargetReleaseSHA256 =
+		command.Payload.SourceReleaseSHA256
+	var err error
+	command.PayloadSHA256, err = UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, signature, err := SignUpdateStart(
+		command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyUpdateStart(
+		raw, signature, authority, now); err != nil {
+		t.Fatal(err)
+	}
+	command.Payload.SourceCheckpointOperationID =
+		command.OperationID
+	command.PayloadSHA256, err =
+		UpdateStartLogicalDigest(command)
+	if err == nil {
+		t.Fatal("restore-start reused its outer operation as checkpoint")
+	}
+}

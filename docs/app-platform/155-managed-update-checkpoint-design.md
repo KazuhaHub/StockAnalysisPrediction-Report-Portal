@@ -9,7 +9,8 @@ native readiness, protected registration, boot handshake and the atomic active
 tuple swap. It does not claim native A-to-B acceptance or a reviewed rollback
 executor. The recovery path now claims a reviewed restore, stops and removes the
 exact failed update candidate, then advances to verified data restore; restarting
-the restored source release remains outstanding.
+the restored source release through a signed `restore-start` intent is prepared,
+but native execution/probe/activation remain outstanding.
 Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
@@ -304,6 +305,7 @@ Disposable Linux/XFS/Docker tests:
    restore and Portal restore-admission primitive are implemented and passed
    the disposable Linux/XFS/Docker probe. Reviewed restore queueing, exact
    failed-target stop/remove, quiesce completion and transition to
-   `restore_data` are implemented; source restart/probe/activation and the
+   `restore_data` are implemented, and the post-restore signed
+   `restore-start` intent is prepared. Native source restart/probe/activation and the
    disposable update-failure acceptance remain.
 7. Only then expose managed update through scheduler and management HTTP.
