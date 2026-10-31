@@ -344,9 +344,9 @@ function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; t
           {
             key: 'raw',
             label: t('audit.raw'),
-            // Copies the payload byte for byte, whatever the panel shows; a click here must not
-            // also fold the panel.
-            extra: r.detail ? <span onClick={(e) => e.stopPropagation()}><Typography.Text copyable={{ text: r.detail }} /></span> : null,
+            // Copies the payload byte for byte, whatever the panel shows.
+            // antd's copy control stops its own click, so copying never folds the panel.
+            extra: r.detail ? <Typography.Text copyable={{ text: r.detail }} /> : null,
             // Bounded and scrollable: a grant change over a large OU carries a long list.
             children: <pre>{pretty || '—'}</pre>,
           },
@@ -691,25 +691,23 @@ export default function AuditPage() {
       <div
         key={r.id}
         className={`rp-audit-row${isOpen(r.id) ? ' is-open' : ''}`}
-        // A tap anywhere on the card toggles its record, except inside the record itself, which has
-        // buttons of its own; the head is the keyboard's control.
+        // The whole card is the control: a tap anywhere toggles its record, except inside the record,
+        // which has buttons of its own, and Enter or Space on the card itself.
+        role="button"
+        tabIndex={0}
+        title={t('audit.details')}
+        aria-expanded={isOpen(r.id)}
         onClick={(e) => {
           if (!(e.target as Element).closest('.rp-audit-record')) toggle(r.id)
         }}
+        onKeyDown={(e) => {
+          if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            toggle(r.id)
+          }
+        }}
       >
-        <div
-          className="rp-audit-row__head"
-          role="button"
-          tabIndex={0}
-          title={t('audit.details')}
-          aria-expanded={isOpen(r.id)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              toggle(r.id)
-            }
-          }}
-        >
+        <div className="rp-audit-row__head">
           <Tag color={ACTION_COLOR[r.action]} style={{ marginInlineEnd: 0 }}>
             {t(`audit.a.${r.action}`, r.action)}
           </Tag>

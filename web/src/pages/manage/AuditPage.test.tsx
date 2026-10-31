@@ -647,10 +647,10 @@ describe('AuditPage', () => {
       expect(screen.queryByRole('dialog')).toBeNull()
     })
 
-    it('opens from the keyboard on the card head', async () => {
+    it('opens from the keyboard on the card', async () => {
       const { container } = mount()
       await screen.findByText(/对外版/)
-      const head = container.querySelectorAll('.rp-audit-row__head')[1] as HTMLElement
+      const head = container.querySelectorAll('.rp-audit-row')[1] as HTMLElement
       head.focus()
       await userEvent.keyboard('{Enter}')
       expect(head.getAttribute('aria-expanded')).toBe('true')
