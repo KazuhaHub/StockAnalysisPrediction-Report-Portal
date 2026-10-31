@@ -773,20 +773,32 @@ func (s *Store) ExecuteUpdateStart(ctx context.Context, claim UpdateStartClaim, 
 			return err
 		}
 		if err := native.ProvisionUpdateStartSockets(ctx, request); err != nil {
+			log.Printf("update-start %s: provision sockets: %v",
+				f.command.OperationID, err)
 			return err
 		}
 		launch, err := native.PrepareUpdateStart(ctx, request)
 		if err != nil {
+			log.Printf("update-start %s: prepare native: %v",
+				f.command.OperationID, err)
 			return err
 		}
 		defer launch.Close()
 		if err := s.bindUpdateStartPreflight(ctx, live, launch); err != nil {
+			log.Printf("update-start %s: bind preflight: %v",
+				f.command.OperationID, err)
 			return err
 		}
 		if err := s.checkBoundUpdateStart(ctx, live, launch); err != nil {
+			log.Printf("update-start %s: check preflight: %v",
+				f.command.OperationID, err)
 			return err
 		}
 		observed, err = native.StartUpdateStart(ctx, launch)
+		if err != nil {
+			log.Printf("update-start %s: start native: %v",
+				f.command.OperationID, err)
+		}
 		return err
 	})
 	if err != nil {
