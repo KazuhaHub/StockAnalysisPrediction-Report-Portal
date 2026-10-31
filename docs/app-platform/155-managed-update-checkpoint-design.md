@@ -3,7 +3,9 @@
 Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
-document does not claim managed update execution or restore.
+document also claims verified native restore and Portal restore admission. It
+does not claim the managed update executor or a completed reviewed rollback
+executor around that primitive.
 
 ## Decision
 
@@ -36,11 +38,11 @@ before those pieces are available.
 - The installer's ordinary candidate mount is read-only. Writable candidates
   deliberately mount application data read-write and can change bytes after
   start.
-- `app_platform_recovery_sets` already has a closed schema with states
-  `preparing`, `verified`, `restoring`, `deleted` and `review_required`, but no
-  producer or verifier exists.
-- The data adapter can create and inspect a project-quota namespace. It has no
-  checkpoint, restore or recursive delete primitive.
+- `app_platform_recovery_sets` has closed states `preparing`, `verified`,
+  `restoring`, `deleted` and `review_required`; checkpoint and restore
+  producers/verifiers now use the first three.
+- The data adapter can checkpoint and restore the existing project-quota
+  namespace. Reviewed retained-namespace deletion remains outstanding.
 - Portal completion, runner journal completion, Docker state and XFS state do not
   share one transaction. Every boundary must be recoverable by exact identity.
 
@@ -93,6 +95,33 @@ applied, changes `preparing` to `verified`, and advances
 `snapshot -> migrate`. A missing, changed or future receipt remains `preparing`
 and cannot be used by restore or target start. Restore pause, an expired lease,
 or any SQL failure rolls all three records back together.
+
+## Verified restore
+
+Restore keeps the existing namespace path, inode, project ID, inheritance and
+quota allocation. It does not swap in a new namespace or silently reset a
+partial restore. Before mutation, the runner re-verifies the archive size,
+SHA-256, canonical manifest and source/checkpoint root identities.
+
+The runner then clears only the namespace's child entries without following
+symlinks or crossing device boundaries, extracts regular files and directories
+through pinned directory descriptors, applies the recorded ownership/mode, and
+reads the complete restored tree back. Extra or missing entries, changed
+contents, metadata drift, quota overflow and archive changes are refused. Any
+failure after clearing begins is `incomplete`, never reported as reverted.
+
+Writable subdirectories may retain normal inherited setgid only when their group
+is the fixed app group 65532. File setgid, setuid and sticky bits remain
+refused.
+
+Portal restore requires a canonical managed-restore plan that names the exact
+recovery set, checkpoint operation/effect/receipt, checkpoint ID, release,
+manifest, archive bytes, source/target generation and controller epoch. The
+recovery set must still be verified. The signed restore intent changes it to
+`restoring`; an exact native receipt atomically applies the effect, records
+restored bytes, returns the recovery set to `verified`, updates the namespace
+observation and advances `restore_data -> start`. Restore pause, an expired
+lease or any SQL failure rolls all of those records back together.
 
 ## Journal protocol
 
@@ -180,6 +209,10 @@ Portable and repository tests:
 - journal unknown/apply/CAS and repeated-read behavior;
 - Portal recovery-set uniqueness, exact source binding, changed
   command/receipt/checkpoint/fence/epoch refusal, restore pause and rollback;
+- native deterministic archive/extract/read-back, post-checkpoint mutation,
+  extra-entry removal, namespace identity preservation and writable metadata;
+- managed-restore plan/recovery-set/checkpoint receipt binding, `restoring`
+  CAS, changed receipt refusal, duplicate/uncertain settlement and SQL rollback;
 - stale runtime/release/policy/checkpoint/generation refusals;
 - no target activation without applied checkpoint and readiness evidence.
 
@@ -200,5 +233,8 @@ Disposable Linux/XFS/Docker tests:
 3. Portal recovery-set preparation/verification transaction. Implemented.
 4. Distinct update-start admission with source-checkpoint binding.
 5. Managed update executor and activation transaction.
-6. Restore/rollback executor and disposable Linux acceptance.
+6. Restore/rollback executor and disposable Linux acceptance. The native
+   restore and Portal restore-admission primitive are implemented and passed
+   the disposable Linux/XFS/Docker probe; binding them to the managed update
+   executor remains.
 7. Only then expose managed update through scheduler and management HTTP.
