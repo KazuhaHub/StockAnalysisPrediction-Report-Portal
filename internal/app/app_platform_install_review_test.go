@@ -180,8 +180,8 @@ func TestPlatformInstallRequirements(t *testing.T) {
 	if compatible, err := appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI}); err != nil || !compatible.Compatible {
 		t.Fatalf("required-capability fixture must be otherwise compatible: %v", err)
 	}
-	if err := platformInstallRequirements(m); err == nil {
-		t.Fatal("unimplemented required storage accepted")
+	if err := platformInstallRequirements(m); err != nil {
+		t.Fatal("platform object storage requirement refused", err)
 	}
 	m.Capabilities.Required = []string{}
 	if err := platformInstallRequirements(m); err != nil {

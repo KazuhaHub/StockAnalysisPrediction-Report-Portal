@@ -48,7 +48,14 @@ func platformInstallRequirements(manifest appplatform.Manifest) error {
 
 func platformFrontendRequiredCapabilities(manifest appplatform.Manifest) bool {
 	required := manifest.Capabilities.Required
-	return len(required) == 0 || (len(required) == 1 && required[0] == "reports.read")
+	seen := make(map[string]bool, len(required))
+	for _, capability := range required {
+		if seen[capability] || (capability != "reports.read" && capability != "storage.files") {
+			return false
+		}
+		seen[capability] = true
+	}
+	return len(seen) <= 2
 }
 
 func platformNoPriorInstall(e migExec, appID string) error {

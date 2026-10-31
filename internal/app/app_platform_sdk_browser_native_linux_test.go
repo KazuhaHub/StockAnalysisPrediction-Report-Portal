@@ -45,7 +45,7 @@ func platformSDKBrowserArchive(t *testing.T, original []byte) []byte {
 // Runs under the real non-root controller after the background scheduler has
 // completed the signed SDK package. No candidate, boot or browser response is
 // fabricated; only the browser/session bootstrap and revoke control are fixture.
-func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork, expectReports bool) {
+func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork, expectReports, expectObjects bool) {
 	t.Helper()
 	dir := os.Getenv("APP_SDK_BROWSER_DIR")
 	if dir == "" {
@@ -182,6 +182,9 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	}
 	if expectReports {
 		markers = append(markers, "SDK_NATIVE_BROWSER_REPORTS")
+	}
+	if expectObjects {
+		markers = append(markers, "SDK_NATIVE_BROWSER_OBJECTS")
 	}
 	for _, marker := range markers {
 		if !strings.Contains(output.String(), marker) {

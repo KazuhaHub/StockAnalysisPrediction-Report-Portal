@@ -147,6 +147,13 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		if reportsGranted == 1 {
 			capabilities = append(capabilities, "reports.read")
 		}
+		var storageGranted int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='storage.files' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&storageGranted); err != nil {
+			return err
+		}
+		if storageGranted == 1 {
+			capabilities = append(capabilities, "storage.files")
+		}
 		display = m.Presentation.Display
 		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
 		for _, route := range routes {

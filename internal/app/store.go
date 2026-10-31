@@ -1120,6 +1120,9 @@ func (s *Store) DeleteUser(name string) error {
 			return err
 		}
 	}
+	if err := cleanupPlatformAccountObjects(migExec{s: s, ex: tx}, name, time.Now().UTC().UnixMilli()); err != nil {
+		return err
+	}
 	if err := invalidateAppPlatformPrincipal(migExec{s: s, ex: tx}, platformImpacts); err != nil {
 		return err
 	}

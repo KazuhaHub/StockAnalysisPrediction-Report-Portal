@@ -43,6 +43,18 @@ async function main(){
    stage='reports';const reportText=await dispatchReports(),report=JSON.parse(reportText);
    if(report.count!==1||report.total!==1||report.title!=='Browser current viewer report'||!report.bodyMarkdown.includes('Current viewer evidence.'))throw new Error('reports SDK result changed');
   }
+  let objectsIssued=0;
+  const objectsReady=await frame.getByTestId('objects-ready').innerText();
+  async function dispatchObject(name){
+   await frame.getByRole('button',{name,exact:true}).click();
+   const result=frame.locator('[data-testid="objects-result"][data-request-id="'+(++objectsIssued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
+  if(objectsReady==='true'){
+   stage='objects';const text=await dispatchObject('Write object'),value=JSON.parse(text);
+   if(value.count!==1||value.label!=='Browser note'||value.body!=='Persisted object'||value.revision!==1)throw new Error('object SDK result changed');
+  }
   stage='page-actions';await page.getByRole('heading',{name:'Fixture zh-CN /',exact:true}).waitFor();
   await page.getByRole('button',{name:'Header increment',exact:true}).click();
   await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
@@ -70,9 +82,14 @@ async function main(){
   await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
   await page.goForward();await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
   await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
-  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;reportsIssued=0;
+  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;reportsIssued=0;objectsIssued=0;
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
   await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  if(objectsReady==='true'){
+   await frame.getByTestId('objects-ready').filter({hasText:'true'}).waitFor();
+   stage='objects-reload';const text=await dispatchObject('Read object'),value=JSON.parse(text);
+   if(value.body!=='Persisted object')throw new Error('object did not persist across reload');
+  }
   const restored=JSON.parse(await frame.getByTestId('app-query').innerText());
   if(restored.page!==2||restored.active!==false||restored.q!=='中文 & test'||restored.sort!=='newest')throw new Error('query reload lost typed values');
   await frame.getByRole('button',{name:'Retained 0',exact:true}).waitFor();
@@ -116,6 +133,10 @@ async function main(){
    stage='reports-revoked';const revokedReport=await dispatchReports();
    if(revokedReport!=='error:unavailable')throw new Error('revoked reports returned '+revokedReport);
   }
+  if(objectsReady==='true'){
+   stage='objects-revoked';const revokedObject=await dispatchObject('Read object');
+   if(revokedObject!=='error:unavailable')throw new Error('revoked objects returned '+revokedObject);
+  }
   if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
   stage='draft-edit';await frame.getByRole('button',{name:'Edit draft',exact:true}).click();
   await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
@@ -144,6 +165,9 @@ async function main(){
   }
   if(reportsReady==='true'){
    console.log('SDK_NATIVE_BROWSER_REPORTS');
+  }
+  if(objectsReady==='true'){
+   console.log('SDK_NATIVE_BROWSER_OBJECTS');
   }
  }finally{clearTimeout(deadline);await browser.close()}
 }

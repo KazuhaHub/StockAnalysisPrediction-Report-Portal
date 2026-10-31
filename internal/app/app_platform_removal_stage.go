@@ -63,7 +63,7 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 	}
 	desired, phase, dataEffect := "disabled", "disabled", "preserve"
 	if p.Action == appplatform.ActionUninstall {
-		desired, phase, dataEffect = "removed", "pending", "retain"
+		desired, phase, dataEffect = "removed", "pending", "delete"
 	}
 	if p.DataEffect != dataEffect || (p.DesiredState != "enabled" && !(p.Action == appplatform.ActionUninstall && p.DesiredState == "disabled")) {
 		return errAppPlatformStageEvidence

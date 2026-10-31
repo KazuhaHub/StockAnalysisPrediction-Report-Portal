@@ -119,15 +119,19 @@ func preCredentialMigrationDump(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	header.Tables = slices.DeleteFunc(header.Tables, func(name string) bool {
-		return name == platformPrefix+"credentials" || name == platformPrefix+"secret_bindings"
+		return name == platformPrefix+"credentials" || name == platformPrefix+"secret_bindings" ||
+			slices.Contains(migration0017().tables, name)
 	})
-	header.Migrations = slices.DeleteFunc(header.Migrations, func(id string) bool { return id == "0016" })
+	header.Migrations = slices.DeleteFunc(header.Migrations, func(id string) bool { return id == "0016" || id == "0017" })
 	tx, err := source.db.Begin()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`DELETE FROM meta WHERE k='mig:0013'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`DELETE FROM meta WHERE k IN ('mig:0016','mig:0017')`); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer

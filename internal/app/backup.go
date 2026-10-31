@@ -434,7 +434,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// restore that ended with the data and the ledger disagreeing would be a database nobody could
 	// reason about, and leaving a step unrecorded is how the next start re-runs an upgrade over data
 	// that has already been upgraded.
-	if err := s.finishRestore(tx, steps, prior); err != nil {
+	if err := s.finishRestore(tx, steps, rep.Header.Migrations, prior); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -476,7 +476,7 @@ func (s *Store) populationFromRow() string {
 // finishRestore settles the database after its rows have been replaced: the unknown-step check, the
 // product check, and the ledger. All of it runs on the restore's own transaction, so a failure here
 // takes the data back with it rather than leaving a half-loaded database behind.
-func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
+func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
 	if prior.appPlatform != nil {
 		if err := applyPlatformRestore(e, *prior.appPlatform); err != nil {
@@ -509,6 +509,18 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior)
 	// A dump from a release that had steps this build does not: its `meta` carried the record in.
 	if err := refuseUnknownLedgerRowsExec(e, known); err != nil {
 		return err
+	}
+	carried := map[string]bool{}
+	for _, id := range declared {
+		carried[id] = true
+	}
+	for _, m := range steps {
+		if carried[m.id] || m.restoreSeed == nil {
+			continue
+		}
+		if err := m.restoreSeed(e); err != nil {
+			return fmt.Errorf("restore migration %s defaults: %w", m.id, err)
+		}
 	}
 	// What the schema actually looks like now, not what the dump claimed.
 	if err := s.verifyMigrationProducts(e, steps); err != nil {

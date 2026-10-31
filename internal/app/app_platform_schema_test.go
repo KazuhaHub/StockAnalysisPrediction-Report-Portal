@@ -106,6 +106,7 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 		}
 		defer tx.Rollback()
 		tables := append(migration0015().tables, migration0016().tables...)
+		tables = append(tables, migration0017().tables...)
 		sort.Strings(tables)
 		for _, name := range tables {
 			if _, err := tx.Exec("DELETE FROM " + name); err != nil {

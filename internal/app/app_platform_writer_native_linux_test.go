@@ -33,7 +33,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 		t.Fatal(err)
 	}
 	manifest.ID = "notes-writer-demo"
-	manifest.Capabilities.Required = []string{"network.http", "reports.read"}
+	manifest.Capabilities.Required = []string{"network.http", "reports.read", "storage.files"}
 	manifest.Capabilities.Optional = slices.DeleteFunc(manifest.Capabilities.Optional, func(c string) bool { return c == "network.http" })
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {

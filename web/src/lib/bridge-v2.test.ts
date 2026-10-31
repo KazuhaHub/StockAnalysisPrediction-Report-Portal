@@ -8,6 +8,7 @@ import {
   BRIDGE_DEADLINE_MS,
   type BridgeBinding,
   BridgeBackendError,
+  BridgeObjectError,
 } from "./bridge-v2";
 
 const cleanup: (() => void)[] = [];
@@ -1595,6 +1596,89 @@ test("report deadline is uncertain, cancels native work and never retries",async
  expect(dispatch).toHaveBeenCalledOnce();
 });
 const networkRequest=()=>({method:"GET",url:"https://api.example.com/v1",accept:"application/json",contentType:"",bodyBase64:""});
+const objectSummary={
+ id:"00000000-0000-4000-8000-000000000042",collection:"note",label:"First note",
+ mediaType:"application/json",sizeBytes:5,revision:1,createdAt:1,updatedAt:1,
+};
+async function objectsPair(
+ onObjectRequest?: Parameters<typeof createBridgeHost>[0]["onObjectRequest"],
+ granted=true,
+) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({
+  localWindow:w.host,
+  frameWindow:w.child,
+  binding,
+  presentation,
+  capabilities:granted?["storage.files"]:[],
+  onObjectRequest,
+ });
+ const client=createBridgeClient({
+  localWindow:w.child,
+  parentWindow:w.host,
+  parentOrigin:"https://portal.example.invalid",
+  onPresentation:()=>{},
+ });
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
+test("object channel preserves closed create/list/get/update/delete results",async()=>{
+ const dispatch=vi.fn(async(request:{action:string})=>{
+  switch(request.action){
+   case "list":return {action:"list" as const,items:[objectSummary],nextCursor:"2:00000000-0000-4000-8000-000000000042"};
+   case "get":return {action:"get" as const,object:objectSummary,contentBase64:"aGVsbG8="};
+   case "delete":return {action:"delete" as const,id:objectSummary.id};
+   default:return {action:request.action as "create"|"update",object:objectSummary};
+  }
+ });
+ const {client}=await objectsPair(dispatch);
+ const create={action:"create" as const,requestId:"create-1",collection:"note",label:"First note",mediaType:"application/json",contentBase64:"aGVsbG8="};
+ await expect(client.requestObjects(create)).resolves.toEqual({action:"create",object:objectSummary});
+ await expect(client.requestObjects({action:"list",collection:"note",limit:20})).resolves.toMatchObject({action:"list",items:[objectSummary]});
+ await expect(client.requestObjects({action:"get",id:objectSummary.id})).resolves.toEqual({action:"get",object:objectSummary,contentBase64:"aGVsbG8="});
+ await expect(client.requestObjects({action:"update",id:objectSummary.id,expectedRevision:1,label:"First note",mediaType:"application/json",contentBase64:"aGVsbG8="})).resolves.toEqual({action:"update",object:objectSummary});
+ await expect(client.requestObjects({action:"delete",id:objectSummary.id,expectedRevision:1})).resolves.toEqual({action:"delete",id:objectSummary.id});
+ expect(dispatch).toHaveBeenCalledTimes(5);
+});
+test("object channel fails closed without grant, transport or valid input",async()=>{
+ const dispatch=vi.fn(async()=>({action:"list" as const,items:[]}));
+ const absent=await objectsPair(dispatch,false);
+ await expect(absent.client.requestObjects({action:"list",collection:"note"})).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await objectsPair();
+ await expect(unsupported.client.requestObjects({action:"list",collection:"note"})).rejects.toMatchObject({code:"unsupported"});
+ const ready=await objectsPair(dispatch);
+ for(const request of [
+  {action:"list",collection:"Note"},
+  {action:"get",id:"bad"},
+  {action:"create",requestId:"create-1",collection:"note",label:"First\nnote",mediaType:"application/json",contentBase64:"aGVsbG8="},
+  {action:"delete",id:objectSummary.id,expectedRevision:0},
+  {action:"list",collection:"note",extra:true},
+ ]) await expect(ready.client.requestObjects(request as never)).rejects.toMatchObject({code:"invalid_request"});
+ expect(dispatch).not.toHaveBeenCalled();
+});
+test("object conflicts and storage full stay stable; close aborts work",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,abort:AbortSignal)=>{
+  signal=abort;
+  return new Promise<never>(()=>{});
+ });
+ const {client,host}=await objectsPair(dispatch);
+ const pending=client.requestObjects({action:"create",requestId:"create-1",collection:"note",label:"First note",mediaType:"application/json",contentBase64:""});
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ host.close();
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ client.close();
+ await rejected;
+ const stable=await objectsPair(vi.fn()
+  .mockRejectedValueOnce(new BridgeObjectError("conflict"))
+  .mockRejectedValueOnce(new BridgeObjectError("storage_full")));
+ for(const code of ["conflict","storage_full"]){
+  await expect(stable.client.requestObjects({action:"list",collection:"note"})).rejects.toMatchObject({code,retryable:false});
+ }
+});
 test("reviewed network channel preserves binary response and remote auth status",async()=>{
  const dispatch=vi.fn(async(_request:unknown)=>({status:401,contentType:"application/octet-stream",bodyBase64:"AP+A"}));
  const {client}=await networkPair(dispatch);

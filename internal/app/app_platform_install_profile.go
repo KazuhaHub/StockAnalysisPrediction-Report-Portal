@@ -22,6 +22,11 @@ func platformInstallProfileQuota(format string, manifest appplatform.Manifest) (
 		if manifest.Backend != nil || !platformFrontendRequiredCapabilities(manifest) || manifest.Data.WritesOnStartup {
 			return 0, errAppPlatformInstallUnavailable
 		}
+		for _, capability := range manifest.Capabilities.Required {
+			if capability == "storage.files" {
+				return 256 << 20, nil
+			}
+		}
 		return 0, nil
 	default:
 		return 0, errAppPlatformPlanChanged

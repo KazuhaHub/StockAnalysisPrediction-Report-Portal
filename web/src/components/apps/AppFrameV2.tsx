@@ -8,6 +8,7 @@ import './AppFrameV2.css'
 import { createAppBackendTransport } from '../../lib/appBackendV2'
 import { createAppNetworkTransport } from '../../lib/appNetworkV2'
 import { createAppReportsTransport } from '../../lib/appReportsV2'
+import { createAppObjectsTransport } from '../../lib/appObjectsV2'
 
 export interface AppFrameV2Props {
   source: string
@@ -97,6 +98,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
       onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
       onReportRequest: capabilities.includes('reports.read') ? createAppReportsTransport(binding) : undefined,
+      onObjectRequest: capabilities.includes('storage.files') ? createAppObjectsTransport(binding) : undefined,
       onNavigate: (path,replace,search)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search)},
       onPageChange: value=>{if(live.current&&epoch.current===generation)pageObserver.current?.(value)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },

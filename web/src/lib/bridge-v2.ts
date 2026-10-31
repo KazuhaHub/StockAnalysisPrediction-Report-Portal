@@ -132,6 +132,61 @@ export type BridgeReportResponse =
       readonly items: readonly BridgeReportSummary[];
     }
   | { readonly kind: "get"; readonly report: BridgeReportDetail };
+export interface BridgeObjectSummary {
+  readonly id: string;
+  readonly collection: string;
+  readonly label: string;
+  readonly mediaType: string;
+  readonly sizeBytes: number;
+  readonly revision: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+export type BridgeObjectRequest =
+  | {
+      readonly action: "list";
+      readonly collection: string;
+      readonly cursor?: string;
+      readonly limit?: number;
+    }
+  | { readonly action: "get"; readonly id: string }
+  | {
+      readonly action: "create";
+      readonly requestId: string;
+      readonly collection: string;
+      readonly label: string;
+      readonly mediaType: string;
+      readonly contentBase64: string;
+    }
+  | {
+      readonly action: "update";
+      readonly id: string;
+      readonly expectedRevision: number;
+      readonly label: string;
+      readonly mediaType: string;
+      readonly contentBase64: string;
+    }
+  | {
+      readonly action: "delete";
+      readonly id: string;
+      readonly expectedRevision: number;
+    };
+export type BridgeObjectResponse =
+  | {
+      readonly action: "list";
+      readonly items: readonly BridgeObjectSummary[];
+      readonly nextCursor?: string;
+    }
+  | {
+      readonly action: "get";
+      readonly object: BridgeObjectSummary;
+      readonly contentBase64: string;
+    }
+  | {
+      readonly action: "create" | "update";
+      readonly object: BridgeObjectSummary;
+    }
+  | { readonly action: "delete"; readonly id: string };
 export type BridgeBackendFailure =
   | "not_ready"
   | "unsupported"
@@ -148,6 +203,11 @@ const backendFailures = new Set<BridgeBackendFailure>([
   "uncertain",
 ]);
 const networkFailures = new Set<AppNetworkFailure>(backendFailures);
+const objectFailures = new Set<BridgeObjectFailure>([
+  ...backendFailures,
+  "conflict",
+  "storage_full",
+]);
 export class BridgeBackendError extends Error {
   readonly retryable = false;
   constructor(readonly code: BridgeBackendFailure) {
@@ -160,6 +220,17 @@ export class BridgeReportError extends Error {
   constructor(readonly code: BridgeBackendFailure) {
     super(`Application reports: ${code}`);
     this.name = "BridgeReportError";
+  }
+}
+export type BridgeObjectFailure =
+  | BridgeBackendFailure
+  | "conflict"
+  | "storage_full";
+export class BridgeObjectError extends Error {
+  readonly retryable = false;
+  constructor(readonly code: BridgeObjectFailure) {
+    super(`Application objects: ${code}`);
+    this.name = "BridgeObjectError";
   }
 }
 export function parseBridgeBackendRequest(
@@ -369,6 +440,250 @@ export function parseBridgeReportResponse(
     items: Object.freeze(items as BridgeReportSummary[]),
   });
 }
+const objectIDPattern =
+  /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+const objectCollectionPattern = /^[a-z0-9_]{1,32}$/;
+const objectRequestPattern = /^[A-Za-z0-9._:-]{1,128}$/;
+const objectMediaTypePattern =
+  /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/;
+function objectText(value: unknown, limit: number): value is string {
+  if (!isString(value) || value.length > limit) return false;
+  for (const char of value) {
+    const code = char.codePointAt(0)!;
+    if (code < 0x20 || code === 0x7f) return false;
+  }
+  return true;
+}
+function objectContent(value: unknown): value is string {
+  if (!isString(value) || value.length > 4 * Math.ceil(1_048_576 / 3)) {
+    return false;
+  }
+  try {
+    const decoded = atob(value);
+    return decoded.length <= 1_048_576 && btoa(decoded) === value;
+  } catch {
+    return false;
+  }
+}
+function objectCursor(value: unknown): value is string {
+  if (!isString(value) || value.length > 288) return false;
+  const [millis, id, extra] = value.split(":");
+  return (
+    extra === undefined &&
+    /^[1-9][0-9]{0,18}$/.test(millis) &&
+    BigInt(millis) <= MAX_REVISION &&
+    objectIDPattern.test(id)
+  );
+}
+export function parseBridgeObjectRequest(
+  value: unknown,
+): BridgeObjectRequest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const action = (value as Record<string, unknown>).action;
+  if (action === "list") {
+    if (
+      !exact(value, ["action", "collection", "cursor", "limit"]) &&
+      !exact(value, ["action", "collection", "cursor"]) &&
+      !exact(value, ["action", "collection", "limit"]) &&
+      !exact(value, ["action", "collection"])
+    )
+      return null;
+    if (
+      !isString(value.collection) ||
+      !objectCollectionPattern.test(value.collection) ||
+      (value.cursor !== undefined && !objectCursor(value.cursor)) ||
+      (value.limit !== undefined &&
+        (!integer(value.limit) || value.limit < 1 || value.limit > 50))
+    )
+      return null;
+    return Object.freeze({
+      action: "list",
+      collection: value.collection,
+      ...(value.cursor === undefined ? {} : { cursor: value.cursor }),
+      ...(value.limit === undefined ? {} : { limit: value.limit }),
+    });
+  }
+  if (action === "get") {
+    if (!exact(value, ["action", "id"]) || !isString(value.id) || !objectIDPattern.test(value.id))
+      return null;
+    return Object.freeze({ action: "get", id: value.id });
+  }
+  if (action === "create") {
+    if (
+      !exact(value, [
+        "action",
+        "requestId",
+        "collection",
+        "label",
+        "mediaType",
+        "contentBase64",
+      ]) ||
+      !isString(value.requestId) ||
+      !objectRequestPattern.test(value.requestId) ||
+      !isString(value.collection) ||
+      !objectCollectionPattern.test(value.collection) ||
+      !objectText(value.label, 256) ||
+      !value.label ||
+      !isString(value.mediaType) ||
+      !objectMediaTypePattern.test(value.mediaType) ||
+      !objectContent(value.contentBase64)
+    )
+      return null;
+    return Object.freeze({
+      action: "create",
+      requestId: value.requestId,
+      collection: value.collection,
+      label: value.label,
+      mediaType: value.mediaType,
+      contentBase64: value.contentBase64,
+    });
+  }
+  if (action === "update") {
+    if (
+      !exact(value, [
+        "action",
+        "id",
+        "expectedRevision",
+        "label",
+        "mediaType",
+        "contentBase64",
+      ]) ||
+      !isString(value.id) ||
+      !objectIDPattern.test(value.id) ||
+      !integer(value.expectedRevision) ||
+      value.expectedRevision < 1 ||
+      !objectText(value.label, 256) ||
+      !value.label ||
+      !isString(value.mediaType) ||
+      !objectMediaTypePattern.test(value.mediaType) ||
+      !objectContent(value.contentBase64)
+    )
+      return null;
+    return Object.freeze({
+      action: "update",
+      id: value.id,
+      expectedRevision: value.expectedRevision,
+      label: value.label,
+      mediaType: value.mediaType,
+      contentBase64: value.contentBase64,
+    });
+  }
+  if (action === "delete") {
+    if (
+      !exact(value, ["action", "id", "expectedRevision"]) ||
+      !isString(value.id) ||
+      !objectIDPattern.test(value.id) ||
+      !integer(value.expectedRevision) ||
+      value.expectedRevision < 1
+    )
+      return null;
+    return Object.freeze({
+      action: "delete",
+      id: value.id,
+      expectedRevision: value.expectedRevision,
+    });
+  }
+  return null;
+}
+function parseBridgeObjectSummary(
+  value: unknown,
+): BridgeObjectSummary | null {
+  if (
+    !exact(value, [
+      "id",
+      "collection",
+      "label",
+      "mediaType",
+      "sizeBytes",
+      "revision",
+      "createdAt",
+      "updatedAt",
+    ]) ||
+    !isString(value.id) ||
+    !objectIDPattern.test(value.id) ||
+    !isString(value.collection) ||
+    !objectCollectionPattern.test(value.collection) ||
+    !objectText(value.label, 256) ||
+    !value.label ||
+    !isString(value.mediaType) ||
+    !objectMediaTypePattern.test(value.mediaType) ||
+    !integer(value.sizeBytes) ||
+    value.sizeBytes < 0 ||
+    value.sizeBytes > 1_048_576 ||
+    !integer(value.revision) ||
+    value.revision < 1 ||
+    !integer(value.createdAt) ||
+    value.createdAt < 0 ||
+    !integer(value.updatedAt) ||
+    value.updatedAt < value.createdAt
+  )
+    return null;
+  return Object.freeze({
+    id: value.id,
+    collection: value.collection,
+    label: value.label,
+    mediaType: value.mediaType,
+    sizeBytes: value.sizeBytes,
+    revision: value.revision,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  });
+}
+export function parseBridgeObjectResponse(
+  value: unknown,
+): BridgeObjectResponse | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const action = (value as Record<string, unknown>).action;
+  if (action === "list") {
+    if (
+      (!exact(value, ["action", "items", "nextCursor"]) &&
+        !exact(value, ["action", "items"])) ||
+      !Array.isArray(value.items) ||
+      value.items.length > 50 ||
+      (value.nextCursor !== undefined && !objectCursor(value.nextCursor))
+    )
+      return null;
+    const items = value.items.map(parseBridgeObjectSummary);
+    if (items.some((item) => item === null)) return null;
+    return Object.freeze({
+      action: "list",
+      items: Object.freeze(items as BridgeObjectSummary[]),
+      ...(value.nextCursor === undefined
+        ? {}
+        : { nextCursor: value.nextCursor }),
+    });
+  }
+  if (action === "get") {
+    if (!exact(value, ["action", "object", "contentBase64"])) return null;
+    const object = parseBridgeObjectSummary(value.object);
+    if (
+      !object ||
+      !objectContent(value.contentBase64) ||
+      atob(value.contentBase64).length !== object.sizeBytes
+    )
+      return null;
+    return Object.freeze({
+      action: "get",
+      object,
+      contentBase64: value.contentBase64,
+    });
+  }
+  if (action === "create" || action === "update") {
+    if (!exact(value, ["action", "object"])) return null;
+    const object = parseBridgeObjectSummary(value.object);
+    return object ? Object.freeze({ action, object }) : null;
+  }
+  if (action === "delete") {
+    if (
+      !exact(value, ["action", "id"]) ||
+      !isString(value.id) ||
+      !objectIDPattern.test(value.id)
+    )
+      return null;
+    return Object.freeze({ action: "delete", id: value.id });
+  }
+  return null;
+}
 interface Session {
   state(): BridgeState;
   close(): void;
@@ -392,6 +707,10 @@ export interface BridgeHostOptions extends BaseOptions {
     request: BridgeReportRequest,
     signal: AbortSignal,
   ) => Promise<BridgeReportResponse>;
+  onObjectRequest?: (
+    request: BridgeObjectRequest,
+    signal: AbortSignal,
+  ) => Promise<BridgeObjectResponse>;
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -676,6 +995,7 @@ export function createBridgeHost(
   let lastRequest = 0n;
   let lastNetworkRequest = 0n;
   let reportIssued = 0n;
+  let objectIssued = 0n;
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
@@ -699,6 +1019,10 @@ export function createBridgeHost(
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
   const reportRequests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const objectRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
@@ -798,6 +1122,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     reportRequests.clear();
+    for (const request of objectRequests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    objectRequests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -1113,6 +1442,108 @@ export function createBridgeHost(
             }
           },
           Math.max(0, 100 - (Date.now() - lastHeightAt)),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "objects.request" || data.type === "objects.cancel")
+    ) {
+      const cancel = data.type === "objects.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > objectIssued) {
+          fail("protocol_error");
+          return;
+        }
+        const active = objectRequests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          objectRequests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= objectIssued) {
+        fail("protocol_error");
+        return;
+      }
+      objectIssued = BigInt(id);
+      const request = parseBridgeObjectRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "objects.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (!options.onObjectRequest || !granted?.includes("storage.files")) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (objectRequests.size >= 2) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = objectRequests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        objectRequests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 20_000);
+      objectRequests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new BridgeObjectError("uncertain");
+          return options.onObjectRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseBridgeObjectResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof BridgeObjectError &&
+                objectFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
         );
       return;
     }
@@ -1615,6 +2046,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeReportRequest,
     signal?: AbortSignal,
   ): Promise<BridgeReportResponse>;
+  requestObjects(
+    request: BridgeObjectRequest,
+    signal?: AbortSignal,
+  ): Promise<BridgeObjectResponse>;
   describePage(
     scope: string,
     page: AppPage | null,
@@ -1741,6 +2176,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   let issued = 0n;
   let networkIssued = 0n;
   let reportIssued = 0n;
+  let objectIssued = 0n;
   const requests = new Map<
     string,
     {
@@ -1765,6 +2201,14 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       dispose: () => void;
     }
   >();
+  const objectRequests = new Map<
+    string,
+    {
+      resolve: (value: BridgeObjectResponse) => void;
+      reject: (error: BridgeObjectError) => void;
+      dispose: () => void;
+    }
+  >();
   function retireRequests() {
     for (const request of requests.values()) {
       request.dispose();
@@ -1781,6 +2225,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new BridgeReportError("uncertain"));
     }
     reportRequests.clear();
+    for (const request of objectRequests.values()) {
+      request.dispose();
+      request.reject(new BridgeObjectError("uncertain"));
+    }
+    objectRequests.clear();
   }
   let pageRevision = 0n,
     lastInvocation = 0n,
@@ -2090,6 +2539,47 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         );
       return;
     }
+    if (data && typeof data === "object" && data.type === "objects.result") {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (!decimal(data.requestId) || BigInt(data.requestId) > objectIssued) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response ? parseBridgeObjectResponse(data.response) : null;
+      if (
+        (response && !value) ||
+        (failure && !objectFailures.has(data.code as BridgeObjectFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = objectRequests.get(data.requestId);
+      if (!pending) return;
+      objectRequests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new BridgeObjectError(data.code as BridgeObjectFailure),
+        );
+      return;
+    }
     if (data && typeof data === "object" && data.type === "network.result") {
       const response = exact(data, [
         "type",
@@ -2246,6 +2736,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         issued = 0n;
         networkIssued = 0n;
         reportIssued = 0n;
+        objectIssued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -2619,6 +3110,58 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "reports.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestObjects(
+      value: BridgeObjectRequest,
+      signal?: AbortSignal,
+    ): Promise<BridgeObjectResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new BridgeObjectError("not_ready"));
+      if (!context.capabilities.includes("storage.files"))
+        return Promise.reject(new BridgeObjectError("unsupported"));
+      const request = parseBridgeObjectRequest(value);
+      if (!request)
+        return Promise.reject(new BridgeObjectError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new BridgeObjectError("not_ready"));
+      if (objectRequests.size >= 2 || objectIssued === MAX_REVISION)
+        return Promise.reject(new BridgeObjectError("busy"));
+      const id = (++objectIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = objectRequests.get(id);
+          if (!active) return;
+          objectRequests.delete(id);
+          active.dispose();
+          reject(new BridgeObjectError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "objects.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 20_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        objectRequests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "objects.request",
             ...envelope,
             requestId: id,
             request,

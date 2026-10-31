@@ -297,7 +297,7 @@ func backToStep0006(t *testing.T, path string) {
 // Later notification/backend products cannot remain in a step-0006 fixture.
 func rewindNotificationAndBackendStatements() []string {
 	var statements []string
-	for _, step := range []migration{migration0016(), migration0015(), migration0014(), migration0013(), migration0012(), migration0011(), migration0008(), migration0007()} {
+	for _, step := range []migration{migration0017(), migration0016(), migration0015(), migration0014(), migration0013(), migration0012(), migration0011(), migration0008(), migration0007()} {
 		for i := len(step.tables) - 1; i >= 0; i-- {
 			statements = append(statements, "DROP TABLE IF EXISTS "+step.tables[i])
 		}
@@ -676,7 +676,7 @@ func TestSchemaUpgradeInspectionListsPendingStepsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[0010, 0009, 0007, 0008, 0011, 0012, 0013, 0014, 0015, 0016]") || !strings.Contains(out, "next start") {
+	if !strings.Contains(out, "[0010, 0009, 0007, 0008, 0011, 0012, 0013, 0014, 0015, 0016, 0017]") || !strings.Contains(out, "next start") {
 		t.Fatalf("inspection did not list the pending steps in list order and say startup applies them: %q", out)
 	}
 	for _, stale := range []string{"refuse", "required", "requires"} {
@@ -711,7 +711,7 @@ func TestSchemaUpgradeApplyUpgradesOfflineWithTheNormalRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[0010, 0009, 0007, 0008, 0011, 0012, 0013, 0014, 0015, 0016]") {
+	if !strings.Contains(out, "[0010, 0009, 0007, 0008, 0011, 0012, 0013, 0014, 0015, 0016, 0017]") {
 		t.Fatalf("--apply did not report the steps it applied: %q", out)
 	}
 	for _, stale := range []string{"refuse", "required", "requires"} {

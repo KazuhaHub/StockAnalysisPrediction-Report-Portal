@@ -83,6 +83,20 @@ test('report transport exists only for a current reports.read grant and revocati
  expect(sessions[2].options.onReportRequest).toBeUndefined()
 })
 
+test('object transport exists only for a current storage.files grant and revocation retires the frame',()=>{
+ const view=render(<AppFrameV2 {...props}/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.onObjectRequest).toBeUndefined()
+ view.rerender(<AppFrameV2 {...props} capabilities={['storage.files']}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(old);expect(sessions[0].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[1].options.onObjectRequest).toBeTypeOf('function')
+ const current=screen.getByTitle('Fixture')
+ view.rerender(<AppFrameV2 {...props} capabilities={[]}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(current);expect(sessions[1].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[2].options.onObjectRequest).toBeUndefined()
+})
+
 test('document reveal waits for height and content can grow and shrink in one iframe',()=>{
  render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame)
  act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')

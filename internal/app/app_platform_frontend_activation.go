@@ -38,14 +38,15 @@ func loadPlatformFrontendCandidate(e migExec, lease platformOperationLease, now 
 		return zero, err
 	}
 	var p platformInstallProjection
-	if json.Unmarshal([]byte(review), &p) != nil || p.Format != platformFrontendInstallFormat || p.DataQuotaBytes != 0 {
+	if json.Unmarshal([]byte(review), &p) != nil || p.Format != platformFrontendInstallFormat {
 		return zero, errAppPlatformStageEvidence
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	if _, err = platformInstallProfileQuota(p.Format, parsed.Manifest); err != nil {
+	quota, err := platformInstallProfileQuota(p.Format, parsed.Manifest)
+	if err != nil || p.DataQuotaBytes != quota {
 		return zero, err
 	}
 	document, err := appplatform.BuildFrontendDocument(parsed.Manifest, archive)
@@ -99,6 +100,10 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	if len(plan) > 65536 || json.Unmarshal([]byte(plan), &p) != nil {
 		return fail
 	}
+	quota, err := platformInstallProfileQuota(platformFrontendInstallFormat, manifest)
+	if err != nil {
+		return fail
+	}
 	encoded, _ := json.Marshal(p)
 	audience, _ := json.Marshal(p.Audience)
 	frame, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, digest})
@@ -106,7 +111,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	slices.Sort(declined)
 	expectedDeclined, _ := json.Marshal(declined)
 	actualDeclined, _ := json.Marshal(p.DeclinedCapabilities)
-	if string(encoded) != plan || platformDigest([]byte(plan)) != digest || digest != proof.ReviewSHA || platformDigest(frame) != request || target != release || p.ReleaseSHA256 != release || p.Format != platformFrontendInstallFormat || p.DataQuotaBytes != 0 || p.ControllerEpoch != epoch || p.PlatformAPI != platformDevelopmentAPI || p.AppID != manifest.ID || p.PublisherID != manifest.Publisher || consumed < 0 || completed < consumed || platformDigest(audience) != proof.AudienceSHA || string(expectedDeclined) != string(actualDeclined) {
+	if string(encoded) != plan || platformDigest([]byte(plan)) != digest || digest != proof.ReviewSHA || platformDigest(frame) != request || target != release || p.ReleaseSHA256 != release || p.Format != platformFrontendInstallFormat || p.DataQuotaBytes != quota || p.ControllerEpoch != epoch || p.PlatformAPI != platformDevelopmentAPI || p.AppID != manifest.ID || p.PublisherID != manifest.Publisher || consumed < 0 || completed < consumed || platformDigest(audience) != proof.AudienceSHA || string(expectedDeclined) != string(actualDeclined) {
 		return fail
 	}
 	var archive []byte

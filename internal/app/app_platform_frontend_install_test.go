@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -47,6 +48,68 @@ func testPlatformFrontendInstall(t *testing.T, pg bool) {
 }
 func TestPlatformFrontendInstallSQLite(t *testing.T)   { testPlatformFrontendInstall(t, false) }
 func TestPlatformFrontendInstallPostgres(t *testing.T) { testPlatformFrontendInstall(t, true) }
+
+func TestPlatformFrontendStorageInstallSQLite(t *testing.T) {
+	s, actor, release := platformInstallFixture(t, false)
+	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	manifest.Capabilities.Required = []string{"storage.files"}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err = s.stagePlatformRelease(actor, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.createPlatformFrontendInstallReview(actor, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: actor.username}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := s.consumePlatformInstallReview(actor, review.ID, review.SHA256, platformFixtureID(955))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.st.claimPlatformOperation(admitted.OperationID, platformFixtureID(956))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.runPlatformStaticInstall(context.Background(), lease, platformRuntimeEndpoint{}); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='storage.files'`, admitted.InstallationID) != 1 {
+		t.Fatal("storage capability was not activated")
+	}
+	binding, err := s.inspectPlatformLaunchAccess(actor, admitted.InstallationID)
+	if err != nil {
+		t.Fatal("frontend storage launch", err)
+	}
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	launch := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+admitted.InstallationID+"/launch", cookie, "")
+	var metadata struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if launch.Code != http.StatusOK || json.Unmarshal(launch.Body.Bytes(), &metadata) != nil || len(metadata.Capabilities) != 1 || metadata.Capabilities[0] != "storage.files" {
+		t.Fatalf("frontend storage capability: %d %s", launch.Code, launch.Body.String())
+	}
+	objectBody := map[string]any{
+		"binding": map[string]string{"generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA},
+		"action":  "create", "requestId": "create-1", "collection": "note",
+		"label": "First note", "mediaType": "application/json",
+		"contentBase64": base64.StdEncoding.EncodeToString([]byte(`{"body":"persisted"}`)),
+	}
+	objectPayload, _ := json.Marshal(objectBody)
+	created := sessionTestRequest(mux, "POST", "/api/app-platform/installations/"+admitted.InstallationID+"/objects", cookie, string(objectPayload))
+	if created.Code != http.StatusOK || !bytes.Contains(created.Body.Bytes(), []byte(`"label":"First note"`)) {
+		t.Fatalf("frontend object write: %d %s", created.Code, created.Body.String())
+	}
+}
 
 func platformFrontendQueuedFixture(t *testing.T, pg bool) (*Server, platformActorSession, string) {
 	t.Helper()
@@ -276,7 +339,7 @@ func TestPlatformFrontendDoesNotBecomeNativeSQLite(t *testing.T) {
 		t.Fatal("native rejection mutated frontend job")
 	}
 }
-func TestPlatformFrontendRequiredStorageRefusedSQLite(t *testing.T) {
+func TestPlatformFrontendRequiredStorageReviewSQLite(t *testing.T) {
 	s, actor, _ := platformInstallFixture(t, false)
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.2")
 	var m appplatform.Manifest
@@ -293,11 +356,16 @@ func TestPlatformFrontendRequiredStorageRefusedSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.createPlatformInstallReview(actor, release.sha256, 1); err == nil {
-		t.Fatal("storage requirement silently declined by no-data provider")
+	plan, err := s.createPlatformInstallReview(actor, release.sha256, 1)
+	if err != nil {
+		t.Fatalf("storage requirement was not reviewable: %v", err)
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != 0 {
-		t.Fatal("unsupported requirements created confirmable plan")
+	var projection platformInstallProjection
+	if json.Unmarshal([]byte(plan.JSON), &projection) != nil || projection.DataQuotaBytes != 256<<20 || projection.Format != platformFrontendInstallFormat {
+		t.Fatal("storage review did not bind its object quota")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != 1 {
+		t.Fatal("storage review was not persisted")
 	}
 }
 

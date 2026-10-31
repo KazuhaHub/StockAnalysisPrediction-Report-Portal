@@ -149,7 +149,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
  (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (completed_ms IS NULL OR stage='recovery_required'))+
  (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
  (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability<>'reports.read')`, installationID, installationID, installationID, policy, installationID).Scan(&unsafe); err != nil {
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability NOT IN ('reports.read','storage.files'))`, installationID, installationID, installationID, policy, installationID).Scan(&unsafe); err != nil {
 		return zero, err
 	}
 	if unsafe != 0 {

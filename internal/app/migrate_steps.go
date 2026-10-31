@@ -207,6 +207,9 @@ type migration struct {
 	renames []colRename
 	restore restoreRule
 	up      func(migExec) error
+	// restoreSeed repairs a migration-owned default row when restoring a dump that predates
+	// this step. It never backfills user data and is not called for a dump that claims the step.
+	restoreSeed func(migExec) error
 	// verify is a shape check beyond what columns, tables, indices and renames can express (types,
 	// nullability, keys, constraints). It runs wherever the declared products are verified: inside the
 	// step's own transaction before the ledger row is written, and on every start for recorded steps.
@@ -218,7 +221,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014(), migration0015(), migration0016()}
+		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014(), migration0015(), migration0016(), migration0017()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).

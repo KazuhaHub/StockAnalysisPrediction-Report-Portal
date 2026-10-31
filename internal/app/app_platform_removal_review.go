@@ -207,7 +207,7 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 	p.Format, p.InstallationID, p.Action, p.Managed, p.TargetGeneration, p.ActorAuthority = "portal.removal-review/1", id, action, runtime.Valid, p.Generation+1, actor.authorityFingerprint
 	p.DataEffect = "preserve"
 	if action == appplatform.ActionUninstall {
-		p.DataEffect = "retain"
+		p.DataEffect = "delete"
 	}
 	return p, nil
 }
@@ -389,6 +389,11 @@ func (s *Server) consumePlatformRemovalReview(session platformActorSession, plan
 		}
 		if _, err := e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=? WHERE installation_id=? AND state='active'`, control.nowMS, p.InstallationID); err != nil {
 			return err
+		}
+		if action == appplatform.ActionUninstall {
+			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, control.nowMS); err != nil {
+				return err
+			}
 		}
 		if p.Data != nil {
 			updated, err := e.exec(`UPDATE app_platform_data_namespaces SET writer_fence=writer_fence+1,revision=revision+1,updated_ms=? WHERE id=? AND owner_installation_id=? AND revision=? AND writer_fence=?`, control.nowMS, p.Data.ID, p.InstallationID, p.Data.Revision, p.Data.WriterFence)

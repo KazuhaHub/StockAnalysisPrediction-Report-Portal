@@ -22,6 +22,7 @@ var (
 	errPlatformObjectInvalid     = errors.New("application object request is invalid")
 	errPlatformObjectConflict    = errors.New("application object revision conflicts")
 	errPlatformObjectStorageFull = errors.New("application object storage is full")
+	errPlatformObjectNotFound    = errors.New("application object is unavailable")
 )
 
 var (

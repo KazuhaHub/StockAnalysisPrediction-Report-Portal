@@ -105,6 +105,10 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.Capabilities.Required = []string{"storage.files"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("platform object storage provider refused", err)
+	}
+	m.Capabilities.Required = []string{"secrets.use"}
 	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err == nil {
 		t.Fatal("missing required provider admitted")
 	}
