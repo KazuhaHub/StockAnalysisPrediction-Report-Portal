@@ -97,3 +97,19 @@ it('keeps the opened data snapshot stable while dashboard refreshes', () => {
   expect(screen.getByRole('table').textContent).toContain('2026-10-25')
   expect(screen.getByRole('table').textContent).not.toContain('New data')
 })
+// An empty breakdown is an empty state, not a grey ring with a label floating beside it.
+it('shows an empty state instead of drawing an empty chart', () => {
+  const { container } = renderChart(<DashboardChart label="Types" rows={[]} series={{ type: 'pie' as const }} total={0} />)
+  expect(container.querySelector('.ant-empty')?.textContent).toContain('manage.dashboard.noReports')
+  expect((container.querySelector('.rp-dashboard-echart-host') as HTMLElement).hidden).toBe(true)
+})
+// The total sits in the ring's middle at every width: the title and the ring share one centre, and
+// the title is centred on it both ways rather than hung from its top edge.
+it.each([600, 400])('centres the donut total on the ring at %ipx', (width) => {
+  hostSize = { width, height: 280 }
+  renderChart(<DashboardChart label="Types" rows={[{ name: 'A', value: 3 }]} series={{ type: 'pie' as const }} total={3} />)
+  const option = chart.setOption.mock.calls[chart.setOption.mock.calls.length - 1]?.[0] as { title: { left: string; top: string; textAlign: string; textVerticalAlign: string }; series: { center: string[] }[] }
+  expect([option.title.left, option.title.top]).toEqual(option.series[0].center)
+  expect(option.title.textAlign).toBe('center')
+  expect(option.title.textVerticalAlign).toBe('middle')
+})

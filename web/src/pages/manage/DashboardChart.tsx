@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Modal, Pagination, Tooltip, theme, Typography } from 'antd'
+import { Button, Empty, Input, Modal, Pagination, Tooltip, theme, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { init, use as registerCharts, type EChartsType } from 'echarts/core'
 import { LineChart, BarChart, PieChart, type LineSeriesOption, type BarSeriesOption, type PieSeriesOption } from 'echarts/charts'
@@ -44,6 +44,7 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   const summary = rows.map(item => `${item.name}: ${item.value}`).join(', ')
   const makeOption = useMemo(() => (width: number): EChartsOption => {
     const narrow = width < 460
+    const center = narrow ? ['50%', '40%'] : ['26%', '50%']
     const countLabel = (value: number) => t('manage.dashboard.tooltipCount', { count: value })
     const tooltip = (raw: unknown) => {
       const item = (Array.isArray(raw) ? raw[0] : raw) as { name?: string; value?: number; marker?: string }
@@ -69,13 +70,14 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
         legend: { type: 'scroll', orient: narrow ? 'horizontal' : 'vertical', ...(narrow ? { bottom: 0, left: 'center' } : { left: '54%', right: 8, top: 'middle' }),
           formatter: legendValues ? (name: string) => `${name}  ${rows.find(row => row.name === name)?.value ?? 0}` : undefined,
           textStyle: { color: token.colorTextSecondary, width: narrow ? 110 : Math.max(80, width * .4), overflow: 'truncate' }, tooltip: { show: true } },
-        title: { text: rows.length ? String(total ?? 0) : t('manage.dashboard.noReports'), left: narrow ? 'center' : '25%', top: narrow ? '34%' : '44%', textAlign: 'center',
+        // The total sits in the ring's middle: one centre for both, the title centred on it both ways.
+        title: { text: String(total ?? 0), left: center[0], top: center[1], textAlign: 'center', textVerticalAlign: 'middle',
           textStyle: { color: token.colorText, fontSize: 20, fontWeight: 600 } },
       } : {
         grid: { left: 8, right: horizontal ? 45 : 16, top: 24, bottom: 8, containLabel: true },
         xAxis: horizontal ? value : category, yAxis: horizontal ? category : value,
       }),
-      series: [{ ...series, ...(pie ? { center: narrow ? ['50%', '40%'] : ['26%', '50%'], radius: narrow ? ['35%', '53%'] : ['45%', '68%'], stillShowZeroSum: false } : {}),
+      series: [{ ...series, ...(pie ? { center, radius: narrow ? ['35%', '53%'] : ['45%', '68%'], stillShowZeroSum: false } : {}),
         data: pie ? rows : rows.map(item => item.value), label: { ...series.label, color: token.colorText, fontSize: 12 },
         emphasis: { focus: 'self' }, ...(pie ? {} : { itemStyle: { borderRadius: 3 } }),
       }],
@@ -107,7 +109,10 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   return <figure className="rp-dashboard-chart rp-dashboard-echart">
     <div role="img" aria-label={label} className="rp-dashboard-chart-visual">
       <span className="rp-sr-only">{summary || t('manage.dashboard.noReports')}</span>
-      <div ref={host} aria-hidden="true" className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40) : undefined }} />
+      {/* Nothing to break down is an empty state (antd's), not an empty ring; the host stays mounted,
+          hidden, so the chart instance survives until there is data again. */}
+      {!rows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.dashboard.noReports')} />}
+      <div ref={host} aria-hidden="true" hidden={!rows.length} className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40) : undefined }} />
     </div>
     {hint && <figcaption><Typography.Text type="secondary">{hint}</Typography.Text></figcaption>}
     {headerTarget && createPortal(dataButton, headerTarget)}
