@@ -4,6 +4,8 @@ import { Grid } from 'antd'
 
 import CardTable from './CardTable'
 
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+
 type Row = { id: number; name: string; size: number }
 const rows: Row[] = [{ id: 1, name: 'alpha', size: 3 }]
 const columns = [
@@ -52,5 +54,25 @@ describe('CardTable', () => {
     const cells = [...container.querySelectorAll('.ant-table-tbody tr.ant-table-row td')]
     expect(cells[0].hasAttribute('data-primary')).toBe(true)
     expect(cells[1].hasAttribute('data-primary')).toBe(false)
+  })
+
+  // Nothing matching the filters is not the same as nothing there: say it is the filters and offer
+  // to clear them, instead of the plain empty state. [Carbon search / empty states]
+  it('says when filters, not the data, leave the table empty, and clears them', async () => {
+    width(false)
+    const onClear = vi.fn()
+    const { getByText, getByRole } = render(<CardTable<Row> rowKey="id" columns={columns} dataSource={[]} filtered onClearFilters={onClear} />)
+    expect(getByText('table.noMatches')).toBeTruthy()
+    getByRole('button', { name: 'table.clearFilters' }).click()
+    expect(onClear).toHaveBeenCalled()
+  })
+
+  it('keeps the page’s own empty text when nothing is filtered', () => {
+    width(false)
+    const { getByText, queryByText } = render(
+      <CardTable<Row> rowKey="id" columns={columns} dataSource={[]} locale={{ emptyText: 'No tokens yet' }} filtered={false} />,
+    )
+    expect(getByText('No tokens yet')).toBeTruthy()
+    expect(queryByText('table.noMatches')).toBeNull()
   })
 })

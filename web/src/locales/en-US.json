@@ -3452,5 +3452,7 @@
   "forecast.eval.gate.nextUnchecked": "{{bench}} becomes the benchmark for new forecasts from {{from}} but has no dry-run check. Until it is checked, its checkpoints are only planned, never written.",
   "forecast.backlog.none": "No checkpoints are waiting to settle (as of {{at}}).",
   "forecast.eval.benchNext": "(new forecasts use {{bench}} from {{from}})",
-  "confirm.irreversible": "This cannot be undone."
+  "confirm.irreversible": "This cannot be undone.",
+  "table.noMatches": "No results match the filters",
+  "table.clearFilters": "Clear filters"
 }

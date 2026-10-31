@@ -3452,5 +3452,7 @@
   "forecast.eval.gate.nextUnchecked": "{{bench}} 将从 {{from}} 起用于新的预测，但还没有试运行核对。核对之前，它的检查点只会规划，不会写入。",
   "forecast.backlog.none": "没有待结算的检查点（统计于 {{at}}）。",
   "forecast.eval.benchNext": "（{{from}} 起新预测改用{{bench}}）",
-  "confirm.irreversible": "此操作无法撤销。"
+  "confirm.irreversible": "此操作无法撤销。",
+  "table.noMatches": "没有符合条件的结果",
+  "table.clearFilters": "清除筛选"
 }
