@@ -36,6 +36,8 @@ type HTTPRequest struct {
 	Accept      string
 	ContentType string
 	Body        []byte
+	HeaderName  string
+	HeaderValue []byte
 }
 
 // HTTPResponse deliberately excludes arbitrary upstream headers, cookies and URLs.
@@ -89,6 +91,14 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	}
 	// Validate before allocating a slot or invoking any external work.
 	if int64(len(input.Body)) > h.policy.RequestBytes || !appplatform.ValidHTTPPolicyHeaderValue(input.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(input.ContentType) {
+		return zero, ErrDenied
+	}
+	if len(input.HeaderValue) > 0 && (input.HeaderName != "Authorization" || len(input.HeaderValue) > 16400) {
+		if input.HeaderName != "X-API-Key" || len(input.HeaderValue) > 16384 {
+			return zero, ErrDenied
+		}
+	}
+	if len(input.HeaderValue) == 0 && input.HeaderName != "" {
 		return zero, ErrDenied
 	}
 	if appplatform.ValidateHTTPPolicyTarget(h.policy, input.Method, input.URL) != nil {
@@ -163,6 +173,9 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if input.ContentType != "" {
 		req.Header.Set("Content-Type", input.ContentType)
 	}
+	if input.HeaderName != "" {
+		req.Header.Set(input.HeaderName, string(input.HeaderValue))
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		return zero, ErrUncertain
@@ -177,14 +190,34 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if err != nil || int64(len(body)) > h.policy.ResponseBytes || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
+	if credentialResponseEcho(body, input.HeaderName, input.HeaderValue) {
+		clear(body)
+		return zero, ErrUncertain
+	}
 	contentType := response.Header.Get("Content-Type")
 	if !appplatform.ValidHTTPPolicyHeaderValue(contentType) || len(response.Header.Values("Content-Type")) > 1 {
+		return zero, ErrUncertain
+	}
+	if credentialResponseEcho([]byte(contentType), input.HeaderName, input.HeaderValue) {
 		return zero, ErrUncertain
 	}
 	if authorize(ctx) != nil || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
 	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body}, nil
+}
+
+func credentialResponseEcho(body []byte, header string, value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+	if bytes.Contains(body, value) {
+		return true
+	}
+	if header == "Authorization" && bytes.HasPrefix(value, []byte("Bearer ")) && len(value) > len("Bearer ") {
+		return bytes.Contains(body, value[len("Bearer "):])
+	}
+	return false
 }
 
 var deniedPrefixes = func() []netip.Prefix {

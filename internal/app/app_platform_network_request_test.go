@@ -23,7 +23,7 @@ func TestPlatformNetworkRequestPayloadBoundary(t *testing.T) {
 		{method: "GET", target: strings.Repeat("x", 4097)},
 		{method: "GET", target: "https://api.example.com/v1", accept: "bad\r\nheader"},
 	} {
-		if _, err := s.preparePlatformNetworkRequest(context.Background(), platformActorSession{}, platformFixtureID(1), binding, tc.method, tc.target, tc.accept, "", tc.body); !errors.Is(err, errAppPlatformNetworkUnavailable) {
+		if _, err := s.preparePlatformNetworkRequest(context.Background(), platformActorSession{}, platformFixtureID(1), binding, tc.method, tc.target, tc.accept, "", "", tc.body); !errors.Is(err, errAppPlatformNetworkUnavailable) {
 			t.Fatal("invalid payload reached authority lookup", err)
 		}
 	}
@@ -42,12 +42,12 @@ func testPlatformNetworkRequestRequiresGrant(t *testing.T, pg bool) {
 	s, actor, lease := platformWritableAccessFixture(t, pg)
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=?`, lease.installationID)}
 	before := dumpOf(t, s.st)
-	intent, err := s.preparePlatformNetworkRequest(context.Background(), actor, lease.installationID, binding, "GET", "https://api.example.com/v1", "application/json", "", nil)
+	intent, err := s.preparePlatformNetworkRequest(context.Background(), actor, lease.installationID, binding, "GET", "https://api.example.com/v1", "application/json", "", "", nil)
 	if err == nil {
 		intent.Close()
 		t.Fatal("denied optional capability signed a request")
 	}
-	if result, err := s.requestPlatformNetwork(context.Background(), actor, lease.installationID, binding, "GET", "https://api.example.com/v1", "application/json", "", nil, platformRuntimeEndpoint{}); !errors.Is(err, errAppPlatformNetworkUnavailable) || len(result.Body) != 0 {
+	if result, err := s.requestPlatformNetwork(context.Background(), actor, lease.installationID, binding, "GET", "https://api.example.com/v1", "application/json", "", "", nil, platformRuntimeEndpoint{}); !errors.Is(err, errAppPlatformNetworkUnavailable) || len(result.Body) != 0 {
 		t.Fatal("denied capability reached dispatch or released a response", err)
 	}
 	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {

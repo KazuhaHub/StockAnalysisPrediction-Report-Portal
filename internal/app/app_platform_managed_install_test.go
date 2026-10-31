@@ -100,6 +100,7 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
 	m.Capabilities.Required = []string{}
+	m.Capabilities.Optional = nil
 	target := &platformManagedInstallTarget{Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol}}
 	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
 		t.Fatal(err)
@@ -109,8 +110,23 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 		t.Fatal("platform object storage provider refused", err)
 	}
 	m.Capabilities.Required = []string{"secrets.use"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("implemented secrets.use provider refused", err)
+	}
+	m.Capabilities.Required = []string{"secrets.read"}
 	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err == nil {
-		t.Fatal("missing required provider admitted")
+		t.Fatal("raw credential disclosure admitted")
+	}
+	m.Capabilities.Required = []string{"background.run", "reports.read"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("background service identity provider refused", err)
+	}
+	m.Capabilities.Required = []string{"background.run", "notifications.publish"}
+	if selection, err := platformInstallCapabilitySelection(m, target); err != nil || len(selection) != 2 || !selection[1].granted {
+		t.Fatal("notification capability selection", selection, err)
+	}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("notification publication provider refused", err)
 	}
 	m.Capabilities.Required = []string{}
 	if err := installRequirementsForTarget(m, platformFrontendInstallFormat, target); err == nil {

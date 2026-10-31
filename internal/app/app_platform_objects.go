@@ -44,24 +44,21 @@ type platformObjectResult struct {
 	DeletedID  string
 }
 
-type platformObjectNamespaceRow struct {
-	ID            string
-	Origin        string
-	Owner         sql.NullString
-	State         string
-	Format        int64
-	QuotaBytes    int64
-	ObservedBytes int64
-	ObjectCount   int64
-	Revision      int64
-	DeletedMS     sql.NullInt64
-	CreatedMS     int64
-	UpdatedMS     int64
+type platformPluginTableRow struct {
+	ID          string
+	AppID       string
+	TableName   string
+	Format      int64
+	UsedBytes   int64
+	UsedObjects int64
+	Revision    int64
+	CreatedMS   int64
+	UpdatedMS   int64
 }
 
 type platformStoredObject struct {
 	ID                  string
-	NamespaceID         string
+	InstallationID      string
 	OwnerUsername       string
 	OwnerAccountCreated string
 	OwnerGeneration     int64
@@ -92,39 +89,38 @@ func lockPlatformObjectStorage(e migExec) (int64, int64, error) {
 	return usedBytes, usedObjects, err
 }
 
-func readPlatformObjectNamespace(e migExec, installation string, lock bool) (platformObjectNamespaceRow, error) {
-	var row platformObjectNamespaceRow
-	query := `SELECT id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,object_count,revision,deleted_ms,created_ms,updated_ms FROM app_platform_object_namespaces WHERE owner_installation_id=?`
+func readPlatformPluginTable(e migExec, appID string, lock bool) (platformPluginTableRow, error) {
+	var row platformPluginTableRow
+	query := `SELECT id,app_id,table_name,data_format,used_bytes,used_objects,revision,created_ms,updated_ms FROM app_platform_plugin_tables WHERE app_id=?`
 	if lock && e.s.driver == "postgres" {
 		query += " FOR UPDATE"
 	}
-	err := e.queryRow(query, installation).Scan(&row.ID, &row.Origin, &row.Owner, &row.State, &row.Format, &row.QuotaBytes, &row.ObservedBytes, &row.ObjectCount, &row.Revision, &row.DeletedMS, &row.CreatedMS, &row.UpdatedMS)
+	err := e.queryRow(query, appID).Scan(&row.ID, &row.AppID, &row.TableName, &row.Format, &row.UsedBytes, &row.UsedObjects, &row.Revision, &row.CreatedMS, &row.UpdatedMS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, errPlatformObjectNotFound
 	}
 	if err != nil {
 		return row, err
 	}
-	if row.State != "active" || !row.Owner.Valid || row.Owner.String != installation || row.Format != 1 || row.QuotaBytes < 1 || row.DeletedMS.Valid {
-		return row, errPlatformObjectNotFound
+	if !platformValidUUID(row.ID) || !platformDirectoryAppID.MatchString(row.AppID) || row.AppID != appID || row.TableName != platformPluginDataTableName(appID) || !platformPluginDataTablePattern.MatchString(row.TableName) || row.Format != 1 || row.UsedBytes < 0 || row.UsedObjects < 0 || row.Revision < 1 {
+		return row, fmt.Errorf("plugin data registry row is invalid")
 	}
 	return row, nil
 }
 
-func ensurePlatformObjectNamespace(e migExec, installation string) (platformObjectNamespaceRow, error) {
-	row, err := readPlatformObjectNamespace(e, installation, true)
+func ensurePlatformPluginTable(e migExec, appID string) (platformPluginTableRow, error) {
+	if !platformDirectoryAppID.MatchString(appID) {
+		return platformPluginTableRow{}, errPlatformObjectNotFound
+	}
+	row, err := readPlatformPluginTable(e, appID, true)
 	if err == nil {
+		if !e.tableExists(row.TableName) {
+			return row, fmt.Errorf("plugin data table is missing")
+		}
 		return row, nil
 	}
 	if !errors.Is(err, errPlatformObjectNotFound) {
 		return row, err
-	}
-	var count int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_object_namespaces WHERE origin_installation_id=?`, installation).Scan(&count); err != nil {
-		return row, err
-	}
-	if count != 0 {
-		return row, errPlatformObjectNotFound
 	}
 	id, err := platformNewUUID()
 	if err != nil {
@@ -134,50 +130,21 @@ func ensurePlatformObjectNamespace(e migExec, installation string) (platformObje
 	if err != nil {
 		return row, err
 	}
-	if _, err := e.exec(`INSERT INTO app_platform_object_namespaces(id,origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,object_count,revision,deleted_ms,created_ms,updated_ms) VALUES(?,?,?,'active',1,?,0,0,1,NULL,?,?)`, id, installation, installation, platformObjectNamespaceBytes, now, now); err != nil {
+	table := platformPluginDataTableName(appID)
+	if _, err := e.exec(`INSERT INTO app_platform_plugin_tables(id,app_id,table_name,data_format,used_bytes,used_objects,revision,created_ms,updated_ms) VALUES(?,?,?,1,0,0,1,?,?)`, id, appID, table, now, now); err != nil {
 		return row, err
 	}
-	return readPlatformObjectNamespace(e, installation, true)
+	if err := createPlatformPluginDataTable(e, table); err != nil {
+		return row, err
+	}
+	return readPlatformPluginTable(e, appID, true)
 }
 
-func platformObjectAccountUsage(e migExec, namespace, username, accountCreated string, generation int64) (int64, int64, error) {
+func platformObjectAccountUsageForInstallation(e migExec, plugin platformPluginTableRow, installation, username, accountCreated string, generation int64) (int64, int64, error) {
 	var usedBytes, usedObjects int64
-	err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM app_platform_storage_objects WHERE namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=?`, namespace, username, accountCreated, generation).Scan(&usedBytes, &usedObjects)
+	err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM `+plugin.TableName+` WHERE installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=?`,
+		installation, username, accountCreated, generation).Scan(&usedBytes, &usedObjects)
 	return usedBytes, usedObjects, err
-}
-
-func scanPlatformStoredObject(scan func(...any) error) (platformStoredObject, error) {
-	var row platformStoredObject
-	var content []byte
-	var digest, idempotency string
-	err := scan(&row.ID, &row.NamespaceID, &row.OwnerUsername, &row.OwnerAccountCreated, &row.OwnerGeneration,
-		&row.Collection, &row.Label, &row.MediaType, &content, &digest, &row.SizeBytes, &row.Revision,
-		&idempotency, &row.CreatedMS, &row.UpdatedMS)
-	if content != nil {
-		row.Content = append([]byte(nil), content...)
-	}
-	row.ContentSHA256, row.IdempotencyKey = digest, idempotency
-	return row, err
-}
-
-const platformObjectSelect = `SELECT id,namespace_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms FROM app_platform_storage_objects`
-
-func readPlatformStoredObject(e migExec, namespace, owner, accountCreated string, generation int64, id string, lock bool) (platformStoredObject, error) {
-	query := platformObjectSelect + ` WHERE id=? AND namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=?`
-	if lock && e.s.driver == "postgres" {
-		query += " FOR UPDATE"
-	}
-	row, err := scanPlatformStoredObject(e.queryRow(query, id, namespace, owner, accountCreated, generation).Scan)
-	if errors.Is(err, sql.ErrNoRows) {
-		return platformStoredObject{}, errPlatformObjectNotFound
-	}
-	if err != nil {
-		return platformStoredObject{}, err
-	}
-	if row.SizeBytes > maxPlatformObjectBytes || int64(len(row.Content)) != row.SizeBytes || platformObjectDigest(row.Content) != row.ContentSHA256 {
-		return platformStoredObject{}, errPlatformObjectNotFound
-	}
-	return row, nil
 }
 
 func platformObjectSummaryOf(row platformStoredObject) platformObjectSummary {
@@ -198,18 +165,54 @@ func platformObjectCAS(result sql.Result, err error) error {
 	return nil
 }
 
-func createPlatformObject(e migExec, installation string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
+func platformObjectSelect(table string) string {
+	return `SELECT id,installation_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms FROM ` + table
+}
+
+func scanPlatformStoredObject(scan func(...any) error) (platformStoredObject, error) {
+	var row platformStoredObject
+	var content []byte
+	var digest, idempotency string
+	err := scan(&row.ID, &row.InstallationID, &row.OwnerUsername, &row.OwnerAccountCreated, &row.OwnerGeneration,
+		&row.Collection, &row.Label, &row.MediaType, &content, &digest, &row.SizeBytes, &row.Revision,
+		&idempotency, &row.CreatedMS, &row.UpdatedMS)
+	if content != nil {
+		row.Content = append([]byte(nil), content...)
+	}
+	row.ContentSHA256, row.IdempotencyKey = digest, idempotency
+	return row, err
+}
+
+func readPlatformStoredObject(e migExec, plugin platformPluginTableRow, installation, owner, accountCreated string, generation int64, id string, lock bool) (platformStoredObject, error) {
+	query := platformObjectSelect(plugin.TableName) + ` WHERE id=? AND installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=?`
+	if lock && e.s.driver == "postgres" {
+		query += " FOR UPDATE"
+	}
+	row, err := scanPlatformStoredObject(e.queryRow(query, id, installation, owner, accountCreated, generation).Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return platformStoredObject{}, errPlatformObjectNotFound
+	}
+	if err != nil {
+		return platformStoredObject{}, err
+	}
+	if row.SizeBytes > maxPlatformObjectBytes || int64(len(row.Content)) != row.SizeBytes || platformObjectDigest(row.Content) != row.ContentSHA256 {
+		return platformStoredObject{}, errPlatformObjectNotFound
+	}
+	return row, nil
+}
+
+func createPlatformObject(e migExec, installation, appID string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
 	usedBytes, usedObjects, err := lockPlatformObjectStorage(e)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	namespace, err := ensurePlatformObjectNamespace(e, installation)
+	plugin, err := ensurePlatformPluginTable(e, appID)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	digest := platformObjectDigest(request.content)
-	idempotency := platformObjectSelect + ` WHERE namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND idempotency_key=?`
-	existing, err := scanPlatformStoredObject(e.queryRow(idempotency, namespace.ID, account.username, account.created, account.generation, request.requestID).Scan)
+	idempotency := platformObjectSelect(plugin.TableName) + ` WHERE installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND idempotency_key=?`
+	existing, err := scanPlatformStoredObject(e.queryRow(idempotency, installation, account.username, account.created, account.generation, request.requestID).Scan)
 	if err == nil {
 		if existing.Collection != request.collection || existing.Label != request.label || existing.MediaType != request.mediaType || existing.SizeBytes != int64(len(request.content)) || existing.ContentSHA256 != digest || !bytes.Equal(existing.Content, request.content) {
 			return platformObjectResult{}, errPlatformObjectConflict
@@ -219,14 +222,14 @@ func createPlatformObject(e migExec, installation string, account platformActorA
 	if !errors.Is(err, sql.ErrNoRows) {
 		return platformObjectResult{}, err
 	}
-	accountBytes, accountObjects, err := platformObjectAccountUsage(e, namespace.ID, account.username, account.created, account.generation)
+	accountBytes, accountObjects, err := platformObjectAccountUsageForInstallation(e, plugin, installation, account.username, account.created, account.generation)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	quota := platformObjectQuota{
-		global:    platformObjectUsage{usedBytes, usedObjects, platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects},
-		namespace: platformObjectUsage{namespace.ObservedBytes, namespace.ObjectCount, namespace.QuotaBytes, platformObjectNamespaceObjects},
-		account:   platformObjectUsage{accountBytes, accountObjects, platformObjectAccountBytes, platformObjectAccountObjects},
+		global:  platformObjectUsage{usedBytes, usedObjects, platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects},
+		plugin:  platformObjectUsage{plugin.UsedBytes, plugin.UsedObjects, platformPluginMaxBytes, platformPluginMaxObjects},
+		account: platformObjectUsage{accountBytes, accountObjects, platformObjectAccountBytes, platformObjectAccountObjects},
 	}
 	if err := admitPlatformObjectQuota(quota, int64(len(request.content)), 1, 0, 0); err != nil {
 		return platformObjectResult{}, err
@@ -239,39 +242,45 @@ func createPlatformObject(e migExec, installation string, account platformActorA
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	if _, err := e.exec(`INSERT INTO app_platform_storage_objects(id,namespace_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`, id, namespace.ID, account.username, account.created, account.generation, request.collection, request.label, request.mediaType, request.content, digest, len(request.content), request.requestID, now, now); err != nil {
+	if _, err := e.exec(`INSERT INTO `+plugin.TableName+`(id,installation_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)`,
+		id, installation, account.username, account.created, account.generation, request.collection, request.label, request.mediaType, request.content, digest, len(request.content), request.requestID, now, now); err != nil {
 		return platformObjectResult{}, err
 	}
 	if _, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=used_bytes+?,used_objects=used_objects+1,revision=revision+1,updated_ms=? WHERE id=1`, len(request.content), now); err != nil {
 		return platformObjectResult{}, err
 	}
-	if _, err := e.exec(`UPDATE app_platform_object_namespaces SET observed_bytes=observed_bytes+?,object_count=object_count+1,revision=revision+1,updated_ms=? WHERE id=? AND owner_installation_id=? AND state='active'`, len(request.content), now, namespace.ID, installation); err != nil {
+	if err := updatePlatformPluginUsage(e, plugin, int64(len(request.content)), 1, now); err != nil {
 		return platformObjectResult{}, err
 	}
-	row, err := readPlatformStoredObject(e, namespace.ID, account.username, account.created, account.generation, id, false)
+	row, err := readPlatformStoredObject(e, plugin, installation, account.username, account.created, account.generation, id, false)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	return platformObjectResult{Action: "create", Object: &platformObjectDetail{platformObjectSummaryOf(row), append([]byte(nil), row.Content...)}}, nil
 }
 
-func listPlatformObjects(e migExec, installation string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
-	namespace, err := readPlatformObjectNamespace(e, installation, false)
+func updatePlatformPluginUsage(e migExec, plugin platformPluginTableRow, deltaBytes, deltaObjects, now int64) error {
+	changed, err := e.exec(`UPDATE app_platform_plugin_tables SET used_bytes=used_bytes+?,used_objects=used_objects+?,revision=revision+1,updated_ms=? WHERE id=?`, deltaBytes, deltaObjects, now, plugin.ID)
+	return platformObjectCAS(changed, err)
+}
+
+func listPlatformObjects(e migExec, installation, appID string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
+	plugin, err := readPlatformPluginTable(e, appID, false)
 	if errors.Is(err, errPlatformObjectNotFound) {
 		return platformObjectResult{Action: "list", Items: []platformObjectSummary{}}, nil
 	}
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	where := `namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND collection=?`
-	args := []any{namespace.ID, account.username, account.created, account.generation, request.collection}
+	where := `installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND collection=?`
+	args := []any{installation, account.username, account.created, account.generation, request.collection}
 	if request.cursor != "" {
 		millisRaw, id, _ := strings.Cut(request.cursor, ":")
 		millis, _ := strconv.ParseInt(millisRaw, 10, 64)
 		where += ` AND (updated_ms>? OR (updated_ms=? AND id>?))`
 		args = append(args, millis, millis, id)
 	}
-	rows, err := e.query(platformObjectSelect+` WHERE `+where+` ORDER BY updated_ms,id LIMIT ?`, append(args, request.limit+1)...)
+	rows, err := e.query(platformObjectSelect(plugin.TableName)+` WHERE `+where+` ORDER BY updated_ms,id LIMIT ?`, append(args, request.limit+1)...)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
@@ -295,42 +304,42 @@ func listPlatformObjects(e migExec, installation string, account platformActorAc
 	return platformObjectResult{Action: "list", Items: items}, nil
 }
 
-func getPlatformObject(e migExec, installation string, account platformActorAccount, id string) (platformObjectResult, error) {
-	namespace, err := readPlatformObjectNamespace(e, installation, false)
+func getPlatformObject(e migExec, installation, appID string, account platformActorAccount, id string) (platformObjectResult, error) {
+	plugin, err := readPlatformPluginTable(e, appID, false)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	row, err := readPlatformStoredObject(e, namespace.ID, account.username, account.created, account.generation, id, false)
+	row, err := readPlatformStoredObject(e, plugin, installation, account.username, account.created, account.generation, id, false)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	return platformObjectResult{Action: "get", Object: &platformObjectDetail{platformObjectSummaryOf(row), append([]byte(nil), row.Content...)}}, nil
 }
 
-func updatePlatformObject(e migExec, installation string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
+func updatePlatformObject(e migExec, installation, appID string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
 	usedBytes, usedObjects, err := lockPlatformObjectStorage(e)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	namespace, err := readPlatformObjectNamespace(e, installation, true)
+	plugin, err := readPlatformPluginTable(e, appID, true)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	row, err := readPlatformStoredObject(e, namespace.ID, account.username, account.created, account.generation, request.id, true)
+	row, err := readPlatformStoredObject(e, plugin, installation, account.username, account.created, account.generation, request.id, true)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	if err := checkPlatformObjectRevision(row.Revision, request.expectedRevision); err != nil {
 		return platformObjectResult{}, err
 	}
-	accountBytes, accountObjects, err := platformObjectAccountUsage(e, namespace.ID, account.username, account.created, account.generation)
+	accountBytes, accountObjects, err := platformObjectAccountUsageForInstallation(e, plugin, installation, account.username, account.created, account.generation)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	quota := platformObjectQuota{
-		global:    platformObjectUsage{usedBytes, usedObjects, platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects},
-		namespace: platformObjectUsage{namespace.ObservedBytes, namespace.ObjectCount, namespace.QuotaBytes, platformObjectNamespaceObjects},
-		account:   platformObjectUsage{accountBytes, accountObjects, platformObjectAccountBytes, platformObjectAccountObjects},
+		global:  platformObjectUsage{usedBytes, usedObjects, platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects},
+		plugin:  platformObjectUsage{plugin.UsedBytes, plugin.UsedObjects, platformPluginMaxBytes, platformPluginMaxObjects},
+		account: platformObjectUsage{accountBytes, accountObjects, platformObjectAccountBytes, platformObjectAccountObjects},
 	}
 	if err := admitPlatformObjectQuota(quota, int64(len(request.content)), 1, row.SizeBytes, 1); err != nil {
 		return platformObjectResult{}, err
@@ -340,32 +349,33 @@ func updatePlatformObject(e migExec, installation string, account platformActorA
 		return platformObjectResult{}, err
 	}
 	digest := platformObjectDigest(request.content)
-	changed, err := e.exec(`UPDATE app_platform_storage_objects SET label=?,media_type=?,content=?,content_sha256=?,size_bytes=?,revision=revision+1,updated_ms=? WHERE id=? AND namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND revision=?`, request.label, request.mediaType, request.content, digest, len(request.content), now, row.ID, namespace.ID, account.username, account.created, account.generation, row.Revision)
+	changed, err := e.exec(`UPDATE `+plugin.TableName+` SET label=?,media_type=?,content=?,content_sha256=?,size_bytes=?,revision=revision+1,updated_ms=? WHERE id=? AND installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND revision=?`,
+		request.label, request.mediaType, request.content, digest, len(request.content), now, row.ID, installation, account.username, account.created, account.generation, row.Revision)
 	if err := platformObjectCAS(changed, err); err != nil {
 		return platformObjectResult{}, err
 	}
 	if _, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=used_bytes-?+?,revision=revision+1,updated_ms=? WHERE id=1`, row.SizeBytes, len(request.content), now); err != nil {
 		return platformObjectResult{}, err
 	}
-	if _, err := e.exec(`UPDATE app_platform_object_namespaces SET observed_bytes=observed_bytes-?+?,revision=revision+1,updated_ms=? WHERE id=? AND owner_installation_id=? AND state='active'`, row.SizeBytes, len(request.content), now, namespace.ID, installation); err != nil {
+	if err := updatePlatformPluginUsage(e, plugin, int64(len(request.content))-row.SizeBytes, 0, now); err != nil {
 		return platformObjectResult{}, err
 	}
-	updated, err := readPlatformStoredObject(e, namespace.ID, account.username, account.created, account.generation, row.ID, false)
+	updated, err := readPlatformStoredObject(e, plugin, installation, account.username, account.created, account.generation, row.ID, false)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
 	return platformObjectResult{Action: "update", Object: &platformObjectDetail{platformObjectSummaryOf(updated), append([]byte(nil), updated.Content...)}}, nil
 }
 
-func deletePlatformObject(e migExec, installation string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
+func deletePlatformObject(e migExec, installation, appID string, account platformActorAccount, request platformObjectRequest) (platformObjectResult, error) {
 	if _, _, err := lockPlatformObjectStorage(e); err != nil {
 		return platformObjectResult{}, err
 	}
-	namespace, err := readPlatformObjectNamespace(e, installation, true)
+	plugin, err := readPlatformPluginTable(e, appID, true)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	row, err := readPlatformStoredObject(e, namespace.ID, account.username, account.created, account.generation, request.id, true)
+	row, err := readPlatformStoredObject(e, plugin, installation, account.username, account.created, account.generation, request.id, true)
 	if err != nil {
 		return platformObjectResult{}, err
 	}
@@ -376,14 +386,15 @@ func deletePlatformObject(e migExec, installation string, account platformActorA
 	if err != nil {
 		return platformObjectResult{}, err
 	}
-	changed, err := e.exec(`DELETE FROM app_platform_storage_objects WHERE id=? AND namespace_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND revision=?`, row.ID, namespace.ID, account.username, account.created, account.generation, row.Revision)
+	changed, err := e.exec(`DELETE FROM `+plugin.TableName+` WHERE id=? AND installation_id=? AND owner_username=? AND owner_account_created=? AND owner_account_generation=? AND revision=?`,
+		row.ID, installation, account.username, account.created, account.generation, row.Revision)
 	if err := platformObjectCAS(changed, err); err != nil {
 		return platformObjectResult{}, err
 	}
 	if _, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=used_bytes-?,used_objects=used_objects-1,revision=revision+1,updated_ms=? WHERE id=1`, row.SizeBytes, now); err != nil {
 		return platformObjectResult{}, err
 	}
-	if _, err := e.exec(`UPDATE app_platform_object_namespaces SET observed_bytes=observed_bytes-?,object_count=object_count-1,revision=revision+1,updated_ms=? WHERE id=? AND owner_installation_id=? AND state='active'`, row.SizeBytes, now, namespace.ID, installation); err != nil {
+	if err := updatePlatformPluginUsage(e, plugin, -row.SizeBytes, -1, now); err != nil {
 		return platformObjectResult{}, err
 	}
 	return platformObjectResult{Action: "delete", DeletedID: row.ID}, nil
@@ -406,15 +417,15 @@ func (s *Server) executePlatformObjectRequest(ctx context.Context, session platf
 		var operationErr error
 		switch request.action {
 		case "list":
-			result, operationErr = listPlatformObjects(e, installation, account, request)
+			result, operationErr = listPlatformObjects(e, installation, manifest.ID, account, request)
 		case "get":
-			result, operationErr = getPlatformObject(e, installation, account, request.id)
+			result, operationErr = getPlatformObject(e, installation, manifest.ID, account, request.id)
 		case "create":
-			result, operationErr = createPlatformObject(e, installation, account, request)
+			result, operationErr = createPlatformObject(e, installation, manifest.ID, account, request)
 		case "update":
-			result, operationErr = updatePlatformObject(e, installation, account, request)
+			result, operationErr = updatePlatformObject(e, installation, manifest.ID, account, request)
 		case "delete":
-			result, operationErr = deletePlatformObject(e, installation, account, request)
+			result, operationErr = deletePlatformObject(e, installation, manifest.ID, account, request)
 		default:
 			operationErr = errPlatformObjectInvalid
 		}
@@ -423,79 +434,106 @@ func (s *Server) executePlatformObjectRequest(ctx context.Context, session platf
 	return result, err
 }
 
-func cleanupPlatformInstallationObjects(e migExec, installation string, now int64) error {
+func platformPluginUsage(e migExec, plugin platformPluginTableRow) (int64, int64, error) {
+	var usedBytes, usedObjects int64
+	err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM `+plugin.TableName).Scan(&usedBytes, &usedObjects)
+	return usedBytes, usedObjects, err
+}
+
+func refreshPlatformPluginUsage(e migExec, plugin platformPluginTableRow, now int64) error {
+	usedBytes, usedObjects, err := platformPluginUsage(e, plugin)
+	if err != nil {
+		return err
+	}
+	changed, err := e.exec(`UPDATE app_platform_plugin_tables SET used_bytes=?,used_objects=?,revision=revision+1,updated_ms=? WHERE id=?`, usedBytes, usedObjects, now, plugin.ID)
+	return platformObjectCAS(changed, err)
+}
+
+func refreshPlatformObjectStorage(e migExec, now int64) error {
+	var usedBytes, usedObjects int64
+	if err := e.queryRow(`SELECT COALESCE(SUM(used_bytes),0),COALESCE(SUM(used_objects),0) FROM app_platform_plugin_tables`).Scan(&usedBytes, &usedObjects); err != nil {
+		return err
+	}
+	changed, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=?,used_objects=?,revision=revision+1,updated_ms=? WHERE id=1`, usedBytes, usedObjects, now)
+	return platformObjectCAS(changed, err)
+}
+
+func cleanupPlatformInstallationObjects(e migExec, installation, appID string, now int64) error {
 	if _, _, err := lockPlatformObjectStorage(e); err != nil {
 		return err
 	}
-	lock := ""
-	if e.s.driver == "postgres" {
-		lock = " FOR UPDATE"
-	}
-	var namespace, state string
-	err := e.queryRow(`SELECT id,state FROM app_platform_object_namespaces WHERE owner_installation_id=?`+lock, installation).Scan(&namespace, &state)
-	if errors.Is(err, sql.ErrNoRows) {
+	plugin, err := readPlatformPluginTable(e, appID, true)
+	if errors.Is(err, errPlatformObjectNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if state == "deleted" {
-		return nil
+	if !e.tableExists(plugin.TableName) {
+		return fmt.Errorf("plugin data table is missing")
 	}
-	var usedBytes, usedObjects int64
-	if err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM app_platform_storage_objects WHERE namespace_id=?`, namespace).Scan(&usedBytes, &usedObjects); err != nil {
+	var others int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_installations WHERE app_id=? AND id<>? AND desired_state<>'removed'`, appID, installation).Scan(&others); err != nil {
 		return err
 	}
-	if _, err := e.exec(`DELETE FROM app_platform_storage_objects WHERE namespace_id=?`, namespace); err != nil {
-		return err
+	if others == 0 {
+		if _, err := e.exec(`DELETE FROM ` + plugin.TableName); err != nil {
+			return err
+		}
+		if err := dropPlatformPluginDataTable(e, plugin.TableName); err != nil {
+			return err
+		}
+		changed, err := e.exec(`DELETE FROM app_platform_plugin_tables WHERE id=?`, plugin.ID)
+		if err := platformObjectCAS(changed, err); err != nil {
+			return err
+		}
+	} else {
+		if _, err := e.exec(`DELETE FROM `+plugin.TableName+` WHERE installation_id=?`, installation); err != nil {
+			return err
+		}
+		if err := refreshPlatformPluginUsage(e, plugin, now); err != nil {
+			return err
+		}
 	}
-	if _, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=used_bytes-?,used_objects=used_objects-?,revision=revision+1,updated_ms=? WHERE id=1`, usedBytes, usedObjects, now); err != nil {
-		return err
-	}
-	changed, err := e.exec(`UPDATE app_platform_object_namespaces SET owner_installation_id=NULL,state='deleted',observed_bytes=0,object_count=0,revision=revision+1,deleted_ms=?,updated_ms=? WHERE id=? AND state<>'deleted'`, now, now, namespace)
-	return platformObjectCAS(changed, err)
+	return refreshPlatformObjectStorage(e, now)
 }
 
 func cleanupPlatformAccountObjects(e migExec, username string, now int64) error {
 	if _, _, err := lockPlatformObjectStorage(e); err != nil {
 		return err
 	}
-	rows, err := e.query(`SELECT DISTINCT namespace_id FROM app_platform_storage_objects WHERE owner_username=?`, username)
+	rows, err := e.query(`SELECT id,app_id,table_name,data_format,used_bytes,used_objects,revision,created_ms,updated_ms FROM app_platform_plugin_tables ORDER BY app_id`)
 	if err != nil {
 		return err
 	}
-	var namespaces []string
+	var plugins []platformPluginTableRow
 	for rows.Next() {
-		var namespace string
-		if err := rows.Scan(&namespace); err != nil {
+		var row platformPluginTableRow
+		if err := rows.Scan(&row.ID, &row.AppID, &row.TableName, &row.Format, &row.UsedBytes, &row.UsedObjects, &row.Revision, &row.CreatedMS, &row.UpdatedMS); err != nil {
 			rows.Close()
 			return err
 		}
-		namespaces = append(namespaces, namespace)
+		if row.TableName != platformPluginDataTableName(row.AppID) || !platformPluginDataTablePattern.MatchString(row.TableName) {
+			rows.Close()
+			return fmt.Errorf("plugin data registry row is invalid")
+		}
+		plugins = append(plugins, row)
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil || len(namespaces) == 0 {
+	if err != nil {
 		return err
 	}
-	var usedBytes, usedObjects int64
-	if err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM app_platform_storage_objects WHERE owner_username=?`, username).Scan(&usedBytes, &usedObjects); err != nil {
-		return err
-	}
-	if _, err := e.exec(`DELETE FROM app_platform_storage_objects WHERE owner_username=?`, username); err != nil {
-		return err
-	}
-	if _, err := e.exec(`UPDATE app_platform_object_storage SET used_bytes=used_bytes-?,used_objects=used_objects-?,revision=revision+1,updated_ms=? WHERE id=1`, usedBytes, usedObjects, now); err != nil {
-		return err
-	}
-	for _, namespace := range namespaces {
-		var remainingBytes, remainingObjects int64
-		if err := e.queryRow(`SELECT COALESCE(SUM(size_bytes),0),COUNT(*) FROM app_platform_storage_objects WHERE namespace_id=?`, namespace).Scan(&remainingBytes, &remainingObjects); err != nil {
+	for _, plugin := range plugins {
+		if !e.tableExists(plugin.TableName) {
+			return fmt.Errorf("plugin data table is missing")
+		}
+		if _, err := e.exec(`DELETE FROM `+plugin.TableName+` WHERE owner_username=?`, username); err != nil {
 			return err
 		}
-		if _, err := e.exec(`UPDATE app_platform_object_namespaces SET observed_bytes=?,object_count=?,revision=revision+1,updated_ms=? WHERE id=?`, remainingBytes, remainingObjects, now, namespace); err != nil {
+		if err := refreshPlatformPluginUsage(e, plugin, now); err != nil {
 			return err
 		}
 	}
-	return nil
+	return refreshPlatformObjectStorage(e, now)
 }

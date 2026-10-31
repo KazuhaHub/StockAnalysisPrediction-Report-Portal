@@ -9,6 +9,10 @@ export interface PlatformRelease {
   display?: AppDisplay
   installable: boolean
   reason?: string
+  installation_id?: string
+  current_release_sha256?: string
+  updateable?: boolean
+  installed?: boolean
 }
 
 export interface PlatformMarketHint {

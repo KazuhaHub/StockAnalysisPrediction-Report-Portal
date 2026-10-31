@@ -246,7 +246,7 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 	}
 	ctx := context.Background()
 	request := func(path string) (int, []byte, error) {
-		r, err := s.requestPlatformNetwork(ctx, actor, installation, binding, "GET", "https://api.example.com"+path, "application/json", "", nil, endpoint)
+		r, err := s.requestPlatformNetwork(ctx, actor, installation, binding, "GET", "https://api.example.com"+path, "application/json", "", "", nil, endpoint)
 		return r.Status, r.Body, err
 	}
 	if platformNetworkFixtureCount(t) != 0 {

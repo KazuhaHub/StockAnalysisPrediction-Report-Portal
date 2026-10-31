@@ -90,11 +90,120 @@ func TestPlatformManagementInstallHTTPPostgres(t *testing.T) {
 	testPlatformManagementInstallHTTP(t, true)
 }
 
+func TestPlatformManagementUpdateHTTP(t *testing.T) {
+	s, actor, installation, target := platformUpdateFixture(t, []int{1})
+	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	body := fmt.Sprintf(`{"action":"update","release_sha256":%q,"trust_revision":"1","installation_id":%q}`, target.sha256, installation)
+	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if plan.Code != 200 || !strings.Contains(plan.Body.String(), `"action":"update"`) || !strings.Contains(plan.Body.String(), `"target_generation":"2"`) || strings.Contains(plan.Body.String(), "actor_authority") {
+		t.Fatal("update review", plan.Code, plan.Body.String())
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil || !platformValidUUID(review.ID) || !platformValidSHA(review.SHA) {
+		t.Fatal("invalid update review", plan.Body.String(), err)
+	}
+	if scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != source || scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation) != 1 {
+		t.Fatal("update review changed the live generation")
+	}
+	commitBody := fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA, platformFixtureID(978))
+	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/operations", cookie, commitBody)
+	if commit.Code != 202 || !strings.Contains(commit.Body.String(), `"operation_id"`) {
+		t.Fatal("update commit", commit.Code, commit.Body.String())
+	}
+	var admitted struct {
+		ID string `json:"operation_id"`
+	}
+	if err := json.Unmarshal(commit.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	platformStartFrontendService(t, s)
+	platformAwaitFrontendService(t, s, "complete")
+	progress := sessionTestRequest(mux, "GET", "/api/admin/app-platform/operations/"+admitted.ID, cookie, "")
+	if progress.Code != 200 || !strings.Contains(progress.Body.String(), `"action":"update"`) || !strings.Contains(progress.Body.String(), `"stage":"complete"`) {
+		t.Fatal("update progress", progress.Code, progress.Body.String())
+	}
+	if binding, err := s.inspectPlatformLaunchAccess(actor, installation); err != nil || binding.generation != "2" || binding.releaseSHA != target.sha256 {
+		t.Fatal("HTTP update cannot launch", binding, err)
+	}
+}
+
+func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
+	s, admin, reader, installation := platformObjectsFixture(t)
+	binding := platformObjectBindingMap(t, s, reader, installation)
+	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"uninstall via management HTTP"}`)); response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	pluginTable := platformPluginTableForInstallation(t, s.st, installation)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET data_namespace_id=NULL,data_format=0 WHERE installation_id=?`, installation)
+	mustExec(t, s.st, `DELETE FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
+	body := fmt.Sprintf(`{"action":"uninstall","installation_id":%q}`, installation)
+	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if plan.Code != 200 || !strings.Contains(plan.Body.String(), `"action":"uninstall"`) || !strings.Contains(plan.Body.String(), `"plugin_data_cleared":true`) || strings.Contains(plan.Body.String(), "actor_authority") {
+		t.Fatal("uninstall review", plan.Code, plan.Body.String())
+	}
+	if !s.st.tableExists(pluginTable) {
+		t.Fatal("uninstall review cleared data before confirmation")
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil || !platformValidUUID(review.ID) || !platformValidSHA(review.SHA) {
+		t.Fatal("invalid uninstall review", plan.Body.String(), err)
+	}
+	commitBody := fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA, platformFixtureID(979))
+	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/operations", cookie, commitBody)
+	if commit.Code != 202 {
+		t.Fatal("uninstall commit", commit.Code, commit.Body.String())
+	}
+	if s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != 0 {
+		t.Fatal("confirmed uninstall retained plugin data or live authority")
+	}
+	var admitted struct {
+		ID string `json:"operation_id"`
+	}
+	if err := json.Unmarshal(commit.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	platformStartFrontendService(t, s)
+	platformAwaitFrontendService(t, s, "complete")
+	progress := sessionTestRequest(mux, "GET", "/api/admin/app-platform/operations/"+admitted.ID, cookie, "")
+	if progress.Code != 200 || !strings.Contains(progress.Body.String(), `"action":"uninstall"`) || !strings.Contains(progress.Body.String(), `"stage":"complete"`) {
+		t.Fatal("uninstall progress", progress.Code, progress.Body.String())
+	}
+	if binding, err := s.inspectPlatformLaunchAccess(reader, installation); err == nil {
+		t.Fatal("uninstalled app remained launchable", binding)
+	}
+}
+
+func TestPlatformManagementUninstallRefusesManagedNamespace(t *testing.T) {
+	s, admin, _, installation := platformObjectsFixture(t)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
+	body := fmt.Sprintf(`{"action":"uninstall","installation_id":%q}`, installation)
+	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if got.Code != 409 || !strings.Contains(got.Body.String(), "app_platform_requirements_unavailable") || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE action='uninstall'`) != 0 {
+		t.Fatal("managed namespace admitted to frontend uninstall", got.Code, got.Body.String())
+	}
+}
+
 func TestPlatformManagementHTTPRefusals(t *testing.T) {
 	s, mux, actor, release, cookie := platformManagementFixture(t, false)
 	path := "/api/admin/app-platform/plans"
 	valid := platformManagementPlanBody(release, actor.username)
 	for _, body := range []string{
+		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[]`, `"audience":[]`, 1),
+		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[`, `"installation_id":"bad","audience":[`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"disable"`, 1),
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":1`, 1),
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":"01"`, 1),
@@ -105,7 +214,7 @@ func TestPlatformManagementHTTPRefusals(t *testing.T) {
 		strings.Replace(valid, `"audience":[`, `"audience":null,"ignored":[`, 1),
 	} {
 		if got := sessionTestRequest(mux, "POST", path, cookie, body); got.Code != 400 {
-			t.Fatalf("malformed request admitted: %d %s", got.Code, got.Body.String())
+			t.Fatalf("malformed request admitted: %d %s body=%s", got.Code, got.Body.String(), body)
 		}
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != 0 {

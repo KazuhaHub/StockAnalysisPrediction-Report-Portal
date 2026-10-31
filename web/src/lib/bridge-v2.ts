@@ -1707,7 +1707,7 @@ export function createBridgeHost(
           fail("transport_error");
         }
       };
-      if (!options.onNetworkRequest || !granted?.includes("network.http")) {
+      if (!options.onNetworkRequest || !granted?.includes("network.http") || (request.credential !== undefined && !granted.includes("secrets.use"))) {
         result({ code: "unsupported" });
         return;
       }
@@ -3026,6 +3026,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       const request = parseNetworkRequest(value);
       if (!request)
         return Promise.reject(new AppNetworkError("invalid_request"));
+      if (request.credential !== undefined && !context.capabilities.includes("secrets.use"))
+        return Promise.reject(new AppNetworkError("unsupported"));
       if (signal?.aborted)
         return Promise.reject(new AppNetworkError("not_ready"));
       if (networkRequests.size >= 2 || networkIssued === MAX_REVISION)

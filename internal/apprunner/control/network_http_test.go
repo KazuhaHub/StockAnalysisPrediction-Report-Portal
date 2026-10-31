@@ -143,3 +143,44 @@ func TestNetworkHTTPRefusesSignedInvalidRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworkHTTPCredentialBindingIsPrivateAndBounded(t *testing.T) {
+	c, key, a, now, _ := networkFixture(t)
+	c.CredentialName = "upstream-api"
+	c.CredentialHeader = "Authorization"
+	c.CredentialValue = []byte("Bearer disposable-value")
+	raw, sig, err := SignNetworkHTTPRequest(c, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := VerifyNetworkHTTPRequest(raw, sig, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy := v.Command()
+	if copy.CredentialName != c.CredentialName || string(copy.CredentialValue) != string(c.CredentialValue) {
+		t.Fatal("credential binding lost")
+	}
+	copy.CredentialValue[0] ^= 1
+	if string(v.Command().CredentialValue) == string(copy.CredentialValue) {
+		t.Fatal("credential value aliased")
+	}
+	v.Clear()
+	for _, mutate := range []func(*NetworkHTTPRequestCommand){
+		func(c *NetworkHTTPRequestCommand) { c.CredentialName = "Bad" },
+		func(c *NetworkHTTPRequestCommand) { c.CredentialHeader = "Cookie" },
+		func(c *NetworkHTTPRequestCommand) { c.CredentialValue = []byte("Basic value") },
+		func(c *NetworkHTTPRequestCommand) { c.CredentialValue = []byte("Bearer bad\nvalue") },
+		func(c *NetworkHTTPRequestCommand) { c.CredentialHeader = "" },
+	} {
+		bad, badKey, badAuthority, badNow, _ := networkFixture(t)
+		bad.CredentialName = "upstream-api"
+		bad.CredentialHeader = "Authorization"
+		bad.CredentialValue = []byte("Bearer disposable-value")
+		mutate(&bad)
+		raw, sig, err := SignNetworkHTTPRequest(bad, badKey, badAuthority, badNow)
+		if err == nil || raw != nil || sig != nil {
+			t.Fatal("invalid credential shape signed")
+		}
+	}
+}

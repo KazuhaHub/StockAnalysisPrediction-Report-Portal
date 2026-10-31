@@ -131,6 +131,23 @@ An iframe runs only while open. A scheduled/background source must run in its ow
 service using a dedicated machine publication token; do not rely on a browser tab
 or allow the portal to load its code into the backend.
 
+## V2 platform applications
+
+Installed v2 applications use their reviewed platform capability instead of the
+legacy `notify` app token. `notifications.publish` must appear in the signed
+manifest and current capability grant. Foreground calls carry the current launch
+binding; background calls use a current H07 service assertion with the same
+resource.
+
+The request body remains only occurrence ID, title, plain-text message and
+severity. The server derives `extension.app.<app-id>.notice`; callers cannot name
+recipients, channels, routes, destinations or another app. Existing central rules
+and workers handle all delivery. Occurrence IDs are idempotent per app.
+
+See [application notification publishing](app-platform/152-app-notification-publishing.md).
+The earlier sandboxed legacy app-token flow remains available only for its
+existing applications and is not the v2 SDK contract.
+
 ## Delivery, inbox and retention
 
 External events use the same bounded capture, explicit rules, adapters, history,

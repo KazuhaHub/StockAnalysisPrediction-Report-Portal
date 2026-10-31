@@ -110,6 +110,47 @@ func TestHTTPRealTLSBufferedResponseAndAuthority(t *testing.T) {
 	}
 }
 
+func TestHTTPCredentialInjectionIsFixedAndEchoSafe(t *testing.T) {
+	secret := []byte("Bearer disposable-upstream")
+	h, _, _ := fixture(t, testPolicy(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != string(secret) || r.Header.Get("X-API-Key") != "" || r.Header.Get("Cookie") != "" {
+			t.Error("credential header was not exact")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	got, err := h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "https://api.example.com/v1", HeaderName: "Authorization", HeaderValue: secret})
+	if err != nil || got.Status != 200 || string(got.Body) != `{"ok":true}` {
+		t.Fatal("credential request", got, err)
+	}
+	for _, body := range []string{"Bearer disposable-upstream", "disposable-upstream"} {
+		h, _, _ = fixture(t, testPolicy(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		})
+		got, err = h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "https://api.example.com/v1", HeaderName: "Authorization", HeaderValue: secret})
+		if !errors.Is(err, ErrUncertain) || got.Status != 0 || len(got.Body) != 0 {
+			t.Fatal("credential echo escaped", got, err)
+		}
+	}
+	h, _, _ = fixture(t, testPolicy(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; token=disposable-upstream")
+		_, _ = w.Write([]byte("ok"))
+	})
+	got, err = h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "https://api.example.com/v1", HeaderName: "Authorization", HeaderValue: secret})
+	if !errors.Is(err, ErrUncertain) || got.Status != 0 || len(got.Body) != 0 {
+		t.Fatal("credential echo escaped through content type", got, err)
+	}
+	h, _ = NewHTTP(testPolicy(), func(context.Context) error { return nil })
+	h.lookup = func(context.Context, string) ([]netip.Addr, error) {
+		t.Fatal("invalid header reached DNS")
+		return nil, nil
+	}
+	if _, err := h.Do(context.Background(), HTTPRequest{Method: "GET", URL: "https://api.example.com/v1", HeaderName: "Cookie", HeaderValue: []byte("x")}); !errors.Is(err, ErrDenied) {
+		t.Fatal("arbitrary header accepted")
+	}
+}
+
 func TestHTTPNeverReplaysOrReleasesUntrustedResponse(t *testing.T) {
 	for _, mode := range []string{"redirect", "oversized", "compressed", "revoked", "disconnect", "tls", "tls-name", "headers", "chunked", "encoding-list"} {
 		t.Run(mode, func(t *testing.T) {

@@ -36,7 +36,11 @@ func TestNotificationSchemaIsOutsideBaselineAndBackedUp(t *testing.T) {
 			t.Fatalf("missing %s", name)
 		}
 		found := false
-		for _, table := range st.backupTables() {
+		tables, err := st.backupTables()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range tables {
 			if table == name {
 				found = true
 			}

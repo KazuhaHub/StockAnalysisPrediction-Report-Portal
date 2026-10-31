@@ -20,27 +20,30 @@ const networkHTTPRequestPurpose = "portal.app/runner-viewer-http/v1"
 // and opaque current viewer scope. It is not a service/background delegation or
 // proof of current SQL authority. The caller must recheck that authority online.
 type NetworkHTTPRequestCommand struct {
-	Format          string `json:"format"`
-	DeploymentID    string `json:"deployment_id"`
-	ControllerEpoch string `json:"controller_epoch"`
-	ControlRevision string `json:"control_revision"`
-	RequestID       string `json:"request_id"`
-	InstallationID  string `json:"installation_id"`
-	ReviewPlanID    string `json:"review_plan_id"`
-	Generation      string `json:"generation"`
-	PolicyRevision  string `json:"policy_revision"`
-	ReleaseSHA256   string `json:"release_sha256"`
-	ActorScope      string `json:"actor_scope"`
-	PolicyRaw       []byte `json:"policy_raw"`
-	PolicySHA256    string `json:"policy_sha256"`
-	Method          string `json:"method"`
-	URL             string `json:"url"`
-	Accept          string `json:"accept"`
-	ContentType     string `json:"content_type"`
-	BodyBytes       string `json:"body_bytes"`
-	BodySHA256      string `json:"body_sha256"`
-	IssuedMS        string `json:"issued_ms"`
-	ExpiresMS       string `json:"expires_ms"`
+	Format           string `json:"format"`
+	DeploymentID     string `json:"deployment_id"`
+	ControllerEpoch  string `json:"controller_epoch"`
+	ControlRevision  string `json:"control_revision"`
+	RequestID        string `json:"request_id"`
+	InstallationID   string `json:"installation_id"`
+	ReviewPlanID     string `json:"review_plan_id"`
+	Generation       string `json:"generation"`
+	PolicyRevision   string `json:"policy_revision"`
+	ReleaseSHA256    string `json:"release_sha256"`
+	ActorScope       string `json:"actor_scope"`
+	PolicyRaw        []byte `json:"policy_raw"`
+	PolicySHA256     string `json:"policy_sha256"`
+	Method           string `json:"method"`
+	URL              string `json:"url"`
+	Accept           string `json:"accept"`
+	ContentType      string `json:"content_type"`
+	BodyBytes        string `json:"body_bytes"`
+	BodySHA256       string `json:"body_sha256"`
+	CredentialName   string `json:"credential_name,omitempty"`
+	CredentialHeader string `json:"credential_header,omitempty"`
+	CredentialValue  []byte `json:"credential_value,omitempty"`
+	IssuedMS         string `json:"issued_ms"`
+	ExpiresMS        string `json:"expires_ms"`
 }
 
 type VerifiedNetworkHTTPRequest struct{ command NetworkHTTPRequestCommand }
@@ -48,7 +51,17 @@ type VerifiedNetworkHTTPRequest struct{ command NetworkHTTPRequestCommand }
 func (v VerifiedNetworkHTTPRequest) Command() NetworkHTTPRequestCommand {
 	c := v.command
 	c.PolicyRaw = bytes.Clone(c.PolicyRaw)
+	c.CredentialValue = bytes.Clone(c.CredentialValue)
 	return c
+}
+
+// Clear releases the decrypted credential copy held by a verified command.
+func (v *VerifiedNetworkHTTPRequest) Clear() {
+	if v == nil {
+		return
+	}
+	clear(v.command.CredentialValue)
+	v.command.CredentialValue = nil
 }
 
 func VerifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64) (VerifiedNetworkHTTPRequest, error) {
@@ -150,6 +163,9 @@ func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS 
 	if err != nil || parsed.SHA256 != c.PolicySHA256 || appplatform.ValidateHTTPPolicyTarget(parsed.Policy, c.Method, c.URL) != nil || !appplatform.ValidHTTPPolicyHeaderValue(c.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
 		return ErrInvalidCommand
 	}
+	if !validNetworkCredential(c) {
+		return ErrInvalidCommand
+	}
 	length, ok := counter(c.BodyBytes, false)
 	if !ok || length > parsed.Policy.RequestBytes {
 		return ErrInvalidCommand
@@ -174,4 +190,36 @@ func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS 
 // Use only alongside VerifyNetworkHTTPRequest and current authorization.
 func ValidateNetworkHTTPRequestMetadata(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
 	return validateNetworkHTTPRequest(c, a, nowMS)
+}
+
+func validNetworkCredential(c NetworkHTTPRequestCommand) bool {
+	if c.CredentialName == "" && c.CredentialHeader == "" && len(c.CredentialValue) == 0 {
+		return true
+	}
+	if len(c.CredentialName) < 1 || len(c.CredentialName) > 64 || c.CredentialName[0] < 'a' || c.CredentialName[0] > 'z' {
+		return false
+	}
+	for _, b := range []byte(c.CredentialName) {
+		if !(b >= 'a' && b <= 'z') && !(b >= '0' && b <= '9') && b != '-' {
+			return false
+		}
+	}
+	if c.CredentialHeader != "Authorization" && c.CredentialHeader != "X-API-Key" {
+		return false
+	}
+	if len(c.CredentialValue) < 1 || len(c.CredentialValue) > 16400 {
+		return false
+	}
+	for _, b := range c.CredentialValue {
+		if b < 32 || b > 126 {
+			return false
+		}
+	}
+	if c.CredentialHeader == "Authorization" {
+		const prefix = "Bearer "
+		if len(c.CredentialValue) <= len(prefix) || string(c.CredentialValue[:len(prefix)]) != prefix {
+			return false
+		}
+	}
+	return true
 }

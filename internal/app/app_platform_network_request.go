@@ -28,6 +28,7 @@ type platformNetworkGrant struct {
 type platformNetworkRequestIntent struct {
 	access         platformWritableBackendAccess
 	grant          platformNetworkGrant
+	secretBinding  platformSecretBindingUse
 	command        control.NetworkHTTPRequestCommand
 	raw, signature []byte
 }
@@ -37,6 +38,7 @@ func (i *platformNetworkRequestIntent) Close() {
 	clear(i.raw)
 	clear(i.signature)
 	clear(i.command.PolicyRaw)
+	clear(i.command.CredentialValue)
 	*i = platformNetworkRequestIntent{}
 }
 func (platformNetworkRequestIntent) MarshalJSON() ([]byte, error) {
@@ -76,9 +78,9 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 	return g, nil
 }
 
-func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind string, body []byte) (platformNetworkRequestIntent, error) {
+func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte) (platformNetworkRequestIntent, error) {
 	var result platformNetworkRequestIntent
-	if !platformValidUUID(installation) || !binding.valid() || len(body) > appplatform.MaxHTTPRequestBytes || len(method) > 16 || len(target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(accept) || !appplatform.ValidHTTPPolicyHeaderValue(kind) {
+	if !platformValidUUID(installation) || !binding.valid() || len(body) > appplatform.MaxHTTPRequestBytes || len(method) > 16 || len(target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(accept) || !appplatform.ValidHTTPPolicyHeaderValue(kind) || (credential != "" && !platformSecretBindingNamePattern.MatchString(credential)) {
 		return result, errAppPlatformNetworkUnavailable
 	}
 	body = bytes.Clone(body)
@@ -95,25 +97,40 @@ func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session plat
 		if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
 			return errAppPlatformNetworkUnavailable
 		}
+		var credentialHeader string
+		var credentialValue []byte
+		if credential != "" {
+			use, header, value, err := s.resolvePlatformSecretBindingCommand(e, installation, credential)
+			if err != nil {
+				clear(value)
+				return errAppPlatformNetworkUnavailable
+			}
+			credentialHeader, credentialValue = header, value
+			result.secretBinding = use
+		}
 		viewer, err := json.Marshal(a.viewer)
 		if err != nil {
+			clear(credentialValue)
 			return errAppPlatformNetworkUnavailable
 		}
 		id, err := platformNewUUID()
 		if err != nil {
+			clear(credentialValue)
 			return err
 		}
 		now := time.Now().UnixMilli()
 		r := a.intent.start.writer.runtime
 		result.grant = grant
-		result.command = control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: "1", PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policy.SHA256, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+platformNetworkRequestLifetime.Milliseconds(), 10)}
+		result.command = control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: "1", PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policy.SHA256, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+platformNetworkRequestLifetime.Milliseconds(), 10)}
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
 		result.raw, result.signature, err = control.SignNetworkHTTPRequest(result.command, key, a.intent.start.writer.authority, now)
+		clear(credentialValue)
 		return err
 	})
 	if err != nil {
 		clear(result.raw)
+		clear(result.command.CredentialValue)
 		clear(result.command.PolicyRaw)
 		return platformNetworkRequestIntent{}, errAppPlatformNetworkUnavailable
 	}
@@ -138,6 +155,16 @@ func (s *Server) withPlatformNetworkRequestCurrent(ctx context.Context, session 
 		grant, err := loadPlatformNetworkGrant(e, installation, a)
 		if err != nil || grant != i.grant || !samePlatformWritableBackendAccess(i.access, a) {
 			return errAppPlatformNetworkUnavailable
+		}
+		if i.command.CredentialName != "" {
+			facts, err := loadPlatformSecretBindingFacts(e, installation, false)
+			if err != nil {
+				return errAppPlatformNetworkUnavailable
+			}
+			use, _, err := loadPlatformSecretBindingUse(e, installation, i.command.CredentialName, facts)
+			if err != nil || use != i.secretBinding {
+				return errAppPlatformNetworkUnavailable
+			}
 		}
 		if fn != nil {
 			return fn(a, seed)
@@ -197,7 +224,7 @@ func (s *Server) completePlatformNetworkRequest(ctx context.Context, session pla
 
 // Private foreground execution, one attempt only. Public route/SDK admission
 // must also provide current session, origin/CSRF/enrollment and page binding.
-func (s *Server) requestPlatformNetwork(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind string, body []byte, e platformRuntimeEndpoint) (broker.HTTPResponse, error) {
+func (s *Server) requestPlatformNetwork(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte, e platformRuntimeEndpoint) (broker.HTTPResponse, error) {
 	if len(body) > appplatform.MaxHTTPRequestBytes {
 		return broker.HTTPResponse{}, errAppPlatformNetworkUnavailable
 	}
@@ -205,7 +232,7 @@ func (s *Server) requestPlatformNetwork(ctx context.Context, session platformAct
 	defer clear(body)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	i, err := s.preparePlatformNetworkRequest(ctx, session, installation, binding, method, target, accept, kind, body)
+	i, err := s.preparePlatformNetworkRequest(ctx, session, installation, binding, method, target, accept, kind, credential, body)
 	if err != nil {
 		return broker.HTTPResponse{}, errAppPlatformNetworkUnavailable
 	}

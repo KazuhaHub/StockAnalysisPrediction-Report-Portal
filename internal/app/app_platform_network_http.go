@@ -21,6 +21,7 @@ const platformNetworkHTTPBodyLimit = 128 << 10
 type platformNetworkHTTPRequest struct {
 	binding                      platformBackendRequestBinding
 	method, target, accept, kind string
+	credential                   string
 	body                         []byte
 }
 
@@ -35,8 +36,8 @@ func readPlatformNetworkHTTPRequest(w http.ResponseWriter, r *http.Request) (pla
 		return result, errPlatformManagementInput
 	}
 	defer clear(raw)
-	fields, err := platformManagementObject(raw, "binding", "method", "url", "accept", "contentType", "bodyBase64")
-	if err != nil || len(fields) != 6 {
+	fields, err := platformManagementObject(raw, "binding", "method", "url", "accept", "contentType", "bodyBase64", "credential")
+	if err != nil || (len(fields) != 6 && len(fields) != 7) {
 		return result, errPlatformManagementInput
 	}
 	bound, err := platformManagementObject(fields["binding"], "generation", "policyRevision", "releaseSha256")
@@ -53,6 +54,12 @@ func readPlatformNetworkHTTPRequest(w http.ResponseWriter, r *http.Request) (pla
 	for key, dst := range map[string]*string{"method": &result.method, "url": &result.target, "accept": &result.accept, "contentType": &result.kind, "bodyBase64": &body} {
 		*dst, err = platformManagementString(fields, key)
 		if err != nil {
+			return platformNetworkHTTPRequest{}, errPlatformManagementInput
+		}
+	}
+	if rawCredential, ok := fields["credential"]; ok {
+		result.credential, err = platformManagementString(fields, "credential")
+		if err != nil || !platformSecretBindingNamePattern.MatchString(result.credential) || len(rawCredential) == 0 {
 			return platformNetworkHTTPRequest{}, errPlatformManagementInput
 		}
 	}
@@ -111,7 +118,7 @@ func (s *Server) apiPlatformNetwork(w http.ResponseWriter, r *http.Request, user
 	installation := r.PathValue("installation")
 	// The complete current grant and reviewed target are checked before revealing
 	// runtime configuration. This preflight creates no durable execution or IO.
-	intent, err := s.preparePlatformNetworkRequest(ctx, session, installation, request.binding, request.method, request.target, request.accept, request.kind, request.body)
+	intent, err := s.preparePlatformNetworkRequest(ctx, session, installation, request.binding, request.method, request.target, request.accept, request.kind, request.credential, request.body)
 	if err != nil {
 		platformDocumentFailure(w)
 		return
@@ -122,7 +129,7 @@ func (s *Server) apiPlatformNetwork(w http.ResponseWriter, r *http.Request, user
 		jsonErrorCode(w, 503, "app_platform_runtime_unavailable", "application runtime unavailable")
 		return
 	}
-	response, err := s.requestPlatformNetwork(ctx, session, installation, request.binding, request.method, request.target, request.accept, request.kind, request.body, *endpoint)
+	response, err := s.requestPlatformNetwork(ctx, session, installation, request.binding, request.method, request.target, request.accept, request.kind, request.credential, request.body, *endpoint)
 	if err != nil {
 		if errors.Is(err, errAppPlatformNetworkUncertain) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")

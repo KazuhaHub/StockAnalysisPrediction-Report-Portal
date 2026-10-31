@@ -32,6 +32,18 @@ func TestPlatformNetworkHTTPDecoder(t *testing.T) {
 		t.Fatal("bounded binary request changed", err)
 	}
 	clear(parsed.body)
+	credentialed := platformNetworkHTTPPayload(t, binding, nil)
+	var credentialFields map[string]any
+	if json.Unmarshal([]byte(credentialed), &credentialFields) != nil {
+		t.Fatal("credential fixture")
+	}
+	credentialFields["credential"] = "upstream-api"
+	credentialedRaw, _ := json.Marshal(credentialFields)
+	credentialed = string(credentialedRaw)
+	parsed, err = decode(credentialed)
+	if err != nil || parsed.credential != "upstream-api" {
+		t.Fatal("credential binding name", err)
+	}
 	for _, bad := range []string{
 		`null`, valid + `{}`,
 		strings.Replace(valid, `"method":"POST"`, `"method":"POST","method":"GET"`, 1),
@@ -41,6 +53,9 @@ func TestPlatformNetworkHTTPDecoder(t *testing.T) {
 		strings.Replace(valid, `"binding":{`, `"binding":{"viewer":"admin",`, 1),
 		strings.Replace(valid, `"generation":"1"`, `"generation":1`, 1),
 		strings.Replace(valid, `"url":`, `"headers":{"Authorization":"untrusted"},"url":`, 1),
+		strings.Replace(credentialed, `"credential":"upstream-api"`, `"credential":{}`, 1),
+		strings.Replace(credentialed, `"credential":"upstream-api"`, `"credential":"Bad"`, 1),
+		strings.Replace(credentialed, `"credential":"upstream-api"`, `"credential":"upstream-api","credentialValue":"secret"`, 1),
 		platformNetworkHTTPPayload(t, binding, append(bytes.Clone(body), 1)),
 		strings.Repeat(" ", platformNetworkHTTPBodyLimit) + valid,
 	} {

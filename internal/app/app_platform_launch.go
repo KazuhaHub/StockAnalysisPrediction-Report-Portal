@@ -141,7 +141,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 		if !owner.Valid || owner.String != installationID || namespaceState != "active" || namespaceFormat != dataFormat || writerFence < 1 {
 			return fail("namespace-state")
 		}
-	} else if dataFormat != 0 || generation != 1 || policy != 1 {
+	} else if dataFormat != 0 || generation < 1 || policy < 1 {
 		return fail("frontend-format")
 	}
 	var unsafe int
@@ -183,7 +183,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 			return fail("data-schema")
 		}
 	} else {
-		if err := verifyPlatformFrontendActivation(e, installationID, releaseSHA, epoch, observed.Int64, evidence, parsed.Manifest); err != nil {
+		if err := verifyPlatformFrontendActivation(e, installationID, releaseSHA, epoch, generation, policy, observed.Int64, evidence, parsed.Manifest); err != nil {
 			return zero, err
 		}
 	}

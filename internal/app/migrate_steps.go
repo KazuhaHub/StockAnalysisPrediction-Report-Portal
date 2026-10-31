@@ -196,6 +196,10 @@ type restoreRule struct {
 	// over the restored rows. No step declares it yet; the restore refuses such a dump rather than
 	// guessing (see checkDumpMigrations).
 	needsDataUpgrade bool
+	// upgradeOnRestore explicitly permits finishRestore to run this step's idempotent up function
+	// against rows loaded by an older dump. It is separate from needsDataUpgrade so a step that
+	// requires data work without a proven implementation still defaults to refusal.
+	upgradeOnRestore bool
 }
 
 // migration is one schema step.
@@ -221,7 +225,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014(), migration0015(), migration0016(), migration0017()}
+		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014(), migration0015(), migration0016(), migration0017(), migration0018()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).

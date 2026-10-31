@@ -1465,10 +1465,10 @@ test("page descriptions require exact current binding, revision, scope and close
   );
 });
 
-async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost>[0]["onNetworkRequest"], granted=true) {
+async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost>[0]["onNetworkRequest"], granted=true, extraCapabilities: readonly string[]=[]) {
  vi.stubGlobal("MessageChannel",NodeMessageChannel);
  const w=windows();
- const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:granted?["network.http"]:[],onNetworkRequest});
+ const host=createBridgeHost({localWindow:w.host,frameWindow:w.child,binding,presentation,capabilities:granted?["network.http",...extraCapabilities]:[],onNetworkRequest});
  const client=createBridgeClient({localWindow:w.child,parentWindow:w.host,parentOrigin:"https://portal.example.invalid",onPresentation:()=>{}});
  cleanup.push(()=>client.close(),()=>host.close());
  await vi.waitFor(()=>expect(host.state()).toBe("ready"));
@@ -1714,6 +1714,16 @@ test("network failures are closed and pending work has a fixed ceiling",async()=
  const first=held.client.requestNetwork(networkRequest()),second=held.client.requestNetwork(networkRequest());
  await expect(held.client.requestNetwork(networkRequest())).rejects.toMatchObject({code:"busy"});
  held.client.close();await expect(first).rejects.toMatchObject({code:"uncertain"});await expect(second).rejects.toMatchObject({code:"uncertain"});
+});
+test("credential binding name crosses only with secrets.use and no credential value",async()=>{
+ const dispatch=vi.fn(async(request:{credential?:string})=>({status:200,contentType:"application/json",bodyBase64:"e30="}));
+ const without=await networkPair(dispatch);
+ await expect(without.client.requestNetwork({...networkRequest(),credential:"upstream-api"})).rejects.toMatchObject({code:"unsupported"});
+ const withUse=await networkPair(dispatch,true,["secrets.use"]);
+ await expect(withUse.client.requestNetwork({...networkRequest(),credential:"upstream-api"})).resolves.toEqual({status:200,contentType:"application/json",bodyBase64:"e30="});
+ expect(dispatch).toHaveBeenCalledOnce();
+ expect(dispatch.mock.calls[0][0]).toMatchObject({credential:"upstream-api"});
+ expect(JSON.stringify(dispatch.mock.calls[0][0])).not.toContain("secret-value");
 });
 test("network and own-backend channels keep independent request identities and results",async()=>{
  vi.stubGlobal("MessageChannel",NodeMessageChannel);

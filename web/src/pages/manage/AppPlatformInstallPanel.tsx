@@ -14,7 +14,38 @@ type Release = PlatformRelease
 type Subject = { id: string; name: string }
 type Page<T> = { items: T[]; next_cursor: string }
 type Commit = { plan_id: string; plan_sha256: string; idempotency_key: string }
-type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: { app_id: string; publisher_id: string; release_sha256: string; declined_capabilities: string[]; audience: Audience[] } }
+type InstallReview = { action: 'install'; app_id: string; publisher_id: string; release_sha256: string; declined_capabilities: string[]; audience: Audience[] }
+type UpdateReview = {
+  action: 'update'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  source_release_sha256: string
+  release_sha256: string
+  source_generation: string
+  target_generation: string
+  policy_revision: string
+  target_policy_revision: string
+  declined_capabilities: string[]
+  previous_capabilities: string[]
+  target_capabilities: string[]
+  declared_data_schema: string
+  grants_sha256: string
+}
+type UninstallReview = {
+  action: 'uninstall'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  release_sha256: string
+  generation: string
+  target_generation: string
+  managed: boolean
+  data_effect: string
+  plugin_data_cleared: boolean
+  managed_data_retained: boolean
+}
+type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview }
 type Progress = { operation_id: string; installation_id: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const sha = /^[0-9a-f]{64}$/
@@ -134,15 +165,22 @@ export default function AppPlatformInstallPanel() {
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }
   }
 
-  const preview = async (release: Release) => {
+  const preview = async (release: Release, action: 'install' | 'update' | 'uninstall') => {
     if (writing.current || marketBusy || intent) return
+    if (action !== 'install' && !release.installation_id) return
     writing.current = true; setBusy(true); setActionError('')
     const account = user
     const epoch = generation.current
     const audience: Audience[] = closed ? [] : selected.map(value => value.startsWith('user:') ? { type: 'user', username: value.slice(5) } : { type: 'ou', group_id: value.slice(3) })
     try {
-      const result = await api.post<Review>(`${root}/plans`, { action: 'install', release_sha256: release.release_sha256, trust_revision: release.trust_revision, audience })
-      if (result.review.release_sha256 !== release.release_sha256 || result.review.app_id !== release.app_id || !uuid.test(result.plan_id) || !sha.test(result.plan_sha256)) throw new Error(t('appPlatform.invalidOperation'))
+      const body = action === 'uninstall'
+        ? { action, installation_id: release.installation_id }
+        : action === 'update'
+        ? { action, release_sha256: release.release_sha256, trust_revision: release.trust_revision, installation_id: release.installation_id }
+        : { action, release_sha256: release.release_sha256, trust_revision: release.trust_revision, audience }
+      const result = await api.post<Review>(`${root}/plans`, body)
+      const returnedInstallation = result.review.action === 'install' ? '' : result.review.installation_id
+      if (result.review.action !== action || result.review.release_sha256 !== release.release_sha256 || result.review.app_id !== release.app_id || (action !== 'install' && returnedInstallation !== release.installation_id) || !uuid.test(result.plan_id) || !sha.test(result.plan_sha256)) throw new Error(t('appPlatform.invalidOperation'))
       if (live(account, epoch)) { setReview(result); setDefinitive(false) }
     } catch (e) { if (live(account, epoch)) setActionError(errText(e, t)) }
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }
@@ -181,6 +219,14 @@ export default function AppPlatformInstallPanel() {
   }
   const choices = [...users.map(u => ({ value: `user:${u.id}`, label: `${t('appPlatform.user')}: ${u.name} (${u.id})` })), ...groups.map(g => ({ value: `ou:${g.id}`, label: `${t('appPlatform.ou')}: ${g.name} (${g.id})` }))]
   const audienceLabel = (target: Audience) => target.type === 'user' ? `${t('appPlatform.user')}: ${target.username}` : `${t('appPlatform.ou')}: ${groups.find(g => g.id === target.group_id)?.name ?? target.group_id}`
+  const capabilityLabel = (capability: string) => t(`appPlatform.capability.${capability}`, { defaultValue: capability })
+  const updateReview = review?.review.action === 'update' ? review.review : null
+  const uninstallReview = review?.review.action === 'uninstall' ? review.review : null
+  const updateDiff = updateReview ? {
+    added: updateReview.target_capabilities.filter(capability => !updateReview.previous_capabilities.includes(capability)),
+    removed: updateReview.previous_capabilities.filter(capability => !updateReview.target_capabilities.includes(capability)),
+  } : null
+  const reviewRelease = review ? [...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256) : undefined
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
     <Alert type="info" showIcon title={t('appPlatform.development')} description={t('appPlatform.installPreview')} />
     <AppPlatformMarketPanel disabled={busy || !!intent || !!review || loading} onReady={setMarketRelease} onBusyChange={setMarketBusy} />
@@ -200,17 +246,18 @@ export default function AppPlatformInstallPanel() {
     <Space>{userCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('user')}>{t('appPlatform.moreUsers')}</Button>}{groupCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('ou')}>{t('appPlatform.moreGroups')}</Button>}</Space>
     <Table<Release> rowKey="release_sha256" loading={loading} dataSource={marketRelease ? [marketRelease, ...releases.filter(r => r.release_sha256 !== marketRelease.release_sha256)] : releases} pagination={false} locale={{ emptyText: <Empty description={loadError ? t('appPlatform.loadFailed') : t('appPlatform.noReleases')} /> }} columns={[
       { title: t('appPlatform.application'), render: (_, r) => { const copy = appDisplayText(r.app_id, r.display, lang); return <><Typography.Text strong>{copy.name}</Typography.Text><div>{copy.description}</div><Typography.Text type="secondary">{r.publisher_id} · {r.version}</Typography.Text></> } },
-      { title: t('appPlatform.action'), render: (_, r) => r.installable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r)}>{t('appPlatform.review')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
+      { title: t('appPlatform.action'), render: (_, r) => r.installed ? <Button danger disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'uninstall')}>{t('appPlatform.reviewUninstall')}</Button> : r.installable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r, 'install')}>{t('appPlatform.review')}</Button> : r.updateable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'update')}>{t('appPlatform.reviewUpdate')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
     ]} />
     {releaseCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
-    <Modal open={!!review && !intent} title={t('appPlatform.confirmTitle')} confirmLoading={busy} okText={t('appPlatform.confirm')} cancelText={t('appPlatform.cancel')} okButtonProps={{ disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
+    <Modal open={!!review && !intent} title={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdateTitle' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstallTitle' : 'appPlatform.confirmTitle')} confirmLoading={busy} okText={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdate' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstall' : 'appPlatform.confirm')} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
       {review && <Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
-        { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, [...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256)?.display, lang).name} · ${[...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256)?.version ?? ''}` },
+        { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : 'appPlatform.install') },
+        { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, reviewRelease?.display, lang).name} · ${reviewRelease?.version ?? ''}` },
         { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
-        { key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') },
-        { key: 'permissions', label: t('appPlatform.permissions'), children: review.review.declined_capabilities.length ? review.review.declined_capabilities.map(capability => t(`appPlatform.capability.${capability}`)).join('、') : t('appPlatform.noPermissions') },
-        { key: 'data', label: t('appPlatform.storage'), children: t('appPlatform.noData') },
-      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : 'appPlatform.confirmHint')} /></Space>}
+        ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
+        ...(uninstallReview ? [] : [{ key: 'permissions', label: t('appPlatform.permissions'), children: updateDiff ? t('appPlatform.permissionDiff', { added: updateDiff.added.length ? updateDiff.added.map(capabilityLabel).join('、') : t('appPlatform.none'), removed: updateDiff.removed.length ? updateDiff.removed.map(capabilityLabel).join('、') : t('appPlatform.none') }) : review.review.action === 'install' && review.review.declined_capabilities.length ? review.review.declined_capabilities.map(capabilityLabel).join('、') : t('appPlatform.noPermissions') }]),
+        { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_retained ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : t('appPlatform.noData') },
+      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : 'appPlatform.confirmHint')} /></Space>}
     </Modal>
   </Space>
 }

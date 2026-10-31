@@ -1,8 +1,9 @@
 # Revoke credential bindings with reviewed uninstall admission
 
-Status: denial-only lifecycle integration, built on documents 136–137. It creates
-no binding, grants no use and does not enable a credential-consuming provider.
-The complete application-platform plan remains incomplete.
+Status: lifecycle integration built on documents 136–137 and completed by 150.
+Uninstall still grants no use itself; current reviewed bindings may use the
+private credential broker path documented in 150. The complete application-platform
+plan remains incomplete.
 
 ## Trigger and resulting behavior
 
@@ -64,6 +65,7 @@ credential grant or replace signed-package/current-viewer use acceptance.
 Local focused removal/secret race tests pass. The focused CI credential group
 includes both SQLite and PostgreSQL variants; exact revision CI is still required.
 No real credential, production deployment, Status adoption, public SDK or beta
-configuration is changed. Exact permission review/consume, current binding use
-resolution, reviewed shared rotation/revocation, private use exchange and response
-projection remain required before any app can use a credential.
+configuration is changed. Exact binding review/consume, current use resolution,
+reviewed shared rotation/revocation, the private fixed-header exchange and response
+projection/echo denial are implemented in 150; native browser/service acceptance
+and complete CI remain evidence gates.

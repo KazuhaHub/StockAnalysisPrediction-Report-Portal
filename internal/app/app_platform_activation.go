@@ -233,7 +233,7 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 		AudienceSHA string `json:"audience_sha256"`
 	}{"portal.static-readiness/1-dev.1", expected.controllerEpoch, candidate.effectID, candidate.namespace, candidate.receiptSHA, candidate.frontendSHA, candidate.documentSHA, platformDigest(audienceJSON)})
 	if candidate.frontendOnly {
-		evidence = platformFrontendEvidence(candidate, expected.controllerEpoch, expected.installationID, platformDigest(audienceJSON))
+		evidence = platformFrontendEvidence(candidate, expected.controllerEpoch, expected.installationID, platformDigest(audienceJSON), 1, 1)
 	}
 	var namespace any = candidate.namespace
 	if candidate.frontendOnly {

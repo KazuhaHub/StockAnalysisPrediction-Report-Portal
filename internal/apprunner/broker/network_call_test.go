@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -42,6 +43,29 @@ func signedNetworkFixture(t *testing.T, h *HTTP, body []byte) ([]byte, []byte, c
 	return raw, sig, a
 }
 
+func signedNetworkCredentialFixture(t *testing.T, h *HTTP, body []byte, value string) ([]byte, []byte, control.Authority) {
+	t.Helper()
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := sha256.Sum256(public)
+	a := control.Authority{DeploymentID: "10000000-0000-4000-8000-000000000001", ControllerEpoch: "20000000-0000-4000-8000-000000000001", ControlRevision: 1, PublicKey: public, Fingerprint: hex.EncodeToString(fingerprint[:])}
+	policy, err := appplatform.CanonicalHTTPPolicy(h.policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, _ := appplatform.ParseHTTPPolicy(policy)
+	digest := sha256.Sum256(body)
+	now := time.Now().UnixMilli()
+	c := control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: a.DeploymentID, ControllerEpoch: a.ControllerEpoch, ControlRevision: "1", RequestID: "30000000-0000-4000-8000-000000000001", InstallationID: "40000000-0000-4000-8000-000000000001", ReviewPlanID: "50000000-0000-4000-8000-000000000001", Generation: "1", PolicyRevision: "1", ReleaseSHA256: strings.Repeat("a", 64), ActorScope: strings.Repeat("b", 64), PolicyRaw: policy, PolicySHA256: parsed.SHA256, Method: "POST", URL: h.policy.Origin + "/v1/check", BodyBytes: strconv.Itoa(len(body)), BodySHA256: hex.EncodeToString(digest[:]), CredentialName: "upstream-api", CredentialHeader: "Authorization", CredentialValue: []byte(value), IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+30000, 10)}
+	raw, sig, err := control.SignNetworkHTTPRequest(c, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, sig, a
+}
+
 func TestSignedNetworkCallRealTLSAndSingleUse(t *testing.T) {
 	var remote, checks atomic.Int32
 	h, _, _ := fixture(t, testPolicy(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +100,34 @@ func TestSignedNetworkCallRealTLSAndSingleUse(t *testing.T) {
 	}
 	if remote.Load() != 1 || checks.Load() != 3 {
 		t.Fatalf("remote=%d checks=%d", remote.Load(), checks.Load())
+	}
+}
+
+func TestSignedNetworkCallInjectsReviewedCredentialOnce(t *testing.T) {
+	value := "Bearer disposable-network-value"
+	var calls atomic.Int32
+	h, _, _ := fixture(t, testPolicy(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") != value || r.Header.Get("Cookie") != "" {
+			t.Error("credential header changed")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	body := []byte(`{}`)
+	raw, sig, a := signedNetworkCredentialFixture(t, h, body, value)
+	call, err := NewNetworkCall(h, raw, sig, body, a, func(context.Context, control.NetworkHTTPRequestCommand) (control.Authority, error) {
+		return a, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := call.Do(context.Background())
+	if err != nil || got.Status != 200 || string(got.Body) != `{"ok":true}` || calls.Load() != 1 {
+		t.Fatal("credential call", got, err)
+	}
+	if len(bytes.Trim(call.raw, "\x00")) != 0 || len(bytes.Trim(call.signature, "\x00")) != 0 || len(bytes.Trim(call.body, "\x00")) != 0 {
+		t.Fatal("credential-bearing command not cleared")
 	}
 }
 

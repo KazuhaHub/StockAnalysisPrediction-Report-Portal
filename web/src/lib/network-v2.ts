@@ -16,6 +16,7 @@ export interface NetworkRequest {
   readonly accept: string;
   readonly contentType: string;
   readonly bodyBase64: string;
+  readonly credential?: string;
 }
 export interface NetworkResponse {
   readonly status: number;
@@ -49,11 +50,12 @@ export function decodeNetworkBody(value: string): Uint8Array {
   return bytes;
 }
 export function parseNetworkRequest(value: unknown): NetworkRequest | null {
-  if (!exact(value,["method","url","accept","contentType","bodyBase64"]) || typeof value.method !== "string" || !["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"].includes(value.method) || typeof value.url !== "string" || new TextEncoder().encode(value.url).length>4096 || /[\x00-\x20\x7f\\#]/.test(value.url) || !header(value.accept) || !header(value.contentType) || binary(value.bodyBase64,NETWORK_REQUEST_MAX_BYTES) === null) return null;
+  if ((!exact(value,["method","url","accept","contentType","bodyBase64"]) && !exact(value,["method","url","accept","contentType","bodyBase64","credential"])) || typeof value.method !== "string" || !["GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"].includes(value.method) || typeof value.url !== "string" || new TextEncoder().encode(value.url).length>4096 || /[\x00-\x20\x7f\\#]/.test(value.url) || !header(value.accept) || !header(value.contentType) || binary(value.bodyBase64,NETWORK_REQUEST_MAX_BYTES) === null) return null;
+  if ("credential" in value && (typeof value.credential !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(value.credential))) return null;
   try {
     const url = new URL(value.url);
     if (url.protocol!=="https:" || url.username || url.password || !url.hostname || !value.url.startsWith("https://")) return null;
-    return Object.freeze({method:value.method,url:value.url,accept:value.accept,contentType:value.contentType,bodyBase64:value.bodyBase64 as string});
+    return Object.freeze({method:value.method,url:value.url,accept:value.accept,contentType:value.contentType,bodyBase64:value.bodyBase64 as string,...("credential" in value?{credential:value.credential as string}:{})});
   } catch { return null; }
 }
 export function parseNetworkResponse(value: unknown): NetworkResponse | null {

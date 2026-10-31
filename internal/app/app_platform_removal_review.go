@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -213,11 +214,26 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 }
 
 func (s *Server) createPlatformRemovalReview(session platformActorSession, installation string, action appplatform.Action) (platformRemovalReview, error) {
+	return s.createPlatformRemovalReviewContext(context.Background(), session, installation, action)
+}
+
+func (s *Server) createPlatformRemovalReviewContext(ctx context.Context, session platformActorSession, installation string, action appplatform.Action) (platformRemovalReview, error) {
+	return s.createPlatformRemovalReviewWithScopeContext(ctx, session, installation, action, false)
+}
+
+func (s *Server) createPlatformFrontendRemovalReviewContext(ctx context.Context, session platformActorSession, installation string, action appplatform.Action) (platformRemovalReview, error) {
+	return s.createPlatformRemovalReviewWithScopeContext(ctx, session, installation, action, true)
+}
+
+func (s *Server) createPlatformRemovalReviewWithScopeContext(ctx context.Context, session platformActorSession, installation string, action appplatform.Action, frontendOnly bool) (platformRemovalReview, error) {
 	var result platformRemovalReview
-	err := s.withAppPlatformActor(session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.withAppPlatformActorContext(ctx, session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		p, err := platformLoadRemovalProjection(e, installation, action, actor, control)
 		if err != nil {
 			return err
+		}
+		if frontendOnly && (p.Managed || p.Data != nil) {
+			return errAppPlatformInstallUnavailable
 		}
 		control, err = platformRefreshActor(e, session, actor, control)
 		if err != nil {
@@ -279,13 +295,17 @@ func platformFindRemovalCommit(e migExec, actorScope, keyDigest, requestDigest s
 }
 
 func (s *Server) consumePlatformRemovalReview(session platformActorSession, planID, planSHA, key string) (platformRemovalCommit, error) {
+	return s.consumePlatformRemovalReviewContext(context.Background(), session, planID, planSHA, key)
+}
+
+func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, session platformActorSession, planID, planSHA, key string) (platformRemovalCommit, error) {
 	var result platformRemovalCommit
 	if !platformValidUUID(planID) || !platformValidUUID(key) || !platformValidSHA(planSHA) {
 		return result, errAppPlatformPlanChanged
 	}
 	request, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, planSHA})
 	requestDigest, keyDigest := platformDigest(request), platformIdempotencySHA(key)
-	err := s.withAppPlatformActor(session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.withAppPlatformActorContext(ctx, session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		found, exists, err := platformFindRemovalCommit(e, actor.scope, keyDigest, requestDigest)
 		if err != nil {
 			return err
@@ -391,7 +411,7 @@ func (s *Server) consumePlatformRemovalReview(session platformActorSession, plan
 			return err
 		}
 		if action == appplatform.ActionUninstall {
-			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, control.nowMS); err != nil {
+			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, p.AppID, control.nowMS); err != nil {
 				return err
 			}
 		}

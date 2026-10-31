@@ -321,14 +321,14 @@ type platformObjectUsage struct {
 }
 
 type platformObjectQuota struct {
-	global, namespace, account platformObjectUsage
+	global, plugin, account platformObjectUsage
 }
 
 func admitPlatformObjectQuota(quota platformObjectQuota, addingBytes, addingObjects, removingBytes, removingObjects int64) error {
 	if addingBytes < 0 || removingBytes < 0 || (addingObjects != 0 && addingObjects != 1) || (removingObjects != 0 && removingObjects != 1) {
 		return errPlatformObjectInvalid
 	}
-	for _, usage := range []platformObjectUsage{quota.global, quota.namespace, quota.account} {
+	for _, usage := range []platformObjectUsage{quota.global, quota.plugin, quota.account} {
 		if usage.Bytes < 0 || usage.Objects < 0 || usage.MaxBytes < 0 || usage.MaxObjects < 0 || usage.Bytes > usage.MaxBytes || usage.Objects > usage.MaxObjects || removingBytes > usage.Bytes || removingObjects > usage.Objects {
 			return errPlatformObjectInvalid
 		}

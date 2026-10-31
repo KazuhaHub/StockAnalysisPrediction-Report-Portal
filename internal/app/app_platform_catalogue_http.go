@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/url"
@@ -14,14 +15,18 @@ import (
 const platformManagementPageSize = 32
 
 type platformStagedSummary struct {
-	Release       string                  `json:"release_sha256"`
-	App           string                  `json:"app_id"`
-	Publisher     string                  `json:"publisher_id"`
-	Version       string                  `json:"version"`
-	TrustRevision string                  `json:"trust_revision"`
-	Display       *appplatform.AppDisplay `json:"display,omitempty"`
-	Installable   bool                    `json:"installable"`
-	Reason        string                  `json:"reason,omitempty"`
+	Release              string                  `json:"release_sha256"`
+	App                  string                  `json:"app_id"`
+	Publisher            string                  `json:"publisher_id"`
+	Version              string                  `json:"version"`
+	TrustRevision        string                  `json:"trust_revision"`
+	Display              *appplatform.AppDisplay `json:"display,omitempty"`
+	Installable          bool                    `json:"installable"`
+	Reason               string                  `json:"reason,omitempty"`
+	InstallationID       string                  `json:"installation_id,omitempty"`
+	CurrentReleaseSHA256 string                  `json:"current_release_sha256,omitempty"`
+	Updateable           bool                    `json:"updateable,omitempty"`
+	Installed            bool                    `json:"installed,omitempty"`
 }
 
 func platformManagementQuery(r *http.Request, keys ...string) (url.Values, error) {
@@ -116,6 +121,34 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 				}
 				item.Installable = false
 				item.Reason = "already_installed"
+				var current string
+				var generation, revision, policy, currentFormat int64
+				err = e.queryRow(`SELECT i.id,a.release_sha256,i.generation,i.revision,i.policy_revision,a.data_format FROM app_platform_installations i JOIN app_platform_activations a ON a.installation_id=i.id AND a.state='active' WHERE i.app_id=? AND i.publisher_id=? AND i.desired_state='enabled' AND i.phase='ready' AND i.runtime_id IS NULL AND NOT EXISTS(SELECT 1 FROM app_platform_data_namespaces d WHERE d.origin_installation_id=i.id OR d.owner_installation_id=i.id)`, record.app, record.publisher).Scan(&item.InstallationID, &current, &generation, &revision, &policy, &currentFormat)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					if currentFormat == 0 {
+						var sourceDescriptor []byte
+						if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, current).Scan(&sourceDescriptor); err != nil {
+							return err
+						}
+						source, err := appplatform.ParseDescriptor(sourceDescriptor)
+						if err != nil {
+							return err
+						}
+						currentFormat = int64(source.Manifest.Data.Schema)
+					}
+					item.CurrentReleaseSHA256 = current
+					if current == record.release {
+						item.Installed = true
+					} else {
+						target := platformStagedIdentity(verified)
+						if _, projectionErr := platformBuildUpdateProjection(e, item.InstallationID, current, generation, revision, policy, currentFormat, facts, final, target); projectionErr == nil {
+							item.Updateable = true
+						}
+					}
+				}
 			}
 			items = append(items, item)
 		}

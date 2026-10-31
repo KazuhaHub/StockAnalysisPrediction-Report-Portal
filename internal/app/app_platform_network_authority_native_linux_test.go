@@ -21,7 +21,7 @@ func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformA
 	t.Helper()
 	ctx := context.Background()
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=?`, installation)}
-	i, err := s.preparePlatformNetworkRequest(ctx, actor, installation, binding, "GET", "https://api.example.com/v1", "application/json", "", nil)
+	i, err := s.preparePlatformNetworkRequest(ctx, actor, installation, binding, "GET", "https://api.example.com/v1", "application/json", "", "", nil)
 	if err != nil {
 		t.Fatal("actual current viewer network signing", err)
 	}

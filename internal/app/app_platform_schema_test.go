@@ -99,17 +99,35 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 	}
 	st := pgStore(t)
 	clean := func() {
+		dynamic, err := platformPluginDataTables(st.poolExec())
+		if err != nil {
+			t.Error(err)
+			return
+		}
 		tx, err := st.db.Begin()
 		if err != nil {
 			t.Error(err)
 			return
 		}
 		defer tx.Rollback()
+		for _, table := range dynamic {
+			if _, err := tx.Exec(`DROP TABLE IF EXISTS ` + table); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+		for _, name := range []string{platformPrefix + "storage_objects", platformPrefix + "object_namespaces", platformPrefix + "plugin_tables"} {
+			if _, err := tx.Exec("DELETE FROM " + name); err != nil {
+				t.Error(err)
+				return
+			}
+		}
 		tables := append(migration0015().tables, migration0016().tables...)
 		tables = append(tables, migration0017().tables...)
+		tables = append(tables, migration0018().tables...)
 		sort.Strings(tables)
 		for _, name := range tables {
-			if name == platformPrefix+"object_storage" {
+			if name == platformPrefix+"object_storage" || name == platformPrefix+"storage_objects" || name == platformPrefix+"object_namespaces" || name == platformPrefix+"plugin_tables" {
 				continue
 			}
 			if _, err := tx.Exec("DELETE FROM " + name); err != nil {

@@ -112,21 +112,21 @@ func TestPlatformObjectRequestRejectsClosedShapes(t *testing.T) {
 
 func TestPlatformObjectQuotaContract(t *testing.T) {
 	limit := platformObjectQuota{
-		global:    platformObjectUsage{MaxBytes: 100, MaxObjects: 4},
-		namespace: platformObjectUsage{MaxBytes: 80, MaxObjects: 3},
-		account:   platformObjectUsage{MaxBytes: 50, MaxObjects: 2},
+		global:  platformObjectUsage{MaxBytes: 100, MaxObjects: 4},
+		plugin:  platformObjectUsage{MaxBytes: 80, MaxObjects: 3},
+		account: platformObjectUsage{MaxBytes: 50, MaxObjects: 2},
 	}
 	if err := admitPlatformObjectQuota(limit, 10, 1, 0, 0); err != nil {
 		t.Fatal("admissible create", err)
 	}
-	for _, scope := range []string{"account", "namespace", "global"} {
+	for _, scope := range []string{"account", "plugin", "global"} {
 		t.Run(scope, func(t *testing.T) {
 			quota := limit
 			switch scope {
 			case "account":
 				quota.account.Objects = 2
-			case "namespace":
-				quota.namespace.Objects = 3
+			case "plugin":
+				quota.plugin.Objects = 3
 			case "global":
 				quota.global.Objects = 4
 			}
@@ -137,7 +137,7 @@ func TestPlatformObjectQuotaContract(t *testing.T) {
 	}
 	used := limit
 	used.global.Bytes, used.global.Objects = 10, 1
-	used.namespace.Bytes, used.namespace.Objects = 10, 1
+	used.plugin.Bytes, used.plugin.Objects = 10, 1
 	used.account.Bytes, used.account.Objects = 10, 1
 	if err := admitPlatformObjectQuota(used, 0, 0, 10, 1); err != nil {
 		t.Fatal("delete did not release quota", err)

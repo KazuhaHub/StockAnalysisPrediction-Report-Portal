@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,39 @@ func testPlatformStagedCatalogueHTTP(t *testing.T, pg bool) {
 
 func TestPlatformStagedCatalogueHTTPSQLite(t *testing.T)   { testPlatformStagedCatalogueHTTP(t, false) }
 func TestPlatformStagedCatalogueHTTPPostgres(t *testing.T) { testPlatformStagedCatalogueHTTP(t, true) }
+
+func TestPlatformStagedCatalogueAdvertisesReviewedUpdateCandidate(t *testing.T) {
+	s, actor, installation, target := platformUpdateFixture(t, []int{1})
+	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	got := sessionTestRequest(mux, "GET", "/api/admin/app-platform/releases", cookie, "")
+	var page struct {
+		Items []platformStagedSummary `json:"items"`
+	}
+	if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &page) != nil {
+		t.Fatal("release catalogue", got.Code, got.Body.String())
+	}
+	installedSeen, updateSeen := false, false
+	for _, item := range page.Items {
+		if item.Release == source {
+			if !item.Installed || item.InstallationID != installation || item.Updateable || item.CurrentReleaseSHA256 != source {
+				t.Fatal("installed release not advertised", item)
+			}
+			installedSeen = true
+		}
+		if item.Release == target.sha256 {
+			if item.Installable || !item.Updateable || item.InstallationID != installation || item.CurrentReleaseSHA256 == "" || item.Reason != "already_installed" {
+				t.Fatal("update candidate not advertised", item)
+			}
+			updateSeen = true
+		}
+	}
+	if !installedSeen || !updateSeen {
+		t.Fatal("installed source or update candidate missing from catalogue")
+	}
+}
 
 func TestPlatformSubjectDirectoryPaginationSQLite(t *testing.T) {
 	s, mux, _, _, cookie := platformManagementFixture(t, false)

@@ -30,6 +30,16 @@ type NetworkCall struct {
 	now                  func() time.Time
 }
 
+func (n *NetworkCall) Close() {
+	if n == nil {
+		return
+	}
+	clear(n.body)
+	clear(n.raw)
+	clear(n.signature)
+	n.verified.Clear()
+}
+
 func NewNetworkCall(h *HTTP, raw, signature, body []byte, a control.Authority, current CurrentNetworkAuthority) (*NetworkCall, error) {
 	if h == nil || h.authorize == nil || current == nil {
 		return nil, ErrDenied
@@ -41,8 +51,10 @@ func NewNetworkCall(h *HTTP, raw, signature, body []byte, a control.Authority, c
 	command := verified.Command()
 	selected, err := appplatform.CanonicalHTTPPolicy(h.policy)
 	if err != nil || !bytes.Equal(selected, command.PolicyRaw) {
+		clear(command.CredentialValue)
 		return nil, ErrDenied
 	}
+	clear(command.CredentialValue)
 	expires, err := strconv.ParseInt(command.ExpiresMS, 10, 64)
 	if err != nil {
 		return nil, ErrDenied
@@ -54,12 +66,15 @@ func (n *NetworkCall) Do(parent context.Context) (HTTPResponse, error) {
 	if n == nil || n.executor == nil || n.current == nil || parent == nil || !n.used.CompareAndSwap(false, true) {
 		return HTTPResponse{}, ErrDenied
 	}
-	defer clear(n.body)
+	defer n.Close()
 	ctx, cancel := context.WithDeadline(parent, n.expires)
 	defer cancel()
 	c := n.verified.Command()
+	defer clear(c.CredentialValue)
 	check := func(ctx context.Context) error {
-		a, err := n.current(ctx, n.verified.Command())
+		current := n.verified.Command()
+		defer clear(current.CredentialValue)
+		a, err := n.current(ctx, current)
 		if err != nil {
 			return ErrDenied
 		}
@@ -68,5 +83,5 @@ func (n *NetworkCall) Do(parent context.Context) (HTTPResponse, error) {
 		}
 		return nil
 	}
-	return n.executor.do(ctx, HTTPRequest{Method: c.Method, URL: c.URL, Accept: c.Accept, ContentType: c.ContentType, Body: n.body}, check)
+	return n.executor.do(ctx, HTTPRequest{Method: c.Method, URL: c.URL, Accept: c.Accept, ContentType: c.ContentType, Body: n.body, HeaderName: c.CredentialHeader, HeaderValue: c.CredentialValue}, check)
 }

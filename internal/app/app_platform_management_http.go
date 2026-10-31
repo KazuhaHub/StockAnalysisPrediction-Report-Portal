@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -25,7 +26,7 @@ var errPlatformOperationMissing = errors.New("application operation not found")
 
 func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handler) {
 	s.route(mux, pattern, authAdmin, "", platformDocumentHeaders(s.requireAdminJSON(func(w http.ResponseWriter, r *http.Request, user string) {
-		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects")
+		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects" || r.URL.Path == "/api/admin/app-platform/credentials" || strings.HasPrefix(r.URL.Path, "/api/admin/app-platform/installations/") && strings.HasSuffix(r.URL.Path, "/secret-bindings"))
 		if !platformHTTPPath(r) && !(listPath && len(r.URL.RawQuery) <= 2048 && !r.URL.ForceQuery && r.URL.EscapedPath() == r.URL.Path) {
 			jsonErrorCode(w, 400, "app_platform_invalid_request", "invalid application management request")
 			return
@@ -163,6 +164,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_plan_changed"
 	case errors.Is(err, errAppPlatformOperationConflict):
 		status, code = 409, "app_platform_operation_conflict"
+	case errors.Is(err, errAppPlatformCredentialUnavailable):
+		status, code = 409, "app_platform_credential_unavailable"
 	case errors.Is(err, errAppPlatformReleaseConflict), errors.Is(err, errAppPlatformTrustConflict):
 		status, code = 409, "app_platform_package_untrusted"
 	case errors.Is(err, errAppPlatformInstallUnavailable):
@@ -187,7 +190,12 @@ func (s *Server) platformManagementSlot(w http.ResponseWriter) (func(), bool) {
 }
 
 func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, user string) {
-	fields, err := platformManagementRead(w, r, "action", "release_sha256", "trust_revision", "audience")
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
+	if err != nil {
+		platformManagementError(w, errPlatformManagementInput)
+		return
+	}
+	fields, err := platformManagementObject(raw, "action", "release_sha256", "trust_revision", "audience", "installation_id")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -195,8 +203,16 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	action, actionErr := platformManagementString(fields, "action")
 	release, releaseErr := platformManagementString(fields, "release_sha256")
 	revision, revisionErr := platformManagementString(fields, "trust_revision")
-	targets, audienceErr := platformManagementAudience(fields["audience"])
-	if actionErr != nil || action != "install" || releaseErr != nil || !platformValidSHA(release) || revisionErr != nil || !platformPositiveCounter(revision) || audienceErr != nil {
+	if actionErr != nil {
+		platformManagementError(w, errPlatformManagementInput)
+		return
+	}
+	if action == "install" || action == "update" {
+		if releaseErr != nil || !platformValidSHA(release) || revisionErr != nil || !platformPositiveCounter(revision) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+	} else if action != "uninstall" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -211,27 +227,95 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	defer releaseSlot()
 	n, _ := strconv.ParseInt(revision, 10, 64)
-	review, err := s.createPlatformInstallReviewForFormatContext(r.Context(), actor, release, n, targets, platformFrontendInstallFormat)
-	if err != nil {
-		platformManagementError(w, err)
-		return
-	}
-	var projection platformInstallProjection
-	if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil {
-		platformManagementError(w, err)
-		return
-	}
-	audience := make([]map[string]string, 0, len(projection.Audience))
-	for _, target := range projection.Audience {
-		item := map[string]string{"type": target.Type}
-		if target.Type == "user" {
-			item["username"] = target.Username
-		} else {
-			item["group_id"] = target.GroupID
+	switch action {
+	case "install":
+		if len(fields) != 4 || fields["audience"] == nil || fields["installation_id"] != nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
 		}
-		audience = append(audience, item)
+		targets, audienceErr := platformManagementAudience(fields["audience"])
+		if audienceErr != nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformInstallReviewForFormatContext(r.Context(), actor, release, n, targets, platformFrontendInstallFormat)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformInstallProjection
+		if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		audience := make([]map[string]string, 0, len(projection.Audience))
+		for _, target := range projection.Audience {
+			item := map[string]string{"type": target.Type}
+			if target.Type == "user" {
+				item["username"] = target.Username
+			} else {
+				item["group_id"] = target.GroupID
+			}
+			audience = append(audience, item)
+		}
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": "0", "audience": audience}})
+	case "update":
+		if len(fields) != 4 || fields["installation_id"] == nil || fields["audience"] != nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		if installationErr != nil || !platformValidUUID(installation) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformFrontendUpdateReviewContext(r.Context(), actor, installation, release, n)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformUpdateProjection
+		if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
+			"action": "update", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
+			"source_release_sha256": projection.SourceReleaseSHA256, "release_sha256": projection.Target.ReleaseSHA256,
+			"source_generation": strconv.FormatInt(projection.SourceGeneration, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
+			"policy_revision": strconv.FormatInt(projection.PolicyRevision, 10), "target_policy_revision": strconv.FormatInt(projection.TargetPolicyRevision, 10),
+			"trust_revision": revision, "declined_capabilities": projection.Target.DeclinedCapabilities,
+			"previous_capabilities": projection.PreviousCapabilities, "target_capabilities": projection.TargetCapabilities, "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
+			"grants_sha256": projection.GrantsSHA256, "audience": nil,
+		}})
+	case "uninstall":
+		if len(fields) != 2 || fields["installation_id"] == nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		if installationErr != nil || !platformValidUUID(installation) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformFrontendRemovalReviewContext(r.Context(), actor, installation, appplatform.ActionUninstall)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformRemovalProjection
+		if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
+			"action": "uninstall", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
+			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
+			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": projection.Managed && projection.Data != nil,
+		}})
+	default:
+		platformManagementError(w, errPlatformManagementInput)
 	}
-	writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": "0", "audience": audience}})
 }
 
 func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request, user string) {
@@ -257,7 +341,22 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer releaseSlot()
-	result, err := s.consumePlatformInstallReviewForFormatContext(r.Context(), actor, id, sha, key, platformFrontendInstallFormat)
+	var action string
+	if err := s.st.db.QueryRowContext(r.Context(), s.st.bind(`SELECT action FROM app_platform_review_plans WHERE id=? AND username=? AND account_created=? AND account_generation=?`), id, actor.username, actor.created, actor.generation).Scan(&action); err != nil {
+		platformManagementError(w, errAppPlatformPlanChanged)
+		return
+	}
+	var result platformRemovalCommit
+	switch action {
+	case "install":
+		result, err = s.consumePlatformInstallReviewForFormatContext(r.Context(), actor, id, sha, key, platformFrontendInstallFormat)
+	case "update":
+		result, err = s.consumePlatformUpdateReview(actor, id, sha, key)
+	case "uninstall":
+		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
+	default:
+		err = errAppPlatformPlanChanged
+	}
 	if err != nil {
 		platformManagementError(w, err)
 		return

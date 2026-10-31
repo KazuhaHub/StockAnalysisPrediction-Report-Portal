@@ -79,7 +79,7 @@ const b64Key = "$b64"
 // backupTables lists every table in the current schema, from the schema declarations and the
 // migration list themselves so a new table is included the day it is declared and nobody has to
 // remember a second list.
-func (s *Store) backupTables() []string {
+func (s *Store) backupTables() ([]string, error) {
 	seen := map[string]bool{}
 	var base []string
 	for _, stmt := range s.baseSchemaStmts() {
@@ -90,7 +90,34 @@ func (s *Store) backupTables() []string {
 		seen[t] = true
 		base = append(base, t)
 	}
-	return backupTableNames(base, s.migrations())
+	names := backupTableNames(base, s.migrations())
+	if s.tableExists(platformPrefix + "plugin_tables") {
+		rows, err := s.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var table string
+			if err := rows.Scan(&table); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if !platformPluginDataTablePattern.MatchString(table) {
+				rows.Close()
+				return nil, fmt.Errorf("invalid plugin data table name %q", table)
+			}
+			if !containsString(names, table) {
+				names = append(names, table)
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(names)
+	}
+	return names, nil
 }
 
 // Backup writes a full dump of the configured database to path ("-" for stdout).
@@ -140,7 +167,10 @@ func Backup(cfgPath, path string) (tables int, rows int64, err error) {
 // dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
 // single point in time rather than a table-by-table sample of a moving database.
 func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
-	names := s.backupTables()
+	names, err := s.backupTables()
+	if err != nil {
+		return 0, 0, err
+	}
 	opts := &sql.TxOptions{ReadOnly: true}
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
@@ -335,14 +365,18 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// Every pooled read happens HERE, before any transaction is opened: on SQLite the pool is a
 	// single connection, and a pooled query issued while the restore transaction is open would
 	// block on the connection that transaction is holding.
+	backupTables, err := s.backupTables()
+	if err != nil {
+		return nil, err
+	}
 	known := map[string]map[string]bool{}
-	for _, t := range s.backupTables() {
+	for _, t := range backupTables {
 		known[t] = map[string]bool{}
 	}
 	if err := s.collectColumns(known); err != nil {
 		return nil, err
 	}
-	existing, err := s.rowCounts(s.backupTables())
+	existing, err := s.rowCounts(backupTables)
 	if err != nil {
 		return nil, err
 	}
@@ -393,6 +427,18 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 			}
 		}
 	}
+	for _, table := range rep.Header.Tables {
+		if !platformPluginDataTablePattern.MatchString(table) {
+			continue
+		}
+		if _, ok := known[table]; !ok {
+			definition, _ := platformPluginDataTableDefinition(table)
+			known[table] = map[string]bool{}
+			for _, column := range definition.columns() {
+				known[table][column.name] = true
+			}
+		}
+	}
 	optional := optionalColumns(rep.Header.Migrations, steps)
 	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
@@ -415,7 +461,13 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 		}
 		// Empty EVERY table in the schema, not only the ones the dump carries: a table the dump
 		// omits must end up empty too, or the result is a mix of two databases that never existed.
-		for _, t := range s.backupTables() {
+		for _, t := range backupTables {
+			if platformPluginDataTablePattern.MatchString(t) {
+				if _, err := tx.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+					return nil, fmt.Errorf("drop %s: %w", t, err)
+				}
+				continue
+			}
 			if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 				return nil, fmt.Errorf("clear %s: %w", t, err)
 			}
@@ -513,6 +565,17 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, 
 	carried := map[string]bool{}
 	for _, id := range declared {
 		carried[id] = true
+	}
+	for _, m := range steps {
+		if carried[m.id] || !m.restore.upgradeOnRestore {
+			continue
+		}
+		if m.up == nil {
+			return fmt.Errorf("restore migration %s has no data upgrade", m.id)
+		}
+		if err := m.up(e); err != nil {
+			return fmt.Errorf("restore migration %s data upgrade: %w", m.id, err)
+		}
 	}
 	for _, m := range steps {
 		if carried[m.id] || m.restoreSeed == nil {
@@ -756,6 +819,9 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 				return err
 			}
 			table, cols = line.Table, line.Columns
+			if platformPluginDataTablePattern.MatchString(table) && !containsString(rep.Header.Tables, table) {
+				return fmt.Errorf("the backup contains undeclared plugin data table %s", table)
+			}
 			// A dump from before a step that renamed a baseline column carries the old name. The
 			// rename moves no data, so the value is loaded under the new one; a dump that claims the
 			// step gets no translation, and an old name in it is refused below as unknown.
@@ -811,6 +877,11 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 			values = make([]any, len(cols))
 			if tx != nil {
 				var err error
+				if platformPluginDataTablePattern.MatchString(table) {
+					if err := createPlatformPluginDataTable(migExec{s: s, ex: tx}, table); err != nil {
+						return fmt.Errorf("create plugin data table %s: %w", table, err)
+					}
+				}
 				if stmt, err = s.prepareInsert(tx, table, cols, identity); err != nil {
 					return fmt.Errorf("prepare insert into %s: %w", table, err)
 				}

@@ -70,6 +70,21 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if storage[0].capability != "network.http" || !storage[0].granted || storage[1].capability != "reports.read" || !storage[1].granted || storage[2].capability != "storage.files" || !storage[2].granted {
 		t.Fatal("storage grant was not exact", storage)
 	}
+	m.Capabilities.Required = []string{"network.http", "secrets.use"}
+	secrets, err := platformInstallCapabilitySelection(m, target)
+	if err != nil || len(secrets) != 2 || secrets[0].capability != "network.http" || !secrets[0].granted || secrets[1].capability != "secrets.use" || !secrets[1].granted || secrets[1].policy != "{}" || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("credential use provider was not selected exactly", secrets, err)
+	}
+	m.Capabilities.Required = []string{"background.run", "reports.read"}
+	background, err := platformInstallCapabilitySelection(m, nil)
+	if err != nil || len(background) != 2 || background[0].capability != "background.run" || !background[0].granted || background[1].capability != "reports.read" || !background[1].granted || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("background service provider was not selected exactly", background, err)
+	}
+	m.Capabilities.Required = []string{"background.run", "notifications.publish"}
+	notifications, err := platformInstallCapabilitySelection(m, nil)
+	if err != nil || len(notifications) != 2 || notifications[0].capability != "background.run" || !notifications[0].granted || notifications[1].capability != "notifications.publish" || !notifications[1].granted || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("notification provider was not selected exactly", notifications, err)
+	}
 	m.Capabilities.Required = []string{}
 	m.Capabilities.Optional = []string{"network.http", "storage.files"}
 	selected, err := platformInstallCapabilitySelection(m, target)
@@ -88,7 +103,7 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 			case "undeclared":
 				copyM.Capabilities.Optional = []string{"storage.files"}
 			case "unsupported_required":
-				copyM.Capabilities.Required = []string{"secrets.use"}
+				copyM.Capabilities.Required = []string{"secrets.read"}
 			case "duplicate":
 				copyM.Capabilities.Required = []string{"network.http"}
 			case "bad_policy":

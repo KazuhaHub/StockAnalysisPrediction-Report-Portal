@@ -175,7 +175,10 @@ func (t platformTable) checkExpressions(driver string) []string {
 	return checks
 }
 func (t platformTable) ddl(driver string) string {
-	name := platformPrefix + t.name
+	return t.ddlNamed(driver, platformPrefix+t.name)
+}
+
+func (t platformTable) ddlNamed(driver, name string) string {
 	var parts []string
 	for _, c := range t.columns() {
 		part := c.name + " " + c.sqlType(driver)
@@ -194,11 +197,14 @@ func (t platformTable) ddl(driver string) string {
 	return "CREATE TABLE IF NOT EXISTS " + name + " (" + strings.Join(parts, ",") + ")"
 }
 func (i platformIndex) ddl() string {
+	return i.ddlOn(platformPrefix + i.table)
+}
+func (i platformIndex) ddlOn(table string) string {
 	unique := ""
 	if i.unique {
 		unique = "UNIQUE "
 	}
-	q := "CREATE " + unique + "INDEX IF NOT EXISTS " + i.name + " ON " + platformPrefix + i.table + " (" + i.columns + ")"
+	q := "CREATE " + unique + "INDEX IF NOT EXISTS " + i.name + " ON " + table + " (" + i.columns + ")"
 	if i.predicate != "" {
 		q += " WHERE " + i.predicate
 	}

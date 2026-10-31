@@ -66,6 +66,27 @@ test("parent network transport fixes the installation destination and preserves 
   }
 });
 
+test("parent transport forwards only the reviewed binding name", async () => {
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        status: 200,
+        contentType: "application/json",
+        bodyBase64: "e30=",
+      }),
+    ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  await createAppNetworkTransport(binding)(
+    { ...request, credential: "upstream-api" },
+    new AbortController().signal,
+  );
+  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  expect(body.credential).toBe("upstream-api");
+  expect(JSON.stringify(body)).not.toContain("credentialValue");
+  expect(JSON.stringify(body)).not.toContain("Authorization");
+});
+
 test("remote authentication status stays inside the response envelope", async () => {
   const lost = vi.fn();
   onSessionLost(lost);

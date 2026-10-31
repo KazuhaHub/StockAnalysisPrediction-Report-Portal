@@ -51,18 +51,18 @@ All changes and non-secret audit details commit together. Fresh authority is
 checked after resource locking and again after audit. A failure returns no result
 metadata and rolls back the transaction.
 
-There is deliberately no HTTP, bridge, SDK or automatic startup caller. Mutation
-objects refuse generic JSON serialization/deserialization. Metadata excludes value
-length, digest, preview, ciphertext and secret-dependent fields. Labels are
-administrator descriptions, not a destination for credentials, and are not copied
-into audit details. Immutable input strings/copies cannot be promised erased.
+Mutation objects refuse generic JSON serialization/deserialization. Metadata
+excludes value length, digest, preview, ciphertext and secret-dependent fields.
+Labels are administrator descriptions, not a destination for credentials, and
+are not copied into audit details. Immutable input strings/copies cannot be
+promised erased.
 
-**Bound replacements/revocations currently refuse without writes.** The affected-
-installation preview, current review/consume and atomic dependent-binding
-transition must be implemented before permitting them. This temporary restriction
-prevents an incomplete repository from bypassing the approved cross-installation
-review and lock order. It is not the final rotation UX or final feature behavior.
-Raw read and credential header injection remain unavailable.
+Bound replacement/revocation now use the exact affected-binding review and
+transaction in [150](150-secret-binding-use-and-rotation.md). The original
+unbound custody path remains; it still refuses a direct shortcut whenever any
+binding references the credential. Raw read remains unavailable. Fixed broker
+header injection is documented and tested without returning plaintext to the
+browser or ordinary response.
 
 ## Restore and retained revocations
 
@@ -119,11 +119,9 @@ The original full local suite exposed two migration-tail expectations; these wer
 updated to explicitly include 0016, with an unchanged read-only/offline contract;
 the full local suite then passed.
 
-Next work remains: strict canonical binding policies; consumed exact grant review;
-affected-installation rotation/revoke preview and transaction; binding-only and
-uninstall invalidation; live current-user use checks; private credential-use
-exchange; bounded fixed-header validation and response projection/echo prevention;
-concurrency on both drivers; generic React/Ant administration and neutral-app
-acceptance. None of these is enabled by the existence of ciphertext or an active
-row alone. Later business/job/event schemas and production acceptance retain
-their independent decisions.
+The strict policy, binding review/consume, affected-binding rotation/revoke,
+uninstall/binding invalidation, current-use resolution, fixed-header private use
+exchange, echo denial and generic Portal management surface are implemented in
+150. Remaining evidence is native browser/service acceptance, concurrent
+PostgreSQL execution and complete CI. Later business/job/event schemas and
+production acceptance retain their independent decisions.

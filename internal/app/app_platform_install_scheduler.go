@@ -86,6 +86,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
 		} else if w.endpoint.path == "" {
 			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendUpdate(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendUninstall(ctx, w.worker)
+			}
 		} else {
 			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
 		}
@@ -123,6 +129,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	var result platformInstallRun
 	if w.writable {
 		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
+		result.lease, err = w.server.runPlatformStaticUpdate(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
+		result.lease, err = w.server.runPlatformFrontendUninstall(ctx, w.active)
 	} else {
 		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
 	}
@@ -145,7 +155,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 }
 func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	operation, stage := w.active.id, w.active.snapshot.Stage
-	if err := w.server.finishPlatformInstallForReview(ctx, w.active); err != nil {
+	finish := w.server.finishPlatformInstallForReview
+	if w.active.snapshot.Action == appplatform.ActionUpdate {
+		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
+		finish = w.server.finishPlatformFrontendUninstallForReview
+	}
+	if err := finish(ctx, w.active); err != nil {
 		if errors.Is(err, errAppPlatformLeaseConflict) {
 			w.active = platformOperationLease{}
 			w.attempts = 0
