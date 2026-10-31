@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Alert, Button, Descriptions, Input, Modal, Space, Table, Tag, Typography } from 'antd'
+import { App, Alert, Button, Descriptions, Input, Modal, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
@@ -7,6 +7,7 @@ import timezone from 'dayjs/plugin/timezone'
 import { Link } from 'react-router'
 import { api, errText } from '../../api/client'
 import type { ForecastPopulation, ForecastPopulationCandidate } from '../../api/types'
+import CardTable from '../../components/CardTable'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -159,7 +160,7 @@ export default function ForecastLedgerStart({
 
             <Typography.Text>{t('forecast.population.candidates')}</Typography.Text>
             <div className="rp-table-scroll">
-            <Table<ForecastPopulationCandidate>
+            <CardTable<ForecastPopulationCandidate>
               rowKey="id"
               size="small"
               pagination={false}

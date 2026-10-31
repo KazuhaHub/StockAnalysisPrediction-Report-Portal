@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Drawer, Segmented, Space, Spin, Table, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Drawer, Segmented, Space, Spin, Tag, Typography, theme } from 'antd'
 import type { ColumnType } from 'antd/es/table'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -23,6 +23,7 @@ import ForecastRetentionNote from './ForecastRetentionNote'
 import Quiet from './Quiet'
 import WarnTag from './WarnTag'
 import ForecastVisibleResults from './ForecastVisibleResults'
+import CardTable from '../CardTable'
 
 // The drawer over a matrix cell (plan §8.1). The numbers come from the cell that was clicked — the
 // server is not asked to recompute them — and only the member list is fetched, so what the drawer
@@ -312,7 +313,7 @@ export default function ForecastCellDrawer({ open, onClose, mode, from, to, grou
             />
           )}
           {(membership || presentation === 'table') && <ScrollRegion label={t('forecast.drawer.members')}>
-            <Table<ForecastMember>
+            <CardTable<ForecastMember>
               size="small"
               rowKey="set_id"
               loading={current.loading}

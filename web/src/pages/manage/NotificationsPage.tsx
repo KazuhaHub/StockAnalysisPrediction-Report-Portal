@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tabs, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
@@ -7,6 +7,7 @@ import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
@@ -121,7 +122,7 @@ export default function NotificationsPage() {
         { key: 'channels', label: t('notify.channels'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Typography.Paragraph>{t('notify.channelHelp')}</Typography.Paragraph>
           <Button type="primary" onClick={() => openChannel(null)}>{t('notify.addChannel')}</Button>
-          <Table<NotificationChannel> rowKey="id" dataSource={channels} scroll={{ x: 850 }} columns={[
+          <CardTable<NotificationChannel> rowKey="id" dataSource={channels} scroll={{ x: 850 }} columns={[
             { title: t('notify.label'), dataIndex: 'label' },
             { title: t('notify.adapter'), render: (_, c) => t(`notify.adapter.${c.adapter}`) },
             { title: t('notify.destination'), render: (_, c) => c.adapter === 'email' ? c.recipients.join(', ') || t('notify.personalEmail') : c.url_host || '—' },
@@ -136,7 +137,7 @@ export default function NotificationsPage() {
         { key: 'rules', label: t('notify.rules'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Alert type="info" showIcon title={t('notify.ruleHelp')} />
           <Button type="primary" onClick={() => openRule(null)}>{t('notify.addRule')}</Button>
-          <Table<NotificationRoute> rowKey="id" dataSource={rules} scroll={{ x: 750 }} columns={[
+          <CardTable<NotificationRoute> rowKey="id" dataSource={rules} scroll={{ x: 750 }} columns={[
             { title: t('notify.label'), dataIndex: 'label' },
             { title: t('notify.channels'), render: (_, r) => channels.find(c => c.id === r.channel_id)?.label || r.channel_id },
             { title: t('notify.events'), render: (_, r) => r.events.split(',').map(kind => <Tag key={kind}>{eventLabel(kind)}</Tag>) },
@@ -149,7 +150,7 @@ export default function NotificationsPage() {
           <Alert type="info" title={t('notify.acceptanceHelp')} />
           <Space><Select allowClear placeholder={t('notify.status')} value={state} onChange={setState} style={{ width: 180 }} options={['pending', 'leased', 'retry_wait', 'accepted', 'failed', 'uncertain', 'canceled', 'expired'].map(value => ({ value, label: stateLabel(value) }))} /><Button onClick={() => run(() => loadHistory())} disabled={busy}>{t('common.refresh')}</Button></Space>
           {historyError && <Alert type="error" title={historyError} />}
-          <Table<NotificationDelivery> rowKey="id" dataSource={history} loading={!historyLoaded && !historyError} pagination={false} scroll={{ x: 850 }} columns={[
+          <CardTable<NotificationDelivery> rowKey="id" dataSource={history} loading={!historyLoaded && !historyError} pagination={false} scroll={{ x: 850 }} columns={[
             { title: t('notify.occurredAt'), dataIndex: 'occurred_at' },
             { title: t('notify.events'), render: (_, d) => eventLabel(d.event_type) },
             { title: t('notify.channels'), render: (_, d) => channels.find(c => c.id === d.channel_id)?.label || d.channel_id },
@@ -222,7 +223,7 @@ export default function NotificationsPage() {
       {detail && <Space orientation="vertical" style={{ width: '100%' }}>
         <Typography.Text copyable>{detail.delivery.id}</Typography.Text><Tag>{stateLabel(detail.delivery.state)}</Tag><Typography.Text>{detail.delivery.error_code}</Typography.Text>
         <Typography.Title level={5}>{detail.preview.subject}</Typography.Title><Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{detail.preview.text}</Typography.Paragraph>
-        <Table rowKey="id" size="small" dataSource={detail.attempts} columns={[{ title: t('notify.occurredAt'), dataIndex: 'started_at' }, { title: t('notify.status'), dataIndex: 'outcome', render: stateLabel }, { title: t('notify.error'), dataIndex: 'error_code' }]} />
+        <CardTable rowKey="id" size="small" dataSource={detail.attempts} columns={[{ title: t('notify.occurredAt'), dataIndex: 'started_at' }, { title: t('notify.status'), dataIndex: 'outcome', render: stateLabel }, { title: t('notify.error'), dataIndex: 'error_code' }]} />
         <Space>{!['pending', 'leased', 'retry_wait'].includes(detail.delivery.state) && <Button onClick={() => { setAction('replay'); setReason(''); setConfirmed(false); setRequestID(crypto.randomUUID()) }}>{t('notify.replay')}</Button>}{detail.delivery.state === 'uncertain' && <Button onClick={() => { setAction('review'); setReason('') }}>{t('notify.dismissUncertain')}</Button>}</Space>
       </Space>}
     </Drawer>

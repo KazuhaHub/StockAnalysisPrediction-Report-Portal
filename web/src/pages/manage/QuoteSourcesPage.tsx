@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, Tag, Typography } from 'antd'
 import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
 import QuoteTrafficPanel, { type QuoteDisplayTraffic } from './QuoteTrafficPanel'
+import CardTable from '../../components/CardTable'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -623,7 +624,7 @@ export default function QuoteSourcesPage() {
                 )
               }
             >
-              <Table<QuoteAdminSource>
+              <CardTable<QuoteAdminSource>
                 rowKey="source"
                 size="small"
                 dataSource={rows}

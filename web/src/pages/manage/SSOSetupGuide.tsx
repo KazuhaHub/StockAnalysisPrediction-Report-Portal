@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Alert, App, Button, Collapse, Select, Space, Steps, Table, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Collapse, Select, Space, Steps, Tooltip, Typography } from 'antd'
 import { CopyOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import CardTable from '../../components/CardTable'
 
 // A walkthrough for wiring an identity provider to the portal (ADR 0023).
 //
@@ -98,7 +99,7 @@ function ValueRow({ value }: { value: string }) {
 function FieldTable({ rows }: { rows: { field: string; value: string }[] }) {
   const { t } = useTranslation()
   return (
-    <Table
+    <CardTable
       size="small"
       pagination={false}
       rowKey="field"

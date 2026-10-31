@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
-import { App, Button, Drawer, Dropdown, Empty, Input, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Drawer, Dropdown, Empty, Input, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { CloudDownloadOutlined, DownOutlined, PlusOutlined, ShopOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { AppMarketEntry, AppMarketResp, AppPreviewResp } from '../../api/types'
 import ScopePermissionModal from '../../components/ScopePermissionModal'
+import CardTable from '../../components/CardTable'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
 // actual install once the scopes are approved.
@@ -210,7 +211,7 @@ export default function AppInstall({ onInstalled }: { onInstalled: () => void })
           {market === null ? null : market.length === 0 ? (
             <Empty description={t('apps.marketEmpty')} />
           ) : (
-            <Table rowKey="id" size="small" dataSource={market} columns={marketCols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
+            <CardTable rowKey="id" size="small" dataSource={market} columns={marketCols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
           )}
         </Space>
       </Drawer>

@@ -619,8 +619,7 @@ body {
   /* Content as wide as the header. Touch devices overlay their scrollbars, so nothing is reserved. */
   .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
   .rp-batch-targets-section > .ant-space-item { min-width: 0; }
-  .rp-table-scroll { overflow-x: auto; }
-  .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
+  /* Wide tables no longer scroll sideways on a phone: CardTable lays their rows out as cards. */
   .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
   .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }

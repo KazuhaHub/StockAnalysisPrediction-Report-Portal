@@ -15,7 +15,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -55,6 +54,7 @@ import LoadGate from './LoadGate'
 import JobDetailDrawer from './JobDetailDrawer'
 import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
+import CardTable from './CardTable'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
@@ -485,7 +485,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         {rows.length === 0 ? (
           <Empty description={t('queue.empty')} />
         ) : (
-          <Table
+          <CardTable
             rowKey="id"
             size="small"
             rowSelection={{

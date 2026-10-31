@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Table, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Tag, Typography, theme } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import ScrollRegion from './forecast/ScrollRegion'
 import { formatReportDateTime, isInstant } from '../lib/datetime'
 import { forecastLinkColor, forecastPalette } from '../lib/forecastPresentation'
 import WarnTag from './forecast/WarnTag'
+import CardTable from './CardTable'
 
 // The report's own prediction panel (plan §8.2). It is part of the READING page, not an admin view:
 // a reader is looking at what this report promised, and whether the market has answered yet.
@@ -387,7 +388,7 @@ export default function ForecastReadingCard({
                   status: m.status === 'resolved' ? 'finish' : m.phase === 'final' ? 'error' : m.phase === 'settling' || m.phase === 'retrying' || m.phase === 'overdue' ? 'process' : 'wait',
                 }))}
               />
-              <ScrollRegion label={t('forecast.panel.checkpoints')}><Table
+              <ScrollRegion label={t('forecast.panel.checkpoints')}><CardTable
                 size="small"
                 rowKey="key"
                 pagination={false}
@@ -421,7 +422,7 @@ export default function ForecastReadingCard({
           {others.length > 0 && (
             <div>
               <Typography.Text strong>{t('forecast.panel.others')}</Typography.Text>
-              <ScrollRegion label={t('forecast.panel.others')}><Table
+              <ScrollRegion label={t('forecast.panel.others')}><CardTable
                 size="small" pagination={false} rowKey="id" dataSource={others} style={{ minWidth: 550 }}
                 onRow={(other) => ({ style: { color: other.report_id ? undefined : token.colorTextSecondary } })}
                 columns={[

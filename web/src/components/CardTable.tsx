@@ -8,7 +8,7 @@ export type CardColumn<T> = ColumnType<T> & { phoneLabel?: string }
 // columns: a phone cannot show six columns, and a sideways scroll hides most of them. Everything else
 // is antd's own (sorting, selection, expansion, pagination); this only labels the cells and drops the
 // horizontal scroll where the cards make it unnecessary (.rp-card-table--cards in index.css).
-export default function CardTable<T extends object>(props: TableProps<T>) {
+export default function CardTable<T>(props: TableProps<T>) {
   const phone = !Grid.useBreakpoint().sm
   const columns = props.columns?.map((column) => {
     const c = column as CardColumn<T>

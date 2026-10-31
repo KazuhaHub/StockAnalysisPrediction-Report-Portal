@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Select, Space, Tag, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -9,6 +9,7 @@ import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
+import CardTable from '../../components/CardTable'
 
 interface VersionRow {
   name: string
@@ -120,7 +121,7 @@ function VersionRegistry() {
             value={query} onChange={(event) => setQuery(event.target.value)} style={{ maxWidth: 360 }} />
           <Button type="primary" icon={<PlusOutlined />} aria-label={t('versions.add')} onClick={() => open()}>{t('versions.add')}</Button>
         </div>
-        <Table<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
+        <CardTable<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
           pagination={{ pageSize: 12, hideOnSinglePage: true, showSizeChanger: false }} columns={[
             { title: t('versions.name'), render: (_, version) => <Space orientation="vertical" size={2}>
               <Space wrap size={4}><Typography.Text strong>{version.label || version.name}</Typography.Text>

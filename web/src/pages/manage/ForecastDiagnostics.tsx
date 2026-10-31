@@ -1,6 +1,7 @@
-import { Alert, Card, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Card, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ForecastDiagnostics as Diagnostics } from '../../api/types'
+import CardTable from '../../components/CardTable'
 
 // Missing, unreadable and measured-zero telemetry are different states. These retained samples
 // describe comparison only; agreement does not grant a candidate permission to settle anything.
@@ -26,7 +27,7 @@ export default function ForecastDiagnostics({ value, fallback }: { value?: Diagn
         </Typography.Paragraph>
         <Typography.Text>{t('forecast.diagnostics.updated', { at: shadow.updated_at })}</Typography.Text>
         <Typography.Title level={5} style={{ margin: 0 }}>{t('forecast.diagnostics.calls')}</Typography.Title>
-        <Table
+        <CardTable
           size="small" pagination={false} scroll={{ x: 700 }} dataSource={callRows}
           rowKey={(row) => `${row.date}:${row.source}`}
           columns={[
@@ -35,7 +36,7 @@ export default function ForecastDiagnostics({ value, fallback }: { value?: Diagn
           ]}
         />
         <Typography.Title level={5} style={{ margin: 0 }}>{t('forecast.diagnostics.comparisons')}</Typography.Title>
-        <Table
+        <CardTable
           size="small" pagination={false} scroll={{ x: 700 }} dataSource={shadow.days} rowKey="date"
           columns={['date', 'selected', 'reads', 'http_attempts', 'matches', 'mismatches', 'unavailable'].map(column)}
         />

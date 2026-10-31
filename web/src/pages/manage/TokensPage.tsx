@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -8,6 +8,7 @@ import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { TokenRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
 
 const SCOPE_COLORS: Record<string, string> = { all: 'gold', ingest: 'blue', query: 'green' }
 
@@ -129,7 +130,7 @@ export default function TokensPage() {
         )}
       </Space>
 
-      <Table<TokenRow>
+      <CardTable<TokenRow>
         rowKey="id"
         size="small"
         loading={loading}

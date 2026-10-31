@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Tag, TimePicker, Typography, theme } from 'antd'
 import { AuditOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,7 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
+import CardTable from '../../components/CardTable'
 
 // Storage management console (docs/adr/0017-storage-cleanup.md): a per-category usage dashboard (icon
 // cards + a proportion bar), a self-explanatory manual cleanup (the button names what and how old),
@@ -574,7 +575,7 @@ export default function StoragePage() {
           <div style={{ overflowX: 'auto' }}>
             {/* Paginated, not a full dump: this is a ring buffer of up to cleanupRunsKeep rows, and
                 a page you have to scroll past to reach anything below it is a page nobody reads. */}
-            <Table
+            <CardTable
               rowKey="id"
               size="small"
               pagination={{ pageSize: 10, size: 'small', hideOnSinglePage: true, showSizeChanger: false }}

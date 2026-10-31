@@ -10,7 +10,6 @@ import {
   Radio,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -20,6 +19,7 @@ import { api, errText } from '../../api/client'
 import type { ForecastDrySample, ForecastReadinessItem, ForecastSettings } from '../../api/types'
 import ForecastBacklog from './ForecastBacklog'
 import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
+import CardTable from '../../components/CardTable'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
 //
@@ -266,7 +266,7 @@ export default function ForecastEvaluatorStatus({
             </Typography.Title>
             {hb && (hb.dry_sample?.length ?? 0) > 0 ? (
               <div className="rp-table-scroll">
-              <Table
+              <CardTable
                 size="small"
                 rowKey={(r) => `${r.set_id}-${r.kind}-${r.mark ?? ''}-${r.code}`}
                 pagination={false}

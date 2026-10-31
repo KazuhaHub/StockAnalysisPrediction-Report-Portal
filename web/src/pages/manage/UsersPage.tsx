@@ -13,7 +13,6 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tabs,
   Tag,
   Tooltip,
@@ -38,6 +37,7 @@ import UserAvatar from '../../components/UserAvatar'
 import OrgUnitDetail from './OrgUnitDetail'
 import { usePendingSettings } from './AdminDraftBoundary'
 import type { Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
+import CardTable from '../../components/CardTable'
 
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
 
@@ -400,7 +400,7 @@ export default function UsersPage() {
         </Card>
       )}
 
-      <Table<UserRow>
+      <CardTable<UserRow>
         rowKey="username"
         loading={loading}
         dataSource={filtered}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Collapse, Form, Grid, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload } from 'antd'
+import { Alert, App, Button, Card, Collapse, Form, Grid, Input, InputNumber, Select, Space, Switch, Tabs, Tag, Typography, Upload } from 'antd'
 import { CopyOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -13,6 +13,7 @@ import LoadGate from '../../components/LoadGate'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
+import CardTable from '../../components/CardTable'
 
 // SSO administration (ADR 0023). One SAML tab and one OIDC tab; the API is row-shaped, so adding
 // more providers later is a change here and nowhere else.
@@ -182,7 +183,7 @@ function LastSeenClaims({ slug }: { slug: string }) {
           ))}
         </div>
       ) : (
-        <Table
+        <CardTable
           className="rp-claims-table"
           size="small"
           pagination={false}

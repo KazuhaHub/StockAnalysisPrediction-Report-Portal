@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Tag, Typography } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -10,6 +10,7 @@ import InheritField from './InheritField'
 import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSettings'
 import { subtreeOf } from './OrgUnitPicker'
 import { usePendingSettings } from './AdminDraftBoundary'
+import CardTable from '../../components/CardTable'
 
 const RUN_SURFACES = ['run', 'batch', 'recurring', 'chat'] as const
 const FORECAST_SCOPES = ['all', 'own', 'none'] as const
@@ -692,7 +693,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
         // only appeared once the workflow was switched on, so you could not see what a workflow
         // WOULD offer; and there was no way to compare one column across workflows, which is the
         // question an admin actually has ("who can use 批量?").
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           pagination={false}
@@ -768,6 +769,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
                   />
                 </Space>
               ),
+              phoneLabel: t(`users.surface.${sf}`),
               width: 92,
               align: 'center' as const,
               render: (_: unknown, tg: GroupTargetRow) =>

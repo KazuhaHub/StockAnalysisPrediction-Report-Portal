@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, CloudDownloadOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,7 @@ import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import type { BatchPlugin, BatchTarget, DifyInput, DifyRefreshResult, DifyTargetEdit, PluginInput } from '../../api/types'
 import DifyRefreshModal from './DifyRefreshModal'
 import LoadGate from '../../components/LoadGate'
+import CardTable from '../../components/CardTable'
 
 const INPUT_PREVIEW_LIMIT = 3
 
@@ -550,7 +551,7 @@ function GlobalExecutionTargets() {
                 >
                 {targets.length === 0 && <Typography.Text type="secondary">{t('batch.dify.targetsHint')}</Typography.Text>}
                 <SortableWrapper ids={targets.map((tg) => String(tg.id))} onReorder={reorderTargets}>
-                  <Table
+                  <CardTable
                     className="rp-batch-targets-table"
                     rowKey="id"
                     size="small"
@@ -583,7 +584,7 @@ function GlobalExecutionTargets() {
                 ) : customPlugins.length === 0 ? (
                   <Typography.Text type="secondary">{t('batch.admin.advancedPluginsHint')}</Typography.Text>
                 ) : (
-                  <Table rowKey="slug" size="small" dataSource={customPlugins} columns={pluginCols} pagination={false} scroll={{ x: 'max-content' }} />
+                  <CardTable rowKey="slug" size="small" dataSource={customPlugins} columns={pluginCols} pagination={false} scroll={{ x: 'max-content' }} />
                 )}
               </Space>
             ),

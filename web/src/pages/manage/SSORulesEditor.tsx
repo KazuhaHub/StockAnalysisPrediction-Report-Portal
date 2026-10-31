@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -9,6 +9,7 @@ import type { Role, SSOProviderAdmin, SSORuleRow, SSORulesResp, UserGroupRow } f
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable from '../../components/CardTable'
 
 // The group-rules editor.
 //
@@ -201,6 +202,7 @@ export default function SSORulesEditor({
           <span>{t('sso.rules.keepOnMiss')}</span>
         </Tooltip>
       ),
+      phoneLabel: t('sso.rules.keepOnMiss'),
       width: 100,
       render: (_: unknown, _r: SSORuleRow, i: number) => (
         <Switch size="small" checked={rules[i].keep_on_miss} onChange={(v) => patch(i, { keep_on_miss: v })} />
@@ -248,7 +250,7 @@ export default function SSORulesEditor({
           setDirty(true)
         }}
       >
-        <Table<RuleTableRow>
+        <CardTable<RuleTableRow>
           rowKey="_rowKey"
           size="small"
           loading={loading}

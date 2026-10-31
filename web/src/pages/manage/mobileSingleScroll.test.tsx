@@ -166,8 +166,10 @@ describe('phone layout has a single vertical scroll region', () => {
     expect(phone).toMatch(/\.rp-reader-export-policy\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/)
   })
 
-  it('scrolls wide tables inside a dedicated wrapper, not every antd table', () => {
-    expect(phone).toMatch(/\.rp-table-scroll\s*\{[^}]*overflow-x:\s*auto/)
+  // A table on a phone is a list of cards (CardTable), not a 640px table in a sideways scroller.
+  it('lays wide tables out as cards on a phone instead of scrolling them sideways', () => {
+    expect(phone).not.toMatch(/min-width:\s*640px/)
+    expect(css).toMatch(/\.rp-card-table--cards[^{]*\{/)
     expect(phone).not.toMatch(/\.ant-table-content\s*\{/)
     expect(phone).not.toMatch(/\.rp-admin-page-body \.ant-space-item/)
   })

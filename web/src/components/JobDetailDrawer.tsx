@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type Key, type ReactNode } from 'react'
-import { Alert, App, Button, Descriptions, Drawer, Grid, Modal, Popconfirm, Space, Table, Typography } from 'antd'
+import { Alert, App, Button, Descriptions, Drawer, Grid, Modal, Popconfirm, Space, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, InfoCircleOutlined, SyncOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
@@ -22,6 +22,7 @@ import { formatElapsed } from '../lib/taskUi'
 import { loadFailure } from '../lib/loadFailure'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import CardTable from './CardTable'
 
 // itemActive reports whether a run (row) can still be cancelled: it hasn't reached a
 // terminal state (succeeded / partial / failed / cancelled).
@@ -366,7 +367,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
           {detail.job.status === 'running' && !detail.running_in_process && (
             <Alert type="info" showIcon style={{ marginBottom: 12 }} title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
           )}
-          <Table
+          <CardTable
             rowKey="id"
             size="small"
             rowSelection={rowSelection}

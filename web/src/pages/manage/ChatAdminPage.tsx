@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -14,6 +14,7 @@ import CompactNumberInput from '../../components/CompactNumberInput'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsField from './SettingsField'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable from '../../components/CardTable'
 
 // Assistant admin (docs/adr/0012-interactive-chat.md). Two independent controls:
 //  1. A concurrency ceiling on in-flight chat turns — chat is interactive, so it does NOT
@@ -225,7 +226,7 @@ export default function ChatAdminPage() {
         }
       >
         {cfgErr && <Alert type="error" showIcon title={cfgErr} style={{ marginBottom: 12 }} />}
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           columns={columns}
@@ -256,7 +257,7 @@ export default function ChatAdminPage() {
         <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
           {t('chatAdmin.convsHint')}
         </Typography.Text>
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           dataSource={filteredConvs}

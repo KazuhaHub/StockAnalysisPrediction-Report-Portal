@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Input, Space, Table, Typography, theme } from 'antd'
+import { Button, Card, Input, Space, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router'
@@ -9,6 +9,7 @@ import AppInstall from './AppInstall'
 import AppReorderModal from './AppReorderModal'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
+import CardTable from '../../components/CardTable'
 
 // The Apps list: every built-in and installed app with where it is switched on, in the administrator's
 // order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
@@ -80,7 +81,7 @@ export default function AppsAdminPage() {
             </Typography.Text>
           </div>
           <div className="rp-table-scroll">
-          <Table
+          <CardTable
             className="rp-apps-table"
             rowKey="key"
             dataSource={shown}

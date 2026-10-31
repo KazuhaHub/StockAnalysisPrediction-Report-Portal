@@ -11,7 +11,6 @@ import {
   Popconfirm,
   Popover,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -25,6 +24,7 @@ import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable from '../../components/CardTable'
 
 // antd's Tag preset colors (https://ant.design/components/tag) — "default" maps
 // to no color prop (the neutral grey Tag).
@@ -373,7 +373,7 @@ export default function TypesPage() {
               <KindColorPicker color={colors[g.kind] || 'default'} onChange={(color) => saveColor(g.kind, color)} />
             </Space>
             <SortableWrapper ids={groupNames} onReorder={(names) => reorderGroup(g.kind, names)}>
-              <Table<TypeRow>
+              <CardTable<TypeRow>
                 rowKey="name"
                 size="small"
                 loading={loading}

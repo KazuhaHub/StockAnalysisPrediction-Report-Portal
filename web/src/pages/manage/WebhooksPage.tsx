@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,7 @@ import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
 
 export default function WebhooksPage() {
   const { t } = useTranslation()
@@ -137,7 +138,7 @@ export default function WebhooksPage() {
         <Typography.Text type="secondary">{t('webhook.hint')}</Typography.Text>
         <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
         <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={180} title={t('common.loadFailedContent')}>
-          <Table rowKey="id" size="small" dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
+          <CardTable rowKey="id" size="small" dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
         </LoadGate>
       </Space>
 

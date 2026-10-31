@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Alert, Button, Card, Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { App, Alert, Button, Card, Popconfirm, Progress, Space, Tag, Tooltip, Typography } from 'antd'
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,7 @@ import { fmtMs } from '../../../lib/exportTime'
 import { useTableView } from '../../../components/TableView'
 import { startVisiblePoll } from '../../../lib/visiblePoll'
 import type { ExportLabels } from './labels'
+import CardTable from '../../../components/CardTable'
 
 export const STATUS_COLOR: Record<ExportStatus, string> = {
   queued: 'default',
@@ -155,7 +156,7 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
       }
     >
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
-      <Table<ExportJob>
+      <CardTable<ExportJob>
         size="small"
         rowKey="id"
         loading={loading}

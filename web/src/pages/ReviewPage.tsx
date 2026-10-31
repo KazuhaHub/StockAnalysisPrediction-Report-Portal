@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Input, Select, Space, Table, Tag, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, Input, Select, Space, Tag, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,7 @@ import type { TrackingResp, TrackingRow } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../lib/loadFailure'
+import CardTable from '../components/CardTable'
 
 // The review queue: what the reports ASSUMED, and whether it held.
 //
@@ -217,7 +218,7 @@ export default function ReviewPage() {
             </Typography.Paragraph>
           </Space>
         ) : (
-          <Table<TrackingRow>
+          <CardTable<TrackingRow>
             rowKey="id"
             size="small"
             loading={loading}

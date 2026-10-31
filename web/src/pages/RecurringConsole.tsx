@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Card, Drawer, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, TimePicker, Typography, Upload } from 'antd'
+import { App, Button, Card, Drawer, Input, InputNumber, Modal, Select, Space, Switch, Tag, TimePicker, Typography, Upload } from 'antd'
 import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -11,6 +11,7 @@ import { csvToRows, downloadCSV, toCSV } from '../lib/csv'
 import LoadGate from '../components/LoadGate'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
+import CardTable from '../components/CardTable'
 
 // Recurring-tasks console (计划任务; docs/adr/0018-recurring-tasks.md). A first-party app card
 // (gated by run_batch) that manages saved job templates + a daily/weekly/monthly cadence the server
@@ -325,7 +326,7 @@ export default function RecurringConsole() {
           {targetsLoaded && targets.length === 0 && <Typography.Text type="warning">{t('recurring.noTargets')}</Typography.Text>}
           <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={200} title={t('common.loadFailedContent')}>
           <div style={{ overflowX: 'auto' }}>
-            <Table
+            <CardTable
               rowKey="id"
               size="small"
               loading={loading}
@@ -498,7 +499,7 @@ export default function RecurringConsole() {
         size={440}
         title={history ? t('recurring.historyTitle', { name: history.task.name }) : ''}
       >
-        <Table
+        <CardTable
           rowKey="id"
           size="small"
           pagination={false}
