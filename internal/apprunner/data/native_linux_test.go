@@ -232,6 +232,9 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if content, err := os.ReadFile(namespace + "/hello.txt"); err != nil || string(content) != "mutated after checkpoint" {
 		t.Fatal("refused restore changed source data", string(content), err)
 	}
+	if _, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, checkpointSnapshot.ManifestSHA256); err != nil {
+		t.Fatal("checkpoint changed before native restore", err)
+	}
 	restored, err := checkpointRoot.Restore(context.Background(), checkpointIdentity, root, expected, restoreRequest)
 	restoredSnapshot, restoreSnapshotErr := restored.Snapshot()
 	if err != nil || restoreSnapshotErr != nil || restoredSnapshot.ManifestSHA256 != checkpointSnapshot.ManifestSHA256 ||

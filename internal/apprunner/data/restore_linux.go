@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -63,7 +64,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 	}
 	verified, err := r.verifyCheckpointLocked(ctx, checkpointExpected, sourceExpected, checkpointRequest, request.ManifestSHA256)
 	if err != nil || verified.ArchiveBytes != request.ArchiveBytes {
-		return zero, ErrRestoreUnsafe
+		return zero, errors.Join(ErrRestoreUnsafe, fmt.Errorf("verify checkpoint: %w", err))
 	}
 	namespace, err := source.openNamespace(request.NamespaceID)
 	if err != nil {
@@ -76,12 +77,12 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 	}
 	archive, err := r.openRestoreArchive(ctx, request)
 	if err != nil {
-		return zero, ErrRestoreUnsafe
+		return zero, errors.Join(ErrRestoreUnsafe, fmt.Errorf("open archive: %w", err))
 	}
 	defer archive.Close()
 	entries, err := restoreArchiveEntries(ctx, archive, request)
 	if err != nil {
-		return zero, ErrRestoreUnsafe
+		return zero, errors.Join(ErrRestoreUnsafe, fmt.Errorf("read archive entries: %w", err))
 	}
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return zero, ErrRestoreUnsafe
