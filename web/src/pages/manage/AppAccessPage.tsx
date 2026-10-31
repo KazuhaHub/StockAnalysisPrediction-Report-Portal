@@ -109,7 +109,7 @@ function AccessWorkspace({
   return (
     <>
       <AppsBreadcrumb app={app} name={name} page={t('apps.section.status.title')} />
-      <Card styles={{ body: { padding: 0 } }}>
+      <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
         <div className="rp-app-access">
           <div className="rp-app-access__tree">
             <ScopeFold label={selected?.name ?? t('ou.title')}>

@@ -81,7 +81,9 @@ export function LoadingPlaceholder({
   const { t } = useTranslation()
   const shown = useDelayedFlag(true)
   return (
-    <div aria-busy style={{ minHeight }}>
+    <div aria-busy className="rp-loading" style={{ minHeight }}>
+      {/* Drawn only when this stands for the whole page (index.css). */}
+      <div className="rp-route-progress" aria-hidden="true" />
       <Typography.Text role="status" className="rp-sr-only">{label ?? t('common.loading')}</Typography.Text>
       {shown && <Skeleton active title paragraph={{ rows }} />}
       <WaitingForConnection />

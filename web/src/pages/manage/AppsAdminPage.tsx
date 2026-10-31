@@ -66,7 +66,7 @@ export default function AppsAdminPage() {
           </Button>
           <AppInstall onInstalled={() => reload({ quiet: true })} />
         </Space>
-        <Card styles={{ body: { padding: 0 } }}>
+        <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Input.Search
               allowClear
