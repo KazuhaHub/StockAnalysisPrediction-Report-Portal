@@ -380,7 +380,7 @@ func (s *Store) beginManagedRemoval(ctx context.Context, raw, signature []byte) 
 		generation, _ := strconv.ParseInt(command.TargetGeneration, 10, 64)
 		fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
 		if fence < source.sourceFence || fence < source.resource.controlFence {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf("%w: managed removal fence %d below source %d/resource %d", ErrFenceReconciliation, fence, source.sourceFence, source.resource.controlFence)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
             VALUES(?,?,?,?,?,?,?,?,?,?,'prepared','{}',NULL,?,?)`, command.EffectID, command.OperationID, command.InstallationID, command.Stage, slot, command.Kind, command.PayloadSHA256, generation, command.ControllerEpoch, fence, now, now); err != nil {
