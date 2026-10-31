@@ -3,14 +3,15 @@
 Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
-document also claims verified native restore, Portal restore admission and the
+document also claims verified native restore, Portal restore primitives and the
 generation-2 `update-start` admission/reservation, native launch, running receipt,
-native readiness, protected registration, boot handshake and the atomic active
-tuple swap. It does not claim native A-to-B acceptance or a reviewed rollback
-executor. The recovery path now claims a reviewed restore, stops and removes the
-exact failed update candidate, then advances to verified data restore; restarting
-the restored source release through a signed `restore-start` intent is prepared,
-but native execution/probe/activation remain outstanding.
+native readiness, protected registration, boot handshake and atomic active-tuple
+swap primitives. It does not claim a managed update review route, managed update
+queue, production source-quiesce/checkpoint executor, native A-to-B acceptance or
+a reviewed rollback executor. The recovery path can claim a pre-seeded reviewed
+restore, stop and remove the exact failed update candidate, then advance to
+verified data restore. The signed `restore-start` launch, readiness, registration,
+boot and activation chain is implemented but has not passed native acceptance.
 Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
@@ -300,7 +301,9 @@ Disposable Linux/XFS/Docker tests:
    Portal reservation recovery. Implemented.
 5. Managed update executor and activation transaction. Native generation-2
    launch/receipt, readiness, registration, boot and the Portal active tuple swap
-   are implemented; native acceptance and rollback remain.
+   primitives are implemented. Managed review/admission, the managed queue,
+   source quiesce/checkpoint orchestration, native A-to-B acceptance and rollback
+   remain.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
    the disposable Linux/XFS/Docker probe. Reviewed restore queueing, exact
