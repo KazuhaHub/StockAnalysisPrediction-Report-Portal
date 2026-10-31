@@ -176,6 +176,10 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if err := os.Chmod(namespace+"/writable", 02770); err != nil {
 		t.Fatal(err)
 	}
+	var writableBefore unix.Stat_t
+	if err := unix.Stat(namespace+"/writable", &writableBefore); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(namespace+"/writable/created.txt", []byte("writable child"), 0640); err != nil {
 		t.Fatal(err)
 	}
@@ -251,10 +255,11 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if content, err := os.ReadFile(namespace + "/writable/created.txt"); err != nil || string(content) != "writable child" {
 		t.Fatal("restored writable content", string(content), err)
 	}
-	var writableStat unix.Stat_t
-	if err := unix.Stat(namespace+"/writable", &writableStat); err != nil ||
-		writableStat.Uid != 65532 || writableStat.Gid != 65532 || writableStat.Mode&07777 != 02770 {
-		t.Fatal("restored writable directory metadata", writableStat, err)
+	var writableAfter unix.Stat_t
+	if err := unix.Stat(namespace+"/writable", &writableAfter); err != nil ||
+		writableAfter.Uid != writableBefore.Uid || writableAfter.Gid != writableBefore.Gid ||
+		writableAfter.Mode&07777 != writableBefore.Mode&07777 {
+		t.Fatal("restored writable directory metadata", writableAfter, writableBefore, err)
 	}
 	if _, err := os.Lstat(namespace + "/after"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("restore retained uncheckpointed entry", err)
