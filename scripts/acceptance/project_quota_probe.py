@@ -225,10 +225,7 @@ def main(args):
                         raise RuntimeError("actual prepared-data writer admission/claim verification missing")
                     report["native_writer_intent_and_claim_verified"] = True
                 if phase == "prepare":
-                    if "NATIVE_JOURNAL_RESTORE_VERIFIED" not in result.stdout:
-                        raise RuntimeError("signed journal restore verification missing: " + (result.stdout+result.stderr)[-32768:])
-                    report["native_journal_checkpoint_verified"] = True
-                    report["native_journal_restore_verified"] = True
+                    report["native_journal_prepare_verified"] = True
 
             run_journal("prepare")
             if len(args) in (9,11):
@@ -518,10 +515,16 @@ def main(args):
                     result = subprocess.run([args[6], "-test.run=^TestNativeJournalCandidateExecution$", "-test.v", "-test.timeout=60s"], cwd=Path(__file__).resolve().parents[2] / "internal/apprunner/journal", env=candidate_journal_env, capture_output=True, text=True, timeout=70)
                     if result.returncode or "--- PASS: TestNativeJournalCandidateExecution" not in result.stdout:
                         raise RuntimeError("native candidate journal failed: " + (result.stdout+result.stderr)[-32768:])
+                    if "NATIVE_JOURNAL_CHECKPOINT_VERIFIED" not in result.stdout:
+                        raise RuntimeError("signed journal checkpoint verification missing: " + (result.stdout+result.stderr)[-32768:])
+                    if "NATIVE_JOURNAL_RESTORE_VERIFIED" not in result.stdout:
+                        raise RuntimeError("signed journal restore verification missing: " + (result.stdout+result.stderr)[-32768:])
                     report["native_candidate_journal_running_receipt"] = True
                     report["native_candidate_journal_atomic_failure_unknown"] = True
                     report["native_candidate_receipt_restart_renewal_replay"] = True
                     report["native_candidate_unknown_dispatch_no_restart"] = True
+                    report["native_journal_checkpoint_verified"] = True
+                    report["native_journal_restore_verified"] = True
                     if len(args) in (9, 11):
                         candidate_receipt_fixture = root / "candidate-receipt"
                         candidate_receipt_fixture.mkdir(mode=0o755)
