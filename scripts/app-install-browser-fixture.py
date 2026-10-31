@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import time
 from urllib.parse import urlsplit
-from fixture_http import fixture_cookie
+from fixture_http import SAFE_RESPONSE_HEADERS, fixture_cookie, safe_response_header
 
 PORTAL = Path(__file__).resolve().parents[1]
 WEB = PORTAL / "web"
@@ -78,8 +78,9 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                     response = connection.getresponse()
                     data = response.read()
                     self.send_response(response.status)
-                    for key, value in response.getheaders():
-                        if key.lower() not in ("connection", "transfer-encoding", "server", "date", "content-length"):
+                    for key in SAFE_RESPONSE_HEADERS:
+                        value = response.getheader(key)
+                        if value is not None and safe_response_header(key, value):
                             self.send_header(key, value)
                     self.end_headers()
                     self.wfile.write(data)

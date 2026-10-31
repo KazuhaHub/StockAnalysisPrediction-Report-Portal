@@ -285,7 +285,9 @@ func listPlatformObjects(e migExec, installation, appID string, account platform
 		return platformObjectResult{}, err
 	}
 	defer rows.Close()
-	items := make([]platformObjectSummary, 0, request.limit)
+	// The contract caps list limits at 50; use a fixed allocation so the
+	// persisted/query limit cannot feed an unbounded preallocation.
+	items := make([]platformObjectSummary, 0, 51)
 	var last platformStoredObject
 	for rows.Next() {
 		row, err := scanPlatformStoredObject(rows.Scan)

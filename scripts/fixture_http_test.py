@@ -1,6 +1,6 @@
 import unittest
 
-from fixture_http import fixture_cookie
+from fixture_http import SAFE_RESPONSE_HEADERS, fixture_cookie, safe_response_header
 
 
 class FixtureCookieTest(unittest.TestCase):
@@ -22,3 +22,11 @@ class FixtureCookieTest(unittest.TestCase):
             with self.subTest(name=name, value=value):
                 with self.assertRaises(ValueError):
                     fixture_cookie(name, value)
+
+    def test_response_headers_are_allowlisted_and_injection_safe(self):
+        self.assertTrue(safe_response_header("Content-Security-Policy", "default-src 'none'"))
+        self.assertTrue(safe_response_header("Set-Cookie", "rp_session=abc; Path=/; SameSite=Lax"))
+        self.assertFalse(safe_response_header("X-Unreviewed", "value"))
+        self.assertFalse(safe_response_header("Content-Type", "text/html\r\nX-Test: yes"))
+        self.assertFalse(safe_response_header("Content-Type", "text/html\nX-Test: yes"))
+        self.assertIn("Content-Type", SAFE_RESPONSE_HEADERS)
