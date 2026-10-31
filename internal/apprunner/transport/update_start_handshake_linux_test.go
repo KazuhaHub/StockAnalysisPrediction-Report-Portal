@@ -70,7 +70,7 @@ func updateStartHandshakeRequestFixture(t *testing.T) (control.Authority, contro
 }
 
 func TestUpdateStartBackendHandshakeFrame(t *testing.T) {
-	authority, start, raw, signature, descriptor, expected, challenge :=
+	authority, _, raw, signature, descriptor, expected, challenge :=
 		updateStartHandshakeRequestFixture(t)
 	dir, err := os.MkdirTemp("/tmp", "ushf-")
 	if err != nil {
@@ -105,7 +105,7 @@ func TestUpdateStartBackendHandshakeFrame(t *testing.T) {
 		challengeSHA := sha256.Sum256([]byte(challenge))
 		evidence := journal.UpdateStartBackendHandshakeEvidence{
 			Format:                "portal.runner.update-start-backend-handshake/1-dev.1",
-			PayloadSHA256:         start.PayloadSHA256,
+			PayloadSHA256:         expected.Claim.PayloadSHA256,
 			DeliveryReceiptSHA256: hex.EncodeToString(expectedSHA[:]),
 			NativeID:              expected.Claim.NativeID,
 			ChallengeSHA256:       hex.EncodeToString(challengeSHA[:]),
@@ -125,7 +125,7 @@ func TestUpdateStartBackendHandshakeFrame(t *testing.T) {
 		raw, signature, authority, descriptor, expected, challenge)
 	<-done
 	if err != nil || proof.ReceivedAt().IsZero() ||
-		proof.Evidence().PayloadSHA256 != start.PayloadSHA256 {
+		proof.Evidence().PayloadSHA256 != expected.Claim.PayloadSHA256 {
 		t.Fatal("update-start handshake frame", proof, err)
 	}
 	if _, err := json.Marshal(proof); err == nil {
