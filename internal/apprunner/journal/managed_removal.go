@@ -598,6 +598,7 @@ func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byt
 		return zero, err
 	}
 	var observation driver.CandidateRemovalObservation
+	var removalErr error
 	if input.writable != nil {
 		launch, err := native.PrepareWritableCandidateRemoval(ctx, driver.WritableCandidateLaunchRequest{CandidateLaunchRequest: input.request, Binding: *input.writable})
 		if err != nil {
@@ -612,9 +613,9 @@ func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byt
 			return zero, err
 		}
 		if source.command.Stage == "stop" {
-			observation, err = native.StopWritableCandidate(ctx, launch, source.nativeID)
+			observation, removalErr = native.StopWritableCandidate(ctx, launch, source.nativeID)
 		} else {
-			observation, err = native.RemoveWritableCandidate(ctx, launch, source.nativeID)
+			observation, removalErr = native.RemoveWritableCandidate(ctx, launch, source.nativeID)
 		}
 	} else {
 		launch, err := native.PrepareCandidate(ctx, input.request)
@@ -630,13 +631,13 @@ func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byt
 			return zero, err
 		}
 		if source.command.Stage == "stop" {
-			observation, err = native.StopCandidate(ctx, launch, source.nativeID)
+			observation, removalErr = native.StopCandidate(ctx, launch, source.nativeID)
 		} else {
-			observation, err = native.RemoveCandidate(ctx, launch, source.nativeID)
+			observation, removalErr = native.RemoveCandidate(ctx, launch, source.nativeID)
 		}
 	}
-	if err != nil {
-		return zero, err
+	if removalErr != nil {
+		return zero, removalErr
 	}
 	return s.settleManagedRemoval(ctx, source, observation)
 }

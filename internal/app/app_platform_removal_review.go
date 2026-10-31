@@ -221,10 +221,6 @@ func (s *Server) createPlatformRemovalReviewContext(ctx context.Context, session
 	return s.createPlatformRemovalReviewWithScopeContext(ctx, session, installation, action, false)
 }
 
-func (s *Server) createPlatformFrontendRemovalReviewContext(ctx context.Context, session platformActorSession, installation string, action appplatform.Action) (platformRemovalReview, error) {
-	return s.createPlatformRemovalReviewWithScopeContext(ctx, session, installation, action, true)
-}
-
 func (s *Server) createPlatformRemovalReviewWithScopeContext(ctx context.Context, session platformActorSession, installation string, action appplatform.Action, frontendOnly bool) (platformRemovalReview, error) {
 	var result platformRemovalReview
 	err := s.withAppPlatformActorContext(ctx, session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
