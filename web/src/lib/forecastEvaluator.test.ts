@@ -90,12 +90,18 @@ describe('how often the record page re-reads the evaluator', () => {
 describe('ledger-wide backlog authority', () => {
   it('keeps sleeping overdue work visible after an empty pass', () => {
     const s = settings()
-    s.backlog = { as_of: new Date(NOW).toISOString(), due: 1, overdue: 1, retrying: 1, oldest_minutes: 2970, items: [], truncated: false }
+    s.backlog = { as_of: new Date(NOW).toISOString(), due: 1, overdue: 1, retrying: 1, oldest_minutes: 2970, oldest_late_minutes: 2070, items: [], truncated: false }
     expect(evaluatorStatus(s, NOW)).toBe('lagging')
   })
   it('does not keep a stale per-pass backlog after ledger recovery', () => {
     const s = settings({}, { oldest_due_unsettled_minutes: 9999 })
-    s.backlog = { as_of: new Date(NOW).toISOString(), due: 0, overdue: 0, retrying: 0, oldest_minutes: 0, items: [], truncated: false }
+    s.backlog = { as_of: new Date(NOW).toISOString(), due: 0, overdue: 0, retrying: 0, oldest_minutes: 0, oldest_late_minutes: 0, items: [], truncated: false }
+    expect(evaluatorStatus(s, NOW)).toBe('healthy')
+  })
+  it('does not call an evening of work that cannot settle before midnight lagging', () => {
+    const s = settings()
+    // Due at today's close, seven hours ago, but not settleable until the date rolls over.
+    s.backlog = { as_of: new Date(NOW).toISOString(), due: 6, overdue: 0, retrying: 0, oldest_minutes: 420, oldest_late_minutes: 0, items: [], truncated: false }
     expect(evaluatorStatus(s, NOW)).toBe('healthy')
   })
 })

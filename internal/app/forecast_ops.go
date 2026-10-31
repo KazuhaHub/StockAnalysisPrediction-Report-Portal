@@ -744,9 +744,9 @@ func (s *Server) forecastWatchdogOnce(now time.Time) {
 	if backlogErr != nil {
 		log.Printf("forecast watchdog backlog: %v", backlogErr)
 	}
-	if backlogErr == nil && backlog.OldestMinutes > int(forecastLaggingAfter/time.Minute) {
+	if backlogErr == nil && backlog.OldestLateMinutes > int(forecastLaggingAfter/time.Minute) {
 		s.emitForecastAlert("lagging",
-			fmt.Sprintf("%d completed checkpoints remain unsettled; %d older than 6 hours; oldest %d minutes (%s %s due %s)",
+			fmt.Sprintf("%d completed checkpoints remain unsettled; %d settleable for over 6 hours; oldest %d minutes since the close (%s %s due %s)",
 				backlog.Due, backlog.Overdue, backlog.OldestMinutes, backlog.Items[0].Symbol, backlog.Items[0].Checkpoint, backlog.Items[0].Due), now, forecastLaggingAlertEvery)
 	}
 	if hb.Pass.StaleValveTripped {

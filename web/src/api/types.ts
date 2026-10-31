@@ -737,7 +737,10 @@ export interface ForecastSettings {
     due: number
     overdue: number
     retrying: number
+    /** Minutes since the oldest item's session closed. */
     oldest_minutes: number
+    /** Minutes the oldest item has been settleable (from midnight after its session): the lagging clock. */
+    oldest_late_minutes: number
     truncated: boolean
     items: Array<{
       set_id: number

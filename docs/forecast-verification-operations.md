@@ -167,8 +167,14 @@ The heartbeat is older than ten minutes while the mode is not off.
 
 ### `lagging` (Email + Slack, at most daily)
 
-One of: a due mark unsettled for over six hours, the stale-data valve tripped, or a benchmark
-calendar still ending before today after 18:00 CST on a weekday.
+One of: a due mark still unsettled six hours after it became settleable, the stale-data valve
+tripped, or a benchmark calendar still ending before today after 18:00 CST on a weekday.
+
+A mark becomes settleable at midnight CST after its session, not at the close: a quote body without
+an as-of stamp cannot vouch for a bar dated today, so the evaluator settles a session's marks only
+once the date has rolled over. The backlog alert therefore fires from about 06:00 CST the next
+day, before the open. Marks that stay unsettled through a quiet evening are the design, not a lag;
+the card's backlog shows them with their wait since the close.
 
 - Look at the heartbeat's per-benchmark last bar and source, and at `stale_valve_tripped`, in
   `GET /api/admin/forecast`.
