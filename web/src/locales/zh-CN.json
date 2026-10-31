@@ -3310,7 +3310,7 @@
   "tasks.elapsed.m": "{{n}} 分",
   "tasks.elapsed.s": "{{n}} 秒",
   "tasks.waiting": "等待中",
-  "tasks.next": "下一个轮到",
+  "tasks.next": "排队中 · 下一个",
   "tasks.runStatus.queued": "排队中",
   "tasks.toast.exportDone": "“{{name}}”已就绪",
   "tasks.toast.exportFailed": "“{{name}}”导出失败",
