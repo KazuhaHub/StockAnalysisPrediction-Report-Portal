@@ -83,7 +83,7 @@ export default function TypeTree({
           {t('export.tree.clear')}
         </Button>
       )}
-      <div role="tree" aria-label={t('export.tree.title')} style={{ maxHeight: 360, overflowY: 'auto' }}>
+      <div className="rp-export-type-tree" role="tree" aria-label={t('export.tree.title')} style={{ maxHeight: 360, overflowY: 'auto' }}>
         {visible.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('export.tree.empty')} />}
         {visible.map((k) => {
           const state = kindCheckState(tree, selection, k.kind)

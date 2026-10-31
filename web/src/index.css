@@ -200,7 +200,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-ou-console {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -209,9 +209,8 @@ body {
     width: 100% !important;
     max-width: none;
   }
-  .rp-ou-picker--manage .rp-ou-picker__tree {
-    max-height: 300px !important;
-  }
+  .rp-scope-fold .rp-ou-picker { width: 100% !important; }
+  .rp-scope-fold .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-ou-profile-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -300,7 +299,6 @@ body {
 }
 .rp-policy-scope, .rp-policy-content { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .rp-policy-scope { border-inline-end: 1px solid var(--ant-color-border-secondary); padding-inline-end: 16px; }
-.rp-policy-scope > .ant-btn { margin-bottom: 16px; text-align: start; justify-content: flex-start; }
 .rp-policy-scope > .ant-typography { margin-top: 16px; font-size: 12px; }
 .rp-policy-scope .rp-ou-picker--manage { position: static; width: 100% !important; border: 0 !important; }
 .rp-policy-scope .rp-ou-picker__tree { max-height: none !important; }
@@ -559,11 +557,38 @@ body {
   gap: 8px;
   margin-inline-start: auto;
 }
+.rp-reader-export-policy { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.rp-table-scroll { max-width: 100%; }
+.rp-scope-fold { min-width: 0; width: 100%; }
+.rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
+.rp-scope-fold__body { margin-top: 8px; }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active {
+  color: var(--ant-color-text-light-solid) !important;
+  background: var(--ant-color-primary) !important;
+}
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover { background: var(--ant-color-primary-hover) !important; }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active { background: var(--ant-color-primary-active) !important; }
+/* Wide screens: the fold wrappers vanish so the tree is laid out exactly as if they were not there. */
+.rp-scope-fold--inline, .rp-scope-fold--inline > .rp-scope-fold__body { display: contents; }
+.rp-policy-scope-toggle { min-width: 0; }
+.rp-policy-scope-toggle__label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {
-  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
-  .rp-policy-scope { max-height: 180px; border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  /* One scroll region: the page body. The workspace grows with its content and neither pane clips. */
+  .rp-admin-page-body:has(> .rp-policy-workspace) { overflow: auto; }
+  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 16px; height: auto; }
+  .rp-policy-scope, .rp-policy-content { overflow: visible; max-height: none; }
+  .rp-policy-scope { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  .rp-policy-content { padding-inline-end: 0; scrollbar-gutter: auto; }
+  .rp-policy-scope-header > .rp-policy-scope-toggle { max-width: 60%; }
+  .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
+  .rp-batch-targets-section > .ant-space-item { min-width: 0; }
+  .rp-table-scroll { overflow-x: auto; }
+  .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
+  .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
+  .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }
-  .rp-policy-scope > .ant-btn { margin-bottom: 8px; }
 }
 
 .rp-plain-list {
@@ -2495,7 +2520,7 @@ body {
 .rp-dashboard-shortcut-options > .ant-btn { justify-content: flex-start; white-space: normal; height: auto; min-height: 36px; text-align: start; }
 .rp-sso-page > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
 @media (max-width: 767px) { .rp-dashboard-shortcut-options { grid-template-columns: minmax(0, 1fr); } }
-@media (min-width: 768px) { .rp-users-directory > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
+@media (min-width: 768px) { .rp-users-directory > .rp-scope-fold--inline > .rp-scope-fold__body > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
 .rp-users-page > .ant-tabs-nav { margin-bottom: 12px; }
 
 .rp-dashboard-catalog-modal .rp-dashboard-preview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2573,6 +2598,7 @@ body {
 .rp-dashboard-data-scroll thead { position: sticky; top: 0; background: var(--ant-color-bg-elevated); z-index: 1; }
 .rp-dashboard-data-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 
+.rp-batch-targets-table { max-width: 100%; min-width: 0; }
 .rp-batch-targets-table td { overflow-wrap: anywhere; }
 .rp-batch-targets-table .ant-space { max-width: 100%; }
 .rp-statistics-page { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -2645,16 +2671,18 @@ body {
 .rp-app-access__tree .rp-ou-picker--manage { width: 100% !important; border: 0 !important; }
 .rp-app-access__tree .rp-ou-picker__tree { max-height: 360px; }
 .rp-app-access__setting { padding: 24px 28px; min-width: 0; }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-app-detail, .rp-app-access { grid-template-columns: minmax(0, 1fr); }
+  .rp-app-access { min-height: 0; }
+  .rp-app-access__tree .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-app-access__tree { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
   .rp-app-access__setting { padding: 16px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-apps-col-type { display: none; }
 }
 .rp-apps-col-chevron { width: 40px; }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-apps-col-chevron { display: none; }
 }
 .rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
