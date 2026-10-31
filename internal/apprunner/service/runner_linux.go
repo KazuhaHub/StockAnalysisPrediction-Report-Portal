@@ -80,7 +80,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		return ErrNotReady
 	}
 	defer native.Close()
-	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, native, cfg.NetworkActive, cfg.NetworkEntries)
+	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, cfg.NetworkActive, cfg.NetworkEntries)
 	if err != nil {
 		return ErrNotReady
 	}

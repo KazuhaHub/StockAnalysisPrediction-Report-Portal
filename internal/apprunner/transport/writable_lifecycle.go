@@ -28,13 +28,15 @@ const (
 	ManagedRemovalStop
 	ManagedRemovalRemoveCode
 	ManagedRemovalRead
+	CheckpointCreate
+	CheckpointRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= ManagedRemovalRead
+	return a >= WritableWriterExecute && a <= CheckpointRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -95,12 +97,19 @@ func (o WritableLifecycleObservation) ManagedRemovalReceipt() (journal.ManagedRe
 	}
 	return journal.ParseManagedRemovalReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) CheckpointReceipt() (journal.CheckpointReceipt, error) {
+	if o.action < CheckpointCreate || o.action > CheckpointRead {
+		return journal.CheckpointReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseCheckpointReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer       control.DataWriterCommand
 	candidate    control.WritableCandidateCommand
 	registration control.WritableBackendRegistrationCommand
 	removal      control.ManagedRemovalCommand
+	checkpoint   control.CheckpointCommand
 	index        control.Command
 	release      string
 }
@@ -138,13 +147,20 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		r.writer = v.Candidate().Writer().Command()
 		r.index = v.Candidate().Writer().Data()
 		r.release = v.Candidate().Index().Payload.ReleaseSHA256
-	default:
+	case action <= ManagedRemovalRead:
 		v, err := control.VerifyManagedRemoval(raw, sig, a, now)
 		if err != nil {
 			return r, err
 		}
 		r.removal = v.Command()
 		r.release = r.removal.Payload.ReleaseSHA256
+	default:
+		v, err := control.VerifyCheckpoint(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.checkpoint = v.Command()
+		r.release = r.checkpoint.Payload.ReleaseSHA256
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != r.release {
@@ -206,6 +222,31 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 		}
 		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
 		issued, issuedErr := strconv.ParseInt(r.removal.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
+			return false
+		}
+		settled = v.SettledMS
+	case action >= CheckpointCreate && action <= CheckpointRead:
+		v, e := journal.ParseCheckpointReceipt(body)
+		c := r.checkpoint
+		if e != nil || v.Stage != "snapshot" || v.DeploymentID != c.DeploymentID ||
+			v.ControllerEpoch != c.ControllerEpoch || v.InstallationID != c.InstallationID ||
+			v.OperationID != c.OperationID || v.TargetGeneration != c.TargetGeneration ||
+			v.EffectID != c.EffectID || v.PayloadSHA256 != c.PayloadSHA256 ||
+			v.CheckpointID != c.Payload.CheckpointID || v.NamespaceID != c.Payload.NamespaceID ||
+			v.ResourceID != c.Payload.ResourceID || v.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+			v.SourceOperationID != c.Payload.SourceOperationID ||
+			v.SourceStartEffectID != c.Payload.SourceStartEffectID ||
+			v.SourceReceiptSHA256 != c.Payload.SourceReceiptSHA256 ||
+			v.SourceDataEffectID != c.Payload.SourceDataEffectID ||
+			v.SourceDataReceiptSHA256 != c.Payload.SourceDataReceiptSHA256 ||
+			v.ProjectID != c.Payload.ProjectID || v.NamespaceInode != c.Payload.NamespaceInode ||
+			v.Device != c.Payload.Device || v.DataFormat != c.Payload.DataFormat ||
+			v.WriterFence != c.Payload.WriterFence {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
 		if observedErr != nil || issuedErr != nil || observed < issued {
 			return false
 		}

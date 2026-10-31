@@ -198,6 +198,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchManagedRemoval(ctx, raw, sig, descriptor, provider.native)
 	case ManagedRemovalRead:
 		result, err = provider.store.ReadManagedRemovalReceipt(ctx, raw, sig)
+	case CheckpointCreate:
+		if provider.dataRoot == nil || provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchCheckpoint(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
+	case CheckpointRead:
+		result, err = provider.store.ReadCheckpointReceipt(ctx, raw, sig)
 	default:
 		return
 	}

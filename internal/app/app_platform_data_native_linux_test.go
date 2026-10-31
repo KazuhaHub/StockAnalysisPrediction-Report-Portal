@@ -59,6 +59,20 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin := data.RootIdentity{FilesystemUUID: os.Getenv("APP_DATA_NATIVE_UUID"), Inode: inode}
+	checkpointInput, err := os.Open(os.Getenv("APP_DATA_CHECKPOINT_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkpointInput.Close()
+	checkpointRoot, err := data.Open(checkpointInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkpointRoot.Close()
+	checkpointPin, err := checkpointRoot.Identity(ctx)
+	if err != nil || checkpointPin == pin {
+		t.Fatal("independent checkpoint root", checkpointPin, err)
+	}
 	store, err := journal.Open(os.Getenv("APP_DATA_JOURNAL_CONTROL"))
 	if err != nil {
 		t.Fatal(err)
@@ -172,13 +186,13 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 		defer native.Close()
 		badPath := filepath.Join(endpoint, "invalid-network.sock")
-		if _, err := transport.ListenNetworkManagedController(context.Background(), badPath, 41001, 41001, store, root, pin, native, 0, 4); err == nil {
+		if _, err := transport.ListenNetworkManagedController(context.Background(), badPath, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, 0, 4); err == nil {
 			t.Fatal("invalid network pool silently started managed listener")
 		}
 		if _, err := os.Stat(badPath); !os.IsNotExist(err) {
 			t.Fatal("invalid network bootstrap left an endpoint")
 		}
-		server, err = transport.ListenNetworkManagedController(context.Background(), path, 41001, 41001, store, root, pin, native, 2, 4)
+		server, err = transport.ListenNetworkManagedController(context.Background(), path, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, 2, 4)
 	} else {
 		server, err = transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
 	}

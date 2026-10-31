@@ -13,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
@@ -22,8 +23,12 @@ const candidateExecutionReplyMagic = "PRKF0001"
 const candidateExecutionTimeout = 30 * time.Second
 
 type candidateExecutionProvider struct {
-	store  *journal.Store
-	native *driver.CandidateRuntime
+	store          *journal.Store
+	native         *driver.CandidateRuntime
+	dataRoot       *data.Root
+	dataPin        data.RootIdentity
+	checkpointRoot *data.Root
+	checkpointPin  data.RootIdentity
 }
 
 // ListenCandidateController explicitly enables signed native candidate dispatch.
