@@ -167,6 +167,35 @@ describe('application installation confirmation', () => {
     expect(result.violations).toEqual([])
   })
 
+  it('keeps the complete lifecycle panel keyboard reachable and free of axe violations', async () => {
+    mount()
+    const user = userEvent.setup()
+    const pageResult = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(pageResult.violations).toEqual([])
+
+    const noAudience = await screen.findByRole('checkbox', { name: 'appPlatform.noAudience' })
+    noAudience.focus()
+    await user.keyboard(' ')
+    expect(noAudience).toHaveProperty('checked', true)
+    const reviewButton = screen.getByRole('button', { name: 'appPlatform.review' })
+    reviewButton.focus()
+    await user.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    const dialogResult = await axe.run(dialog, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(dialogResult.violations).toEqual([])
+  })
+
   it('requests the uninstall review close with Escape', async () => {
     const installedRelease = {
       release_sha256: release,
@@ -189,6 +218,7 @@ describe('application installation confirmation', () => {
     const dialog = await screen.findByRole('dialog')
     await user.keyboard('{Escape}')
     await waitFor(() => expect(dialog.className).toContain('ant-zoom-leave'))
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 
   it('requires a separate confirmation before uninstalling and clearing plugin data', async () => {

@@ -69,6 +69,8 @@ export default function AppPlatformInstallPanel() {
   owner.current = user
   const mounted = useRef(false)
   const writing = useRef(false)
+  const reviewFocus = useRef<HTMLDivElement>(null)
+  const reviewTrigger = useRef<HTMLElement | null>(null)
   const generation = useRef(0)
   const directoryGeneration = useRef(0)
   const [releases, setReleases] = useState<Release[]>([])
@@ -148,6 +150,18 @@ export default function AppPlatformInstallPanel() {
     return () => clearTimeout(timer)
   }, [review])
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (review && !intent) {
+        reviewFocus.current?.focus()
+      } else if (reviewTrigger.current?.isConnected) {
+        reviewTrigger.current.focus()
+        reviewTrigger.current = null
+      }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [review, intent])
+
   const loadMore = async (kind: 'release' | 'user' | 'ou') => {
     if (writing.current || marketBusy || loading || loadError) return
     writing.current = true; setBusy(true); setActionError('')
@@ -168,6 +182,7 @@ export default function AppPlatformInstallPanel() {
   const preview = async (release: Release, action: 'install' | 'update' | 'uninstall') => {
     if (writing.current || marketBusy || intent) return
     if (action !== 'install' && !release.installation_id) return
+    reviewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     writing.current = true; setBusy(true); setActionError('')
     const account = user
     const epoch = generation.current
@@ -250,14 +265,14 @@ export default function AppPlatformInstallPanel() {
     ]} />
     {releaseCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
     <Modal open={!!review && !intent} title={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdateTitle' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstallTitle' : 'appPlatform.confirmTitle')} confirmLoading={busy} okText={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdate' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstall' : 'appPlatform.confirm')} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
-      {review && <Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
+      {review && <div ref={reviewFocus} role="document" tabIndex={-1}><Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
         { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : 'appPlatform.install') },
         { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, reviewRelease?.display, lang).name} · ${reviewRelease?.version ?? ''}` },
         { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
         ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
         ...(uninstallReview ? [] : [{ key: 'permissions', label: t('appPlatform.permissions'), children: updateDiff ? t('appPlatform.permissionDiff', { added: updateDiff.added.length ? updateDiff.added.map(capabilityLabel).join('、') : t('appPlatform.none'), removed: updateDiff.removed.length ? updateDiff.removed.map(capabilityLabel).join('、') : t('appPlatform.none') }) : review.review.action === 'install' && review.review.declined_capabilities.length ? review.review.declined_capabilities.map(capabilityLabel).join('、') : t('appPlatform.noPermissions') }]),
         { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_retained ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : t('appPlatform.noData') },
-      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : 'appPlatform.confirmHint')} /></Space>}
+      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>}
     </Modal>
   </Space>
 }
