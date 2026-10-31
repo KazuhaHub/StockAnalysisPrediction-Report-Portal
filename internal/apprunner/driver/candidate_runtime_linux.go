@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"runtime"
@@ -175,7 +176,7 @@ func (r *CandidateRuntime) prepareCandidateProfileAccess(ctx context.Context, re
 	}
 	request.Descriptor = bytes.Clone(request.Descriptor)
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
-		return zero, err
+		return zero, fmt.Errorf("prepare candidate data profile: %w", err)
 	}
 	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
 	if err != nil {
@@ -205,7 +206,7 @@ func (r *CandidateRuntime) prepareCandidateProfileAccess(ctx context.Context, re
 	}
 	pins, snapshot, err := r.pinCandidatePreflight(ctx, request, image, plan)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("prepare candidate mount pins: %w", err)
 	}
 	state := &candidateLaunchState{owner: r, plan: plan, pins: pins, snapshot: snapshot}
 	r.launches[state] = struct{}{}
@@ -414,7 +415,8 @@ func (r *CandidateRuntime) checkConfigurationLocked(ctx context.Context) error {
 func (r *CandidateRuntime) pinCandidatePreflight(ctx context.Context, request CandidateLaunchRequest, image BackendImageInspection, plan containerPlan) (*candidateMountPins, CandidateLaunchSnapshot, error) {
 	pins, err := pinCandidateMounts(ctx, plan, candidateDataPin{Device: request.Data.Device, Inode: request.Data.NamespaceInode})
 	if err != nil {
-		return nil, CandidateLaunchSnapshot{}, err
+		return nil, CandidateLaunchSnapshot{}, fmt.Errorf(
+			"pin candidate mounts: %w", err)
 	}
 	fail := func(err error) (*candidateMountPins, CandidateLaunchSnapshot, error) {
 		pins.Close()
@@ -431,13 +433,15 @@ func (r *CandidateRuntime) pinCandidatePreflight(ctx context.Context, request Ca
 	for _, p := range pins.dirs {
 		if p.path == r.roots.Data {
 			if p.stat.Ino != r.rootIdentity.Inode || uint64(p.stat.Dev) != request.Data.Device {
-				return fail(ErrUnsafeSocket)
+				return fail(fmt.Errorf(
+					"candidate data root: %w", ErrUnsafeSocket))
 			}
 			foundRoot = true
 		}
 	}
 	if !foundRoot {
-		return fail(ErrUnsafeSocket)
+		return fail(fmt.Errorf(
+			"candidate data root missing: %w", ErrUnsafeSocket))
 	}
 	var body containerCreate
 	if json.Unmarshal(plan.body, &body) != nil {
@@ -451,10 +455,12 @@ func (r *CandidateRuntime) pinCandidatePreflight(ctx context.Context, request Ca
 		}
 	}
 	if len(metadata) != 3 {
-		return fail(ErrUnsafeSocket)
+		return fail(fmt.Errorf(
+			"candidate mount metadata: %w", ErrUnsafeSocket))
 	}
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, plan.writable != nil || plan.updateStart != nil); err != nil {
-		return fail(err)
+		return fail(fmt.Errorf(
+			"candidate preflight data profile: %w", err))
 	}
 	return pins, CandidateLaunchSnapshot{Identity: request.Identity, ImageID: image.ImageID, Platform: image.Platform, PolicySHA256: plan.bodySHA, MountsSHA256: candidateSnapshotHash(metadata), Data: request.Data}, nil
 }
