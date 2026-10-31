@@ -121,7 +121,7 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 			t.Error(err)
 			return
 		}
-		if _, err := tx.Exec(`INSERT INTO app_platform_object_storage(id,max_bytes,max_objects,used_bytes,used_objects,revision,updated_ms) VALUES(1,?,?,0,0,1,1)`, platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects); err != nil {
+		if _, err := tx.Exec(st.bind(`INSERT INTO app_platform_object_storage(id,max_bytes,max_objects,used_bytes,used_objects,revision,updated_ms) VALUES(1,?,?,0,0,1,1)`), platformObjectGlobalMaxBytes, platformObjectGlobalMaxObjects); err != nil {
 			t.Error(err)
 			return
 		}
