@@ -2434,10 +2434,9 @@ body {
 .rp-audit-card .ant-table-tbody > tr.ant-table-row { cursor: pointer; }
 .rp-audit-row.is-open { border-color: var(--ant-color-primary-border); }
 .rp-audit-row .rp-audit-record { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--ant-color-split); }
-.rp-audit-row__head:focus-visible {
+.rp-audit-row:focus-visible {
   outline: 2px solid var(--ant-color-primary);
   outline-offset: 2px;
-  border-radius: var(--ant-border-radius-sm);
 }
 /* The phone record is a compact two-column list: labels small, beside their values. */
 .rp-audit-record--compact .rp-audit-record__fields { gap: 6px 12px; font-size: 13px; }
