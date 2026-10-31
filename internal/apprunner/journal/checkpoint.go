@@ -108,11 +108,279 @@ func checkpointReceiptMatchesCommand(r CheckpointReceipt, c control.CheckpointCo
 type checkpointSource struct {
 	command     control.CheckpointCommand
 	source      CandidateRunningReceipt
+	update      *UpdateStartRunningReceipt
+	writable    *WritableCandidateRunningReceipt
 	data        DataPreparationReceipt
 	sourceFence int64
 	resource    managedRemovalResource
 	raw         []byte
 	signature   []byte
+}
+
+func loadCheckpointWritableSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions []string, startOperation, startState, storedPayload, startRaw string, sourceFence int64) (checkpointSource, error) {
+	var result checkpointSource
+	result.command = c
+	result.sourceFence = sourceFence
+	if startOperation != c.Payload.SourceOperationID ||
+		startState != "applied" || sourceFence < 1 ||
+		candidateHash([]byte(startRaw)) !=
+			c.Payload.SourceReceiptSHA256 {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable source command",
+			ErrFenceReconciliation)
+	}
+	running, err := ParseWritableCandidateRunningReceipt(
+		[]byte(startRaw))
+	if err != nil || running.Claim.Preflight == nil ||
+		running.Claim.EffectID != c.Payload.SourceStartEffectID ||
+		running.Claim.ResourceID != c.Payload.ResourceID ||
+		running.Claim.PayloadSHA256 != storedPayload ||
+		running.Claim.AdmittedFence !=
+			strconv.FormatInt(sourceFence, 10) ||
+		running.Claim.SandboxProfile !=
+			control.WritableCandidateSandboxProfile {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable source receipt",
+			ErrFenceReconciliation)
+	}
+	var dataRaw, dataEffect, dataKind, dataState, dataPayload string
+	var dataFence int64
+	if err := tx.QueryRowContext(ctx, `SELECT effect_id,kind,state,
+		payload_sha256,receipt_json,admitted_fence
+		FROM runner_commands WHERE operation_id=?
+		AND stage='prepare_data' AND effect_number=1`,
+		c.Payload.SourceOperationID).
+		Scan(&dataEffect, &dataKind, &dataState, &dataPayload,
+			&dataRaw, &dataFence); err != nil ||
+		dataEffect != c.Payload.SourceDataEffectID ||
+		dataKind != "prepare-data" || dataState != "applied" ||
+		dataFence != sourceFence ||
+		candidateHash([]byte(dataRaw)) !=
+			c.Payload.SourceDataReceiptSHA256 ||
+		running.Claim.DataReceiptSHA256 !=
+			candidateHash([]byte(dataRaw)) {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable source data",
+			ErrFenceReconciliation)
+	}
+	data, err := ParseDataPreparationReceipt([]byte(dataRaw))
+	if err != nil || data.PayloadSHA256 != dataPayload ||
+		data.Claim.ResourceID != c.Payload.NamespaceID ||
+		data.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+		data.DataFormat != c.Payload.DataFormat ||
+		data.WriterFence != c.Payload.WriterFence ||
+		data.ProjectID != c.Payload.ProjectID ||
+		data.NamespaceInode != c.Payload.NamespaceInode ||
+		data.Device != c.Payload.Device {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable data receipt",
+			ErrFenceReconciliation)
+	}
+	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	if target != 2 {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable generation",
+			ErrFenceReconciliation)
+	}
+	var nativeID, observed, desired, release, namespace, epoch,
+		ownership sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT native_id,observed_state,
+		desired_state,release_sha256,data_namespace_id,controller_epoch,
+		ownership_sha256,revision,generation,control_fence,writer_fence
+		FROM runner_resources WHERE id=? AND kind='container'`,
+		c.Payload.ResourceID).
+		Scan(&nativeID, &observed, &desired, &release, &namespace,
+			&epoch, &ownership, &result.resource.revision,
+			&result.resource.generation, &result.resource.controlFence,
+			&result.resource.writerFence); err != nil {
+		return result, ErrCheckpointUnavailable
+	}
+	result.resource.nativeID, result.resource.observed,
+		result.resource.desired = nativeID.String, observed.String,
+		desired.String
+	result.resource.release, result.resource.namespace,
+		result.resource.epoch = release.String, namespace.String,
+		epoch.String
+	result.resource.ownership = ownership.String
+	if !nativeID.Valid || nativeID.String != running.NativeID ||
+		!ownership.Valid ||
+		ownership.String != running.Claim.OwnershipSHA256 ||
+		result.resource.release != c.Payload.ReleaseSHA256 ||
+		result.resource.namespace != c.Payload.NamespaceID ||
+		result.resource.epoch != c.ControllerEpoch ||
+		result.resource.generation != 1 ||
+		result.resource.controlFence != sourceFence ||
+		result.resource.writerFence != mustDataInt(c.Payload.WriterFence) ||
+		result.resource.revision != 3 ||
+		result.resource.observed != "stopped" ||
+		result.resource.desired != "stopped" {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable stopped resource",
+			ErrFenceReconciliation)
+	}
+	additional := ""
+	if len(additionalExclusions) > 1 {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable exclusions",
+			ErrFenceReconciliation)
+	}
+	if len(additionalExclusions) == 1 {
+		additional = additionalExclusions[0]
+	}
+	var pending int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands
+		WHERE installation_id=? AND effect_id<>?
+		AND (?='' OR effect_id<>?) AND state IN ('prepared','unknown')`,
+		c.InstallationID, excludeEffect, additional, additional).
+		Scan(&pending); err != nil || pending != 0 {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable pending command",
+			ErrFenceReconciliation)
+	}
+	if now <= 0 {
+		return result, fmt.Errorf(
+			"%w: checkpoint writable clock",
+			ErrFenceReconciliation)
+	}
+	result.writable, result.data = &running, data
+	return result, nil
+}
+
+func loadCheckpointUpdateSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions []string, startOperation, startState, storedPayload, startRaw string, sourceFence int64) (checkpointSource, error) {
+	var result checkpointSource
+	result.command = c
+	result.sourceFence = sourceFence
+	if startOperation != c.Payload.SourceOperationID ||
+		startState != "applied" || sourceFence < 1 ||
+		candidateHash([]byte(startRaw)) !=
+			c.Payload.SourceReceiptSHA256 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update source command",
+			ErrFenceReconciliation)
+	}
+	update, err := ParseUpdateStartRunningReceipt([]byte(startRaw))
+	if err != nil || update.OperationID != c.Payload.SourceOperationID ||
+		update.InstallationID != c.InstallationID ||
+		update.NamespaceID != c.Payload.NamespaceID ||
+		update.TargetReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+		update.Claim.EffectID != c.Payload.SourceStartEffectID ||
+		update.Claim.PayloadSHA256 != storedPayload ||
+		update.Claim.ResourceID != c.Payload.ResourceID ||
+		update.Claim.Preflight == nil ||
+		update.Claim.AdmittedFence !=
+			strconv.FormatInt(sourceFence, 10) ||
+		update.TargetWriterFence != c.Payload.WriterFence ||
+		update.DataFormat != c.Payload.DataFormat {
+		return result, fmt.Errorf(
+			"%w: checkpoint update source receipt",
+			ErrFenceReconciliation)
+	}
+	checkpoint, err := loadManagedRemovalUpdateCheckpoint(
+		ctx, tx, c.InstallationID, &update)
+	if err != nil {
+		return result, err
+	}
+	if checkpoint.CheckpointID == "" ||
+		checkpoint.SourceDataEffectID !=
+			c.Payload.SourceDataEffectID ||
+		checkpoint.SourceDataReceiptSHA256 !=
+			c.Payload.SourceDataReceiptSHA256 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update lineage",
+			ErrFenceReconciliation)
+	}
+	var dataRaw, dataKind, dataState string
+	if err := tx.QueryRowContext(ctx, `SELECT kind,state,receipt_json
+		FROM runner_commands WHERE effect_id=? AND state='applied'`,
+		checkpoint.SourceDataEffectID).
+		Scan(&dataKind, &dataState, &dataRaw); err != nil ||
+		dataKind != "prepare-data" || dataState != "applied" ||
+		candidateHash([]byte(dataRaw)) !=
+			checkpoint.SourceDataReceiptSHA256 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update data",
+			ErrFenceReconciliation)
+	}
+	data, err := ParseDataPreparationReceipt([]byte(dataRaw))
+	if err != nil || data.InstallationID != c.InstallationID ||
+		data.DeploymentID != c.DeploymentID ||
+		data.ControllerEpoch != c.ControllerEpoch ||
+		data.Claim.ResourceID != c.Payload.NamespaceID ||
+		data.ProjectID != c.Payload.ProjectID ||
+		data.Device != c.Payload.Device ||
+		data.NamespaceInode != c.Payload.NamespaceInode {
+		return result, fmt.Errorf(
+			"%w: checkpoint update data receipt",
+			ErrFenceReconciliation)
+	}
+	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	sourceGeneration := mustDataInt(update.TargetGeneration)
+	if target != sourceGeneration+1 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update generation",
+			ErrFenceReconciliation)
+	}
+	var nativeID, observed, desired, release, namespace, epoch, ownership sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT native_id,observed_state,
+		desired_state,release_sha256,data_namespace_id,controller_epoch,
+		ownership_sha256,revision,generation,control_fence,writer_fence
+		FROM runner_resources WHERE id=? AND kind='container'`,
+		c.Payload.ResourceID).
+		Scan(&nativeID, &observed, &desired, &release, &namespace,
+			&epoch, &ownership, &result.resource.revision,
+			&result.resource.generation, &result.resource.controlFence,
+			&result.resource.writerFence); err != nil {
+		return result, ErrCheckpointUnavailable
+	}
+	result.resource.nativeID, result.resource.observed,
+		result.resource.desired = nativeID.String, observed.String,
+		desired.String
+	result.resource.release, result.resource.namespace,
+		result.resource.epoch = release.String, namespace.String, epoch.String
+	result.resource.ownership = ownership.String
+	if !nativeID.Valid || nativeID.String != update.NativeID ||
+		!ownership.Valid ||
+		ownership.String != update.Claim.OwnershipSHA256 ||
+		result.resource.release != c.Payload.ReleaseSHA256 ||
+		result.resource.namespace != c.Payload.NamespaceID ||
+		result.resource.epoch != c.ControllerEpoch ||
+		result.resource.generation != sourceGeneration ||
+		result.resource.controlFence != sourceFence ||
+		result.resource.writerFence !=
+			mustDataInt(c.Payload.WriterFence) ||
+		result.resource.revision != 3 ||
+		result.resource.observed != "stopped" ||
+		result.resource.desired != "stopped" {
+		return result, fmt.Errorf(
+			"%w: checkpoint update stopped resource",
+			ErrFenceReconciliation)
+	}
+	additional := ""
+	if len(additionalExclusions) > 1 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update exclusions",
+			ErrFenceReconciliation)
+	}
+	if len(additionalExclusions) == 1 {
+		additional = additionalExclusions[0]
+	}
+	var pending int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands
+		WHERE installation_id=? AND effect_id<>?
+		AND (?='' OR effect_id<>?) AND state IN ('prepared','unknown')`,
+		c.InstallationID, excludeEffect, additional, additional).
+		Scan(&pending); err != nil || pending != 0 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update pending command",
+			ErrFenceReconciliation)
+	}
+	if now <= 0 {
+		return result, fmt.Errorf(
+			"%w: checkpoint update clock",
+			ErrFenceReconciliation)
+	}
+	result.update, result.data = &update, data
+	return result, nil
 }
 
 func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64) (checkpointSource, error) {
@@ -122,11 +390,39 @@ func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointC
 func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions ...string) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
-	var startRaw, startOperation, startState, storedPayload string
-	if err := tx.QueryRowContext(ctx, `SELECT operation_id,state,payload_sha256,receipt_json,admitted_fence
-		FROM runner_commands WHERE effect_id=? AND installation_id=? AND stage='start' AND kind='start-candidate'`,
-		c.Payload.SourceStartEffectID, c.InstallationID).Scan(&startOperation, &startState, &storedPayload, &startRaw, &result.sourceFence); err != nil {
+	var startRaw, startOperation, startKind, startState, storedPayload string
+	if err := tx.QueryRowContext(ctx, `SELECT operation_id,kind,state,payload_sha256,receipt_json,admitted_fence
+		FROM runner_commands WHERE effect_id=? AND installation_id=? AND stage='start'`,
+		c.Payload.SourceStartEffectID, c.InstallationID).Scan(&startOperation, &startKind, &startState, &storedPayload, &startRaw, &result.sourceFence); err != nil {
 		return result, ErrCheckpointUnavailable
+	}
+	if startKind == "update-start" {
+		return loadCheckpointUpdateSource(
+			ctx, tx, c, now, excludeEffect, additionalExclusions,
+			startOperation, startState, storedPayload, startRaw,
+			result.sourceFence)
+	}
+	if startKind != "start-candidate" {
+		return result, fmt.Errorf(
+			"%w: checkpoint source kind", ErrFenceReconciliation)
+	}
+	var startFormat struct {
+		Format string `json:"format"`
+	}
+	if json.Unmarshal([]byte(startRaw), &startFormat) != nil {
+		return result, fmt.Errorf(
+			"%w: checkpoint source format", ErrFenceReconciliation)
+	}
+	if startFormat.Format == writableRunningFormat ||
+		startFormat.Format == writableRecoveredRunningFormat {
+		return loadCheckpointWritableSource(
+			ctx, tx, c, now, excludeEffect, additionalExclusions,
+			startOperation, startState, storedPayload, startRaw,
+			result.sourceFence)
+	}
+	if startFormat.Format != candidateReceiptFormat {
+		return result, fmt.Errorf(
+			"%w: checkpoint source profile", ErrFenceReconciliation)
 	}
 	if startOperation != c.Payload.SourceOperationID || startState != "applied" || candidateHash([]byte(startRaw)) != c.Payload.SourceReceiptSHA256 || result.sourceFence < 1 {
 		return result, fmt.Errorf("%w: checkpoint source start", ErrFenceReconciliation)
@@ -398,7 +694,15 @@ func (source checkpointSource) commandRaw() []byte       { return source.raw }
 func (source checkpointSource) commandSignature() []byte { return source.signature }
 
 func sameCheckpointSource(a, b checkpointSource) bool {
-	return a.command == b.command && sameManagedRemovalJSON(a.source, b.source) && a.data == b.data &&
+	update := a.update == nil && b.update == nil ||
+		a.update != nil && b.update != nil &&
+			sameManagedRemovalJSON(*a.update, *b.update)
+	writable := a.writable == nil && b.writable == nil ||
+		a.writable != nil && b.writable != nil &&
+			sameManagedRemovalJSON(*a.writable, *b.writable)
+	return a.command == b.command &&
+		sameManagedRemovalJSON(a.source, b.source) && update && writable &&
+		a.data == b.data &&
 		a.sourceFence == b.sourceFence && a.resource == b.resource
 }
 

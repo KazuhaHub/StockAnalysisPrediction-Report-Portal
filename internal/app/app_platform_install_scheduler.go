@@ -85,6 +85,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUpdate(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -143,6 +146,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedRestore(
 			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedUpdate(
+			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
 		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
 	} else if w.writable {
@@ -155,6 +162,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
 	}
 	if err == nil {
+		if result.lease.id != "" &&
+			result.lease.snapshot.Stage != appplatform.StageComplete {
+			w.active, w.attempts = result.lease, 0
+			w.publish("running", w.active.id,
+				w.active.snapshot.Stage)
+			return nil
+		}
 		w.publish("complete", w.active.id, appplatform.StageComplete)
 		w.active, w.attempts = platformOperationLease{}, 0
 		return nil

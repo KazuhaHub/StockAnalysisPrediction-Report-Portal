@@ -46,6 +46,7 @@ type UpdateStartClaimMarker struct {
 	PayloadSHA256           string                        `json:"payload_sha256"`
 	OwnershipSHA256         string                        `json:"ownership_sha256"`
 	CheckpointReceiptSHA256 string                        `json:"checkpoint_receipt_sha256"`
+	PolicyRevision          string                        `json:"policy_revision"`
 	ControlRevision         string                        `json:"control_revision"`
 	AdmittedFence           string                        `json:"admitted_fence"`
 	SandboxProfile          string                        `json:"sandbox_profile"`
@@ -126,7 +127,9 @@ func validUpdateStartPreflight(p UpdateStartPreflightEvidence) bool {
 func validUpdateStartClaimMarker(m UpdateStartClaimMarker) bool {
 	if m.Format != "portal.runner.update-start-claim/1-dev.1" ||
 		!dataSHA(m.PayloadSHA256) || !dataSHA(m.OwnershipSHA256) ||
-		!dataSHA(m.CheckpointReceiptSHA256) || !dataNumber(m.ControlRevision, true) ||
+		!dataSHA(m.CheckpointReceiptSHA256) ||
+		!dataNumber(m.PolicyRevision, true) ||
+		!dataNumber(m.ControlRevision, true) ||
 		!dataNumber(m.AdmittedFence, true) || !dataNumber(m.ClaimedMS, false) ||
 		!dataNumber(m.ExpiresMS, true) ||
 		(m.SandboxProfile != control.CandidateSandboxProfile &&
@@ -560,6 +563,7 @@ func (s *Store) ClaimUpdateStart(ctx context.Context, raw, signature []byte) (Up
 		PayloadSHA256:           f.command.PayloadSHA256,
 		OwnershipSHA256:         reservation.OwnershipSHA256,
 		CheckpointReceiptSHA256: f.command.Payload.SourceCheckpointReceiptSHA256,
+		PolicyRevision:          f.command.Payload.TargetPolicyRevision,
 		ControlRevision:         f.command.ControlRevision,
 		AdmittedFence:           strconv.FormatInt(f.stored.fence, 10),
 		SandboxProfile:          control.WritableCandidateSandboxProfile,

@@ -141,6 +141,10 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	if err := platformFinalizeManagedUpdatePlan(
+		e, expected, current, receipt, archiveBytes, now); err != nil {
+		return zero, err
+	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
@@ -178,4 +182,75 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 		return zero, err
 	}
 	return result, nil
+}
+
+func platformFinalizeManagedUpdatePlan(e migExec, expected platformOperationLease, checkpoint platformCheckpointIntent, receipt journal.CheckpointReceipt, archiveBytes, now int64) error {
+	var planID, raw, digest string
+	var consumed int64
+	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,p.consumed_ms
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND p.action='update'`,
+		expected.id).
+		Scan(&planID, &raw, &digest, &consumed); err != nil ||
+		platformDigest([]byte(raw)) != digest || consumed > now {
+		return errAppPlatformStageEvidence
+	}
+	var existingFormat struct {
+		Format string `json:"format"`
+	}
+	if json.Unmarshal([]byte(raw), &existingFormat) != nil {
+		return errAppPlatformStageEvidence
+	}
+	if platformManagedFormat(existingFormat.Format) {
+		return nil
+	}
+	var review platformUpdateProjection
+	unmarshalErr := json.Unmarshal([]byte(raw), &review)
+	canonical, marshalErr := json.Marshal(review)
+	if unmarshalErr != nil || marshalErr != nil ||
+		string(canonical) != raw ||
+		review.Format != platformUpdateReviewFormat ||
+		review.InstallationID != expected.installationID ||
+		review.SourceGeneration != int64(expected.snapshot.Generation)-1 ||
+		review.TargetGeneration != int64(expected.snapshot.Generation) ||
+		review.Target.ReleaseSHA256 == "" ||
+		review.SourceReleaseSHA256 != checkpoint.source.releaseSHA256 {
+		return errAppPlatformStageEvidence
+	}
+	plan := platformManagedUpdatePlan{
+		Format:         platformManagedUpdateFormat,
+		InstallationID: expected.installationID,
+		AppID:          review.AppID, PublisherID: review.PublisherID,
+		SourceReleaseSHA256:      review.SourceReleaseSHA256,
+		TargetReleaseSHA256:      review.Target.ReleaseSHA256,
+		SourceGeneration:         review.SourceGeneration,
+		TargetGeneration:         review.TargetGeneration,
+		SourcePolicyRevision:     review.PolicyRevision,
+		TargetPolicyRevision:     review.TargetPolicyRevision,
+		ControllerEpoch:          review.ControllerEpoch,
+		RecoverySetID:            checkpoint.recoverySetID,
+		CheckpointOperationID:    expected.id,
+		CheckpointEffectID:       checkpoint.effectID,
+		CheckpointID:             checkpoint.command.Payload.CheckpointID,
+		CheckpointManifestSHA256: receipt.ManifestSHA256,
+		CheckpointArchiveBytes:   archiveBytes,
+		DataNamespaceID:          checkpoint.source.namespaceID,
+		DataFormat:               mustPlatformCheckpointInt(checkpoint.source.dataFormat),
+		SourceWriterFence: mustPlatformCheckpointInt(
+			checkpoint.source.writerFence),
+		TargetRuntime: review.Target.Runtime,
+	}
+	planRaw, err := json.Marshal(plan)
+	if err != nil || len(planRaw) > 65536 {
+		return errAppPlatformStageEvidence
+	}
+	planSHA := platformDigest(planRaw)
+	changed, err := e.exec(`UPDATE app_platform_review_plans
+		SET plan_json=?,plan_sha256=?,updated_ms=?
+		WHERE id=? AND plan_sha256=? AND action='update'
+		AND consumed_ms IS NOT NULL AND plan_json LIKE ?`,
+		string(planRaw), planSHA, now, planID, digest,
+		`{"format":"`+platformUpdateReviewFormat+`",%`)
+	return platformLeaseCAS(changed, err)
 }

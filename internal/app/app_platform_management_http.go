@@ -269,7 +269,8 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		review, err := s.createPlatformFrontendUpdateReviewContext(r.Context(), actor, installation, release, n)
+		review, err := s.createPlatformUpdateReviewContext(
+			r.Context(), actor, installation, release, n)
 		if err != nil {
 			platformManagementError(w, err)
 			return
@@ -351,7 +352,8 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 	case "install":
 		result, err = s.consumePlatformInstallReviewForFormatContext(r.Context(), actor, id, sha, key, platformFrontendInstallFormat)
 	case "update":
-		result, err = s.consumePlatformUpdateReview(actor, id, sha, key)
+		result, err = s.consumePlatformUpdateReviewContext(
+			r.Context(), actor, id, sha, key)
 	case "uninstall":
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
 	default:

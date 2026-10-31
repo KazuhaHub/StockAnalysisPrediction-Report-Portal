@@ -96,6 +96,72 @@ func TestCheckpointPersistsOneExactUnknownIntent(t *testing.T) {
 	}
 }
 
+func TestCheckpointAcceptsUpdateStartSource(t *testing.T) {
+	fixture, checkpoint, start, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, fixture, start, startRaw, startSignature)
+	running, err := ParseUpdateStartRunningReceipt(runningRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	if _, err := fixture.store.db.Exec(`UPDATE runner_resources
+		SET desired_state='stopped',observed_state='stopped',revision=3,
+		observed_ms=?,updated_ms=? WHERE id=? AND native_id=?`,
+		now, now, running.Claim.ResourceID, running.NativeID); err != nil {
+		t.Fatal(err)
+	}
+	command := control.CheckpointCommand{
+		Format: control.CheckpointFormat, DeploymentID: start.DeploymentID,
+		ControllerEpoch: start.ControllerEpoch,
+		ControlRevision: start.ControlRevision,
+		InstallationID:  start.InstallationID, OperationID: fixtureID(1720),
+		TargetGeneration: "3", Stage: "snapshot", EffectNumber: "1",
+		EffectID: fixtureID(1721), Kind: "snapshot", InstallationFence: "3",
+		Payload: control.CheckpointPayload{
+			CheckpointID: fixtureID(1722), NamespaceID: running.NamespaceID,
+			ResourceID:              running.Claim.ResourceID,
+			ReleaseSHA256:           running.TargetReleaseSHA256,
+			SourceOperationID:       start.OperationID,
+			SourceStartEffectID:     start.EffectID,
+			SourceReceiptSHA256:     candidateHash(runningRaw),
+			SourceDataEffectID:      checkpoint.SourceDataEffectID,
+			SourceDataReceiptSHA256: checkpoint.SourceDataReceiptSHA256,
+			ProjectID:               checkpoint.ProjectID,
+			NamespaceInode:          checkpoint.NamespaceInode,
+			Device:                  checkpoint.Device, DataFormat: running.DataFormat,
+			WriterFence: running.TargetWriterFence,
+		},
+	}
+	command.PayloadSHA256, err = control.CheckpointLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.IssuedMS, command.ExpiresMS =
+		strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID:    enrollment.DeploymentID,
+		ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision,
+		PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+	}
+	raw, signature, err := control.SignCheckpoint(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, replay, err := fixture.store.beginCheckpoint(
+		context.Background(), raw, signature)
+	if err != nil || replay || source.update == nil ||
+		source.update.NativeID != running.NativeID ||
+		source.resource.generation != 2 {
+		t.Fatal("update-start checkpoint source", source, replay, err)
+	}
+}
+
 func TestCheckpointRejectsChangedSourceAndPendingWork(t *testing.T) {
 	for _, name := range []string{"source state", "source hash", "data hash", "resource", "pending", "target", "fence"} {
 		t.Run(name, func(t *testing.T) {

@@ -22,6 +22,7 @@ type platformCheckpointSource struct {
 	operationID, startEffectID, dataEffectID      string
 	sourceReceiptSHA256, sourceDataReceiptSHA256  string
 	resourceID, namespaceID, releaseSHA256        string
+	nativeID                                      string
 	projectID, namespaceInode, device, dataFormat string
 	quotaBytes, quotaInodes                       string
 	rootFilesystemUUID, rootInode                 string
@@ -65,11 +66,28 @@ func platformCheckpointMatchesCommand(receipt journal.CheckpointReceipt, command
 		receipt.WriterFence == command.Payload.WriterFence
 }
 
-// loadPlatformCheckpointSource derives the checkpoint identity only from a
-// completed managed install and its applied start/data effects. The source
-// process must already have been stopped by the update quiesce step; the runner
-// checks that state independently before writing checkpoint bytes.
 func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
+	var action string
+	if err := e.queryRow(`SELECT action FROM app_platform_operations
+		WHERE installation_id=? AND action IN ('install','update','restore')
+		AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL
+		AND lease_owner IS NULL AND lease_until_ms IS NULL
+		AND error_code IS NULL
+		ORDER BY target_generation DESC,completed_ms DESC,id DESC LIMIT 1`,
+		expected.installationID).Scan(&action); err != nil {
+		return platformCheckpointSource{}, errAppPlatformStageEvidence
+	}
+	if action == "install" {
+		return loadPlatformCheckpointInstallSource(
+			e, expected, runtime, now)
+	}
+	return loadPlatformCheckpointUpdateSource(
+		e, expected, runtime, action, now)
+}
+
+// The install source is a completed managed install whose applied start/data
+// effects provide the exact stopped resource and original data evidence.
+func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
 	var zero platformCheckpointSource
 	var sourceOperation, sourcePlanRaw, sourcePlanSHA, sourceRelease, descriptorRaw string
 	var sourceGeneration, sourceFence, sourceCompleted int64
@@ -209,6 +227,7 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 			return zero, fmt.Errorf("%w: checkpoint managed start command", errAppPlatformStageEvidence)
 		}
 		source.resourceID = running.Claim.ResourceID
+		source.nativeID = running.NativeID
 		nativeID, runningRelease, runningGeneration = running.NativeID, running.ReleaseSHA256, running.Generation
 		runningNamespace, runningOperation = running.DataNamespaceID, running.OperationID
 		runningFormat, runningWriter = running.DataFormat, running.WriterFence
@@ -225,6 +244,7 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 			return zero, fmt.Errorf("%w: checkpoint writable running receipt", errAppPlatformStageEvidence)
 		}
 		source.resourceID = running.Claim.ResourceID
+		source.nativeID = running.NativeID
 		nativeID, runningRelease, runningGeneration = running.NativeID, sourceRelease, strconv.FormatInt(sourceGeneration, 10)
 		runningNamespace, runningOperation = data.Claim.ResourceID, source.operationID
 		runningFormat, runningWriter = data.DataFormat, data.WriterFence

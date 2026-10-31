@@ -21,6 +21,18 @@ type platformRuntimeEndpoint struct {
 	path                         string
 	controllerUID, controllerGID uint32
 }
+
+func (s *Server) platformRuntimeEndpoint() (platformRuntimeEndpoint, bool) {
+	if s == nil {
+		return platformRuntimeEndpoint{}, false
+	}
+	endpoint := s.platformBackendEndpoint.Load()
+	if endpoint == nil || *endpoint == (platformRuntimeEndpoint{}) {
+		return platformRuntimeEndpoint{}, false
+	}
+	return *endpoint, true
+}
+
 type platformRuntimeObservation struct {
 	controller journal.ControllerEnrollment
 	receivedAt time.Time

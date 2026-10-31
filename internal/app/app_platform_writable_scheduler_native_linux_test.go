@@ -105,6 +105,8 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	t.Log("PORTAL_WRITABLE_BACKGROUND_COMPLETE")
+	testNativeWritableManagedUpdate(
+		t, s, actor, endpoint, admitted.InstallationID)
 	// Current normal-user authorization, not possession of the installer role.
 	role := scalar[string](t, s.st, `SELECT role FROM users WHERE username=?`, actor.username)
 	defer mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`, role, actor.username)
@@ -125,4 +127,134 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	}
 	testNativeWritableLaunchHTTP(t, s, actor, admitted.InstallationID, release.sha256, endpoint)
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
+}
+
+func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) {
+	t.Helper()
+	ctx := context.Background()
+	facts, err := s.observePlatformManagedRuntime(ctx, actor, endpoint)
+	if err != nil {
+		t.Fatal("managed update runtime", err)
+	}
+	appID := scalar[string](t, s.st, `SELECT app_id
+		FROM app_platform_installations WHERE id=?`, installation)
+	raw, archive := platformManagedReleaseFixture(
+		t, facts.observation.Profile().Platform)
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.ID = appID
+	manifest.Version = "1.1.0-beta.2"
+	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	manifest.Frontend.SHA256 = platformDigest(archive)
+	manifest.Data.Schema = 1
+	manifest.Data.ReadableSchemas = []int{1}
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.stagePlatformRelease(
+		actor, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal("stage managed update", err)
+	}
+	review, err := s.createPlatformManagedUpdateReview(
+		ctx, actor, installation, release.sha256, 1, endpoint)
+	if err != nil {
+		t.Fatal("managed update review", err)
+	}
+	var projection platformUpdateProjection
+	if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil ||
+		projection.Target.Runtime == nil ||
+		projection.Target.Runtime.RuntimeID != facts.runtime.id ||
+		projection.Target.ReleaseSHA256 != release.sha256 {
+		t.Fatal("managed update review projection", err)
+	}
+	admitted, err := s.consumePlatformManagedUpdateReview(
+		ctx, actor, review.ID, review.SHA256,
+		platformFixtureID(979), endpoint)
+	if err != nil {
+		t.Fatal("managed update admission", err)
+	}
+	if scalar[int](t, s.st, `SELECT managed
+		FROM app_platform_operations WHERE id=?`,
+		admitted.OperationID) != 1 ||
+		scalar[string](t, s.st, `SELECT action||':'||stage
+			FROM app_platform_operations WHERE id=?`,
+			admitted.OperationID) != "update:queued" {
+		t.Fatal("managed update did not create a managed operation")
+	}
+	worker, err := newPlatformWritableInstallScheduler(
+		s, endpoint, platformFixtureID(980), 100*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	done := make(chan error, 1)
+	go func() { done <- worker.serve(workerCtx) }()
+	joined := false
+	defer func() {
+		cancel()
+		if !joined {
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		stage, code := "", ""
+		if err := s.st.queryRow(`SELECT stage,COALESCE(error_code,'')
+			FROM app_platform_operations WHERE id=?`,
+			admitted.OperationID).Scan(&stage, &code); err != nil {
+			t.Fatal(err)
+		}
+		if stage == "complete" {
+			break
+		}
+		if stage == "recovery_required" || stage == "failed" {
+			t.Fatalf("managed update stopped at %s:%s: %+v",
+				stage, code, worker.currentStatus())
+		}
+		select {
+		case err := <-done:
+			joined = true
+			t.Fatalf("managed update worker stopped: %v %+v",
+				err, worker.currentStatus())
+		case <-workerCtx.Done():
+			t.Fatalf("managed update deadline: %+v",
+				worker.currentStatus())
+		case <-ticker.C:
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		joined = true
+		t.Fatal(err)
+	}
+	joined = true
+	if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision
+		FROM app_platform_installations WHERE id=?`,
+		installation) != "ready:2:2" ||
+		scalar[string](t, s.st, `SELECT release_sha256
+			FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			installation) != release.sha256 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='retired'
+			AND generation=1`, installation) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations
+			WHERE id=? AND managed=1 AND stage='complete'
+			AND completed_ms IS NOT NULL`, admitted.OperationID) != 1 {
+		t.Fatal("managed update did not activate generation two")
+	}
+	if binding, err := s.inspectPlatformLaunchAccess(
+		actor, installation); err != nil ||
+		binding.generation != "2" ||
+		binding.releaseSHA != release.sha256 {
+		t.Fatal("updated managed app did not launch", binding, err)
+	}
+	t.Log("MANAGED_UPDATE_A_TO_B")
 }

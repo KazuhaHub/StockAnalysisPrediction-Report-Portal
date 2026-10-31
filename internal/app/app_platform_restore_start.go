@@ -287,6 +287,7 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 			DataNamespaceID:          checkpoint.NamespaceID,
 			DataFormat:               mustPlatformCheckpointInt(checkpoint.DataFormat),
 			SourceWriterFence:        mustPlatformCheckpointInt(checkpoint.WriterFence),
+			TargetRuntime:            source.runtimeTarget,
 		},
 		targetDescriptor: source.descriptor, raw: raw, signature: signature,
 	}

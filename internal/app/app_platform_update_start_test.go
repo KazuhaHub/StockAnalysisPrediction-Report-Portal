@@ -104,6 +104,17 @@ func platformUpdateStartEndpointFixture() platformRuntimeEndpoint {
 func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
 	t.Helper()
 	s, checkpointLease := platformCheckpointUpdateFixture(t, pg)
+	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(
+		operation_id,stage,effect_number,effect_id,kind,payload_sha256,
+		runtime_id,controller_epoch,admitted_fence,observed_fence,state,
+		receipt_json,created_ms,updated_ms)
+		SELECT o.id,'quiesce',1,?,'stop',?,i.runtime_id,o.controller_epoch,
+		o.fence,o.fence,'applied','{}',o.created_ms,o.updated_ms
+		FROM app_platform_operations o
+		JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.id=?`,
+		platformFixtureID(1299), strings.Repeat("9", 64),
+		checkpointLease.id)
 	checkpointIntent, err := s.preparePlatformCheckpoint(context.Background(), checkpointLease)
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +176,20 @@ func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platform
 		startLease.id).Scan(&recoverySetID); err != nil {
 		t.Fatal(err)
 	}
+	var sourcePlanRaw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='install' AND o.managed=1
+		ORDER BY o.target_generation DESC LIMIT 1`,
+		startLease.installationID).Scan(&sourcePlanRaw); err != nil {
+		t.Fatal(err)
+	}
+	var sourcePlan platformInstallProjection
+	if err := json.Unmarshal([]byte(sourcePlanRaw), &sourcePlan); err != nil ||
+		sourcePlan.Runtime == nil {
+		t.Fatal("source runtime plan", err)
+	}
 	plan := platformManagedUpdatePlan{
 		Format: platformManagedUpdateFormat, InstallationID: startLease.installationID,
 		AppID: sourceApp, PublisherID: publisher,
@@ -177,6 +202,7 @@ func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platform
 		CheckpointArchiveBytes: mustPlatformCheckpointInt(checkpoint.ArchiveBytes),
 		DataNamespaceID:        checkpoint.NamespaceID, DataFormat: mustPlatformCheckpointInt(checkpoint.DataFormat),
 		SourceWriterFence: mustPlatformCheckpointInt(checkpoint.WriterFence),
+		TargetRuntime:     sourcePlan.Runtime,
 	}
 	planRaw, err := json.Marshal(plan)
 	if err != nil {
@@ -225,6 +251,7 @@ func platformUpdateStartRunningFixture(intent platformUpdateStartIntent, reserva
 			EffectID: intent.effectID, ResourceID: intent.resourceID,
 			PayloadSHA256: command.PayloadSHA256, OwnershipSHA256: reservation.OwnershipSHA256,
 			CheckpointReceiptSHA256: command.Payload.SourceCheckpointReceiptSHA256,
+			PolicyRevision:          command.Payload.TargetPolicyRevision,
 			ControlRevision:         command.ControlRevision, AdmittedFence: command.InstallationFence,
 			SandboxProfile: command.Payload.SandboxProfile,
 			ClaimedMS:      command.IssuedMS, ExpiresMS: command.ExpiresMS,
@@ -539,6 +566,13 @@ func platformUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Serve
 	if err != nil {
 		t.Fatal(err)
 	}
+	observation := platformUpdateStartRegistrationObservationForIntent(
+		t, intent, endpoint)
+	return s, lease, intent, endpoint, observation
+}
+
+func platformUpdateStartRegistrationObservationForIntent(t *testing.T, intent platformUpdateStartRegistrationIntent, endpoint platformRuntimeEndpoint) platformUpdateStartTestObservation {
+	t.Helper()
 	var receipt journal.UpdateStartRegistrationReceipt
 	if err := json.Unmarshal([]byte(`{"claim":{}}`), &receipt); err != nil {
 		t.Fatal(err)
@@ -569,7 +603,7 @@ func platformUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Serve
 	if !validPlatformUpdateStartRegistrationObservation(observation, intent, endpoint) {
 		t.Fatal("registration observation fixture refused")
 	}
-	return s, lease, intent, endpoint, observation
+	return observation
 }
 
 func platformUpdateRecoveryRestoreFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt) {

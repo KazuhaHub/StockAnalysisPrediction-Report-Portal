@@ -21,26 +21,27 @@ import (
 const platformManagedUpdateFormat = "portal.managed-update-review/1-dev.1"
 
 type platformManagedUpdatePlan struct {
-	Format                   string `json:"format"`
-	InstallationID           string `json:"installation_id"`
-	AppID                    string `json:"app_id"`
-	PublisherID              string `json:"publisher_id"`
-	SourceReleaseSHA256      string `json:"source_release_sha256"`
-	TargetReleaseSHA256      string `json:"target_release_sha256"`
-	SourceGeneration         int64  `json:"source_generation"`
-	TargetGeneration         int64  `json:"target_generation"`
-	SourcePolicyRevision     int64  `json:"source_policy_revision"`
-	TargetPolicyRevision     int64  `json:"target_policy_revision"`
-	ControllerEpoch          string `json:"controller_epoch"`
-	RecoverySetID            string `json:"recovery_set_id"`
-	CheckpointOperationID    string `json:"checkpoint_operation_id"`
-	CheckpointEffectID       string `json:"checkpoint_effect_id"`
-	CheckpointID             string `json:"checkpoint_id"`
-	CheckpointManifestSHA256 string `json:"checkpoint_manifest_sha256"`
-	CheckpointArchiveBytes   int64  `json:"checkpoint_archive_bytes"`
-	DataNamespaceID          string `json:"data_namespace_id"`
-	DataFormat               int64  `json:"data_format"`
-	SourceWriterFence        int64  `json:"source_writer_fence"`
+	Format                   string                        `json:"format"`
+	InstallationID           string                        `json:"installation_id"`
+	AppID                    string                        `json:"app_id"`
+	PublisherID              string                        `json:"publisher_id"`
+	SourceReleaseSHA256      string                        `json:"source_release_sha256"`
+	TargetReleaseSHA256      string                        `json:"target_release_sha256"`
+	SourceGeneration         int64                         `json:"source_generation"`
+	TargetGeneration         int64                         `json:"target_generation"`
+	SourcePolicyRevision     int64                         `json:"source_policy_revision"`
+	TargetPolicyRevision     int64                         `json:"target_policy_revision"`
+	ControllerEpoch          string                        `json:"controller_epoch"`
+	RecoverySetID            string                        `json:"recovery_set_id"`
+	CheckpointOperationID    string                        `json:"checkpoint_operation_id"`
+	CheckpointEffectID       string                        `json:"checkpoint_effect_id"`
+	CheckpointID             string                        `json:"checkpoint_id"`
+	CheckpointManifestSHA256 string                        `json:"checkpoint_manifest_sha256"`
+	CheckpointArchiveBytes   int64                         `json:"checkpoint_archive_bytes"`
+	DataNamespaceID          string                        `json:"data_namespace_id"`
+	DataFormat               int64                         `json:"data_format"`
+	SourceWriterFence        int64                         `json:"source_writer_fence"`
+	TargetRuntime            *platformManagedInstallTarget `json:"target_runtime,omitempty"`
 }
 
 type platformUpdateStartIntent struct {
@@ -68,7 +69,8 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
-		AND o.stage IN ('start','probe','activate','recovery_required')`, expected.id, expected.installationID).
+		AND o.stage IN ('migrate','start','probe','activate','recovery_required')`,
+		expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
 			&sourceGeneration, &targetGeneration); err != nil {
 		return zero, nil, errAppPlatformStageEvidence
@@ -92,6 +94,8 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		plan.DataNamespaceID != source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(source.dataFormat) ||
 		plan.SourceWriterFence != mustPlatformCheckpointInt(source.writerFence) ||
+		!samePlatformManagedUpdateRuntime(
+			plan.TargetRuntime, source.runtimeTarget) ||
 		!platformValidSHA(plan.SourceReleaseSHA256) || !platformValidSHA(plan.TargetReleaseSHA256) ||
 		!platformValidUUID(plan.RecoverySetID) || !platformValidUUID(plan.CheckpointOperationID) ||
 		!platformValidUUID(plan.CheckpointEffectID) || !platformValidUUID(plan.CheckpointID) ||
@@ -486,11 +490,11 @@ func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected pl
 	}
 	plan, targetDescriptor, err := loadPlatformManagedUpdatePlan(e, expected, source)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("update-start plan: %w", err)
 	}
 	checkpoint, checkpointRaw, err := loadPlatformUpdateStartCheckpoint(e, expected, plan)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("update-start checkpoint: %w", err)
 	}
 	var result platformUpdateStartIntent
 	var fresh bool

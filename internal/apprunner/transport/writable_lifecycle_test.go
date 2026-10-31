@@ -252,6 +252,7 @@ func updateStartRunningReceiptFixture(command control.UpdateStartCommand, reserv
 			EffectID: command.EffectID, ResourceID: reservation.ResourceID,
 			PayloadSHA256: command.PayloadSHA256, OwnershipSHA256: reservation.OwnershipSHA256,
 			CheckpointReceiptSHA256: command.Payload.SourceCheckpointReceiptSHA256,
+			PolicyRevision:          command.Payload.TargetPolicyRevision,
 			ControlRevision:         command.ControlRevision, AdmittedFence: command.InstallationFence,
 			SandboxProfile: command.Payload.SandboxProfile,
 			ClaimedMS:      command.IssuedMS, ExpiresMS: command.ExpiresMS,

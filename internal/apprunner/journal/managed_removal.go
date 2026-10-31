@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -104,6 +105,7 @@ type managedRemovalSource struct {
 	command            control.ManagedRemovalCommand
 	source             CandidateRunningReceipt
 	writable           *WritableCandidateRunningReceipt
+	update             *UpdateStartRunningReceipt
 	data               DataPreparationReceipt
 	sourceFence        int64
 	generation         int64
@@ -120,6 +122,58 @@ type managedRemovalResource struct {
 	revision, generation, controlFence, writerFence                   int64
 }
 
+func loadManagedRemovalUpdateCheckpoint(ctx context.Context, tx *sql.Tx, installation string, running *UpdateStartRunningReceipt) (CheckpointReceipt, error) {
+	if running == nil || running.Claim.Preflight == nil {
+		return CheckpointReceipt{}, fmt.Errorf(
+			"%w: managed removal update checkpoint", ErrFenceReconciliation)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT operation_id,payload_sha256,receipt_json
+		FROM runner_commands WHERE installation_id=? AND stage='snapshot'
+		AND kind='snapshot' AND state='applied'`, installation)
+	if err != nil {
+		return CheckpointReceipt{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var operation, payload, raw string
+		if err := rows.Scan(&operation, &payload, &raw); err != nil {
+			return CheckpointReceipt{}, err
+		}
+		if candidateHash([]byte(raw)) !=
+			running.Claim.CheckpointReceiptSHA256 {
+			continue
+		}
+		checkpoint, err := ParseCheckpointReceipt([]byte(raw))
+		if err != nil || checkpoint.PayloadSHA256 != payload ||
+			checkpoint.InstallationID == "" ||
+			checkpoint.TargetGeneration != running.TargetGeneration ||
+			checkpoint.NamespaceID != running.NamespaceID ||
+			checkpoint.ReleaseSHA256 != running.SourceReleaseSHA256 ||
+			checkpoint.DataFormat != running.DataFormat ||
+			checkpoint.WriterFence != running.SourceWriterFence ||
+			checkpoint.ProjectID != running.Claim.Preflight.ProjectID ||
+			checkpoint.Device != running.Claim.Preflight.Device ||
+			checkpoint.NamespaceInode !=
+				running.Claim.Preflight.NamespaceInode {
+			return CheckpointReceipt{}, fmt.Errorf(
+				"%w: managed removal update checkpoint binding",
+				ErrFenceReconciliation)
+		}
+		if operation != checkpoint.OperationID {
+			return CheckpointReceipt{}, fmt.Errorf(
+				"%w: managed removal update checkpoint operation",
+				ErrFenceReconciliation)
+		}
+		return checkpoint, nil
+	}
+	if err := rows.Err(); err != nil {
+		return CheckpointReceipt{}, err
+	}
+	return CheckpointReceipt{}, fmt.Errorf(
+		"%w: managed removal update checkpoint missing",
+		ErrFenceReconciliation)
+}
+
 func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.ManagedRemovalCommand, now int64) (managedRemovalSource, error) {
 	var result managedRemovalSource
 	result.command = c
@@ -131,7 +185,9 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		return result, ErrManagedRemovalUnavailable
 	}
 	sourceDigest := sha256.Sum256([]byte(sourceRaw))
-	if sourceOperation != c.Payload.SourceOperationID || sourceKind != "start-candidate" || sourceState != "applied" ||
+	if sourceOperation != c.Payload.SourceOperationID ||
+		(sourceKind != "start-candidate" && sourceKind != "update-start") ||
+		sourceState != "applied" ||
 		!dataSHA(sourcePayload) || hex.EncodeToString(sourceDigest[:]) != c.Payload.SourceReceiptSHA256 || result.sourceFence < 1 {
 		return result, fmt.Errorf("%w: managed removal source command", ErrFenceReconciliation)
 	}
@@ -142,8 +198,12 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		return result, fmt.Errorf("%w: managed removal source receipt format", ErrFenceReconciliation)
 	}
 	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	updateSource := sourceKind == "update-start"
 	switch format.Format {
 	case candidateReceiptFormat:
+		if updateSource {
+			return result, fmt.Errorf("%w: managed removal source kind", ErrFenceReconciliation)
+		}
 		source, err := ParseCandidateRunningReceipt([]byte(sourceRaw))
 		if err != nil ||
 			source.InstallationID != c.InstallationID ||
@@ -163,6 +223,9 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		result.nativeID, result.platform = source.NativeID, source.Claim.Preflight.Platform
 		result.ownership = source.Claim.OwnershipSHA256
 	case writableRunningFormat, writableRecoveredRunningFormat:
+		if updateSource {
+			return result, fmt.Errorf("%w: managed removal source kind", ErrFenceReconciliation)
+		}
 		writable, err := ParseWritableCandidateRunningReceipt([]byte(sourceRaw))
 		if err != nil ||
 			writable.Claim.Preflight == nil ||
@@ -184,6 +247,31 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		result.nativeID = writable.NativeID
 		result.platform = writable.Claim.Preflight.Native.Platform
 		result.ownership = writable.Claim.OwnershipSHA256
+	case updateStartRunningFormat:
+		if !updateSource {
+			return result, fmt.Errorf("%w: managed removal update source kind", ErrFenceReconciliation)
+		}
+		update, err := ParseUpdateStartRunningReceipt([]byte(sourceRaw))
+		if err != nil ||
+			update.InstallationID != c.InstallationID ||
+			update.OperationID != c.Payload.SourceOperationID ||
+			update.NamespaceID != c.Payload.DataNamespaceID ||
+			update.TargetReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+			update.Claim.EffectID != c.Payload.SourceEffectID ||
+			update.Claim.PayloadSHA256 != sourcePayload ||
+			update.Claim.ResourceID != c.Payload.ResourceID ||
+			update.Claim.Preflight == nil ||
+			update.Claim.Preflight.Platform != c.Payload.Platform ||
+			update.Claim.AdmittedFence !=
+				strconv.FormatInt(result.sourceFence, 10) {
+			return result, fmt.Errorf("%w: managed removal update source receipt", ErrFenceReconciliation)
+		}
+		result.update = &update
+		result.generation = mustDataInt(update.TargetGeneration)
+		result.writerFence = mustDataInt(update.TargetWriterFence)
+		result.nativeID = update.NativeID
+		result.platform = update.Claim.Preflight.Platform
+		result.ownership = update.Claim.OwnershipSHA256
 	default:
 		return result, fmt.Errorf("%w: managed removal source receipt profile", ErrFenceReconciliation)
 	}
@@ -191,10 +279,29 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		return result, fmt.Errorf("%w: managed removal target generation", ErrFenceReconciliation)
 	}
 
-	var dataRaw, dataKind, dataState string
-	if err := tx.QueryRowContext(ctx, `SELECT kind,state,receipt_json FROM runner_commands
-        WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`, c.Payload.SourceOperationID).
-		Scan(&dataKind, &dataState, &dataRaw); err != nil {
+	var dataRaw, dataKind, dataState, dataEffect string
+	if result.update != nil {
+		checkpoint, err := loadManagedRemovalUpdateCheckpoint(
+			ctx, tx, c.InstallationID, result.update)
+		if err != nil {
+			return result, err
+		}
+		dataEffect = checkpoint.SourceDataEffectID
+		if err := tx.QueryRowContext(ctx, `SELECT kind,state,receipt_json
+			FROM runner_commands WHERE effect_id=?`, dataEffect).
+			Scan(&dataKind, &dataState, &dataRaw); err != nil {
+			return result, ErrManagedRemovalUnavailable
+		}
+		if candidateHash([]byte(dataRaw)) !=
+			checkpoint.SourceDataReceiptSHA256 {
+			return result, fmt.Errorf(
+				"%w: managed removal update data digest",
+				ErrFenceReconciliation)
+		}
+	} else if err := tx.QueryRowContext(ctx, `SELECT effect_id,kind,state,receipt_json FROM runner_commands
+		WHERE operation_id=? AND stage='prepare_data' AND effect_number=1`,
+		c.Payload.SourceOperationID).
+		Scan(&dataEffect, &dataKind, &dataState, &dataRaw); err != nil {
 		return result, ErrManagedRemovalUnavailable
 	}
 	data, err := ParseDataPreparationReceipt([]byte(dataRaw))
@@ -203,12 +310,24 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		data.InstallationID != c.InstallationID ||
 		data.DeploymentID != c.DeploymentID ||
 		data.ControllerEpoch != c.ControllerEpoch ||
-		data.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
-		data.Generation != strconv.FormatInt(result.generation, 10) ||
 		data.Claim.ResourceID != c.Payload.DataNamespaceID {
 		return result, fmt.Errorf("%w: managed removal data receipt", ErrFenceReconciliation)
 	}
-	if result.writable != nil {
+	if result.update == nil &&
+		(data.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+			data.Generation != strconv.FormatInt(result.generation, 10)) {
+		return result, fmt.Errorf("%w: managed removal data generation", ErrFenceReconciliation)
+	}
+	if result.update != nil {
+		if result.update.Claim.Preflight == nil ||
+			data.ProjectID != result.update.Claim.Preflight.ProjectID ||
+			data.Device != result.update.Claim.Preflight.Device ||
+			data.NamespaceInode != result.update.Claim.Preflight.NamespaceInode ||
+			data.QuotaBytes != result.update.Claim.Preflight.QuotaBytes ||
+			data.QuotaInodes != result.update.Claim.Preflight.QuotaInodes {
+			return result, fmt.Errorf("%w: managed removal update data identity", ErrFenceReconciliation)
+		}
+	} else if result.writable != nil {
 		if result.writable.Claim.DataReceiptSHA256 != hex.EncodeToString(dataDigest[:]) {
 			return result, fmt.Errorf("%w: managed removal writable data digest", ErrFenceReconciliation)
 		}
@@ -268,10 +387,58 @@ func mustDataInt(value string) int64 {
 type managedRemovalNativeInput struct {
 	request  driver.CandidateLaunchRequest
 	writable *driver.WritableCandidateBinding
+	update   *driver.UpdateStartLaunchRequest
 }
 
 func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte) (managedRemovalNativeInput, error) {
 	var zero managedRemovalNativeInput
+	if source.update != nil {
+		p := source.update.Claim.Preflight
+		if p == nil {
+			return zero, fmt.Errorf(
+				"%w: managed removal update preflight",
+				ErrFenceReconciliation)
+		}
+		request := driver.UpdateStartLaunchRequest{
+			CandidateLaunchRequest: driver.CandidateLaunchRequest{
+				Identity: driver.CandidateIdentity{
+					DeploymentID:    source.command.DeploymentID,
+					ControllerEpoch: source.command.ControllerEpoch,
+					InstallationID:  source.command.InstallationID,
+					OperationID:     source.command.Payload.SourceOperationID,
+					ResourceID:      source.command.Payload.ResourceID,
+					NamespaceID:     source.command.Payload.DataNamespaceID,
+					ReleaseSHA256:   source.command.Payload.ReleaseSHA256,
+					Generation:      source.update.TargetGeneration,
+					ControlFence:    source.update.Claim.AdmittedFence,
+					WriterFence:     source.update.TargetWriterFence,
+				},
+				Descriptor: bytes.Clone(descriptor),
+				Platform:   source.command.Payload.Platform,
+				Data: driver.CandidateDataEvidence{
+					Root: data.RootIdentity{
+						FilesystemUUID: p.RootFilesystemUUID,
+						Inode:          mustDataUint(p.RootInode),
+					},
+					ProjectID:      uint32(mustDataUint(p.ProjectID)),
+					Device:         mustDataUint(p.Device),
+					NamespaceInode: mustDataUint(p.NamespaceInode),
+					QuotaBytes:     mustDataInt(p.QuotaBytes),
+					QuotaInodes:    mustDataInt(p.QuotaInodes),
+				},
+			},
+			Binding: driver.UpdateStartBinding{
+				EffectID:                source.update.Claim.EffectID,
+				ClaimID:                 source.update.Claim.ClaimID,
+				PayloadSHA256:           source.update.Claim.PayloadSHA256,
+				OwnershipSHA256:         source.update.Claim.OwnershipSHA256,
+				CheckpointReceiptSHA256: source.update.Claim.CheckpointReceiptSHA256,
+				PolicyRevision:          source.update.Claim.PolicyRevision,
+			},
+			SandboxProfile: source.update.Claim.SandboxProfile,
+		}
+		return managedRemovalNativeInput{update: &request}, nil
+	}
 	project, err := strconv.ParseUint(source.data.ProjectID, 10, 32)
 	if err != nil {
 		return zero, fmt.Errorf("%w: managed removal project id", ErrFenceReconciliation)
@@ -443,6 +610,40 @@ func (s *Store) checkManagedRemovalPrepared(ctx context.Context, source managedR
 	return tx.Commit()
 }
 
+func (s *Store) checkManagedRemovalUpdatePrepared(ctx context.Context, source managedRemovalSource, request driver.UpdateStartLaunchRequest, snapshot driver.UpdateStartLaunchSnapshot) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := loadManagedRemovalSource(
+		ctx, tx, source.command, time.Now().UTC().UnixMilli())
+	if err != nil {
+		return err
+	}
+	if current.update == nil ||
+		snapshot.Launch.Identity != request.Identity ||
+		snapshot.Launch.Data != request.Data ||
+		snapshot.Binding != request.Binding ||
+		snapshot.SandboxProfile != request.SandboxProfile ||
+		current.update.Claim.Preflight == nil ||
+		*current.update.Claim.Preflight != updateStartPreflight(snapshot) {
+		return fmt.Errorf(
+			"%w: managed removal update preflight",
+			ErrFenceReconciliation)
+	}
+	var state, receipt string
+	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json
+		FROM runner_commands WHERE effect_id=?`,
+		source.command.EffectID).Scan(&state, &receipt); err != nil ||
+		state != "unknown" || receipt != "{}" {
+		return fmt.Errorf(
+			"%w: managed removal update unknown intent",
+			ErrFenceReconciliation)
+	}
+	return tx.Commit()
+}
+
 func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalSource, observation driver.CandidateRemovalObservation) (ManagedRemovalReceipt, error) {
 	var zero ManagedRemovalReceipt
 	snapshot, err := observation.Snapshot()
@@ -545,6 +746,11 @@ func (source managedRemovalSource) writableBinding() *driver.WritableCandidateBi
 	}
 }
 func (source managedRemovalSource) preflightMatches(snapshot driver.CandidateLaunchSnapshot) bool {
+	if source.update != nil {
+		return source.update.Claim.Preflight != nil &&
+			*source.update.Claim.Preflight == updateStartPreflight(
+				driver.UpdateStartLaunchSnapshot{Launch: snapshot})
+	}
 	if source.writable != nil {
 		return source.writable.Claim.Preflight != nil && source.writable.Claim.Preflight.Native == candidatePreflight(snapshot)
 	}
@@ -554,7 +760,11 @@ func (source managedRemovalSource) preflightMatches(snapshot driver.CandidateLau
 func sameCandidateRemovalProvenance(a, b managedRemovalSource) bool {
 	writable := a.writable == nil && b.writable == nil ||
 		a.writable != nil && b.writable != nil && sameManagedRemovalJSON(*a.writable, *b.writable)
-	return a.command == b.command && sameManagedRemovalJSON(a.source, b.source) && writable && a.data == b.data &&
+	update := a.update == nil && b.update == nil ||
+		a.update != nil && b.update != nil &&
+			sameManagedRemovalJSON(*a.update, *b.update)
+	return a.command == b.command && sameManagedRemovalJSON(a.source, b.source) &&
+		writable && update && a.data == b.data &&
 		a.sourceFence == b.sourceFence && a.generation == b.generation && a.writerFence == b.writerFence &&
 		a.nativeID == b.nativeID && a.platform == b.platform && a.ownership == b.ownership
 }
@@ -599,7 +809,29 @@ func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byt
 	}
 	var observation driver.CandidateRemovalObservation
 	var removalErr error
-	if input.writable != nil {
+	if input.update != nil {
+		launch, err := native.PrepareUpdateStartRemoval(
+			ctx, *input.update)
+		if err != nil {
+			return zero, err
+		}
+		defer launch.Close()
+		snapshot, err := launch.Snapshot()
+		if err != nil {
+			return zero, err
+		}
+		if err := s.checkManagedRemovalUpdatePrepared(
+			ctx, source, *input.update, snapshot); err != nil {
+			return zero, err
+		}
+		if source.command.Stage == "stop" {
+			observation, removalErr = native.StopUpdateStart(
+				ctx, launch, source.nativeID)
+		} else {
+			observation, removalErr = native.RemoveUpdateStart(
+				ctx, launch, source.nativeID)
+		}
+	} else if input.writable != nil {
 		launch, err := native.PrepareWritableCandidateRemoval(ctx, driver.WritableCandidateLaunchRequest{CandidateLaunchRequest: input.request, Binding: *input.writable})
 		if err != nil {
 			return zero, err
