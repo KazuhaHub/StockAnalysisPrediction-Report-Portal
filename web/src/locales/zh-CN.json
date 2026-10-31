@@ -3408,5 +3408,6 @@
   "forecast.eval.summary": "上次运行：得出 {{resolved}} 个检查点的结果，剩 {{due}} 个待结算，请求行情 {{fetches}} 次，{{errors}} 个错误。",
   "forecast.eval.gate.nextUnchecked": "{{bench}} 将从 {{from}} 起用于新的预测，但还没有试运行核对。核对之前，它的检查点只会规划，不会写入。",
   "forecast.backlog.none": "没有待结算的检查点（统计于 {{at}}）。",
-  "forecast.eval.benchNext": "（{{from}} 起新预测改用{{bench}}）"
+  "forecast.eval.benchNext": "（{{from}} 起新预测改用{{bench}}）",
+  "confirm.irreversible": "此操作无法撤销。"
 }

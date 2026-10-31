@@ -3408,5 +3408,6 @@
   "forecast.eval.summary": "Last pass: results for {{resolved}} checkpoints, {{due}} left to settle, {{fetches}} quote requests, {{errors}} errors.",
   "forecast.eval.gate.nextUnchecked": "{{bench}} becomes the benchmark for new forecasts from {{from}} but has no dry-run check. Until it is checked, its checkpoints are only planned, never written.",
   "forecast.backlog.none": "No checkpoints are waiting to settle (as of {{at}}).",
-  "forecast.eval.benchNext": "(new forecasts use {{bench}} from {{from}})"
+  "forecast.eval.benchNext": "(new forecasts use {{bench}} from {{from}})",
+  "confirm.irreversible": "This cannot be undone."
 }
