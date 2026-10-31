@@ -559,11 +559,19 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 		t.Fatal(err)
 	}
 	socket := filepath.Join(controlRoot, "runner.sock")
+	checkpointRoot, err := os.MkdirTemp(filepath.Dir(os.Getenv("APP_DATA_JOURNAL_ROOT")), "service-checkpoints-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(checkpointRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
 	cfg := service.Config{
 		Format:         service.ConfigFormat,
 		DockerSocket:   os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"),
 		JournalDir:     os.Getenv("APP_DATA_JOURNAL_CONTROL"),
 		DataRoot:       os.Getenv("APP_DATA_JOURNAL_ROOT"),
+		CheckpointRoot: checkpointRoot,
 		IPCRoot:        ipcRoot,
 		ControlRoot:    controlRoot,
 		ControlSocket:  socket,

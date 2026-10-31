@@ -75,9 +75,10 @@ jobs:
           sudo -n chmod 0700 "$root"
           journal="$root/journal"
           data="$root/data"
+          checkpoints="$root/checkpoints"
           ipc="$root/ipc"
           control="$root/control"
-          sudo -n install -d -m 0700 -o root -g root "$journal" "$data" "$ipc"
+          sudo -n install -d -m 0700 -o root -g root "$journal" "$data" "$checkpoints" "$ipc"
           sudo -n install -d -m 0750 -o root -g root "$control"
           runner="$RUNNER_TEMP/app-runner-service"
           go build -o "$runner" ./cmd/app-runner
@@ -103,6 +104,7 @@ jobs:
           jq -n \
             --arg journal "$journal" \
             --arg data "$data" \
+            --arg checkpoints "$checkpoints" \
             --arg ipc "$ipc" \
             --arg control_root "$control" \
             --arg control "$control/runner.sock" \
@@ -112,6 +114,7 @@ jobs:
               docker_socket:"/run/docker.sock",
               journal_dir:$journal,
               data_root:$data,
+              checkpoint_root:$checkpoints,
               ipc_root:$ipc,
               control_root:$control_root,
               control_socket:$control,
@@ -181,7 +184,7 @@ jobs:
           sudo -n mkfs.xfs -f "$loop" >/dev/null
           sudo -n install -d -m 0700 -o root -g root "$mountpoint" "$root/journal"
           sudo -n mount -t xfs -o prjquota,nodev,nosuid,noexec "$loop" "$mountpoint"
-          sudo -n install -d -m 0700 -o root -g root "$mountpoint/data"
+          sudo -n install -d -m 0700 -o root -g root "$mountpoint/data" "$mountpoint/checkpoints"
           sudo -n install -d -m 0750 -o root -g 41001 "$service_root"
           sudo -n install -d -m 0750 -o root -g 41001 "$service_root/control"
           sudo -n install -d -m 0700 -o root -g root "$service_root/ipc"
@@ -213,6 +216,7 @@ jobs:
           jq -n \
             --arg journal "$root/journal" \
             --arg data "$mountpoint/data" \
+            --arg checkpoints "$mountpoint/checkpoints" \
             --arg socket "$service_root/control/runner.sock" \
             --arg fingerprint "$fingerprint" \
             --arg deployment "$deployment" \
@@ -223,6 +227,7 @@ jobs:
               docker_socket:$docker,
               journal_dir:$journal,
               data_root:$data,
+              checkpoint_root:$checkpoints,
               ipc_root:"/run/portal-app-runner-service/ipc",
               control_root:"/run/portal-app-runner-service/control",
               control_socket:$socket,

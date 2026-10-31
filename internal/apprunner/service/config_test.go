@@ -23,7 +23,8 @@ func controllerFixture() Controller {
 func configFixture(canonical string) Config {
 	return Config{
 		Format: ConfigFormat, DockerSocket: "/run/docker.sock", JournalDir: filepath.Join(canonical, "journal"),
-		DataRoot: filepath.Join(canonical, "data"), IPCRoot: filepath.Join(canonical, "ipc"), ControlRoot: filepath.Join(canonical, "control"),
+		DataRoot: filepath.Join(canonical, "data"), CheckpointRoot: filepath.Join(canonical, "checkpoints"),
+		IPCRoot: filepath.Join(canonical, "ipc"), ControlRoot: filepath.Join(canonical, "control"),
 		ControlSocket: filepath.Join(canonical, "control", "runner.sock"), ControllerUID: 41001, ControllerGID: 41001,
 		NetworkActive: 4, NetworkEntries: 1024, MinimumCPUs: 2, MinimumMemory: 2 << 30, Controller: controllerFixture(),
 	}
@@ -85,12 +86,16 @@ func TestConfigRefusesExposureAndOverlappingRoots(t *testing.T) {
 	dir := canonicalTempDir(t)
 	path := filepath.Join(dir, "service.json")
 	for name, mutate := range map[string]func(*Config){
-		"mode":             func(*Config) {},
-		"control_outside":  func(c *Config) { c.ControlSocket = filepath.Join(dir, "outside.sock") },
-		"overlap":          func(c *Config) { c.DataRoot = c.JournalDir },
-		"zero_controller":  func(c *Config) { c.ControllerUID = 0 },
-		"network_overflow": func(c *Config) { c.NetworkEntries = 4097 },
-		"relative":         func(c *Config) { c.DataRoot = "relative" },
+		"mode":            func(*Config) {},
+		"control_outside": func(c *Config) { c.ControlSocket = filepath.Join(dir, "outside.sock") },
+		"overlap":         func(c *Config) { c.DataRoot = c.JournalDir },
+		"checkpoint_overlap": func(c *Config) {
+			c.CheckpointRoot = c.DataRoot
+		},
+		"missing_checkpoint": func(c *Config) { c.CheckpointRoot = "" },
+		"zero_controller":    func(c *Config) { c.ControllerUID = 0 },
+		"network_overflow":   func(c *Config) { c.NetworkEntries = 4097 },
+		"relative":           func(c *Config) { c.DataRoot = "relative" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := configFixture(dir)

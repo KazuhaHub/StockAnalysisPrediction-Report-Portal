@@ -11,9 +11,9 @@ The runtime administrator creates only infrastructure:
 
 - a dedicated rootful Linux host or VM;
 - the fixed Portal controller UID and runner endpoint GID;
-- private existing journal, XFS data-root, root-only application IPC root and
-  separately provisioned controller-socket root with the modes required by the
-  existing journal/data/transport adapters;
+- private existing journal, XFS data-root, distinct XFS checkpoint-root,
+  root-only application IPC root and separately provisioned controller-socket
+  root with the modes required by the existing journal/data/transport adapters;
 - the canonical Docker Unix socket;
 - `/etc/portal-app-runner/bootstrap.json` and `service.json`, root-owned and mode
   `0600`;
@@ -52,12 +52,14 @@ Startup is ordered:
 1. open the existing private journal and verify its exclusive owner;
 2. require the exact enrolled deployment/epoch/revision/fingerprint from config;
 3. open the pinned XFS project-quota root and verify enforcement/identity;
-4. inspect the fixed Docker socket and require the native rootful profile plus
+4. open the distinct pinned XFS checkpoint root and require a different root
+   inode identity;
+5. inspect the fixed Docker socket and require the native rootful profile plus
    configured reported CPU/memory floors;
-5. open the constrained candidate runtime;
-6. bind the fixed root/controller protected Unix endpoint with the bounded data,
+6. open the constrained candidate runtime;
+7. bind the fixed root/controller protected Unix endpoint with the bounded data,
    candidate and network providers;
-7. accept work.
+8. accept work.
 
 Any failed prerequisite exits non-zero without enabling execution. Static Portal
 applications do not depend on this service.

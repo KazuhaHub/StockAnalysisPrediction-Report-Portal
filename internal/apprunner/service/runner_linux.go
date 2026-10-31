@@ -57,6 +57,20 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil {
 		return ErrNotReady
 	}
+	checkpointFile, err := openRootDirectory(cfg.CheckpointRoot)
+	if err != nil {
+		return ErrNotReady
+	}
+	defer checkpointFile.Close()
+	checkpointRoot, err := data.Open(checkpointFile)
+	if err != nil {
+		return ErrNotReady
+	}
+	defer checkpointRoot.Close()
+	checkpointPin, err := checkpointRoot.Identity(ctx)
+	if err != nil || checkpointPin == pin {
+		return ErrNotReady
+	}
 	report, err := driver.InspectDaemon(ctx, cfg.DockerSocket)
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady

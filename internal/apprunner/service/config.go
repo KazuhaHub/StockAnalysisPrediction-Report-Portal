@@ -34,6 +34,7 @@ type Config struct {
 	DockerSocket   string     `json:"docker_socket"`
 	JournalDir     string     `json:"journal_dir"`
 	DataRoot       string     `json:"data_root"`
+	CheckpointRoot string     `json:"checkpoint_root"`
 	IPCRoot        string     `json:"ipc_root"`
 	ControlRoot    string     `json:"control_root"`
 	ControlSocket  string     `json:"control_socket"`
@@ -57,13 +58,14 @@ func LoadConfig(path string) (Config, error) {
 	var cfg Config
 	raw, err := readPrivateConfig(path)
 	if err != nil || decodeStrict(raw, &cfg) != nil || !validController(cfg.Controller) || cfg.Format != ConfigFormat ||
-		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) ||
+		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) || !validAbsolute(cfg.CheckpointRoot) ||
 		!validAbsolute(cfg.IPCRoot) || !validAbsolute(cfg.ControlRoot) || !validAbsolute(cfg.ControlSocket) ||
 		filepath.Dir(cfg.ControlSocket) != cfg.ControlRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
 		cfg.NetworkActive < 1 || cfg.NetworkActive > 16 || cfg.NetworkEntries < 16 || cfg.NetworkEntries > 4096 ||
 		cfg.MinimumCPUs < 1 || cfg.MinimumCPUs > 1024 || cfg.MinimumMemory < 64<<20 || cfg.MinimumMemory > 1<<50 ||
-		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
-		overlap(cfg.DataRoot, cfg.IPCRoot) || overlap(cfg.DataRoot, cfg.ControlRoot) || overlap(cfg.IPCRoot, cfg.ControlRoot) {
+		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.CheckpointRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
+		overlap(cfg.DataRoot, cfg.CheckpointRoot) || overlap(cfg.DataRoot, cfg.IPCRoot) || overlap(cfg.DataRoot, cfg.ControlRoot) ||
+		overlap(cfg.CheckpointRoot, cfg.IPCRoot) || overlap(cfg.CheckpointRoot, cfg.ControlRoot) || overlap(cfg.IPCRoot, cfg.ControlRoot) {
 		return Config{}, ErrConfig
 	}
 	return cfg, nil
