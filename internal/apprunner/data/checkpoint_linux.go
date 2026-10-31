@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -95,7 +96,7 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	}
 	directory, err := r.openCheckpointDirectory()
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("verify checkpoint directory: %w", err)
 	}
 	defer directory.Close()
 	name := request.CheckpointID + ".tar"
@@ -426,33 +427,33 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 	defer directory.Close()
 	fd, err := unix.Openat(int(directory.Fd()), request.CheckpointID+".tar", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive open", ErrCheckpointUnsafe)
 	}
 	archive := os.NewFile(uintptr(fd), "runner-data-checkpoint-read")
 	if archive == nil {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive handle", ErrCheckpointUnsafe)
 	}
 	defer archive.Close()
 	stat, err := archive.Stat()
 	if err != nil || stat.Size() <= 0 || stat.Size() > request.MaxArchiveBytes || !stat.Mode().IsRegular() || stat.Mode().Perm() != 0400 {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive stat", ErrCheckpointUnsafe)
 	}
 	hasher := sha256.New()
 	copied, err := io.Copy(hasher, archive)
 	if err != nil || copied != stat.Size() || hex.EncodeToString(hasher.Sum(nil)) != manifestSHA256 {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive digest", ErrCheckpointUnsafe)
 	}
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive seek", ErrCheckpointUnsafe)
 	}
 	reader := tar.NewReader(archive)
 	first, err := reader.Next()
 	if err != nil || first.Name != checkpointManifestEntry || first.Typeflag != tar.TypeReg || first.Size <= 0 || first.Size > 4096 {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint manifest entry", ErrCheckpointUnsafe)
 	}
 	manifestRaw, err := io.ReadAll(io.LimitReader(reader, 4097))
 	if err != nil || int64(len(manifestRaw)) != first.Size {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint manifest read", ErrCheckpointUnsafe)
 	}
 	var manifest checkpointManifest
 	if json.Unmarshal(manifestRaw, &manifest) != nil || manifest.Format != checkpointFormat ||
@@ -462,11 +463,11 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		manifest.NamespaceInode != request.ExpectedNamespaceInode || manifest.Device != request.ExpectedDevice ||
 		manifest.SourceFilesystemUUID != sourceExpected.FilesystemUUID || manifest.SourceRootInode != sourceExpected.Inode ||
 		manifest.CheckpointFilesystemUUID != expected.FilesystemUUID || manifest.CheckpointRootInode != expected.Inode {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint manifest binding", ErrCheckpointUnsafe)
 	}
 	canonicalManifest, err := json.Marshal(manifest)
 	if err != nil || string(canonicalManifest) != string(manifestRaw) {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint manifest canonical", ErrCheckpointUnsafe)
 	}
 	seen := map[string]bool{}
 	last := ""
@@ -482,7 +483,7 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		if err != nil || header.Name == "" || header.Name == checkpointManifestEntry || seen[header.Name] || header.Name < last ||
 			header.Name == "." || header.Name == ".." || strings.HasPrefix(header.Name, "/") || strings.Contains(header.Name, "\\") || path.Clean(strings.TrimSuffix(header.Name, "/")) != strings.TrimSuffix(header.Name, "/") ||
 			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= maxCheckpointEntries {
-			return zero, ErrCheckpointUnsafe
+			return zero, fmt.Errorf("%w: verify checkpoint entry path", ErrCheckpointUnsafe)
 		}
 		if header.Typeflag == tar.TypeDir {
 			if header.Mode&(unix.S_ISUID|unix.S_ISVTX) != 0 ||
@@ -490,29 +491,29 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 				return zero, ErrCheckpointUnsafe
 			}
 		} else if header.Mode&07000 != 0 {
-			return zero, ErrCheckpointUnsafe
+			return zero, fmt.Errorf("%w: verify checkpoint entry mode", ErrCheckpointUnsafe)
 		}
 		if header.Uid < 0 || header.Gid < 0 || !checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) {
-			return zero, ErrCheckpointUnsafe
+			return zero, fmt.Errorf("%w: verify checkpoint entry owner", ErrCheckpointUnsafe)
 		}
 		if header.Typeflag == tar.TypeReg {
 			if header.Size < 0 || header.Size > request.MaxArchiveBytes-bytes {
-				return zero, ErrCheckpointUnsafe
+				return zero, fmt.Errorf("%w: verify checkpoint entry size", ErrCheckpointUnsafe)
 			}
 			copied, err := io.CopyN(io.Discard, reader, header.Size)
 			if err != nil || copied != header.Size {
-				return zero, ErrCheckpointUnsafe
+				return zero, fmt.Errorf("%w: verify checkpoint entry content", ErrCheckpointUnsafe)
 			}
 			bytes += copied
 		} else if header.Size != 0 {
-			return zero, ErrCheckpointUnsafe
+			return zero, fmt.Errorf("%w: verify checkpoint entry directory size", ErrCheckpointUnsafe)
 		}
 		seen[header.Name] = true
 		last = header.Name
 		entries++
 	}
 	if stat.Size() > request.MaxArchiveBytes {
-		return zero, ErrCheckpointUnsafe
+		return zero, fmt.Errorf("%w: verify checkpoint archive size", ErrCheckpointUnsafe)
 	}
 	return CheckpointSnapshot{
 		NamespaceID: request.NamespaceID, ReleaseSHA256: request.ReleaseSHA256, ProjectID: request.ProjectID,
