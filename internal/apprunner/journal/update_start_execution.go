@@ -365,9 +365,13 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 	if len(descriptor) > 0 {
 		parsed, err := appplatform.ParseDescriptor(descriptor)
 		if err != nil || parsed.Manifest.Backend == nil ||
-			parsed.SHA256 != c.Payload.TargetReleaseSHA256 ||
-			strconv.Itoa(parsed.Manifest.Data.Schema) != c.Payload.DataFormat {
-			return zero, ErrFenceReconciliation
+			parsed.SHA256 != c.Payload.TargetReleaseSHA256 {
+			return zero, fmt.Errorf("%w: update-start descriptor",
+				ErrFenceReconciliation)
+		}
+		if strconv.Itoa(parsed.Manifest.Data.Schema) != c.Payload.DataFormat {
+			return zero, fmt.Errorf("%w: update-start descriptor data format",
+				ErrFenceReconciliation)
 		}
 		found := false
 		for _, platform := range parsed.Manifest.Backend.Platforms {
@@ -376,7 +380,8 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 			}
 		}
 		if !found {
-			return zero, ErrFenceReconciliation
+			return zero, fmt.Errorf("%w: update-start descriptor platform",
+				ErrFenceReconciliation)
 		}
 	}
 	project, projectErr := strconv.ParseUint(c.Payload.ProjectID, 10, 32)
@@ -387,17 +392,28 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 	quotaInodes, quotaInodesErr := strconv.ParseInt(c.Payload.QuotaInodes, 10, 64)
 	source := f.source.source.source
 	data := f.source.source.data
-	if projectErr != nil || deviceErr != nil || inodeErr != nil || rootInodeErr != nil ||
-		quotaBytesErr != nil || quotaInodesErr != nil ||
-		c.Payload.RootFilesystemUUID != data.Claim.RootFilesystemUUID ||
-		markerRoot(data.Claim).Inode != rootInode ||
-		c.Payload.NamespaceInode != data.NamespaceInode ||
+	if projectErr != nil || deviceErr != nil || inodeErr != nil ||
+		rootInodeErr != nil || quotaBytesErr != nil || quotaInodesErr != nil {
+		return zero, fmt.Errorf("%w: update-start data integers",
+			ErrFenceReconciliation)
+	}
+	if c.Payload.RootFilesystemUUID != data.Claim.RootFilesystemUUID ||
+		markerRoot(data.Claim).Inode != rootInode {
+		return zero, fmt.Errorf("%w: update-start data root",
+			ErrFenceReconciliation)
+	}
+	if c.Payload.NamespaceInode != data.NamespaceInode ||
 		c.Payload.Device != data.Device || c.Payload.ProjectID != data.ProjectID ||
-		c.Payload.QuotaBytes != data.QuotaBytes || c.Payload.QuotaInodes != data.QuotaInodes ||
-		source.Claim.Preflight == nil ||
+		c.Payload.QuotaBytes != data.QuotaBytes ||
+		c.Payload.QuotaInodes != data.QuotaInodes {
+		return zero, fmt.Errorf("%w: update-start data identity",
+			ErrFenceReconciliation)
+	}
+	if source.Claim.Preflight == nil ||
 		source.Claim.Preflight.RootFilesystemUUID != c.Payload.RootFilesystemUUID ||
 		source.Claim.Preflight.RootInode != c.Payload.RootInode {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: update-start source profile",
+			ErrFenceReconciliation)
 	}
 	request := driver.UpdateStartLaunchRequest{
 		CandidateLaunchRequest: driver.CandidateLaunchRequest{
@@ -427,7 +443,8 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
 	if !validUpdateStartClaimMarker(marker) || !updateStartClaimMatches(f, marker) {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: update-start claim",
+			ErrFenceReconciliation)
 	}
 	return request, nil
 }
