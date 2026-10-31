@@ -527,9 +527,9 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				retained, err := root.Inspect(ctx, pin, index.Payload.DataNamespaceID, uint32(project))
-				if err != nil || retained.NamespaceID != index.Payload.DataNamespaceID {
-					t.Fatal("writable managed removal deleted its retained namespace", retained, err)
+				retained, err := root.InspectWriteAccess(ctx, pin, index.Payload.DataNamespaceID, uint32(project))
+				if err != nil || retained.Namespace.NamespaceID != index.Payload.DataNamespaceID || retained.Namespace.ProjectID != uint32(project) {
+					t.Fatal("writable managed removal deleted its retained namespace", retained.Namespace, err)
 				}
 			}
 			if _, err := s.ClaimWritableCandidate(ctx, raw, sig); err == nil {
