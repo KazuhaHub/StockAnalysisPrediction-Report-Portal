@@ -96,26 +96,29 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 	}
 	count := 0
 	if err := restoreClearNamespace(ctx, namespace, source.device, 1, &count); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("clear namespace: %w", err))
 	}
 	if err := namespace.Sync(); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("sync cleared namespace: %w", err))
 	}
 	if err := restoreExtract(ctx, archive, namespace, source.device, request); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("extract archive: %w", err))
 	}
 	if err := restoreApplyDirectoryMetadata(ctx, namespace, source.device, entries); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("apply directory metadata: %w", err))
 	}
 	if err := restoreSyncNamespace(ctx, namespace, source.device); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("sync restored namespace: %w", err))
 	}
 	if err := restoreArchiveDigest(ctx, archive, request); err != nil {
-		return incomplete(err)
+		return incomplete(fmt.Errorf("recheck archive: %w", err))
 	}
 	restored, err := restoreReadNamespace(ctx, namespace, source.device, request)
-	if err != nil || !sameRestoreEntries(entries, restored) {
-		return incomplete(ErrRestoreUnsafe)
+	if err != nil {
+		return incomplete(fmt.Errorf("verify restored namespace: %w", err))
+	}
+	if !sameRestoreEntries(entries, restored) {
+		return incomplete(fmt.Errorf("verify restored namespace: content mismatch"))
 	}
 	currentStat := unix.Stat_t{}
 	if err := unix.Fstat(int(namespace.Fd()), &currentStat); err != nil ||
