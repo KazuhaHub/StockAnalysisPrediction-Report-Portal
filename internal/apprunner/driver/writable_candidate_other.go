@@ -53,3 +53,6 @@ func (*CandidateRuntime) StopUpdateStart(context.Context, UpdateStartLaunch, str
 func (*CandidateRuntime) RemoveUpdateStart(context.Context, UpdateStartLaunch, string) (CandidateRemovalObservation, error) {
 	return CandidateRemovalObservation{}, ErrUnsupported
 }
+func (*CandidateRuntime) CheckUpdateStartReadiness(context.Context, UpdateStartLaunchRequest, UpdateStartLaunchSnapshot, string, string) (UpdateStartReadinessObservation, error) {
+	return UpdateStartReadinessObservation{}, ErrUnsupported
+}

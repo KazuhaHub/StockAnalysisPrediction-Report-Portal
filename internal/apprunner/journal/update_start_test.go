@@ -336,3 +336,36 @@ func TestUpdateStartRunningReceiptBindsExactGeneration(t *testing.T) {
 		t.Fatal("update-start running receipt", parsed, err)
 	}
 }
+
+func TestUpdateStartReadinessBindsRunningReceipt(t *testing.T) {
+	readiness := UpdateStartReadiness{
+		Format: updateStartReadinessFormat, PayloadSHA256: strings.Repeat("a", 64),
+		RunningReceiptSHA256: strings.Repeat("b", 64), NativeID: strings.Repeat("c", 64),
+		Protocol: "portal.backend/1", DataFormat: "1",
+		ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10),
+	}
+	raw, err := json.Marshal(readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed, err := ParseUpdateStartReadiness(raw); err != nil || parsed != readiness {
+		t.Fatal("update-start readiness", parsed, err)
+	}
+	for name, mutate := range map[string]func(*UpdateStartReadiness){
+		"payload":  func(r *UpdateStartReadiness) { r.PayloadSHA256 = "bad" },
+		"receipt":  func(r *UpdateStartReadiness) { r.RunningReceiptSHA256 = "bad" },
+		"native":   func(r *UpdateStartReadiness) { r.NativeID = "bad" },
+		"protocol": func(r *UpdateStartReadiness) { r.Protocol = "portal.backend/2" },
+		"format":   func(r *UpdateStartReadiness) { r.DataFormat = "0" },
+		"observed": func(r *UpdateStartReadiness) { r.ObservedMS = "01" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := readiness
+			mutate(&changed)
+			encoded, _ := json.Marshal(changed)
+			if _, err := ParseUpdateStartReadiness(encoded); err == nil {
+				t.Fatal("changed readiness accepted")
+			}
+		})
+	}
+}

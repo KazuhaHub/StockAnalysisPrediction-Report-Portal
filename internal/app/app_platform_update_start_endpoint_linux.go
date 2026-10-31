@@ -22,3 +22,8 @@ func platformExecuteUpdateStart(ctx context.Context, endpoint platformRuntimeEnd
 	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
 		transport.UpdateStartExecute, intent.raw, intent.signature, intent.authority, intent.targetDescriptor, nil)
 }
+
+func platformProbeUpdateStart(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformUpdateStartIntent) (transport.WritableLifecycleObservation, error) {
+	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
+		transport.UpdateStartProbe, intent.raw, intent.signature, intent.authority, intent.targetDescriptor, nil)
+}

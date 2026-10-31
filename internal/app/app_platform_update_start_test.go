@@ -18,6 +18,7 @@ import (
 type platformUpdateStartTestObservation struct {
 	reservation journal.UpdateStartReservation
 	running     journal.UpdateStartRunningReceipt
+	readiness   journal.UpdateStartReadiness
 	authority   control.Authority
 	endpoint    transport.CandidateReceiptEndpoint
 	receivedAt  time.Time
@@ -29,6 +30,9 @@ func (o platformUpdateStartTestObservation) UpdateStartReservation() (journal.Up
 }
 func (o platformUpdateStartTestObservation) UpdateStartRunningReceipt() (journal.UpdateStartRunningReceipt, error) {
 	return o.running, nil
+}
+func (o platformUpdateStartTestObservation) UpdateStartReadiness() (journal.UpdateStartReadiness, error) {
+	return o.readiness, nil
 }
 func (o platformUpdateStartTestObservation) Controller() control.Authority { return o.authority }
 func (o platformUpdateStartTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
@@ -418,6 +422,118 @@ func TestPlatformUpdateStartRunningRollbackSQLite(t *testing.T) {
 
 func TestPlatformUpdateStartRunningRollbackPostgres(t *testing.T) {
 	testPlatformUpdateStartRunningRollback(t, true)
+}
+
+func platformUpdateStartReadinessCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, lease, runningIntent, endpoint, runningObservation := platformUpdateStartRunningCommitFixture(t, pg)
+	probeLease, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, runningIntent, endpoint, runningObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := s.preparePlatformUpdateProbe(context.Background(), probeLease)
+	if err != nil || intent.running == nil {
+		t.Fatal("prepare update-start probe", err)
+	}
+	observation := platformUpdateStartReservationFixture(intent, endpoint)
+	observation.readiness = journal.UpdateStartReadiness{
+		Format:               "portal.runner.update-start-readiness/1-dev.1",
+		PayloadSHA256:        intent.command.PayloadSHA256,
+		RunningReceiptSHA256: platformDigest(mustMarshalPlatformUpdateStartReceipt(*intent.running)),
+		NativeID:             intent.running.NativeID, Protocol: "portal.backend/1",
+		DataFormat: intent.command.Payload.DataFormat,
+		ObservedMS: intent.running.NativeObservedMS,
+	}
+	return s, probeLease, intent, endpoint, observation
+}
+
+func testPlatformUpdateStartCommitsReadiness(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation := platformUpdateStartReadinessCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartReadiness(context.Background(), lease, intent, endpoint, observation)
+	if err != nil || next.snapshot.Stage != appplatform.StageActivate ||
+		next.snapshot.Revision != lease.snapshot.Revision+1 {
+		t.Fatal("update-start readiness commit", next.snapshot, err)
+	}
+	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != "candidate" ||
+		scalar[int64](t, s.st, `SELECT observed_ms FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != mustPlatformCheckpointInt(observation.readiness.ObservedMS) ||
+		scalar[string](t, s.st, `SELECT readiness_evidence FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) == "{}" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_ready' AND target_id=?`, lease.id) != 1 {
+		t.Fatal("update-start readiness did not commit to the candidate")
+	}
+}
+
+func TestPlatformUpdateStartCommitsReadinessSQLite(t *testing.T) {
+	testPlatformUpdateStartCommitsReadiness(t, false)
+}
+
+func TestPlatformUpdateStartCommitsReadinessPostgres(t *testing.T) {
+	testPlatformUpdateStartCommitsReadiness(t, true)
+}
+
+func testPlatformUpdateStartReadinessRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*journal.UpdateStartReadiness){
+		"payload": func(r *journal.UpdateStartReadiness) { r.PayloadSHA256 = strings.Repeat("a", 64) },
+		"running receipt": func(r *journal.UpdateStartReadiness) {
+			r.RunningReceiptSHA256 = strings.Repeat("b", 64)
+		},
+		"native":   func(r *journal.UpdateStartReadiness) { r.NativeID = strings.Repeat("c", 64) },
+		"protocol": func(r *journal.UpdateStartReadiness) { r.Protocol = "portal.backend/2" },
+		"format":   func(r *journal.UpdateStartReadiness) { r.DataFormat = "2" },
+		"future observed": func(r *journal.UpdateStartReadiness) {
+			r.ObservedMS = strconv.FormatInt(time.Now().Add(10*time.Second).UnixMilli(), 10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, lease, intent, endpoint, observation := platformUpdateStartReadinessCommitFixture(t, pg)
+			mutate(&observation.readiness)
+			if _, err := s.commitPlatformUpdateStartReadiness(context.Background(), lease, intent, endpoint, observation); err == nil {
+				t.Fatal("changed update-start readiness committed")
+			}
+			if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "probe" ||
+				scalar[string](t, s.st, `SELECT readiness_evidence FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != "{}" {
+				t.Fatal("refused readiness changed durable state")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartReadinessRefusalsSQLite(t *testing.T) {
+	testPlatformUpdateStartReadinessRefusals(t, false)
+}
+
+func TestPlatformUpdateStartReadinessRefusalsPostgres(t *testing.T) {
+	testPlatformUpdateStartReadinessRefusals(t, true)
+}
+
+func testPlatformUpdateStartReadinessRollback(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation := platformUpdateStartReadinessCommitFixture(t, pg)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_update_start_ready_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture ready failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_ready_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.update_start_ready') EXECUTE FUNCTION fixture_update_start_ready_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_ready_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_update_start_ready_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_ready_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_ready' BEGIN SELECT RAISE(ABORT,'fixture ready failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_ready_failure`)
+	}
+	if _, err := s.commitPlatformUpdateStartReadiness(context.Background(), lease, intent, endpoint, observation); err == nil {
+		t.Fatal("failed readiness audit committed")
+	}
+	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "probe" ||
+		scalar[string](t, s.st, `SELECT readiness_evidence FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != "{}" {
+		t.Fatal("failed readiness commit was partial")
+	}
+}
+
+func TestPlatformUpdateStartReadinessRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartReadinessRollback(t, false)
+}
+
+func TestPlatformUpdateStartReadinessRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartReadinessRollback(t, true)
 }
 
 func testPlatformUpdateStartReservationRefusals(t *testing.T, pg bool) {

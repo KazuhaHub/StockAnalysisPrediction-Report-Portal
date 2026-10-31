@@ -47,6 +47,12 @@ reservation and advances only `start -> probe`; readiness, registration,
 activation and rollback remain outstanding. Focused SQLite and PostgreSQL 18.6
 tests pass, including changed receipt refusal and audit-failure rollback.
 
+Generation-2 readiness now rechecks the exact running native ID, pinned data
+profile, mounts and private application UDS. Portal binds the readiness to the
+applied running receipt and target release/format, stores it on the candidate
+activation, and advances only `probe -> activate`. Registration, the final active
+tuple swap and rollback remain outstanding.
+
 Production remains out of scope for this record. No real credential was imported,
 no legacy application was migrated, no market release was published, and the
 server beta channel was not pinned or changed.

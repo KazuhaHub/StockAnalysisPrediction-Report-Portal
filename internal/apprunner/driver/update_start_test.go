@@ -97,4 +97,14 @@ func TestUpdateStartNativeHandlesRefuseJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"valid":true}`), &observed); err == nil {
 		t.Fatal("process proof decoded")
 	}
+	var readiness UpdateStartReadinessObservation
+	if _, err := readiness.Snapshot(); err == nil {
+		t.Fatal("zero readiness proof")
+	}
+	if _, err := json.Marshal(readiness); err == nil {
+		t.Fatal("readiness proof serialized")
+	}
+	if err := json.Unmarshal([]byte(`{"valid":true}`), &readiness); err == nil {
+		t.Fatal("readiness proof decoded")
+	}
 }

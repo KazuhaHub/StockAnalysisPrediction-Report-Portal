@@ -70,7 +70,7 @@ func TestWritableRecoveryInventoryRequiresUniquePrivateReference(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(encoded)))}, nil
 			}))
-			got, err := writableCandidateReference(context.Background(), client, plan)
+			got, err := managedCandidateReference(context.Background(), client, plan)
 			if (err == nil) != tc.want || (tc.want && got != id) || calls != 1 {
 				t.Fatal("inventory result", got, err, calls)
 			}

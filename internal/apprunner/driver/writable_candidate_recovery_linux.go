@@ -16,8 +16,8 @@ import (
 // Inventory includes stopped containers. Exactly one native identity may refer
 // to any private mount; the caller must independently inspect its full policy.
 // This is lifecycle-scoped observation, not exclusion against host root.
-func writableCandidateReference(ctx context.Context, client *http.Client, plan containerPlan) (string, error) {
-	if !validContainerPlan(plan) || plan.writable == nil {
+func managedCandidateReference(ctx context.Context, client *http.Client, plan containerPlan) (string, error) {
+	if !validContainerPlan(plan) || (plan.writable == nil && plan.updateStart == nil) {
 		return "", ErrInvalidResponse
 	}
 	var policy containerCreate
@@ -135,7 +135,7 @@ func (r *CandidateRuntime) withVerifiedWritableCandidate(ctx context.Context, re
 	}
 	client, closeClient := r.client()
 	defer closeClient()
-	id, err := writableCandidateReference(ctx, client, plan)
+	id, err := managedCandidateReference(ctx, client, plan)
 	if err != nil {
 		return zero, err
 	}
@@ -157,7 +157,7 @@ func (r *CandidateRuntime) withVerifiedWritableCandidate(ctx context.Context, re
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, true); err != nil {
 		return zero, err
 	}
-	again, err := writableCandidateReference(ctx, client, plan)
+	again, err := managedCandidateReference(ctx, client, plan)
 	if err != nil || again != id {
 		return zero, errors.Join(ErrContainerConflict, err)
 	}

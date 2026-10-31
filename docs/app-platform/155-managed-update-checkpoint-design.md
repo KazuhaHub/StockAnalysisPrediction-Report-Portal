@@ -4,9 +4,9 @@ Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
 document also claims verified native restore, Portal restore admission and the
-generation-2 `update-start` admission/reservation, native launch and running
-receipt boundary. It does not claim a completed managed update executor,
-generation-2 readiness/registration/activation or a reviewed rollback executor.
+generation-2 `update-start` admission/reservation, native launch, running receipt
+and native readiness boundary. It does not claim a completed managed update
+executor, generation-2 registration/activation or a reviewed rollback executor.
 Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
@@ -170,6 +170,13 @@ remains uncertain and is never retried under the same or a fresh identity.
 Portal verifies the receipt against the persisted reservation and then advances
 only `start -> probe`. Running is not readiness, registration or activation.
 
+Readiness is a separate fresh observation over the exact running native ID,
+pinned data/mount profile and private application UDS. Portal requires the
+observation to bind the applied running receipt, target release/data format and
+native identity, then records canonical readiness evidence on the candidate
+activation and advances only `probe -> activate`. A stale or changed running
+receipt, native ID, protocol, format or timestamp is refused.
+
 ## Portal operation tuple
 
 A managed update review binds:
@@ -267,8 +274,8 @@ Disposable Linux/XFS/Docker tests:
 4. Distinct update-start admission with source-checkpoint binding and durable
    Portal reservation recovery. Implemented.
 5. Managed update executor and activation transaction. Native generation-2
-   launch/receipt and Portal `start -> probe` are implemented; readiness,
-   registration, activation and rollback remain.
+   launch/receipt, readiness and Portal `start -> activate` progression are
+   implemented; registration, activation and rollback remain.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
    the disposable Linux/XFS/Docker probe; binding them to the managed update

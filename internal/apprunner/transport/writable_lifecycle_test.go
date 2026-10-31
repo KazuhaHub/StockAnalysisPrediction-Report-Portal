@@ -568,6 +568,54 @@ func TestWritableLifecycleUpdateStartRunningReceipt(t *testing.T) {
 	}
 }
 
+func TestWritableLifecycleUpdateStartReadiness(t *testing.T) {
+	a, command, raw, sig, descriptor, reservation := updateStartTransportFixture(t)
+	now := time.Now().UnixMilli()
+	running := updateStartRunningReceiptFixture(command, reservation)
+	runningRaw, err := json.Marshal(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runningHash := sha256.Sum256(runningRaw)
+	readiness := journal.UpdateStartReadiness{
+		Format:               "portal.runner.update-start-readiness/1-dev.1",
+		PayloadSHA256:        command.PayloadSHA256,
+		RunningReceiptSHA256: hex.EncodeToString(runningHash[:]),
+		NativeID:             running.NativeID, Protocol: "portal.backend/1",
+		DataFormat: command.Payload.DataFormat,
+		ObservedMS: strconv.FormatInt(now, 10),
+	}
+	body, err := json.Marshal(readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := verifyWritableLifecycle(UpdateStartProbe, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().Add(-time.Second)
+	if !validWritableLifecycleReply(UpdateStartProbe, body, ref, started, time.Now()) {
+		t.Fatal("exact update-start readiness refused")
+	}
+	for name, mutate := range map[string]func(*journal.UpdateStartReadiness){
+		"payload":  func(r *journal.UpdateStartReadiness) { r.PayloadSHA256 = "bad" },
+		"protocol": func(r *journal.UpdateStartReadiness) { r.Protocol = "portal.backend/2" },
+		"format":   func(r *journal.UpdateStartReadiness) { r.DataFormat = "2" },
+		"future": func(r *journal.UpdateStartReadiness) {
+			r.ObservedMS = strconv.FormatInt(time.Now().Add(time.Second).UnixMilli(), 10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := readiness
+			mutate(&changed)
+			encoded, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(UpdateStartProbe, encoded, ref, started, time.Now()) {
+				t.Fatal("changed update-start readiness accepted")
+			}
+		})
+	}
+}
+
 func TestWritableLifecycleOpaqueTypedEvidence(t *testing.T) {
 	var proof WritableLifecycleObservation
 	if _, err := json.Marshal(proof); err == nil {

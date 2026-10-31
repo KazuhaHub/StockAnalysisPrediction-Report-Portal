@@ -220,6 +220,8 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchUpdateStart(ctx, raw, sig, descriptor, provider.native)
 	case UpdateStartReceipt:
 		result, err = provider.store.ReadUpdateStartRunningReceipt(ctx, raw, sig)
+	case UpdateStartProbe:
+		result, err = provider.store.ObserveUpdateStartReadiness(ctx, raw, sig, provider.native, descriptor)
 	default:
 		return
 	}

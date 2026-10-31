@@ -66,7 +66,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
-		AND o.stage='start'`, expected.id, expected.installationID).
+		AND o.stage IN ('start','probe')`, expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
 			&sourceGeneration, &targetGeneration); err != nil {
 		return zero, nil, errAppPlatformStageEvidence
@@ -337,9 +337,17 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 }
 
 func (s *Server) preparePlatformUpdateStart(ctx context.Context, expected platformOperationLease) (platformUpdateStartIntent, error) {
+	return s.preparePlatformUpdateStartMode(ctx, expected, appplatform.StageStart)
+}
+
+func (s *Server) preparePlatformUpdateProbe(ctx context.Context, expected platformOperationLease) (platformUpdateStartIntent, error) {
+	return s.preparePlatformUpdateStartMode(ctx, expected, appplatform.StageProbe)
+}
+
+func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected platformOperationLease, stage appplatform.Stage) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
 	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
-		expected.snapshot.Stage != appplatform.StageStart || expected.snapshot.Generation < 2 {
+		expected.snapshot.Stage != stage || expected.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
 	if ctx == nil || ctx.Err() != nil {
@@ -442,6 +450,14 @@ type platformUpdateStartRunningObservation interface {
 	CommandSHA256() string
 }
 
+type platformUpdateStartReadinessObservation interface {
+	UpdateStartReadiness() (journal.UpdateStartReadiness, error)
+	Controller() control.Authority
+	Endpoint() transport.CandidateReceiptEndpoint
+	ReceivedAt() time.Time
+	CommandSHA256() string
+}
+
 func validPlatformUpdateStartObservation(observation platformUpdateStartObservation, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint) (journal.UpdateStartReservation, bool) {
 	reservation, err := observation.UpdateStartReservation()
 	command := intent.command
@@ -490,6 +506,44 @@ func validPlatformUpdateStartRunningObservation(observation platformUpdateStartR
 		return journal.UpdateStartRunningReceipt{}, false
 	}
 	return receipt, true
+}
+
+func validPlatformUpdateStartReadinessObservation(observation platformUpdateStartReadinessObservation, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint) (journal.UpdateStartReadiness, bool) {
+	readiness, err := observation.UpdateStartReadiness()
+	if err != nil || intent.running == nil ||
+		readiness.PayloadSHA256 != intent.command.PayloadSHA256 ||
+		readiness.RunningReceiptSHA256 != platformDigest([]byte(mustMarshalPlatformUpdateStartReceipt(*intent.running))) ||
+		readiness.NativeID != intent.running.NativeID ||
+		readiness.Protocol != "portal.backend/1" ||
+		readiness.DataFormat != intent.command.Payload.DataFormat ||
+		observation.CommandSHA256() != platformDigest(intent.raw) ||
+		observation.ReceivedAt().IsZero() {
+		return journal.UpdateStartReadiness{}, false
+	}
+	observed, observedErr := strconv.ParseInt(readiness.ObservedMS, 10, 64)
+	nativeObserved, nativeErr := strconv.ParseInt(intent.running.NativeObservedMS, 10, 64)
+	received := observation.ReceivedAt()
+	if observedErr != nil || nativeErr != nil || observed < nativeObserved ||
+		observed > received.UnixMilli() {
+		return journal.UpdateStartReadiness{}, false
+	}
+	a, b := observation.Controller(), intent.authority
+	peer := observation.Endpoint()
+	age := time.Since(received)
+	if a.DeploymentID != b.DeploymentID || a.ControllerEpoch != b.ControllerEpoch ||
+		a.ControlRevision != b.ControlRevision || a.Fingerprint != b.Fingerprint ||
+		!bytes.Equal(a.PublicKey, b.PublicKey) || !peer.RootController ||
+		peer.Path != endpoint.path || peer.RunnerUID != 0 ||
+		peer.ControllerUID != endpoint.controllerUID || peer.ControllerGID != endpoint.controllerGID ||
+		age < 0 || age > 3*time.Second {
+		return journal.UpdateStartReadiness{}, false
+	}
+	return readiness, true
+}
+
+func mustMarshalPlatformUpdateStartReceipt(receipt journal.UpdateStartRunningReceipt) []byte {
+	raw, _ := json.Marshal(receipt)
+	return raw
 }
 
 func platformUpdateStartRunningMatches(receipt journal.UpdateStartRunningReceipt, command control.UpdateStartCommand, resourceID, effectID string, reservation *journal.UpdateStartReservation) bool {

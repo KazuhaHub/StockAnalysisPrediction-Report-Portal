@@ -43,6 +43,8 @@ func testPlatformWritableRegistrationIntent(t *testing.T, pg bool) {
 		t.Fatal(err)
 	}
 	parsed.Close()
+	lease.leaseUntilMS = time.Now().Add(30 * time.Second).UnixMilli()
+	mustExec(t, s.st, `UPDATE app_platform_operations SET lease_until_ms=? WHERE id=?`, lease.leaseUntilMS, lease.id)
 	before := dumpOf(t, s.st)
 	var private struct {
 		Key []byte `json:"signing_key"`

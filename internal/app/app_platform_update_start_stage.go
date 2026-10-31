@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -72,6 +73,24 @@ func (s *Server) executePlatformUpdateStart(ctx context.Context, expected platfo
 		return platformOperationLease{}, err
 	}
 	return s.commitPlatformUpdateStartReceipt(ctx, expected, admission.intent, endpoint, proof)
+}
+
+func (s *Server) probePlatformUpdateStart(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	intent, err := s.preparePlatformUpdateProbe(ctx, expected)
+	if err != nil {
+		return platformOperationLease{}, err
+	}
+	if intent.running == nil {
+		return platformOperationLease{}, errAppPlatformStageEvidence
+	}
+	if err := s.checkPlatformManagedOperationRoot(ctx, expected.id, intent.runtime, intent.authority, endpoint); err != nil {
+		return platformOperationLease{}, err
+	}
+	proof, err := platformProbeUpdateStart(ctx, endpoint, intent)
+	if err != nil {
+		return platformOperationLease{}, err
+	}
+	return s.commitPlatformUpdateStartReadiness(ctx, expected, intent, endpoint, proof)
 }
 
 func platformUpdateStartCommandsEqual(a, b control.UpdateStartCommand) bool {
@@ -197,6 +216,130 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 	}{receipt.Claim.ResourceID, receipt.NativeID, receipt.TargetReleaseSHA256})
 	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,'system',0,'app_platform.update_start_running','app_platform_operation',?,?,'')`,
+		time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
+		return zero, err
+	}
+	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return result, nil
+}
+
+func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartReadinessObservation) (platformOperationLease, error) {
+	var zero platformOperationLease
+	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+		expected.snapshot.Stage != appplatform.StageProbe || expected.snapshot.Generation < 2 ||
+		expected.rowRevision == math.MaxInt64 || intent.reservation == nil || intent.running == nil {
+		return zero, fmt.Errorf("update-start readiness precondition: %w", errAppPlatformStageEvidence)
+	}
+	intent.raw, intent.signature = bytes.Clone(intent.raw), bytes.Clone(intent.signature)
+	intent.authority.PublicKey = bytes.Clone(intent.authority.PublicKey)
+	readiness, ok := validPlatformUpdateStartReadinessObservation(observation, intent, endpoint)
+	if !ok {
+		return zero, fmt.Errorf("update-start readiness observation: %w", errAppPlatformStageEvidence)
+	}
+	readinessRaw, err := json.Marshal(readiness)
+	if err != nil || len(readinessRaw) > 4096 {
+		return zero, fmt.Errorf("update-start readiness encode: %w", errAppPlatformStageEvidence)
+	}
+	observed, err := strconv.ParseInt(readiness.ObservedMS, 10, 64)
+	if err != nil || observed <= 0 {
+		return zero, fmt.Errorf("update-start readiness timestamp: %w", errAppPlatformStageEvidence)
+	}
+	dek, err := s.dek()
+	if err != nil {
+		return zero, err
+	}
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	runtime, seed, err := s.platformDataRuntime(e, expected.controllerEpoch, dek)
+	if err != nil {
+		return zero, err
+	}
+	defer clear(seed)
+	facts, err := loadPlatformBoundOperationLease(e, expected)
+	if err != nil {
+		return zero, err
+	}
+	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	if err != nil {
+		return zero, err
+	}
+	plan, _, err := loadPlatformManagedUpdatePlan(e, expected, source)
+	if err != nil {
+		return zero, err
+	}
+	checkpoint, _, err := loadPlatformUpdateStartCheckpoint(e, expected, plan)
+	if err != nil {
+		return zero, err
+	}
+	current, _, err := loadPlatformUpdateStartIntent(e, expected, runtime, source, checkpoint, plan, facts.now, false)
+	if err != nil || current.reservation == nil || current.running == nil ||
+		current.resourceID != intent.resourceID || current.effectID != intent.effectID ||
+		!platformUpdateStartReservationsEqual(*current.reservation, *intent.reservation) ||
+		platformDigest(mustMarshalPlatformUpdateStartReceipt(*current.running)) !=
+			platformDigest(mustMarshalPlatformUpdateStartReceipt(*intent.running)) ||
+		!platformUpdateStartCommandsEqual(current.command, intent.command) ||
+		current.authority.Fingerprint != intent.authority.Fingerprint ||
+		!bytes.Equal(current.authority.PublicKey, intent.authority.PublicKey) {
+		return zero, fmt.Errorf("update-start readiness current intent: %w", errAppPlatformStageEvidence)
+	}
+	if _, err := control.VerifyUpdateStart(intent.raw, intent.signature, current.authority, time.Now().UnixMilli()); err != nil {
+		return zero, fmt.Errorf("update-start readiness signature: %w", errAppPlatformStageEvidence)
+	}
+	now, err := finalPlatformOperationLeaseCheck(e, facts)
+	if err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	changed, err := e.exec(`UPDATE app_platform_activations SET readiness_evidence=?,observed_ms=?,updated_ms=?
+		WHERE id=? AND installation_id=? AND release_sha256=? AND generation=? AND policy_revision=?
+		AND data_namespace_id=? AND data_format=? AND state='candidate'
+		AND readiness_evidence='{}' AND observed_ms IS NULL`,
+		string(readinessRaw), observed, now, current.resourceID, expected.installationID,
+		current.command.Payload.TargetReleaseSHA256, expected.snapshot.Generation,
+		current.plan.TargetPolicyRevision, current.plan.DataNamespaceID, current.plan.DataFormat)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return zero, fmt.Errorf("update-start readiness activation: %w", err)
+	}
+	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
+	if err != nil {
+		return zero, fmt.Errorf("update-start readiness operation model: %w", errAppPlatformStageEvidence)
+	}
+	next, err := model.Advance(expected.snapshot.Revision, appplatform.StageActivate)
+	if err != nil {
+		return zero, fmt.Errorf("update-start readiness stage model: %w", errAppPlatformStageEvidence)
+	}
+	result := expected
+	result.snapshot, result.rowRevision = next.Snapshot(), expected.rowRevision+1
+	changed, err = e.exec(`UPDATE app_platform_operations SET stage='activate',state_revision=?,row_revision=row_revision+1,updated_ms=?
+		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage='probe' AND state_revision=?
+		AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`,
+		int64(result.snapshot.Revision), now, expected.id, expected.installationID, expected.controllerEpoch,
+		int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner,
+		expected.leaseUntilMS, now)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return zero, fmt.Errorf("update-start readiness operation CAS: %w", err)
+	}
+	detail, _ := json.Marshal(struct {
+		NativeID string `json:"native_id"`
+		Protocol string `json:"protocol"`
+		Observed string `json:"observed_ms"`
+	}{readiness.NativeID, readiness.Protocol, readiness.ObservedMS})
+	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+		VALUES(?,'system',0,'app_platform.update_start_ready','app_platform_operation',?,?,'')`,
 		time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
 		return zero, err
 	}

@@ -36,10 +36,11 @@ const (
 	UpdateStartRead
 	UpdateStartExecute
 	UpdateStartReceipt
+	UpdateStartProbe
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= UpdateStartReceipt
+	return a >= WritableWriterExecute && a <= UpdateStartProbe
 }
 func (a WritableLifecycleAction) mutating() bool {
 	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute
@@ -126,6 +127,12 @@ func (o WritableLifecycleObservation) UpdateStartRunningReceipt() (journal.Updat
 		return journal.UpdateStartRunningReceipt{}, driver.ErrContainerUncertain
 	}
 	return journal.ParseUpdateStartRunningReceipt([]byte(o.body))
+}
+func (o WritableLifecycleObservation) UpdateStartReadiness() (journal.UpdateStartReadiness, error) {
+	if o.action != UpdateStartProbe {
+		return journal.UpdateStartReadiness{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseUpdateStartReadiness([]byte(o.body))
 }
 
 type writableLifecycleReference struct {
@@ -359,6 +366,20 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return false
 		}
 		settled = v.SettledMS
+	case action == UpdateStartProbe:
+		v, e := journal.ParseUpdateStartReadiness(body)
+		c := r.updateStart
+		if e != nil || v.PayloadSHA256 != c.PayloadSHA256 ||
+			v.DataFormat != c.Payload.DataFormat {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued ||
+			observed < started.UnixMilli() || observed > received.UnixMilli() {
+			return false
+		}
+		return true
 	default:
 		return false
 	}
