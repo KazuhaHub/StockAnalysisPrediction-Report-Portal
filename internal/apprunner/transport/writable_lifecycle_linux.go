@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -247,6 +248,10 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		return
 	}
 	if err != nil || ctx.Err() != nil {
+		if err != nil {
+			log.Printf("writable lifecycle action %d failed: %v",
+				action, err)
+		}
 		return
 	}
 	encoded, err := json.Marshal(result)
