@@ -2196,6 +2196,62 @@ body {
   }
 }
 
+/* Every antd tab row that does not fit scrolls (antd's own swipe and wheel) and fades at the side
+   that has more, like the settings workspace; antd's "…" overflow menu hid tabs behind a click. */
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-operations { display: none !important; }
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-wrap::before,
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-wrap::after { display: none; }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-left { mask-image: linear-gradient(to right, transparent, #000 32px); }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-right { mask-image: linear-gradient(to left, transparent, #000 32px); }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-left.ant-tabs-nav-wrap-ping-right {
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+/* CardTable (components/CardTable.tsx) on a phone: each row is a card of label and value, so no
+   table needs a sideways scroll. The !important lines undo widths, offsets and stickiness antd
+   writes inline for columns and fixed cells, which a card has no use for. */
+.rp-card-table--cards .ant-table { background: transparent; }
+.rp-card-table--cards .ant-table-thead,
+.rp-card-table--cards colgroup { display: none; }
+.rp-card-table--cards table,
+.rp-card-table--cards tbody { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto !important; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row {
+  display: block;
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  background: var(--ant-color-bg-container);
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: auto !important;
+  min-width: 0;
+  padding: 5px 0 !important;
+  border: 0 !important;
+  position: static !important;
+  inset: auto !important;
+  background: transparent !important;
+  text-align: start !important;
+  overflow-wrap: anywhere;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td::before {
+  content: attr(data-label);
+  flex: 0 0 32%;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-label='']::before,
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td:not([data-label])::before { content: none; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td > * { min-width: 0; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:hover > td { background: transparent !important; }
+.rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) { display: block; }
+.rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) > td { display: block; border: 0; }
+.rp-card-table--cards .ant-table-container,
+.rp-card-table--cards .ant-table-content { overflow: visible !important; }
+
 /* Audit log toolbar: the filtering controls wrap as the card narrows, with the search taking what
    is left of its line and never less than a usable width. */
 .rp-audit-toolbar {

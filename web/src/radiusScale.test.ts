@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 // One radius scale for the portal, set as theme tokens in App.tsx: XS 4, SM 6, base 8, LG 12, plus
@@ -6,7 +9,9 @@ import { describe, expect, it } from 'vitest'
 // back. Use var(--ant-border-radius[-xs|-sm|-lg]) in CSS and token.borderRadius[XS|SM|LG] inline.
 
 // Vite's raw glob rather than node:fs, as in antdStaticApi.test.ts.
-const css = import.meta.glob('./**/*.css', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+// Stylesheets from disk: a ?raw glob of CSS comes back empty under vitest, which left this guard
+// checking nothing; the length assertion below keeps that from happening silently again.
+const css: Record<string, string> = { './index.css': readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.css'), 'utf8') }
 const tsx = import.meta.glob('./**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 const production = Object.entries(tsx).filter(([p]) => !/\.test\.tsx?$/.test(p))
 
@@ -14,7 +19,7 @@ const ALLOWED_CSS = /^(?:(?:var\(--ant-border-radius(?:-xs|-sm|-lg)?\)|999px|50%
 
 describe('radius scale', () => {
   it('has files to check', () => {
-    expect(Object.keys(css).length).toBeGreaterThan(0)
+    expect(css['./index.css'].length).toBeGreaterThan(10_000)
     expect(production.length).toBeGreaterThan(50)
   })
 

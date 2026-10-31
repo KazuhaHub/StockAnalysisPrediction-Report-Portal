@@ -73,7 +73,8 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const total = shown.reduce((sum, column) => sum + (explicit[columnKey(column)] ?? weight(column)), 0)
   const labelOf = (column: ColumnType<T>) => labels[columnKey(column)] ?? (typeof column.title === 'function' ? columnKey(column) : column.title || t('table.actions'))
   const nameOf = (column: ColumnType<T>) => { const label = labelOf(column); return typeof label === 'string' || typeof label === 'number' ? String(label) : columnKey(column) }
-  const columns: ColumnType<T>[] = shown.map((column, index) => ({ ...column, responsive: undefined,
+  // phoneLabel: the header is a component here, so CardTable is told the column's name for its cards.
+  const columns: (ColumnType<T> & { phoneLabel?: string })[] = shown.map((column, index) => ({ ...column, responsive: undefined, phoneLabel: nameOf(column),
     width: fit ? `${(column.minWidth ?? 96) / minimum * 100}%` : explicit[columnKey(column)] ?? weight(column),
     fixed: preference.order.length && ((column.fixed === 'right' && index !== shown.length - 1) || (column.fixed === 'left' && index !== 0)) ? undefined : column.fixed,
     title: (props) => <TableColumnHeader id={columnKey(column)} name={nameOf(column)} onMeasure={measure}
