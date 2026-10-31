@@ -160,12 +160,13 @@ describe('AppLayout queue badge', () => {
     expect(shown(container, '.ant-badge-dot')).toBeNull()
   })
 
-  // Same module-global tag store as the queue table: the badge must not be told "unchanged" about
-  // a count it has never held.
-  it('drops the summary tag before its first ask', async () => {
+  // The queue views poll the same summary URL: the badge must not be told "unchanged" about a
+  // count it has never held, so it revalidates against tags of its own and drops them before its
+  // first ask.
+  it('drops its own summary tag before its first ask', async () => {
     queueState.answer = { running: 0, waiting: 0, scheduled: 0, budget: 3 }
     renderAt('/queue')
-    await vi.waitFor(() => expect(forgetTags).toHaveBeenCalledWith('/api/admin/batch/queue'))
+    await vi.waitFor(() => expect(forgetTags).toHaveBeenCalledWith('/api/admin/batch/queue', expect.any(Object)))
   })
 })
 

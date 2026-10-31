@@ -11,7 +11,7 @@ import { useAppAccess } from '../appAccess'
 import { SiteLogo, useSite } from '../site'
 import { sanitizeFooterHtml } from '../lib/footerHtml'
 import { QUEUE_EVENT, RUN_ANALYSIS_EVENT } from '../lib/shortcuts'
-import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
+import { UNCHANGED, forgetTags, getIfChanged, type TagHolder } from '../lib/conditionalGet'
 import { prefetch } from '../lib/prefetch'
 import { queueOnScreen } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope } from '../lib/queueScope'
@@ -108,9 +108,12 @@ function AppShell() {
   const [queueOpen, setQueueOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('runs')
   const [queue, setQueue] = useState<BatchQueueSummary | null>(null)
-  // Whether the badge is holding a summary at all. The ETag store is module-global, so if a queue
-  // view tagged this URL first, the badge's own first poll would be answered "nothing changed"
-  // about a count it has never had — and an absent badge is how this header says "nothing queued".
+  // The badge's own revalidation tags, apart from the queue views that poll the same URL: a 304
+  // they earned must not answer "nothing changed" about a count the badge has never had — an
+  // absent badge is how this header says "nothing queued".
+  const [queueTags] = useState<TagHolder>(() => ({}))
+  useEffect(() => () => forgetTags(undefined, queueTags), [queueTags])
+  // The summary URL whose answer the badge holds: it keeps one count, so a scope change drops it.
   const heldQueue = useRef<string | null>(null)
   const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
@@ -200,8 +203,8 @@ function AppShell() {
       if (queueOnScreen()) return Promise.resolve()
       // The badge counts what the queue views would list: an administrator's mine/all pick applies.
       const url = withQueueScope('/api/admin/batch/queue', queueScope, admin)
-      if (heldQueue.current !== url) forgetTags(url)
-      return getIfChanged<BatchQueueSummary>(url)
+      if (heldQueue.current !== url) forgetTags(url, queueTags)
+      return getIfChanged<BatchQueueSummary>(url, queueTags)
         .then((r) => {
           if (r === UNCHANGED) return
           setQueue(r)
@@ -210,7 +213,7 @@ function AppShell() {
         .catch(() => {})
     }
     return startVisiblePoll(load, 12000)
-  }, [canRun, queueOpen, queueScope, admin])
+  }, [canRun, queueOpen, queueScope, admin, queueTags])
 
   // Run Analysis + the queue live here as a modal/drawer, but an entry-link shortcut (from
   // the home page) needs to open them — it fires a window event we listen for.

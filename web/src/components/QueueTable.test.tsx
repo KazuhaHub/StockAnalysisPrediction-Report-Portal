@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter, useLocation } from 'react-router'
 import QueueTable from './QueueTable'
@@ -9,7 +9,7 @@ import type { BatchJob } from '../api/types'
 // Mutable so a test can inject jobs into the mocked API. vi.hoisted keeps it reachable from
 // the hoisted vi.mock factory below. `hold` makes every polled GET hang, which is what a slow
 // link looks like for the seconds that matter: the page is up and nothing has answered yet.
-const store = vi.hoisted(() => ({ urls: [] as string[], jobs: [] as BatchJob[], hold: false, detail404: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
+const store = vi.hoisted(() => ({ urls: [] as string[], holders: [] as unknown[], jobs: [] as BatchJob[], hold: false, detail404: false, fail: '', unchanged: false, admin: true, jobsMine: null as BatchJob[] | null, pendMine: false, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
 const forgetTags = vi.hoisted(() => vi.fn())
 
 // Smoke test: the queue page must mount without crashing (it renders on load, before any
@@ -39,8 +39,12 @@ const UNCHANGED = vi.hoisted(() => Symbol('unchanged'))
 vi.mock('../lib/conditionalGet', () => ({
   UNCHANGED,
   forgetTags,
-  getIfChanged: (url: string) => {
+  getIfChanged: (url: string, holder?: unknown) => {
     store.urls.push(String(url))
+    store.holders.push(holder)
+    const mine = String(url).includes('scope=mine')
+    if (mine && store.pendMine) return new Promise(() => {})
+    if (mine && store.jobsMine && String(url).includes('/jobs')) return Promise.resolve({ jobs: store.jobsMine })
     if (store.hold) return new Promise(() => {})
     if (store.fail) return Promise.reject(new Error(store.fail))
     if (store.unchanged) return Promise.resolve(UNCHANGED)
@@ -217,14 +221,23 @@ describe('QueueTable', () => {
     expect(screen.queryByText('common.loading')).toBeNull()
   })
 
-  // The ETag store is module-global and outlives any one mount, so a component that holds nothing
-  // can be told "nothing changed" — about data it has never had. Two guards, both pinned here.
-  it('asks unconditionally for what it is not holding', async () => {
+  // A 304 means "unchanged since the tag you sent", and the header badge and the Tasks drawer poll
+  // the same summary URL. A view that revalidated against their tags could be told "nothing
+  // changed" about data it has never had. Two guards, both pinned here.
+  it('revalidates only against tags of its own, kept apart for each mount', async () => {
+    store.holders = []
     mount()
     await screen.findByText('queue.empty')
-    const asked = forgetTags.mock.calls.map((c) => String(c[0]))
-    expect(asked.some((u) => u.includes('/api/admin/batch/jobs'))).toBe(true)
-    expect(asked).toContain('/api/admin/batch/queue')
+    const first = store.holders[0]
+    expect(first).toBeTypeOf('object')
+    expect(store.holders.every((h) => h === first)).toBe(true)
+    cleanup()
+    store.holders = []
+    mount()
+    await screen.findByText('queue.empty')
+    expect(store.holders[0]).not.toBe(first)
+    // A mount lets its tags go when it goes.
+    expect(forgetTags).toHaveBeenCalledWith(undefined, first)
   })
 
   it('does not open the gate on a 304 for rows it never received', async () => {
@@ -251,7 +264,34 @@ describe('QueueTable', () => {
   describe('mine / all (ADR 0047)', () => {
     beforeEach(() => {
       store.urls = []
+      store.jobsMine = null
+      store.pendMine = false
       localStorage.clear()
+    })
+
+    it("shows a spinner, not the other scope's runs, until the picked scope has answered", async () => {
+      store.admin = true
+      store.jobs = [job({ id: 1, target_id: 71 })]
+      store.pendMine = true
+      mount()
+      await screen.findAllByText('#71')
+      fireEvent.click(screen.getByText('queue.scope.mine'))
+      expect(screen.queryAllByText('#71')).toHaveLength(0)
+      expect(document.querySelector('.ant-spin-spinning')).not.toBeNull()
+    })
+
+    it('shows a scope it has already loaded at once when switched back', async () => {
+      store.admin = true
+      store.jobs = [job({ id: 1, target_id: 71 })]
+      store.jobsMine = [job({ id: 2, target_id: 33 })]
+      mount()
+      await screen.findAllByText('#71')
+      fireEvent.click(screen.getByText('queue.scope.mine'))
+      await screen.findAllByText('#33')
+      store.hold = true // the refresh on switching back has not answered yet
+      fireEvent.click(screen.getByText('queue.scope.all'))
+      expect(screen.getAllByText('#71').length).toBeGreaterThan(0)
+      expect(screen.queryAllByText('#33')).toHaveLength(0)
     })
 
     it('lets an administrator switch to their own runs, for the list and the tiles', async () => {
