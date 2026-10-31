@@ -136,6 +136,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	checkpointVerified := false
 	for slot := 0; slot < 4; slot++ {
 		if slot == 2 {
 			continue
@@ -304,7 +305,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 					if err != nil || checkpointAgain != checkpoint {
 						t.Fatal("managed update checkpoint read", checkpointAgain, err)
 					}
-					fmt.Println("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
+					checkpointVerified = true
 					dispatchRemoval("remove_code", "remove-code", fixtureID(7108+slot*10), fixtureID(7109+slot*10))
 					var absentState, absentDesired string
 					var absentRevision int
@@ -352,5 +353,9 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 			}
 		})
 	}
+	if !checkpointVerified {
+		t.Fatal("signed journal checkpoint was not verified")
+	}
+	fmt.Println("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
 	t.Log("native journal candidate: actual running receipt; atomic SQL failure retained uncertainty; exact owned native IDs cleaned")
 }
