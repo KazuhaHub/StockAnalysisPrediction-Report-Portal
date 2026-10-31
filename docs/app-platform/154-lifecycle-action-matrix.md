@@ -27,6 +27,10 @@ Implemented and tested:
 - reviewed frontend uninstall scheduling through
   `revoke -> remove_code -> complete`, with access/capability rows removed and
   the installation made permanently unavailable;
+- restore at the frontend clear-on-uninstall crash point keeps the installation
+  removed, recreates no plugin table or live activation, preserves an empty
+  object store, and forces the unfinished operation to `recovery_required`
+  under the restore pause;
 - restoration pause, controller-epoch rotation and credential/binding revocation
   floors;
 - backup of control, credential, object and plugin-table products; and
@@ -41,7 +45,8 @@ Still required for H13 completion:
 - retained-data adoption is superseded for the owner-approved static object
   store by clear-on-uninstall; managed namespace retention/deletion remains;
 - explicit `delete_data` review/consume path after uninstall;
-- full concurrent operator and restore-vs-runner acceptance;
+- full concurrent operator acceptance and managed backend restore-vs-runner
+  acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
 
 No row may be made safe by a UI-only check, a cached generation, a copied database

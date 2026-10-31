@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -270,6 +271,63 @@ func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsSQLite(t *testing.T) 
 
 func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsPostgres(t *testing.T) {
 	testPlatformObjectUninstallRollsBackWhenAdmissionFails(t, true)
+}
+
+func testPlatformUninstallRestoreDoesNotResurrectData(t *testing.T, pg bool) {
+	s, admin, reader, installation := platformObjectsFixturePG(t, pg)
+	binding := platformObjectBindingMap(t, s, reader, installation)
+	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"must not return after restore"}`)); response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	pluginTable := platformPluginTableForInstallation(t, s.st, installation)
+	plan, err := s.createPlatformRemovalReview(admin, installation, appplatform.ActionUninstall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := s.consumePlatformRemovalReview(admin, plan.ID, plan.SHA256, platformFixtureID(892))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.st.tableExists(pluginTable) {
+		t.Fatal("uninstall admission retained the plugin table")
+	}
+
+	// Restore the durable state at the crash point between clear-on-uninstall
+	// admission and logical code removal. A restore may not recreate the old
+	// plugin table, resurrect access, or make the removal resumable automatically.
+	dump := dumpOf(t, s.st)
+	if _, err := s.st.restoreFrom(bytes.NewReader(dump), true); err != nil {
+		t.Fatal(err)
+	}
+	if s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 || scalar[int64](t, s.st, `SELECT used_bytes+used_objects FROM app_platform_object_storage WHERE id=1`) != 0 {
+		t.Fatal("restore resurrected plugin data or counters")
+	}
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "removed:removed" {
+		t.Fatal("restore reopened the removed installation")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != 0 {
+		t.Fatal("restore restored live application authority")
+	}
+	if binding, err := s.inspectPlatformLaunchAccess(reader, installation); err == nil {
+		t.Fatal("restored uninstall remained launchable", binding)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, commit.OperationID) != "recovery_required:restore_review_required" {
+		t.Fatal("restore did not force uninstall reconciliation")
+	}
+	if _, err := s.claimNextPlatformFrontendUninstall(t.Context(), platformFixtureID(893)); !errors.Is(err, errAppPlatformControlPaused) {
+		t.Fatalf("restored uninstall resumed automatically: %v", err)
+	}
+	if err := verifyPlatformObjectStorage(s.st.poolExec()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlatformUninstallRestoreDoesNotResurrectDataSQLite(t *testing.T) {
+	testPlatformUninstallRestoreDoesNotResurrectData(t, false)
+}
+
+func TestPlatformUninstallRestoreDoesNotResurrectDataPostgres(t *testing.T) {
+	testPlatformUninstallRestoreDoesNotResurrectData(t, true)
 }
 
 func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.T) {
