@@ -3310,7 +3310,7 @@
   "tasks.elapsed.m": "{{n}}m",
   "tasks.elapsed.s": "{{n}}s",
   "tasks.waiting": "Waiting",
-  "tasks.next": "Next in line",
+  "tasks.next": "Queued · next up",
   "tasks.runStatus.queued": "Queued",
   "tasks.toast.exportDone": "“{{name}}” is ready",
   "tasks.toast.exportFailed": "“{{name}}” failed",
