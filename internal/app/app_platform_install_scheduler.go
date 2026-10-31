@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -227,7 +228,9 @@ func (w *platformInstallScheduler) serve(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			_ = w.tick(ctx)
+			if err := w.tick(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("app-platform scheduler tick: %v", err)
+			}
 			if ctx.Err() != nil {
 				return nil
 			}
