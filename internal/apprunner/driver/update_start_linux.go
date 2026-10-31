@@ -67,12 +67,14 @@ func (c UpdateStartLaunch) Snapshot() (UpdateStartLaunchSnapshot, error) {
 	var zero UpdateStartLaunchSnapshot
 	state := c.launch.state
 	if state == nil {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: update-start launch state", ErrContainerUncertain)
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	if state.closed || state.plan.updateStart == nil || state.plan.writable != nil {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: update-start launch profile", ErrContainerUncertain)
 	}
 	snapshot := UpdateStartLaunchSnapshot{
 		Launch: state.snapshot, Binding: *state.plan.updateStart,
@@ -91,18 +93,22 @@ func (r *CandidateRuntime) StartUpdateStart(ctx context.Context, launch UpdateSt
 	var zero UpdateStartRunningObservation
 	snapshot, err := launch.Snapshot()
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start start snapshot: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	binding := snapshot.Binding
 	observed, err := r.startCandidateProfileAccess(ctx, launch.launch, nil, &binding)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start native start: %w", err)
 	}
 	actual, err := observed.Snapshot()
 	if err != nil || actual.Launch != snapshot.Launch {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: update-start native identity",
+			ErrContainerUncertain)
 	}
 	result := UpdateStartRunningObservation{
 		valid: true,
