@@ -256,6 +256,8 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > maxWritableLifecycleReply || !validWritableLifecycleReply(action, encoded, ref, started, time.Now()) {
+		log.Printf("writable lifecycle action %d reply invalid: err=%v bytes=%d",
+			action, err, len(encoded))
 		return
 	}
 	digest := sha256.New()
