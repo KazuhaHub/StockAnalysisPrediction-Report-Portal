@@ -31,6 +31,14 @@ conditional CodeQL corrections.
 | H15 | platform developer | Shared legacy/v2 templates, create-app, plugin-standard, strict descriptor/package builder, deterministic ZIP, publisher/descriptor signing verification, contract generation, catalogue rejection of development versions and exact source/test pins are implemented. | The current Apps integration worktree reran all 55 Python script tests, the maintained frontend standard and fresh legacy/v2 template typecheck/test/build/candidate generation without catalogue or trust changes. Contract products match Portal source after regeneration. Status UI passed 9 tests, and the Notes reference app passed its UI test and production build. | Actual release-key workflow, externally downloaded release assets for both architectures, non-implementer tutorial walkthrough and final publication approval |
 | H16-H18 | not yet started in this pass | Full acceptance requires named owners, exact candidate SHA evidence and external CI/PostgreSQL/native hosts; production and legacy adoption remain separate owner decisions. | Existing focused/local evidence is mapped above but does not satisfy full matrix | Follow `144` H16-H18 with repository-owner assignment and explicit production/migration approvals |
 
+Latest H13 evidence: the generation-2 `update-start` reservation is now stored
+atomically on the prepared Portal start effect after exact runner acknowledgement.
+Reload and replay accept only the same resource/effect/namespace/release/generation/
+fence tuple; altered evidence is refused, and a failed audit insert rolls the
+reservation update back. Focused SQLite tests and the full `internal/app`,
+`internal/apprunner/...` and `internal/appplatform` suites pass. PostgreSQL and
+native execution still require their dedicated environments.
+
 Production remains out of scope for this record. No real credential was imported,
 no legacy application was migrated, no market release was published, and the
 server beta channel was not pinned or changed.

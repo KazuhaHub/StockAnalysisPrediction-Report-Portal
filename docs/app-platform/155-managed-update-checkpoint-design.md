@@ -6,7 +6,9 @@ receipt and Portal recovery-set preparation/verification are implemented. This
 document also claims verified native restore, Portal restore admission and the
 generation-2 `update-start` admission/reservation boundary. It does not claim
 the managed update executor, native generation-2 launch or a completed reviewed
-rollback executor around that primitive.
+rollback executor around that primitive. Portal now persists the exact
+runner-acknowledged target reservation on the prepared start effect, so a
+restart can distinguish the same reserved resource from an unreserved intent.
 
 ## Decision
 
@@ -152,7 +154,10 @@ update operation, a checkpoint repository row in `verified` state, exact source
 start/data receipts, a source process that is stopped, no other live process on
 the namespace, and target generation N+1 with an increased writer fence. A
 replay returns the same resource/effect identities and never advances Portal's
-operation stage.
+operation stage. Portal writes that exact reservation to the prepared start
+effect in one transaction and verifies it again on intent reload. The runner's
+replay marker is descriptive rather than authority; a changed resource, effect,
+namespace, release, generation, fence or writer fence is refused.
 
 ## Portal operation tuple
 
@@ -248,7 +253,8 @@ Disposable Linux/XFS/Docker tests:
 1. Native quiescent checkpoint/read-back primitive and refusals.
 2. Journal checkpoint command, receipt, crash recovery and repository tests.
 3. Portal recovery-set preparation/verification transaction. Implemented.
-4. Distinct update-start admission with source-checkpoint binding. Implemented.
+4. Distinct update-start admission with source-checkpoint binding and durable
+   Portal reservation recovery. Implemented.
 5. Managed update executor and activation transaction.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed

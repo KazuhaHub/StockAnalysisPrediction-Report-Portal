@@ -191,6 +191,136 @@ func TestPlatformUpdateStartPreparesExactIntentPostgres(t *testing.T) {
 	testPlatformUpdateStartPreparesExactIntent(t, true)
 }
 
+func testPlatformUpdateStartPersistsReservation(t *testing.T, pg bool) {
+	s, lease, _, _ := platformManagedUpdateStartFixture(t, pg)
+	endpoint := platformUpdateStartEndpointFixture()
+	intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := platformUpdateStartReservationFixture(intent, endpoint)
+	reservation, ok := validPlatformUpdateStartObservation(observation, intent, endpoint)
+	if !ok {
+		t.Fatal("reservation observation refused")
+	}
+	admitted, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, observation, reservation)
+	if err != nil || admitted.reservation.ResourceID != reservation.ResourceID ||
+		len(admitted.intent.raw) == 0 || len(admitted.intent.signature) != 64 {
+		t.Fatal("persist update-start reservation", admitted, err)
+	}
+	var raw string
+	var observedFence int64
+	if err := s.st.queryRow(`SELECT receipt_json,observed_fence FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start'`, lease.id).Scan(&raw, &observedFence); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := journal.ParseUpdateStartReservation([]byte(raw))
+	if err != nil || !platformUpdateStartReservationsEqual(parsed, reservation) ||
+		observedFence != lease.fence ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "prepared" ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" {
+		t.Fatal("reservation did not persist as prepared evidence", parsed, observedFence, err)
+	}
+	replay, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, observation, reservation)
+	if err != nil || !platformUpdateStartReservationsEqual(replay.reservation, reservation) ||
+		len(replay.intent.raw) == 0 || len(replay.intent.signature) != 64 {
+		t.Fatal("reservation replay", replay, err)
+	}
+	again, err := s.preparePlatformUpdateStart(context.Background(), lease)
+	if err != nil || again.reservation == nil || !platformUpdateStartReservationsEqual(*again.reservation, reservation) {
+		t.Fatal("prepared intent lost reservation", again.reservation, err)
+	}
+}
+
+func TestPlatformUpdateStartPersistsReservationSQLite(t *testing.T) {
+	testPlatformUpdateStartPersistsReservation(t, false)
+}
+
+func TestPlatformUpdateStartPersistsReservationPostgres(t *testing.T) {
+	testPlatformUpdateStartPersistsReservation(t, true)
+}
+
+func testPlatformUpdateStartReservationRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*journal.UpdateStartReservation){
+		"resource":          func(r *journal.UpdateStartReservation) { r.ResourceID = platformFixtureID(1370) },
+		"effect":            func(r *journal.UpdateStartReservation) { r.EffectID = platformFixtureID(1371) },
+		"namespace":         func(r *journal.UpdateStartReservation) { r.NamespaceID = platformFixtureID(1372) },
+		"source release":    func(r *journal.UpdateStartReservation) { r.SourceReleaseSHA256 = strings.Repeat("e", 64) },
+		"target release":    func(r *journal.UpdateStartReservation) { r.TargetReleaseSHA256 = strings.Repeat("f", 64) },
+		"control fence":     func(r *journal.UpdateStartReservation) { r.ControlFence++ },
+		"source writer":     func(r *journal.UpdateStartReservation) { r.SourceWriterFence++ },
+		"target generation": func(r *journal.UpdateStartReservation) { r.TargetGeneration++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, lease, _, _ := platformManagedUpdateStartFixture(t, pg)
+			endpoint := platformUpdateStartEndpointFixture()
+			intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observation := platformUpdateStartReservationFixture(intent, endpoint)
+			reservation := observation.reservation
+			mutate(&reservation)
+			if _, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, observation, reservation); err == nil {
+				t.Fatal("changed reservation committed")
+			}
+			if scalar[int64](t, s.st, `SELECT observed_fence FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != 0 ||
+				scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "{}" {
+				t.Fatal("refused reservation changed durable evidence")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartReservationRefusalsSQLite(t *testing.T) {
+	testPlatformUpdateStartReservationRefusals(t, false)
+}
+
+func TestPlatformUpdateStartReservationRefusalsPostgres(t *testing.T) {
+	testPlatformUpdateStartReservationRefusals(t, true)
+}
+
+func testPlatformUpdateStartReservationRollback(t *testing.T, pg bool) {
+	s, lease, _, _ := platformManagedUpdateStartFixture(t, pg)
+	endpoint := platformUpdateStartEndpointFixture()
+	intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := platformUpdateStartReservationFixture(intent, endpoint)
+	reservation, ok := validPlatformUpdateStartObservation(observation, intent, endpoint)
+	if !ok {
+		t.Fatal("reservation observation refused")
+	}
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_update_start_reservation_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture reservation failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_reservation_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.update_start_reserved') EXECUTE FUNCTION fixture_update_start_reservation_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_reservation_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_update_start_reservation_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_reservation_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_reserved' BEGIN SELECT RAISE(ABORT,'fixture reservation failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_reservation_failure`)
+	}
+	if _, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, observation, reservation); err == nil {
+		t.Fatal("failed reservation audit committed")
+	}
+	if scalar[int64](t, s.st, `SELECT observed_fence FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != 0 ||
+		scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "{}" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_reserved' AND target_id=?`, lease.id) != 0 {
+		t.Fatal("failed reservation commit was partial")
+	}
+}
+
+func TestPlatformUpdateStartReservationRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartReservationRollback(t, false)
+}
+
+func TestPlatformUpdateStartReservationRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartReservationRollback(t, true)
+}
+
 func testPlatformUpdateStartRefusals(t *testing.T, pg bool) {
 	for name, mutate := range map[string]func(*Server, platformManagedUpdatePlan){
 		"checkpoint state": func(s *Server, plan platformManagedUpdatePlan) {
