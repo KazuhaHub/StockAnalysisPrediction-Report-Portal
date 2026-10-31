@@ -219,7 +219,7 @@ export default function RunPresetsEditor() {
                   gap: 8,
                   padding: '6px 8px',
                   border: '1px solid rgba(128,128,128,0.2)',
-                  borderRadius: 8,
+                  borderRadius: 'var(--ant-border-radius)',
                 }}
               >
                 <DragHandle label={t('common.reorder')} />

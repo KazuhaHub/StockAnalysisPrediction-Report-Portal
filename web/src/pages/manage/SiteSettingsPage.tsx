@@ -219,7 +219,7 @@ export default function SiteSettingsPage() {
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
                 {icon ? (
-                  <img src={icon} alt="" style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 8 }} />
+                  <img src={icon} alt="" style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 'var(--ant-border-radius)' }} />
                 ) : (
                   <BrandIcon style={{ color: 'var(--ant-color-primary)', fontSize: 40 }} />
                 )}

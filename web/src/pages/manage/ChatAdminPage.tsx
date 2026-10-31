@@ -334,7 +334,7 @@ export default function ChatAdminPage() {
                     style={{
                       marginBottom: 8,
                       padding: '8px 12px',
-                      borderRadius: 8,
+                      borderRadius: 'var(--ant-border-radius)',
                       whiteSpace: 'pre-wrap',
                       background: 'var(--ant-color-fill-secondary)',
                     }}

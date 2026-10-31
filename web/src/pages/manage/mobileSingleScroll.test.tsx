@@ -137,8 +137,20 @@ describe('phone layout has a single vertical scroll region', () => {
     expect(phone).not.toMatch(/\.rp-policy-scope\s*\{[^}]*max-height:\s*\d+px/)
   })
 
-  it('drops the scrollbar gutter and end padding so content is as wide as the header', () => {
+  // Content stays as wide as the header, and the scrollbar is not drawn on its right borders: the
+  // body reaches into the page's own end padding by exactly its gutter plus gap, and keeps both there.
+  // Content stays as wide as the header either way. Touch devices overlay their scrollbars, so the
+  // body reserves nothing; a narrow window with a mouse has a 6px bar that takes space, and the body
+  // reaches into the page's end padding by exactly that bar plus its gap, so it is not drawn on borders.
+  it('keeps content as wide as the header with the scrollbar beside it, not on it', () => {
     expect(phone).toMatch(/\.rp-admin-page-body\s*\{[^}]*scrollbar-gutter:\s*auto[^}]*padding-inline-end:\s*0/)
+    const fine = css.match(/@media \(max-width: 767px\) and \(pointer: fine\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+    const rule = fine.match(/\.rp-admin-page-body\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(rule).toMatch(/scrollbar-gutter:\s*stable/)
+    const pad = Number(rule.match(/padding-inline-end:\s*(\d+)px/)?.[1])
+    const reach = Number(rule.match(/margin-inline-end:\s*-(\d+)px/)?.[1])
+    // 6px is the scrollbar's width (index.css, ::-webkit-scrollbar).
+    expect(reach).toBe(pad + 6)
   })
 
   it('leaves no capped tree on phones now that every directory tree folds', () => {

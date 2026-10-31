@@ -120,7 +120,7 @@ function KindColorPicker({ color, onChange }: { color: string; onChange: (color:
           gap: 5,
           padding: '3px 7px',
           border: '1px solid var(--ant-color-border)',
-          borderRadius: 6,
+          borderRadius: 'var(--ant-border-radius-sm)',
           background: 'var(--ant-color-bg-container)',
           cursor: 'pointer',
         }}

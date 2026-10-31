@@ -7,6 +7,7 @@ import { AnnouncementsProvider } from './announcements'
 import { FavoritesProvider } from './favorites'
 import { AppAccessProvider, RequireAppOpen } from './appAccess'
 import { lazyRetry } from './lib/lazyRetry'
+import { RADIUS } from './theme/radius'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionBoundary, { ConnectionContent, ConnectionNotice } from './components/ConnectionBoundary'
@@ -277,11 +278,23 @@ function Themed() {
       spin={{ indicator: <span className="rp-spin-ring" /> }}
       theme={{
         algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: { colorPrimary: '#1677ff', borderRadius: 8 },
+        // One radius scale for the whole portal; index.css and inline styles use these tokens rather
+        // than numbers of their own: XS 4 (hairlines, bars), SM 6 (tags, small chips), base 8
+        // (controls), LG 12 (cards, dialogs, drawers, panels). Pills and circles stay 999px / 50%.
+        token: { colorPrimary: '#1677ff', borderRadius: RADIUS.base, borderRadiusXS: RADIUS.xs, borderRadiusSM: RADIUS.sm, borderRadiusLG: RADIUS.lg },
         // antd 6 gives a left/right-titled Divider a leading rail (orientationMargin token,
         // default 5%) so the text floats inward. Our section headers want the title flush to
         // the edge, so zero the token globally — the native way, no per-Divider prop or CSS.
-        components: { Divider: { orientationMargin: 0 } },
+        // LG (12) is for surfaces. Controls keep the base radius at every size, so a large button
+        // or input does not round more than the default one beside it.
+        components: {
+          Divider: { orientationMargin: 0 },
+          Button: { borderRadiusLG: RADIUS.base },
+          Input: { borderRadiusLG: RADIUS.base },
+          InputNumber: { borderRadiusLG: RADIUS.base },
+          Select: { borderRadiusLG: RADIUS.base },
+          DatePicker: { borderRadiusLG: RADIUS.base },
+        },
         // A cssVar key PER THEME, not the single useId `cssVar: true` gives. antd caches the
         // generated CSS variables under this key; with one shared key, switching the algorithm at
         // runtime does not regenerate them, so neutral tokens (default button/select/tag fills)

@@ -11,6 +11,7 @@ import { DownloadOutlined, TableOutlined } from '@ant-design/icons'
 import { downloadCSV } from '../../lib/csv'
 import { ChartHeaderTarget } from './DashboardChartCard'
 import { chartDataCSV } from './dashboardChartExport'
+import { RADIUS } from '../../theme/radius'
 
 registerCharts([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent, SVGRenderer])
 export interface ChartRow { name: string; value: number }
@@ -77,7 +78,7 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
       }),
       series: [{ ...series, ...(pie ? { center: narrow ? ['50%', '40%'] : ['26%', '50%'], radius: narrow ? ['35%', '53%'] : ['45%', '68%'], stillShowZeroSum: false } : {}),
         data: pie ? rows : rows.map(item => item.value), label: { ...series.label, color: token.colorText, fontSize: 12 },
-        emphasis: { focus: 'self' }, ...(pie ? {} : { itemStyle: { borderRadius: 3 } }),
+        emphasis: { focus: 'self' }, ...(pie ? {} : { itemStyle: { borderRadius: RADIUS.xs } }),
       }],
     } as EChartsOption
   }, [rows, series, horizontal, dates, total, pie, legendValues, token, t])

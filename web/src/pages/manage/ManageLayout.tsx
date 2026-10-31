@@ -10,6 +10,7 @@ import { useSite } from '../../site'
 import { useNarrow } from '../../lib/useNarrow'
 import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
+import { RADIUS } from '../../theme/radius'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const OPEN_KEY = 'rp.manage.sider.open'
@@ -72,7 +73,7 @@ export default function ManageLayout() {
   ]
   const menu = <ConfigProvider theme={{ components: { Menu: {
     itemBg: 'transparent', subMenuItemBg: 'transparent', popupBg: token.colorBgContainer,
-    itemBorderRadius: 8,
+    itemBorderRadius: RADIUS.base,
     itemSelectedBg: token.colorFillSecondary, itemSelectedColor: token.colorText,
     subMenuItemSelectedColor: token.colorText, itemHoverBg: token.colorFillQuaternary,
   } } }}><Menu className="rp-admin-menu" mode="inline" inlineCollapsed={railCollapsed} selectedKeys={[active]}
