@@ -481,6 +481,10 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 				if err := s.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=? AND state='applied'`, c.EffectID).Scan(&storedStart); err != nil {
 					t.Fatal(err)
 				}
+				var durableFence string
+				if err := s.db.QueryRow(`SELECT admitted_fence FROM runner_commands WHERE effect_id=? AND state='applied'`, c.EffectID).Scan(&durableFence); err != nil {
+					t.Fatal(err)
+				}
 				enrollment := enrollmentFixture(30)
 				authority := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
 				key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
@@ -491,7 +495,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 						Format: control.ManagedRemovalFormat, DeploymentID: index.DeploymentID, ControllerEpoch: index.ControllerEpoch,
 						ControlRevision: index.ControlRevision, InstallationID: index.InstallationID, OperationID: operation,
 						TargetGeneration: "2", Stage: stage, EffectNumber: "1", EffectID: effect, Kind: kind,
-						InstallationFence: index.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+						InstallationFence: durableFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
 						Payload: control.ManagedRemovalPayload{ResourceID: index.Payload.ResourceID, DataNamespaceID: index.Payload.DataNamespaceID,
 							ReleaseSHA256: index.Payload.ReleaseSHA256, Platform: index.Payload.Platform, SourceOperationID: index.OperationID,
 							SourceEffectID: c.EffectID, SourceReceiptSHA256: candidateHash([]byte(storedStart))},
