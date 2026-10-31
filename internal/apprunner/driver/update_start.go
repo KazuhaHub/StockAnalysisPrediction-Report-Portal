@@ -83,22 +83,48 @@ func validUpdateStartBinding(b UpdateStartBinding) bool {
 }
 
 func validUpdateStartSnapshot(s UpdateStartLaunchSnapshot) bool {
+	return updateStartSnapshotFailure(s) == ""
+}
+
+func updateStartSnapshotFailure(s UpdateStartLaunchSnapshot) string {
 	base := s.Launch
 	d := base.Data
-	return validUpdateStartBinding(s.Binding) && validContainerOwner(candidateOwner(base.Identity)) &&
-		positiveContainerCounter(base.Identity.Generation) && base.Identity.Generation != "1" &&
-		positiveContainerCounter(base.Identity.WriterFence) && base.Identity.WriterFence != "1" &&
-		nativeImageID.MatchString(base.ImageID) &&
-		(base.Platform == "linux/amd64" || base.Platform == "linux/arm64") &&
-		containerSHA.MatchString(base.PolicySHA256) && containerSHA.MatchString(base.MountsSHA256) &&
-		(s.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
-			s.SandboxProfile == UpdateStartWritableSandboxProfile) &&
-		candidateSeccompError == nil &&
-		s.SeccompSHA256 == updateStartSeccompSHA(s.SandboxProfile) && d.Root.Inode > 0 &&
-		containerUUID.MatchString(d.Root.FilesystemUUID) &&
-		d.Root.FilesystemUUID != "00000000-0000-0000-0000-000000000000" &&
-		d.ProjectID > 0 && d.NamespaceInode > 0 && d.QuotaBytes > 0 &&
-		d.QuotaBytes%512 == 0 && d.QuotaInodes > 0
+	switch {
+	case !validUpdateStartBinding(s.Binding):
+		return "binding"
+	case !validContainerOwner(candidateOwner(base.Identity)):
+		return "owner"
+	case !positiveContainerCounter(base.Identity.Generation) ||
+		base.Identity.Generation == "1":
+		return "generation"
+	case !positiveContainerCounter(base.Identity.WriterFence) ||
+		base.Identity.WriterFence == "1":
+		return "writer fence"
+	case !nativeImageID.MatchString(base.ImageID):
+		return "image"
+	case base.Platform != "linux/amd64" &&
+		base.Platform != "linux/arm64":
+		return "platform"
+	case !containerSHA.MatchString(base.PolicySHA256) ||
+		!containerSHA.MatchString(base.MountsSHA256):
+		return "plan digest"
+	case s.SandboxProfile != UpdateStartReadOnlySandboxProfile &&
+		s.SandboxProfile != UpdateStartWritableSandboxProfile:
+		return "sandbox profile"
+	case candidateSeccompError != nil ||
+		s.SeccompSHA256 != updateStartSeccompSHA(s.SandboxProfile):
+		return "seccomp"
+	case d.Root.Inode == 0 ||
+		!containerUUID.MatchString(d.Root.FilesystemUUID) ||
+		d.Root.FilesystemUUID == "00000000-0000-0000-0000-000000000000":
+		return "data root"
+	case d.ProjectID == 0 || d.NamespaceInode == 0 ||
+		d.QuotaBytes <= 0 || d.QuotaBytes%512 != 0 ||
+		d.QuotaInodes <= 0:
+		return "data quota"
+	default:
+		return ""
+	}
 }
 
 func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {

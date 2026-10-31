@@ -5,6 +5,7 @@ package driver
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -78,8 +79,10 @@ func (c UpdateStartLaunch) Snapshot() (UpdateStartLaunchSnapshot, error) {
 		SandboxProfile: state.plan.profile,
 		SeccompSHA256:  updateStartSeccompSHA(state.plan.profile),
 	}
-	if !validUpdateStartSnapshot(snapshot) {
-		return zero, ErrContainerUncertain
+	if reason := updateStartSnapshotFailure(snapshot); reason != "" {
+		return zero, fmt.Errorf(
+			"%w: update-start snapshot %s",
+			ErrContainerUncertain, reason)
 	}
 	return snapshot, nil
 }
