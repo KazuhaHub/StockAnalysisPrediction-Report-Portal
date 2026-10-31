@@ -657,6 +657,7 @@ func (f *platformServiceFixture) stop(t *testing.T) {
 			<-f.done
 			t.Errorf("managed service did not stop")
 		}
+		t.Logf("managed service output:\n%s", f.output.String())
 		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
 			if _, err := os.Lstat(f.socket); os.IsNotExist(err) {
 				return
