@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // My tasks (ADR 0047). The acceptance conditions are numbered as in the ADR.
@@ -376,5 +377,25 @@ func TestBatchJobsListIsOwnOnlyForNonAdmins(t *testing.T) {
 	ids, total = list("admin", "")
 	if len(ids) != 3 || total != 3 {
 		t.Fatalf("admin sees %v total %v", ids, total)
+	}
+}
+
+func TestJobJSONCarriesInstantsAlongsideTheWallClock(t *testing.T) {
+	zone, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	old := time.Local
+	time.Local = zone
+	defer func() { time.Local = old }()
+	m := jobJSON(BatchJob{ID: 1, StartedAt: "2026-10-29 09:00:00", FinishedAt: ""})
+	if m["started_at"] != "2026-10-29 09:00:00" {
+		t.Fatalf("wall-clock field changed: %v", m["started_at"])
+	}
+	if got, want := m["started_at_ms"], time.Date(2026, 10, 29, 1, 0, 0, 0, time.UTC).UnixMilli(); got != want {
+		t.Fatalf("started_at_ms = %v, want %d", got, want)
+	}
+	if m["finished_at_ms"] != int64(0) {
+		t.Fatalf("unset finish must be 0, got %v", m["finished_at_ms"])
 	}
 }

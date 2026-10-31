@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
 import { InputsPreview, isTerminal, jobProgressPresentation } from '../lib/batchUi'
@@ -17,6 +17,9 @@ import { startVisiblePoll } from '../lib/visiblePoll'
 import { loadFailure } from '../lib/loadFailure'
 import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
+import RunningFor from './RunningFor'
+import ExportDetailModal from './ExportDetailModal'
+import { openJobDetail, pageShowsJob } from '../lib/jobDetailStore'
 
 export type DrawerTab = 'runs' | 'exports'
 
@@ -49,6 +52,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  const loc = useLocation()
   const { admin } = useAuth()
   const showRuns = canRun
   const showExports = canExport || admin
@@ -56,18 +60,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
   // The row whose cancel confirmation is open keeps its actions on screen.
   const [confirming, setConfirming] = useState<string | null>(null)
-  // The one row whose actions a tap or click has revealed.
-  const [openRow, setOpenRow] = useState<string | null>(null)
-  const toggleRow = (key: string) => setOpenRow((cur) => (cur === key ? null : key))
+  // The export whose compact detail is open.
+  const [exportDetail, setExportDetail] = useState<string | null>(null)
+  // It belongs to this open of the drawer and this page: closing the drawer or changing route puts it away.
+  const here = loc.pathname + loc.search
   useEffect(() => {
-    if (openRow === null) return
-    // A press anywhere outside the task lists puts the actions away; a press on another row is that row's own toggle.
-    const away = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest('.rp-task-list')) setOpenRow(null)
-    }
-    document.addEventListener('pointerdown', away, true)
-    return () => document.removeEventListener('pointerdown', away, true)
-  }, [openRow])
+    setExportDetail(null)
+  }, [open, here])
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
@@ -177,7 +176,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <Button type="text" size="small" icon={icon} aria-label={label} {...props} />
     </Tooltip>
   )
-  const openAction = (label: string, to: string) => iconAction(label, <ArrowRightOutlined />, { onClick: () => { onClose(); navigate(to) } })
 
   // null = not answered yet; a dash rather than a 0, which would read as a settled idle queue.
   const stat = (label: string, value: number | null) => (
@@ -209,8 +207,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     let percent: number | undefined
     if (j.status === 'running' || j.status === 'cancelling') {
       tone = 'running'
-      percent = progress.percent
-      detail = t('tasks.rows', { done: progress.done, total: j.total })
+      if (j.status === 'running' && j.total === 1) {
+        // One row: a bar and "0 / 1 rows" say nothing, so say how long it has been going.
+        detail = <RunningFor since={j.started_at_ms ?? 0} />
+      } else {
+        percent = progress.percent
+        detail = t('tasks.rows', { done: progress.done, total: j.total })
+      }
     } else if (j.status === 'queued') {
       tone = 'waiting'
       detail = j.window_blocked
@@ -252,8 +255,12 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={j.id}
         pinned={confirming === `run-${j.id}`}
-        expanded={openRow === `run-${j.id}`}
-        onToggle={() => toggleRow(`run-${j.id}`)}
+        label={`${targetName(j.target_id)}, ${t(`batch.status.${j.status}`, j.status)}`}
+        onOpen={() => {
+          // The queue page already shows this run in its own drawer: step aside rather than stack a second one.
+          if (pageShowsJob(loc, j.id)) onClose()
+          else openJobDetail(j.id)
+        }}
         tone={tone}
         name={
           <>
@@ -274,7 +281,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
                 </Tooltip>
               </Popconfirm>
             )}
-            {openAction(t('tasks.open'), `/queue?job=${j.id}`)}
           </>
         }
       />
@@ -310,8 +316,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={taskKey(x)}
         pinned={confirming === `export-${taskKey(x)}`}
-        expanded={openRow === `export-${taskKey(x)}`}
-        onToggle={() => toggleRow(`export-${taskKey(x)}`)}
+        label={`${x.name}, ${t(`export.status.${x.status}`, x.status)}`}
+        onOpen={() => setExportDetail(taskKey(x))}
         tone={tone}
         name={x.name}
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
@@ -423,6 +429,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         />
       )}
       {activePane}
+      <ExportDetailModal
+        task={exportDetail ? (exportTasks.find((x) => taskKey(x) === exportDetail) ?? null) : null}
+        onClose={() => setExportDetail(null)}
+        onCancel={cancelExport}
+      />
     </Drawer>
   )
 }

@@ -178,6 +178,9 @@ export interface BatchJob {
   created_at: string
   started_at: string
   finished_at: string
+  /** The same moments as unix milliseconds (0 = unset); the strings are zoneless server wall-clock. */
+  started_at_ms?: number
+  finished_at_ms?: number
 }
 
 export interface BatchItem {
@@ -192,6 +195,8 @@ export interface BatchItem {
   error: string
   started_at: string
   finished_at: string
+  started_at_ms?: number
+  finished_at_ms?: number
 }
 
 // Interactive chat/assistant (docs/adr/0012). A ChatTarget is a Dify chat/agent app;
