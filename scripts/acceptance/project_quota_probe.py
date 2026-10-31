@@ -222,8 +222,8 @@ def main(args):
                         raise RuntimeError("actual prepared-data writer admission/claim verification missing")
                     report["native_writer_intent_and_claim_verified"] = True
                 if phase == "prepare":
-                    if "NATIVE_JOURNAL_CHECKPOINT_VERIFIED" not in result.stdout:
-                        raise RuntimeError("actual signed journal checkpoint verification missing")
+                    if "--- PASS: TestNativeJournalCandidateExecution/3" not in result.stdout:
+                        raise RuntimeError("signed journal checkpoint subtest did not run")
                     report["native_journal_checkpoint_verified"] = True
 
             run_journal("prepare")
