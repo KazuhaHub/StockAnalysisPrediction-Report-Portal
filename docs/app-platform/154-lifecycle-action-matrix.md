@@ -37,6 +37,10 @@ Implemented and tested:
 - managed uninstall failure/uncertainty is denial-only and lands in
   `recovery_required`; a prepared effect left by a crash is reclaimable only to
   record that review and is not automatically reissued;
+- a disposable GitHub-hosted Linux/XFS/Docker acceptance run completed ordinary
+  and writable managed uninstall end to end, verified the exact plugin table was
+  removed, and verified the managed namespace remained for a separate deletion
+  review;
 - restore at the frontend clear-on-uninstall crash point keeps the installation
   removed, recreates no plugin table or live activation, preserves an empty
   object store, and forces the unfinished operation to `recovery_required`
@@ -50,8 +54,8 @@ Still required for H13 completion:
 
 - managed update A-to-B execution (the current generic update executor is
   frontend-only);
-- native disposable acceptance of managed uninstall, including restoration
-  around stop/remove-code and reconciliation with the live runner;
+- managed restore and reconciliation around stop/remove-code against a live
+  runner;
 - reviewed managed namespace deletion after the retained state (frontend plugin
   object data is already cleared at uninstall admission);
 - retained-data adoption is superseded for the owner-approved static object
