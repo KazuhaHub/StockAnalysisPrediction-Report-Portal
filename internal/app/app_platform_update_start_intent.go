@@ -284,11 +284,15 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		format != plan.DataFormat || state != "candidate" || readiness != "{}" ||
 		observed.Valid || kind != "update-start" || effectEpoch != expected.controllerEpoch ||
 		admitted != expected.fence || (effectState != "prepared" && effectState != "applied") {
-		return zero, false, errAppPlatformStageEvidence
+		return zero, false, fmt.Errorf(
+			"update-start activation tuple: %w",
+			errAppPlatformStageEvidence)
 	}
 	command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
-		return zero, false, errAppPlatformStageEvidence
+		return zero, false, fmt.Errorf(
+			"update-start activation command: %w",
+			errAppPlatformStageEvidence)
 	}
 	result := platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
@@ -316,11 +320,15 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		result.reservation = &reservation
 	case "applied":
 		if observedFence != expected.fence {
-			return zero, false, errAppPlatformStageEvidence
+			return zero, false, fmt.Errorf(
+				"update-start activation fence: %w",
+				errAppPlatformStageEvidence)
 		}
 		running, err := journal.ParseUpdateStartRunningReceipt([]byte(receipt))
 		if err != nil || !platformUpdateStartRunningMatches(running, command, activation, effectID, nil) {
-			return zero, false, errAppPlatformStageEvidence
+			return zero, false, fmt.Errorf(
+				"update-start activation running evidence: %w",
+				errAppPlatformStageEvidence)
 		}
 		reservation := journal.UpdateStartReservation{
 			ResourceID: running.Claim.ResourceID, InstallationID: running.InstallationID,

@@ -174,6 +174,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active, w.attempts = platformOperationLease{}, 0
 		return nil
 	}
+	if result.lease.id == "" {
+		result.lease = w.active
+	}
 	w.active = result.lease
 	if parent.Err() != nil {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
