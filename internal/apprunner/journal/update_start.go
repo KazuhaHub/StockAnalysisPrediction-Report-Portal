@@ -208,7 +208,7 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return zero, ErrFenceReconciliation
 	}
-	if source.resource.observed != "stopped" || source.resource.desired != "stopped" ||
+	if !checkpointSourceResourceStopped(source.resource) ||
 		source.source.Claim.ResourceID == p.ResourceID {
 		return zero, ErrFenceReconciliation
 	}

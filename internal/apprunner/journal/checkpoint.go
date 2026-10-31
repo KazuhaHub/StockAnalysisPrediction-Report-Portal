@@ -117,6 +117,15 @@ type checkpointSource struct {
 	signature   []byte
 }
 
+func checkpointSourceResourceStopped(resource managedRemovalResource) bool {
+	return resource.revision == 3 &&
+		resource.observed == "stopped" &&
+		resource.desired == "stopped" ||
+		resource.revision == 4 &&
+			resource.observed == "absent" &&
+			resource.desired == "absent"
+}
+
 func loadCheckpointWritableSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions []string, startOperation, startState, storedPayload, startRaw string, sourceFence int64) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
@@ -211,9 +220,7 @@ func loadCheckpointWritableSource(ctx context.Context, tx *sql.Tx, c control.Che
 		result.resource.generation != 1 ||
 		result.resource.controlFence != sourceFence ||
 		result.resource.writerFence != mustDataInt(c.Payload.WriterFence) ||
-		result.resource.revision != 3 ||
-		result.resource.observed != "stopped" ||
-		result.resource.desired != "stopped" {
+		!checkpointSourceResourceStopped(result.resource) {
 		return result, fmt.Errorf(
 			"%w: checkpoint writable stopped resource",
 			ErrFenceReconciliation)
@@ -348,9 +355,7 @@ func loadCheckpointUpdateSource(ctx context.Context, tx *sql.Tx, c control.Check
 		result.resource.controlFence != sourceFence ||
 		result.resource.writerFence !=
 			mustDataInt(c.Payload.WriterFence) ||
-		result.resource.revision != 3 ||
-		result.resource.observed != "stopped" ||
-		result.resource.desired != "stopped" {
+		!checkpointSourceResourceStopped(result.resource) {
 		return result, fmt.Errorf(
 			"%w: checkpoint update stopped resource",
 			ErrFenceReconciliation)
@@ -494,7 +499,7 @@ func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.Ch
 		result.resource.release != c.Payload.ReleaseSHA256 || result.resource.namespace != c.Payload.NamespaceID ||
 		result.resource.epoch != c.ControllerEpoch || result.resource.generation != sourceGeneration ||
 		result.resource.controlFence != result.sourceFence || result.resource.writerFence != mustDataInt(source.WriterFence) ||
-		result.resource.revision != 3 || result.resource.observed != "stopped" || result.resource.desired != "stopped" {
+		!checkpointSourceResourceStopped(result.resource) {
 		return result, fmt.Errorf("%w: checkpoint stopped resource", ErrFenceReconciliation)
 	}
 	additional := ""

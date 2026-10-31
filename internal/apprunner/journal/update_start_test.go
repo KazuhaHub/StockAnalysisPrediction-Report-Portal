@@ -106,6 +106,24 @@ func TestUpdateStartReservesExactTargetResource(t *testing.T) {
 	}
 }
 
+func TestUpdateStartReservesAfterRemovedSourceCode(t *testing.T) {
+	fixture, checkpoint, command, raw, signature :=
+		updateStartJournalFixture(t)
+	now := time.Now().UTC().UnixMilli()
+	if _, err := fixture.store.db.Exec(`UPDATE runner_resources
+		SET desired_state='absent',observed_state='absent',revision=4,
+		observed_ms=?,updated_ms=? WHERE id=?`,
+		now, now, checkpoint.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := fixture.store.ReserveUpdateStart(
+		context.Background(), raw, signature)
+	if err != nil || reservation.ResourceID != command.Payload.ResourceID ||
+		reservation.TargetGeneration != 2 {
+		t.Fatal("removed source update-start reservation", reservation, err)
+	}
+}
+
 func TestRestoreStartReservesFromSeparateCheckpointOperation(t *testing.T) {
 	f, _, command, _, _ := updateStartJournalFixture(t)
 	command.Kind = "restore-start"
