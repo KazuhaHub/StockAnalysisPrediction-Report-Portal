@@ -277,6 +277,50 @@ func TestUpdateStartClaimsExactGenerationBeforeNativeExecution(t *testing.T) {
 	}
 }
 
+func TestCheckpointSourceRootUsesEachSourceReceiptShape(t *testing.T) {
+	const filesystem, inode = "00000000-0000-4000-8000-000000001234", "42"
+	candidate := checkpointSource{}
+	candidate.source.Claim.Preflight = &candidatePreflightEvidence{
+		RootFilesystemUUID: filesystem,
+		RootInode:          inode,
+	}
+	writable := checkpointSource{}
+	writable.writable = &WritableCandidateRunningReceipt{
+		Claim: writableCandidateClaimMarker{
+			Preflight: &writableCandidatePreflightEvidence{
+				Native: candidatePreflightEvidence{
+					RootFilesystemUUID: filesystem,
+					RootInode:          inode,
+				},
+			},
+		},
+	}
+	update := checkpointSource{}
+	update.update = &UpdateStartRunningReceipt{
+		Claim: UpdateStartClaimMarker{
+			Preflight: &UpdateStartPreflightEvidence{
+				RootFilesystemUUID: filesystem,
+				RootInode:          inode,
+			},
+		},
+	}
+	for name, source := range map[string]checkpointSource{
+		"candidate": candidate,
+		"writable":  writable,
+		"update":    update,
+	} {
+		t.Run(name, func(t *testing.T) {
+			gotFilesystem, gotInode, ok := checkpointSourceRoot(source)
+			if !ok || gotFilesystem != filesystem || gotInode != inode {
+				t.Fatal("checkpoint source root", gotFilesystem, gotInode, ok)
+			}
+		})
+	}
+	if _, _, ok := checkpointSourceRoot(checkpointSource{}); ok {
+		t.Fatal("empty checkpoint source exposed a root")
+	}
+}
+
 func TestUpdateStartExecutionClaimIsSingleUseAndUncertain(t *testing.T) {
 	f, _, command, raw, signature := updateStartJournalFixture(t)
 	if _, err := f.store.ReserveUpdateStart(context.Background(), raw, signature); err != nil {

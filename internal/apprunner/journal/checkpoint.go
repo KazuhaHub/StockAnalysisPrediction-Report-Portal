@@ -117,6 +117,22 @@ type checkpointSource struct {
 	signature   []byte
 }
 
+func checkpointSourceRoot(source checkpointSource) (string, string, bool) {
+	if source.writable != nil && source.writable.Claim.Preflight != nil {
+		preflight := source.writable.Claim.Preflight.Native
+		return preflight.RootFilesystemUUID, preflight.RootInode, true
+	}
+	if source.update != nil && source.update.Claim.Preflight != nil {
+		preflight := source.update.Claim.Preflight
+		return preflight.RootFilesystemUUID, preflight.RootInode, true
+	}
+	if source.source.Claim.Preflight != nil {
+		preflight := source.source.Claim.Preflight
+		return preflight.RootFilesystemUUID, preflight.RootInode, true
+	}
+	return "", "", false
+}
+
 func checkpointSourceResourceStopped(resource managedRemovalResource) bool {
 	return resource.revision == 3 &&
 		resource.observed == "stopped" &&

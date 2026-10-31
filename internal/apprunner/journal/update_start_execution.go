@@ -390,7 +390,6 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 	rootInode, rootInodeErr := strconv.ParseUint(c.Payload.RootInode, 10, 64)
 	quotaBytes, quotaBytesErr := strconv.ParseInt(c.Payload.QuotaBytes, 10, 64)
 	quotaInodes, quotaInodesErr := strconv.ParseInt(c.Payload.QuotaInodes, 10, 64)
-	source := f.source.source.source
 	data := f.source.source.data
 	if projectErr != nil || deviceErr != nil || inodeErr != nil ||
 		rootInodeErr != nil || quotaBytesErr != nil || quotaInodesErr != nil {
@@ -409,9 +408,11 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		return zero, fmt.Errorf("%w: update-start data identity",
 			ErrFenceReconciliation)
 	}
-	if source.Claim.Preflight == nil ||
-		source.Claim.Preflight.RootFilesystemUUID != c.Payload.RootFilesystemUUID ||
-		source.Claim.Preflight.RootInode != c.Payload.RootInode {
+	sourceRootUUID, sourceRootInode, hasSourceRoot :=
+		checkpointSourceRoot(f.source.source)
+	if !hasSourceRoot ||
+		sourceRootUUID != c.Payload.RootFilesystemUUID ||
+		sourceRootInode != c.Payload.RootInode {
 		return zero, fmt.Errorf("%w: update-start source profile",
 			ErrFenceReconciliation)
 	}
