@@ -1,9 +1,9 @@
 # Managed update checkpoint and execution gate
 
 Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
-root, bounded quiescent archive, read-back verification and signed runner-journal
-receipt are implemented. This document does not claim Portal recovery-set
-admission, managed update execution or restore.
+root, bounded quiescent archive, read-back verification, signed runner-journal
+receipt and Portal recovery-set preparation/verification are implemented. This
+document does not claim managed update execution or restore.
 
 ## Decision
 
@@ -71,6 +71,28 @@ records the same manifest digest.
 
 A copy is not considered verified merely because the process returned. It must be
 read back and rehashed before either store changes the recovery set to `verified`.
+
+## Portal recovery-set admission
+
+The controller transport exposes checkpoint create/read as two closed lifecycle
+actions. It accepts no host path, file name, archive option or caller-selected
+manifest. The combined managed endpoint opens the separately pinned checkpoint
+root; ordinary candidate-only endpoints do not acquire checkpoint authority.
+
+Portal derives a checkpoint command only from an active managed generation and
+the completed install operation's applied `prepare_data` and start receipts. The
+`snapshot` stage persists one recovery-set row and one operation effect before
+signing, with stable recovery-set, checkpoint and effect identities. A retry may
+renew the command timestamps but cannot replace the namespace, writer fence,
+source receipts, release, operation or generation.
+
+A successful observation must match the exact command, controller key and
+endpoint, with native observation/settlement inside the authenticated response.
+One transaction then writes the manifest digest/archive bytes, marks the effect
+applied, changes `preparing` to `verified`, and advances
+`snapshot -> migrate`. A missing, changed or future receipt remains `preparing`
+and cannot be used by restore or target start. Restore pause, an expired lease,
+or any SQL failure rolls all three records back together.
 
 ## Journal protocol
 
@@ -156,7 +178,8 @@ Portable and repository tests:
 - deterministic manifest order and digest;
 - crash before and after checkpoint creation;
 - journal unknown/apply/CAS and repeated-read behavior;
-- Portal recovery-set uniqueness, exact source binding and rollback;
+- Portal recovery-set uniqueness, exact source binding, changed
+  command/receipt/checkpoint/fence/epoch refusal, restore pause and rollback;
 - stale runtime/release/policy/checkpoint/generation refusals;
 - no target activation without applied checkpoint and readiness evidence.
 
@@ -174,7 +197,7 @@ Disposable Linux/XFS/Docker tests:
 
 1. Native quiescent checkpoint/read-back primitive and refusals.
 2. Journal checkpoint command, receipt, crash recovery and repository tests.
-3. Portal recovery-set preparation/verification transaction.
+3. Portal recovery-set preparation/verification transaction. Implemented.
 4. Distinct update-start admission with source-checkpoint binding.
 5. Managed update executor and activation transaction.
 6. Restore/rollback executor and disposable Linux acceptance.
