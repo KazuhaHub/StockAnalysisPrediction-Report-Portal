@@ -3,11 +3,36 @@ package app
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
+
+func TestPlatformWritableSchedulerRoutesManagedUninstall(t *testing.T) {
+	s, actor, lease := platformWritableAccessFixture(t, false)
+	plan, err := s.createPlatformRemovalReview(actor, lease.installationID, appplatform.ActionUninstall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := s.consumePlatformRemovalReview(actor, plan.ID, plan.SHA256, platformFixtureID(947))
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformRuntimeEndpoint{path: "/tmp/portal-writable-uninstall.sock", controllerUID: uint32(os.Geteuid()), controllerGID: uint32(os.Getegid())}
+	worker, err := newPlatformWritableInstallScheduler(s, endpoint, platformFixtureID(948), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.tick(context.Background()); err == nil {
+		t.Fatal("unreachable managed endpoint unexpectedly succeeded")
+	}
+	if worker.active.id != commit.OperationID || worker.active.snapshot.Action != appplatform.ActionUninstall ||
+		!worker.active.snapshot.Managed || worker.active.snapshot.Stage != appplatform.StageStop {
+		t.Fatal("writable scheduler did not route managed uninstall", worker.active.snapshot)
+	}
+}
 
 // Canonical SQL review/runtime metadata only; no native success is produced.
 func platformWritableQueueFixture(t *testing.T, pg bool) (*Server, string) {

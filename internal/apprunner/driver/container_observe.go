@@ -170,7 +170,7 @@ func inspectCandidateContainerHTTP(ctx context.Context, client *http.Client, nat
 
 // Removal is non-forced and preserves volumes. It inspects exact native identity,
 // ownership and policy first; it never deletes a running or unknown container.
-// Like create, this remains package-private until signed lifecycle integration.
+// Callers reach it only through signed managed-removal journal commands.
 func removeCandidateContainerHTTP(ctx context.Context, client *http.Client, nativeID string, plan containerPlan) error {
 	state, err := inspectCandidateContainerHTTP(ctx, client, nativeID, plan)
 	if err != nil {

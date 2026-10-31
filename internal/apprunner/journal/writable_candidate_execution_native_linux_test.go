@@ -5,6 +5,7 @@ package journal
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"os"
@@ -475,6 +476,58 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 					t.Fatal("unbound preflight changed process state")
 				}
 			}
+			if slot == 4 {
+				var storedStart string
+				if err := s.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=? AND state='applied'`, c.EffectID).Scan(&storedStart); err != nil {
+					t.Fatal(err)
+				}
+				enrollment := enrollmentFixture(30)
+				authority := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
+				key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
+				dispatchRemoval := func(stage, kind, operation, effect string) {
+					t.Helper()
+					now := time.Now().UnixMilli()
+					command := control.ManagedRemovalCommand{
+						Format: control.ManagedRemovalFormat, DeploymentID: index.DeploymentID, ControllerEpoch: index.ControllerEpoch,
+						ControlRevision: index.ControlRevision, InstallationID: index.InstallationID, OperationID: operation,
+						TargetGeneration: "2", Stage: stage, EffectNumber: "1", EffectID: effect, Kind: kind,
+						InstallationFence: index.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+						Payload: control.ManagedRemovalPayload{ResourceID: index.Payload.ResourceID, DataNamespaceID: index.Payload.DataNamespaceID,
+							ReleaseSHA256: index.Payload.ReleaseSHA256, Platform: index.Payload.Platform, SourceOperationID: index.OperationID,
+							SourceEffectID: c.EffectID, SourceReceiptSHA256: candidateHash([]byte(storedStart))},
+					}
+					digest, err := control.ManagedRemovalLogicalDigest(command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					command.PayloadSHA256 = digest
+					raw, sig, err := control.SignManagedRemoval(command, key, authority, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := s.DispatchManagedRemoval(ctx, raw, sig, descriptor, native); err != nil {
+						t.Fatal("writable managed removal", stage, err)
+					}
+				}
+				dispatchRemoval("stop", "stop", fixtureID(base+8), fixtureID(base+9))
+				var stopped string
+				if err := s.db.QueryRow(`SELECT revision||':'||observed_state FROM runner_resources WHERE id=?`, writer.ResourceID).Scan(&stopped); err != nil || stopped != "3:stopped" {
+					t.Fatal("writable managed stop did not settle")
+				}
+				dispatchRemoval("remove_code", "remove-code", fixtureID(base+10), fixtureID(base+11))
+				var absent string
+				if err := s.db.QueryRow(`SELECT revision||':'||observed_state||':'||desired_state FROM runner_resources WHERE id=?`, writer.ResourceID).Scan(&absent); err != nil || absent != "4:absent:absent" || writableFixtureOwnedNative(t, socket, index, receipt.Claim) != "" {
+					t.Fatal("writable managed remove-code did not settle")
+				}
+				project, err := strconv.ParseUint(source.ProjectID, 10, 32)
+				if err != nil {
+					t.Fatal(err)
+				}
+				retained, err := root.Inspect(ctx, pin, index.Payload.DataNamespaceID, uint32(project))
+				if err != nil || retained.NamespaceID != index.Payload.DataNamespaceID {
+					t.Fatal("writable managed removal deleted its retained namespace", retained, err)
+				}
+			}
 			if _, err := s.ClaimWritableCandidate(ctx, raw, sig); err == nil {
 				t.Fatal("completed/unknown start reclaimed")
 			}
@@ -500,6 +553,7 @@ func TestNativeJournalWritableCandidateExecution(t *testing.T) {
 	t.Log("NATIVE_WRITABLE_REGISTRATION_STOPPED_DELIVERY_REFUSED")
 	t.Log("NATIVE_WRITABLE_HANDSHAKE_POSSESSION_VERIFIED")
 	t.Log("NATIVE_WRITABLE_HANDSHAKE_FILE_REPLACEMENT_REFUSED")
+	t.Log("NATIVE_WRITABLE_MANAGED_STOP_REMOVE_CODE_VERIFIED")
 	t.Log("NATIVE_WRITABLE_HANDSHAKE_PRESERVES_JOURNAL")
 	t.Log("NATIVE_WRITABLE_STOPPED_HANDSHAKE_REFUSED")
 }

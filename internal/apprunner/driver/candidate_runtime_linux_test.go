@@ -137,8 +137,21 @@ func TestNativeCandidateRuntime(t *testing.T) {
 	if err := other.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := native.cleanupCandidate(context.Background(), launch, running); err != nil {
+	stopped, err := native.StopCandidate(context.Background(), launch, snapshot.NativeID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	stoppedSnapshot, err := stopped.Snapshot()
+	if err != nil || stoppedSnapshot.State != "exited" || stoppedSnapshot.NativeID != snapshot.NativeID {
+		t.Fatal("stop did not return exact exited evidence", stoppedSnapshot, err)
+	}
+	removed, err := native.RemoveCandidate(context.Background(), launch, snapshot.NativeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removedSnapshot, err := removed.Snapshot()
+	if err != nil || removedSnapshot.State != "absent" || removedSnapshot.NativeID != snapshot.NativeID {
+		t.Fatal("remove did not return exact absence evidence", removedSnapshot, err)
 	}
 	cleaned = true
 	if err := native.Close(); err != nil {

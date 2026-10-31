@@ -65,6 +65,54 @@ func (o CandidateRunningObservation) Snapshot() (CandidateRunningSnapshot, error
 	}
 	return o.snapshot, nil
 }
+
+// CandidateRemovalObservation is current native lifecycle evidence for one
+// exact previously-running candidate. It is not a journal receipt or proof
+// that the application stopped cleanly at an earlier point.
+type CandidateRemovalObservation struct {
+	snapshot CandidateRemovalSnapshot
+	valid    bool
+}
+
+type CandidateRemovalSnapshot struct {
+	Launch     CandidateLaunchSnapshot `json:"launch"`
+	NativeID   string                  `json:"native_id"`
+	State      string                  `json:"state"`
+	ObservedMS int64                   `json:"observed_ms"`
+}
+
+func (CandidateRemovalObservation) MarshalJSON() ([]byte, error) {
+	return nil, ErrContainerUncertain
+}
+func (o *CandidateRemovalObservation) UnmarshalJSON([]byte) error {
+	*o = CandidateRemovalObservation{}
+	return ErrContainerUncertain
+}
+func (o CandidateRemovalObservation) Snapshot() (CandidateRemovalSnapshot, error) {
+	if !o.valid || !containerSHA.MatchString(o.snapshot.NativeID) || (o.snapshot.State != "exited" && o.snapshot.State != "absent") || o.snapshot.ObservedMS < 0 {
+		return CandidateRemovalSnapshot{}, ErrContainerUncertain
+	}
+	if !validCandidateLaunchSnapshot(o.snapshot.Launch) {
+		return CandidateRemovalSnapshot{}, ErrContainerUncertain
+	}
+	return o.snapshot, nil
+}
+func validCandidateLaunchSnapshot(s CandidateLaunchSnapshot) bool {
+	d := s.Data
+	return validContainerOwner(candidateOwner(s.Identity)) &&
+		(s.Platform == "linux/amd64" || s.Platform == "linux/arm64") &&
+		nativeImageID.MatchString(s.ImageID) &&
+		containerSHA.MatchString(s.PolicySHA256) &&
+		containerSHA.MatchString(s.MountsSHA256) &&
+		d.ProjectID > 0 &&
+		d.NamespaceInode > 0 &&
+		d.QuotaBytes > 0 &&
+		d.QuotaInodes > 0 &&
+		d.QuotaBytes%512 == 0 &&
+		d.Root.Inode > 0 &&
+		containerUUID.MatchString(d.Root.FilesystemUUID) &&
+		d.Root.FilesystemUUID != "00000000-0000-0000-0000-000000000000"
+}
 func candidateOwner(i CandidateIdentity) containerOwner { return containerOwner(i) }
 
 func candidateRequestValid(request CandidateLaunchRequest) bool {

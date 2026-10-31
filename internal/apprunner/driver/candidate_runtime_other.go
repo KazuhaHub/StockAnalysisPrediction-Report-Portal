@@ -36,6 +36,14 @@ func (*CandidateRuntime) CheckCandidateReadiness(context.Context, CandidateLaunc
 
 func (*CandidateRuntime) CheckConfiguration(context.Context) error { return ErrUnsupported }
 
+func (*CandidateRuntime) StopCandidate(context.Context, CandidateLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
+}
+
+func (*CandidateRuntime) RemoveCandidate(context.Context, CandidateLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
+}
+
 func (*CandidateRuntime) CheckSharedRootConfiguration(context.Context, *data.Root, data.RootIdentity) error {
 	return ErrUnsupported
 }

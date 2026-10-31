@@ -25,13 +25,16 @@ const (
 	WritableCandidateProbe
 	WritableRegistrationDeliver
 	WritableRegistrationRead
+	ManagedRemovalStop
+	ManagedRemovalRemoveCode
+	ManagedRemovalRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= WritableRegistrationRead
+	return a >= WritableWriterExecute && a <= ManagedRemovalRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -86,11 +89,18 @@ func (o WritableLifecycleObservation) RegistrationReceipt() (journal.WritableBac
 	}
 	return journal.ParseWritableBackendRegistrationReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) ManagedRemovalReceipt() (journal.ManagedRemovalReceipt, error) {
+	if o.action < ManagedRemovalStop || o.action > ManagedRemovalRead {
+		return journal.ManagedRemovalReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseManagedRemovalReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer       control.DataWriterCommand
 	candidate    control.WritableCandidateCommand
 	registration control.WritableBackendRegistrationCommand
+	removal      control.ManagedRemovalCommand
 	index        control.Command
 	release      string
 }
@@ -118,7 +128,7 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		r.writer = v.Writer().Command()
 		r.index = v.Writer().Data()
 		r.release = v.Index().Payload.ReleaseSHA256
-	default:
+	case action <= WritableRegistrationRead:
 		v, err := control.VerifyWritableBackendRegistration(raw, sig, a, now)
 		if err != nil {
 			return r, err
@@ -128,6 +138,13 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		r.writer = v.Candidate().Writer().Command()
 		r.index = v.Candidate().Writer().Data()
 		r.release = v.Candidate().Index().Payload.ReleaseSHA256
+	default:
+		v, err := control.VerifyManagedRemoval(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.removal = v.Command()
+		r.release = r.removal.Payload.ReleaseSHA256
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != r.release {
@@ -166,6 +183,30 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 	case action == WritableRegistrationDeliver || action == WritableRegistrationRead:
 		v, e := journal.ParseWritableBackendRegistrationReceipt(body)
 		if e != nil || v.Claim.EffectID != r.registration.EffectID || v.Claim.PayloadSHA256 != r.registration.PayloadSHA256 || v.Claim.SourceSHA256 != r.registration.RunningReceiptSHA256 || v.Claim.DocumentSHA256 != r.registration.DocumentSHA256 || !lifecycleRevisionWithin(v.Claim.ControlRevision, r.index.ControlRevision) || (v.RecoveryControlRevision != "" && !lifecycleRevisionWithin(v.RecoveryControlRevision, r.index.ControlRevision)) {
+			return false
+		}
+		settled = v.SettledMS
+	case action >= ManagedRemovalStop && action <= ManagedRemovalRead:
+		v, e := journal.ParseManagedRemovalReceipt(body)
+		expectedStage := r.removal.Stage
+		if action == ManagedRemovalStop {
+			expectedStage = "stop"
+		} else if action == ManagedRemovalRemoveCode {
+			expectedStage = "remove_code"
+		}
+		if e != nil || v.DeploymentID != r.removal.DeploymentID || v.ControllerEpoch != r.removal.ControllerEpoch ||
+			v.InstallationID != r.removal.InstallationID || v.OperationID != r.removal.OperationID ||
+			v.SourceOperationID != r.removal.Payload.SourceOperationID || v.SourceEffectID != r.removal.Payload.SourceEffectID ||
+			v.TargetGeneration != r.removal.TargetGeneration || v.Stage != expectedStage ||
+			v.EffectID != r.removal.EffectID || v.PayloadSHA256 != r.removal.PayloadSHA256 ||
+			v.SourceReceiptSHA256 != r.removal.Payload.SourceReceiptSHA256 ||
+			v.ResourceID != r.removal.Payload.ResourceID || v.DataNamespaceID != r.removal.Payload.DataNamespaceID ||
+			v.ReleaseSHA256 != r.removal.Payload.ReleaseSHA256 {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(r.removal.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
 			return false
 		}
 		settled = v.SettledMS

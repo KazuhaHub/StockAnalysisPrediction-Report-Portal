@@ -195,5 +195,30 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 		testNativeRegistrationRPC(t, s, activated, endpoint, platformDigest(document))
+		removal, err := s.createPlatformRemovalReview(session, activated.installationID, appplatform.ActionUninstall)
+		if err != nil {
+			t.Fatal("managed uninstall review", err)
+		}
+		removalCommit, err := s.consumePlatformRemovalReview(session, removal.ID, removal.SHA256, platformFixtureID(882))
+		if err != nil {
+			t.Fatal("managed uninstall admission", err)
+		}
+		removalLease, err := s.claimNextPlatformManagedUninstall(ctx, platformFixtureID(883))
+		if err != nil || removalLease.lease.id != removalCommit.OperationID {
+			t.Fatal("managed uninstall claim", removalLease, err)
+		}
+		removalRun, err := s.runPlatformManagedUninstall(ctx, removalLease.lease, endpoint)
+		if err != nil || removalRun.lease.snapshot.Stage != appplatform.StageComplete {
+			t.Fatal("managed uninstall execution", removalRun, err)
+		}
+		if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, activated.installationID) != "removed:removed" ||
+			scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, activated.installationID) != "retained" ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND stage='complete' AND completed_ms IS NOT NULL`, removalCommit.OperationID) != 1 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, activated.installationID) != 0 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 {
+			t.Fatal("managed uninstall left authority or plugin data")
+		}
+		t.Log("MANAGED_UNINSTALL_STOP_REMOVE_CODE")
 	}
 }

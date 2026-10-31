@@ -155,6 +155,9 @@ func (r *CandidateRuntime) PrepareCandidate(ctx context.Context, request Candida
 	return r.prepareCandidateProfile(ctx, request, nil)
 }
 func (r *CandidateRuntime) prepareCandidateProfile(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding) (CandidateLaunch, error) {
+	return r.prepareCandidateProfileMode(ctx, request, writable, true)
+}
+func (r *CandidateRuntime) prepareCandidateProfileMode(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding, enforceExclusion bool) (CandidateLaunch, error) {
 	var zero CandidateLaunch
 	if r == nil {
 		return zero, ErrUnsupported
@@ -176,8 +179,10 @@ func (r *CandidateRuntime) prepareCandidateProfile(ctx context.Context, request 
 	if writable == nil {
 		plan, err = planCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots)
 	} else {
-		if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
-			return zero, err
+		if enforceExclusion {
+			if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
+				return zero, err
+			}
 		}
 		plan, err = planWritableCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *writable)
 	}
@@ -254,8 +259,8 @@ func (r *CandidateRuntime) startCandidateProfile(ctx context.Context, launch Can
 	return CandidateRunningObservation{snapshot: CandidateRunningSnapshot{Launch: state.snapshot, NativeID: native, ObservedMS: time.Now().UTC().UnixMilli()}, valid: true}, nil
 }
 
-// cleanupCandidate is only the owned disposable test/support primitive. Current
-// lifecycle authority is still required before exposing any stop/remove route.
+// cleanupCandidate remains the owned disposable test/support primitive. Signed
+// lifecycle routes use StopCandidate/RemoveCandidate instead.
 func (r *CandidateRuntime) cleanupCandidate(ctx context.Context, launch CandidateLaunch, observed CandidateRunningObservation) error {
 	if r == nil || launch.state == nil || launch.state.owner != r {
 		return ErrInvalidResponse
@@ -277,6 +282,56 @@ func (r *CandidateRuntime) cleanupCandidate(ctx context.Context, launch Candidat
 		return err
 	}
 	return removeCandidateContainerHTTP(ctx, client, snapshot.NativeID, launch.state.plan)
+}
+
+// StopCandidate observes the exact previously-running container described by a
+// freshly reconstructed launch plan, performs one bounded stop and returns only
+// current exited-state evidence. It never removes the container.
+func (r *CandidateRuntime) StopCandidate(ctx context.Context, launch CandidateLaunch, nativeID string) (CandidateRemovalObservation, error) {
+	return r.changeCandidateLifecycle(ctx, launch, nativeID, false)
+}
+
+// RemoveCandidate accepts only an exact stopped/created candidate owned by the
+// reconstructed launch plan. Absence is returned only after the non-forced
+// native removal request succeeds.
+func (r *CandidateRuntime) RemoveCandidate(ctx context.Context, launch CandidateLaunch, nativeID string) (CandidateRemovalObservation, error) {
+	return r.changeCandidateLifecycle(ctx, launch, nativeID, true)
+}
+
+func (r *CandidateRuntime) changeCandidateLifecycle(ctx context.Context, launch CandidateLaunch, nativeID string, remove bool) (CandidateRemovalObservation, error) {
+	var zero CandidateRemovalObservation
+	if r == nil || launch.state == nil || launch.state.owner != r || !containerSHA.MatchString(nativeID) {
+		return zero, ErrInvalidResponse
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state := launch.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if r.closed || state.closed {
+		return zero, ErrInvalidResponse
+	}
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	result := "exited"
+	var err error
+	if remove {
+		err = removeCandidateContainerHTTP(ctx, client, nativeID, state.plan)
+		result = "absent"
+	} else {
+		result, err = stopCandidateContainerHTTP(ctx, client, nativeID, state.plan)
+	}
+	if err != nil {
+		return zero, err
+	}
+	observed := time.Now().UTC().UnixMilli()
+	if err := ctx.Err(); err != nil {
+		return zero, errors.Join(ErrContainerUncertain, err)
+	}
+	return CandidateRemovalObservation{snapshot: CandidateRemovalSnapshot{Launch: state.snapshot, NativeID: nativeID, State: result, ObservedMS: observed}, valid: true}, nil
 }
 
 // CheckConfiguration checks the borrowed provider and daemon availability only.

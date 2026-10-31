@@ -10,11 +10,20 @@ func (*CandidateRuntime) ProvisionWritableCandidateSockets(context.Context, Writ
 func (*CandidateRuntime) PrepareWritableCandidate(context.Context, WritableCandidateLaunchRequest) (WritableCandidateLaunch, error) {
 	return WritableCandidateLaunch{}, ErrUnsupported
 }
+func (*CandidateRuntime) PrepareWritableCandidateRemoval(context.Context, WritableCandidateLaunchRequest) (WritableCandidateLaunch, error) {
+	return WritableCandidateLaunch{}, ErrUnsupported
+}
 func (WritableCandidateLaunch) Snapshot() (WritableCandidateLaunchSnapshot, error) {
 	return WritableCandidateLaunchSnapshot{}, ErrUnsupported
 }
 func (*CandidateRuntime) StartWritableCandidate(context.Context, WritableCandidateLaunch) (WritableCandidateRunningObservation, error) {
 	return WritableCandidateRunningObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) StopWritableCandidate(context.Context, WritableCandidateLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) RemoveWritableCandidate(context.Context, WritableCandidateLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
 }
 func (*CandidateRuntime) ObserveWritableCandidate(context.Context, WritableCandidateLaunchRequest, WritableCandidateLaunchSnapshot) (WritableCandidateRecoveryObservation, error) {
 	return WritableCandidateRecoveryObservation{}, ErrUnsupported

@@ -185,15 +185,28 @@ func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
 	}
 }
 
-func TestPlatformManagementUninstallRefusesManagedNamespace(t *testing.T) {
-	s, admin, _, installation := platformObjectsFixture(t)
+func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
+	s, admin, lease := platformManagedAccessFixture(t, false)
+	installation := lease.installationID
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
 	body := fmt.Sprintf(`{"action":"uninstall","installation_id":%q}`, installation)
 	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
-	if got.Code != 409 || !strings.Contains(got.Body.String(), "app_platform_requirements_unavailable") || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE action='uninstall'`) != 0 {
-		t.Fatal("managed namespace admitted to frontend uninstall", got.Code, got.Body.String())
+	if got.Code != 200 || !strings.Contains(got.Body.String(), `"managed":true`) || !strings.Contains(got.Body.String(), `"managed_data_retained":true`) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE action='uninstall'`) != 1 {
+		t.Fatal("managed uninstall review", got.Code, got.Body.String())
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if json.Unmarshal(got.Body.Bytes(), &review) != nil {
+		t.Fatal(got.Body.String())
+	}
+	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/operations", cookie, fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA, platformFixtureID(996)))
+	if commit.Code != 202 || scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "removed:pending" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND action='uninstall' AND managed=1 AND stage='queued'`, installation) != 1 {
+		t.Fatal("managed uninstall admission", commit.Code, commit.Body.String())
 	}
 }
 

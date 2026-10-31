@@ -3,7 +3,9 @@
 package journal
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -211,6 +213,54 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 				replay, err := s.DispatchCandidate(ctx, renewedRaw, renewedSig, nil, descriptor)
 				if err != nil || !sameCandidateReceipt(replay, receipt) || candidateFixtureOwnedNative(t, socket, c) != id {
 					t.Fatal("applied dispatch reexecuted/changed native identity", err)
+				}
+				enrollment := enrollmentFixture(30)
+				authority := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
+				key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
+				dispatchRemoval := func(stage, kind, operation, effect string) {
+					t.Helper()
+					now := time.Now().UnixMilli()
+					command := control.ManagedRemovalCommand{
+						Format: control.ManagedRemovalFormat, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
+						ControlRevision: c.ControlRevision, InstallationID: c.InstallationID, OperationID: operation,
+						TargetGeneration: "2", Stage: stage, EffectNumber: "1", EffectID: effect, Kind: kind,
+						InstallationFence: "2", IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+						Payload: control.ManagedRemovalPayload{ResourceID: c.Payload.ResourceID, DataNamespaceID: c.Payload.DataNamespaceID,
+							ReleaseSHA256: c.Payload.ReleaseSHA256, Platform: c.Payload.Platform, SourceOperationID: c.OperationID,
+							SourceEffectID: c.EffectID, SourceReceiptSHA256: candidateHash([]byte(stored))},
+					}
+					digest, err := control.ManagedRemovalLogicalDigest(command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					command.PayloadSHA256 = digest
+					raw, sig, err := control.SignManagedRemoval(command, key, authority, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := s.DispatchManagedRemoval(ctx, raw, sig, descriptor, native); err != nil {
+						t.Fatal("managed removal", stage, err)
+					}
+				}
+				dispatchRemoval("stop", "stop", fixtureID(7106+slot*10), fixtureID(7107+slot*10))
+				var stoppedState string
+				var stoppedRevision int
+				if err := s.db.QueryRow(`SELECT observed_state,revision FROM runner_resources WHERE id=?`, c.Payload.ResourceID).Scan(&stoppedState, &stoppedRevision); err != nil || stoppedState != "stopped" || stoppedRevision != 3 {
+					t.Fatal("managed stop did not settle", stoppedState, stoppedRevision, err)
+				}
+				dispatchRemoval("remove_code", "remove-code", fixtureID(7108+slot*10), fixtureID(7109+slot*10))
+				var absentState, absentDesired string
+				var absentRevision int
+				if err := s.db.QueryRow(`SELECT observed_state,desired_state,revision FROM runner_resources WHERE id=?`, c.Payload.ResourceID).Scan(&absentState, &absentDesired, &absentRevision); err != nil || absentState != "absent" || absentDesired != "absent" || absentRevision != 4 || candidateFixtureOwnedNative(t, socket, c) != "" {
+					t.Fatal("managed remove-code did not settle", absentState, absentDesired, absentRevision, err)
+				}
+				project, err := strconv.ParseUint(proof.ProjectID, 10, 32)
+				if err != nil {
+					t.Fatal(err)
+				}
+				retained, err := root.Inspect(ctx, pin, c.Payload.DataNamespaceID, uint32(project))
+				if err != nil || retained.NamespaceID != c.Payload.DataNamespaceID || retained.ProjectID != uint32(project) {
+					t.Fatal("managed remove-code deleted or changed the retained data namespace", retained, err)
 				}
 			} else {
 				if err == nil || receipt.Format != "" {

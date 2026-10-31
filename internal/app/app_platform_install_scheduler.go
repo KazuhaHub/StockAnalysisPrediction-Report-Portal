@@ -84,6 +84,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		var err error
 		if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
+			}
 		} else if w.endpoint.path == "" {
 			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -94,6 +97,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			}
 		} else {
 			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
+			}
 		}
 		if err != nil {
 			w.publish("worker_unavailable", "", "")
@@ -127,7 +133,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	w.active = renewed
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
-	if w.writable {
+	if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
+		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
+	} else if w.writable {
 		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
 	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
 		result.lease, err = w.server.runPlatformStaticUpdate(ctx, w.active)
@@ -158,6 +166,8 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	finish := w.server.finishPlatformInstallForReview
 	if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedUninstallForReview
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
 		finish = w.server.finishPlatformFrontendUninstallForReview
 	}

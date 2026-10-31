@@ -298,7 +298,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		review, err := s.createPlatformFrontendRemovalReviewContext(r.Context(), actor, installation, appplatform.ActionUninstall)
+		review, err := s.createPlatformRemovalReviewContext(r.Context(), actor, installation, appplatform.ActionUninstall)
 		if err != nil {
 			platformManagementError(w, err)
 			return

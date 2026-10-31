@@ -77,13 +77,25 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 	if currentApp != p.AppID || currentPublisher != p.PublisherID || currentDesired != desired || currentPhase != phase || generation != p.TargetGeneration || currentRevision < installRevision+1 || currentPolicy < policyRevision {
 		return errAppPlatformStageEvidence
 	}
-	var active, effects int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'),
-        (SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?)`, lease.installationID, lease.id).Scan(&active, &effects); err != nil {
+	var active int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, lease.installationID).Scan(&active); err != nil {
 		return err
 	}
-	if active != 0 || effects != 0 {
+	if active != 0 {
 		return errAppPlatformStageEvidence
+	}
+	if lease.snapshot.Managed {
+		if err := validatePlatformManagedRemovalEffects(e, lease); err != nil {
+			return err
+		}
+	} else {
+		var effects int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil {
+			return err
+		}
+		if effects != 0 {
+			return errAppPlatformStageEvidence
+		}
 	}
 	var data platformRemovalData
 	err = e.queryRow(`SELECT id,state,data_format,revision,writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID).
@@ -99,6 +111,81 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 	}
 	if p.Data == nil || data.ID != p.Data.ID || data.State != "active" || p.Data.State != "active" || data.Format != p.Data.Format || p.Data.Revision < 1 || p.Data.Revision == math.MaxInt64 ||
 		p.Data.WriterFence < 0 || p.Data.WriterFence == math.MaxInt64 || data.Revision < p.Data.Revision+1 || data.WriterFence < p.Data.WriterFence+1 {
+		return errAppPlatformStageEvidence
+	}
+	return nil
+}
+
+func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLease) error {
+	if lease.snapshot.Action != appplatform.ActionUninstall {
+		var effects int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil {
+			return err
+		}
+		if effects != 0 {
+			return errAppPlatformStageEvidence
+		}
+		return nil
+	}
+	rows, err := e.query(`SELECT stage,effect_number,kind,state FROM app_platform_operation_effects WHERE operation_id=? ORDER BY stage`, lease.id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type managedEffect struct{ kind, state string }
+	effects := map[string]managedEffect{}
+	for rows.Next() {
+		var stage, kind, state string
+		var number int
+		if err := rows.Scan(&stage, &number, &kind, &state); err != nil {
+			return err
+		}
+		expectedKind := ""
+		switch stage {
+		case "stop":
+			expectedKind = "stop"
+		case "remove_code":
+			expectedKind = "remove-code"
+		default:
+			return errAppPlatformStageEvidence
+		}
+		if number != 1 || kind != expectedKind || (state != "prepared" && state != "applied" && state != "unknown") {
+			return errAppPlatformStageEvidence
+		}
+		if _, duplicate := effects[stage]; duplicate {
+			return errAppPlatformStageEvidence
+		}
+		effects[stage] = managedEffect{kind: kind, state: state}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for stage, effect := range effects {
+		if stage != string(lease.snapshot.Stage) && effect.state != "applied" {
+			return errAppPlatformStageEvidence
+		}
+	}
+	switch lease.snapshot.Stage {
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageRevoke:
+		if len(effects) != 0 {
+			return errAppPlatformStageEvidence
+		}
+	case appplatform.StageStop:
+		if len(effects) > 1 || (len(effects) == 1 && effects["stop"].kind != "stop") {
+			return errAppPlatformStageEvidence
+		}
+	case appplatform.StageRemoveCode:
+		if stop, ok := effects["stop"]; !ok || stop.kind != "stop" || stop.state != "applied" || len(effects) > 2 {
+			return errAppPlatformStageEvidence
+		}
+		if remove, ok := effects["remove_code"]; ok && remove.kind != "remove-code" {
+			return errAppPlatformStageEvidence
+		}
+	case appplatform.StageComplete:
+		if len(effects) != 2 || effects["stop"].state != "applied" || effects["remove_code"].state != "applied" {
+			return errAppPlatformStageEvidence
+		}
+	default:
 		return errAppPlatformStageEvidence
 	}
 	return nil

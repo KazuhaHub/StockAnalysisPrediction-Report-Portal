@@ -75,6 +75,25 @@ func (r *CandidateRuntime) PrepareWritableCandidate(ctx context.Context, request
 	}
 	return result, nil
 }
+func (r *CandidateRuntime) PrepareWritableCandidateRemoval(ctx context.Context, request WritableCandidateLaunchRequest) (WritableCandidateLaunch, error) {
+	request.Descriptor = bytes.Clone(request.Descriptor)
+	if !validWritableCandidateRequest(request) {
+		return WritableCandidateLaunch{}, ErrInvalidResponse
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	binding := request.Binding
+	launch, err := r.prepareCandidateProfileMode(ctx, request.CandidateLaunchRequest, &binding, false)
+	if err != nil {
+		return WritableCandidateLaunch{}, err
+	}
+	result := WritableCandidateLaunch{launch: launch}
+	if _, err := result.Snapshot(); err != nil {
+		launch.Close()
+		return WritableCandidateLaunch{}, err
+	}
+	return result, nil
+}
 func (c WritableCandidateLaunch) Snapshot() (WritableCandidateLaunchSnapshot, error) {
 	var zero WritableCandidateLaunchSnapshot
 	state := c.launch.state
@@ -91,6 +110,14 @@ func (c WritableCandidateLaunch) Snapshot() (WritableCandidateLaunchSnapshot, er
 		return zero, ErrContainerUncertain
 	}
 	return snapshot, nil
+}
+
+func (r *CandidateRuntime) StopWritableCandidate(ctx context.Context, launch WritableCandidateLaunch, nativeID string) (CandidateRemovalObservation, error) {
+	return r.changeCandidateLifecycle(ctx, launch.launch, nativeID, false)
+}
+
+func (r *CandidateRuntime) RemoveWritableCandidate(ctx context.Context, launch WritableCandidateLaunch, nativeID string) (CandidateRemovalObservation, error) {
+	return r.changeCandidateLifecycle(ctx, launch.launch, nativeID, true)
 }
 
 // StartWritableCandidate never retries, adopts a container or changes data

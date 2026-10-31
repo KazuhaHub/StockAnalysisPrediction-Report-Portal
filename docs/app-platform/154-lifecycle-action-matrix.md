@@ -1,6 +1,6 @@
 # Application lifecycle action matrix
 
-Status: H13 implementation checklist, 2026-10-30. This is not evidence that
+Status: H13 implementation checklist, 2026-10-31. This is not evidence that
 every row is implemented.
 
 | Action | Entry state and review | Immediate authority | Data/code effect | Failure/uncertain |
@@ -27,6 +27,16 @@ Implemented and tested:
 - reviewed frontend uninstall scheduling through
   `revoke -> remove_code -> complete`, with access/capability rows removed and
   the installation made permanently unavailable;
+- managed uninstall review and execution through
+  `revoke -> stop -> remove_code -> complete`. The exact signed command binds the
+  original ordinary or writable candidate operation/effect/receipt/native
+  identity; stop and remove-code accept only opaque `exited` and `absent`
+  observations. Completion clears access/capability rows, makes the installation
+  unavailable, and retains the managed data namespace as `retained` for a
+  separate reviewed deletion;
+- managed uninstall failure/uncertainty is denial-only and lands in
+  `recovery_required`; a prepared effect left by a crash is reclaimable only to
+  record that review and is not automatically reissued;
 - restore at the frontend clear-on-uninstall crash point keeps the installation
   removed, recreates no plugin table or live activation, preserves an empty
   object store, and forces the unfinished operation to `recovery_required`
@@ -40,13 +50,14 @@ Still required for H13 completion:
 
 - managed update A-to-B execution (the current generic update executor is
   frontend-only);
-- managed uninstall execution and reviewed namespace deletion (frontend plugin
+- native disposable acceptance of managed uninstall, including restoration
+  around stop/remove-code and reconciliation with the live runner;
+- reviewed managed namespace deletion after the retained state (frontend plugin
   object data is already cleared at uninstall admission);
 - retained-data adoption is superseded for the owner-approved static object
   store by clear-on-uninstall; managed namespace retention/deletion remains;
 - explicit `delete_data` review/consume path after uninstall;
-- full concurrent operator acceptance and managed backend restore-vs-runner
-  acceptance;
+- full concurrent operator acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
 
 No row may be made safe by a UI-only check, a cached generation, a copied database

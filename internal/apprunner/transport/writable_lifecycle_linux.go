@@ -194,6 +194,10 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchWritableBackendRegistration(ctx, raw, sig, descriptor, document, provider.native)
 	case WritableRegistrationRead:
 		result, err = provider.store.ReadWritableBackendRegistrationReceipt(ctx, raw, sig)
+	case ManagedRemovalStop, ManagedRemovalRemoveCode:
+		result, err = provider.store.DispatchManagedRemoval(ctx, raw, sig, descriptor, provider.native)
+	case ManagedRemovalRead:
+		result, err = provider.store.ReadManagedRemovalReceipt(ctx, raw, sig)
 	default:
 		return
 	}
