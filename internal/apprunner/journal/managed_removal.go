@@ -553,10 +553,19 @@ func (source managedRemovalSource) preflightMatches(snapshot driver.CandidateLau
 
 func sameCandidateRemovalProvenance(a, b managedRemovalSource) bool {
 	writable := a.writable == nil && b.writable == nil ||
-		a.writable != nil && b.writable != nil && *a.writable == *b.writable
-	return a.command == b.command && a.source == b.source && writable && a.data == b.data &&
+		a.writable != nil && b.writable != nil && sameManagedRemovalJSON(*a.writable, *b.writable)
+	return a.command == b.command && sameManagedRemovalJSON(a.source, b.source) && writable && a.data == b.data &&
 		a.sourceFence == b.sourceFence && a.generation == b.generation && a.writerFence == b.writerFence &&
 		a.nativeID == b.nativeID && a.platform == b.platform && a.ownership == b.ownership
+}
+
+func sameManagedRemovalJSON(a, b any) bool {
+	first, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	second, err := json.Marshal(b)
+	return err == nil && bytes.Equal(first, second)
 }
 
 func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byte, descriptor []byte, native *driver.CandidateRuntime) (ManagedRemovalReceipt, error) {

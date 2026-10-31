@@ -235,3 +235,35 @@ func TestManagedRemovalReceiptReadRejectsChangedBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedRemovalProvenanceComparesParsedPreflightByContent(t *testing.T) {
+	_, _, _, ordinary := appliedCandidateReceiptFixture(t)
+	raw, _ := json.Marshal(ordinary)
+	first, err := ParseCandidateRunningReceipt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ParseCandidateRunningReceipt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Claim.Preflight == second.Claim.Preflight ||
+		!sameCandidateRemovalProvenance(managedRemovalSource{source: first}, managedRemovalSource{source: second}) {
+		t.Fatal("ordinary parsed preflight content was treated as changed")
+	}
+
+	_, _, _, writable := syntheticWritableRunningFixture(t)
+	raw, _ = json.Marshal(writable)
+	firstWritable, err := ParseWritableCandidateRunningReceipt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondWritable, err := ParseWritableCandidateRunningReceipt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstWritable.Claim.Preflight == secondWritable.Claim.Preflight ||
+		!sameCandidateRemovalProvenance(managedRemovalSource{writable: &firstWritable}, managedRemovalSource{writable: &secondWritable}) {
+		t.Fatal("writable parsed preflight content was treated as changed")
+	}
+}
