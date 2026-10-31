@@ -2356,6 +2356,92 @@ body {
     border-bottom: 1px solid var(--ant-color-split);
   }
 }
+/* An audit row's record, expanded under it (pages/manage/AuditPage.tsx): label and value side by
+   side, labels never wrapping, and labels above values once the space is too narrow for both. */
+.rp-audit-record {
+  container-type: inline-size;
+  padding: 4px 4px 8px;
+  cursor: auto;
+}
+.rp-audit-record__fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 20px;
+  margin: 0;
+}
+.rp-audit-record__fields > dt {
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+.rp-audit-record__fields > dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 420px) {
+  .rp-audit-record:not(.rp-audit-record--compact) .rp-audit-record__fields { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rp-audit-record:not(.rp-audit-record--compact) .rp-audit-record__fields > dd { margin-bottom: 8px; }
+}
+@container (max-width: 240px) {
+  .rp-audit-record--compact .rp-audit-record__fields { grid-template-columns: minmax(0, 1fr); }
+}
+.rp-audit-record__raw {
+  margin-top: 8px;
+}
+.rp-audit-record__raw .ant-btn { padding-inline: 0; }
+.rp-audit-record__raw pre {
+  max-height: 320px;
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--ant-border-radius);
+  background: var(--ant-color-fill-quaternary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* The leading chevron: small and quiet, turning down to point at its open record. */
+.rp-audit-expand.ant-btn { width: 24px; height: 24px; color: var(--ant-color-text-tertiary); }
+.rp-audit-expand.ant-btn:hover { color: var(--ant-color-text); }
+.rp-audit-expand .anticon { font-size: 11px; transition: transform var(--ant-motion-duration-mid, 0.2s); }
+.rp-audit-expand.is-open .anticon { transform: rotate(90deg); }
+/* A record unfolds from its row and folds back into it: the grid row grows from 0fr to 1fr while it
+   fades in, and the reverse on close, before the record is unmounted. */
+.rp-expand {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: rp-expand-in 0.2s var(--ant-motion-ease-out, ease-out);
+}
+.rp-expand > * { min-height: 0; overflow: hidden; }
+.rp-expand.is-closing { animation: rp-expand-out 0.18s var(--ant-motion-ease-in, ease-in) forwards; }
+@keyframes rp-expand-in {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+@keyframes rp-expand-out {
+  from { grid-template-rows: 1fr; opacity: 1; }
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-audit-expand .anticon { transition: none; }
+  .rp-expand, .rp-expand.is-closing { animation: none; }
+}
+/* The expanded row's cell carries no padding of its own, so the fold starts from nothing. */
+.rp-audit-card .ant-table-wrapper .ant-table-tbody > tr.ant-table-expanded-row > td { padding: 0; }
+.rp-audit-card .ant-table-expanded-row .rp-audit-record { padding: 12px 16px 14px 52px; }
+/* A clickable row says so. */
+.rp-audit-card .ant-table-tbody > tr.ant-table-row { cursor: pointer; }
+.rp-audit-row.is-open { border-color: var(--ant-color-primary-border); }
+.rp-audit-row .rp-audit-record { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--ant-color-split); }
+.rp-audit-row__head:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
+  border-radius: var(--ant-border-radius-sm);
+}
+/* The phone record is a compact two-column list: labels small, beside their values. */
+.rp-audit-record--compact .rp-audit-record__fields { gap: 6px 12px; font-size: 13px; }
+.rp-audit-record--compact .rp-audit-record__fields > dt { font-size: 12px; }
+
 /* Audit log on a phone: the table becomes a list of cards (see pages/manage/AuditPage.tsx).
    Each card is a whole row, so every field gets the full width instead of a column narrow
    enough to wrap CJK one character per line. */
@@ -2375,12 +2461,8 @@ body {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.rp-audit-row:active {
+.rp-audit-row:active:not(:has(.rp-audit-record:active)) {
   background: var(--ant-color-fill-quaternary, rgba(128, 128, 128, 0.06));
-}
-.rp-audit-row:focus-visible {
-  outline: 2px solid var(--ant-color-primary, #1677ff);
-  outline-offset: 2px;
 }
 .rp-audit-row__head {
   display: flex;

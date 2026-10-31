@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { auditTime } from '../../lib/auditTime'
 import { formatRegion } from '../../lib/geo'
@@ -6,11 +6,9 @@ import {
   Alert,
   Button,
   Card,
-  Descriptions,
   Empty,
   Grid,
   Input,
-  Modal,
   Pagination,
   Select,
   Space,
@@ -26,7 +24,7 @@ import AuditTimeRange from './AuditTimeRange'
 import { auditExportInput, auditQueryParams, type AuditCondition, type AuditRange } from '../../lib/auditQuery'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
-import { ExportOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
+import { ExportOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { auditDetail, headline, listSeparator, type ChangeMember, type DetailPart } from '../../lib/auditDetail'
@@ -220,6 +218,138 @@ const ACTION_COLOR: Record<string, string> = {
  * reports only WHETHER one is configured; the field starts blank and blank means "leave it alone",
  * the same rule the SMTP password and the SSO client secrets already follow.
  */
+// Everything a row carries, in the order an investigation reads it, laid out as label and value under
+// the row; the stored payload is folded until asked for. The sentence in the table is a rendering, and
+// somebody chasing an incident needs the thing itself to paste into a ticket. At module level so a
+// re-render of the page (a poll, a filter) keeps an open record's state.
+// The stored payload, indented for reading only when that changes nothing but whitespace: re-serialising
+// JSON can reorder integer-like keys, round large numbers and rewrite escapes, and an audit record must
+// show what was stored. Anything else is shown exactly as it is.
+export function readablePayload(detail: string): string {
+  if (!detail) return ''
+  try {
+    const value: unknown = JSON.parse(detail)
+    if (JSON.stringify(value) === withoutLayout(detail)) return JSON.stringify(value, null, 2)
+  } catch {
+    // Not JSON.
+  }
+  return detail
+}
+
+// JSON text with the whitespace between tokens removed, strings untouched: one pass, no regex.
+function withoutLayout(json: string): string {
+  let out = ''
+  let inString = false
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i]
+    if (inString) {
+      out += c
+      if (c === '\\') out += json[++i] ?? ''
+      else if (c === '"') inString = false
+    } else if (c === '"') {
+      inString = true
+      out += c
+    } else if (c !== ' ' && c !== '\n' && c !== '\r' && c !== '\t') {
+      out += c
+    }
+  }
+  return out
+}
+
+// Everything a row carries, in the order an investigation reads it, laid out as label and value under
+// the row; the stored payload is folded until asked for. The sentence in the table is a rendering, and
+// somebody chasing an incident needs the thing itself to paste into a ticket. At module level so a
+// re-render of the page (a poll, a filter) keeps an open record's state.
+//
+// `compact` is the phone card's record: the card already shows the time, the actor, the address, the
+// action, the object and the sentence, so the record adds only what it does not.
+function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; tz: string; ouNames: Record<string, string>; locale: string; compact?: boolean }) {
+  const { t } = useTranslation()
+  const [raw, setRaw] = useState(false)
+  const client = clientInfoFromDetail(r.detail)
+  const region = formatRegion(r.geo, locale)
+  const pretty = useMemo(() => readablePayload(r.detail), [r.detail])
+  const ou = r.actor_ou > 0 ? (ouNames[String(r.actor_ou)] ?? `OU ${r.actor_ou}`) : ''
+  const at = auditTime(r.at, tz).text
+  const actionName = t(`audit.a.${r.action}`, r.action)
+  const full = auditDetail(r.action, r.detail, t, { ouNames })
+  const field = (label: ReactNode, value: ReactNode) => (
+    <>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </>
+  )
+  const clientField =
+    client &&
+    field(
+      t('audit.client'),
+      <Space orientation="vertical" size={2} style={{ width: '100%' }}>
+        {!compact && (
+          <Typography.Text>
+            {clientLabel(client, client.device_type ? t(`loginActivity.deviceType.${client.device_type}`) : '') || '—'}
+          </Typography.Text>
+        )}
+        {client.user_agent && (
+          <Typography.Text type="secondary" copyable={{ text: client.user_agent }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
+            {t('audit.userAgent')}: {client.user_agent}
+          </Typography.Text>
+        )}
+        {client.client_hints && (
+          <Typography.Text type="secondary" copyable={{ text: JSON.stringify(client.client_hints) }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
+            {t('audit.clientHints')}: {JSON.stringify(client.client_hints)}
+          </Typography.Text>
+        )}
+      </Space>,
+    )
+  return (
+    <section
+      className={`rp-audit-record${compact ? ' rp-audit-record--compact' : ''}`}
+      role="region"
+      // Named after its row, so several open records are told apart in a screen reader's landmarks.
+      aria-label={t('audit.recordLabel', { action: actionName, at })}
+    >
+      <dl className="rp-audit-record__fields">
+        {compact ? (
+          <>
+            {ou && field(t('audit.f.ou'), ou)}
+            {field(t('audit.action'), <Typography.Text type="secondary">{r.action}</Typography.Text>)}
+            {clientField}
+            {/* The card shows the headline; the full detail is worth a line only when it says more. */}
+            {JSON.stringify(full) !== JSON.stringify(headline(full)) && field(t('audit.detail'), <DetailParts t={t} parts={full} full />)}
+          </>
+        ) : (
+          <>
+            {field(t('audit.at'), at)}
+            {field(t('audit.actor'), `${actorOf(r, t)}${ou ? ` · ${ou}` : ''}`)}
+            {field(t('audit.ipFilter'), r.ip ? `${r.ip}${region ? ` · ${region}` : ''}` : '—')}
+            {clientField}
+            {field(
+              t('audit.action'),
+              <Space size={6} wrap>
+                <Tag color={ACTION_COLOR[r.action]} style={{ marginInlineEnd: 0 }}>{actionName}</Tag>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.action}</Typography.Text>
+              </Space>,
+            )}
+            {field(t('audit.target'), `${t(`audit.t.${r.target_type}`, r.target_type)} ${r.target_id}`)}
+            {field(t('audit.detail'), <DetailParts t={t} parts={full} full />)}
+          </>
+        )}
+      </dl>
+      <div className="rp-audit-record__raw">
+        <Space size={4}>
+          <Button type="link" size="small" icon={<RightOutlined rotate={raw ? 90 : 0} />} aria-expanded={raw} onClick={() => setRaw((o) => !o)}>
+            {t('audit.raw')}
+          </Button>
+          {/* Copies the payload byte for byte, whatever the panel shows. */}
+          {r.detail ? <Typography.Text copyable={{ text: r.detail }} /> : null}
+        </Space>
+        {/* Bounded and scrollable: a grant change over a large OU carries a long list. */}
+        {raw && <pre>{pretty || '—'}</pre>}
+      </div>
+    </section>
+  )
+}
+
 export default function AuditPage() {
   const { failure, retryKey } = useLoadFailure()
   const { t, i18n } = useTranslation()
@@ -246,7 +376,29 @@ export default function AuditPage() {
     return a ? [{ field: 'action', op: 'is', value: a }] : []
   })
   const [category, setCategory] = useState<string | undefined>(() => params.get('category') ?? undefined)
-  const [row, setRow] = useState<AuditEntry | null>(null) // the row opened in full
+  // Rows expanded in place, below themselves, as Cloudflare's logs do: several can be open at once,
+  // to be read side by side, and the list never moves under a dialog.
+  // A record that is closing stays mounted until its fold has played (see .rp-expand in index.css).
+  const [expanded, setExpanded] = useState<ReadonlyMap<number, 'open' | 'closing'>>(() => new Map())
+  const isOpen = (id: number) => expanded.get(id) === 'open'
+  const toggle = (id: number) => {
+    // Selecting text in a row is reading it, not asking to open it.
+    if (typeof window !== 'undefined' && window.getSelection?.()?.toString()) return
+    if (!isOpen(id)) {
+      setExpanded((m) => new Map(m).set(id, 'open'))
+      return
+    }
+    setExpanded((m) => new Map(m).set(id, 'closing'))
+    const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    setTimeout(() => {
+      setExpanded((m) => {
+        if (m.get(id) !== 'closing') return m
+        const next = new Map(m)
+        next.delete(id)
+        return next
+      })
+    }, still ? 0 : 180)
+  }
   const [q, setQ] = useState('')
   // Like Workspace, the log opens on the last seven days. A link that arrives with filters points at
   // specific events, which may be older, so it opens on all time.
@@ -262,6 +414,12 @@ export default function AuditPage() {
   const filterKey = JSON.stringify([category, conditions, range, q])
   const [anchor, setAnchor] = useState(() => ({ key: filterKey, at: new Date() }))
   if (anchor.key !== filterKey) setAnchor({ key: filterKey, at: new Date() })
+  // Another page or another filter is another list: what was open on the last one closes.
+  const [openFor, setOpenFor] = useState(`${filterKey}|${page}`)
+  if (openFor !== `${filterKey}|${page}`) {
+    setOpenFor(`${filterKey}|${page}`)
+    setExpanded(new Map())
+  }
 
   const pageSize = 50
 
@@ -369,7 +527,11 @@ export default function AuditPage() {
             <Space orientation="vertical" size={0}>
               <Typography.Link
                 style={{ fontSize: 11 }}
-                {...clickable(() => filterByIP(r.ip ?? ''))}
+                // The address filters the log; the row expands. Without this a click does both.
+                {...clickable((e) => {
+                  e.stopPropagation()
+                  filterByIP(r.ip ?? '')
+                })}
               >
                 {r.ip}
               </Typography.Link>
@@ -415,22 +577,8 @@ export default function AuditPage() {
       // is clamped to two lines as well, so one long line cannot stretch its row either.
       render: (_, r) => <DetailParts t={t} parts={headline(auditDetail(r.action, r.detail, t, { ouNames }))} />,
     },
-    {
-      // Scanning and investigating want opposite things from this table. The column above serves
-      // the scan; this serves the investigation — every field as stored, including the ones the
-      // sentence drops for being uninformative, and the payload verbatim for pasting elsewhere.
-      title: '',
-      key: 'details', minWidth: 44,
-      width: 44,
-      // Pinned: it is the last thing in the row and the first thing a narrow window pushes off the
-      // right edge, which is exactly the control somebody reaches for when a cell looks wrong.
-      fixed: 'right',
-      render: (_, r) => (
-        <Button size="small" type="text" icon={<InfoCircleOutlined />} title={t('audit.details')} onClick={() => setRow(r)} />
-      ),
-    },
   ]
-  const tableView = useTableView('audit', columns, ['at', 'action', 'details'], { details: t('audit.details') })
+  const tableView = useTableView('audit', columns, ['at', 'action'])
 
   const categorySelect = (
     <Select
@@ -536,19 +684,26 @@ export default function AuditPage() {
     return (
       <div
         key={r.id}
-        className="rp-audit-row"
-        role="button"
-        tabIndex={0}
-        title={t('audit.details')}
-        onClick={() => setRow(r)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            setRow(r)
-          }
+        className={`rp-audit-row${isOpen(r.id) ? ' is-open' : ''}`}
+        // A tap anywhere on the card toggles its record, except inside the record itself, which has
+        // buttons of its own; the head is the keyboard's control.
+        onClick={(e) => {
+          if (!(e.target as Element).closest('.rp-audit-record')) toggle(r.id)
         }}
       >
-        <div className="rp-audit-row__head">
+        <div
+          className="rp-audit-row__head"
+          role="button"
+          tabIndex={0}
+          title={t('audit.details')}
+          aria-expanded={isOpen(r.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              toggle(r.id)
+            }
+          }}
+        >
           <Tag color={ACTION_COLOR[r.action]} style={{ marginInlineEnd: 0 }}>
             {t(`audit.a.${r.action}`, r.action)}
           </Tag>
@@ -567,8 +722,7 @@ export default function AuditPage() {
             {r.ip && (
               <Typography.Link
                 style={{ fontSize: 12 }}
-                // The address filters the log; the card opens the record. Without this, tapping the
-                // address does both and the modal covers the result.
+                // The address filters the log; the card expands. Without this, tapping it does both.
                 {...clickable((e) => {
                   e.stopPropagation()
                   filterByIP(r.ip ?? '')
@@ -603,11 +757,36 @@ export default function AuditPage() {
             {t('audit.legacyTime')}
           </Typography.Text>
         )}
+        {expanded.has(r.id) && recordView(r, true)}
       </div>
     )
   }
 
-  const rowClient = row ? clientInfoFromDetail(row.detail) : undefined
+  // The record unfolds from the row rather than appearing at full height (.rp-expand in index.css).
+  const recordView = (r: AuditEntry, compact = false) => (
+    <div key={`record-${r.id}`} className={`rp-expand${expanded.get(r.id) === 'closing' ? ' is-closing' : ''}`}>
+      <div>
+        <AuditRecordView r={r} tz={data?.timezone ?? ''} ouNames={ouNames} locale={locale} compact={compact} />
+      </div>
+    </div>
+  )
+  // Leading the row, as in Cloudflare's and Workspace's logs: a small chevron that turns down when open.
+  const expandIcon = (r: AuditEntry) => (
+    <Button
+      size="small"
+      type="text"
+      className={`rp-audit-expand${isOpen(r.id) ? ' is-open' : ''}`}
+      icon={<RightOutlined />}
+      title={t('audit.details')}
+      aria-label={t('audit.recordLabel', { action: t(`audit.a.${r.action}`, r.action), at: auditTime(r.at, data?.timezone ?? '').text })}
+      aria-expanded={isOpen(r.id)}
+      // The row expands on click too; this is the keyboard's way in, and must not count twice.
+      onClick={(e) => {
+        e.stopPropagation()
+        toggle(r.id)
+      }}
+    />
+  )
 
   return (
     <Card
@@ -658,7 +837,16 @@ export default function AuditPage() {
           // the shape the raw column was already failing in.
           tableLayout="fixed"
           // Fit to the visible columns' readable minimum; narrow views retain their card layout.
-          scroll={tableView.scroll}
+          // The expand column is antd's, outside the hook's columns.
+          scroll={{ x: tableView.scroll.x + 36 }}
+          expandable={{
+            expandedRowKeys: [...expanded.keys()],
+            onExpand: (_, r) => toggle(r.id),
+            expandRowByClick: true,
+            columnWidth: 36,
+            expandIcon: ({ record: r }) => expandIcon(r),
+            expandedRowRender: (r) => recordView(r),
+          }}
           pagination={{
             current: page,
             pageSize,
@@ -700,82 +888,6 @@ export default function AuditPage() {
         </Typography.Text>
       )}
 
-      {/* Everything the row carries, in the order an investigation reads it, and the payload
-          exactly as stored — the sentence in the table is a rendering, and somebody chasing an
-          incident needs the thing itself to paste into a ticket. */}
-      <Modal
-        open={row != null}
-        title={t('audit.details')}
-        footer={null}
-        // A 640px dialog on a 390px phone is centred by antd and then clipped on both sides.
-        width={mobile ? 'calc(100vw - 24px)' : 640}
-        // `margin: 0 auto` because setting `top` replaces antd's own margin shorthand, and without
-        // the auto the dialog sits against the left edge instead of centred.
-        style={mobile ? { top: 16, maxWidth: 'calc(100vw - 24px)', margin: '0 auto' } : undefined}
-        onCancel={() => setRow(null)}
-      >
-        {row && (
-          // Labels above values on a phone: side by side, the label column eats a third of the
-          // width and the address, the object and the payload each wrap to four lines.
-          <Descriptions bordered size="small" column={1} layout={mobile ? 'vertical' : 'horizontal'}>
-            <Descriptions.Item label={t('audit.at')}>{auditTime(row.at, data?.timezone ?? '').text}</Descriptions.Item>
-            <Descriptions.Item label={t('audit.actor')}>
-              {actorOf(row, t)}
-              {row.actor_ou > 0 ? ` · ${ouNames[String(row.actor_ou)] ?? `OU ${row.actor_ou}`}` : ''}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('audit.ipFilter')}>
-              {row.ip ? `${row.ip}${formatRegion(row.geo, locale) ? ` · ${formatRegion(row.geo, locale)}` : ''}` : '—'}
-            </Descriptions.Item>
-            {rowClient && (
-              <Descriptions.Item label={t('audit.client')}>
-                <Space orientation="vertical" size={2} style={{ width: '100%' }}>
-                  <Typography.Text>{clientLabel(rowClient, rowClient.device_type ? t(`loginActivity.deviceType.${rowClient.device_type}`) : '') || '—'}</Typography.Text>
-                  {rowClient.user_agent && (
-                    <Typography.Text type="secondary" copyable={{ text: rowClient.user_agent }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                      {t('audit.userAgent')}: {rowClient.user_agent}
-                    </Typography.Text>
-                  )}
-                  {rowClient.client_hints && (
-                    <Typography.Text type="secondary" copyable={{ text: JSON.stringify(rowClient.client_hints) }} style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                      {t('audit.clientHints')}: {JSON.stringify(rowClient.client_hints)}
-                    </Typography.Text>
-                  )}
-                </Space>
-              </Descriptions.Item>
-            )}
-            <Descriptions.Item label={t('audit.action')}>
-              <Tag color={ACTION_COLOR[row.action]}>{t(`audit.a.${row.action}`, row.action)}</Tag>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {row.action}
-              </Typography.Text>
-            </Descriptions.Item>
-            <Descriptions.Item label={t('audit.target')}>
-              {t(`audit.t.${row.target_type}`, row.target_type)} {row.target_id}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('audit.detail')}>
-              {/* Unclamped here: this is the place the clamped column sends somebody who needs the
-                  whole thing. Still bounded, so the dialog does not grow past the window. */}
-              <DetailParts t={t} parts={auditDetail(row.action, row.detail, t, { ouNames })} full />
-            </Descriptions.Item>
-            <Descriptions.Item
-              // Copy sits on the label rather than on the payload: antd puts the icon after its
-              // child, and after a block of JSON that is a stray glyph on a line of its own.
-              label={
-                <Space size={4}>
-                  {t('audit.raw')}
-                  {row.detail ? <Typography.Text copyable={{ text: row.detail }} /> : null}
-                </Space>
-              }
-            >
-              {/* Bounded and scrollable: a grant change over a large OU can carry a long list, and
-                  a dialog that grows past the window is one nobody can close. */}
-              <pre style={{ margin: 0, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 12 }}>
-                {row.detail || '—'}
-              </pre>
-            </Descriptions.Item>
-          </Descriptions>
-        )}
-      </Modal>
     </Card>
   )
 }

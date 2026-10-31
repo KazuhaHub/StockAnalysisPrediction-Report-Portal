@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, Grid } from 'antd'
-import AuditPage from './AuditPage'
+import AuditPage, { readablePayload } from './AuditPage'
 import { decodeFilter } from '../../lib/exportFilter'
 
 const navigateSpy = vi.hoisted(() => vi.fn())
@@ -86,6 +86,9 @@ const mount = (initial = '/manage/audit') =>
       </App>
     </MemoryRouter>,
   )
+
+// The record a row expands into, below it (Cloudflare's logs): a region named after the details.
+const record = async (n = 0) => (await screen.findAllByRole('region', { name: 'audit.recordLabel' }))[n]
 
 // Opens the Filters panel. With nothing applied it starts on one empty action row.
 const openFilters = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -430,9 +433,9 @@ describe('AuditPage', () => {
 
     await waitFor(() => expect(reachable(screen.getAllByTitle('audit.details')[0])).toBe(true))
     await userEvent.click(screen.getAllByTitle('audit.details')[0])
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/audit\.userAgent: raw browser evidence/)).toBeTruthy()
-    expect(within(dialog).getByText(/audit\.clientHints:/)).toBeTruthy()
+    const open = await record()
+    expect(within(open).getByText(/audit\.userAgent: raw browser evidence/)).toBeTruthy()
+    expect(within(open).getByText(/audit\.clientHints:/)).toBeTruthy()
   })
 
   // The pair arrives alphabetically ("after" first) because the server stores it in a map. Rendered
@@ -521,10 +524,10 @@ describe('AuditPage', () => {
     // stops loading, and holding the node from before the wait is the other half of the race.
     await waitFor(() => expect(reachable(screen.getAllByTitle('audit.details')[0])).toBe(true))
     await userEvent.click(screen.getAllByTitle('audit.details')[0])
-    const record = detailText(await screen.findByRole('dialog'))
-    expect(record).toContain('priority 30')
-    expect(record).toContain('retries 2')
-    expect(record).toContain('inputs query=x')
+    const full = detailText(await record())
+    expect(full).toContain('priority 30')
+    expect(full).toContain('retries 2')
+    expect(full).toContain('inputs query=x')
   })
 
   // The target column used to read "version <name>" only because target_type happened to be spelled
@@ -544,7 +547,48 @@ describe('AuditPage', () => {
   // The detail column is a sentence now, which is what somebody scanning the log wants. Somebody
   // investigating wants the opposite: every field exactly as stored, including the ones the
   // sentence leaves out for being uninformative. One click, not a second page.
-  it('opens a row in full, with the stored payload verbatim', async () => {
+  // Expanded in place rather than in a dialog, so two records can be read side by side and the list
+  // stays where it was.
+  it('expands rows in place, several at once, and folds them again', async () => {
+    mount()
+    await waitFor(() => expect(reachable(screen.getAllByTitle('audit.details')[1])).toBe(true))
+    await userEvent.click(screen.getAllByTitle('audit.details')[0])
+    await userEvent.click(screen.getAllByTitle('audit.details')[1])
+    expect(await screen.findAllByRole('region', { name: 'audit.recordLabel' })).toHaveLength(2)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getAllByTitle('audit.details')[0].getAttribute('aria-expanded')).toBe('true')
+    await userEvent.click(screen.getAllByTitle('audit.details')[0])
+    await waitFor(() => expect(screen.getAllByRole('region', { name: 'audit.recordLabel' })).toHaveLength(1))
+  })
+
+  // The expand control leads the row, as in Cloudflare's and Workspace's logs, rather than trailing
+  // after the last column where it read as a stray glyph.
+  it('puts the expand control at the start of the row', async () => {
+    const { container } = mount()
+    await screen.findByText('客户A')
+    const first = container.querySelector('.ant-table-tbody tr.ant-table-row td')
+    expect(first?.querySelector('[title="audit.details"]')).not.toBeNull()
+  })
+
+  it('filters by an address clicked in a row without expanding it', async () => {
+    apiMock.get.mockResolvedValue({ ...RESP, items: [{ ...RESP.items[1], ip: '10.1.2.3' }] })
+    mount()
+    await waitFor(() => expect(reachable(screen.getByText('10.1.2.3'))).toBe(true))
+    await userEvent.click(screen.getByText('10.1.2.3'))
+    await waitFor(() => expect(lastUrl()).toContain('ip=10.1.2.3'))
+    expect(screen.queryByRole('region', { name: 'audit.recordLabel' })).toBeNull()
+  })
+
+  it('expands from a click anywhere on the row, and stays open while its record is used', async () => {
+    const { container } = mount()
+    await waitFor(() => expect(reachable(container.querySelectorAll('.ant-table-tbody tr.ant-table-row td')[2])).toBe(true))
+    await userEvent.click(container.querySelectorAll('.ant-table-tbody tr.ant-table-row td')[2])
+    const open = await record()
+    await userEvent.click(within(open).getByRole('button', { name: /audit\.raw/ }))
+    expect(screen.getAllByRole('region', { name: 'audit.recordLabel' })).toHaveLength(1)
+  })
+
+  it('opens a row in full, with the stored payload', async () => {
     mount()
     await screen.findAllByTitle('audit.details')
     // A row appearing is not the same as a row being clickable: while the table is loading antd
@@ -560,8 +604,11 @@ describe('AuditPage', () => {
     await waitFor(() => expect(reachable(screen.getAllByTitle('audit.details')[1])).toBe(true))
     await userEvent.click(screen.getAllByTitle('audit.details')[1]) // the grant change: a payload worth reading
 
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('{"before":[],"after":["u:client@corp.example"]}')).toBeTruthy()
+    const dialog = await record()
+    // The stored payload is folded until asked for, then shown as written, indented for reading.
+    expect(within(dialog).queryByText(/u:client@corp\.example"\]/)).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: /audit\.raw/ }))
+    expect(within(dialog).getByText((_, el) => el?.tagName === 'PRE' && el.textContent === JSON.stringify({ before: [], after: ['u:client@corp.example'] }, null, 2))).toBeTruthy()
     // Everything the row carries, not just its detail — an investigation needs the actor, the
     // address and the object together, in one place.
     // Exact, because the payload below also mentions the account: this asserts the actor FIELD,
@@ -595,8 +642,36 @@ describe('AuditPage', () => {
       // so looks reachable. This is the one that failed on a loaded runner.
       await waitFor(() => expect(reachable(container.querySelectorAll('.rp-audit-row')[1])).toBe(true))
       await userEvent.click(container.querySelectorAll('.rp-audit-row')[1] as Element)
-      const dialog = await screen.findByRole('dialog')
-      expect(within(dialog).getByText('{"before":[],"after":["u:client@corp.example"]}')).toBeTruthy()
+      const open = await record()
+      expect(open.closest('.rp-audit-row')).toBe(container.querySelectorAll('.rp-audit-row')[1])
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    it('opens from the keyboard on the card head', async () => {
+      const { container } = mount()
+      await screen.findByText(/对外版/)
+      const head = container.querySelectorAll('.rp-audit-row__head')[1] as HTMLElement
+      head.focus()
+      await userEvent.keyboard('{Enter}')
+      expect(head.getAttribute('aria-expanded')).toBe('true')
+      expect(await record()).toBeTruthy()
+    })
+
+    // The card already shows the time, the actor, the address, the action, the object and the
+    // sentence; its record adds only what the card does not, so one open card is not a screenful.
+    it('adds only what the card does not already show', async () => {
+      const { container } = mount()
+      await screen.findByText(/对外版/)
+      await waitFor(() => expect(reachable(container.querySelectorAll('.rp-audit-row')[1])).toBe(true))
+      await userEvent.click(container.querySelectorAll('.rp-audit-row')[1] as Element)
+      const open = await record()
+      const labels = [...open.querySelectorAll('dt')].map((d) => d.textContent)
+      expect(labels).not.toContain('audit.at')
+      expect(labels).not.toContain('audit.target')
+      expect(labels).not.toContain('audit.ipFilter')
+      // The OU and the action's code are not on the card.
+      expect(labels).toContain('audit.f.ou')
+      expect(within(open).getByText('grant.change')).toBeTruthy()
     })
 
     // Beside its button a panel wider than the window is cut off at one edge, so a narrow screen
@@ -658,5 +733,19 @@ describe('token identity', () => {
     mount()
     expect(await screen.findByText('Dify production')).toBeTruthy()
     expect(screen.queryByText('audit.machine')).toBeNull()
+  })
+})
+
+// The panel shows what was stored. Re-serialised JSON can reorder integer-like keys, round big numbers
+// and rewrite escapes, so it is indented only when that would change nothing but whitespace.
+describe('readablePayload', () => {
+  it('indents JSON whose layout is the only thing that changes', () => {
+    expect(readablePayload('{"a":1,"b":["x y"]}')).toBe('{\n  "a": 1,\n  "b": [\n    "x y"\n  ]\n}')
+  })
+
+  it('shows anything else exactly as stored', () => {
+    for (const raw of ['{"10":1,"2":2}', '{"n":12345678901234567890}', '{"e":"\\u00e9"}', 'not json', '{"a":1,"a":2}']) {
+      expect(readablePayload(raw)).toBe(raw)
+    }
   })
 })
