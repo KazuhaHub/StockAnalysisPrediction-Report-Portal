@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { Button, ConfigProvider, Drawer, Dropdown, Menu, Spin, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
-import { DownOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { DownOutlined, ExportOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
@@ -90,10 +90,14 @@ export default function ManageLayout() {
       {!railCollapsed && t('manage.search')}
     </Button>
   )
-  const relatedItems: MenuProps['items'] = (page?.related ?? []).flatMap((key) => {
+  const relatedItems: NonNullable<MenuProps['items']> = (page?.related ?? []).flatMap((key) => {
     const related = adminPage(key)
     return related ? [{ key, label: t(related.label), icon: related.icon }] : []
   })
+  // The reader-facing page leaves the console, so it sits apart, after a divider, with the open icon.
+  if (page?.readerPage) {
+    relatedItems.push({ type: 'divider' }, { key: `reader:${page.readerPage.to}`, label: t(page.readerPage.label), icon: <ExportOutlined /> })
+  }
   const header = (
     <header className="rp-admin-page-header">
       <div className="rp-admin-page-header__row">
@@ -106,7 +110,7 @@ export default function ManageLayout() {
         {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
         {page && relatedItems.length > 0 && (
           <Dropdown trigger={['click']} placement="bottomRight"
-            menu={{ items: relatedItems, onClick: ({ key }) => go(`/manage/${key}`) }}>
+            menu={{ items: relatedItems, onClick: ({ key }) => (key.startsWith('reader:') ? navigate(key.slice('reader:'.length)) : go(`/manage/${key}`)) }}>
             <Button size="small" aria-label={t('manage.related')}>
               {t('manage.related')} <DownOutlined />
             </Button>

@@ -90,7 +90,6 @@ function GlobalForecastOperations() {
             <Typography.Text type="secondary">{t('forecast.page.subtitle')}</Typography.Text>
           </div>
           <Space wrap>
-            <Link to="/forecast">{t('nav.forecast_record')}</Link>
             <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
               {t('forecast.settings.button')}
             </Button>
