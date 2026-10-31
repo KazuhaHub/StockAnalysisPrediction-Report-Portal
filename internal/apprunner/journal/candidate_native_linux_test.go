@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -303,7 +304,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 					if err != nil || checkpointAgain != checkpoint {
 						t.Fatal("managed update checkpoint read", checkpointAgain, err)
 					}
-					t.Log("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
+					fmt.Println("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
 					dispatchRemoval("remove_code", "remove-code", fixtureID(7108+slot*10), fixtureID(7109+slot*10))
 					var absentState, absentDesired string
 					var absentRevision int
