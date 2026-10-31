@@ -22,6 +22,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd'
+import type { SelectProps } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
 import { ExportOutlined, FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
@@ -241,6 +242,7 @@ export default function AuditPage() {
   // Seed the action filter from `?action=`, so a link from an incident surface (the
   // store-failure line, the ledger-start audit link) opens already filtered.
   const [action, setAction] = useState<string | undefined>(() => params.get('action') ?? undefined)
+  const [category, setCategory] = useState<string | undefined>(() => params.get('category') ?? undefined)
   const [row, setRow] = useState<AuditEntry | null>(null) // the row opened in full
   const [actor, setActor] = useState('')
   const [ip, setIP] = useState('')
@@ -257,6 +259,7 @@ export default function AuditPage() {
   const load = useCallback(() => {
     setLoading(true)
     const qs = new URLSearchParams({ limit: String(pageSize), offset: String((page - 1) * pageSize) })
+    if (category) qs.set('category', category)
     if (action) qs.set('action', action)
     if (actor.trim()) qs.set('actor', actor.trim())
     if (ip.trim()) qs.set('ip', ip.trim())
@@ -281,8 +284,31 @@ export default function AuditPage() {
         setErr(text)
         setLoading(false)
       })
-  }, [action, actor, ip, q, since, page, t, failure])
+  }, [category, action, actor, ip, q, since, page, t, failure])
   useEffect(load, [load, retryKey])
+
+  // Grouped like the Workspace audit log: an area of the portal, then its events. An older server
+  // that sends no grouping still filters, with every event under one list.
+  const categories = data?.categories ?? []
+  // A category a newer server adds reads as its key until this build learns a word for it.
+  const categoryLabel = (key: string) => t(`audit.cat.${key}`, key)
+  const categoryOf = (a: string) => categories.find((c) => c.actions.includes(a))?.key
+  const categoryActions = categories.find((c) => c.key === category)?.actions
+  const actionLabel = (a: string) => ({ value: a, label: t(`audit.a.${a}`, a), title: a })
+  const actionOptions: SelectProps['options'] = categoryActions
+    ? categoryActions.map(actionLabel)
+    : categories.length
+      ? categories.map((c) => ({ label: categoryLabel(c.key), title: c.key, options: c.actions.map(actionLabel) }))
+      : (data?.actions ?? []).map(actionLabel)
+
+  // A seeded or stale category the server does not offer (a link from an older build, or "other" once
+  // nothing undeclared is left) would leave a silently empty log; drop it once the answer says so.
+  useEffect(() => {
+    if (category && data?.categories && !data.categories.some((c) => c.key === category)) {
+      setCategory(undefined)
+      setPage(1)
+    }
+  }, [category, data])
 
   const ouNames = data?.ou_names ?? {}
   const geo = data?.geo
@@ -412,18 +438,37 @@ export default function AuditPage() {
     <>
       <Select
         allowClear
+        style={width(150)}
+        aria-label={t('audit.category')}
+        placeholder={t('audit.category')}
+        value={category}
+        onChange={(v) => {
+          setCategory(v)
+          // An event outside the new category would match nothing; drop it rather than show an empty log.
+          if (action && v && !categories.find((c) => c.key === v)?.actions.includes(action)) setAction(undefined)
+          setPage(1)
+        }}
+        options={categories.map((c) => ({ value: c.key, label: categoryLabel(c.key), title: categoryLabel(c.key) }))}
+      />
+      <Select
+        allowClear
+        showSearch
+        optionFilterProp="label"
         style={width(170)}
+        aria-label={t('audit.action')}
         placeholder={t('audit.action')}
         value={action}
+        classNames={{ popup: { root: 'rp-audit-action-popup' } }}
         onChange={(v) => {
           setAction(v)
+          if (v && !category) setCategory(categoryOf(v))
           setPage(1)
         }}
         // The label is a sentence ("changed a grant"), so on a phone the popup is wider than the
         // 50%-width control that opens it rather than truncating every option.
         popupMatchSelectWidth={false}
         // Built from the values present, so rows written by an older build still filter.
-        options={(data?.actions ?? []).map((a) => ({ value: a, label: t(`audit.a.${a}`, a) }))}
+        options={actionOptions}
       />
       <Input
         allowClear
@@ -474,10 +519,15 @@ export default function AuditPage() {
   )
 
   // Hands the current filters to the Export page, which turns them into chips it can edit further.
+  // A category the page cannot resolve yet (before the first answer) has no events to hand over, and
+  // an event outside the chosen category shows nothing here: Export must never come out wider than
+  // the page, so it waits rather than dropping the category.
+  const exportBlocked = Boolean(category && (!categoryActions || (action && !categoryActions.includes(action))))
   const exportButton = (
     <Button
       icon={<ExportOutlined />}
-      onClick={() => navigate(exportLink('audit', auditFilterToTree({ action, actor, ip, q, since })))}
+      disabled={exportBlocked}
+      onClick={() => navigate(exportLink('audit', auditFilterToTree({ action, categoryActions, actor, ip, q, since })))}
     >
       {t('audit.export')}
     </Button>
@@ -612,7 +662,7 @@ export default function AuditPage() {
         <div className="rp-audit-filters">
           <div className="rp-audit-filters__top">
             {search}
-            <Badge dot={Boolean(action || actor.trim() || ip.trim() || since)} offset={[-4, 4]}>
+            <Badge dot={Boolean(category || action || actor.trim() || ip.trim() || since)} offset={[-4, 4]}>
               <Button icon={<FilterOutlined />} onClick={() => setFiltersOpen((o) => !o)}>
                 {t('audit.filters')}
               </Button>

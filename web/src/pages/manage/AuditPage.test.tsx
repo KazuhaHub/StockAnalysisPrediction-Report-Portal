@@ -43,6 +43,11 @@ vi.mock('react-i18next', () => {
 const RESP = {
   total: 2,
   actions: ['report.read', 'grant.change'],
+  categories: [
+    { key: 'auth', actions: ['auth.login', 'auth.login_failed'] },
+    { key: 'accounts', actions: ['user.create', 'grant.change'] },
+    { key: 'reports', actions: ['report.read', 'report.edit'] },
+  ],
   ou_names: { '7': '客户A' },
   items: [
     { id: 2, at: '2026-08-01 09:00:00', actor: '', actor_ou: 0, action: 'report.read',
@@ -102,6 +107,95 @@ describe('AuditPage', () => {
         apiMock.get.mock.calls.some(([u]) => String(u).includes('action=predictions.store_failed')),
       ).toBe(true),
     )
+  })
+
+  // Like the Workspace audit log: a category first, then an event within it. A category alone filters
+  // to all of its events, and the event list narrows to the category picked.
+  it('filters by category, and narrows the event list to it', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('combobox', { name: 'audit.category' }))
+    await user.click(await screen.findByTitle('reports'))
+    await waitFor(() =>
+      expect(apiMock.get.mock.calls.some(([u]) => String(u).includes('category=reports'))).toBe(true),
+    )
+    await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
+    await screen.findByTitle('report.edit')
+    const options = [...document.querySelectorAll('.rp-audit-action-popup .ant-select-item-option')].map((o) => o.getAttribute('title'))
+    expect(options).toEqual(['report.read', 'report.edit'])
+  })
+
+  it('groups every event under its category while no category is picked', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
+    await screen.findByTitle('auth.login')
+    const groups = [...document.querySelectorAll('.rp-audit-action-popup .ant-select-item-group')].map((g) => g.textContent)
+    expect(groups).toEqual(['auth', 'accounts', 'reports'])
+  })
+
+  it('picks the category of an event chosen without one', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
+    await user.click(await screen.findByTitle('auth.login_failed'))
+    await waitFor(() =>
+      expect(
+        apiMock.get.mock.calls.some(([u]) => String(u).includes('category=auth') && String(u).includes('action=auth.login_failed')),
+      ).toBe(true),
+    )
+  })
+
+  it('seeds the category from the URL', async () => {
+    mount('/manage/audit?category=auth')
+    await waitFor(() =>
+      expect(apiMock.get.mock.calls.some(([u]) => String(u).includes('category=auth'))).toBe(true),
+    )
+  })
+
+  it('hands a category without an event to Export as all of its events', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?category=auth')
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('button', { name: /audit\.export/ }))
+    const to = new URL(navigateSpy.mock.calls[0][0] as string, 'http://x')
+    expect(decodeFilter(to.searchParams.get('f') ?? '')).toEqual({
+      op: 'and',
+      items: [{ field: 'action', operator: 'in', values: ['auth.login', 'auth.login_failed'] }],
+    })
+  })
+
+  it('drops a category the server does not offer instead of showing an empty log', async () => {
+    mount('/manage/audit?category=retired')
+    await screen.findByText('客户A')
+    await waitFor(() => {
+      const calls = apiMock.get.mock.calls
+      const last = String(calls[calls.length - 1]?.[0])
+      expect(last).not.toContain('category=')
+    })
+  })
+
+  it('does not hand Export a filter wider than the page while the category is unresolved', async () => {
+    let answer: (v: unknown) => void = () => {}
+    apiMock.get.mockReturnValueOnce(new Promise((r) => (answer = r)))
+    mount('/manage/audit?category=auth')
+    const button = await screen.findByRole('button', { name: /audit\.export/ })
+    expect(button.hasAttribute('disabled')).toBe(true)
+    answer(RESP)
+    await screen.findByText('客户A')
+    expect(screen.getByRole('button', { name: /audit\.export/ }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('labels a category this build has no word for by its key', async () => {
+    apiMock.get.mockResolvedValue({ ...RESP, categories: [...RESP.categories, { key: 'billing', actions: ['bill.pay'] }] })
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('combobox', { name: 'audit.category' }))
+    expect(await screen.findByTitle('billing')).toBeTruthy()
   })
 
   // Export is where an investigation ends: the page hands over what it is filtered to, so the admin
