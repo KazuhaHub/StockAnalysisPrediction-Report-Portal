@@ -99,9 +99,13 @@ it('keeps the opened data snapshot stable while dashboard refreshes', () => {
 })
 // An empty breakdown is an empty state, not a grey ring with a label floating beside it.
 it('shows an empty state instead of drawing an empty chart', () => {
-  const { container } = renderChart(<DashboardChart label="Types" rows={[]} series={{ type: 'pie' as const }} total={0} />)
+  const { container } = renderChart(<DashboardChart label="Types" rows={[]} series={{ type: 'pie' as const }} total={0} hint="Sorted by count." />)
   expect(container.querySelector('.ant-empty')?.textContent).toContain('manage.dashboard.noReports')
   expect((container.querySelector('.rp-dashboard-echart-host') as HTMLElement).hidden).toBe(true)
+  // Centred in the chart's own space, which keeps its height, and without the hint about an order
+  // nothing is in.
+  expect(container.querySelector('.rp-dashboard-chart-visual')?.classList.contains('is-empty')).toBe(true)
+  expect(container.querySelector('figcaption')).toBeNull()
 })
 // The total sits in the ring's middle at every width: the title and the ring share one centre, and
 // the title is centred on it both ways rather than hung from its top edge.
@@ -112,4 +116,25 @@ it.each([600, 400])('centres the donut total on the ring at %ipx', (width) => {
   expect([option.title.left, option.title.top]).toEqual(option.series[0].center)
   expect(option.title.textAlign).toBe('center')
   expect(option.title.textVerticalAlign).toBe('middle')
+  expect((option.title as { padding?: number }).padding).toBe(0)
+})
+// A narrow donut lists every group under the ring and wraps, rather than a one-line scroll legend
+// that cut its third entry to a sliver beside a pager. The chart grows by the lines the legend takes.
+it('wraps a narrow legend under the ring instead of paging it', async () => {
+  hostSize = { width: 360, height: 280 }
+  const rows = ['A', 'B', 'C', 'D', 'E', 'F'].map((name, i) => ({ name, value: i + 1 }))
+  const { container } = renderChart(<DashboardChart label="Types" rows={rows} series={{ type: 'pie' as const }} total={21} />)
+  await act(async () => { resize([], {} as ResizeObserver); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  const option = chart.setOption.mock.lastCall![0] as { legend: { type: string; top: number }; series: { center: [string, number]; radius: [number, number] }[] }
+  expect(option.legend.type).toBe('plain')
+  const [, cy] = option.series[0].center
+  expect(option.legend.top).toBeGreaterThan(cy + option.series[0].radius[1])
+  const host = container.querySelector('.rp-dashboard-echart-host') as HTMLElement
+  expect(parseFloat(host.style.minHeight)).toBeGreaterThan(option.legend.top)
+})
+// Two groups must never share a colour: the palette is distinct hues, not tokens that alias each other.
+it('gives every series colour a distinct hue', () => {
+  renderChart(<DashboardChart label="Types" rows={[{ name: 'A', value: 1 }]} series={{ type: 'pie' as const }} total={1} />)
+  const colors = (chart.setOption.mock.lastCall![0] as { color: string[] }).color
+  expect(new Set(colors.map((c) => c.toLowerCase())).size).toBe(colors.length)
 })

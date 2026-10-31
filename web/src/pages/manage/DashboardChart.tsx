@@ -25,6 +25,18 @@ interface ChartProps {
   legendValues?: boolean
 }
 
+// A narrow donut: the ring in a fixed band at the top, every group listed under it in a legend that
+// wraps (ECharts' plain legend), and the chart as tall as the two together, so no entry is cut off
+// or hidden behind a pager.
+const NARROW = 460
+const RING_BAND = 230
+const LEGEND_LINE = 24
+const LEGEND_ITEM = 120
+export function narrowDonutHeight(width: number, groups: number): number {
+  const perLine = Math.max(1, Math.floor((width - 32) / LEGEND_ITEM))
+  return RING_BAND + Math.ceil(groups / perLine) * LEGEND_LINE + 8
+}
+
 /** Container sizing belongs to the dashboard; plot geometry and interactions belong to ECharts. */
 export default function DashboardChart({ label, rows, series, horizontal, dates, total, hint, legendValues }: ChartProps) {
   const { token } = theme.useToken()
@@ -40,11 +52,13 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   const openData = () => { setSnapshot({rows:rows.map(row => ({...row})), total}); setQuery(''); setPage(1) }
   const dataButton = <Tooltip title={t('manage.dashboard.viewChartData')}><Button size="small" icon={<TableOutlined aria-hidden="true" />} aria-label={t('manage.dashboard.viewChartData')} onClick={openData} /></Tooltip>
   const refresh = useRef<() => void>(() => {})
+  // The host's width, known only once it is laid out; a narrow donut's height follows its legend.
+  const [hostWidth, setHostWidth] = useState(0)
   const pie = series.type === 'pie'
   const summary = rows.map(item => `${item.name}: ${item.value}`).join(', ')
   const makeOption = useMemo(() => (width: number): EChartsOption => {
-    const narrow = width < 460
-    const center = narrow ? ['50%', '40%'] : ['26%', '50%']
+    const narrow = width < NARROW
+    const center: [string, string | number] = narrow ? ['50%', RING_BAND / 2] : ['26%', '50%']
     const countLabel = (value: number) => t('manage.dashboard.tooltipCount', { count: value })
     const tooltip = (raw: unknown) => {
       const item = (Array.isArray(raw) ? raw[0] : raw) as { name?: string; value?: number; marker?: string }
@@ -62,22 +76,25 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
     return {
       animationDuration: 250, animationDurationUpdate: 180,
       animation: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-      color: [token.colorPrimary, token.colorSuccess, token.colorWarning, token.colorInfo, token.colorError, token.colorTextTertiary],
+      // Distinct hues only: antd's colorInfo is the primary blue, which painted two groups alike.
+      color: [token.colorPrimary, token.colorSuccess, token.colorWarning, token.purple, token.colorError, token.cyan, token.magenta, token.colorTextTertiary],
       textStyle: { fontFamily: token.fontFamily, fontSize: 12, color: token.colorText },
       tooltip: { trigger: pie || horizontal ? 'item' : 'axis', renderMode: 'richText', confine: true, formatter: tooltip,
         backgroundColor: token.colorBgElevated, borderColor: token.colorBorder, textStyle: { color: token.colorText, fontSize: 12 } },
       ...(pie ? {
-        legend: { type: 'scroll', orient: narrow ? 'horizontal' : 'vertical', ...(narrow ? { bottom: 0, left: 'center' } : { left: '54%', right: 8, top: 'middle' }),
+        legend: { type: narrow ? 'plain' : 'scroll', orient: narrow ? 'horizontal' : 'vertical',
+          ...(narrow ? { top: RING_BAND, left: 16, right: 16, itemGap: 12 } : { left: '54%', right: 8, top: 'middle' }),
           formatter: legendValues ? (name: string) => `${name}  ${rows.find(row => row.name === name)?.value ?? 0}` : undefined,
-          textStyle: { color: token.colorTextSecondary, width: narrow ? 110 : Math.max(80, width * .4), overflow: 'truncate' }, tooltip: { show: true } },
+          textStyle: { color: token.colorTextSecondary, width: narrow ? LEGEND_ITEM - 40 : Math.max(80, width * .4), overflow: 'truncate' }, tooltip: { show: true } },
         // The total sits in the ring's middle: one centre for both, the title centred on it both ways.
-        title: { text: String(total ?? 0), left: center[0], top: center[1], textAlign: 'center', textVerticalAlign: 'middle',
+        // No padding: ECharts pads a title by 5px, which moved the anchored text off the centre.
+        title: { text: String(total ?? 0), left: center[0], top: center[1], textAlign: 'center', textVerticalAlign: 'middle', padding: 0,
           textStyle: { color: token.colorText, fontSize: 20, fontWeight: 600 } },
       } : {
         grid: { left: 8, right: horizontal ? 45 : 16, top: 24, bottom: 8, containLabel: true },
         xAxis: horizontal ? value : category, yAxis: horizontal ? category : value,
       }),
-      series: [{ ...series, ...(pie ? { center, radius: narrow ? ['35%', '53%'] : ['45%', '68%'], stillShowZeroSum: false } : {}),
+      series: [{ ...series, ...(pie ? { center, radius: narrow ? [RING_BAND * .25, RING_BAND * .39] : ['45%', '68%'], stillShowZeroSum: false } : {}),
         data: pie ? rows : rows.map(item => item.value), label: { ...series.label, color: token.colorText, fontSize: 12 },
         emphasis: { focus: 'self' }, ...(pie ? {} : { itemStyle: { borderRadius: 3 } }),
       }],
@@ -93,6 +110,7 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
       const { width, height } = element.getBoundingClientRect()
       if (!width || !height) return
       chart ??= init(element, undefined, { renderer: 'svg' })
+      setHostWidth((was) => (was === width ? was : width))
       chart.resize({ width, height })
       chart.setOption(latest.current(width), { notMerge: true })
     }
@@ -107,14 +125,15 @@ export default function DashboardChart({ label, rows, series, horizontal, dates,
   }, [])
   useEffect(() => { refresh.current() }, [makeOption])
   return <figure className="rp-dashboard-chart rp-dashboard-echart">
-    <div role="img" aria-label={label} className="rp-dashboard-chart-visual">
+    <div role="img" aria-label={label} className={`rp-dashboard-chart-visual${rows.length ? '' : ' is-empty'}`}>
       <span className="rp-sr-only">{summary || t('manage.dashboard.noReports')}</span>
       {/* Nothing to break down is an empty state (antd's), not an empty ring; the host stays mounted,
           hidden, so the chart instance survives until there is data again. */}
       {!rows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('manage.dashboard.noReports')} />}
-      <div ref={host} aria-hidden="true" hidden={!rows.length} className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40) : undefined }} />
+      <div ref={host} aria-hidden="true" hidden={!rows.length} className="rp-dashboard-echart-host" style={{ minHeight: horizontal ? Math.max(220, rows.length * 30 + 40)
+        : pie && hostWidth && hostWidth < NARROW ? narrowDonutHeight(hostWidth, rows.length) : undefined }} />
     </div>
-    {hint && <figcaption><Typography.Text type="secondary">{hint}</Typography.Text></figcaption>}
+    {hint && rows.length > 0 && <figcaption><Typography.Text type="secondary">{hint}</Typography.Text></figcaption>}
     {headerTarget && createPortal(dataButton, headerTarget)}
     <Modal open={snapshot !== null} onCancel={() => setSnapshot(null)} footer={null} title={label} width={760}
       className="rp-dashboard-chart-data-modal" styles={{ body: { maxHeight: '65dvh', overflow: 'auto' } }}>
