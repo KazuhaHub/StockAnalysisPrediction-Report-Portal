@@ -206,6 +206,18 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	if err != nil || snapshot.snapshot.Stage != appplatform.StageSnapshot {
 		t.Fatal("managed update source quiesce", snapshot.snapshot, err)
 	}
+	migrate, err := s.dispatchPlatformCheckpoint(ctx, snapshot, endpoint)
+	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
+		t.Fatal("managed update checkpoint", migrate.snapshot, err)
+	}
+	start, err := s.advancePlatformManagedUpdateStage(ctx, migrate)
+	if err != nil || start.snapshot.Stage != appplatform.StageStart {
+		t.Fatal("managed update migrate", start.snapshot, err)
+	}
+	probe, err := s.executePlatformUpdateStart(ctx, start, endpoint)
+	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
+		t.Fatal("managed update start", probe.snapshot, err)
+	}
 	mustExec(t, s.st, `UPDATE app_platform_operations
 		SET lease_until_ms=1 WHERE id=?`, admitted.OperationID)
 	worker, err := newPlatformWritableInstallScheduler(
