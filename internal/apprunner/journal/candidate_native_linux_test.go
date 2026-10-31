@@ -120,7 +120,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for slot := 0; slot < 3; slot++ {
+	for slot := 0; slot < 4; slot++ {
 		t.Run(strconv.Itoa(slot), func(t *testing.T) {
 			ctx := context.Background()
 			prepare := runnerCommandFixture(t)
@@ -169,12 +169,12 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 				}
 			}
 			var receipt CandidateRunningReceipt
-			if slot == 0 || slot == 2 {
+			if slot == 0 || slot == 3 {
 				receipt, err = s.DispatchCandidate(ctx, raw, sig, native, descriptor)
 			} else {
 				receipt, err = s.ExecuteCandidate(ctx, claim, native, descriptor)
 			}
-			if slot == 0 || slot == 2 {
+			if slot == 0 || slot == 3 {
 				if err != nil || !validCandidateReceipt(receipt) || receipt.Claim.Preflight == nil || receipt.Claim.Preflight.NamespaceInode != proof.NamespaceInode {
 					t.Fatal("real native candidate receipt", err)
 				}
@@ -214,7 +214,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 				if err != nil || !sameCandidateReceipt(replay, receipt) || candidateFixtureOwnedNative(t, socket, c) != id {
 					t.Fatal("applied dispatch reexecuted/changed native identity", err)
 				}
-				if slot == 2 {
+				if slot == 3 {
 					enrollment := enrollmentFixture(30)
 					authority := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
 					key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
