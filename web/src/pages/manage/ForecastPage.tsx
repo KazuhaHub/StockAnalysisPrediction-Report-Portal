@@ -108,14 +108,22 @@ function GlobalForecastOperations() {
         <Card title={t('forecast.eval.title')}>
           {settings && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {settings.enabled ? (
-                <Tag color="green">{t('forecast.eval.on')}</Tag>
-              ) : (
-                <Tag>{t('forecast.eval.off')}</Tag>
-              )}
-              {!settings.enabled && <Alert type="info" showIcon title={t('forecast.eval.offHint')} />}
               <Descriptions column={1} size="small" bordered>
-                {row(t('forecast.eval.bench'), <Typography.Text code>{settings.bench}</Typography.Text>)}
+                {row(
+                  t('forecast.eval.bench'),
+                  <>
+                    {t(`forecast.bench.${settings.bench}`)}
+                    {settings.bench_next && (
+                      <Typography.Text type="secondary">
+                        {' '}
+                        {t('forecast.eval.benchNext', {
+                          bench: t(`forecast.bench.${settings.bench_next}`),
+                          from: settings.bench_next_from ?? '',
+                        })}
+                      </Typography.Text>
+                    )}
+                  </>,
+                )}
                 {row(t('forecast.eval.due'), settings.due_sets)}
                 {row(t('forecast.eval.pending'), settings.pending)}
                 {row(
@@ -131,7 +139,6 @@ function GlobalForecastOperations() {
                   ),
                 )}
               </Descriptions>
-              <Typography.Text type="secondary">{t('forecast.eval.hint')}</Typography.Text>
               {(settings.unrecorded ?? [])
                 .filter((u) => u.ok && (u.n > 0 || u.store_failed_30d > 0))
                 .map((u) => (

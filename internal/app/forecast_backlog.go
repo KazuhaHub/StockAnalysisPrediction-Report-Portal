@@ -113,13 +113,33 @@ type forecastBacklogItem struct {
 }
 
 type forecastBacklog struct {
-	AsOf          string                `json:"as_of"`
-	Due           int                   `json:"due"`
-	Overdue       int                   `json:"overdue"`
-	Retrying      int                   `json:"retrying"`
-	OldestMinutes int                   `json:"oldest_minutes"`
-	Items         []forecastBacklogItem `json:"items"`
-	Truncated     bool                  `json:"truncated"`
+	AsOf          string `json:"as_of"`
+	Due           int    `json:"due"`
+	Overdue       int    `json:"overdue"`
+	Retrying      int    `json:"retrying"`
+	OldestMinutes int    `json:"oldest_minutes"`
+	// OldestLateMinutes is how long the oldest item has been settleable and still is not: the
+	// lagging clock. It starts at forecastSettleableAt, not at the close (OldestMinutes).
+	OldestLateMinutes int                   `json:"oldest_late_minutes"`
+	Items             []forecastBacklogItem `json:"items"`
+	Truncated         bool                  `json:"truncated"`
+}
+
+// forecastSettleableAt is the earliest instant every settlement source can vouch for a session's bar.
+// A body without an as-of stamp cannot vouch for a bar dated today (newestBarFinal), and the ledger
+// chain does not promise a stamp, so the bar is believed from midnight China time after the session.
+// Waiting before then is the evaluator working as designed, not lagging.
+//
+// The anchor is the same for every source. A stamped body (Yahoo, a stamped Tencent body) can settle
+// the same evening, so a real outage on such a source now pages at about 06:00 the next day rather
+// than that evening. That is still before the next open, and one clock for every source keeps the
+// alert from depending on which source happened to answer.
+func forecastSettleableAt(due string) time.Time {
+	t, err := time.ParseInLocation("2006-01-02", due, chinaZone)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.AddDate(0, 0, 1)
 }
 
 // Count completed due sessions across the ledger, including marks sleeping until a retry.
@@ -170,14 +190,21 @@ func (s *Server) forecastBacklog(now time.Time) (forecastBacklog, error) {
 			continue
 		}
 		minutes := int(now.Sub(at) / time.Minute)
+		late := 0
+		if from := forecastSettleableAt(due); now.After(from) {
+			late = int(now.Sub(from) / time.Minute)
+		}
 		item := forecastBacklogItem{SetID: set.SetID, Symbol: set.Symbol, Checkpoint: mark.Checkpoint, Due: due, Minutes: minutes, Refusal: mark.Refusal, NextAttempt: mark.NextAttemptAt}
 		if f, ok := failures[set.SetID]; ok {
 			f := f
 			item.Failure = &f
 		}
 		out.Due++
-		if minutes > int(forecastLaggingAfter/time.Minute) {
+		if late > int(forecastLaggingAfter/time.Minute) {
 			out.Overdue++
+		}
+		if late > out.OldestLateMinutes {
+			out.OldestLateMinutes = late
 		}
 		if mark.Status == markRefused {
 			out.Retrying++
