@@ -616,18 +616,25 @@ func (s *Store) RunUpdateStartOnce(ctx context.Context, claim UpdateStartClaim, 
 	}
 	tx, f, err := s.beginUpdateStartExecution(ctx, live.raw, live.signature, "unknown")
 	if err != nil {
+		log.Printf("update-start claim pre-execution journal read: %v", err)
 		return zero, err
 	}
 	defer tx.Rollback()
 	var marker UpdateStartClaimMarker
 	if !canonicalDataJSON(live.marker, &marker) || marker.Preflight != nil ||
 		live.bound != nil || !updateStartClaimMatches(f, marker) {
+		log.Printf("update-start %s: pre-execution claim changed",
+			f.command.OperationID)
 		return zero, ErrFenceReconciliation
 	}
 	if err := finalUpdateStartCheck(ctx, f); err != nil {
+		log.Printf("update-start %s: pre-execution final check: %v",
+			f.command.OperationID, err)
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
+		log.Printf("update-start %s: pre-execution journal commit: %v",
+			f.command.OperationID, err)
 		return zero, err
 	}
 	bounded, cancel := context.WithDeadline(ctx, live.deadline)
@@ -639,6 +646,8 @@ func (s *Store) RunUpdateStartOnce(ctx context.Context, claim UpdateStartClaim, 
 	runErr := run(bounded)
 	post, after, err := s.beginUpdateStartExecution(bounded, live.raw, live.signature, "unknown")
 	if err != nil {
+		log.Printf("update-start %s: post-execution journal read: %v",
+			f.command.OperationID, err)
 		return attempt, errors.Join(ErrUpdateStartExecutionUncertain, runErr, err)
 	}
 	defer post.Rollback()
@@ -647,15 +656,23 @@ func (s *Store) RunUpdateStartOnce(ctx context.Context, claim UpdateStartClaim, 
 		updateStartClaimCore(current) != updateStartClaimCore(marker) ||
 		(current.Preflight == nil) != (live.bound == nil) ||
 		(current.Preflight != nil && *current.Preflight != *live.bound) {
+		log.Printf("update-start %s: post-execution claim changed: current_preflight=%t bound=%t",
+			f.command.OperationID, current.Preflight != nil, live.bound != nil)
 		return attempt, errors.Join(ErrUpdateStartExecutionUncertain, runErr, ErrFenceReconciliation)
 	}
 	if err := finalUpdateStartCheck(bounded, after); err != nil {
+		log.Printf("update-start %s: post-execution final check: %v",
+			f.command.OperationID, err)
 		return attempt, errors.Join(ErrUpdateStartExecutionUncertain, runErr, err)
 	}
 	if s.closing.Load() {
+		log.Printf("update-start %s: post-execution journal closing",
+			f.command.OperationID)
 		return attempt, errors.Join(ErrUpdateStartExecutionUncertain, runErr, ErrUpdateStartExecutionUnavailable)
 	}
 	if err := post.Commit(); err != nil {
+		log.Printf("update-start %s: post-execution journal commit: %v",
+			f.command.OperationID, err)
 		return attempt, errors.Join(ErrUpdateStartExecutionUncertain, runErr, err)
 	}
 	if runErr != nil {
@@ -770,6 +787,8 @@ func (s *Store) ExecuteUpdateStart(ctx context.Context, claim UpdateStartClaim, 
 		request, err := updateStartNativeRequest(f, marker, descriptor)
 		tx.Rollback()
 		if err != nil {
+			log.Printf("update-start %s: build native request: %v",
+				f.command.OperationID, err)
 			return err
 		}
 		if err := native.ProvisionUpdateStartSockets(ctx, request); err != nil {
