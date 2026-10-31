@@ -1,5 +1,6 @@
 name: app runner daemon probe
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'internal/apprunner/**'

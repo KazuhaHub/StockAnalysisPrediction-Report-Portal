@@ -1,5 +1,6 @@
 name: app project quota probe
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
