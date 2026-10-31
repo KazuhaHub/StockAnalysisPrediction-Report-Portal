@@ -87,6 +87,23 @@ const mount = (initial = '/manage/audit') =>
     </MemoryRouter>,
   )
 
+// Opens the Filters panel. With nothing applied it starts on one empty action row.
+const openFilters = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole('button', { name: /audit\.filters/ }))
+  await screen.findByRole('button', { name: 'audit.apply' })
+}
+// The newest panel: a closed one can linger in jsdom, which never finishes the exit animation.
+const panel = () => {
+  const all = [...document.querySelectorAll('.rp-audit-filter-panel')]
+  return all[all.length - 1] as HTMLElement
+}
+const applyButton = () => within(panel()).getByRole('button', { name: 'audit.apply' })
+const outerClear = () => screen.getAllByRole('button', { name: 'audit.clearAll' }).find((b) => !b.closest('.ant-popover'))!
+const lastUrl = () => {
+  const calls = apiMock.get.mock.calls
+  return String(calls[calls.length - 1]?.[0])
+}
+
 // jsdom's matchMedia never matches, so antd would report every breakpoint as absent and the page
 // would render its phone layout under test. Say which one is being tested instead of inheriting it.
 const screenWidth = (wide: boolean) =>
@@ -120,6 +137,7 @@ describe('AuditPage', () => {
     await waitFor(() =>
       expect(apiMock.get.mock.calls.some(([u]) => String(u).includes('category=reports'))).toBe(true),
     )
+    await openFilters(user)
     await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
     await screen.findByTitle('report.edit')
     const options = [...document.querySelectorAll('.rp-audit-action-popup .ant-select-item-option')].map((o) => o.getAttribute('title'))
@@ -130,6 +148,7 @@ describe('AuditPage', () => {
     const user = userEvent.setup()
     mount()
     await screen.findByText('客户A')
+    await openFilters(user)
     await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
     await screen.findByTitle('auth.login')
     const groups = [...document.querySelectorAll('.rp-audit-action-popup .ant-select-item-group')].map((g) => g.textContent)
@@ -140,8 +159,10 @@ describe('AuditPage', () => {
     const user = userEvent.setup()
     mount()
     await screen.findByText('客户A')
+    await openFilters(user)
     await user.click(screen.getByRole('combobox', { name: 'audit.action' }))
     await user.click(await screen.findByTitle('auth.login_failed'))
+    await user.click(applyButton())
     await waitFor(() =>
       expect(
         apiMock.get.mock.calls.some(([u]) => String(u).includes('category=auth') && String(u).includes('action=auth.login_failed')),
@@ -196,6 +217,140 @@ describe('AuditPage', () => {
     await screen.findByText('客户A')
     await user.click(screen.getByRole('combobox', { name: 'audit.category' }))
     expect(await screen.findByTitle('billing')).toBeTruthy()
+  })
+
+  // Like Workspace, the log opens on the last seven days; the range is sent as an instant, read
+  // back from now, so the window does not depend on the reader's or the server's zone.
+  it('opens on the last seven days, sent as an instant', async () => {
+    mount()
+    await screen.findByText('客户A')
+    const from = new URL(String(apiMock.get.mock.calls[0][0]), 'http://x').searchParams.get('from')
+    expect(Math.abs(Date.now() - 7 * 86_400_000 - Date.parse(from ?? ''))).toBeLessThan(60_000)
+    expect(screen.getByRole('button', { name: 'audit.range.aria' }).textContent).toContain('audit.range.7d')
+  })
+
+  // A link from an incident points at specific events, which may be older than a week.
+  it('opens a link that arrives with filters on all time', async () => {
+    mount('/manage/audit?category=auth')
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalled())
+    expect(String(apiMock.get.mock.calls[0][0])).not.toContain('from=')
+  })
+
+  it('switches the range to a preset, or to all time', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await user.click(screen.getByRole('button', { name: 'audit.range.aria' }))
+    await user.click(await screen.findByRole('button', { name: 'audit.range.24h' }))
+    await waitFor(() => {
+      const from = new URL(lastUrl(), 'http://x').searchParams.get('from')
+      expect(Math.abs(Date.now() - 86_400_000 - Date.parse(from ?? ''))).toBeLessThan(60_000)
+    })
+    await user.click(screen.getByRole('button', { name: 'audit.range.aria' }))
+    const all = await screen.findAllByRole('button', { name: 'audit.range.all' })
+    await user.click(all[all.length - 1])
+    await waitFor(() => expect(lastUrl()).not.toContain('from='))
+  })
+
+  it('adds a condition in the panel, and sends nothing until it is applied', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await openFilters(user)
+    await user.click(within(panel()).getByRole('combobox', { name: 'audit.f.field' }))
+    await user.click(await screen.findByTitle('audit.actor'))
+    const calls = apiMock.get.mock.calls.length
+    await user.type(within(panel()).getByPlaceholderText('audit.actor'), 'admin')
+    expect(apiMock.get.mock.calls.length).toBe(calls)
+    await user.click(applyButton())
+    await waitFor(() => expect(lastUrl()).toContain('actor=admin'))
+    expect(screen.getByRole('button', { name: /audit\.filters/ }).textContent).toContain('1')
+  })
+
+  it('sends is not as a negated condition', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await openFilters(user)
+    await user.click(within(panel()).getByRole('button', { name: /audit\.addFilter/ }))
+    const rows = within(panel()).getAllByRole('group')
+    await user.click(within(rows[1]).getByRole('combobox', { name: 'audit.f.op' }))
+    await user.click(await screen.findByTitle('audit.op.isNot'))
+    await user.type(within(rows[1]).getByPlaceholderText('audit.actor'), 'admin{Enter}')
+    await waitFor(() => expect(lastUrl()).toContain('not_actor=admin'))
+    // The empty action row is dropped rather than sent.
+    expect(lastUrl()).not.toMatch(/[?&]action=/)
+  })
+
+  it('throws away an edit that was not applied', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?action=grant.change')
+    await screen.findByText('客户A')
+    await openFilters(user)
+    await user.click(within(panel()).getByRole('button', { name: 'audit.removeFilter' }))
+    await user.keyboard('{Escape}')
+    await openFilters(user)
+    expect(within(panel()).getAllByRole('group')).toHaveLength(1)
+  })
+
+  it('does not ask again when nothing changed', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?action=grant.change')
+    await screen.findByText('客户A')
+    const calls = apiMock.get.mock.calls.length
+    await openFilters(user)
+    await user.click(applyButton())
+    await new Promise((r) => setTimeout(r, 50))
+    expect(apiMock.get.mock.calls.length).toBe(calls)
+  })
+
+  it('removes a condition from the panel', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?action=grant.change')
+    await screen.findByText('客户A')
+    await openFilters(user)
+    await user.click(within(panel()).getByRole('button', { name: 'audit.removeFilter' }))
+    await user.click(applyButton())
+    await waitFor(() => expect(lastUrl()).not.toContain('action='))
+  })
+
+  it('clears every condition but keeps the category', async () => {
+    const user = userEvent.setup()
+    mount('/manage/audit?category=auth&action=auth.login')
+    await screen.findByText('客户A')
+    await user.click(outerClear())
+    await waitFor(() => {
+      expect(lastUrl()).toContain('category=auth')
+      expect(lastUrl()).not.toContain('action=')
+    })
+  })
+
+  it('turns an address clicked in a row into an IP condition', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockResolvedValue({ ...RESP, items: [{ ...RESP.items[1], ip: '10.1.2.3' }] })
+    mount()
+    await user.click(await screen.findByText('10.1.2.3'))
+    await waitFor(() => expect(lastUrl()).toContain('ip=10.1.2.3'))
+    expect(screen.getByRole('button', { name: /audit\.filters/ }).textContent).toContain('1')
+  })
+
+  it('hands Export the negated conditions and the range', async () => {
+    const user = userEvent.setup()
+    mount()
+    await screen.findByText('客户A')
+    await openFilters(user)
+    await user.click(within(panel()).getByRole('combobox', { name: 'audit.f.field' }))
+    await user.click(await screen.findByTitle('audit.actor'))
+    await user.click(within(panel()).getByRole('combobox', { name: 'audit.f.op' }))
+    await user.click(await screen.findByTitle('audit.op.isNot'))
+    await user.type(within(panel()).getByPlaceholderText('audit.actor'), 'admin{Enter}')
+    await waitFor(() => expect(lastUrl()).toContain('not_actor=admin'))
+    await user.click(screen.getByRole('button', { name: /audit\.export/ }))
+    const to = new URL(navigateSpy.mock.calls[0][0] as string, 'http://x')
+    const items = decodeFilter(to.searchParams.get('f') ?? '')?.items ?? []
+    expect(items).toContainEqual({ field: 'actor', operator: 'is_not', values: ['admin'] })
+    // A preset is handed over closed, as between, so Export keeps exactly the rows on the page.
+    expect(items.some((i) => 'field' in i && i.field === 'at' && i.operator === 'between')).toBe(true)
   })
 
   // Export is where an investigation ends: the page hands over what it is filtered to, so the admin
@@ -444,15 +599,43 @@ describe('AuditPage', () => {
       expect(within(dialog).getByText('{"before":[],"after":["u:client@corp.example"]}')).toBeTruthy()
     })
 
-    // Folded away, the filters would silently explain an empty page, so the button carries a dot
-    // whenever one of them is set. Nothing is set on arrival.
-    it('keeps the filters folded but reachable', async () => {
+    // Beside its button a panel wider than the window is cut off at one edge, so a narrow screen
+    // opens it as a sheet across the whole width instead.
+    it('opens the filter panel and the range as sheets', async () => {
+      const user = userEvent.setup()
       mount()
       await screen.findByText(/对外版/)
-      expect(screen.queryByPlaceholderText('audit.ipFilter')).toBeNull()
-      await userEvent.click(screen.getByRole('button', { name: /audit\.filters/ }))
-      expect(screen.getByPlaceholderText('audit.ipFilter')).toBeTruthy()
+      await user.click(screen.getByRole('button', { name: /audit\.filters/ }))
+      const sheet = await screen.findByRole('dialog')
+      expect(sheet.closest('.ant-drawer')).not.toBeNull()
+      expect(within(sheet).getByRole('button', { name: 'audit.apply' })).toBeTruthy()
+      await user.click(within(sheet).getByRole('button', { name: /close/i }))
+      await user.click(screen.getByRole('button', { name: 'audit.range.aria' }))
+      const sheets = await screen.findAllByRole('dialog')
+      const range = sheets[sheets.length - 1]
+      expect(range.closest('.ant-drawer')).not.toBeNull()
+      expect(within(range).getByRole('button', { name: 'audit.range.30d' })).toBeTruthy()
     })
+
+    // The toolbar wraps rather than folding away, so nothing that narrows the list is hidden.
+    it('keeps the category, filters and range in reach', async () => {
+      mount()
+      await screen.findByText(/对外版/)
+      expect(screen.getByRole('combobox', { name: 'audit.category' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /audit\.filters/ })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'audit.range.aria' })).toBeTruthy()
+    })
+  })
+
+  // Export and the column control act on the results, so they sit with them, not with the filters.
+  it('puts the count, the columns and Export above the results', async () => {
+    mount()
+    await screen.findByText('客户A')
+    const bar = document.querySelector('.rp-audit-results') as HTMLElement
+    expect(within(bar).getByText('audit.total')).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: /audit\.export/ })).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: /table\.display/ })).toBeTruthy()
+    expect(document.querySelector('.ant-card-extra')).toBeNull()
   })
 
   it('asks the server for a page, not the whole table', async () => {

@@ -54,9 +54,13 @@ type AuditFilter struct {
 	TargetID   string
 	IP         string
 	Q          string // substring of the detail
-	Since      string // "YYYY-MM-DD"; inclusive
-	Limit      int
-	Offset     int
+	Since      string // "YYYY-MM-DD"; inclusive. The older form of From, kept for links that carry it.
+	// From and To bound the time range, both inclusive; the zero value leaves that end open.
+	From, To time.Time
+	// The negated filters: rows whose field differs, a row without the field included.
+	NotAction, NotActor, NotIP, NotTargetID string
+	Limit                                   int
+	Offset                                  int
 }
 
 // LoginActivity is the small, self-service view of a successful authentication event. The full
@@ -370,6 +374,21 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 	if f.Since != "" {
 		add("at >= ?", f.Since)
 	}
+	if !f.From.IsZero() {
+		cond, v := auditAt(">=", f.From)
+		add(cond, v...)
+	}
+	if !f.To.IsZero() {
+		cond, v := auditAt("<=", f.To)
+		add(cond, v...)
+	}
+	for _, neg := range []struct{ col, v string }{
+		{"action", f.NotAction}, {"actor", f.NotActor}, {"ip", f.NotIP}, {"target_id", f.NotTargetID},
+	} {
+		if neg.v != "" {
+			add("COALESCE("+neg.col+",'') <> ?", neg.v)
+		}
+	}
 	cond := strings.Join(where, " AND ")
 
 	var total int
@@ -432,8 +451,14 @@ func (s *Store) DeleteAuditBefore(cutoff time.Time) (int64, error) {
 // Rewriting the legacy stamps would be a runtime data conversion, which ADR 0034 rules out.
 
 func auditBefore(cutoff time.Time) (string, []any) {
-	return "at <> '' AND ((at " + likeT + " AND at < ?) OR (at NOT " + likeT + " AND at < ?))",
-		[]any{cutoff.UTC().Format(time.RFC3339), cutoff.Format("2006-01-02 15:04:05")}
+	return auditAt("<", cutoff)
+}
+
+// auditAt compares each row's stamp with an instant in the row's own format: UTC RFC 3339 for
+// current rows, the host's local wall clock for legacy ones (see auditBefore).
+func auditAt(op string, t time.Time) (string, []any) {
+	return "at <> '' AND ((at " + likeT + " AND at " + op + " ?) OR (at NOT " + likeT + " AND at " + op + " ?))",
+		[]any{t.UTC().Format(time.RFC3339), t.In(time.Local).Format("2006-01-02 15:04:05")}
 }
 
 // likeT distinguishes the two formats: an RFC3339 stamp has a T between the date and the time, a
@@ -777,17 +802,36 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	// The range is two RFC 3339 instants. A malformed one is refused rather than ignored, because
+	// ignoring it would answer with the whole log as though it were the range asked for.
+	var bounds [2]time.Time
+	for i, key := range []string{"from", "to"} {
+		if v := strings.TrimSpace(q.Get(key)); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				jsonError(w, http.StatusBadRequest, key+" must be an RFC 3339 instant")
+				return
+			}
+			bounds[i] = t
+		}
+	}
 	rows, total := s.st.ListAudit(AuditFilter{
-		Actor:      strings.TrimSpace(q.Get("actor")),
-		Category:   strings.TrimSpace(q.Get("category")),
-		Action:     strings.TrimSpace(q.Get("action")),
-		TargetType: strings.TrimSpace(q.Get("target_type")),
-		TargetID:   strings.TrimSpace(q.Get("target_id")),
-		IP:         strings.TrimSpace(q.Get("ip")),
-		Q:          strings.TrimSpace(q.Get("q")),
-		Since:      strings.TrimSpace(q.Get("since")),
-		Limit:      limit,
-		Offset:     offset,
+		From:        bounds[0],
+		To:          bounds[1],
+		NotAction:   strings.TrimSpace(q.Get("not_action")),
+		NotActor:    strings.TrimSpace(q.Get("not_actor")),
+		NotIP:       strings.TrimSpace(q.Get("not_ip")),
+		NotTargetID: strings.TrimSpace(q.Get("not_target_id")),
+		Actor:       strings.TrimSpace(q.Get("actor")),
+		Category:    strings.TrimSpace(q.Get("category")),
+		Action:      strings.TrimSpace(q.Get("action")),
+		TargetType:  strings.TrimSpace(q.Get("target_type")),
+		TargetID:    strings.TrimSpace(q.Get("target_id")),
+		IP:          strings.TrimSpace(q.Get("ip")),
+		Q:           strings.TrimSpace(q.Get("q")),
+		Since:       strings.TrimSpace(q.Get("since")),
+		Limit:       limit,
+		Offset:      offset,
 	})
 	// OU ids are meaningless on screen; resolve them once here rather than per row in the client.
 	ouNames := map[string]string{}

@@ -4,10 +4,8 @@ import { auditTime } from '../../lib/auditTime'
 import { formatRegion } from '../../lib/geo'
 import {
   Alert,
-  Badge,
   Button,
   Card,
-  DatePicker,
   Descriptions,
   Empty,
   Grid,
@@ -23,11 +21,13 @@ import {
   Typography,
 } from 'antd'
 import type { SelectProps } from 'antd'
+import AuditFilterPanel from './AuditFilterPanel'
+import AuditTimeRange from './AuditTimeRange'
+import { auditExportInput, auditQueryParams, type AuditCondition, type AuditRange } from '../../lib/auditQuery'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
-import { ExportOutlined, FilterOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
+import { ExportOutlined, InfoCircleOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import dayjs from 'dayjs'
 import { api } from '../../api/client'
 import { auditDetail, headline, listSeparator, type ChangeMember, type DetailPart } from '../../lib/auditDetail'
 import type { AuditEntry, AuditResp } from '../../api/types'
@@ -239,32 +239,39 @@ export default function AuditPage() {
   const [data, setData] = useState<AuditResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
-  // Seed the action filter from `?action=`, so a link from an incident surface (the
+  // Seed the action condition from `?action=`, so a link from an incident surface (the
   // store-failure line, the ledger-start audit link) opens already filtered.
-  const [action, setAction] = useState<string | undefined>(() => params.get('action') ?? undefined)
+  const [conditions, setConditions] = useState<AuditCondition[]>(() => {
+    const a = params.get('action')
+    return a ? [{ field: 'action', op: 'is', value: a }] : []
+  })
   const [category, setCategory] = useState<string | undefined>(() => params.get('category') ?? undefined)
   const [row, setRow] = useState<AuditEntry | null>(null) // the row opened in full
-  const [actor, setActor] = useState('')
-  const [ip, setIP] = useState('')
   const [q, setQ] = useState('')
-  const [since, setSince] = useState<string>()
+  // Like Workspace, the log opens on the last seven days. A link that arrives with filters points at
+  // specific events, which may be older, so it opens on all time.
+  const [range, setRange] = useState<AuditRange>(() =>
+    params.has('action') || params.has('category') ? { preset: 'all' } : { preset: '7d' },
+  )
+  // The one event the log is narrowed to, if any: what the category has to contain.
+  const action = conditions.find((c) => c.field === 'action' && c.op === 'is')?.value
   const [page, setPage] = useState(1)
-  // Five filter controls at full width would push the first row off a phone screen, so all but
-  // the search box fold away. The badge is what stops a folded-away filter from silently
-  // explaining an empty page.
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  // A preset range ends at the moment the filters were last set, not at each request: every page of
+  // one result is then read from the same window, so paging cannot skip or repeat rows at its edge.
+  // Changing any filter takes a fresh moment (React's adjust-state-during-render pattern).
+  const filterKey = JSON.stringify([category, conditions, range, q])
+  const [anchor, setAnchor] = useState(() => ({ key: filterKey, at: new Date() }))
+  if (anchor.key !== filterKey) setAnchor({ key: filterKey, at: new Date() })
 
   const pageSize = 50
 
   const load = useCallback(() => {
     setLoading(true)
-    const qs = new URLSearchParams({ limit: String(pageSize), offset: String((page - 1) * pageSize) })
+    const qs = auditQueryParams(conditions, range, anchor.at)
+    qs.set('limit', String(pageSize))
+    qs.set('offset', String((page - 1) * pageSize))
     if (category) qs.set('category', category)
-    if (action) qs.set('action', action)
-    if (actor.trim()) qs.set('actor', actor.trim())
-    if (ip.trim()) qs.set('ip', ip.trim())
     if (q.trim()) qs.set('q', q.trim())
-    if (since) qs.set('since', since)
     api
       .get<AuditResp>(`/api/admin/audit?${qs}`)
       // Data and the loading flag land in ONE state transition. Splitting them across .then and
@@ -284,7 +291,7 @@ export default function AuditPage() {
         setErr(text)
         setLoading(false)
       })
-  }, [category, action, actor, ip, q, since, page, t, failure])
+  }, [category, conditions, range, anchor, q, page, t, failure])
   useEffect(load, [load, retryKey])
 
   // Grouped like the Workspace audit log: an area of the portal, then its events. An older server
@@ -362,10 +369,7 @@ export default function AuditPage() {
             <Space orientation="vertical" size={0}>
               <Typography.Link
                 style={{ fontSize: 11 }}
-                {...clickable(() => {
-                  setIP(r.ip ?? '')
-                  setPage(1)
-                })}
+                {...clickable(() => filterByIP(r.ip ?? ''))}
               >
                 {r.ip}
               </Typography.Link>
@@ -428,87 +432,57 @@ export default function AuditPage() {
   ]
   const tableView = useTableView('audit', columns, ['at', 'action', 'details'], { details: t('audit.details') })
 
-  // On a phone every control takes the full width of its cell; on a desktop each keeps the width
-  // its content needs, so the header row stays one line.
-  const width = (w: number) => (mobile ? { width: '100%' } : { width: w })
-
-  // The narrowing filters, minus the free-text search — that one stays visible on a phone while
-  // these fold away, because it is the one people reach for first.
-  const narrowFilters = (
-    <>
-      <Select
-        allowClear
-        style={width(150)}
-        aria-label={t('audit.category')}
-        placeholder={t('audit.category')}
-        value={category}
-        onChange={(v) => {
-          setCategory(v)
-          // An event outside the new category would match nothing; drop it rather than show an empty log.
-          if (action && v && !categories.find((c) => c.key === v)?.actions.includes(action)) setAction(undefined)
-          setPage(1)
-        }}
-        options={categories.map((c) => ({ value: c.key, label: categoryLabel(c.key), title: categoryLabel(c.key) }))}
-      />
-      <Select
-        allowClear
-        showSearch
-        optionFilterProp="label"
-        style={width(170)}
-        aria-label={t('audit.action')}
-        placeholder={t('audit.action')}
-        value={action}
-        classNames={{ popup: { root: 'rp-audit-action-popup' } }}
-        onChange={(v) => {
-          setAction(v)
-          if (v && !category) setCategory(categoryOf(v))
-          setPage(1)
-        }}
-        // The label is a sentence ("changed a grant"), so on a phone the popup is wider than the
-        // 50%-width control that opens it rather than truncating every option.
-        popupMatchSelectWidth={false}
-        // Built from the values present, so rows written by an older build still filter.
-        options={actionOptions}
-      />
-      <Input
-        allowClear
-        style={width(170)}
-        placeholder={t('audit.actor')}
-        value={actor}
-        onChange={(e) => {
-          setActor(e.target.value)
-          setPage(1)
-        }}
-      />
-      {/* An equality filter, not the free-text one. "Which host tried nine accounts" is the
-          query that turns a pile of failed sign-ins into a single incident. */}
-      <Input
-        allowClear
-        style={width(150)}
-        placeholder={t('audit.ipFilter')}
-        value={ip}
-        onChange={(e) => {
-          setIP(e.target.value)
-          setPage(1)
-        }}
-      />
-      <DatePicker
-        style={mobile ? { width: '100%' } : undefined}
-        placeholder={t('audit.since')}
-        value={since ? dayjs(since) : null}
-        onChange={(d) => {
-          setSince(d ? d.format('YYYY-MM-DD') : undefined)
-          setPage(1)
-        }}
-      />
-    </>
+  const categorySelect = (
+    <Select
+      allowClear
+      style={{ width: 150 }}
+      aria-label={t('audit.category')}
+      placeholder={t('audit.category')}
+      value={category}
+      onChange={(v) => {
+        setCategory(v)
+        // An event outside the new category would match nothing; drop it rather than show an empty log.
+        if (action && v && !categories.find((c) => c.key === v)?.actions.includes(action))
+          setConditions((cs) => cs.filter((c) => !(c.field === 'action' && c.op === 'is')))
+        setPage(1)
+      }}
+      options={categories.map((c) => ({ value: c.key, label: categoryLabel(c.key), title: categoryLabel(c.key) }))}
+    />
   )
+
+  const filterPanel = (
+    <AuditFilterPanel
+      conditions={conditions}
+      onChange={(next) => {
+        setConditions(next)
+        const picked = next.find((c) => c.field === 'action' && c.op === 'is')?.value
+        if (picked && !category) setCategory(categoryOf(picked))
+        setPage(1)
+      }}
+      actionOptions={actionOptions}
+    />
+  )
+  const timeRange = (
+    <AuditTimeRange
+      value={range}
+      tz={data?.timezone ?? ''}
+      onChange={(next) => {
+        setRange(next)
+        setPage(1)
+      }}
+    />
+  )
+  // Clicking an address in a row narrows the log to it, replacing any address condition.
+  const filterByIP = (value: string) => {
+    setConditions((cs) => [...cs.filter((c) => c.field !== 'ip'), { field: 'ip', op: 'is', value }])
+    setPage(1)
+  }
 
   const search = (
     <Input
       allowClear
       prefix={<SearchOutlined />}
-      style={width(220)}
+      className="rp-audit-toolbar__search"
       placeholder={t('audit.search')}
       value={q}
       onChange={(e) => {
@@ -527,7 +501,7 @@ export default function AuditPage() {
     <Button
       icon={<ExportOutlined />}
       disabled={exportBlocked}
-      onClick={() => navigate(exportLink('audit', auditFilterToTree({ action, categoryActions, actor, ip, q, since })))}
+      onClick={() => navigate(exportLink('audit', auditFilterToTree({ ...auditExportInput(conditions, range, anchor.at), categoryActions, q })))}
     >
       {t('audit.export')}
     </Button>
@@ -597,8 +571,7 @@ export default function AuditPage() {
                 // address does both and the modal covers the result.
                 {...clickable((e) => {
                   e.stopPropagation()
-                  setIP(r.ip ?? '')
-                  setPage(1)
+                  filterByIP(r.ip ?? '')
                 })}
               >
                 {r.ip}
@@ -640,38 +613,27 @@ export default function AuditPage() {
     <Card
       className="rp-audit-card"
       title={t('audit.title')}
-      extra={
-        mobile ? undefined : (
-          <Space wrap>
-            {narrowFilters}
-            {search}
-            {exportButton}
-            {tableView.controls}
-          </Space>
-        )
-      }
       styles={{ body: { paddingTop: 12 } }}
     >
       {err && <Alert type="error" showIcon title={err} style={{ marginBottom: 12 }} />}
+      {/* The filtering controls sit in the body at every width, wrapping as the card narrows, so
+          the header never squeezes them; what acts on the results sits with the results. */}
+      <div className="rp-audit-toolbar">
+        {categorySelect}
+        {filterPanel}
+        {timeRange}
+        {search}
+      </div>
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
         {t('audit.intro')}
       </Typography.Paragraph>
-      {/* A card header on a phone is barely wider than one of these controls, so they move into
-          the body where they get the full width. */}
-      {mobile && (
-        <div className="rp-audit-filters">
-          <div className="rp-audit-filters__top">
-            {search}
-            <Badge dot={Boolean(category || action || actor.trim() || ip.trim() || since)} offset={[-4, 4]}>
-              <Button icon={<FilterOutlined />} onClick={() => setFiltersOpen((o) => !o)}>
-                {t('audit.filters')}
-              </Button>
-            </Badge>
-            {exportButton}
-          </div>
-          {filtersOpen && <div className="rp-audit-filters__grid">{narrowFilters}</div>}
-        </div>
-      )}
+      <div className="rp-audit-results">
+        <Typography.Text type="secondary">{data ? t('audit.total', { n: data.total }) : null}</Typography.Text>
+        <Space>
+          {!mobile && tableView.controls}
+          {exportButton}
+        </Space>
+      </div>
       {mobile ? (
         <Spin spinning={loading}>
           {items.length === 0 && !loading ? (

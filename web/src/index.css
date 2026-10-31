@@ -2180,40 +2180,169 @@ body {
   }
 }
 
-/* Audit log on a phone: the table becomes a list of cards (see pages/manage/AuditPage.tsx).
-   Each card is a whole row, so every field gets the full width instead of a column narrow
-   enough to wrap CJK one character per line. */
-.rp-audit-filters {
+/* Audit log toolbar: the filtering controls wrap as the card narrows, with the search taking what
+   is left of its line and never less than a usable width. */
+.rp-audit-toolbar {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
-.rp-audit-filters__top {
-  display: flex;
-  gap: 8px;
-}
-/* The search box takes whatever the filter button leaves; min-width: 0 is what lets a flex
-   child shrink below the width of its own placeholder. */
-.rp-audit-filters__top > .ant-input-affix-wrapper,
-.rp-audit-filters__top > .ant-input-outlined {
-  flex: 1;
+.rp-audit-toolbar__search {
+  flex: 1 1 200px;
   min-width: 0;
 }
-.rp-audit-filters__top > .ant-badge {
-  flex: none;
-}
-.rp-audit-filters__grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* The results bar: the count on the left, what acts on the results on the right. */
+.rp-audit-results {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  margin-bottom: 8px;
 }
-/* Two half-width controls on a very narrow phone show about four characters each. */
-@media (max-width: 400px) {
-  .rp-audit-filters__grid {
-    grid-template-columns: 1fr;
+/* A bottom sheet floats like the side drawers do (see the right-drawer rule near the top): inset
+   from the window's edges, rounded, bordered and shadowed, and no wider than reads well. */
+.ant-drawer.rp-sheet > .ant-drawer-content-wrapper {
+  inset-inline: 12px;
+  bottom: 12px;
+  width: auto;
+  max-width: 560px;
+  margin-inline: auto;
+  border-radius: 16px;
+  box-shadow: none;
+}
+.ant-drawer.rp-sheet > .ant-drawer-content-wrapper > .ant-drawer-section {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--ant-box-shadow-secondary);
+}
+.ant-drawer.rp-sheet .ant-drawer-header {
+  padding: 12px 16px;
+}
+.ant-drawer.rp-sheet .ant-drawer-body {
+  padding: 12px 16px 16px;
+}
+/* In a sheet the presets are pills that wrap, rather than a column of full-width rows. */
+.ant-drawer .rp-audit-range__presets {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ant-drawer .rp-audit-range__presets button {
+  width: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 999px;
+}
+.ant-drawer .rp-audit-range__presets button.is-selected {
+  border-color: var(--ant-color-primary-border);
+}
+/* In a bottom sheet the panels take the sheet's width rather than a popover's. */
+.ant-drawer .rp-audit-filter-panel,
+.ant-drawer .rp-audit-range {
+  width: auto;
+  max-width: none;
+}
+/* The sheet's own header names the panel, so the panel does not name itself twice. */
+.ant-drawer .rp-audit-filter-panel__head > .ant-typography {
+  visibility: hidden;
+}
+/* Audit log filters (pages/manage/AuditFilterPanel.tsx): one row per condition, attribute,
+   operator and value, as Cloudflare's log filters lay them out. */
+.rp-audit-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(480px, calc(100vw - 48px));
+}
+.rp-audit-filter-panel__head,
+.rp-audit-filter-panel__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rp-audit-filter-row {
+  display: grid;
+  grid-template-columns: 110px 80px minmax(0, 1fr) 24px;
+  grid-template-areas: 'field op value remove';
+  gap: 6px;
+  align-items: center;
+}
+.rp-audit-filter-row__field { grid-area: field; }
+.rp-audit-filter-row__op { grid-area: op; }
+.rp-audit-filter-row__value { grid-area: value; min-width: 0; }
+.rp-audit-filter-row__remove { grid-area: remove; }
+/* Sized by the panel, not the window: the same panel is a 480px popover or a sheet as wide as the
+   phone, so its own width decides whether the value takes a line of its own. */
+.rp-audit-filter-panel {
+  container-type: inline-size;
+}
+@container (max-width: 440px) {
+  .rp-audit-filter-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px;
+    grid-template-areas:
+      'field op remove'
+      'value value .';
   }
 }
+/* Audit time range (pages/manage/AuditTimeRange.tsx): presets beside an absolute range. */
+.rp-audit-range {
+  display: flex;
+  gap: 12px;
+  max-width: calc(100vw - 48px);
+}
+.rp-audit-range__presets {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  margin: 0;
+  padding: 0 12px 0 0;
+  border-right: 1px solid var(--ant-color-split);
+  list-style: none;
+}
+.rp-audit-range__presets button {
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ant-color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.rp-audit-range__presets button:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+.rp-audit-range__presets button.is-selected {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+}
+.rp-audit-range__presets button:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+.rp-audit-range__absolute {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .rp-audit-range {
+    flex-direction: column;
+  }
+  .rp-audit-range__presets {
+    padding: 0 0 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ant-color-split);
+  }
+}
+/* Audit log on a phone: the table becomes a list of cards (see pages/manage/AuditPage.tsx).
+   Each card is a whole row, so every field gets the full width instead of a column narrow
+   enough to wrap CJK one character per line. */
 .rp-audit-list {
   display: flex;
   flex-direction: column;
