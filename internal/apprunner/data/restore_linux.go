@@ -284,7 +284,7 @@ func restoreClearNamespace(ctx context.Context, parent *os.File, device uint64, 
 	if depth > maxCheckpointDepth {
 		return ErrRestoreUnsafe
 	}
-	entries, err := parent.ReadDir(-1)
+	entries, err := restoreReadDir(parent)
 	if err != nil {
 		return err
 	}
@@ -499,7 +499,7 @@ func restoreSyncNamespace(ctx context.Context, namespace *os.File, device uint64
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	entries, err := namespace.ReadDir(-1)
+	entries, err := restoreReadDir(namespace)
 	if err != nil {
 		return err
 	}
@@ -544,7 +544,7 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 	if depth > maxCheckpointDepth || len(*result) >= maxCheckpointEntries {
 		return ErrRestoreUnsafe
 	}
-	entries, err := parent.ReadDir(-1)
+	entries, err := restoreReadDir(parent)
 	if err != nil {
 		return err
 	}
@@ -621,6 +621,13 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 
 func sameRestoreEntries(expected, actual []restoreEntry) bool {
 	return restoreEntryDifference(expected, actual) == ""
+}
+
+func restoreReadDir(directory *os.File) ([]os.DirEntry, error) {
+	if _, err := unix.Seek(int(directory.Fd()), 0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return directory.ReadDir(-1)
 }
 
 func restoreEntryDifference(expected, actual []restoreEntry) string {
