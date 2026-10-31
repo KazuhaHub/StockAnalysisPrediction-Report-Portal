@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Card, Collapse, Descriptions, Skeleton, Space, Steps, Tag, Typography, theme } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -436,10 +436,11 @@ export default function ForecastReadingCard({
           )}
 
           {allowPayload && set.payload && (
-            <details>
-              <summary style={{ cursor: 'pointer' }}>{t('forecast.panel.payload')}</summary>
-              <pre className="rp-code">{set.payload}</pre>
-            </details>
+            <Collapse
+              ghost
+              size="small"
+              items={[{ key: 'payload', label: t('forecast.panel.payload'), children: <pre className="rp-code">{set.payload}</pre> }]}
+            />
           )}
         </div>
       )}
