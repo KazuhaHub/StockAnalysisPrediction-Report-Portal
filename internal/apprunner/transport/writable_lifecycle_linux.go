@@ -146,53 +146,73 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn) {
 	provider := s.candidateExecution
 	if provider == nil || provider.store == nil || provider.native == nil {
+		log.Printf("writable lifecycle action 0 provider unavailable")
 		return
 	}
 	header := make([]byte, 45)
 	copy(header, writableLifecycleQueryMagic)
 	if _, err := io.ReadFull(conn, header[8:]); err != nil {
+		log.Printf("writable lifecycle header read: %v", err)
 		return
 	}
 	count := binary.BigEndian.Uint32(header[40:44])
 	action := WritableLifecycleAction(header[44])
 	if count == 0 || count > control.MaxCommandBytes || !action.valid() {
+		log.Printf("writable lifecycle header invalid: count=%d action=%d",
+			count, action)
 		return
 	}
 	// The entire lifecycle frame and execution share the bounded session. Signed
 	// deadlines remain independently enforced by concrete journal/native operations.
 	body := make([]byte, int(count)+64)
 	if _, err := io.ReadFull(conn, body); err != nil {
+		log.Printf("writable lifecycle action %d body read: %v",
+			action, err)
 		return
 	}
 	descriptor, err := readCandidateDescriptor(conn)
 	if err != nil {
+		log.Printf("writable lifecycle action %d descriptor: %v",
+			action, err)
 		return
 	}
 	enrollment, err := provider.store.ControllerDeployment(ctx)
 	if err != nil {
+		log.Printf("writable lifecycle action %d deployment: %v",
+			action, err)
 		return
 	}
 	a := control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}
 	ref, err := verifyWritableLifecycle(action, body[:count], body[count:], descriptor, a, time.Now().UnixMilli())
 	if err != nil {
+		log.Printf("writable lifecycle action %d verify: %v",
+			action, err)
 		return
 	}
 	// Authenticate the exact signed public reference before reading private bytes.
 	var size [4]byte
 	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		log.Printf("writable lifecycle action %d document size read: %v",
+			action, err)
 		return
 	}
 	n := binary.BigEndian.Uint32(size[:])
 	if n > 4096 || action.registrationDelivery() != (n > 0) {
+		log.Printf("writable lifecycle action %d document size invalid: %d",
+			action, n)
 		return
 	}
 	document := make([]byte, int(n))
 	defer clear(document)
 	if _, err := io.ReadFull(conn, document); err != nil {
+		log.Printf("writable lifecycle action %d document read: %v",
+			action, err)
 		return
 	}
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
+		log.Printf("writable lifecycle action %d trailing bytes: n=%d err=%v",
+			action, n, err)
 		return
 	}
 	started := time.Now()
