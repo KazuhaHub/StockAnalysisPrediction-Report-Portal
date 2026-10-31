@@ -1503,6 +1503,18 @@ body {
     transform: none !important;
   }
 }
+.rp-task-row__go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--ant-color-text-tertiary);
+  cursor: pointer;
+}
+.rp-task-row:hover .rp-task-row__go {
+  color: var(--ant-color-text);
+}
 /* Specific enough to beat antd's text-button hover colour. */
 .rp-task-row__acts .ant-btn.rp-task-cancel {
   color: var(--ant-color-text-tertiary);

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Progress, Typography, theme } from 'antd'
+import { ArrowRightOutlined } from '@ant-design/icons'
 import { useHoverNone } from '../lib/useHoverNone'
 
 export type TaskTone = 'running' | 'waiting' | 'ok' | 'warn' | 'fail' | 'idle'
@@ -27,7 +28,8 @@ export interface TaskRowProps {
 // on the first line; a bar, queue position or result on the second. The time is flush with the row's
 // right edge and shares one cell with the actions: hovering or focusing the row (where hover exists),
 // slides the actions in over the time (see .rp-task-row__end); where nothing hovers they stay away, since
-// the row itself opens the task's detail, which has them. Clicking or tapping the row anywhere opens it.
+// the row itself opens the task's detail, which has them. An openable row always ends them with an arrow,
+// so the time never gives way to an empty cell. Clicking or tapping the row anywhere opens it.
 export default function TaskRow({ tone, name, sub, detail, percent, time, actions, pinned, label, onOpen }: TaskRowProps) {
   const { token } = theme.useToken()
   const uid = useId()
@@ -43,7 +45,8 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
     const row = rowRef.current
     if (!row) return
     const onClick = (e: MouseEvent) => {
-      if ((e.target as Element).closest('.rp-task-row__acts')) return
+      const target = e.target as Element
+      if (target.closest('.rp-task-row__acts') && !target.closest('.rp-task-row__go')) return
       openRef.current?.()
     }
     row.addEventListener('click', onClick)
@@ -98,16 +101,18 @@ export default function TaskRow({ tone, name, sub, detail, percent, time, action
           </div>
         </div>
       </div>
-      {(time || actions) && (
+      {(time || actions || onOpen) && (
         <div className="rp-task-row__end">
           {time && (
             <span id={`${uid}-time`} className="rp-task-row__time" style={{ color: token.colorTextSecondary }}>
               {time}
             </span>
           )}
-          {actions && (
+          {(actions || onOpen) && (
             <div className="rp-task-row__acts" inert={noHover && !pinned}>
               {actions}
+              {/* Decorative: the row's own button carries the name and the keyboard path. */}
+              {onOpen && <ArrowRightOutlined aria-hidden="true" className="rp-task-row__go" />}
             </div>
           )}
         </div>
