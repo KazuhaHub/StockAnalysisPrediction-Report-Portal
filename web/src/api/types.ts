@@ -1577,6 +1577,11 @@ export interface AuditResp {
   total: number
   /** The action values actually present, so rows written by an older build still filter. */
   actions: string[]
+  /**
+   * The same actions grouped for the filter, in reading order: every category this build declares,
+   * then "other" for actions in the data that none declares, when there are any.
+   */
+  categories?: { key: string; actions: string[] }[]
   ou_names: Record<string, string>
   /** The portal's business timezone; '' means follow the reader's. Stamps are UTC. */
   timezone?: string

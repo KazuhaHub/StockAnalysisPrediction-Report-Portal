@@ -48,6 +48,7 @@ type AuditEntry struct {
 // AuditFilter narrows the log. The zero value is everything.
 type AuditFilter struct {
 	Actor      string
+	Category   string // an auditCategories key, or "other"
 	Action     string
 	TargetType string
 	TargetID   string
@@ -339,6 +340,20 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 	if f.Action != "" {
 		add("action=?", f.Action)
 	}
+	if f.Category != "" {
+		// "other" is everything no category declares; a key this build does not know matches nothing
+		// rather than quietly showing the whole log.
+		list, known := auditCategoryActions(f.Category)
+		switch {
+		case f.Category == auditCategoryOther:
+			// COALESCE so a row with no action at all lands here rather than in no category.
+			add("COALESCE(action,'') NOT IN ("+placeholders(len(auditVocabulary))+")", anyStrings(auditVocabulary)...)
+		case known:
+			add("action IN ("+placeholders(len(list))+")", anyStrings(list)...)
+		default:
+			add("1=0")
+		}
+	}
 	if f.TargetType != "" {
 		add("target_type=?", f.TargetType)
 	}
@@ -425,31 +440,94 @@ func auditBefore(cutoff time.Time) (string, []any) {
 // legacy one has a space.
 const likeT = "LIKE '%T%'"
 
+// auditCategory is one heading of the console's action filter: an area of the portal and the events
+// it records, in the order an operator reads them (sign-in, then failed sign-in, then lockout), not
+// sorted by key. Picking a category alone filters to all of its events.
+type auditCategory struct {
+	Key     string   `json:"key"`
+	Actions []string `json:"actions"`
+}
+
+// auditCategoryOther holds actions present in the data that no category declares: rows written by an
+// older build, or by one that has since retired an action. It is offered only when there are some.
+const auditCategoryOther = "other"
+
+// auditCategories is every action this build can write, grouped. Each action sits in exactly one
+// category; a new action goes into the category of the area that writes it.
+var auditCategories = []auditCategory{
+	{"auth", []string{
+		AuditLogin, AuditLoginFailed, AuditLockout, AuditLogout, AuditStepUp,
+		AuditSessionRevoke, AuditSessionsRevoke,
+		AuditPasswordChange, AuditPasswordReset, AuditMFAChange,
+		AuditIdentityLink, AuditIdentityUnlink, AuditLoginHistoryRetention,
+	}},
+	{"accounts", []string{
+		AuditUserCreate, AuditUserChange, AuditUserDelete,
+		AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
+		AuditGrantChange, AuditPolicyChange,
+	}},
+	{"reports", []string{
+		AuditReportRead, AuditReportIngest, AuditReportCreate, AuditReportEdit, AuditReportRestore, AuditReportDelete,
+	}},
+	{"runs", []string{AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete, AuditTargetChange}},
+	{"forecast", []string{
+		AuditForecastAuto, AuditForecastEvalRun, AuditForecastDryGate, AuditForecastBench,
+		AuditForecastPopulation, AuditForecastRepair, AuditForecastReader, AuditForecastFallback,
+		AuditForecastAlert, AuditForecastAlertTest, AuditPredictionsRejected, AuditPredictionsStoreFailed,
+	}},
+	{"apps", []string{
+		AuditAppInstall, AuditAppDelete, AuditAppOrder, AuditAppAccess, AuditAppBackendChange, AuditAppBackendDelete,
+		AuditTokenCreate, AuditTokenDelete, AuditWebhookCreate, AuditWebhookDelete,
+	}},
+	{"notifications", []string{
+		AuditNotificationChange, AuditNotificationPublish, AuditNotificationDispatch,
+		AuditNotificationReview, AuditNotificationReplay, AuditNotificationTest,
+	}},
+	{"exports", []string{AuditExportCreate, AuditExportDownload}},
+	{"data", []string{AuditQuoteOrder}},
+}
+
 // auditVocabulary is every action this build can write. The filter offers these WHETHER OR NOT
 // they have happened, because a dropdown built only from the data cannot distinguish "not
 // recorded" from "has not happened yet" — a freshly upgraded portal would offer one option and
 // look like a log that records one thing.
-var auditVocabulary = []string{
-	AuditReportRead, AuditReportIngest, AuditReportCreate, AuditReportEdit, AuditReportRestore,
-	AuditReportDelete,
-	AuditLogin, AuditLoginFailed, AuditLockout, AuditLogout,
-	AuditSessionRevoke, AuditSessionsRevoke, AuditLoginHistoryRetention,
-	AuditPasswordChange, AuditPasswordReset, AuditMFAChange,
-	AuditIdentityLink, AuditIdentityUnlink, AuditStepUp,
-	AuditUserCreate, AuditUserChange, AuditUserDelete,
-	AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
-	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
-	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
-	AuditTokenCreate, AuditTokenDelete,
-	AuditAppInstall, AuditAppDelete, AuditAppOrder, AuditAppAccess, AuditAppBackendChange, AuditAppBackendDelete,
-	AuditWebhookCreate, AuditWebhookDelete,
-	AuditTargetChange,
-	AuditNotificationChange, AuditNotificationTest, AuditNotificationReplay, AuditNotificationReview, AuditNotificationDispatch,
-	AuditNotificationPublish,
-	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
-	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
-	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader, AuditForecastFallback,
-	AuditExportCreate, AuditExportDownload,
+var auditVocabulary = func() []string {
+	var out []string
+	for _, c := range auditCategories {
+		out = append(out, c.Actions...)
+	}
+	return out
+}()
+
+// auditCategoryActions is the actions a category key stands for; ok is false for a key this build
+// does not know. "other" is resolved against the data, not here.
+func auditCategoryActions(key string) (actions []string, ok bool) {
+	for _, c := range auditCategories {
+		if c.Key == key {
+			return c.Actions, true
+		}
+	}
+	return nil, false
+}
+
+// AuditCategories is the filter's grouping: every declared category, then "other" for actions in
+// the data that none declares, when there are any.
+func (s *Store) AuditCategories() []auditCategory {
+	out := append([]auditCategory(nil), auditCategories...)
+	known := map[string]bool{}
+	for _, a := range auditVocabulary {
+		known[a] = true
+	}
+	var other []string
+	for _, a := range s.auditActionsPresent() {
+		if !known[a] {
+			other = append(other, a)
+		}
+	}
+	if len(other) > 0 {
+		out = append(out, auditCategory{auditCategoryOther, other})
+	}
+	return out
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present
@@ -701,6 +779,7 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	rows, total := s.st.ListAudit(AuditFilter{
 		Actor:      strings.TrimSpace(q.Get("actor")),
+		Category:   strings.TrimSpace(q.Get("category")),
 		Action:     strings.TrimSpace(q.Get("action")),
 		TargetType: strings.TrimSpace(q.Get("target_type")),
 		TargetID:   strings.TrimSpace(q.Get("target_id")),
@@ -724,8 +803,10 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 	}
 	writeJSON(w, map[string]any{
 		"items": rows, "total": total,
-		"actions":  s.st.AuditActions(), // built from the data, so an older build's rows still filter
-		"ou_names": ouNames,
+		"actions": s.st.AuditActions(), // built from the data, so an older build's rows still filter
+		// The same actions grouped for the filter, with "other" for what no category declares.
+		"categories": s.st.AuditCategories(),
+		"ou_names":   ouNames,
 		// The stamps are UTC; the panel timezone is what they are READ in. Sent with the page rather
 		// than fetched separately, because a time column cannot render without it.
 		"timezone": s.st.GetSetting("timezone", ""),

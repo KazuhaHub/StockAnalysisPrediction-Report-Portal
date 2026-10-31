@@ -332,6 +332,8 @@ export function clearBelowEntryPreset(f: ExportFilter): ExportFilter {
 
 export interface AuditFilterInput {
   action?: string
+  /** A category's events, used when a category is picked without one event. */
+  categoryActions?: string[]
   actor?: string
   ip?: string
   q?: string
@@ -344,7 +346,8 @@ export function auditFilterToTree(a: AuditFilterInput): ExportFilter {
     const value = (v ?? '').trim()
     if (value) items.push({ field, operator, values: [value] })
   }
-  add('action', 'in', a.action)
+  if (a.action?.trim()) add('action', 'in', a.action)
+  else if (a.categoryActions?.length) items.push({ field: 'action', operator: 'in', values: [...a.categoryActions] })
   add('actor', 'is', a.actor)
   add('ip', 'is', a.ip)
   add('q', 'contains', a.q)
