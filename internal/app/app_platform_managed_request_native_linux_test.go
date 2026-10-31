@@ -102,4 +102,5 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 		t.Fatal("native request fixture enabled public managed launch")
 	}
 	t.Log("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")
+	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 }
