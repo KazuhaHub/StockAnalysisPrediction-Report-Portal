@@ -279,14 +279,36 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 			source: source, plan: plan, targetDescriptor: bytes.Clone(source.descriptor),
 		}, true, nil
 	}
-	if release != plan.TargetReleaseSHA256 || generation != int64(expected.snapshot.Generation) ||
-		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
-		format != plan.DataFormat || state != "candidate" || readiness != "{}" ||
-		observed.Valid || kind != "update-start" || effectEpoch != expected.controllerEpoch ||
-		admitted != expected.fence || (effectState != "prepared" && effectState != "applied") {
+	invalidActivation := func(field string) (platformUpdateStartIntent, bool, error) {
 		return zero, false, fmt.Errorf(
-			"update-start activation tuple: %w",
-			errAppPlatformStageEvidence)
+			"update-start activation %s: %w",
+			field, errAppPlatformStageEvidence)
+	}
+	switch {
+	case release != plan.TargetReleaseSHA256:
+		return invalidActivation("release")
+	case generation != int64(expected.snapshot.Generation):
+		return invalidActivation("generation")
+	case policy != plan.TargetPolicyRevision:
+		return invalidActivation("policy")
+	case namespace != plan.DataNamespaceID:
+		return invalidActivation("namespace")
+	case format != plan.DataFormat:
+		return invalidActivation("format")
+	case state != "candidate":
+		return invalidActivation("state")
+	case readiness != "{}":
+		return invalidActivation("readiness")
+	case observed.Valid:
+		return invalidActivation("observation")
+	case kind != "update-start":
+		return invalidActivation("effect kind")
+	case effectEpoch != expected.controllerEpoch:
+		return invalidActivation("effect epoch")
+	case admitted != expected.fence:
+		return invalidActivation("effect fence")
+	case effectState != "prepared" && effectState != "applied":
+		return invalidActivation("effect state")
 	}
 	command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {

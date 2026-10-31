@@ -103,7 +103,23 @@ func platformUpdateStartEndpointFixture() platformRuntimeEndpoint {
 
 func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
 	t.Helper()
-	s, checkpointLease := platformCheckpointUpdateFixture(t, pg)
+	return platformManagedUpdateStartFixtureMode(t, pg, false)
+}
+
+func platformWritableManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
+	t.Helper()
+	return platformManagedUpdateStartFixtureMode(t, pg, true)
+}
+
+func platformManagedUpdateStartFixtureMode(t *testing.T, pg, writable bool) (*Server, platformOperationLease, journal.CheckpointReceipt, platformManagedUpdatePlan) {
+	t.Helper()
+	var s *Server
+	var checkpointLease platformOperationLease
+	if writable {
+		s, checkpointLease = platformWritableCheckpointUpdateFixture(t, pg)
+	} else {
+		s, checkpointLease = platformCheckpointUpdateFixture(t, pg)
+	}
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(
 		operation_id,stage,effect_number,effect_id,kind,payload_sha256,
 		runtime_id,controller_epoch,admitted_fence,observed_fence,state,
@@ -391,7 +407,23 @@ func TestPlatformUpdateStartPersistsReservationPostgres(t *testing.T) {
 
 func platformUpdateStartRunningCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
 	t.Helper()
-	s, lease, _, _ := platformManagedUpdateStartFixture(t, pg)
+	return platformUpdateStartRunningCommitFixtureMode(t, pg, false)
+}
+
+func platformWritableUpdateStartRunningCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	return platformUpdateStartRunningCommitFixtureMode(t, pg, true)
+}
+
+func platformUpdateStartRunningCommitFixtureMode(t *testing.T, pg, writable bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	var s *Server
+	var lease platformOperationLease
+	if writable {
+		s, lease, _, _ = platformWritableManagedUpdateStartFixture(t, pg)
+	} else {
+		s, lease, _, _ = platformManagedUpdateStartFixture(t, pg)
+	}
 	endpoint := platformUpdateStartEndpointFixture()
 	intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
 	if err != nil {
@@ -437,6 +469,32 @@ func TestPlatformUpdateStartCommitsRunningReceiptSQLite(t *testing.T) {
 
 func TestPlatformUpdateStartCommitsRunningReceiptPostgres(t *testing.T) {
 	testPlatformUpdateStartCommitsRunningReceipt(t, true)
+}
+
+func testPlatformWritableUpdateStartPreparesProbe(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation :=
+		platformWritableUpdateStartRunningCommitFixture(t, pg)
+	probe, err := s.commitPlatformUpdateStartReceipt(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
+		t.Fatal("writable update-start running commit", probe.snapshot, err)
+	}
+	probeIntent, err := s.preparePlatformUpdateProbe(
+		context.Background(), probe)
+	if err != nil || probeIntent.running == nil ||
+		probeIntent.running.OperationID != lease.id ||
+		probeIntent.command.Payload.SandboxProfile !=
+			control.WritableCandidateSandboxProfile {
+		t.Fatal("writable update-start probe intent", err)
+	}
+}
+
+func TestPlatformWritableUpdateStartPreparesProbeSQLite(t *testing.T) {
+	testPlatformWritableUpdateStartPreparesProbe(t, false)
+}
+
+func TestPlatformWritableUpdateStartPreparesProbePostgres(t *testing.T) {
+	testPlatformWritableUpdateStartPreparesProbe(t, true)
 }
 
 func testPlatformUpdateStartRunningReceiptRefusals(t *testing.T, pg bool) {
