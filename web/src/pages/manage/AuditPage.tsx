@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Empty,
   Grid,
   Input,
@@ -24,7 +25,6 @@ import AuditTimeRange from './AuditTimeRange'
 import { auditExportInput, auditQueryParams, type AuditCondition, type AuditRange } from '../../lib/auditQuery'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
-import Fold from '../../components/Fold'
 import { ExportOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
@@ -266,7 +266,6 @@ function withoutLayout(json: string): string {
 // action, the object and the sentence, so the record adds only what it does not.
 function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; tz: string; ouNames: Record<string, string>; locale: string; compact?: boolean }) {
   const { t } = useTranslation()
-  const [raw, setRaw] = useState(false)
   const client = clientInfoFromDetail(r.detail)
   const region = formatRegion(r.geo, locale)
   const pretty = useMemo(() => readablePayload(r.detail), [r.detail])
@@ -336,19 +335,23 @@ function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; t
           </>
         )}
       </dl>
-      <div className="rp-audit-record__raw">
-        <Space size={4}>
-          <Button type="link" size="small" icon={<RightOutlined rotate={raw ? 90 : 0} />} aria-expanded={raw} onClick={() => setRaw((o) => !o)}>
-            {t('audit.raw')}
-          </Button>
-          {/* Copies the payload byte for byte, whatever the panel shows. */}
-          {r.detail ? <Typography.Text copyable={{ text: r.detail }} /> : null}
-        </Space>
-        {/* Bounded and scrollable: a grant change over a large OU carries a long list. */}
-        <Fold open={raw}>
-          <pre>{pretty || '—'}</pre>
-        </Fold>
-      </div>
+      {/* antd's Collapse: its own unfold motion, header semantics and reduced-motion handling. */}
+      <Collapse
+        ghost
+        size="small"
+        className="rp-audit-record__raw"
+        items={[
+          {
+            key: 'raw',
+            label: t('audit.raw'),
+            // Copies the payload byte for byte, whatever the panel shows; a click here must not
+            // also fold the panel.
+            extra: r.detail ? <span onClick={(e) => e.stopPropagation()}><Typography.Text copyable={{ text: r.detail }} /></span> : null,
+            // Bounded and scrollable: a grant change over a large OU carries a long list.
+            children: <pre>{pretty || '—'}</pre>,
+          },
+        ]}
+      />
     </section>
   )
 }

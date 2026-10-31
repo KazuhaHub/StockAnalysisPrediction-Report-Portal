@@ -2388,10 +2388,11 @@ body {
 .rp-audit-record__raw {
   margin-top: 8px;
 }
-.rp-audit-record__raw .ant-btn { padding-inline: 0; }
+.rp-audit-record__raw.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding-inline: 0; color: var(--ant-color-primary); }
+.rp-audit-record__raw.ant-collapse .ant-collapse-content-box { padding-inline: 0; }
 .rp-audit-record__raw pre {
   max-height: 320px;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 10px 12px;
   overflow: auto;
   border-radius: var(--ant-border-radius);
