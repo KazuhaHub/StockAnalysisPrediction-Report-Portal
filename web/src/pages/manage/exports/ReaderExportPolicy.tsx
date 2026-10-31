@@ -137,8 +137,6 @@ function PolicyEditor({ entry, entries, defaultId, onSaved }: { entry: ExportPol
         <Switch
           checked={draft.allowed.value}
           onChange={(v) => setField('allowed', { value: v })}
-          checkedChildren={t('ou.allowed')}
-          unCheckedChildren={t('ou.notAllowed')}
           aria-label={t('export.reader.fieldAllowed')}
         />
       </InheritField>
